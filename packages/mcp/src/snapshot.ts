@@ -8,7 +8,8 @@ import {
     CodebaseInfo,
     CodebaseInfoIndexing,
     CodebaseInfoIndexed,
-    CodebaseInfoIndexFailed
+    CodebaseInfoIndexFailed,
+    CodebaseInfoSyncCompleted
 } from "./config.js";
 
 export class SnapshotManager {
@@ -402,7 +403,7 @@ export class SnapshotManager {
     /**
      * Get codebase status
      */
-    public getCodebaseStatus(codebasePath: string): 'indexed' | 'indexing' | 'indexfailed' | 'not_found' {
+    public getCodebaseStatus(codebasePath: string): 'indexed' | 'indexing' | 'indexfailed' | 'sync_completed' | 'not_found' {
         const info = this.codebaseInfoMap.get(codebasePath);
         if (!info) return 'not_found';
         return info.status;
@@ -422,6 +423,43 @@ export class SnapshotManager {
         return Array.from(this.codebaseInfoMap.entries())
             .filter(([_, info]) => info.status === 'indexfailed')
             .map(([path, _]) => path);
+    }
+
+    /**
+     * Set codebase to sync completed status with change statistics
+     */
+    public setCodebaseSyncCompleted(
+        codebasePath: string,
+        stats: { added: number; removed: number; modified: number }
+    ): void {
+        const totalChanges = stats.added + stats.removed + stats.modified;
+
+        const info: CodebaseInfoSyncCompleted = {
+            status: 'sync_completed',
+            added: stats.added,
+            removed: stats.removed,
+            modified: stats.modified,
+            totalChanges: totalChanges,
+            lastUpdated: new Date().toISOString()
+        };
+        this.codebaseInfoMap.set(codebasePath, info);
+    }
+
+    /**
+     * Get last sync result for a codebase
+     */
+    public getLastSyncResult(codebasePath: string): { added: number; removed: number; modified: number; totalChanges: number; timestamp: string } | undefined {
+        const info = this.codebaseInfoMap.get(codebasePath);
+        if (info && info.status === 'sync_completed') {
+            return {
+                added: info.added,
+                removed: info.removed,
+                modified: info.modified,
+                totalChanges: info.totalChanges,
+                timestamp: info.lastUpdated
+            };
+        }
+        return undefined;
     }
 
     /**
@@ -503,4 +541,4 @@ export class SnapshotManager {
             console.error('[SNAPSHOT-DEBUG] Error saving snapshot:', error);
         }
     }
-} 
+}

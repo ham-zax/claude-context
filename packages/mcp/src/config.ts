@@ -55,8 +55,17 @@ export interface CodebaseInfoIndexFailed extends CodebaseInfoBase {
     lastAttemptedPercentage?: number;  // Progress when failure occurred
 }
 
+// Sync completed state - when incremental sync completed
+export interface CodebaseInfoSyncCompleted extends CodebaseInfoBase {
+    status: 'sync_completed';
+    added: number;               // Number of new files added
+    removed: number;             // Number of files removed
+    modified: number;            // Number of files modified
+    totalChanges: number;        // Total number of changes
+}
+
 // Union type for all codebase information states
-export type CodebaseInfo = CodebaseInfoIndexing | CodebaseInfoIndexed | CodebaseInfoIndexFailed;
+export type CodebaseInfo = CodebaseInfoIndexing | CodebaseInfoIndexed | CodebaseInfoIndexFailed | CodebaseInfoSyncCompleted;
 
 export interface CodebaseSnapshotV2 {
     formatVersion: 'v2';
@@ -183,22 +192,22 @@ Options:
 Environment Variables:
   MCP_SERVER_NAME         Server name
   MCP_SERVER_VERSION      Server version
-  
+
   Embedding Provider Configuration:
   EMBEDDING_PROVIDER      Embedding provider: OpenAI, VoyageAI, Gemini, Ollama (default: OpenAI)
   EMBEDDING_MODEL         Embedding model name (works for all providers)
-  
+
   Provider-specific API Keys:
   OPENAI_API_KEY          OpenAI API key (required for OpenAI provider)
   OPENAI_BASE_URL         OpenAI API base URL (optional, for custom endpoints)
   VOYAGEAI_API_KEY        VoyageAI API key (required for VoyageAI provider)
   GEMINI_API_KEY          Google AI API key (required for Gemini provider)
   GEMINI_BASE_URL         Gemini API base URL (optional, for custom endpoints)
-  
+
   Ollama Configuration:
   OLLAMA_HOST             Ollama server host (default: http://127.0.0.1:11434)
   OLLAMA_MODEL            Ollama model name (alternative to EMBEDDING_MODEL for Ollama)
-  
+
   Vector Database Configuration:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
@@ -206,20 +215,20 @@ Environment Variables:
 Examples:
   # Start MCP server with OpenAI (default) and explicit Milvus address
   OPENAI_API_KEY=sk-xxx MILVUS_ADDRESS=localhost:19530 npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with OpenAI and specific model
   OPENAI_API_KEY=sk-xxx EMBEDDING_MODEL=text-embedding-3-large MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with VoyageAI and specific model
   EMBEDDING_PROVIDER=VoyageAI VOYAGEAI_API_KEY=pa-xxx EMBEDDING_MODEL=voyage-3-large MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with Gemini and specific model
   EMBEDDING_PROVIDER=Gemini GEMINI_API_KEY=xxx EMBEDDING_MODEL=gemini-embedding-001 MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with Ollama and specific model (using OLLAMA_MODEL)
   EMBEDDING_PROVIDER=Ollama OLLAMA_MODEL=mxbai-embed-large MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with Ollama and specific model (using EMBEDDING_MODEL)
   EMBEDDING_PROVIDER=Ollama EMBEDDING_MODEL=nomic-embed-text MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
         `);
-} 
+}
