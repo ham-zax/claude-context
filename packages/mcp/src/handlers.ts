@@ -23,7 +23,7 @@ export class ToolHandlers {
      * This method fetches all collections from the vector database,
      * gets the first document from each collection to extract codebasePath from metadata,
      * and updates the snapshot with discovered codebases.
-     * 
+     *
      * Logic: Compare mcp-codebase-snapshot.json with zilliz cloud collections
      * - If local snapshot has extra directories (not in cloud), remove them
      * - If local snapshot is missing directories (exist in cloud), ignore them
@@ -770,6 +770,17 @@ export class ToolHandlers {
                     }
                     break;
 
+                case 'sync_completed':
+                    if (info && 'added' in info) {
+                        const syncInfo = info as any;
+                        statusMessage = `🔄 Codebase '${absolutePath}' sync completed.`;
+                        statusMessage += `\n📊 Changes: +${syncInfo.added} added, -${syncInfo.removed} removed, ~${syncInfo.modified} modified`;
+                        statusMessage += `\n🕐 Last synced: ${new Date(syncInfo.lastUpdated).toLocaleString()}`;
+                    } else {
+                        statusMessage = `🔄 Codebase '${absolutePath}' sync completed.`;
+                    }
+                    break;
+
                 case 'not_found':
                 default:
                     statusMessage = `❌ Codebase '${absolutePath}' is not indexed. Please use the index_codebase tool to index it first.`;
@@ -797,4 +808,92 @@ export class ToolHandlers {
             };
         }
     }
-} 
+
+    /**
+     * Handle sync request - manually trigger incremental sync for a codebase
+     */
+    public async handleSyncCodebase(args: any) {
+        const { path: codebasePath } = args;
+
+        try {
+            // Force absolute path resolution
+            const absolutePath = ensureAbsolutePath(codebasePath);
+
+            // Validate path exists
+            if (!fs.existsSync(absolutePath)) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: Path '${absolutePath}' does not exist. Original input: '${codebasePath}'`
+                    }],
+                    isError: true
+                };
+            }
+
+            // Check if it's a directory
+            const stat = fs.statSync(absolutePath);
+            if (!stat.isDirectory()) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: Path '${absolutePath}' is not a directory`
+                    }],
+                    isError: true
+                };
+            }
+
+            // Check if this codebase is indexed
+            const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
+            if (!isIndexed) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: Codebase '${absolutePath}' is not indexed. Please index it first using the index_codebase tool.`
+                    }],
+                    isError: true
+                };
+            }
+
+            console.log(`[SYNC] Manually triggering incremental sync for: ${absolutePath}`);
+
+            // Perform incremental sync
+            const syncStats = await this.context.reindexByChange(absolutePath);
+
+            // Store sync result in snapshot
+            this.snapshotManager.setCodebaseSyncCompleted(absolutePath, syncStats);
+            this.snapshotManager.saveCodebaseSnapshot();
+
+            const totalChanges = syncStats.added + syncStats.removed + syncStats.modified;
+
+            if (totalChanges === 0) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `✅ No changes detected for codebase '${absolutePath}'. Index is up to date.`
+                    }]
+                };
+            }
+
+            const resultMessage = `🔄 Incremental sync completed for '${absolutePath}'.\n\n📊 Changes:\n+ ${syncStats.added} file(s) added\n- ${syncStats.removed} file(s) removed\n~ ${syncStats.modified} file(s) modified\n\nTotal changes: ${totalChanges}`;
+
+            console.log(`[SYNC] ✅ Sync completed: +${syncStats.added}, -${syncStats.removed}, ~${syncStats.modified}`);
+
+            return {
+                content: [{
+                    type: "text",
+                    text: resultMessage
+                }]
+            };
+
+        } catch (error: any) {
+            console.error(`[SYNC] Error during sync:`, error);
+            return {
+                content: [{
+                    type: "text",
+                    text: `Error syncing codebase: ${error.message || error}`
+                }],
+                isError: true
+            };
+        }
+    }
+}

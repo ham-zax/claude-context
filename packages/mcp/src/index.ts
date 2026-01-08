@@ -89,9 +89,18 @@ Index a codebase directory to enable semantic search using a configurable code s
 ⚠️ **IMPORTANT**:
 - You MUST provide an absolute path to the target codebase.
 
-✨ **Usage Guidance**:
-- This tool is typically used when search fails due to an unindexed codebase.
-- If indexing is attempted on an already indexed path, and a conflict is detected, you MUST prompt the user to confirm whether to proceed with a force index (i.e., re-indexing and overwriting the previous index).
+🔧 **Tool Selection Guide** (VERY IMPORTANT):
+- **First time indexing** → Use this tool (index_codebase)
+- **Refresh/update sync** → Use **sync_codebase** tool instead (preferred for "reindex", "refresh", "update index" requests)
+- **Force rebuild** → Use force=true only when user explicitly says "force reindex" or "rebuild index from scratch"
+
+💡 **When to use this tool**:
+- The codebase has never been indexed before
+- You need to start fresh with a completely new index
+
+💡 **When to use sync_codebase instead**:
+- The codebase is already indexed and you want to update it with recent changes
+- User says "reindex", "refresh", or "update index" (defaults to incremental)
 `;
 
 
@@ -209,13 +218,27 @@ This tool is versatile and can be used before completing various tasks to retrie
                     },
                     {
                         name: "get_indexing_status",
-                        description: `Get the current indexing status of a codebase. Shows progress percentage for actively indexing codebases and completion status for indexed codebases.`,
+                        description: `Get the current indexing status of a codebase. Shows progress percentage for actively indexing codebases and completion status for indexed codebases. Also shows last sync result with changes detected.`,
                         inputSchema: {
                             type: "object",
                             properties: {
                                 path: {
                                     type: "string",
                                     description: `ABSOLUTE path to the codebase directory to check status for.`
+                                }
+                            },
+                            required: ["path"]
+                        }
+                    },
+                    {
+                        name: "sync_codebase",
+                        description: `Manually trigger incremental sync for an indexed codebase. Checks for file changes since last sync and updates the index accordingly. Use this to ensure your index is up-to-date with recent changes.`,
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                path: {
+                                    type: "string",
+                                    description: `ABSOLUTE path to the codebase directory to sync.`
                                 }
                             },
                             required: ["path"]
@@ -238,6 +261,8 @@ This tool is versatile and can be used before completing various tasks to retrie
                     return await this.toolHandlers.handleClearIndex(args);
                 case "get_indexing_status":
                     return await this.toolHandlers.handleGetIndexingStatus(args);
+                case "sync_codebase":
+                    return await this.toolHandlers.handleSyncCodebase(args);
 
                 default:
                     throw new Error(`Unknown tool: ${name}`);
