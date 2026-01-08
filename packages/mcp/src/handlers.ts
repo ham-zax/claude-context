@@ -209,7 +209,12 @@ export class ToolHandlers {
                 return {
                     content: [{
                         type: "text",
-                        text: `Codebase '${absolutePath}' is already indexed. Use force=true to re-index.`
+                        text: `Codebase '${absolutePath}' is already indexed.
+
+To update incrementally with recent changes: Use mcp__claude-context__sync_codebase
+To force rebuild from scratch: Use mcp__claude-context__index_codebase with force=true
+
+💡 Tip: sync_codebase is preferred for most "reindex" requests.`
                     }],
                     isError: true
                 };
