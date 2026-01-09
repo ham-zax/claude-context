@@ -79,7 +79,79 @@ class ContextMcpServer {
         // Load existing codebase snapshot on startup
         this.snapshotManager.loadCodebaseSnapshot();
 
+        // CRITICAL: Verify cloud state and fix any interrupted indexing states
+        // This ensures the snapshot matches reality after unexpected shutdowns
+        this.verifyCloudState().catch(err => {
+            console.error('[STARTUP] Error verifying cloud state:', err.message);
+        });
+
         this.setupTools();
+    }
+
+    /**
+     * Verify cloud state and fix any mismatches between local snapshot and cloud index
+     * This is called on startup to ensure graceful recovery from interrupted indexing
+     */
+    private async verifyCloudState(): Promise<void> {
+        console.log('[STARTUP] 🔍 Verifying cloud state against local snapshot...');
+
+        // Get the vector database
+        const vectorDb = this.context.getVectorDatabase();
+        const collections = await vectorDb.listCollections();
+
+        const cloudCodebases = new Set<string>();
+
+        // Build set of codebases that exist in cloud
+        for (const collectionName of collections) {
+            if (!collectionName.startsWith('code_chunks_') && !collectionName.startsWith('hybrid_code_chunks_')) {
+                continue;
+            }
+
+            try {
+                const results = await vectorDb.query(
+                    collectionName,
+                    '',
+                    ['metadata'],
+                    1
+                );
+
+                if (results && results.length > 0 && results[0].metadata) {
+                    const metadata = JSON.parse(results[0].metadata);
+                    if (metadata.codebasePath) {
+                        cloudCodebases.add(metadata.codebasePath);
+                    }
+                }
+            } catch (e) {
+                // Skip this collection
+            }
+        }
+
+        // Check each codebase in the snapshot
+        const allCodebases = this.snapshotManager.getIndexedCodebases();
+        const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+
+        let fixedCount = 0;
+
+        // Fix codebases that are "indexing" but exist in cloud
+        for (const codebasePath of indexingCodebases) {
+            if (cloudCodebases.has(codebasePath) || await this.context.hasIndex(codebasePath)) {
+                console.log(`[STARTUP] 🔄 Fixing interrupted indexing: ${codebasePath} → marked as indexed`);
+                const info = this.snapshotManager.getCodebaseInfo(codebasePath);
+                this.snapshotManager.setCodebaseIndexed(codebasePath, {
+                    indexedFiles: (info as any)?.indexedFiles || 0,
+                    totalChunks: (info as any)?.totalChunks || 0,
+                    status: 'completed'
+                });
+                fixedCount++;
+            }
+        }
+
+        if (fixedCount > 0) {
+            this.snapshotManager.saveCodebaseSnapshot();
+            console.log(`[STARTUP] ✅ Fixed ${fixedCount} interrupted indexing state(s)`);
+        } else {
+            console.log('[STARTUP] ✅ Cloud state matches local snapshot');
+        }
     }
 
     private setupTools() {
@@ -110,6 +182,11 @@ Search the indexed codebase using natural language queries within a specified ab
 ⚠️ **IMPORTANT**:
 - You MUST provide an absolute path.
 
+🔧 **Tool Behavior**:
+- **If indexed**: Returns search results immediately
+- **If indexing in progress**: Returns partial results with a warning that indexing is still running
+- **If not indexed**: Returns error telling you to use index_codebase first
+
 🎯 **When to Use**:
 This tool is versatile and can be used before completing various tasks to retrieve relevant context:
 - **Code search**: Find specific functions, classes, or implementations
@@ -120,9 +197,10 @@ This tool is versatile and can be used before completing various tasks to retrie
 - **Feature development**: Understand existing architecture and similar implementations
 - **Duplicate detection**: Identify redundant or duplicated code patterns across the codebase
 
-✨ **Usage Guidance**:
-- If the codebase is not indexed, this tool will return a clear error message indicating that indexing is required first.
-- You can then use the index_codebase tool to index the codebase before searching again.
+💡 **Pro Tips**:
+- Works even while indexing is in progress (returns partial results)
+- If results are incomplete, wait for indexing to complete then search again
+- Use extensionFilter to narrow down results by file type
 `;
 
         // Define available tools
