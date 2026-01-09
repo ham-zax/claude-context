@@ -109,12 +109,12 @@ export class SnapshotManager {
             // Store the complete info for this codebase
             validCodebaseInfoMap.set(codebasePath, info);
 
-            if (info.status === 'indexed') {
+            if (info.status === 'indexed' || info.status === 'sync_completed') {
                 validIndexedCodebases.push(codebasePath);
                 if ('indexedFiles' in info) {
                     validFileCount.set(codebasePath, info.indexedFiles);
                 }
-                console.log(`[SNAPSHOT-DEBUG] Validated indexed codebase: ${codebasePath} (${info.indexedFiles || 'unknown'} files, ${info.totalChunks || 'unknown'} chunks)`);
+                console.log(`[SNAPSHOT-DEBUG] Validated indexed codebase: ${codebasePath} (${(info as any).indexedFiles || 'unknown'} files, ${(info as any).totalChunks || 'unknown'} chunks)`);
             } else if (info.status === 'indexing') {
                 if ('indexingPercentage' in info) {
                     validIndexingCodebases.set(codebasePath, info.indexingPercentage);

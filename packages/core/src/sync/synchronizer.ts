@@ -252,13 +252,37 @@ export class FileSynchronizer {
     private simpleGlobMatch(text: string, pattern: string): boolean {
         if (!text || !pattern) return false;
 
-        // Convert glob pattern to regex
-        const regexPattern = pattern
-            .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except *
-            .replace(/\*/g, '.*'); // Convert * to .*
+        // Handle ** (globstar) - matches any number of directories (including zero)
+        // First, handle special cases for ** patterns
+
+        // Normalize path separators
+        const normalizedText = text.replace(/\\/g, '/');
+        const normalizedPattern = pattern.replace(/\\/g, '/');
+
+        // Convert glob pattern to regex with proper ** and * handling
+        let regexPattern = normalizedPattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&'); // Escape regex special chars except * and ?
+
+        // Handle ** (globstar) - must be done BEFORE handling single *
+        // **/ at start or middle means "any directories"
+        // /** at end means "anything below"
+        // ** alone means "anything"
+
+        // Replace **/ with a placeholder first
+        regexPattern = regexPattern.replace(/\*\*\//g, '(?:[^/]+/)*');
+        // Replace /** with a placeholder
+        regexPattern = regexPattern.replace(/\/\*\*/g, '(?:/.*)?');
+        // Replace standalone ** (rare, but handle it)
+        regexPattern = regexPattern.replace(/\*\*/g, '.*');
+
+        // Now handle single * - matches anything except /
+        regexPattern = regexPattern.replace(/\*/g, '[^/]*');
+
+        // Handle ? - matches single character except /
+        regexPattern = regexPattern.replace(/\?/g, '[^/]');
 
         const regex = new RegExp(`^${regexPattern}$`);
-        return regex.test(text);
+        return regex.test(normalizedText);
     }
 
     private buildMerkleDAG(fileHashes: Map<string, string>): MerkleDAG {

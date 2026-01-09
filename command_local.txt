@@ -1,0 +1,1 @@
+Set-Location "E:\MyDocuments\claude-context\packages\core"; pnpm run build; Set-Location "E:\MyDocuments\claude-context\packages\mcp"; pnpm run build; npm link
