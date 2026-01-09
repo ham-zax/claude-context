@@ -113,10 +113,19 @@ export class FileSynchronizer {
             return false; // Don't ignore root
         }
 
-        // Check direct pattern matches first
-        for (const pattern of this.ignorePatterns) {
+        // Separate ignore patterns from negation patterns
+        const { ignorePatterns, negationPatterns } = this.parsePatterns(this.ignorePatterns);
+
+        // Check direct pattern matches first (ignore patterns)
+        for (const pattern of ignorePatterns) {
             if (this.matchPattern(normalizedPath, pattern, isDirectory)) {
-                return true;
+                // Path matches an ignore pattern - check if it matches a negation pattern
+                const negated = negationPatterns.some(negPattern =>
+                    this.matchNegationPattern(normalizedPath, negPattern, isDirectory)
+                );
+                if (!negated) {
+                    return true;
+                }
             }
         }
 
@@ -124,24 +133,35 @@ export class FileSynchronizer {
         const normalizedPathParts = normalizedPath.split('/');
         for (let i = 0; i < normalizedPathParts.length; i++) {
             const partialPath = normalizedPathParts.slice(0, i + 1).join('/');
-            for (const pattern of this.ignorePatterns) {
+            for (const pattern of ignorePatterns) {
+                let matches = false;
                 // Check directory patterns
                 if (pattern.endsWith('/')) {
                     const dirPattern = pattern.slice(0, -1);
                     if (this.simpleGlobMatch(partialPath, dirPattern) ||
                         this.simpleGlobMatch(normalizedPathParts[i], dirPattern)) {
-                        return true;
+                        matches = true;
                     }
                 }
                 // Check exact path patterns
                 else if (pattern.includes('/')) {
                     if (this.simpleGlobMatch(partialPath, pattern)) {
-                        return true;
+                        matches = true;
                     }
                 }
                 // Check filename patterns against any path component
                 else {
                     if (this.simpleGlobMatch(normalizedPathParts[i], pattern)) {
+                        matches = true;
+                    }
+                }
+
+                if (matches) {
+                    // Check if this path is negated
+                    const negated = negationPatterns.some(negPattern =>
+                        this.matchNegationPattern(partialPath, negPattern, isDirectory)
+                    );
+                    if (!negated) {
                         return true;
                     }
                 }
@@ -149,6 +169,55 @@ export class FileSynchronizer {
         }
 
         return false;
+    }
+
+    /**
+     * Parse patterns into ignore and negation patterns
+     */
+    private parsePatterns(patterns: string[]): { ignorePatterns: string[]; negationPatterns: string[] } {
+        const ignorePatterns: string[] = [];
+        const negationPatterns: string[] = [];
+
+        for (const pattern of patterns) {
+            if (pattern.startsWith('!')) {
+                // Remove the ! prefix and add to negation patterns
+                negationPatterns.push(pattern.slice(1));
+            } else {
+                ignorePatterns.push(pattern);
+            }
+        }
+
+        return { ignorePatterns, negationPatterns };
+    }
+
+    /**
+     * Match a negation pattern against a path
+     */
+    private matchNegationPattern(filePath: string, pattern: string, isDirectory: boolean = false): boolean {
+        // Clean the pattern (remove leading/trailing slashes and the ! prefix was already removed)
+        const cleanPath = filePath.replace(/^\/+|\/+$/g, '');
+        const cleanPattern = pattern.replace(/^\/+|\/+$/g, '');
+
+        if (!cleanPath || !cleanPattern) {
+            return false;
+        }
+
+        // Handle directory patterns (ending with /)
+        if (pattern.endsWith('/')) {
+            if (!isDirectory) return false;
+            const dirPattern = cleanPattern.slice(0, -1);
+            return this.simpleGlobMatch(cleanPath, dirPattern) ||
+                cleanPath.split('/').some(part => this.simpleGlobMatch(part, dirPattern));
+        }
+
+        // Handle path patterns (containing /)
+        if (cleanPattern.includes('/')) {
+            return this.simpleGlobMatch(cleanPath, cleanPattern);
+        }
+
+        // Handle filename patterns - match against basename
+        const fileName = path.basename(cleanPath);
+        return this.simpleGlobMatch(fileName, cleanPattern);
     }
 
     private matchPattern(filePath: string, pattern: string, isDirectory: boolean = false): boolean {

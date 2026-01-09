@@ -147,7 +147,7 @@ export class SnapshotManager {
 
             if (this.isV2Format(snapshot)) {
                 return Object.entries(snapshot.codebases)
-                    .filter(([_, info]) => info.status === 'indexed')
+                    .filter(([_, info]) => info.status === 'indexed' || info.status === 'sync_completed')
                     .map(([path, _]) => path);
             } else {
                 // V1 format

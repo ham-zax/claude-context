@@ -132,7 +132,7 @@ export class Context {
         // Remove duplicates
         this.supportedExtensions = [...new Set(allSupportedExtensions)];
 
-        // Load custom ignore patterns from environment variables  
+        // Load custom ignore patterns from environment variables
         const envCustomIgnorePatterns = this.getCustomIgnorePatternsFromEnv();
 
         // Start with default ignore patterns
@@ -1059,13 +1059,70 @@ export class Context {
         const relativePath = path.relative(basePath, filePath);
         const normalizedPath = relativePath.replace(/\\/g, '/'); // Normalize path separators
 
-        for (const pattern of this.ignorePatterns) {
+        // Separate ignore patterns from negation patterns
+        const { ignorePatterns, negationPatterns } = this.parsePatterns(this.ignorePatterns);
+
+        for (const pattern of ignorePatterns) {
             if (this.isPatternMatch(normalizedPath, pattern)) {
-                return true;
+                // Check if this path is negated
+                const negated = negationPatterns.some(negPattern =>
+                    this.isNegationPatternMatch(normalizedPath, negPattern)
+                );
+                if (!negated) {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    /**
+     * Parse patterns into ignore and negation patterns
+     */
+    private parsePatterns(patterns: string[]): { ignorePatterns: string[]; negationPatterns: string[] } {
+        const ignorePatterns: string[] = [];
+        const negationPatterns: string[] = [];
+
+        for (const pattern of patterns) {
+            if (pattern.startsWith('!')) {
+                // Remove the ! prefix and add to negation patterns
+                negationPatterns.push(pattern.slice(1));
+            } else {
+                ignorePatterns.push(pattern);
+            }
+        }
+
+        return { ignorePatterns, negationPatterns };
+    }
+
+    /**
+     * Match a negation pattern against a path
+     */
+    private isNegationPatternMatch(filePath: string, pattern: string): boolean {
+        // Clean the pattern (remove leading/trailing slashes and the ! prefix was already removed)
+        const cleanPath = filePath.replace(/^\/+|\/+$/g, '');
+        const cleanPattern = pattern.replace(/^\/+|\/+$/g, '');
+
+        if (!cleanPath || !cleanPattern) {
+            return false;
+        }
+
+        // Handle directory patterns (ending with /)
+        if (pattern.endsWith('/')) {
+            const dirPattern = cleanPattern.slice(0, -1);
+            return this.simpleGlobMatch(cleanPath, dirPattern) ||
+                cleanPath.split('/').some(part => this.simpleGlobMatch(part, dirPattern));
+        }
+
+        // Handle path patterns (containing /)
+        if (cleanPattern.includes('/')) {
+            return this.simpleGlobMatch(cleanPath, cleanPattern);
+        }
+
+        // Handle filename patterns - match against basename
+        const fileName = path.basename(cleanPath);
+        return this.simpleGlobMatch(fileName, cleanPattern);
     }
 
     /**
@@ -1135,7 +1192,7 @@ export class Context {
     }
 
     /**
-     * Get custom ignore patterns from environment variables  
+     * Get custom ignore patterns from environment variables
      * Supports CUSTOM_IGNORE_PATTERNS as comma-separated list
      * @returns Array of custom ignore patterns
      */
