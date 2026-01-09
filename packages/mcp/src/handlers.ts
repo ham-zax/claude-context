@@ -110,17 +110,54 @@ export class ToolHandlers {
             console.log(`[SYNC-CLOUD] 📊 Found ${cloudCodebases.size} valid codebases in cloud`);
 
             // Get current local codebases
-            const localCodebases = new Set(this.snapshotManager.getIndexedCodebases());
-            console.log(`[SYNC-CLOUD] 📊 Found ${localCodebases.size} local codebases in snapshot`);
+            const localIndexedCodebases = new Set(this.snapshotManager.getIndexedCodebases());
+            console.log(`[SYNC-CLOUD] 📊 Found ${localIndexedCodebases.size} locally indexed codebases in snapshot`);
+
+            // Get codebases that are currently indexing (might have been interrupted)
+            const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+            console.log(`[SYNC-CLOUD] 📊 Found ${indexingCodebases.length} codebases currently indexing`);
 
             let hasChanges = false;
 
             // Remove local codebases that don't exist in cloud
-            for (const localCodebase of localCodebases) {
+            for (const localCodebase of localIndexedCodebases) {
                 if (!cloudCodebases.has(localCodebase)) {
                     this.snapshotManager.removeIndexedCodebase(localCodebase);
                     hasChanges = true;
                     console.log(`[SYNC-CLOUD] ➖ Removed local codebase (not in cloud): ${localCodebase}`);
+                }
+            }
+
+            // FIX: Mark interrupted indexing codebases as indexed if they exist in cloud
+            // This handles the case where indexing was interrupted but cloud index is complete
+            for (const codebasePath of indexingCodebases) {
+                if (cloudCodebases.has(codebasePath)) {
+                    console.log(`[SYNC-CLOUD] 🔄 Marking interrupted indexing codebase as indexed: ${codebasePath}`);
+                    // Get the last known stats from the snapshot info
+                    const info = this.snapshotManager.getCodebaseInfo(codebasePath);
+                    const indexedFiles = (info as any)?.indexedFiles || 0;
+                    const totalChunks = (info as any)?.totalChunks || 0;
+
+                    // Mark as indexed with known stats
+                    this.snapshotManager.setCodebaseIndexed(codebasePath, {
+                        indexedFiles,
+                        totalChunks,
+                        status: 'completed'
+                    });
+                    hasChanges = true;
+                } else if (await this.context.hasIndex(codebasePath)) {
+                    // Double-check with hasIndex method
+                    console.log(`[SYNC-CLOUD] 🔄 hasIndex confirms cloud index exists for: ${codebasePath}`);
+                    const info = this.snapshotManager.getCodebaseInfo(codebasePath);
+                    const indexedFiles = (info as any)?.indexedFiles || 0;
+                    const totalChunks = (info as any)?.totalChunks || 0;
+
+                    this.snapshotManager.setCodebaseIndexed(codebasePath, {
+                        indexedFiles,
+                        totalChunks,
+                        status: 'completed'
+                    });
+                    hasChanges = true;
                 }
             }
 
