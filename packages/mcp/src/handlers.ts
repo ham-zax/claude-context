@@ -4,16 +4,19 @@ import * as crypto from "crypto";
 import { Context, COLLECTION_LIMIT_MESSAGE } from "@zilliz/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
 import { ensureAbsolutePath, truncateContent, trackCodebasePath } from "./utils.js";
+import { SyncManager } from "./sync.js";
 
 export class ToolHandlers {
     private context: Context;
     private snapshotManager: SnapshotManager;
+    private syncManager: SyncManager;
     private indexingStats: { indexedFiles: number; totalChunks: number } | null = null;
     private currentWorkspace: string;
 
-    constructor(context: Context, snapshotManager: SnapshotManager) {
+    constructor(context: Context, snapshotManager: SnapshotManager, syncManager: SyncManager) {
         this.context = context;
         this.snapshotManager = snapshotManager;
+        this.syncManager = syncManager;
         this.currentWorkspace = process.cwd();
         console.log(`[WORKSPACE] Current workspace: ${this.currentWorkspace}`);
     }
@@ -518,6 +521,10 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     };
                 }
             }
+
+            // Sync Optimization: Ensure freshness (Smart Sync-on-Read)
+            // This handles the "call 5 tools, only 1 syncs" requirement via coalescing
+            await this.syncManager.ensureFreshness(effectiveRoot, 3 * 60 * 1000); // 3 minute threshold matching auto-sync
 
             // Show indexing status if codebase is being indexed
             let indexingStatusMessage = '';

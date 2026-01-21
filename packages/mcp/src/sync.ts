@@ -1,143 +1,124 @@
 import * as fs from "fs";
-import { Context, FileSynchronizer } from "@zilliz/claude-context-core";
+import { Context } from "@zilliz/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
 
 export class SyncManager {
     private context: Context;
     private snapshotManager: SnapshotManager;
-    private isSyncing: boolean = false;
+    private activeSyncs: Map<string, Promise<void>> = new Map();
+    private lastSyncTimes: Map<string, number> = new Map();
+    // Removed isSyncing in favor of per-codebase activeSyncs
 
     constructor(context: Context, snapshotManager: SnapshotManager) {
         this.context = context;
         this.snapshotManager = snapshotManager;
     }
 
-    public async handleSyncIndex(): Promise<void> {
-        const syncStartTime = Date.now();
-        console.log(`[SYNC-DEBUG] handleSyncIndex() called at ${new Date().toISOString()}`);
+    /**
+     * Ensures the codebase is fresh before use.
+     * Unified entry point for ALL sync operations (manual, periodic, and on-read).
+     */
+    public async ensureFreshness(codebasePath: string, thresholdMs: number = 60000): Promise<void> {
+        // 1. Coalescing: Join existing in-flight sync
+        if (this.activeSyncs.has(codebasePath)) {
+            console.log(`[SYNC] 🛡️ Request Coalesced: Attaching to active sync for '${codebasePath}'`);
+            return this.activeSyncs.get(codebasePath);
+        }
 
-        const indexedCodebases = this.snapshotManager.getIndexedCodebases();
-
-        if (indexedCodebases.length === 0) {
-            console.log('[SYNC-DEBUG] No codebases indexed. Skipping sync.');
+        // 2. Throttling: Skip if recently synced
+        const lastSync = this.lastSyncTimes.get(codebasePath) || 0;
+        const timeSince = Date.now() - lastSync;
+        if (thresholdMs > 0 && timeSince < thresholdMs) {
+            console.log(`[SYNC] ⏩ Skipped (Fresh): '${codebasePath}' was synced ${Math.round(timeSince / 1000)}s ago (Threshold: ${thresholdMs / 1000}s)`);
             return;
         }
 
-        console.log(`[SYNC-DEBUG] Found ${indexedCodebases.length} indexed codebases:`, indexedCodebases);
+        // 3. Execution Gate
+        // console.log(`[SYNC] 🔄 Triggering Sync for '${codebasePath}' (Threshold: ${thresholdMs}ms)`);
 
-        if (this.isSyncing) {
-            console.log('[SYNC-DEBUG] Index sync already in progress. Skipping.');
+        const syncPromise = (async () => {
+            try {
+                await this.syncCodebase(codebasePath);
+            } catch (e) {
+                // Log and rethrow to allow callers to handle/see failure
+                console.error(`[SYNC] Error syncing '${codebasePath}':`, e);
+                throw e;
+            } finally {
+                this.activeSyncs.delete(codebasePath);
+            }
+        })();
+
+        this.activeSyncs.set(codebasePath, syncPromise);
+        return syncPromise;
+    }
+
+    private async syncCodebase(codebasePath: string): Promise<void> {
+        // Async existence check to avoid blocking event loop
+        try {
+            await fs.promises.access(codebasePath);
+        } catch {
+            // Path doesn't exist anymore - Clean up snapshot
+            console.log(`[SYNC] 🗑️ Codebase '${codebasePath}' no longer exists. Removing from snapshot.`);
+            try {
+                this.snapshotManager.removeIndexedCodebase(codebasePath);
+                this.snapshotManager.saveCodebaseSnapshot();
+            } catch (e) {
+                console.error(`[SYNC] Failed to clean snapshot for '${codebasePath}':`, e);
+            }
             return;
         }
-
-        this.isSyncing = true;
-        console.log(`[SYNC-DEBUG] Starting index sync for all ${indexedCodebases.length} codebases...`);
 
         try {
-            let totalStats = { added: 0, removed: 0, modified: 0 };
+            // Incremental sync
+            const stats = await this.context.reindexByChange(codebasePath);
 
-            for (let i = 0; i < indexedCodebases.length; i++) {
-                const codebasePath = indexedCodebases[i];
-                const codebaseStartTime = Date.now();
+            // Centralized State Update
+            this.lastSyncTimes.set(codebasePath, Date.now());
 
-                console.log(`[SYNC-DEBUG] [${i + 1}/${indexedCodebases.length}] Starting sync for codebase: '${codebasePath}'`);
+            // Persist Snapshot
+            this.snapshotManager.setCodebaseSyncCompleted(codebasePath, stats);
+            this.snapshotManager.saveCodebaseSnapshot();
 
-                // Check if codebase path still exists
-                try {
-                    const pathExists = fs.existsSync(codebasePath);
-                    console.log(`[SYNC-DEBUG] Codebase path exists: ${pathExists}`);
-
-                    if (!pathExists) {
-                        console.warn(`[SYNC-DEBUG] Codebase path '${codebasePath}' no longer exists. Skipping sync.`);
-                        continue;
-                    }
-                } catch (pathError: any) {
-                    console.error(`[SYNC-DEBUG] Error checking codebase path '${codebasePath}':`, pathError);
-                    continue;
-                }
-
-                try {
-                    console.log(`[SYNC-DEBUG] Calling context.reindexByChange() for '${codebasePath}'`);
-                    const stats = await this.context.reindexByChange(codebasePath);
-                    const codebaseElapsed = Date.now() - codebaseStartTime;
-
-                    console.log(`[SYNC-DEBUG] Reindex stats for '${codebasePath}':`, stats);
-                    console.log(`[SYNC-DEBUG] Codebase sync completed in ${codebaseElapsed}ms`);
-
-                    // Accumulate total stats
-                    totalStats.added += stats.added;
-                    totalStats.removed += stats.removed;
-                    totalStats.modified += stats.modified;
-
-                    if (stats.added > 0 || stats.removed > 0 || stats.modified > 0) {
-                        console.log(`[SYNC] Sync complete for '${codebasePath}'. Added: ${stats.added}, Removed: ${stats.removed}, Modified: ${stats.modified} (${codebaseElapsed}ms)`);
-                    } else {
-                        console.log(`[SYNC] No changes detected for '${codebasePath}' (${codebaseElapsed}ms)`);
-                    }
-                } catch (error: any) {
-                    const codebaseElapsed = Date.now() - codebaseStartTime;
-                    console.error(`[SYNC-DEBUG] Error syncing codebase '${codebasePath}' after ${codebaseElapsed}ms:`, error);
-                    console.error(`[SYNC-DEBUG] Error stack:`, error.stack);
-
-                    if (error.message.includes('Failed to query Milvus')) {
-                        // Collection maybe deleted manually, delete the snapshot file
-                        await FileSynchronizer.deleteSnapshot(codebasePath);
-                    }
-
-                    // Log additional error details
-                    if (error.code) {
-                        console.error(`[SYNC-DEBUG] Error code: ${error.code}`);
-                    }
-                    if (error.errno) {
-                        console.error(`[SYNC-DEBUG] Error errno: ${error.errno}`);
-                    }
-
-                    // Continue with next codebase even if one fails
-                }
+            if (stats.added > 0 || stats.removed > 0 || stats.modified > 0) {
+                console.log(`[SYNC] ✅ Sync Result for '${codebasePath}': +${stats.added}, -${stats.removed}, ~${stats.modified}`);
             }
-
-            const totalElapsed = Date.now() - syncStartTime;
-            console.log(`[SYNC-DEBUG] Total sync stats across all codebases: Added: ${totalStats.added}, Removed: ${totalStats.removed}, Modified: ${totalStats.modified}`);
-            console.log(`[SYNC-DEBUG] Index sync completed for all codebases in ${totalElapsed}ms`);
-            console.log(`[SYNC] Index sync completed for all codebases. Total changes - Added: ${totalStats.added}, Removed: ${totalStats.removed}, Modified: ${totalStats.modified}`);
         } catch (error: any) {
-            const totalElapsed = Date.now() - syncStartTime;
-            console.error(`[SYNC-DEBUG] Error during index sync after ${totalElapsed}ms:`, error);
-            console.error(`[SYNC-DEBUG] Error stack:`, error.stack);
-        } finally {
-            this.isSyncing = false;
-            const totalElapsed = Date.now() - syncStartTime;
-            console.log(`[SYNC-DEBUG] handleSyncIndex() finished at ${new Date().toISOString()}, total duration: ${totalElapsed}ms`);
+            console.error(`[SYNC] Failed to sync '${codebasePath}':`, error);
+            throw error; // Let ensureFreshness handle the catch/finally
+        }
+    }
+
+    public async handleSyncIndex(): Promise<void> {
+        const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+        if (indexedCodebases.length === 0) return;
+
+        // console.log(`[SYNC-DEBUG] Starting periodic sync via unified gate...`);
+
+        // Execute sequentially to avoid resource spikes, but through the ensureFreshness gate
+        for (const codebasePath of indexedCodebases) {
+            try {
+                // thresholdMs = 0 forces a check (unless coalesced)
+                await this.ensureFreshness(codebasePath, 0);
+            } catch (e) {
+                // Individual codebase failure shouldn't stop the loop
+                console.error(`[SYNC] Periodic sync failed for '${codebasePath}':`, e);
+            }
         }
     }
 
     public startBackgroundSync(): void {
-        console.log('[SYNC-DEBUG] startBackgroundSync() called');
+        console.log('[SYNC-DEBUG] startBackgroundSync() called with recursive scheduling');
 
-        // Execute initial sync immediately after a short delay to let server initialize
-        console.log('[SYNC-DEBUG] Scheduling initial sync in 5 seconds...');
-        setTimeout(async () => {
-            console.log('[SYNC-DEBUG] Executing initial sync after server startup');
-            try {
-                await this.handleSyncIndex();
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                if (errorMessage.includes('Failed to query collection')) {
-                    console.log('[SYNC-DEBUG] Collection not yet established, this is expected for new cluster users. Will retry on next sync cycle.');
-                } else {
-                    console.error('[SYNC-DEBUG] Initial sync failed with unexpected error:', error);
-                    throw error;
-                }
-            }
-        }, 5000); // Initial sync after 5 seconds
+        const run = async () => {
+            // console.log('[SYNC-DEBUG] Running scheduled sync cycle...');
+            await this.handleSyncIndex();
 
-        // Periodically check for file changes and update the index
-        console.log('[SYNC-DEBUG] Setting up periodic sync every 5 minutes (300000ms)');
-        const syncInterval = setInterval(() => {
-            console.log('[SYNC-DEBUG] Executing scheduled periodic sync');
-            this.handleSyncIndex();
-        }, 5 * 60 * 1000); // every 5 minutes
+            // recursive schedule to prevent overlap
+            setTimeout(run, 3 * 60 * 1000); // 3 minutes
+        };
 
-        console.log('[SYNC-DEBUG] Background sync setup complete. Interval ID:', syncInterval);
+        // Initial delay
+        setTimeout(run, 5000);
+        console.log('[SYNC-DEBUG] Background sync scheduled.');
     }
-} 
+}
