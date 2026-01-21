@@ -9,7 +9,7 @@ export interface VoyageAIEmbeddingConfig {
 export class VoyageAIEmbedding extends Embedding {
     private client: VoyageAIClient;
     private config: VoyageAIEmbeddingConfig;
-    private dimension: number = 1024; // Default dimension for voyage-code-3
+    private dimension: number = 1024; // Default dimension for voyage-4 series
     private inputType: 'document' | 'query' = 'document';
     protected maxTokens: number = 32000; // Default max tokens
 
@@ -21,7 +21,7 @@ export class VoyageAIEmbedding extends Embedding {
         });
 
         // Set dimension and context length based on different models
-        this.updateModelSettings(config.model || 'voyage-code-3');
+        this.updateModelSettings(config.model || 'voyage-4');
     }
 
     private updateModelSettings(model: string): void {
@@ -68,7 +68,7 @@ export class VoyageAIEmbedding extends Embedding {
 
     async embed(text: string): Promise<EmbeddingVector> {
         const processedText = this.preprocessText(text);
-        const model = this.config.model || 'voyage-code-3';
+        const model = this.config.model || 'voyage-4';
 
         const response = await this.client.embed({
             input: processedText,
@@ -88,7 +88,7 @@ export class VoyageAIEmbedding extends Embedding {
 
     async embedBatch(texts: string[]): Promise<EmbeddingVector[]> {
         const processedTexts = this.preprocessTexts(texts);
-        const model = this.config.model || 'voyage-code-3';
+        const model = this.config.model || 'voyage-4';
 
         const response = await this.client.embed({
             input: processedTexts,
@@ -146,75 +146,107 @@ export class VoyageAIEmbedding extends Embedding {
     /**
      * Get list of supported models
      */
-    static getSupportedModels(): Record<string, { dimension: number | string; contextLength: number; description: string }> {
+    static getSupportedModels(): Record<string, { dimension: number | string; contextLength: number; description: string; maxBatchTokens?: number }> {
         return {
-            // Latest recommended models
+            // Voyage 4 series - Latest recommended models
+            'voyage-4-large': {
+                dimension: '1024 (default), 256, 512, 2048',
+                contextLength: 32000,
+                maxBatchTokens: 120000,
+                description: 'Best quality for general-purpose embedding (recommended)'
+            },
+            'voyage-4': {
+                dimension: '1024 (default), 256, 512, 2048',
+                contextLength: 32000,
+                maxBatchTokens: 320000,
+                description: 'Balance between quality and cost (recommended)'
+            },
+            'voyage-4-lite': {
+                dimension: '1024 (default), 256, 512, 2048',
+                contextLength: 32000,
+                maxBatchTokens: 1000000,
+                description: 'Lowest latency and cost (recommended)'
+            },
+            // Voyage 3 series
             'voyage-3-large': {
                 dimension: '1024 (default), 256, 512, 2048',
                 contextLength: 32000,
-                description: 'The best general-purpose and multilingual retrieval quality'
+                maxBatchTokens: 120000,
+                description: 'Best general-purpose and multilingual retrieval quality'
             },
             'voyage-3.5': {
                 dimension: '1024 (default), 256, 512, 2048',
                 contextLength: 32000,
-                description: 'Optimized for general-purpose and multilingual retrieval quality'
+                maxBatchTokens: 320000,
+                description: 'Optimized for general-purpose and multilingual retrieval'
             },
             'voyage-3.5-lite': {
                 dimension: '1024 (default), 256, 512, 2048',
                 contextLength: 32000,
+                maxBatchTokens: 1000000,
                 description: 'Optimized for latency and cost'
             },
+            // Code-specific model
             'voyage-code-3': {
                 dimension: '1024 (default), 256, 512, 2048',
                 contextLength: 32000,
-                description: 'Optimized for code retrieval (recommended for code)'
+                maxBatchTokens: 120000,
+                description: 'Optimized for code retrieval and programming documentation (recommended for code)'
             },
-            // Professional domain models
+            // Domain-specific models
             'voyage-finance-2': {
                 dimension: 1024,
                 contextLength: 32000,
+                maxBatchTokens: 120000,
                 description: 'Optimized for finance retrieval and RAG'
             },
             'voyage-law-2': {
                 dimension: 1024,
                 contextLength: 16000,
+                maxBatchTokens: 120000,
                 description: 'Optimized for legal retrieval and RAG'
             },
+            // Contextualized embeddings
+            'voyage-context-3': {
+                dimension: '1024 (default), 256, 512, 2048',
+                contextLength: 32000,
+                description: 'Contextualized chunk embeddings for improved retrieval'
+            },
+            // Legacy models
             'voyage-multilingual-2': {
                 dimension: 1024,
                 contextLength: 32000,
-                description: 'Legacy: Use voyage-3.5 for multilingual tasks'
+                description: 'Legacy: Use voyage-4 or voyage-3.5 for multilingual tasks'
             },
             'voyage-large-2-instruct': {
                 dimension: 1024,
                 contextLength: 16000,
-                description: 'Legacy: Use voyage-3.5 instead'
+                description: 'Legacy: Use voyage-4 instead'
             },
-            // Legacy models
             'voyage-large-2': {
                 dimension: 1536,
                 contextLength: 16000,
-                description: 'Legacy: Use voyage-3.5 instead'
+                description: 'Legacy: Use voyage-4 instead'
             },
             'voyage-code-2': {
                 dimension: 1536,
                 contextLength: 16000,
-                description: 'Previous generation of code embeddings'
+                description: 'Legacy: Use voyage-code-3 instead'
             },
             'voyage-3': {
                 dimension: 1024,
                 contextLength: 32000,
-                description: 'Legacy: Use voyage-3.5 instead'
+                description: 'Legacy: Use voyage-4 instead'
             },
             'voyage-3-lite': {
                 dimension: 512,
                 contextLength: 32000,
-                description: 'Legacy: Use voyage-3.5-lite instead'
+                description: 'Legacy: Use voyage-4-lite instead'
             },
             'voyage-2': {
                 dimension: 1024,
                 contextLength: 4000,
-                description: 'Legacy: Use voyage-3.5-lite instead'
+                description: 'Legacy: Use voyage-4-lite instead'
             },
             // Other legacy models
             'voyage-02': {
