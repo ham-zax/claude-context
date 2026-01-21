@@ -298,6 +298,11 @@ This tool is versatile and can be used before completing various tasks to retrie
                                     type: "boolean",
                                     description: "If true, returns raw document array in JSON format (useful for reranking). Default: false",
                                     default: false
+                                },
+                                showScores: {
+                                    type: "boolean",
+                                    description: "If true, shows relevance scores (0.00-1.00) in the output. Default: false",
+                                    default: false
                                 }
                             },
                             required: ["path", "query"]
@@ -463,6 +468,29 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                             required: ["path", "query"]
                         }
                     },
+                    {
+                        name: "read_file",
+                        description: `Read the full content of a file from the local filesystem.
+                        
+🎯 **When to Use**:
+- After search_code returns a snippet and you need the full context
+- To read a file at a specific path provided by search results
+- To inspect code implementation details
+
+⚠️ **Constraints**:
+- Path must be absolute
+- Use this when 'search_code' truncation prevents seeing full logic`,
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                path: {
+                                    type: "string",
+                                    description: "ABSOLUTE path to the file to read."
+                                }
+                            },
+                            required: ["path"]
+                        }
+                    }
                 ]
             };
         });
@@ -488,6 +516,8 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                     return await this.handleListIndexedCodebases();
                 case "search_and_rerank":
                     return await this.handleSearchAndRerank(args);
+                case "read_file":
+                    return await this.toolHandlers.handleReadCode(args);
 
                 default:
                     throw new Error(`Unknown tool: ${name}`);
@@ -536,16 +566,41 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                 };
             }
 
+            // Filter out empty documents BUT keep track of original indices
+            const validDocuments = searchData.documentsForReranking
+                .map((doc: string, index: number) => ({ doc, index }))
+                .filter((item: any) => item.doc && item.doc.trim().length > 0);
+
+            if (validDocuments.length === 0) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Results found but all documents were empty. Query: "${query}" in codebase '${codebasePath}'`
+                    }]
+                };
+            }
+
+            // Extract just the document strings for the API
+            let docsToRerank = validDocuments.map((item: any) => item.doc);
+
+            // Cap at 100 documents to prevent VoyageAI API errors
+            if (docsToRerank.length > 100) {
+                docsToRerank = docsToRerank.slice(0, 100);
+            }
+
             // Step 2: Rerank the results
             const rerankedResults = await this.reranker.rerank(
                 query,
-                searchData.documentsForReranking,
-                { topK: Math.min(topK, searchData.documentsForReranking.length), returnDocuments: true }
+                docsToRerank,
+                { topK: Math.min(topK, docsToRerank.length), returnDocuments: true }
             );
 
-            // Step 3: Map reranked results back to original search results with location info
+            // Step 3: Map reranked results back to original search results using the preserved index
             const formattedResults = rerankedResults.map((r, i) => {
-                const originalResult = searchData.results[r.index];
+                // r.index is the index in docsToRerank, so we first find the original index
+                const originalIndex = validDocuments[r.index].index;
+                const originalResult = searchData.results[originalIndex];
+
                 return `${i + 1}. [Relevance: ${r.relevanceScore.toFixed(4)}] ${originalResult.language}\n` +
                     `   📍 ${originalResult.location}\n` +
                     `   \`\`\`${originalResult.language}\n${originalResult.content.substring(0, 2000)}${originalResult.content.length > 2000 ? '...' : ''}\n\`\`\`\n`;
@@ -638,16 +693,46 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
 
         try {
             // Set model if specified
-            if (model && ['rerank-2.5', 'rerank-2.5-lite'].includes(model)) {
+            if (model) {
                 this.reranker.setModel(model);
             }
 
-            const results = await this.reranker.rerank(query, documents, {
-                topK: Math.min(topK, documents.length),
+            // Filter out empty documents BUT keep track of original indices to return correct result
+            const validDocuments = documents
+                .map((doc: string, index: number) => ({ doc, index }))
+                .filter((item: any) => item.doc && item.doc.trim().length > 0);
+
+            if (validDocuments.length === 0) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Results found but all documents were empty.`
+                    }]
+                };
+            }
+
+            // Extract just the document strings for the API
+            let docsToRerank = validDocuments.map((item: any) => item.doc);
+
+            // Cap at 100 documents to prevent VoyageAI API errors
+            if (docsToRerank.length > 100) {
+                docsToRerank = docsToRerank.slice(0, 100);
+            }
+
+            // Call reranker
+            const results = await this.reranker.rerank(query, docsToRerank, {
+                topK: Math.min(topK, docsToRerank.length),
                 returnDocuments: true
             });
 
-            const formattedResults = results.map((r, i) =>
+            // Map results back to original structure
+            const mappedResults = results.map(r => ({
+                ...r,
+                index: validDocuments[r.index].index // Restore original index
+            }));
+
+            // Format for display if called directly
+            const formattedResults = mappedResults.map((r, i) =>
                 `${i + 1}. [Score: ${r.relevanceScore.toFixed(4)}] ${r.document?.substring(0, 200)}...`
             ).join('\n\n');
 
@@ -657,6 +742,7 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                     text: `## Reranked Results (${results.length} items)\n\nUsing model: ${this.reranker.getModel()}\n\n${formattedResults}`
                 }]
             };
+
         } catch (error) {
             return {
                 content: [{
