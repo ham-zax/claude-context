@@ -708,12 +708,37 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     context += `\n\n(Preview truncated: ${missingChars} more chars. To read full file, call read_file(path='${cleanPath}'))`;
                 }
 
+                // Identify exact line matches for query terms
+                let matchInfo = "";
+                try {
+                    const queryTerms = query.toLowerCase().split(/\s+/).filter((t: string) => t.length > 2);
+                    if (queryTerms.length > 0) {
+                        const matches: number[] = [];
+                        const lines = result.content.split('\n');
+                        lines.forEach((line: string, i: number) => {
+                            const lowerLine = line.toLowerCase();
+                            if (queryTerms.some((term: string) => lowerLine.includes(term))) {
+                                matches.push(result.startLine + i);
+                            }
+                        });
+
+                        if (matches.length > 0) {
+                            // Deduplicate and limit
+                            const unique = [...new Set(matches)].sort((a, b) => a - b);
+                            const shown = unique.slice(0, 5).join(', ');
+                            matchInfo = `\n   Matches at lines: ${shown}${unique.length > 5 ? '...' : ''}`;
+                        }
+                    }
+                } catch (e) {
+                    // Ignore matching errors
+                }
+
                 const codebaseInfo = path.basename(absolutePath);
 
                 const scoreInfo = showScores ? ` [Score: ${result.score.toFixed(4)}]` : '';
 
                 return `${index + 1}. Code snippet (${result.language}) [${codebaseInfo}]${scoreInfo}\n` +
-                    `   Location: ${location}\n` +
+                    `   Location: ${location}${matchInfo}\n` +
                     `   Rank: ${index + 1}\n` +
                     `   Context: \n\`\`\`${result.language}\n${context}\n\`\`\`\n`;
             }).join('\n');
