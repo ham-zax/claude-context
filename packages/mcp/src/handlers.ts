@@ -454,7 +454,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
     }
 
     public async handleSearchCode(args: any) {
-        const { path: codebasePath, query, limit = 10, extensionFilter, returnRaw = false } = args;
+        const { path: codebasePath, query, limit = 10, extensionFilter, returnRaw = false, showScores = false } = args;
         const resultLimit = limit || 10;
 
         try {
@@ -490,17 +490,33 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             trackCodebasePath(absolutePath);
 
             // Check if this codebase is indexed or being indexed
+            // Smart Path Resolution: Check if indexed, or if a parent is indexed
+            let effectiveRoot = absolutePath;
+            let subdirectoryFilter: string | null = null;
+
             const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
             const isIndexing = this.snapshotManager.getIndexingCodebases().includes(absolutePath);
 
             if (!isIndexed && !isIndexing) {
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Error: Codebase '${absolutePath}' is not indexed. Please index it first using the index_codebase tool.`
-                    }],
-                    isError: true
-                };
+                // Try to find an indexed parent
+                const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+                const parents = indexedCodebases.filter(root => absolutePath.startsWith(root) && absolutePath !== root);
+
+                if (parents.length > 0) {
+                    // Sort by length desc (longest match is closest parent)
+                    parents.sort((a: string, b: string) => b.length - a.length);
+                    effectiveRoot = parents[0];
+                    subdirectoryFilter = absolutePath;
+                    console.log(`[SEARCH] Auto-resolved subdirectory '${absolutePath}' to indexed root '${effectiveRoot}'`);
+                } else {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Error: Codebase '${absolutePath}' (or any parent) is not indexed. Please index the root using the index_codebase tool.`
+                        }],
+                        isError: true
+                    };
+                }
             }
 
             // Show indexing status if codebase is being indexed
@@ -536,14 +552,27 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                 filterExpr = `fileExtension in [${quoted}]`;
             }
 
-            // Search in the specified codebase
-            const searchResults = await this.context.semanticSearch(
-                absolutePath,
+            // Search in the specified codebase (or resolved parent)
+            let searchResults = await this.context.semanticSearch(
+                effectiveRoot,
                 query,
                 Math.min(resultLimit, 50),
                 0.3,
                 filterExpr
             );
+
+            // Filter by subdirectory if auto-resolved
+            if (subdirectoryFilter) {
+                const relativeFilter = path.relative(effectiveRoot, subdirectoryFilter).replace(/\\/g, '/');
+                const originalCount = searchResults.length;
+
+                searchResults = searchResults.filter((r: any) => {
+                    const normalizedPath = r.relativePath.replace(/\\/g, '/');
+                    return normalizedPath.startsWith(relativeFilter);
+                });
+
+                console.log(`[SEARCH] Filtered ${originalCount} -> ${searchResults.length} results by subdirectory '${relativeFilter}'`);
+            }
 
             console.log(`[SEARCH] ✅ Search completed! Found ${searchResults.length} results using ${embeddingProvider.getProvider()} embeddings`);
 
@@ -570,6 +599,8 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     content: result.content
                 }));
 
+                const status = isIndexing ? 'indexing' : 'ready';
+
                 return {
                     content: [{
                         type: "text",
@@ -578,21 +609,110 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                             codebasePath: absolutePath,
                             resultCount: searchResults.length,
                             isIndexing,
+                            indexingStatus: status,
                             results: rawResults,
-                            // Include document array ready for reranking
                             documentsForReranking: rawResults.map((r: any) => r.content)
                         }, null, 2)
                     }]
                 };
             }
 
-            // Format results
-            const formattedResults = searchResults.map((result: any, index: number) => {
+            // Optimize: Merge overlapping/adjacent chunks to provide better context
+            // This solves the issue of fragmented snippets for large functions
+            const mergedResults: any[] = [];
+            const processedFiles = new Set<string>();
+
+            // Sort by score to prioritize high relevance, but process by file group
+            const sortedByScore = [...searchResults].sort((a: any, b: any) => b.score - a.score);
+
+            for (const result of sortedByScore) {
+                if (processedFiles.has(result.relativePath)) continue;
+
+                // Find all relevant chunks for this file from the original search results
+                // We want to merge all chunks that are close to each other
+                const fileChunks = searchResults.filter((r: any) => r.relativePath === result.relativePath);
+
+                if (fileChunks.length > 1) {
+                    // Sort by line number
+                    fileChunks.sort((a: any, b: any) => a.startLine - b.startLine);
+
+                    const clusters: any[][] = [];
+                    let currentCluster = [fileChunks[0]];
+
+                    for (let i = 1; i < fileChunks.length; i++) {
+                        // Merge if within 20 lines (context window)
+                        if (fileChunks[i].startLine <= currentCluster[currentCluster.length - 1].endLine + 20) {
+                            currentCluster.push(fileChunks[i]);
+                        } else {
+                            clusters.push(currentCluster);
+                            currentCluster = [fileChunks[i]];
+                        }
+                    }
+                    clusters.push(currentCluster);
+
+                    // Create merged result for each cluster
+                    for (const cluster of clusters) {
+                        const start = cluster[0].startLine;
+                        const end = cluster[cluster.length - 1].endLine;
+                        const maxScore = Math.max(...cluster.map((c: any) => c.score));
+
+                        let mergedContent = "";
+                        try {
+                            const filePath = path.join(absolutePath, result.relativePath);
+                            if (fs.existsSync(filePath)) {
+                                const fileContent = fs.readFileSync(filePath, 'utf-8');
+                                const lines = fileContent.split('\n');
+                                // Ensure bounds
+                                const startIdx = Math.max(0, start - 1);
+                                const endIdx = Math.min(lines.length, end);
+                                mergedContent = lines.slice(startIdx, endIdx).join('\n');
+                            } else {
+                                throw new Error("File not found");
+                            }
+                        } catch (e) {
+                            // Fallback to joining snippets with divider
+                            mergedContent = cluster.map((c: any) => c.content).join('\n\n... (gap) ...\n\n');
+                        }
+
+                        mergedResults.push({
+                            ...result, // Keep metadata from primary match
+                            startLine: start,
+                            endLine: end,
+                            content: mergedContent,
+                            score: maxScore,
+                            isMerged: cluster.length > 1
+                        });
+                    }
+                } else {
+                    mergedResults.push(result);
+                }
+
+                processedFiles.add(result.relativePath);
+            }
+
+            // Re-sort final merged results by score
+            mergedResults.sort((a, b) => b.score - a.score);
+
+            // Format results (Use mergedResults instead of searchResults)
+            const formattedResults = mergedResults.map((result: any, index: number) => {
                 const location = `${result.relativePath}:${result.startLine}-${result.endLine}`;
-                const context = truncateContent(result.content, 5000);
+                const PREVIEW_LIMIT = 4000;
+                let context = truncateContent(result.content, PREVIEW_LIMIT);
+
+                // Add explicit hint for agents if content is truncated
+                if (context.endsWith('...')) {
+                    const fullFilePath = path.join(absolutePath, result.relativePath);
+                    // Use forward slashes for cross-platform consistency in agent thought process
+                    const cleanPath = fullFilePath.replace(/\\/g, '/');
+                    const missingChars = result.content.length - PREVIEW_LIMIT;
+                    context += `\n\n(Preview truncated: ${missingChars} more chars. To read full file, call read_file(path='${cleanPath}'))`;
+                }
+
                 const codebaseInfo = path.basename(absolutePath);
 
-                return `${index + 1}. Code snippet (${result.language}) [${codebaseInfo}]\n` +
+                const scoreInfo = showScores ? ` [Score: ${result.score.toFixed(4)}]` : '';
+
+                return `${index + 1}. Code snippet (${result.language}) [${codebaseInfo}]${scoreInfo}\n` +
                     `   Location: ${location}\n` +
                     `   Rank: ${index + 1}\n` +
                     `   Context: \n\`\`\`${result.language}\n${context}\n\`\`\`\n`;
@@ -602,6 +722,9 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
 
             if (isIndexing) {
                 resultMessage += `\n\n💡 **Tip**: This codebase is still being indexed. More results may become available as indexing progresses.`;
+                resultMessage += `\nStatus: 🔄 Indexing in progress`;
+            } else {
+                resultMessage += `\nStatus: ✅ Indexing complete`;
             }
 
             return {
@@ -611,13 +734,9 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                 }]
             };
         } catch (error) {
-            // Check if this is the collection limit error
-            // Handle both direct string throws and Error objects containing the message
             const errorMessage = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error));
 
             if (errorMessage === COLLECTION_LIMIT_MESSAGE || errorMessage.includes(COLLECTION_LIMIT_MESSAGE)) {
-                // Return the collection limit message as a successful response
-                // This ensures LLM treats it as final answer, not as retryable error
                 return {
                     content: [{
                         type: "text",
@@ -960,6 +1079,43 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     type: "text",
                     text: `Error syncing codebase: ${error.message || error}`
                 }],
+                isError: true
+            };
+        }
+    }
+    public async handleReadCode(args: any) {
+        const { path: filePath } = args;
+
+        try {
+            const absolutePath = ensureAbsolutePath(filePath);
+
+            if (!fs.existsSync(absolutePath)) {
+                return {
+                    content: [{ type: "text", text: `Error: File '${absolutePath}' not found.` }],
+                    isError: true
+                };
+            }
+
+            const stat = fs.statSync(absolutePath);
+            if (!stat.isFile()) {
+                return {
+                    content: [{ type: "text", text: `Error: '${absolutePath}' is not a file.` }],
+                    isError: true
+                };
+            }
+
+            // Read file
+            const content = fs.readFileSync(absolutePath, 'utf-8');
+
+            return {
+                content: [{
+                    type: "text",
+                    text: content
+                }]
+            };
+        } catch (error: any) {
+            return {
+                content: [{ type: "text", text: `Error reading file: ${error.message}` }],
                 isError: true
             };
         }
