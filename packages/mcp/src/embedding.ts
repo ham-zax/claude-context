@@ -26,9 +26,13 @@ export function createEmbeddingInstance(config: ContextMcpConfig): OpenAIEmbeddi
                 throw new Error('VOYAGEAI_API_KEY is required for VoyageAI embedding provider');
             }
             console.log(`[EMBEDDING] 🔧 Configuring VoyageAI with model: ${config.embeddingModel}`);
+            if (config.embeddingOutputDimension) {
+                console.log(`[EMBEDDING] 🔧 Using custom output dimension: ${config.embeddingOutputDimension}`);
+            }
             const voyageEmbedding = new VoyageAIEmbedding({
                 apiKey: config.voyageaiApiKey,
-                model: config.embeddingModel
+                model: config.embeddingModel,
+                ...(config.embeddingOutputDimension && { outputDimension: config.embeddingOutputDimension as 256 | 512 | 1024 | 2048 })
             });
             console.log(`[EMBEDDING] ✅ VoyageAI embedding instance created successfully`);
             return voyageEmbedding;
