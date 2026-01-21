@@ -30,6 +30,7 @@ import { createEmbeddingInstance, logEmbeddingProviderInfo } from "./embedding.j
 import { SnapshotManager } from "./snapshot.js";
 import { SyncManager } from "./sync.js";
 import { ToolHandlers } from "./handlers.js";
+import { VoyageAIReranker } from "@zilliz/claude-context-core";
 
 class ContextMcpServer {
     private server: Server;
@@ -37,6 +38,8 @@ class ContextMcpServer {
     private snapshotManager: SnapshotManager;
     private syncManager: SyncManager;
     private toolHandlers: ToolHandlers;
+    private reranker: VoyageAIReranker | null = null;
+    private config: ContextMcpConfig;
 
     constructor(config: ContextMcpConfig) {
         // Initialize MCP server
@@ -75,6 +78,16 @@ class ContextMcpServer {
         this.snapshotManager = new SnapshotManager();
         this.syncManager = new SyncManager(this.context, this.snapshotManager);
         this.toolHandlers = new ToolHandlers(this.context, this.snapshotManager);
+        this.config = config;
+
+        // Initialize VoyageAI reranker if API key is available
+        if (config.voyageaiApiKey) {
+            this.reranker = new VoyageAIReranker({
+                apiKey: config.voyageaiApiKey,
+                model: config.rerankerModel || 'rerank-2.5-lite'
+            });
+            console.log(`[RERANKER] VoyageAI Reranker initialized with model: ${config.rerankerModel || 'rerank-2.5-lite'}`);
+        }
 
         // Load existing codebase snapshot on startup
         this.snapshotManager.loadCodebaseSnapshot();
@@ -195,12 +208,17 @@ This tool is versatile and can be used before completing various tasks to retrie
 - **Code review**: Understand existing implementations and patterns
 - **Refactoring**: Find all related code pieces that need to be updated
 - **Feature development**: Understand existing architecture and similar implementations
-- **Duplicate detection**: Identify redundant or duplicated code patterns across the codebase
+
+🔄 **Reranking Workflow** (for higher precision):
+1. Call search_code with returnRaw=true to get JSON output
+2. Extract the 'documentsForReranking' array from the response
+3. Pass that array to rerank_results tool with the same query
+4. Get results reordered by neural relevance scoring
 
 💡 **Pro Tips**:
+- Use returnRaw=true when you plan to rerank results for better precision
+- Use extensionFilter to narrow down results by file type (e.g., ['.ts', '.py'])
 - Works even while indexing is in progress (returns partial results)
-- If results are incomplete, wait for indexing to complete then search again
-- Use extensionFilter to narrow down results by file type
 `;
 
         // Define available tools
@@ -275,6 +293,11 @@ This tool is versatile and can be used before completing various tasks to retrie
                                     },
                                     description: "Optional: List of file extensions to filter results. (e.g., ['.ts','.py']).",
                                     default: []
+                                },
+                                returnRaw: {
+                                    type: "boolean",
+                                    description: "If true, returns raw document array in JSON format (useful for reranking). Default: false",
+                                    default: false
                                 }
                             },
                             required: ["path", "query"]
@@ -322,6 +345,124 @@ This tool is versatile and can be used before completing various tasks to retrie
                             required: ["path"]
                         }
                     },
+                    {
+                        name: "rerank_results",
+                        description: `Rerank search results using VoyageAI's neural reranker for improved relevance precision.
+
+🎯 **When to Use**:
+- After search_code when you need the MOST relevant results
+- When initial search returns many results and you need to prioritize
+- For complex queries where semantic similarity alone isn't enough
+
+🔄 **Workflow**:
+1. First call search_code with returnRaw=true, limit=20
+2. Parse the JSON response and extract 'documentsForReranking' array
+3. Call this tool with: query (same as search), documents (the array), topK (how many to return)
+4. Results are reordered by neural relevance score
+
+💡 **Example**:
+After search_code returns: { "documentsForReranking": ["code1...", "code2..."] }
+Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], topK=5)
+
+⚠️ Requires VOYAGEAI_API_KEY to be configured.`,
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                query: {
+                                    type: "string",
+                                    description: "The original search query (same one used in search_code)"
+                                },
+                                documents: {
+                                    type: "array",
+                                    items: { type: "string" },
+                                    description: "Array of document texts from search_code's 'documentsForReranking' field"
+                                },
+                                topK: {
+                                    type: "number",
+                                    description: "Number of top results to return after reranking",
+                                    default: 5
+                                },
+                                model: {
+                                    type: "string",
+                                    enum: ["rerank-2.5", "rerank-2.5-lite"],
+                                    description: "Reranker model: 'rerank-2.5' (best quality) or 'rerank-2.5-lite' (faster)",
+                                    default: "rerank-2.5-lite"
+                                }
+                            },
+                            required: ["query", "documents"]
+                        }
+                    },
+                    {
+                        name: "list_indexed_codebases",
+                        description: `List all indexed codebases that are available for search.
+
+🎯 **When to Use**:
+- At the start of a session to discover what codebases are indexed
+- When unsure which paths are available for search_code
+- To check indexing status of multiple codebases
+
+📋 **Returns**:
+- List of all indexed codebase paths with their status
+- Indexing progress for codebases currently being indexed
+- Last sync/index timestamp for each codebase
+
+💡 **Tip**: Use this before search_code to know which paths are valid.`,
+                        inputSchema: {
+                            type: "object",
+                            properties: {},
+                            required: []
+                        }
+                    },
+                    {
+                        name: "search_and_rerank",
+                        description: `Search and rerank in ONE call - best for high-precision code search.
+
+🎯 **When to Use**:
+- When you need the MOST relevant code results
+- For complex queries where you want neural reranking automatically
+- To simplify workflow (combines search_code + rerank_results)
+
+⚡ **How it works**:
+1. Searches the codebase with your query
+2. Automatically reranks results using VoyageAI neural reranker
+3. Returns top results ordered by neural relevance score
+
+📋 **Returns**:
+- Reranked code snippets with location and relevance scores
+- Higher precision than search_code alone
+
+⚠️ Requires VOYAGEAI_API_KEY for reranking.`,
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                path: {
+                                    type: "string",
+                                    description: "ABSOLUTE path to the codebase directory to search in"
+                                },
+                                query: {
+                                    type: "string",
+                                    description: "Natural language query to search for"
+                                },
+                                limit: {
+                                    type: "number",
+                                    description: "Number of initial results to fetch before reranking",
+                                    default: 20
+                                },
+                                topK: {
+                                    type: "number",
+                                    description: "Number of top results to return after reranking",
+                                    default: 5
+                                },
+                                extensionFilter: {
+                                    type: "array",
+                                    items: { type: "string" },
+                                    description: "Optional: List of file extensions to filter (e.g., ['.ts', '.py'])",
+                                    default: []
+                                }
+                            },
+                            required: ["path", "query"]
+                        }
+                    },
                 ]
             };
         });
@@ -341,11 +482,190 @@ This tool is versatile and can be used before completing various tasks to retrie
                     return await this.toolHandlers.handleGetIndexingStatus(args);
                 case "sync_codebase":
                     return await this.toolHandlers.handleSyncCodebase(args);
+                case "rerank_results":
+                    return await this.handleRerankResults(args);
+                case "list_indexed_codebases":
+                    return await this.handleListIndexedCodebases();
+                case "search_and_rerank":
+                    return await this.handleSearchAndRerank(args);
 
                 default:
                     throw new Error(`Unknown tool: ${name}`);
             }
         });
+    }
+
+    private async handleSearchAndRerank(args: any) {
+        const { path: codebasePath, query, limit = 20, topK = 5, extensionFilter } = args;
+
+        // Check if reranker is available
+        if (!this.reranker) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "Error: VoyageAI Reranker not configured. Please set VOYAGEAI_API_KEY environment variable."
+                }],
+                isError: true
+            };
+        }
+
+        try {
+            // Step 1: Search with returnRaw
+            const searchResult = await this.toolHandlers.handleSearchCode({
+                path: codebasePath,
+                query,
+                limit,
+                extensionFilter,
+                returnRaw: true
+            });
+
+            // Parse the search result
+            const searchContent = searchResult.content?.[0]?.text;
+            if (searchResult.isError || !searchContent) {
+                return searchResult; // Return error as-is
+            }
+
+            const searchData = JSON.parse(searchContent);
+
+            if (!searchData.documentsForReranking || searchData.documentsForReranking.length === 0) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `No results found for query: "${query}" in codebase '${codebasePath}'`
+                    }]
+                };
+            }
+
+            // Step 2: Rerank the results
+            const rerankedResults = await this.reranker.rerank(
+                query,
+                searchData.documentsForReranking,
+                { topK: Math.min(topK, searchData.documentsForReranking.length), returnDocuments: true }
+            );
+
+            // Step 3: Map reranked results back to original search results with location info
+            const formattedResults = rerankedResults.map((r, i) => {
+                const originalResult = searchData.results[r.index];
+                return `${i + 1}. [Relevance: ${r.relevanceScore.toFixed(4)}] ${originalResult.language}\n` +
+                    `   📍 ${originalResult.location}\n` +
+                    `   \`\`\`${originalResult.language}\n${originalResult.content.substring(0, 2000)}${originalResult.content.length > 2000 ? '...' : ''}\n\`\`\`\n`;
+            }).join('\n');
+
+            return {
+                content: [{
+                    type: "text",
+                    text: `## Search + Rerank Results\n\n**Query**: "${query}"\n**Model**: ${this.reranker.getModel()}\n**Results**: ${rerankedResults.length} (from ${searchData.resultCount} initial matches)\n\n${formattedResults}`
+                }]
+            };
+
+        } catch (error) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `Error in search_and_rerank: ${error instanceof Error ? error.message : String(error)}`
+                }],
+                isError: true
+            };
+        }
+    }
+
+    private async handleListIndexedCodebases() {
+        const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+        const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+
+        if (indexedCodebases.length === 0 && indexingCodebases.length === 0) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "No codebases are currently indexed.\n\n💡 Use index_codebase tool to index a codebase first."
+                }]
+            };
+        }
+
+        let response = "## Indexed Codebases\n\n";
+
+        // List fully indexed codebases
+        if (indexedCodebases.length > 0) {
+            response += "### ✅ Ready for Search\n";
+            for (const codebasePath of indexedCodebases) {
+                const info = this.snapshotManager.getCodebaseInfo(codebasePath);
+                const lastUpdated = info?.lastUpdated ? new Date(info.lastUpdated).toLocaleString() : 'Unknown';
+                response += `- \`${codebasePath}\`\n  Last updated: ${lastUpdated}\n`;
+            }
+        }
+
+        // List codebases being indexed
+        if (indexingCodebases.length > 0) {
+            response += "\n### 🔄 Currently Indexing\n";
+            for (const codebasePath of indexingCodebases) {
+                const progress = this.snapshotManager.getIndexingProgress(codebasePath) || 0;
+                response += `- \`${codebasePath}\` (${progress.toFixed(1)}% complete)\n`;
+            }
+        }
+
+        response += `\n**Total**: ${indexedCodebases.length} indexed, ${indexingCodebases.length} indexing`;
+
+        return {
+            content: [{
+                type: "text",
+                text: response
+            }]
+        };
+    }
+
+    private async handleRerankResults(args: any) {
+        const { query, documents, topK = 5, model } = args;
+
+        if (!this.reranker) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "Error: VoyageAI Reranker not configured. Please set VOYAGEAI_API_KEY environment variable."
+                }],
+                isError: true
+            };
+        }
+
+        if (!query || !documents || !Array.isArray(documents) || documents.length === 0) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "Error: Both 'query' and 'documents' (non-empty array) are required."
+                }],
+                isError: true
+            };
+        }
+
+        try {
+            // Set model if specified
+            if (model && ['rerank-2.5', 'rerank-2.5-lite'].includes(model)) {
+                this.reranker.setModel(model);
+            }
+
+            const results = await this.reranker.rerank(query, documents, {
+                topK: Math.min(topK, documents.length),
+                returnDocuments: true
+            });
+
+            const formattedResults = results.map((r, i) =>
+                `${i + 1}. [Score: ${r.relevanceScore.toFixed(4)}] ${r.document?.substring(0, 200)}...`
+            ).join('\n\n');
+
+            return {
+                content: [{
+                    type: "text",
+                    text: `## Reranked Results (${results.length} items)\n\nUsing model: ${this.reranker.getModel()}\n\n${formattedResults}`
+                }]
+            };
+        } catch (error) {
+            return {
+                content: [{
+                    type: "text",
+                    text: `Error reranking results: ${error instanceof Error ? error.message : String(error)}`
+                }],
+                isError: true
+            };
+        }
     }
 
     async start() {

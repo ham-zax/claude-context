@@ -454,7 +454,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
     }
 
     public async handleSearchCode(args: any) {
-        const { path: codebasePath, query, limit = 10, extensionFilter } = args;
+        const { path: codebasePath, query, limit = 10, extensionFilter, returnRaw = false } = args;
         const resultLimit = limit || 10;
 
         try {
@@ -556,6 +556,32 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     content: [{
                         type: "text",
                         text: noResultsMessage
+                    }]
+                };
+            }
+
+            // If returnRaw is true, return JSON format for reranking
+            if (returnRaw) {
+                const rawResults = searchResults.map((result: any, index: number) => ({
+                    index,
+                    location: `${result.relativePath}:${result.startLine}-${result.endLine}`,
+                    language: result.language,
+                    score: result.score,
+                    content: result.content
+                }));
+
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({
+                            query,
+                            codebasePath: absolutePath,
+                            resultCount: searchResults.length,
+                            isIndexing,
+                            results: rawResults,
+                            // Include document array ready for reranking
+                            documentsForReranking: rawResults.map((r: any) => r.content)
+                        }, null, 2)
                     }]
                 };
             }

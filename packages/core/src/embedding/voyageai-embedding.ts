@@ -1,9 +1,14 @@
 import { VoyageAIClient } from 'voyageai';
 import { Embedding, EmbeddingVector } from './base-embedding';
 
+export type VoyageOutputDimension = 256 | 512 | 1024 | 2048;
+export type VoyageOutputDtype = 'float' | 'int8' | 'uint8' | 'binary' | 'ubinary';
+
 export interface VoyageAIEmbeddingConfig {
     model: string;
     apiKey: string;
+    outputDimension?: VoyageOutputDimension;
+    outputDtype?: VoyageOutputDtype;
 }
 
 export class VoyageAIEmbedding extends Embedding {
@@ -22,6 +27,12 @@ export class VoyageAIEmbedding extends Embedding {
 
         // Set dimension and context length based on different models
         this.updateModelSettings(config.model || 'voyage-4');
+
+        // Override dimension if outputDimension is specified
+        if (config.outputDimension) {
+            this.dimension = config.outputDimension;
+            console.log(`[VoyageAI] Using custom output dimension: ${config.outputDimension}`);
+        }
     }
 
     private updateModelSettings(model: string): void {
@@ -74,6 +85,8 @@ export class VoyageAIEmbedding extends Embedding {
             input: processedText,
             model: model,
             inputType: this.inputType,
+            ...(this.config.outputDimension && { outputDimension: this.config.outputDimension }),
+            ...(this.config.outputDtype && { outputDtype: this.config.outputDtype }),
         });
 
         if (!response.data || !response.data[0] || !response.data[0].embedding) {
@@ -94,6 +107,8 @@ export class VoyageAIEmbedding extends Embedding {
             input: processedTexts,
             model: model,
             inputType: this.inputType,
+            ...(this.config.outputDimension && { outputDimension: this.config.outputDimension }),
+            ...(this.config.outputDtype && { outputDtype: this.config.outputDtype }),
         });
 
         if (!response.data) {

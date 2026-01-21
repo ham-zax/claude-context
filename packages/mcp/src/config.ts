@@ -6,6 +6,7 @@ export interface ContextMcpConfig {
     // Embedding provider configuration
     embeddingProvider: 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama';
     embeddingModel: string;
+    embeddingOutputDimension?: number;  // For VoyageAI: 256, 512, 1024, 2048
     // Provider-specific API keys
     openaiApiKey?: string;
     openaiBaseUrl?: string;
@@ -18,6 +19,8 @@ export interface ContextMcpConfig {
     // Vector database configuration
     milvusAddress?: string; // Optional, can be auto-resolved from token
     milvusToken?: string;
+    // Reranker configuration
+    rerankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
 }
 
 // Legacy format (v1) - for backward compatibility
@@ -116,11 +119,32 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG] 🔍 Environment Variables Debug:`);
     console.log(`[DEBUG]   EMBEDDING_PROVIDER: ${envManager.get('EMBEDDING_PROVIDER') || 'NOT SET'}`);
     console.log(`[DEBUG]   EMBEDDING_MODEL: ${envManager.get('EMBEDDING_MODEL') || 'NOT SET'}`);
+    console.log(`[DEBUG]   EMBEDDING_OUTPUT_DIMENSION: ${envManager.get('EMBEDDING_OUTPUT_DIMENSION') || 'NOT SET'}`);
+    console.log(`[DEBUG]   VOYAGEAI_RERANKER_MODEL: ${envManager.get('VOYAGEAI_RERANKER_MODEL') || 'NOT SET'}`);
     console.log(`[DEBUG]   OLLAMA_MODEL: ${envManager.get('OLLAMA_MODEL') || 'NOT SET'}`);
     console.log(`[DEBUG]   GEMINI_API_KEY: ${envManager.get('GEMINI_API_KEY') ? 'SET (length: ' + envManager.get('GEMINI_API_KEY')!.length + ')' : 'NOT SET'}`);
     console.log(`[DEBUG]   OPENAI_API_KEY: ${envManager.get('OPENAI_API_KEY') ? 'SET (length: ' + envManager.get('OPENAI_API_KEY')!.length + ')' : 'NOT SET'}`);
     console.log(`[DEBUG]   MILVUS_ADDRESS: ${envManager.get('MILVUS_ADDRESS') || 'NOT SET'}`);
     console.log(`[DEBUG]   NODE_ENV: ${envManager.get('NODE_ENV') || 'NOT SET'}`);
+
+    // Parse output dimension from env var
+    const outputDimensionStr = envManager.get('EMBEDDING_OUTPUT_DIMENSION');
+    let embeddingOutputDimension: number | undefined;
+    if (outputDimensionStr) {
+        const parsed = parseInt(outputDimensionStr, 10);
+        if ([256, 512, 1024, 2048].includes(parsed)) {
+            embeddingOutputDimension = parsed;
+        } else {
+            console.warn(`[WARN] Invalid EMBEDDING_OUTPUT_DIMENSION value: ${outputDimensionStr}. Must be 256, 512, 1024, or 2048.`);
+        }
+    }
+
+    // Parse reranker model from env var
+    const rerankerModelStr = envManager.get('VOYAGEAI_RERANKER_MODEL');
+    let rerankerModel: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite' | undefined;
+    if (rerankerModelStr && ['rerank-2.5', 'rerank-2.5-lite', 'rerank-2', 'rerank-2-lite'].includes(rerankerModelStr)) {
+        rerankerModel = rerankerModelStr as typeof rerankerModel;
+    }
 
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
@@ -128,6 +152,7 @@ export function createMcpConfig(): ContextMcpConfig {
         // Embedding provider configuration
         embeddingProvider: (envManager.get('EMBEDDING_PROVIDER') as 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama') || 'OpenAI',
         embeddingModel: getEmbeddingModelForProvider(envManager.get('EMBEDDING_PROVIDER') || 'OpenAI'),
+        embeddingOutputDimension,
         // Provider-specific API keys
         openaiApiKey: envManager.get('OPENAI_API_KEY'),
         openaiBaseUrl: envManager.get('OPENAI_BASE_URL'),
@@ -139,7 +164,9 @@ export function createMcpConfig(): ContextMcpConfig {
         ollamaHost: envManager.get('OLLAMA_HOST'),
         // Vector database configuration - address can be auto-resolved from token
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
-        milvusToken: envManager.get('MILVUS_TOKEN')
+        milvusToken: envManager.get('MILVUS_TOKEN'),
+        // Reranker configuration
+        rerankerModel,
     };
 
     return config;
