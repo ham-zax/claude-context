@@ -21,8 +21,8 @@ import {
     ListToolsRequestSchema,
     CallToolRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { Context } from "@zilliz/claude-context-core";
-import { MilvusVectorDatabase } from "@zilliz/claude-context-core";
+import { Context } from "@zokizuan/claude-context-core";
+import { MilvusVectorDatabase } from "@zokizuan/claude-context-core";
 
 // Import our modular components
 import { createMcpConfig, logConfigurationSummary, showHelpMessage, ContextMcpConfig } from "./config.js";
@@ -30,7 +30,7 @@ import { createEmbeddingInstance, logEmbeddingProviderInfo } from "./embedding.j
 import { SnapshotManager } from "./snapshot.js";
 import { SyncManager } from "./sync.js";
 import { ToolHandlers } from "./handlers.js";
-import { VoyageAIReranker } from "@zilliz/claude-context-core";
+import { VoyageAIReranker } from "@zokizuan/claude-context-core";
 
 class ContextMcpServer {
     private server: Server;
