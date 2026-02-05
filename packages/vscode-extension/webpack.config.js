@@ -31,10 +31,10 @@ module.exports = {
         // support reading TypeScript and JavaScript files
         extensions: ['.ts', '.js'],
         alias: {
-            '@zilliz/claude-context-core': path.resolve(__dirname, '../core/dist/index.js'),
-            '@zilliz/claude-context-core/dist/splitter': path.resolve(__dirname, '../core/dist/splitter'),
-            '@zilliz/claude-context-core/dist/embedding': path.resolve(__dirname, '../core/dist/embedding'),
-            '@zilliz/claude-context-core/dist/vectordb': path.resolve(__dirname, '../core/dist/vectordb')
+            '@zokizuan/claude-context-core': path.resolve(__dirname, '../core/dist/index.js'),
+            '@zokizuan/claude-context-core/dist/splitter': path.resolve(__dirname, '../core/dist/splitter'),
+            '@zokizuan/claude-context-core/dist/embedding': path.resolve(__dirname, '../core/dist/embedding'),
+            '@zokizuan/claude-context-core/dist/vectordb': path.resolve(__dirname, '../core/dist/vectordb')
         }
     },
     module: {

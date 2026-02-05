@@ -38,13 +38,14 @@
         "url": "^0.11.4",
         "vm-browserify": "^1.1.2"
     },
+    "packageManager": "pnpm@10.28.2",
     "engines": {
         "node": ">=20.0.0",
         "pnpm": ">=10.0.0"
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/zilliztech/claude-context.git"
+        "url": "https://github.com/ham-zax/claude-context.git"
     },
     "license": "MIT",
     "author": "Cheney Zhang <277584121@qq.com>"

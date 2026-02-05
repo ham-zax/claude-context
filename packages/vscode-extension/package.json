@@ -194,7 +194,7 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/zilliztech/claude-context.git",
+        "url": "https://github.com/ham-zax/claude-context.git",
         "directory": "packages/vscode-extension"
     },
     "license": "MIT"
