@@ -72,13 +72,13 @@ If the previous steps don't solve the issue, search existing resources:
    - [Troubleshooting FAQ](./faq.md) - Common issues and solutions
 
 3. **Search GitHub Issues:**
-   - [GitHub Issues](https://github.com/zilliztech/claude-context/issues) - Known issues and discussions
+   - [GitHub Issues](https://github.com/ham-zax/claude-context/issues) - Known issues and discussions
    - Search for similar problems and solutions
    - Check both open and closed issues
 
 ### Step 5: Report the Issue
 
-If none of the above steps resolve your problem, please [create a GitHub issue](https://github.com/zilliztech/claude-context/issues/new/choose).
+If none of the above steps resolve your problem, please [create a GitHub issue](https://github.com/ham-zax/claude-context/issues/new/choose).
 
 ### Step 6: After Version Updates
 
@@ -115,13 +115,13 @@ If debug logs don't solve the issue, search existing resources:
    - [Troubleshooting FAQ](./faq.md) - Common issues and solutions
 
 3. **Search GitHub Issues:**
-   - [GitHub Issues](https://github.com/zilliztech/claude-context/issues) - Known issues and discussions
+   - [GitHub Issues](https://github.com/ham-zax/claude-context/issues) - Known issues and discussions
    - Search for similar problems and solutions
    - Check both open and closed issues
 
 ### Step 3: Report the Issue
 
-If none of the above steps resolve your problem, please [create a GitHub issue](https://github.com/zilliztech/claude-context/issues/new/choose).
+If none of the above steps resolve your problem, please [create a GitHub issue](https://github.com/ham-zax/claude-context/issues/new/choose).
 
 ### Step 4: After Version Updates
 

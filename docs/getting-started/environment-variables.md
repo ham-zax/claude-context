@@ -32,11 +32,11 @@ Claude Context supports a global configuration file at `~/.context/.env` to simp
 
 > **Supported Model Names:**
 > 
-> - OpenAI Models: See `getSupportedModels` in [`openai-embedding.ts`](https://github.com/zilliztech/claude-context/blob/master/packages/core/src/embedding/openai-embedding.ts) for the full list of supported models.
+> - OpenAI Models: See `getSupportedModels` in [`openai-embedding.ts`](https://github.com/ham-zax/claude-context/blob/master/packages/core/src/embedding/openai-embedding.ts) for the full list of supported models.
 > 
-> - VoyageAI Models: See `getSupportedModels` in [`voyageai-embedding.ts`](https://github.com/zilliztech/claude-context/blob/master/packages/core/src/embedding/voyageai-embedding.ts) for the full list of supported models.
+> - VoyageAI Models: See `getSupportedModels` in [`voyageai-embedding.ts`](https://github.com/ham-zax/claude-context/blob/master/packages/core/src/embedding/voyageai-embedding.ts) for the full list of supported models.
 > 
-> - Gemini Models: See `getSupportedModels` in [`gemini-embedding.ts`](https://github.com/zilliztech/claude-context/blob/master/packages/core/src/embedding/gemini-embedding.ts) for the full list of supported models.
+> - Gemini Models: See `getSupportedModels` in [`gemini-embedding.ts`](https://github.com/ham-zax/claude-context/blob/master/packages/core/src/embedding/gemini-embedding.ts) for the full list of supported models.
 > 
 > - Ollama Models: Depends on the model you install locally.
 
@@ -45,7 +45,7 @@ Claude Context supports a global configuration file at `~/.context/.env` to simp
 ### Vector Database
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MILVUS_TOKEN` | Milvus authentication token. Get [Zilliz Personal API Key](https://github.com/zilliztech/claude-context/blob/master/assets/signup_and_get_apikey.png) | Recommended |
+| `MILVUS_TOKEN` | Milvus authentication token. Get [Zilliz Personal API Key](https://github.com/ham-zax/claude-context/blob/master/assets/signup_and_get_apikey.png) | Recommended |
 | `MILVUS_ADDRESS` | Milvus server address. Optional when using Zilliz Personal API Key | Auto-resolved from token |
 
 ### Ollama (Optional)
@@ -83,7 +83,7 @@ See the [Example File](../../.env.example) for more details.
 
 **Claude Code:**
 ```bash
-claude mcp add claude-context -- npx @zilliz/claude-context-mcp@latest
+claude mcp add claude-context -- npx @zokizuan/claude-context-mcp@latest
 ```
 
 **Cursor/Windsurf/Others:**
@@ -92,7 +92,7 @@ claude mcp add claude-context -- npx @zilliz/claude-context-mcp@latest
   "mcpServers": {
     "claude-context": {
       "command": "npx",
-      "args": ["-y", "@zilliz/claude-context-mcp@latest"]
+      "args": ["-y", "@zokizuan/claude-context-mcp@latest"]
     }
   }
 }
