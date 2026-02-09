@@ -294,6 +294,14 @@ This tool is versatile and can be used before completing various tasks to retrie
                                     description: "Optional: List of file extensions to filter results. (e.g., ['.ts','.py']).",
                                     default: []
                                 },
+                                excludePatterns: {
+                                    type: "array",
+                                    items: {
+                                        type: "string"
+                                    },
+                                    description: "Optional: Exclude files/dirs at query-time (even if already indexed). Patterns are relative to the provided 'path'. Supports simple glob wildcards like '*', '**', '?'. Use a leading '/' to anchor patterns to the indexed root when searching a subdirectory (e.g., ['/docs/**', 'generated/**']).",
+                                    default: []
+                                },
                                 returnRaw: {
                                     type: "boolean",
                                     description: "If true, returns raw document array in JSON format (useful for reranking). Default: false",
@@ -463,6 +471,12 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                                     items: { type: "string" },
                                     description: "Optional: List of file extensions to filter (e.g., ['.ts', '.py'])",
                                     default: []
+                                },
+                                excludePatterns: {
+                                    type: "array",
+                                    items: { type: "string" },
+                                    description: "Optional: Exclude files/dirs at query-time (even if already indexed). Same semantics as search_code.excludePatterns.",
+                                    default: []
                                 }
                             },
                             required: ["path", "query"]
@@ -546,6 +560,7 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                 query,
                 limit,
                 extensionFilter,
+                excludePatterns: args.excludePatterns,
                 returnRaw: true
             });
 

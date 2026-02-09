@@ -21,6 +21,176 @@ export class ToolHandlers {
         console.log(`[WORKSPACE] Current workspace: ${this.currentWorkspace}`);
     }
 
+    private buildExcludePatternsFilterExpr(
+        excludePatterns: any,
+        effectiveRoot: string,
+        absoluteSearchPath: string
+    ): { filterExpr?: string; warning?: string } {
+        if (!Array.isArray(excludePatterns) || excludePatterns.length === 0) return {};
+
+        const raw = excludePatterns
+            .filter((v: any) => typeof v === 'string')
+            .map((v: string) => v.trim())
+            .filter((v: string) => v.length > 0);
+        if (raw.length === 0) return {};
+
+        const unique: string[] = [];
+        const seen = new Set<string>();
+        for (const p of raw) {
+            if (!seen.has(p)) {
+                seen.add(p);
+                unique.push(p);
+            }
+        }
+
+        const searchRel = path
+            .relative(effectiveRoot, absoluteSearchPath)
+            .replace(/\\/g, '/')
+            .replace(/^\/+|\/+$/g, '');
+        const needsSubdirPrefix = searchRel.length > 0 && effectiveRoot !== absoluteSearchPath;
+
+        const exprs: string[] = [];
+        const ignored: string[] = [];
+        let usedApproxStar = false;
+
+        const escapeForLikeLiteral = (text: string): string => {
+            // Escape LIKE metacharacters in literals.
+            // We rely on Milvus supporting backslash escaping.
+            return text
+                .replace(/\\/g, '\\\\')
+                .replace(/%/g, '\\%')
+                .replace(/_/g, '\\_');
+        };
+
+        const escapeForStringLiteral = (text: string): string => {
+            return text
+                .replace(/\\/g, '\\\\')
+                .replace(/"/g, '\\"');
+        };
+
+        const globToLikePatterns = (glob: string, maxVariants: number = 16): string[] => {
+            const variants: string[] = [''];
+            let i = 0;
+
+            const push = (s: string) => {
+                for (let k = 0; k < variants.length; k++) variants[k] += s;
+            };
+
+            while (i < glob.length) {
+                if (glob.startsWith('**/', i)) {
+                    const next: string[] = [];
+                    for (const v of variants) {
+                        next.push(v + '%/');
+                        next.push(v);
+                        if (next.length >= maxVariants) break;
+                    }
+                    variants.length = 0;
+                    variants.push(...next.slice(0, maxVariants));
+                    i += 3;
+                    continue;
+                }
+
+                if (glob.startsWith('**', i)) {
+                    push('%');
+                    i += 2;
+                    continue;
+                }
+
+                const ch = glob[i];
+                if (ch === '*') {
+                    usedApproxStar = true;
+                    push('%');
+                    i += 1;
+                    continue;
+                }
+
+                if (ch === '?') {
+                    push('_');
+                    i += 1;
+                    continue;
+                }
+
+                // Unsupported advanced glob syntax
+                if (ch === '[' || ch === ']' || ch === '{' || ch === '}' || ch === '(' || ch === ')' || ch === '|') {
+                    return [];
+                }
+
+                push(escapeForLikeLiteral(ch));
+                i += 1;
+            }
+
+            return variants;
+        };
+
+        for (const p of unique) {
+            let pattern = p.replace(/\\/g, '/');
+
+            // Negation isn't supported at query-time (Milvus can't easily express it safely)
+            if (pattern.startsWith('!')) {
+                ignored.push(p);
+                continue;
+            }
+
+            let anchored = false;
+            if (pattern.startsWith('/')) {
+                anchored = true;
+                pattern = pattern.replace(/^\/+/, '');
+            }
+
+            pattern = pattern.replace(/^\.\/+/, '');
+            pattern = pattern.replace(/^\/+/, '');
+
+            if (pattern.endsWith('/')) {
+                pattern = `${pattern}**`;
+            }
+
+            pattern = pattern.replace(/^\/+|\/+$/g, '');
+            if (pattern.length === 0) {
+                ignored.push(p);
+                continue;
+            }
+
+            // Bare directory name (e.g. 'docs') means 'docs/**'
+            if (!/[?*]/.test(pattern) && !pattern.includes('/')) {
+                pattern = `${pattern}/**`;
+            }
+
+            if (needsSubdirPrefix && !anchored) {
+                pattern = `${searchRel}/${pattern}`.replace(/\/+/, '/');
+            }
+
+            const likes = globToLikePatterns(pattern);
+            if (likes.length === 0) {
+                ignored.push(p);
+                continue;
+            }
+
+            for (const likeRaw of likes) {
+                const escaped = escapeForStringLiteral(likeRaw);
+                exprs.push(`relativePath like "${escaped}"`);
+            }
+        }
+
+        if (exprs.length === 0) {
+            return {
+                warning: ignored.length > 0 ? `Note: excludePatterns ignored (unsupported patterns): ${JSON.stringify(ignored)}.` : undefined
+            };
+        }
+
+        const notes: string[] = [];
+        if (ignored.length > 0) {
+            notes.push(`Note: excludePatterns partially applied. Ignored (unsupported patterns): ${JSON.stringify(ignored)}.`);
+        }
+        if (usedApproxStar) {
+            notes.push(`Note: excludePatterns uses Milvus LIKE; '*' may match across directories (use '**/' or anchor with '/' when needed).`);
+        }
+
+        return {
+            filterExpr: `not (${exprs.join(' or ')})`,
+            warning: notes.length > 0 ? notes.join(' ') : undefined
+        };
+    }
+
     /**
      * Sync indexed codebases from Zilliz Cloud collections
      * This method fetches all collections from the vector database,
@@ -457,7 +627,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
     }
 
     public async handleSearchCode(args: any) {
-        const { path: codebasePath, query, limit = 10, extensionFilter, returnRaw = false, showScores = false } = args;
+        const { path: codebasePath, query, limit = 10, extensionFilter, excludePatterns, returnRaw = false, showScores = false } = args;
         const resultLimit = limit || 10;
 
         try {
@@ -559,6 +729,14 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                 filterExpr = `fileExtension in [${quoted}]`;
             }
 
+            // Add query-time excludes (even if already indexed)
+            const excludeBuilt = this.buildExcludePatternsFilterExpr(excludePatterns, effectiveRoot, absolutePath);
+            if (excludeBuilt.filterExpr) {
+                filterExpr = filterExpr
+                    ? `(${filterExpr}) and (${excludeBuilt.filterExpr})`
+                    : excludeBuilt.filterExpr;
+            }
+
             // Search in the specified codebase (or resolved parent)
             let searchResults = await this.context.semanticSearch(
                 effectiveRoot,
@@ -582,6 +760,10 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             }
 
             console.log(`[SEARCH] ✅ Search completed! Found ${searchResults.length} results using ${embeddingProvider.getProvider()} embeddings`);
+
+            if (excludeBuilt.warning) {
+                console.log(`[SEARCH] ⚠️  ${excludeBuilt.warning}`);
+            }
 
             if (searchResults.length === 0) {
                 let noResultsMessage = `No results found for query: "${query}" in codebase '${absolutePath}'`;
@@ -617,6 +799,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                             resultCount: searchResults.length,
                             isIndexing,
                             indexingStatus: status,
+                            excludePatternsWarning: excludeBuilt.warning,
                             results: rawResults,
                             documentsForReranking: rawResults.map((r: any) => r.content)
                         }, null, 2)
@@ -751,6 +934,10 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             }).join('\n');
 
             let resultMessage = `Found ${searchResults.length} results for query: "${query}" in codebase '${absolutePath}'${indexingStatusMessage}\n\n${formattedResults}`;
+
+            if (excludeBuilt.warning) {
+                resultMessage = `${excludeBuilt.warning}\n\n${resultMessage}`;
+            }
 
             if (isIndexing) {
                 resultMessage += `\n\n💡 **Tip**: This codebase is still being indexed. More results may become available as indexing progresses.`;
