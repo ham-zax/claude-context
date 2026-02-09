@@ -49,85 +49,293 @@ export class ToolHandlers {
             .replace(/^\/+|\/+$/g, '');
         const needsSubdirPrefix = searchRel.length > 0 && effectiveRoot !== absoluteSearchPath;
 
-        const exprs: string[] = [];
-        const ignored: string[] = [];
-        let usedApproxStar = false;
+        // Caps to avoid generating huge Milvus expressions.
+        const MAX_BRACE_EXPANSIONS = 64;
+        const MAX_GLOBSTAR_SLASH_VARIANTS = 16;
+        const MAX_MATCH_CLAUSES = 256;
+        const MAX_WILDCARD_ENFORCEMENTS = 24;
 
-        const escapeForLikeLiteral = (text: string): string => {
-            // Escape LIKE metacharacters in literals.
-            // We rely on Milvus supporting backslash escaping.
-            return text
-                .replace(/\\/g, '\\\\')
-                .replace(/%/g, '\\%')
-                .replace(/_/g, '\\_');
+        type GlobToken =
+            | { t: 'lit'; v: string }
+            | { t: 'star' }
+            | { t: 'qmark' }
+            | { t: 'globstar' }
+            | { t: 'globstar_slash' };
+
+        const ignored: string[] = [];
+        const notes = new Set<string>();
+        const matchClauses: string[] = [];
+
+        const normalizeGlobInput = (input: string): string => {
+            // Preserve glob escaping (e.g. \\*) but normalize Windows separators (\) to '/'
+            // when the backslash is not escaping a glob meta character.
+            let out = '';
+            for (let i = 0; i < input.length; i++) {
+                const ch = input[i];
+                if (ch !== '\\') {
+                    out += ch;
+                    continue;
+                }
+
+                const next = i + 1 < input.length ? input[i + 1] : '';
+                if (next && '*?{},[]\\'.includes(next)) {
+                    out += '\\' + next;
+                    i++;
+                    continue;
+                }
+
+                // Treat as path separator.
+                out += '/';
+            }
+
+            out = out.replace(/\/+/g, '/');
+            return out;
         };
 
-        const escapeForStringLiteral = (text: string): string => {
+        const expandBraces = (input: string, globEscapeChar: string = '\\'): string[] => {
+            const out: string[] = [];
+
+            const findFirstBraceRange = (str: string): { start: number; end: number } | null => {
+                let depth = 0;
+                let start = -1;
+                for (let i = 0; i < str.length; i++) {
+                    const ch = str[i];
+                    if (ch === globEscapeChar) {
+                        i++;
+                        continue;
+                    }
+                    if (ch === '{') {
+                        if (depth === 0) start = i;
+                        depth++;
+                    } else if (ch === '}') {
+                        if (depth > 0) depth--;
+                        if (depth === 0 && start !== -1) return { start, end: i };
+                    }
+                }
+                return null;
+            };
+
+            const splitTopLevel = (str: string): string[] => {
+                const parts: string[] = [];
+                let buf = '';
+                let depth = 0;
+                for (let i = 0; i < str.length; i++) {
+                    const ch = str[i];
+                    if (ch === globEscapeChar) {
+                        if (i + 1 < str.length) {
+                            buf += ch + str[i + 1];
+                            i++;
+                        } else {
+                            buf += ch;
+                        }
+                        continue;
+                    }
+                    if (ch === '{') depth++;
+                    else if (ch === '}') depth = Math.max(0, depth - 1);
+
+                    if (ch === ',' && depth === 0) {
+                        parts.push(buf);
+                        buf = '';
+                    } else {
+                        buf += ch;
+                    }
+                }
+                parts.push(buf);
+                return parts;
+            };
+
+            const rec = (str: string) => {
+                if (out.length >= MAX_BRACE_EXPANSIONS) return;
+                const range = findFirstBraceRange(str);
+                if (!range) {
+                    out.push(str);
+                    return;
+                }
+                const before = str.slice(0, range.start);
+                const inside = str.slice(range.start + 1, range.end);
+                const after = str.slice(range.end + 1);
+                const options = splitTopLevel(inside).map(s => s.trim());
+                for (const opt of options) {
+                    rec(before + opt + after);
+                    if (out.length >= MAX_BRACE_EXPANSIONS) return;
+                }
+            };
+
+            rec(input);
+            return out;
+        };
+
+        const escapeLikeChar = (ch: string): string => {
+            // Escape LIKE metacharacters for Milvus LIKE.
+            if (ch === '\\') return '\\\\';
+            if (ch === '%') return '\\%';
+            if (ch === '_') return '\\_';
+            return ch;
+        };
+
+        const escapeForMilvusStringLiteral = (text: string): string => {
+            // Escape for embedding inside a Milvus string literal using double quotes.
             return text
                 .replace(/\\/g, '\\\\')
                 .replace(/"/g, '\\"');
         };
 
-        const globToLikePatterns = (glob: string, maxVariants: number = 16): string[] => {
-            const variants: string[] = [''];
-            let i = 0;
-
-            const push = (s: string) => {
-                for (let k = 0; k < variants.length; k++) variants[k] += s;
+        const tokenizeGlob = (glob: string, globEscapeChar: string = '\\'): GlobToken[] | null => {
+            const tokens: GlobToken[] = [];
+            let lit = '';
+            const flush = () => {
+                if (lit.length > 0) {
+                    tokens.push({ t: 'lit', v: lit });
+                    lit = '';
+                }
             };
 
-            while (i < glob.length) {
-                if (glob.startsWith('**/', i)) {
-                    const next: string[] = [];
-                    for (const v of variants) {
-                        next.push(v + '%/');
-                        next.push(v);
-                        if (next.length >= maxVariants) break;
-                    }
-                    variants.length = 0;
-                    variants.push(...next.slice(0, maxVariants));
-                    i += 3;
-                    continue;
-                }
-
-                if (glob.startsWith('**', i)) {
-                    push('%');
-                    i += 2;
-                    continue;
-                }
-
+            for (let i = 0; i < glob.length; i++) {
                 const ch = glob[i];
+
+                if (ch === globEscapeChar) {
+                    if (i + 1 < glob.length) {
+                        lit += glob[i + 1];
+                        i++;
+                    } else {
+                        lit += ch;
+                    }
+                    continue;
+                }
+
+                // Unsupported syntax in Milvus LIKE mode.
+                if (ch === '[' || ch === ']' || ch === '(' || ch === ')' || ch === '|') {
+                    return null;
+                }
+                if (ch === '{' || ch === '}') {
+                    // Brace expansion should have removed these.
+                    return null;
+                }
+
                 if (ch === '*') {
-                    usedApproxStar = true;
-                    push('%');
-                    i += 1;
+                    flush();
+                    if (glob[i + 1] === '*') {
+                        if (glob[i + 2] === '/') {
+                            tokens.push({ t: 'globstar_slash' });
+                            i += 2;
+                        } else {
+                            tokens.push({ t: 'globstar' });
+                            i += 1;
+                        }
+                    } else {
+                        tokens.push({ t: 'star' });
+                    }
                     continue;
                 }
 
                 if (ch === '?') {
-                    push('_');
-                    i += 1;
+                    flush();
+                    tokens.push({ t: 'qmark' });
                     continue;
                 }
 
-                // Unsupported advanced glob syntax
-                if (ch === '[' || ch === ']' || ch === '{' || ch === '}' || ch === '(' || ch === ')' || ch === '|') {
-                    return [];
-                }
-
-                push(escapeForLikeLiteral(ch));
-                i += 1;
+                lit += ch;
             }
 
-            return variants;
+            flush();
+            return tokens;
         };
 
-        for (const p of unique) {
-            let pattern = p.replace(/\\/g, '/');
+        const expandGlobstarSlash = (tokens: GlobToken[]): GlobToken[][] => {
+            const out: GlobToken[][] = [[]];
+            for (const tok of tokens) {
+                if (tok.t !== 'globstar_slash') {
+                    for (const arr of out) arr.push(tok);
+                    continue;
+                }
 
-            // Negation isn't supported at query-time (Milvus can't easily express it safely)
+                const next: GlobToken[][] = [];
+                for (const arr of out) {
+                    next.push([...arr, { t: 'globstar' }, { t: 'lit', v: '/' }]);
+                    next.push([...arr]);
+                    if (next.length >= MAX_GLOBSTAR_SLASH_VARIANTS) break;
+                }
+                out.length = 0;
+                out.push(...next.slice(0, MAX_GLOBSTAR_SLASH_VARIANTS));
+                if (out.length >= MAX_GLOBSTAR_SLASH_VARIANTS) break;
+            }
+            return out;
+        };
+
+        const compileLike = (
+            tokens: GlobToken[],
+            overrides?: { starIndex?: number; starReplacement?: string; qmarkIndex?: number; qmarkReplacement?: string }
+        ): { like: string; starCount: number; qmarkCount: number } => {
+            let like = '';
+            let starCount = 0;
+            let qmarkCount = 0;
+
+            for (const tok of tokens) {
+                if (tok.t === 'lit') {
+                    for (const c of tok.v) like += escapeLikeChar(c);
+                    continue;
+                }
+                if (tok.t === 'globstar') {
+                    like += '%';
+                    continue;
+                }
+                if (tok.t === 'star') {
+                    const idx = starCount;
+                    starCount++;
+                    if (overrides?.starIndex === idx && overrides.starReplacement !== undefined) like += overrides.starReplacement;
+                    else like += '%';
+                    continue;
+                }
+                if (tok.t === 'qmark') {
+                    const idx = qmarkCount;
+                    qmarkCount++;
+                    if (overrides?.qmarkIndex === idx && overrides.qmarkReplacement !== undefined) like += overrides.qmarkReplacement;
+                    else like += '_';
+                    continue;
+                }
+            }
+
+            return { like, starCount, qmarkCount };
+        };
+
+        const buildMatchClause = (tokens: GlobToken[]): string => {
+            const compiled = compileLike(tokens);
+            const parts: string[] = [];
+            parts.push(`relativePath like "${escapeForMilvusStringLiteral(compiled.like)}"`);
+
+            // Enforce path-glob semantics: '*' and '?' must not match '/'.
+            // For each '*' wildcard, forbid a corresponding match where it spans at least one '/'.
+            // For each '?' wildcard, forbid matching '/'.
+            const enforceBudget = Math.min(MAX_WILDCARD_ENFORCEMENTS, compiled.starCount + compiled.qmarkCount);
+            let enforced = 0;
+
+            for (let i = 0; i < compiled.starCount && enforced < enforceBudget; i++) {
+                const forbidden = compileLike(tokens, { starIndex: i, starReplacement: '%/%' }).like;
+                parts.push(`not (relativePath like "${escapeForMilvusStringLiteral(forbidden)}")`);
+                enforced++;
+            }
+
+            for (let i = 0; i < compiled.qmarkCount && enforced < enforceBudget; i++) {
+                const forbidden = compileLike(tokens, { qmarkIndex: i, qmarkReplacement: '/' }).like;
+                parts.push(`not (relativePath like "${escapeForMilvusStringLiteral(forbidden)}")`);
+                enforced++;
+            }
+
+            if ((compiled.starCount + compiled.qmarkCount) > enforceBudget) {
+                notes.add(`Note: excludePatterns wildcard enforcement capped at ${MAX_WILDCARD_ENFORCEMENTS} per pattern.`);
+            }
+
+            return `(${parts.join(' and ')})`;
+        };
+
+        for (const rawPattern of unique) {
+            if (matchClauses.length >= MAX_MATCH_CLAUSES) break;
+
+            let pattern = normalizeGlobInput(rawPattern);
+
+            // Negation isn't supported at query-time.
             if (pattern.startsWith('!')) {
-                ignored.push(p);
+                ignored.push(rawPattern);
                 continue;
             }
 
@@ -140,17 +348,18 @@ export class ToolHandlers {
             pattern = pattern.replace(/^\.\/+/, '');
             pattern = pattern.replace(/^\/+/, '');
 
+            // Directory shorthand: "docs/" -> "docs/**"
             if (pattern.endsWith('/')) {
                 pattern = `${pattern}**`;
             }
 
             pattern = pattern.replace(/^\/+|\/+$/g, '');
             if (pattern.length === 0) {
-                ignored.push(p);
+                ignored.push(rawPattern);
                 continue;
             }
 
-            // Bare directory name (e.g. 'docs') means 'docs/**'
+            // Bare directory name (e.g. "docs") means "docs/**"
             if (!/[?*]/.test(pattern) && !pattern.includes('/')) {
                 pattern = `${pattern}/**`;
             }
@@ -159,35 +368,47 @@ export class ToolHandlers {
                 pattern = `${searchRel}/${pattern}`.replace(/\/+/, '/');
             }
 
-            const likes = globToLikePatterns(pattern);
-            if (likes.length === 0) {
-                ignored.push(p);
-                continue;
+            const braceExpanded = expandBraces(pattern);
+            if (braceExpanded.length >= MAX_BRACE_EXPANSIONS) {
+                notes.add(`Note: excludePatterns brace expansion capped at ${MAX_BRACE_EXPANSIONS} variants.`);
             }
 
-            for (const likeRaw of likes) {
-                const escaped = escapeForStringLiteral(likeRaw);
-                exprs.push(`relativePath like "${escaped}"`);
+            let supported = true;
+            for (const expanded of braceExpanded) {
+                if (matchClauses.length >= MAX_MATCH_CLAUSES) break;
+                const tokens0 = tokenizeGlob(expanded);
+                if (!tokens0) {
+                    supported = false;
+                    break;
+                }
+                const variants = expandGlobstarSlash(tokens0);
+                for (const vt of variants) {
+                    if (matchClauses.length >= MAX_MATCH_CLAUSES) break;
+                    matchClauses.push(buildMatchClause(vt));
+                }
+            }
+
+            if (!supported) {
+                ignored.push(rawPattern);
             }
         }
 
-        if (exprs.length === 0) {
+        if (matchClauses.length === 0) {
             return {
                 warning: ignored.length > 0 ? `Note: excludePatterns ignored (unsupported patterns): ${JSON.stringify(ignored)}.` : undefined
             };
         }
 
-        const notes: string[] = [];
-        if (ignored.length > 0) {
-            notes.push(`Note: excludePatterns partially applied. Ignored (unsupported patterns): ${JSON.stringify(ignored)}.`);
+        if (matchClauses.length >= MAX_MATCH_CLAUSES) {
+            notes.add(`Note: excludePatterns filter generation capped at ${MAX_MATCH_CLAUSES} clauses.`);
         }
-        if (usedApproxStar) {
-            notes.push(`Note: excludePatterns uses Milvus LIKE; '*' may match across directories (use '**/' or anchor with '/' when needed).`);
+        if (ignored.length > 0) {
+            notes.add(`Note: excludePatterns partially applied. Ignored (unsupported patterns): ${JSON.stringify(ignored)}.`);
         }
 
         return {
-            filterExpr: `not (${exprs.join(' or ')})`,
-            warning: notes.length > 0 ? notes.join(' ') : undefined
+            filterExpr: `not (${matchClauses.join(' or ')})`,
+            warning: notes.size > 0 ? [...notes].join(' ') : undefined
         };
     }
 
@@ -627,7 +848,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
     }
 
     public async handleSearchCode(args: any) {
-        const { path: codebasePath, query, limit = 10, extensionFilter, excludePatterns, returnRaw = false, showScores = false } = args;
+        const { path: codebasePath, query, limit = 10, extensionFilter, excludePatterns, useIgnoreFiles = true, returnRaw = false, showScores = false } = args;
         const resultLimit = limit || 10;
 
         try {
@@ -730,7 +951,37 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             }
 
             // Add query-time excludes (even if already indexed)
-            const excludeBuilt = this.buildExcludePatternsFilterExpr(excludePatterns, effectiveRoot, absolutePath);
+            const mergedExcludePatterns: string[] = [];
+            if (Array.isArray(excludePatterns)) {
+                for (const p of excludePatterns) {
+                    if (typeof p === 'string') mergedExcludePatterns.push(p);
+                }
+            }
+
+            // Also apply repo-root ignore files at search-time (opt-out)
+            if (useIgnoreFiles !== false) {
+                try {
+                    const ignoreFiles = await fs.promises.readdir(effectiveRoot, { withFileTypes: true });
+                    const ignoreFileNames = ignoreFiles
+                        .filter((e: any) => e.isFile && e.isFile())
+                        .map((e: any) => e.name)
+                        .filter((name: string) => name.startsWith('.') && name.endsWith('ignore'));
+
+                    for (const name of ignoreFileNames) {
+                        if (mergedExcludePatterns.length > 200) break;
+                        const filePath = path.join(effectiveRoot, name);
+                        const patterns = await Context.getIgnorePatternsFromFile(filePath);
+                        for (const pat of patterns) {
+                            if (mergedExcludePatterns.length > 200) break;
+                            mergedExcludePatterns.push(pat);
+                        }
+                    }
+                } catch (e) {
+                    // Ignore missing permissions / read errors for ignore files at search time.
+                }
+            }
+
+            const excludeBuilt = this.buildExcludePatternsFilterExpr(mergedExcludePatterns, effectiveRoot, absolutePath);
             if (excludeBuilt.filterExpr) {
                 filterExpr = filterExpr
                     ? `(${filterExpr}) and (${excludeBuilt.filterExpr})`

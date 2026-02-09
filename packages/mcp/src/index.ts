@@ -218,6 +218,8 @@ This tool is versatile and can be used before completing various tasks to retrie
 💡 **Pro Tips**:
 - Use returnRaw=true when you plan to rerank results for better precision
 - Use extensionFilter to narrow down results by file type (e.g., ['.ts', '.py'])
+- Use excludePatterns to exclude docs/tests/generated paths at query-time (supports globs like '**/docs/**', 'src/**/*.test.ts', '/investigations/**')
+- By default, ignore files in the repo root are applied at search time too (set useIgnoreFiles=false to disable)
 - Works even while indexing is in progress (returns partial results)
 `;
 
@@ -293,6 +295,11 @@ This tool is versatile and can be used before completing various tasks to retrie
                                     },
                                     description: "Optional: List of file extensions to filter results. (e.g., ['.ts','.py']).",
                                     default: []
+                                },
+                                useIgnoreFiles: {
+                                    type: "boolean",
+                                    description: "If true (default), applies ignore patterns from repo-root ignore files (e.g. .contextignore, .gitignore, and other .*ignore files) at search-time as additional excludes.",
+                                    default: true
                                 },
                                 excludePatterns: {
                                     type: "array",
@@ -472,6 +479,11 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                                     description: "Optional: List of file extensions to filter (e.g., ['.ts', '.py'])",
                                     default: []
                                 },
+                                useIgnoreFiles: {
+                                    type: "boolean",
+                                    description: "If true (default), applies ignore patterns from repo-root ignore files at search-time as additional excludes.",
+                                    default: true
+                                },
                                 excludePatterns: {
                                     type: "array",
                                     items: { type: "string" },
@@ -540,7 +552,7 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
     }
 
     private async handleSearchAndRerank(args: any) {
-        const { path: codebasePath, query, limit = 20, topK = 5, extensionFilter } = args;
+        const { path: codebasePath, query, limit = 20, topK = 5, extensionFilter, excludePatterns, useIgnoreFiles } = args;
 
         // Check if reranker is available
         if (!this.reranker) {
@@ -560,7 +572,8 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
                 query,
                 limit,
                 extensionFilter,
-                excludePatterns: args.excludePatterns,
+                excludePatterns,
+                useIgnoreFiles,
                 returnRaw: true
             });
 
