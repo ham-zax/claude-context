@@ -63,8 +63,10 @@ export class ToolHandlers {
             | { t: 'globstar_slash' };
 
         const ignored: string[] = [];
+        const directoryOnlyNegationsIgnored: string[] = [];
         const notes = new Set<string>();
-        const matchClauses: string[] = [];
+        const ignoreClauses: string[] = [];
+        const negationClauses: string[] = [];
 
         const normalizeGlobInput = (input: string): string => {
             // Preserve glob escaping (e.g. \\*) but normalize Windows separators (\) to '/'
@@ -329,14 +331,17 @@ export class ToolHandlers {
         };
 
         for (const rawPattern of unique) {
-            if (matchClauses.length >= MAX_MATCH_CLAUSES) break;
+            if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) break;
 
             let pattern = normalizeGlobInput(rawPattern);
 
-            // Negation isn't supported at query-time.
+            // Support gitignore-style negation patterns in excludePatterns/ignore files.
+            // Important: directory-only negation patterns (ending with '/') don't apply to file-only
+            // search results; we ignore them here to avoid unintentionally re-including entire trees.
+            let isNegation = false;
             if (pattern.startsWith('!')) {
-                ignored.push(rawPattern);
-                continue;
+                isNegation = true;
+                pattern = pattern.slice(1);
             }
 
             let anchored = false;
@@ -348,8 +353,12 @@ export class ToolHandlers {
             pattern = pattern.replace(/^\.\/+/, '');
             pattern = pattern.replace(/^\/+/, '');
 
-            // Directory shorthand: "docs/" -> "docs/**"
+            // Directory shorthand: "docs/" -> "docs/**" (ignore patterns only)
             if (pattern.endsWith('/')) {
+                if (isNegation) {
+                    directoryOnlyNegationsIgnored.push(rawPattern);
+                    continue;
+                }
                 pattern = `${pattern}**`;
             }
 
@@ -375,7 +384,7 @@ export class ToolHandlers {
 
             let supported = true;
             for (const expanded of braceExpanded) {
-                if (matchClauses.length >= MAX_MATCH_CLAUSES) break;
+                if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) break;
                 const tokens0 = tokenizeGlob(expanded);
                 if (!tokens0) {
                     supported = false;
@@ -383,8 +392,9 @@ export class ToolHandlers {
                 }
                 const variants = expandGlobstarSlash(tokens0);
                 for (const vt of variants) {
-                    if (matchClauses.length >= MAX_MATCH_CLAUSES) break;
-                    matchClauses.push(buildMatchClause(vt));
+                    if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) break;
+                    if (isNegation) negationClauses.push(buildMatchClause(vt));
+                    else ignoreClauses.push(buildMatchClause(vt));
                 }
             }
 
@@ -393,21 +403,33 @@ export class ToolHandlers {
             }
         }
 
-        if (matchClauses.length === 0) {
+        if (ignoreClauses.length === 0) {
             return {
-                warning: ignored.length > 0 ? `Note: excludePatterns ignored (unsupported patterns): ${JSON.stringify(ignored)}.` : undefined
+                warning: (ignored.length > 0 || directoryOnlyNegationsIgnored.length > 0)
+                    ? `Note: excludePatterns ignored (unsupported patterns): ${JSON.stringify(ignored)}.${directoryOnlyNegationsIgnored.length > 0 ? ` Directory-only negations ignored at search-time: ${JSON.stringify(directoryOnlyNegationsIgnored)}.` : ''}`
+                    : undefined
             };
         }
 
-        if (matchClauses.length >= MAX_MATCH_CLAUSES) {
+        if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) {
             notes.add(`Note: excludePatterns filter generation capped at ${MAX_MATCH_CLAUSES} clauses.`);
         }
         if (ignored.length > 0) {
             notes.add(`Note: excludePatterns partially applied. Ignored (unsupported patterns): ${JSON.stringify(ignored)}.`);
         }
+        if (directoryOnlyNegationsIgnored.length > 0) {
+            notes.add(`Note: excludePatterns directory-only negations ignored at search-time: ${JSON.stringify(directoryOnlyNegationsIgnored)}.`);
+        }
+
+        const ignoreExpr = `(${ignoreClauses.join(' or ')})`;
+        const negationExpr = negationClauses.length > 0 ? `(${negationClauses.join(' or ')})` : undefined;
 
         return {
-            filterExpr: `not (${matchClauses.join(' or ')})`,
+            // Exclude ignored paths, but re-include anything matched by a negation pattern.
+            // Equivalent: allowed = not (ignored and not reIncluded)
+            filterExpr: negationExpr
+                ? `not ((${ignoreExpr}) and not (${negationExpr}))`
+                : `not (${ignoreExpr})`,
             warning: notes.size > 0 ? [...notes].join(' ') : undefined
         };
     }
