@@ -62,6 +62,7 @@ __pycache__/
 CLAUDE.md
 
 .cursor/*
+.serena/
 
 evaluation/repos
 repos
