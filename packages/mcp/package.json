@@ -36,6 +36,11 @@
         "url": "https://github.com/ham-zax/claude-context.git",
         "directory": "packages/mcp"
     },
+    "homepage": "https://github.com/ham-zax/claude-context",
+    "bugs": {
+        "url": "https://github.com/ham-zax/claude-context/issues"
+    },
+    "author": "ham-zax",
     "license": "MIT",
     "publishConfig": {
         "access": "public"

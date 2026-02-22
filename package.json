@@ -1,16 +1,14 @@
 {
     "name": "claude-context",
     "version": "0.1.4",
-    "description": "A powerful code indexing tool with multi-platform support",
+    "description": "A focused code indexing tool with core engine + MCP integration",
     "private": true,
     "scripts": {
-        "build": "pnpm -r --filter='!./examples/*' build && pnpm -r --filter='./examples/*' build",
+        "build": "pnpm -r build",
         "build:core": "pnpm --filter @zokizuan/claude-context-core build",
-        "build:vscode": "pnpm --filter semanticcodesearch compile",
         "build:mcp": "pnpm --filter @zokizuan/claude-context-mcp build",
         "dev": "pnpm -r dev",
         "dev:core": "pnpm --filter @zokizuan/claude-context-core dev",
-        "dev:vscode": "pnpm --filter semanticcodesearch watch",
         "dev:mcp": "pnpm --filter @zokizuan/claude-context-mcp dev",
         "clean": "pnpm -r clean",
         "lint": "pnpm -r lint",
@@ -18,8 +16,7 @@
         "typecheck": "pnpm -r run typecheck",
         "release:core": "pnpm --filter @zokizuan/claude-context-core... run build && pnpm --filter @zokizuan/claude-context-core publish --access public --no-git-checks",
         "release:mcp": "pnpm --filter @zokizuan/claude-context-mcp... run build && pnpm --filter @zokizuan/claude-context-mcp publish --access public --no-git-checks",
-        "release:vscode": "pnpm --filter @zokizuan/claude-context-core build && pnpm --filter semanticcodesearch run webpack && pnpm --filter semanticcodesearch release",
-        "example:basic": "pnpm --filter claude-context-basic-example start",
+        "test:integration": "pnpm --filter @zokizuan/claude-context-core run test:integration",
         "benchmark": "node scripts/build-benchmark.js"
     },
     "devDependencies": {
@@ -33,8 +30,8 @@
         "os-browserify": "^0.3.0",
         "rimraf": "^6.0.1",
         "stream-http": "^3.2.0",
-        "tree-sitter-cli": "^0.25.6",
         "typescript": "^5.8.3",
+        "tree-sitter-cli": "^0.25.6",
         "url": "^0.11.4",
         "vm-browserify": "^1.1.2"
     },
@@ -47,6 +44,10 @@
         "type": "git",
         "url": "https://github.com/ham-zax/claude-context.git"
     },
+    "homepage": "https://github.com/ham-zax",
+    "bugs": {
+        "url": "https://github.com/ham-zax/claude-context/issues"
+    },
     "license": "MIT",
-    "author": "Cheney Zhang <277584121@qq.com>"
+    "author": "ham-zax"
 }

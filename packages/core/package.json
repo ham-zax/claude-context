@@ -10,7 +10,8 @@
         "clean": "rimraf dist",
         "lint": "eslint src --ext .ts",
         "lint:fix": "eslint src --ext .ts --fix",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "test:integration": "pnpm run build && HOME=/tmp node --test --test-concurrency=1 --test-isolation=none ../../tests/integration/*.test.mjs"
     },
     "dependencies": {
         "@google/genai": "^1.9.0",
@@ -51,6 +52,11 @@
         "url": "https://github.com/ham-zax/claude-context.git",
         "directory": "packages/core"
     },
+    "homepage": "https://github.com/ham-zax/claude-context",
+    "bugs": {
+        "url": "https://github.com/ham-zax/claude-context/issues"
+    },
+    "author": "ham-zax",
     "license": "MIT",
     "publishConfig": {
         "access": "public"

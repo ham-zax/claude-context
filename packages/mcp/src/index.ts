@@ -27,9 +27,9 @@ import { MilvusVectorDatabase } from "@zokizuan/claude-context-core";
 // Import our modular components
 import { createMcpConfig, logConfigurationSummary, showHelpMessage, ContextMcpConfig } from "./config.js";
 import { createEmbeddingInstance, logEmbeddingProviderInfo } from "./embedding.js";
-import { SnapshotManager } from "./snapshot.js";
-import { SyncManager } from "./sync.js";
-import { ToolHandlers } from "./handlers.js";
+import { SnapshotManager } from "./core/snapshot.js";
+import { SyncManager } from "./core/sync.js";
+import { ToolHandlers } from "./core/handlers.js";
 import { VoyageAIReranker } from "@zokizuan/claude-context-core";
 
 class ContextMcpServer {
@@ -56,16 +56,16 @@ class ContextMcpServer {
         );
 
         // Initialize embedding provider
-        console.log(`[EMBEDDING] Initializing embedding provider: ${config.embeddingProvider}`);
-        console.log(`[EMBEDDING] Using model: ${config.embeddingModel}`);
+        console.log(`[EMBEDDING] Initializing embedding provider: ${config.encoderProvider}`);
+        console.log(`[EMBEDDING] Using model: ${config.encoderModel}`);
 
         const embedding = createEmbeddingInstance(config);
         logEmbeddingProviderInfo(config, embedding);
 
         // Initialize vector database
         const vectorDatabase = new MilvusVectorDatabase({
-            address: config.milvusAddress,
-            ...(config.milvusToken && { token: config.milvusToken })
+            address: config.milvusEndpoint,
+            ...(config.milvusApiToken && { token: config.milvusApiToken })
         });
 
         // Initialize Claude Context
@@ -81,12 +81,12 @@ class ContextMcpServer {
         this.config = config;
 
         // Initialize VoyageAI reranker if API key is available
-        if (config.voyageaiApiKey) {
+        if (config.voyageKey) {
             this.reranker = new VoyageAIReranker({
-                apiKey: config.voyageaiApiKey,
-                model: config.rerankerModel || 'rerank-2.5-lite'
+                apiKey: config.voyageKey,
+                model: config.rankerModel || 'rerank-2.5-lite'
             });
-            console.log(`[RERANKER] VoyageAI Reranker initialized with model: ${config.rerankerModel || 'rerank-2.5-lite'}`);
+            console.log(`[RERANKER] VoyageAI Reranker initialized with model: ${config.rankerModel || 'rerank-2.5-lite'}`);
         }
 
         // Load existing codebase snapshot on startup
@@ -109,7 +109,7 @@ class ContextMcpServer {
         console.log('[STARTUP] 🔍 Verifying cloud state against local snapshot...');
 
         // Get the vector database
-        const vectorDb = this.context.getVectorDatabase();
+        const vectorDb = this.context.getVectorStore();
         const collections = await vectorDb.listCollections();
 
         const cloudCodebases = new Set<string>();
@@ -147,7 +147,7 @@ class ContextMcpServer {
 
         // Fix codebases that are "indexing" but exist in cloud
         for (const codebasePath of indexingCodebases) {
-            if (cloudCodebases.has(codebasePath) || await this.context.hasIndex(codebasePath)) {
+            if (cloudCodebases.has(codebasePath) || await this.context.hasIndexedCollection(codebasePath)) {
                 console.log(`[STARTUP] 🔄 Fixing interrupted indexing: ${codebasePath} → marked as indexed`);
                 const info = this.snapshotManager.getCodebaseInfo(codebasePath);
                 this.snapshotManager.setCodebaseIndexed(codebasePath, {
@@ -783,20 +783,15 @@ Call: rerank_results(query="auth logic", documents=["code1...", "code2..."], top
     }
 
     async start() {
-        console.log('[SYNC-DEBUG] MCP server start() method called');
         console.log('Starting Context MCP server...');
 
         const transport = new StdioServerTransport();
-        console.log('[SYNC-DEBUG] StdioServerTransport created, attempting server connection...');
 
         await this.server.connect(transport);
         console.log("MCP server started and listening on stdio.");
-        console.log('[SYNC-DEBUG] Server connection established successfully');
 
         // Start background sync after server is connected
-        console.log('[SYNC-DEBUG] Initializing background sync...');
         this.syncManager.startBackgroundSync();
-        console.log('[SYNC-DEBUG] MCP server initialization complete');
     }
 }
 
