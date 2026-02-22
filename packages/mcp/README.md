@@ -15,6 +15,97 @@ Tool surface is now hard-broken to 4 tools only:
 
 Removed tools from pre-1.0 releases are no longer routed.
 
+## Features
+
+- Capability-driven execution via `CapabilityResolver`.
+- Unified `search_codebase` flow with optional reranker override:
+  - `useReranker=true`: force rerank (errors if capability missing)
+  - `useReranker=false`: disable rerank
+  - `useReranker` omitted: auto behavior by capability/profile
+- Snapshot `v3` safety with index fingerprints and strict `requires_reindex` access gates.
+- Deterministic train-in-the-error responses for incompatible or legacy index states.
+- Query-time exclusion support with `.gitignore`-style matching.
+- Structured search telemetry logs (`[TELEMETRY]` JSON to `stderr`).
+- Zod-first tool schemas converted to MCP JSON Schema for `ListTools`.
+- Auto-generated tool docs in this README from live tool schemas.
+- `read_file` line-range retrieval with default large-file truncation guard.
+
+## Architecture Evolution
+
+### Before (pre-v1.0.0)
+
+- Monolithic routing and execution concentrated in `index.ts` + `handlers.ts`.
+- Redundant tool surface (9 tools) increased agent/tool-selection ambiguity.
+- Inline JSON schemas and docs drift risk.
+- Environment checks leaked across runtime paths.
+- Snapshot state lacked robust fingerprint protection for model/provider changes.
+
+### After (v1.0.0+)
+
+- Lightweight bootstrap in `index.ts` with registry-based tool routing.
+- Hard-break 4-tool surface optimized for agent cognition.
+- Modular tool execution in `src/tools/*.ts` with a shared `ToolContext`.
+- Zod schemas as canonical source, converted to JSON Schema at runtime.
+- Snapshot `v3` + fingerprint compatibility gates for safe multi-provider usage.
+- Deterministic train-in-the-error messages for self-healing agent loops.
+- Search observability via structured telemetry.
+- `read_file` upgraded for context-density control (ranges + truncation guard).
+
+### Architectural Shape (Current)
+
+```text
+[MCP Client]
+    -> [index.ts bootstrap + ListTools/CallTool]
+    -> [tool registry]
+    -> [manage_index | search_codebase | read_file | list_codebases]
+    -> [ToolContext DI]
+       -> [CapabilityResolver]
+       -> [SnapshotManager v3 + access gate]
+       -> [Context / Vector store / Embedding / Reranker adapters]
+```
+
+## Phase Summary
+
+- Phase 1 (state safety + API hard break):
+  - 9 tools -> 4 tools
+  - capability-driven behavior
+  - snapshot `v3` with index fingerprinting and strict reindex gating
+- Phase 2 (modularization + observability):
+  - tool registry and modular `src/tools/*`
+  - Zod-first schemas and generated docs
+  - structured search telemetry
+- Phase 3 (context density):
+  - `read_file` line-range semantics
+  - safe clamping for out-of-range requests
+  - `READ_FILE_MAX_LINES` truncation and continuation hints
+
+## read_file Behavior
+
+- Supports optional `start_line` and `end_line` (1-based, inclusive).
+- When no range is provided and file length exceeds `READ_FILE_MAX_LINES` (default `1000`), output is truncated and includes a continuation hint with `path` and next `start_line`.
+
+## Future Plan
+
+### 1) Agent Context Density
+
+- Add optional `read_file` paging ergonomics beyond current line ranges (for very large files/workflows).
+- Explore syntax-aware snippet shaping in `search_codebase` so results preserve function/class boundaries more reliably.
+
+### 2) Proactive Sync
+
+- Introduce optional filesystem watching with debounce for near-real-time incremental indexing.
+- Keep manual `manage_index(action="sync")` as explicit fallback.
+
+### 3) Provider Expansion
+
+- Extend reranker adapters (for example, Cohere) behind the same capability model.
+- Evaluate local vector-store adapters to support fully offline deployments.
+
+### 4) Observability Productization
+
+- Expand telemetry consumption into a local stats/report workflow (latency, reranker utilization, filter/drop rates).
+- Keep CI fast with deterministic unit/in-memory tests; run provider-backed integration checks on scheduled/manual workflows.
+
 <!-- TOOLS_START -->
 
 ## Tool Reference
@@ -50,11 +141,13 @@ Unified semantic search tool. Supports optional reranking and query-time exclude
 
 ### `read_file`
 
-Read full content of a file from the local filesystem.
+Read file content from the local filesystem, with optional 1-based inclusive line ranges and safe truncation.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `path` | string | yes |  | ABSOLUTE path to the file. |
+| `start_line` | integer | no |  | Optional start line (1-based, inclusive). |
+| `end_line` | integer | no |  | Optional end line (1-based, inclusive). |
 
 ### `list_codebases`
 
@@ -96,6 +189,7 @@ pnpm --filter @zokizuan/claude-context-mcp start
 pnpm --filter @zokizuan/claude-context-mcp build
 pnpm --filter @zokizuan/claude-context-mcp typecheck
 pnpm --filter @zokizuan/claude-context-mcp test
-pnpm --filter @zokizuan/claude-context-mcp docs:generate
 pnpm --filter @zokizuan/claude-context-mcp docs:check
 ```
+
+`build` automatically runs docs generation from tool schemas.

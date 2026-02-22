@@ -7,7 +7,7 @@
     "types": "dist/index.d.ts",
     "bin": "dist/index.js",
     "scripts": {
-        "build": "pnpm clean && tsc --build --force",
+        "build": "pnpm clean && tsc --build --force && pnpm docs:generate",
         "dev": "tsx --watch src/index.ts",
         "clean": "rimraf dist",
         "lint": "eslint src --ext .ts",

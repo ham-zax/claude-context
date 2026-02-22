@@ -43,6 +43,7 @@ class ContextMcpServer {
     private reranker: VoyageAIReranker | null = null;
     private capabilities: CapabilityResolver;
     private runtimeFingerprint: IndexFingerprint;
+    private readFileMaxLines: number;
 
     constructor(config: ContextMcpConfig) {
         this.server = new Server(
@@ -65,6 +66,7 @@ class ContextMcpServer {
 
         this.capabilities = new CapabilityResolver(config);
         this.runtimeFingerprint = buildRuntimeIndexFingerprint(config, embedding.getDimension());
+        this.readFileMaxLines = Math.max(1, config.readFileMaxLines ?? 1000);
         console.log(`[FINGERPRINT] Runtime index fingerprint: ${JSON.stringify(this.runtimeFingerprint)}`);
 
         const vectorDatabase = new MilvusVectorDatabase({
@@ -107,6 +109,7 @@ class ContextMcpServer {
             reranker: this.reranker,
             runtimeFingerprint: this.runtimeFingerprint,
             toolHandlers: this.toolHandlers,
+            readFileMaxLines: this.readFileMaxLines,
         };
     }
 

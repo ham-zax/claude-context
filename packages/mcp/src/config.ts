@@ -33,6 +33,8 @@ export interface ContextMcpConfig {
     milvusApiToken?: string;
     // Reranker configuration
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
+    // read_file behavior
+    readFileMaxLines?: number;
 }
 
 // Legacy format (v1) - for backward compatibility
@@ -165,6 +167,7 @@ export function buildRuntimeIndexFingerprint(config: ContextMcpConfig, embedding
 
 export function createMcpConfig(): ContextMcpConfig {
     const defaultProvider = (envManager.get('EMBEDDING_PROVIDER') as EmbeddingProvider) || 'VoyageAI';
+    const defaultReadFileMaxLines = 1000;
 
     // Parse output dimension from env var
     const outputDimensionStr = envManager.get('EMBEDDING_OUTPUT_DIMENSION');
@@ -190,6 +193,17 @@ export function createMcpConfig(): ContextMcpConfig {
         rankerModel = 'rerank-2.5';
     }
 
+    let readFileMaxLines = defaultReadFileMaxLines;
+    const readFileMaxLinesRaw = envManager.get('READ_FILE_MAX_LINES');
+    if (readFileMaxLinesRaw) {
+        const parsed = Number.parseInt(readFileMaxLinesRaw, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            readFileMaxLines = parsed;
+        } else {
+            console.warn(`[WARN] Invalid READ_FILE_MAX_LINES value: ${readFileMaxLinesRaw}. Using default ${defaultReadFileMaxLines}.`);
+        }
+    }
+
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || "1.0.0",
@@ -211,6 +225,8 @@ export function createMcpConfig(): ContextMcpConfig {
         milvusApiToken: envManager.get('MILVUS_TOKEN'),
         // Reranker configuration
         rankerModel,
+        // read_file behavior
+        readFileMaxLines,
     };
 
     return config;

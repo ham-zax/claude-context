@@ -52,3 +52,19 @@ test('search_codebase schema keeps useReranker optional without default', () => 
     assert.ok(required.includes('path'));
     assert.ok(required.includes('query'));
 });
+
+test('read_file schema includes optional start_line and end_line parameters', () => {
+    const tools = getMcpToolList(buildContext());
+    const readFileTool = tools.find((tool) => tool.name === 'read_file');
+    assert.ok(readFileTool);
+
+    const properties = readFileTool!.inputSchema.properties as Record<string, any>;
+    assert.ok(properties.path);
+    assert.ok(properties.start_line);
+    assert.ok(properties.end_line);
+
+    const required = readFileTool!.inputSchema.required as string[];
+    assert.deepEqual(required, ['path']);
+    assert.equal(Object.prototype.hasOwnProperty.call(properties.start_line, 'default'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(properties.end_line, 'default'), false);
+});

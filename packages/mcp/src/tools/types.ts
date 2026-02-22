@@ -20,6 +20,7 @@ export interface ToolContext {
     reranker: VoyageAIReranker | null;
     runtimeFingerprint: IndexFingerprint;
     toolHandlers: ToolHandlers;
+    readFileMaxLines: number;
 }
 
 export interface McpTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
