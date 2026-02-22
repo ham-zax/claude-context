@@ -15,14 +15,17 @@
         "typecheck": "tsc --noEmit",
         "start": "tsx src/index.ts",
         "start:with-env": "OPENAI_API_KEY=${OPENAI_API_KEY:your-api-key-here} MILVUS_ADDRESS=${MILVUS_ADDRESS:localhost:19530} tsx src/index.ts",
-        "prepublishOnly": "pnpm build",
+        "docs:generate": "tsx scripts/generate-docs.ts",
+        "docs:check": "tsx scripts/generate-docs.ts --check",
+        "prepublishOnly": "pnpm build && pnpm docs:check",
         "test": "tsx --test --test-concurrency=1 src/**/*.test.ts"
     },
     "dependencies": {
-        "@zokizuan/claude-context-core": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.12.1",
+        "@zokizuan/claude-context-core": "workspace:*",
         "ignore": "^7.0.5",
-        "zod": "^3.25.55"
+        "zod": "^3.25.55",
+        "zod-to-json-schema": "^3.25.1"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",

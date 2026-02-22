@@ -150,6 +150,9 @@ importers:
       zod:
         specifier: ^3.25.55
         version: 3.25.55
+      zod-to-json-schema:
+        specifier: ^3.25.1
+        version: 3.25.1(zod@3.25.55)
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -3242,6 +3245,11 @@ packages:
     peerDependencies:
       zod: ^3.24.1
 
+  zod-to-json-schema@3.25.1:
+    resolution: {integrity: sha512-pM/SU9d3YAggzi6MtR4h7ruuQlqKtad8e9S0fmxcMi+ueAK5Korys/aWcV9LIIHTVbj01NdzxcnXSN+O74ZIVA==}
+    peerDependencies:
+      zod: ^3.25 || ^4
+
   zod@3.25.55:
     resolution: {integrity: sha512-219huNnkSLQnLsQ3uaRjXsxMrVm5C9W3OOpEVt2k5tvMKuA8nBSu38e0B//a+he9Iq2dvmk2VyYVlHqiHa4YBA==}
 
@@ -3889,7 +3897,7 @@ snapshots:
       pkce-challenge: 5.0.0
       raw-body: 3.0.0
       zod: 3.25.55
-      zod-to-json-schema: 3.24.5(zod@3.25.55)
+      zod-to-json-schema: 3.25.1(zod@3.25.55)
     transitivePeerDependencies:
       - supports-color
 
@@ -6675,6 +6683,10 @@ snapshots:
   yocto-queue@0.1.0: {}
 
   zod-to-json-schema@3.24.5(zod@3.25.55):
+    dependencies:
+      zod: 3.25.55
+
+  zod-to-json-schema@3.25.1(zod@3.25.55):
     dependencies:
       zod: 3.25.55
 

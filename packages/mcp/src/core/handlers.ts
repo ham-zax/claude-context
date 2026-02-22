@@ -74,84 +74,6 @@ export class ToolHandlers {
         return {};
     }
 
-    public async handleManageIndex(args: any) {
-        const { action } = args || {};
-
-        if (!action || typeof action !== 'string') {
-            return {
-                content: [{
-                    type: "text",
-                    text: `Error: Invalid or missing action. Use one of: create, sync, status, clear.`
-                }],
-                isError: true
-            };
-        }
-
-        if (action === 'create') {
-            if (!args?.path || typeof args.path !== 'string') {
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Error: 'path' is required for action='create'.`
-                    }],
-                    isError: true
-                };
-            }
-            return this.handleIndexCodebase(args);
-        }
-
-        if (action === 'sync') {
-            if (!args?.path || typeof args.path !== 'string') {
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Error: 'path' is required for action='sync'.`
-                    }],
-                    isError: true
-                };
-            }
-            return this.handleSyncCodebase(args);
-        }
-
-        if (action === 'status') {
-            if (!args?.path || typeof args.path !== 'string') {
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Error: 'path' is required for action='status'.`
-                    }],
-                    isError: true
-                };
-            }
-            return this.handleGetIndexingStatus(args);
-        }
-
-        if (action === 'clear') {
-            if (!args?.path || typeof args.path !== 'string') {
-                return {
-                    content: [{
-                        type: "text",
-                        text: `Error: 'path' is required for action='clear'.`
-                    }],
-                    isError: true
-                };
-            }
-            return this.handleClearIndex(args);
-        }
-
-        return {
-            content: [{
-                type: "text",
-                text: `Error: Unsupported action '${action}'. Use one of: create, sync, status, clear.`
-            }],
-            isError: true
-        };
-    }
-
-    public async handleSearchCodebase(args: any) {
-        return this.handleSearchCode(args);
-    }
-
     private buildSearchExcludeMatcher(
         excludePatterns: any,
         effectiveRoot: string,
@@ -707,6 +629,15 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
     public async handleSearchCode(args: any) {
         const { path: codebasePath, query, limit = 10, extensionFilter, excludePatterns, useIgnoreFiles = true, returnRaw = false, showScores = false } = args;
         const resultLimit = limit || 10;
+        const searchDiagnostics = {
+            queryLength: typeof query === 'string' ? query.length : 0,
+            limitRequested: resultLimit,
+            resultsBeforeFilter: 0,
+            resultsAfterFilter: 0,
+            excludedByIgnore: 0,
+            excludedBySubdirectory: 0,
+            filterPass: 'initial' as 'initial' | 'expanded',
+        };
 
         try {
             // Sync indexed codebases from cloud first
@@ -866,12 +797,14 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                 Math.min(MAX_SEARCH_CANDIDATES, Math.max(resultLimit * 4, resultLimit + 20))
             );
 
-            const applyPostFilters = (results: any[], stageLabel: string): any[] => {
+            const applyPostFilters = (results: any[], stageLabel: string, pass: 'initial' | 'expanded'): any[] => {
                 let filteredResults = this.applySearchExcludeMatcher(results, excludeBuilt.matcher);
+                const excludedByIgnore = results.length - filteredResults.length;
                 if (excludeBuilt.matcher && filteredResults.length !== results.length) {
                     console.log(`[SEARCH] ${stageLabel}: excludePatterns filtered ${results.length} -> ${filteredResults.length}`);
                 }
 
+                let excludedBySubdirectory = 0;
                 if (relativeFilter) {
                     const beforeSubdirectoryFilter = filteredResults.length;
                     filteredResults = filteredResults.filter((r: any) => {
@@ -879,10 +812,17 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                         const normalizedPath = r.relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
                         return normalizedPath === relativeFilter || normalizedPath.startsWith(`${relativeFilter}/`);
                     });
+                    excludedBySubdirectory = beforeSubdirectoryFilter - filteredResults.length;
                     if (beforeSubdirectoryFilter !== filteredResults.length) {
                         console.log(`[SEARCH] ${stageLabel}: subdirectory filter '${relativeFilter}' trimmed ${beforeSubdirectoryFilter} -> ${filteredResults.length}`);
                     }
                 }
+
+                searchDiagnostics.resultsBeforeFilter = results.length;
+                searchDiagnostics.resultsAfterFilter = filteredResults.length;
+                searchDiagnostics.excludedByIgnore = Math.max(0, excludedByIgnore);
+                searchDiagnostics.excludedBySubdirectory = Math.max(0, excludedBySubdirectory);
+                searchDiagnostics.filterPass = pass;
 
                 return filteredResults;
             };
@@ -895,7 +835,7 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                 0.3,
                 filterExpr
             );
-            let searchResults = applyPostFilters(rawSearchResults, 'Initial pass');
+            let searchResults = applyPostFilters(rawSearchResults, 'Initial pass', 'initial');
 
             // If post-filtering under-fills, expand candidate pool once to improve recall.
             if (
@@ -910,7 +850,7 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                     0.3,
                     filterExpr
                 );
-                searchResults = applyPostFilters(rawSearchResults, 'Expanded pass');
+                searchResults = applyPostFilters(rawSearchResults, 'Expanded pass', 'expanded');
             }
 
             if (searchResults.length > resultLimit) {
@@ -932,7 +872,8 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                     content: [{
                         type: "text",
                         text: noResultsMessage
-                    }]
+                    }],
+                    meta: { searchDiagnostics }
                 };
             }
 
@@ -955,13 +896,19 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                             query,
                             codebasePath: absolutePath,
                             resultCount: searchResults.length,
+                            resultsBeforeFilter: searchDiagnostics.resultsBeforeFilter,
+                            resultsAfterFilter: searchDiagnostics.resultsAfterFilter,
+                            excludedByIgnore: searchDiagnostics.excludedByIgnore,
+                            excludedBySubdirectory: searchDiagnostics.excludedBySubdirectory,
+                            filterPass: searchDiagnostics.filterPass,
                             isIndexing,
                             indexingStatus: status,
                             excludePatternsWarning: excludeBuilt.warning,
                             results: rawResults,
                             documentsForReranking: rawResults.map((r: any) => r.content)
                         }, null, 2)
-                    }]
+                    }],
+                    meta: { searchDiagnostics }
                 };
             }
 
@@ -1108,7 +1055,8 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                 content: [{
                     type: "text",
                     text: resultMessage
-                }]
+                }],
+                meta: { searchDiagnostics }
             };
         } catch (error) {
             const errorMessage = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error));
