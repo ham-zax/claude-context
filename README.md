@@ -3,7 +3,7 @@
 Claude Context is a semantic code indexing system focused on two runtime packages:
 
 - `@zokizuan/claude-context-core`: indexing, chunking, embeddings, vector storage, and incremental sync
-- `@zokizuan/claude-context-mcp`: MCP server surface for agent tools (`index_codebase`, `search_code`, `sync_codebase`, etc.)
+- `@zokizuan/claude-context-mcp`: MCP server surface for agent tools (`manage_index`, `search_codebase`, `read_file`, `list_codebases`)
 
 This repository intentionally excludes UI extensions and evaluation sidecars. It is optimized for production MCP + core workflows.
 

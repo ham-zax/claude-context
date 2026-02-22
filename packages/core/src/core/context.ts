@@ -22,6 +22,7 @@ import { DEFAULT_IGNORE_PATTERNS, DEFAULT_SUPPORTED_EXTENSIONS } from '../config
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import ignore from 'ignore';
 import { FileSynchronizer } from '../sync/synchronizer';
 
 export interface ContextConfig {
@@ -40,6 +41,7 @@ export class Context {
     private codeSplitter: Splitter;
     private supportedExtensions: string[];
     private ignorePatterns: string[];
+    private ignoreMatcher: ReturnType<typeof ignore> | null = null;
     private synchronizers = new Map<string, FileSynchronizer>();
 
     constructor(config: ContextConfig = {}) {
@@ -82,6 +84,7 @@ export class Context {
         ];
         // Remove duplicates
         this.ignorePatterns = [...new Set(allIgnorePatterns)];
+        this.invalidateIgnoreMatcher();
 
         console.log(`[Context] 🔧 Initialized with ${this.supportedExtensions.length} supported extensions and ${this.ignorePatterns.length} ignore patterns`);
         if (envCustomExtensions.length > 0) {
@@ -503,6 +506,7 @@ export class Context {
         const patternSet = new Set(mergedPatterns);
         patternSet.forEach(pattern => uniquePatterns.push(pattern));
         this.ignorePatterns = uniquePatterns;
+        this.invalidateIgnoreMatcher();
         console.log(`[Context] 🚫 Updated ignore patterns: ${ignorePatterns.length} new + ${DEFAULT_IGNORE_PATTERNS.length} default = ${this.ignorePatterns.length} total patterns`);
     }
 
@@ -519,6 +523,7 @@ export class Context {
         const patternSet = new Set(mergedPatterns);
         patternSet.forEach(pattern => uniquePatterns.push(pattern));
         this.ignorePatterns = uniquePatterns;
+        this.invalidateIgnoreMatcher();
         console.log(`[Context] 🚫 Added ${customPatterns.length} custom ignore patterns. Total: ${this.ignorePatterns.length} patterns`);
     }
 
@@ -527,6 +532,7 @@ export class Context {
      */
     resetIgnorePatternsToDefaults(): void {
         this.ignorePatterns = [...DEFAULT_IGNORE_PATTERNS];
+        this.invalidateIgnoreMatcher();
         console.log(`[Context] 🔄 Reset ignore patterns to defaults: ${this.ignorePatterns.length} patterns`);
     }
 
@@ -607,7 +613,7 @@ export class Context {
                 const fullPath = path.join(currentPath, entry.name);
 
                 // Check if path matches ignore patterns
-                if (this.matchesIgnorePattern(fullPath, codebasePath)) {
+                if (this.matchesIgnorePattern(fullPath, codebasePath, entry.isDirectory())) {
                     continue;
                 }
 
@@ -983,144 +989,43 @@ export class Context {
         }
     }
 
+    private invalidateIgnoreMatcher(): void {
+        this.ignoreMatcher = null;
+    }
+
+    private getIgnoreMatcher(): ReturnType<typeof ignore> {
+        if (!this.ignoreMatcher) {
+            this.ignoreMatcher = ignore();
+            this.ignoreMatcher.add(this.ignorePatterns);
+        }
+        return this.ignoreMatcher;
+    }
+
     /**
      * Check if a path matches any ignore pattern
      * @param filePath Path to check
      * @param basePath Base path for relative pattern matching
+     * @param isDirectory Whether the path is a directory
      * @returns True if path should be ignored
      */
-    private matchesIgnorePattern(filePath: string, basePath: string): boolean {
+    private matchesIgnorePattern(filePath: string, basePath: string, isDirectory: boolean = false): boolean {
         if (this.ignorePatterns.length === 0) {
             return false;
         }
 
-        const relativePath = path.relative(basePath, filePath);
-        const normalizedPath = relativePath.replace(/\\/g, '/'); // Normalize path separators
-
-        // Separate ignore patterns from negation patterns
-        const { ignorePatterns, negationPatterns } = this.parsePatterns(this.ignorePatterns);
-
-        for (const pattern of ignorePatterns) {
-            if (this.isPatternMatch(normalizedPath, pattern)) {
-                // Check if this path is negated
-                const negated = negationPatterns.some(negPattern =>
-                    this.isNegationPatternMatch(normalizedPath, negPattern)
-                );
-                if (!negated) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Parse patterns into ignore and negation patterns
-     */
-    private parsePatterns(patterns: string[]): { ignorePatterns: string[]; negationPatterns: string[] } {
-        const ignorePatterns: string[] = [];
-        const negationPatterns: string[] = [];
-
-        for (const pattern of patterns) {
-            if (pattern.startsWith('!')) {
-                // Remove the ! prefix and add to negation patterns
-                negationPatterns.push(pattern.slice(1));
-            } else {
-                ignorePatterns.push(pattern);
-            }
-        }
-
-        return { ignorePatterns, negationPatterns };
-    }
-
-    /**
-     * Match a negation pattern against a path
-     */
-    private isNegationPatternMatch(filePath: string, pattern: string): boolean {
-        // Clean the pattern (remove leading/trailing slashes and the ! prefix was already removed)
-        const cleanPath = filePath.replace(/^\/+|\/+$/g, '');
-        const cleanPattern = pattern.replace(/^\/+|\/+$/g, '');
-
-        if (!cleanPath || !cleanPattern) {
+        const relativePath = path.relative(basePath, filePath).replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!relativePath || relativePath.startsWith('..')) {
             return false;
         }
 
-        // Handle path patterns (containing /) - match against full path
-        if (cleanPattern.includes('/')) {
-            return this.simpleGlobMatch(cleanPath, cleanPattern);
+        const matcher = this.getIgnoreMatcher();
+
+        if (isDirectory) {
+            const withSlash = relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
+            return matcher.ignores(relativePath) || matcher.ignores(withSlash);
         }
 
-        // Handle filename patterns - match against basename
-        const fileName = path.basename(cleanPath);
-        return this.simpleGlobMatch(fileName, cleanPattern);
-    }
-
-    /**
-     * Simple glob pattern matching
-     * @param filePath File path to test
-     * @param pattern Glob pattern
-     * @returns True if pattern matches
-     */
-    private isPatternMatch(filePath: string, pattern: string): boolean {
-        // Handle directory patterns (ending with /)
-        if (pattern.endsWith('/')) {
-            const dirPattern = pattern.slice(0, -1);
-            const pathParts = filePath.split('/');
-            return pathParts.some(part => this.simpleGlobMatch(part, dirPattern));
-        }
-
-        // Handle file patterns
-        if (pattern.includes('/')) {
-            // Pattern with path separator - match exact path
-            return this.simpleGlobMatch(filePath, pattern);
-        } else {
-            // Pattern without path separator - match filename in any directory
-            const fileName = path.basename(filePath);
-            return this.simpleGlobMatch(fileName, pattern);
-        }
-    }
-
-    /**
-     * Simple glob matching supporting * wildcard
-     * @param text Text to test
-     * @param pattern Pattern with * wildcards
-     * @returns True if pattern matches
-     */
-    private simpleGlobMatch(text: string, pattern: string): boolean {
-        if (!text || !pattern) return false;
-
-        // Handle ** (globstar) - matches any number of directories (including zero)
-        // First, handle special cases for ** patterns
-
-        // Normalize path separators
-        const normalizedText = text.replace(/\\/g, '/');
-        const normalizedPattern = pattern.replace(/\\/g, '/');
-
-        // Convert glob pattern to regex with proper ** and * handling
-        let regexPattern = normalizedPattern
-            .replace(/[.+^${}()|[\]\\]/g, '\\$&'); // Escape regex special chars except * and ?
-
-        // Handle ** (globstar) - must be done BEFORE handling single *
-        // **/ at start or middle means "any directories"
-        // /** at end means "anything below"
-        // ** alone means "anything"
-
-        // Replace **/ with a placeholder first
-        regexPattern = regexPattern.replace(/\*\*\//g, '(?:[^/]+/)*');
-        // Replace /** with a placeholder
-        regexPattern = regexPattern.replace(/\/\*\*/g, '(?:/.*)?');
-        // Replace standalone ** (rare, but handle it)
-        regexPattern = regexPattern.replace(/\*\*/g, '.*');
-
-        // Now handle single * - matches anything except /
-        regexPattern = regexPattern.replace(/\*/g, '[^/]*');
-
-        // Handle ? - matches single character except /
-        regexPattern = regexPattern.replace(/\?/g, '[^/]');
-
-        const regex = new RegExp(`^${regexPattern}$`);
-        return regex.test(normalizedText);
+        return matcher.ignores(relativePath);
     }
 
     /**

@@ -1,6 +1,6 @@
 {
     "name": "@zokizuan/claude-context-mcp",
-    "version": "0.2.0",
+    "version": "1.0.0",
     "description": "Model Context Protocol integration for Claude Context",
     "type": "module",
     "main": "dist/index.js",
@@ -15,11 +15,13 @@
         "typecheck": "tsc --noEmit",
         "start": "tsx src/index.ts",
         "start:with-env": "OPENAI_API_KEY=${OPENAI_API_KEY:your-api-key-here} MILVUS_ADDRESS=${MILVUS_ADDRESS:localhost:19530} tsx src/index.ts",
-        "prepublishOnly": "pnpm build"
+        "prepublishOnly": "pnpm build",
+        "test": "tsx --test --test-concurrency=1 src/**/*.test.ts"
     },
     "dependencies": {
         "@zokizuan/claude-context-core": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.12.1",
+        "ignore": "^7.0.5",
         "zod": "^3.25.55"
     },
     "devDependencies": {

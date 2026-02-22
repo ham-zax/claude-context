@@ -1,42 +1,177 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
+import ignore from "ignore";
 import { Context, COLLECTION_LIMIT_MESSAGE } from "@zokizuan/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
 import { ensureAbsolutePath, truncateContent, trackCodebasePath } from "../utils.js";
 import { SyncManager } from "./sync.js";
+import { IndexFingerprint } from "../config.js";
 
 export class ToolHandlers {
     private context: Context;
     private snapshotManager: SnapshotManager;
     private syncManager: SyncManager;
+    private runtimeFingerprint: IndexFingerprint;
     private indexingStats: { indexedFiles: number; totalChunks: number } | null = null;
     private currentWorkspace: string;
 
-    constructor(context: Context, snapshotManager: SnapshotManager, syncManager: SyncManager) {
+    constructor(context: Context, snapshotManager: SnapshotManager, syncManager: SyncManager, runtimeFingerprint: IndexFingerprint) {
         this.context = context;
         this.snapshotManager = snapshotManager;
         this.syncManager = syncManager;
+        this.runtimeFingerprint = runtimeFingerprint;
         this.currentWorkspace = process.cwd();
         console.log(`[WORKSPACE] Current workspace: ${this.currentWorkspace}`);
     }
 
-    private buildExcludePatternsFilterExpr(
+    private buildReindexInstruction(codebasePath: string, detail?: string): string {
+        const detailLine = detail ? `${detail}\n\n` : '';
+        return `${detailLine}Error: The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt.\nNext step: call manage_index with {\"action\":\"create\",\"path\":\"${codebasePath}\",\"force\":true}.`;
+    }
+
+    private getMatchingBlockedRoot(absolutePath: string): { path: string; message?: string } | null {
+        const blocked = this.snapshotManager
+            .getAllCodebases()
+            .filter((entry) => entry.info.status === 'requires_reindex');
+        if (blocked.length === 0) {
+            return null;
+        }
+
+        blocked.sort((a, b) => b.path.length - a.path.length);
+        const match = blocked.find((entry) => absolutePath === entry.path || absolutePath.startsWith(`${entry.path}${path.sep}`));
+        if (!match) {
+            return null;
+        }
+
+        const message = 'message' in match.info ? match.info.message : undefined;
+        return {
+            path: match.path,
+            message
+        };
+    }
+
+    private enforceFingerprintGate(codebasePath: string): { blockedResponse?: any } {
+        const gate = this.snapshotManager.ensureFingerprintCompatibilityOnAccess(codebasePath);
+        if (!gate.allowed) {
+            if (gate.changed) {
+                this.snapshotManager.saveCodebaseSnapshot();
+            }
+            return {
+                blockedResponse: {
+                    content: [{
+                        type: "text",
+                        text: this.buildReindexInstruction(codebasePath, gate.message)
+                    }],
+                    isError: true
+                }
+            };
+        }
+
+        if (gate.changed) {
+            this.snapshotManager.saveCodebaseSnapshot();
+        }
+
+        return {};
+    }
+
+    public async handleManageIndex(args: any) {
+        const { action } = args || {};
+
+        if (!action || typeof action !== 'string') {
+            return {
+                content: [{
+                    type: "text",
+                    text: `Error: Invalid or missing action. Use one of: create, sync, status, clear.`
+                }],
+                isError: true
+            };
+        }
+
+        if (action === 'create') {
+            if (!args?.path || typeof args.path !== 'string') {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: 'path' is required for action='create'.`
+                    }],
+                    isError: true
+                };
+            }
+            return this.handleIndexCodebase(args);
+        }
+
+        if (action === 'sync') {
+            if (!args?.path || typeof args.path !== 'string') {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: 'path' is required for action='sync'.`
+                    }],
+                    isError: true
+                };
+            }
+            return this.handleSyncCodebase(args);
+        }
+
+        if (action === 'status') {
+            if (!args?.path || typeof args.path !== 'string') {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: 'path' is required for action='status'.`
+                    }],
+                    isError: true
+                };
+            }
+            return this.handleGetIndexingStatus(args);
+        }
+
+        if (action === 'clear') {
+            if (!args?.path || typeof args.path !== 'string') {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Error: 'path' is required for action='clear'.`
+                    }],
+                    isError: true
+                };
+            }
+            return this.handleClearIndex(args);
+        }
+
+        return {
+            content: [{
+                type: "text",
+                text: `Error: Unsupported action '${action}'. Use one of: create, sync, status, clear.`
+            }],
+            isError: true
+        };
+    }
+
+    public async handleSearchCodebase(args: any) {
+        return this.handleSearchCode(args);
+    }
+
+    private buildSearchExcludeMatcher(
         excludePatterns: any,
         effectiveRoot: string,
         absoluteSearchPath: string
-    ): { filterExpr?: string; warning?: string } {
-        if (!Array.isArray(excludePatterns) || excludePatterns.length === 0) return {};
+    ): { matcher?: ReturnType<typeof ignore>; warning?: string } {
+        if (!Array.isArray(excludePatterns) || excludePatterns.length === 0) {
+            return {};
+        }
 
-        const raw = excludePatterns
+        const rawPatterns = excludePatterns
             .filter((v: any) => typeof v === 'string')
             .map((v: string) => v.trim())
             .filter((v: string) => v.length > 0);
-        if (raw.length === 0) return {};
+        if (rawPatterns.length === 0) {
+            return {};
+        }
 
         const unique: string[] = [];
         const seen = new Set<string>();
-        for (const p of raw) {
+        for (const p of rawPatterns) {
             if (!seen.has(p)) {
                 seen.add(p);
                 unique.push(p);
@@ -48,390 +183,81 @@ export class ToolHandlers {
             .replace(/\\/g, '/')
             .replace(/^\/+|\/+$/g, '');
         const needsSubdirPrefix = searchRel.length > 0 && effectiveRoot !== absoluteSearchPath;
-
-        // Caps to avoid generating huge Milvus expressions.
-        const MAX_BRACE_EXPANSIONS = 64;
-        const MAX_GLOBSTAR_SLASH_VARIANTS = 16;
-        const MAX_MATCH_CLAUSES = 256;
-        const MAX_WILDCARD_ENFORCEMENTS = 24;
-
-        type GlobToken =
-            | { t: 'lit'; v: string }
-            | { t: 'star' }
-            | { t: 'qmark' }
-            | { t: 'globstar' }
-            | { t: 'globstar_slash' };
-
-        const ignored: string[] = [];
-        const directoryOnlyNegationsIgnored: string[] = [];
-        const notes = new Set<string>();
-        const ignoreClauses: string[] = [];
-        const negationClauses: string[] = [];
-
-        const normalizeGlobInput = (input: string): string => {
-            // Preserve glob escaping (e.g. \\*) but normalize Windows separators (\) to '/'
-            // when the backslash is not escaping a glob meta character.
-            let out = '';
-            for (let i = 0; i < input.length; i++) {
-                const ch = input[i];
-                if (ch !== '\\') {
-                    out += ch;
-                    continue;
-                }
-
-                const next = i + 1 < input.length ? input[i + 1] : '';
-                if (next && '*?{},[]\\'.includes(next)) {
-                    out += '\\' + next;
-                    i++;
-                    continue;
-                }
-
-                // Treat as path separator.
-                out += '/';
-            }
-
-            out = out.replace(/\/+/g, '/');
-            return out;
-        };
-
-        const expandBraces = (input: string, globEscapeChar: string = '\\'): string[] => {
-            const out: string[] = [];
-
-            const findFirstBraceRange = (str: string): { start: number; end: number } | null => {
-                let depth = 0;
-                let start = -1;
-                for (let i = 0; i < str.length; i++) {
-                    const ch = str[i];
-                    if (ch === globEscapeChar) {
-                        i++;
-                        continue;
-                    }
-                    if (ch === '{') {
-                        if (depth === 0) start = i;
-                        depth++;
-                    } else if (ch === '}') {
-                        if (depth > 0) depth--;
-                        if (depth === 0 && start !== -1) return { start, end: i };
-                    }
-                }
-                return null;
-            };
-
-            const splitTopLevel = (str: string): string[] => {
-                const parts: string[] = [];
-                let buf = '';
-                let depth = 0;
-                for (let i = 0; i < str.length; i++) {
-                    const ch = str[i];
-                    if (ch === globEscapeChar) {
-                        if (i + 1 < str.length) {
-                            buf += ch + str[i + 1];
-                            i++;
-                        } else {
-                            buf += ch;
-                        }
-                        continue;
-                    }
-                    if (ch === '{') depth++;
-                    else if (ch === '}') depth = Math.max(0, depth - 1);
-
-                    if (ch === ',' && depth === 0) {
-                        parts.push(buf);
-                        buf = '';
-                    } else {
-                        buf += ch;
-                    }
-                }
-                parts.push(buf);
-                return parts;
-            };
-
-            const rec = (str: string) => {
-                if (out.length >= MAX_BRACE_EXPANSIONS) return;
-                const range = findFirstBraceRange(str);
-                if (!range) {
-                    out.push(str);
-                    return;
-                }
-                const before = str.slice(0, range.start);
-                const inside = str.slice(range.start + 1, range.end);
-                const after = str.slice(range.end + 1);
-                const options = splitTopLevel(inside).map(s => s.trim());
-                for (const opt of options) {
-                    rec(before + opt + after);
-                    if (out.length >= MAX_BRACE_EXPANSIONS) return;
-                }
-            };
-
-            rec(input);
-            return out;
-        };
-
-        const escapeLikeChar = (ch: string): string => {
-            // Escape LIKE metacharacters for Milvus LIKE.
-            if (ch === '\\') return '\\\\';
-            if (ch === '%') return '\\%';
-            if (ch === '_') return '\\_';
-            return ch;
-        };
-
-        const escapeForMilvusStringLiteral = (text: string): string => {
-            // Escape for embedding inside a Milvus string literal using double quotes.
-            return text
-                .replace(/\\/g, '\\\\')
-                .replace(/"/g, '\\"');
-        };
-
-        const tokenizeGlob = (glob: string, globEscapeChar: string = '\\'): GlobToken[] | null => {
-            const tokens: GlobToken[] = [];
-            let lit = '';
-            const flush = () => {
-                if (lit.length > 0) {
-                    tokens.push({ t: 'lit', v: lit });
-                    lit = '';
-                }
-            };
-
-            for (let i = 0; i < glob.length; i++) {
-                const ch = glob[i];
-
-                if (ch === globEscapeChar) {
-                    if (i + 1 < glob.length) {
-                        lit += glob[i + 1];
-                        i++;
-                    } else {
-                        lit += ch;
-                    }
-                    continue;
-                }
-
-                // Unsupported syntax in Milvus LIKE mode.
-                if (ch === '[' || ch === ']' || ch === '(' || ch === ')' || ch === '|') {
-                    return null;
-                }
-                if (ch === '{' || ch === '}') {
-                    // Brace expansion should have removed these.
-                    return null;
-                }
-
-                if (ch === '*') {
-                    flush();
-                    if (glob[i + 1] === '*') {
-                        if (glob[i + 2] === '/') {
-                            tokens.push({ t: 'globstar_slash' });
-                            i += 2;
-                        } else {
-                            tokens.push({ t: 'globstar' });
-                            i += 1;
-                        }
-                    } else {
-                        tokens.push({ t: 'star' });
-                    }
-                    continue;
-                }
-
-                if (ch === '?') {
-                    flush();
-                    tokens.push({ t: 'qmark' });
-                    continue;
-                }
-
-                lit += ch;
-            }
-
-            flush();
-            return tokens;
-        };
-
-        const expandGlobstarSlash = (tokens: GlobToken[]): GlobToken[][] => {
-            const out: GlobToken[][] = [[]];
-            for (const tok of tokens) {
-                if (tok.t !== 'globstar_slash') {
-                    for (const arr of out) arr.push(tok);
-                    continue;
-                }
-
-                const next: GlobToken[][] = [];
-                for (const arr of out) {
-                    next.push([...arr, { t: 'globstar' }, { t: 'lit', v: '/' }]);
-                    next.push([...arr]);
-                    if (next.length >= MAX_GLOBSTAR_SLASH_VARIANTS) break;
-                }
-                out.length = 0;
-                out.push(...next.slice(0, MAX_GLOBSTAR_SLASH_VARIANTS));
-                if (out.length >= MAX_GLOBSTAR_SLASH_VARIANTS) break;
-            }
-            return out;
-        };
-
-        const compileLike = (
-            tokens: GlobToken[],
-            overrides?: { starIndex?: number; starReplacement?: string; qmarkIndex?: number; qmarkReplacement?: string }
-        ): { like: string; starCount: number; qmarkCount: number } => {
-            let like = '';
-            let starCount = 0;
-            let qmarkCount = 0;
-
-            for (const tok of tokens) {
-                if (tok.t === 'lit') {
-                    for (const c of tok.v) like += escapeLikeChar(c);
-                    continue;
-                }
-                if (tok.t === 'globstar') {
-                    like += '%';
-                    continue;
-                }
-                if (tok.t === 'star') {
-                    const idx = starCount;
-                    starCount++;
-                    if (overrides?.starIndex === idx && overrides.starReplacement !== undefined) like += overrides.starReplacement;
-                    else like += '%';
-                    continue;
-                }
-                if (tok.t === 'qmark') {
-                    const idx = qmarkCount;
-                    qmarkCount++;
-                    if (overrides?.qmarkIndex === idx && overrides.qmarkReplacement !== undefined) like += overrides.qmarkReplacement;
-                    else like += '_';
-                    continue;
-                }
-            }
-
-            return { like, starCount, qmarkCount };
-        };
-
-        const buildMatchClause = (tokens: GlobToken[]): string => {
-            const compiled = compileLike(tokens);
-            const parts: string[] = [];
-            parts.push(`relativePath like "${escapeForMilvusStringLiteral(compiled.like)}"`);
-
-            // Enforce path-glob semantics: '*' and '?' must not match '/'.
-            // For each '*' wildcard, forbid a corresponding match where it spans at least one '/'.
-            // For each '?' wildcard, forbid matching '/'.
-            const enforceBudget = Math.min(MAX_WILDCARD_ENFORCEMENTS, compiled.starCount + compiled.qmarkCount);
-            let enforced = 0;
-
-            for (let i = 0; i < compiled.starCount && enforced < enforceBudget; i++) {
-                const forbidden = compileLike(tokens, { starIndex: i, starReplacement: '%/%' }).like;
-                parts.push(`not (relativePath like "${escapeForMilvusStringLiteral(forbidden)}")`);
-                enforced++;
-            }
-
-            for (let i = 0; i < compiled.qmarkCount && enforced < enforceBudget; i++) {
-                const forbidden = compileLike(tokens, { qmarkIndex: i, qmarkReplacement: '/' }).like;
-                parts.push(`not (relativePath like "${escapeForMilvusStringLiteral(forbidden)}")`);
-                enforced++;
-            }
-
-            if ((compiled.starCount + compiled.qmarkCount) > enforceBudget) {
-                notes.add(`Note: excludePatterns wildcard enforcement capped at ${MAX_WILDCARD_ENFORCEMENTS} per pattern.`);
-            }
-
-            return `(${parts.join(' and ')})`;
-        };
-
+        const normalizedPatterns: string[] = [];
+        const invalidPatterns: string[] = [];
         for (const rawPattern of unique) {
-            if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) break;
-
-            let pattern = normalizeGlobInput(rawPattern);
-
-            // Support gitignore-style negation patterns in excludePatterns/ignore files.
-            // Important: directory-only negation patterns (ending with '/') don't apply to file-only
-            // search results; we ignore them here to avoid unintentionally re-including entire trees.
-            let isNegation = false;
-            if (pattern.startsWith('!')) {
-                isNegation = true;
-                pattern = pattern.slice(1);
-            }
-
-            let anchored = false;
-            if (pattern.startsWith('/')) {
-                anchored = true;
-                pattern = pattern.replace(/^\/+/, '');
-            }
-
-            pattern = pattern.replace(/^\.\/+/, '');
-            pattern = pattern.replace(/^\/+/, '');
-
-            // Directory shorthand: "docs/" -> "docs/**" (ignore patterns only)
-            if (pattern.endsWith('/')) {
-                if (isNegation) {
-                    directoryOnlyNegationsIgnored.push(rawPattern);
-                    continue;
-                }
-                pattern = `${pattern}**`;
-            }
-
-            pattern = pattern.replace(/^\/+|\/+$/g, '');
-            if (pattern.length === 0) {
-                ignored.push(rawPattern);
+            let pattern = rawPattern.replace(/\\/g, '/').trim();
+            if (!pattern) {
                 continue;
             }
 
-            // Bare directory name (e.g. "docs") means "docs/**"
-            if (!/[?*]/.test(pattern) && !pattern.includes('/')) {
-                pattern = `${pattern}/**`;
+            const isNegation = pattern.startsWith('!');
+            if (isNegation) {
+                pattern = pattern.slice(1);
+            }
+
+            const anchored = pattern.startsWith('/');
+            pattern = pattern.replace(/^\.\/+/, '').replace(/^\/+/, '');
+            if (!pattern) {
+                invalidPatterns.push(rawPattern);
+                continue;
             }
 
             if (needsSubdirPrefix && !anchored) {
-                pattern = `${searchRel}/${pattern}`.replace(/\/+/, '/');
+                pattern = `${searchRel}/${pattern}`.replace(/\/+/g, '/');
             }
 
-            const braceExpanded = expandBraces(pattern);
-            if (braceExpanded.length >= MAX_BRACE_EXPANSIONS) {
-                notes.add(`Note: excludePatterns brace expansion capped at ${MAX_BRACE_EXPANSIONS} variants.`);
-            }
-
-            let supported = true;
-            for (const expanded of braceExpanded) {
-                if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) break;
-                const tokens0 = tokenizeGlob(expanded);
-                if (!tokens0) {
-                    supported = false;
-                    break;
-                }
-                const variants = expandGlobstarSlash(tokens0);
-                for (const vt of variants) {
-                    if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) break;
-                    if (isNegation) negationClauses.push(buildMatchClause(vt));
-                    else ignoreClauses.push(buildMatchClause(vt));
-                }
-            }
-
-            if (!supported) {
-                ignored.push(rawPattern);
-            }
+            normalizedPatterns.push(isNegation ? `!${pattern}` : pattern);
         }
 
-        if (ignoreClauses.length === 0) {
+        if (normalizedPatterns.length === 0) {
             return {
-                warning: (ignored.length > 0 || directoryOnlyNegationsIgnored.length > 0)
-                    ? `Note: excludePatterns ignored (unsupported patterns): ${JSON.stringify(ignored)}.${directoryOnlyNegationsIgnored.length > 0 ? ` Directory-only negations ignored at search-time: ${JSON.stringify(directoryOnlyNegationsIgnored)}.` : ''}`
+                warning: invalidPatterns.length > 0
+                    ? `Note: excludePatterns ignored (invalid patterns): ${JSON.stringify(invalidPatterns)}.`
                     : undefined
             };
         }
 
-        if ((ignoreClauses.length + negationClauses.length) >= MAX_MATCH_CLAUSES) {
-            notes.add(`Note: excludePatterns filter generation capped at ${MAX_MATCH_CLAUSES} clauses.`);
+        try {
+            const matcher = ignore();
+            matcher.add(normalizedPatterns);
+            return {
+                matcher,
+                warning: invalidPatterns.length > 0
+                    ? `Note: excludePatterns partially applied. Ignored (invalid patterns): ${JSON.stringify(invalidPatterns)}.`
+                    : undefined
+            };
+        } catch (error: any) {
+            const parseError = error?.message || String(error);
+            const invalidNote = invalidPatterns.length > 0
+                ? ` Ignored patterns: ${JSON.stringify(invalidPatterns)}.`
+                : '';
+            return {
+                warning: `Note: excludePatterns ignored due to invalid pattern syntax: ${parseError}.${invalidNote}`
+            };
         }
-        if (ignored.length > 0) {
-            notes.add(`Note: excludePatterns partially applied. Ignored (unsupported patterns): ${JSON.stringify(ignored)}.`);
-        }
-        if (directoryOnlyNegationsIgnored.length > 0) {
-            notes.add(`Note: excludePatterns directory-only negations ignored at search-time: ${JSON.stringify(directoryOnlyNegationsIgnored)}.`);
+    }
+
+    private applySearchExcludeMatcher(
+        searchResults: any[],
+        matcher: ReturnType<typeof ignore> | undefined
+    ): any[] {
+        if (!matcher || searchResults.length === 0) {
+            return searchResults;
         }
 
-        const ignoreExpr = `(${ignoreClauses.join(' or ')})`;
-        const negationExpr = negationClauses.length > 0 ? `(${negationClauses.join(' or ')})` : undefined;
+        return searchResults.filter((result: any) => {
+            if (!result || typeof result.relativePath !== 'string') {
+                return true;
+            }
 
-        return {
-            // Exclude ignored paths, but re-include anything matched by a negation pattern.
-            // Equivalent: allowed = not (ignored and not reIncluded)
-            filterExpr: negationExpr
-                ? `not ((${ignoreExpr}) and not (${negationExpr}))`
-                : `not (${ignoreExpr})`,
-            warning: notes.size > 0 ? [...notes].join(' ') : undefined
-        };
+            const normalizedPath = result.relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+            if (!normalizedPath || normalizedPath.startsWith('..')) {
+                return true;
+            }
+
+            return !matcher.ignores(normalizedPath);
+        });
     }
 
     /**
@@ -559,7 +385,7 @@ export class ToolHandlers {
                         indexedFiles,
                         totalChunks,
                         status: 'completed'
-                    });
+                    }, this.runtimeFingerprint, 'verified');
                     hasChanges = true;
                 } else if (await this.context.hasIndexedCollection(codebasePath)) {
                     // Double-check with hasIndexedCollection method
@@ -572,7 +398,7 @@ export class ToolHandlers {
                         indexedFiles,
                         totalChunks,
                         status: 'completed'
-                    });
+                    }, this.runtimeFingerprint, 'verified');
                     hasChanges = true;
                 }
             }
@@ -652,6 +478,17 @@ export class ToolHandlers {
                 };
             }
 
+            const existingInfo = this.snapshotManager.getCodebaseInfo(absolutePath);
+            if (!forceReindex && existingInfo?.status === 'requires_reindex') {
+                return {
+                    content: [{
+                        type: "text",
+                        text: this.buildReindexInstruction(absolutePath, existingInfo.message)
+                    }],
+                    isError: true
+                };
+            }
+
             //Check if the snapshot and cloud index are in sync
             if (this.snapshotManager.getIndexedCodebases().includes(absolutePath) !== await this.context.hasIndexedCollection(absolutePath)) {
                 console.warn(`[INDEX-VALIDATION] ❌ Snapshot and cloud index mismatch: ${absolutePath}`);
@@ -664,10 +501,8 @@ export class ToolHandlers {
                         type: "text",
                         text: `Codebase '${absolutePath}' is already indexed.
 
-To update incrementally with recent changes: Use mcp__claude-context__sync_codebase
-To force rebuild from scratch: Use mcp__claude-context__index_codebase with force=true
-
-💡 Tip: sync_codebase is preferred for most "reindex" requests.`
+To update incrementally with recent changes: call manage_index with {"action":"sync","path":"${absolutePath}"}.
+To force rebuild from scratch: call manage_index with {"action":"create","path":"${absolutePath}","force":true}.`
                     }],
                     isError: true
                 };
@@ -675,9 +510,9 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
 
             // If force reindex and codebase is already indexed, remove it
             if (forceReindex) {
-                if (this.snapshotManager.getIndexedCodebases().includes(absolutePath)) {
+                if (this.snapshotManager.getIndexedCodebases().includes(absolutePath) || this.snapshotManager.getCodebaseStatus(absolutePath) === 'requires_reindex') {
                     console.log(`[FORCE-REINDEX] 🔄 Removing '${absolutePath}' from indexed list for re-indexing`);
-                    this.snapshotManager.removeIndexedCodebase(absolutePath);
+                    this.snapshotManager.removeCodebaseCompletely(absolutePath);
                 }
                 if (await this.context.hasIndexedCollection(absolutePath)) {
                     console.log(`[FORCE-REINDEX] 🔄 Clearing index for '${absolutePath}'`);
@@ -840,7 +675,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             console.log(`[BACKGROUND-INDEX] ✅ Indexing completed successfully! Files: ${stats.indexedFiles}, Chunks: ${stats.totalChunks}`);
 
             // Set codebase to indexed status with complete statistics
-            this.snapshotManager.setCodebaseIndexed(absolutePath, stats);
+            this.snapshotManager.setCodebaseIndexed(absolutePath, stats, this.runtimeFingerprint, 'verified');
             this.indexingStats = { indexedFiles: stats.indexedFiles, totalChunks: stats.totalChunks };
 
             // Save snapshot after updating codebase lists
@@ -905,13 +740,24 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
 
             trackCodebasePath(absolutePath);
 
+            const blockedRoot = this.getMatchingBlockedRoot(absolutePath);
+            if (blockedRoot) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: this.buildReindexInstruction(blockedRoot.path, blockedRoot.message)
+                    }],
+                    isError: true
+                };
+            }
+
             // Check if this codebase is indexed or being indexed
             // Smart Path Resolution: Check if indexed, or if a parent is indexed
             let effectiveRoot = absolutePath;
             let subdirectoryFilter: string | null = null;
 
-            const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
-            const isIndexing = this.snapshotManager.getIndexingCodebases().includes(absolutePath);
+            let isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
+            let isIndexing = this.snapshotManager.getIndexingCodebases().includes(absolutePath);
 
             if (!isIndexed && !isIndexing) {
                 // Try to find an indexed parent
@@ -923,16 +769,23 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     parents.sort((a: string, b: string) => b.length - a.length);
                     effectiveRoot = parents[0];
                     subdirectoryFilter = absolutePath;
+                    isIndexed = true;
+                    isIndexing = this.snapshotManager.getIndexingCodebases().includes(effectiveRoot);
                     console.log(`[SEARCH] Auto-resolved subdirectory '${absolutePath}' to indexed root '${effectiveRoot}'`);
                 } else {
                     return {
                         content: [{
                             type: "text",
-                            text: `Error: Codebase '${absolutePath}' (or any parent) is not indexed. Please index the root using the index_codebase tool.`
+                            text: `Error: Codebase '${absolutePath}' (or any parent) is not indexed. Call manage_index with {"action":"create","path":"${absolutePath}"} to index it first.`
                         }],
                         isError: true
                     };
                 }
+            }
+
+            const gateResult = this.enforceFingerprintGate(effectiveRoot);
+            if (gateResult.blockedResponse) {
+                return gateResult.blockedResponse;
             }
 
             // Sync Optimization: Ensure freshness (Smart Sync-on-Read)
@@ -1003,33 +856,65 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                 }
             }
 
-            const excludeBuilt = this.buildExcludePatternsFilterExpr(mergedExcludePatterns, effectiveRoot, absolutePath);
-            if (excludeBuilt.filterExpr) {
-                filterExpr = filterExpr
-                    ? `(${filterExpr}) and (${excludeBuilt.filterExpr})`
-                    : excludeBuilt.filterExpr;
-            }
+            const excludeBuilt = this.buildSearchExcludeMatcher(mergedExcludePatterns, effectiveRoot, absolutePath);
+            const relativeFilter = subdirectoryFilter
+                ? path.relative(effectiveRoot, subdirectoryFilter).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+                : null;
+            const MAX_SEARCH_CANDIDATES = 50;
+            const initialCandidateLimit = Math.max(
+                1,
+                Math.min(MAX_SEARCH_CANDIDATES, Math.max(resultLimit * 4, resultLimit + 20))
+            );
+
+            const applyPostFilters = (results: any[], stageLabel: string): any[] => {
+                let filteredResults = this.applySearchExcludeMatcher(results, excludeBuilt.matcher);
+                if (excludeBuilt.matcher && filteredResults.length !== results.length) {
+                    console.log(`[SEARCH] ${stageLabel}: excludePatterns filtered ${results.length} -> ${filteredResults.length}`);
+                }
+
+                if (relativeFilter) {
+                    const beforeSubdirectoryFilter = filteredResults.length;
+                    filteredResults = filteredResults.filter((r: any) => {
+                        if (!r || typeof r.relativePath !== 'string') return false;
+                        const normalizedPath = r.relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+                        return normalizedPath === relativeFilter || normalizedPath.startsWith(`${relativeFilter}/`);
+                    });
+                    if (beforeSubdirectoryFilter !== filteredResults.length) {
+                        console.log(`[SEARCH] ${stageLabel}: subdirectory filter '${relativeFilter}' trimmed ${beforeSubdirectoryFilter} -> ${filteredResults.length}`);
+                    }
+                }
+
+                return filteredResults;
+            };
 
             // Search in the specified codebase (or resolved parent)
-            let searchResults = await this.context.semanticSearch(
+            let rawSearchResults = await this.context.semanticSearch(
                 effectiveRoot,
                 query,
-                Math.min(resultLimit, 50),
+                initialCandidateLimit,
                 0.3,
                 filterExpr
             );
+            let searchResults = applyPostFilters(rawSearchResults, 'Initial pass');
 
-            // Filter by subdirectory if auto-resolved
-            if (subdirectoryFilter) {
-                const relativeFilter = path.relative(effectiveRoot, subdirectoryFilter).replace(/\\/g, '/');
-                const originalCount = searchResults.length;
+            // If post-filtering under-fills, expand candidate pool once to improve recall.
+            if (
+                searchResults.length < resultLimit &&
+                initialCandidateLimit < MAX_SEARCH_CANDIDATES &&
+                (excludeBuilt.matcher || relativeFilter)
+            ) {
+                rawSearchResults = await this.context.semanticSearch(
+                    effectiveRoot,
+                    query,
+                    MAX_SEARCH_CANDIDATES,
+                    0.3,
+                    filterExpr
+                );
+                searchResults = applyPostFilters(rawSearchResults, 'Expanded pass');
+            }
 
-                searchResults = searchResults.filter((r: any) => {
-                    const normalizedPath = r.relativePath.replace(/\\/g, '/');
-                    return normalizedPath.startsWith(relativeFilter);
-                });
-
-                console.log(`[SEARCH] Filtered ${originalCount} -> ${searchResults.length} results by subdirectory '${relativeFilter}'`);
+            if (searchResults.length > resultLimit) {
+                searchResults = searchResults.slice(0, resultLimit);
             }
 
             console.log(`[SEARCH] ✅ Search completed! Found ${searchResults.length} results using ${encoderEngine.getProvider()} embeddings`);
@@ -1250,11 +1135,11 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
     public async handleClearIndex(args: any) {
         const { path: codebasePath } = args;
 
-        if (this.snapshotManager.getIndexedCodebases().length === 0 && this.snapshotManager.getIndexingCodebases().length === 0) {
+        if (this.snapshotManager.getAllCodebases().length === 0) {
             return {
                 content: [{
                     type: "text",
-                    text: "No codebases are currently indexed or being indexed."
+                    text: "No codebases are currently tracked."
                 }]
             };
         }
@@ -1289,8 +1174,10 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             // Check if this codebase is indexed or being indexed
             const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
             const isIndexing = this.snapshotManager.getIndexingCodebases().includes(absolutePath);
+            const status = this.snapshotManager.getCodebaseStatus(absolutePath);
+            const isRequiresReindex = status === 'requires_reindex';
 
-            if (!isIndexed && !isIndexing) {
+            if (!isIndexed && !isIndexing && !isRequiresReindex) {
                 return {
                     content: [{
                         type: "text",
@@ -1398,6 +1285,11 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             }
 
             // Check indexing status using new status system
+            const statusGate = this.enforceFingerprintGate(absolutePath);
+            if (statusGate.blockedResponse) {
+                return statusGate.blockedResponse;
+            }
+
             const status = this.snapshotManager.getCodebaseStatus(absolutePath);
             const info = this.snapshotManager.getCodebaseInfo(absolutePath);
 
@@ -1443,7 +1335,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                             statusMessage += `\n📊 Failed at: ${failedInfo.lastAttemptedPercentage.toFixed(1)}% progress`;
                         }
                         statusMessage += `\n🕐 Failed at: ${new Date(failedInfo.lastUpdated).toLocaleString()}`;
-                        statusMessage += `\n💡 You can retry indexing by running the index_codebase command again.`;
+                        statusMessage += `\n💡 Retry with manage_index action='create'.`;
                     } else {
                         statusMessage = `❌ Codebase '${absolutePath}' indexing failed. You can retry indexing.`;
                     }
@@ -1460,9 +1352,13 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
                     }
                     break;
 
+                case 'requires_reindex':
+                    statusMessage = this.buildReindexInstruction(absolutePath, info && 'message' in info ? info.message : undefined);
+                    break;
+
                 case 'not_found':
                 default:
-                    statusMessage = `❌ Codebase '${absolutePath}' is not indexed. Please use the index_codebase tool to index it first.`;
+                    statusMessage = `❌ Codebase '${absolutePath}' is not indexed. Call manage_index with {\"action\":\"create\",\"path\":\"${absolutePath}\"} to index it first.`;
                     break;
             }
 
@@ -1522,12 +1418,17 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             }
 
             // Check if this codebase is indexed
+            const syncGate = this.enforceFingerprintGate(absolutePath);
+            if (syncGate.blockedResponse) {
+                return syncGate.blockedResponse;
+            }
+
             const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
             if (!isIndexed) {
                 return {
                     content: [{
                         type: "text",
-                        text: `Error: Codebase '${absolutePath}' is not indexed. Please index it first using the index_codebase tool.`
+                        text: `Error: Codebase '${absolutePath}' is not indexed. Call manage_index with {\"action\":\"create\",\"path\":\"${absolutePath}\"} first.`
                     }],
                     isError: true
                 };
@@ -1539,7 +1440,7 @@ To force rebuild from scratch: Use mcp__claude-context__index_codebase with forc
             const syncStats = await this.context.reindexByChange(absolutePath);
 
             // Store sync result in snapshot
-            this.snapshotManager.setCodebaseSyncCompleted(absolutePath, syncStats);
+            this.snapshotManager.setCodebaseSyncCompleted(absolutePath, syncStats, this.runtimeFingerprint, 'verified');
             this.snapshotManager.saveCodebaseSnapshot();
 
             const totalChanges = syncStats.added + syncStats.removed + syncStats.modified;

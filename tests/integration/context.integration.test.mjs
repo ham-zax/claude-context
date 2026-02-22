@@ -239,3 +239,50 @@ test('integration: reindex_by_change tracks add/modify/remove deltas', async () 
     fs.rmSync(codebasePath, { recursive: true, force: true });
   }
 });
+
+test('integration: ignore negation patterns keep explicitly unignored files indexable', async () => {
+  const { context } = createContext();
+  context.addCustomIgnorePatterns(['generated/**', '!generated/keep.ts']);
+
+  const codebasePath = createTempCodebase({
+    'src/main.ts': 'export const main = true;',
+    'generated/drop.ts': 'export const dropped = true;',
+    'generated/keep.ts': 'export const kept = true;',
+  });
+
+  try {
+    const stats = await context.indexCodebase(codebasePath);
+    assert.equal(stats.indexedFiles, 2);
+
+    const keptResults = await context.semanticSearch(codebasePath, 'kept', 10, 0);
+    assert.ok(keptResults.some((r) => r.relativePath === 'generated/keep.ts'));
+    assert.ok(!keptResults.some((r) => r.relativePath === 'generated/drop.ts'));
+  } finally {
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+  }
+});
+
+test('integration: reindex_by_change ignores excluded files but tracks unignored negation files', async () => {
+  const { context } = createContext();
+  context.addCustomIgnorePatterns(['generated/**', '!generated/keep.ts']);
+
+  const codebasePath = createTempCodebase({
+    'src/main.ts': 'export const main = true;',
+    'generated/drop.ts': 'export const dropped = true;',
+    'generated/keep.ts': 'export const kept = 1;',
+  });
+
+  try {
+    await context.indexCodebase(codebasePath);
+
+    fs.writeFileSync(path.join(codebasePath, 'generated/drop.ts'), 'export const dropped = false;', 'utf8');
+    const ignoredOnlyDelta = await context.reindexByChange(codebasePath);
+    assert.deepEqual(ignoredOnlyDelta, { added: 0, removed: 0, modified: 0 });
+
+    fs.writeFileSync(path.join(codebasePath, 'generated/keep.ts'), 'export const kept = 2;', 'utf8');
+    const negatedDelta = await context.reindexByChange(codebasePath);
+    assert.deepEqual(negatedDelta, { added: 0, removed: 0, modified: 1 });
+  } finally {
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+  }
+});

@@ -144,6 +144,9 @@ importers:
       '@zokizuan/claude-context-core':
         specifier: workspace:*
         version: link:../core
+      ignore:
+        specifier: ^7.0.5
+        version: 7.0.5
       zod:
         specifier: ^3.25.55
         version: 3.25.55

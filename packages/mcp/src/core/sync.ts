@@ -53,6 +53,11 @@ export class SyncManager {
     }
 
     private async syncCodebase(codebasePath: string): Promise<void> {
+        if (this.snapshotManager.getCodebaseStatus(codebasePath) === 'requires_reindex') {
+            console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because it requires reindex.`);
+            return;
+        }
+
         // Async existence check to avoid blocking event loop
         try {
             await fs.promises.access(codebasePath);
