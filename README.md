@@ -88,3 +88,6 @@ pnpm release:mcp
 ## License
 
 MIT
+
+---
+*Note: This project was inspired by the [Zilliz Claude Context](https://github.com/zilliztech/claude-context) project.*
