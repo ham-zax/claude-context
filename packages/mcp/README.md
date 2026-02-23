@@ -30,6 +30,8 @@ Removed tools from pre-1.0 releases are no longer routed.
 - Auto-generated tool docs in this README from live tool schemas.
 - `read_file` line-range retrieval with default large-file truncation guard.
 - Optional proactive sync watcher mode (debounced filesystem events).
+- Index-time AST scope breadcrumbs (TS/JS/Python) rendered in search output as `🧬 Scope`.
+- Fingerprint schema bump to `dense_v2`/`hybrid_v2` with strict reindex gate for legacy `*_v1` indexes.
 
 ## Architecture Evolution
 
@@ -79,6 +81,10 @@ Removed tools from pre-1.0 releases are no longer routed.
   - `read_file` line-range semantics
   - safe clamping for out-of-range requests
   - `READ_FILE_MAX_LINES` truncation and continuation hints
+- Phase 5A (advanced context density, search-first):
+  - index-time AST breadcrumbs stored in chunk metadata (`breadcrumbs`)
+  - `search_codebase` scope rendering (`🧬 Scope: outer > inner`) across standard and rerank views
+  - fingerprint schema version bump to `*_v2` requiring reindex for `*_v1` snapshots
 
 ## read_file Behavior
 

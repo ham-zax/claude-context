@@ -352,6 +352,18 @@ export class Context {
         const searchType = isHybrid === true ? 'hybrid search' : 'semantic search';
         console.log(`[Context] 🔍 Executing ${searchType}: "${query}" in ${codebasePath}`);
 
+        const normalizeBreadcrumbs = (value: unknown): string[] | undefined => {
+            if (!Array.isArray(value)) {
+                return undefined;
+            }
+            const normalized = value
+                .filter((item): item is string => typeof item === 'string')
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0)
+                .slice(0, 2);
+            return normalized.length > 0 ? normalized : undefined;
+        };
+
         const collectionName = this.resolveCollectionName(codebasePath);
         console.log(`[Context] 🔍 Using collection: ${collectionName}`);
 
@@ -420,7 +432,8 @@ export class Context {
                 startLine: result.document.startLine,
                 endLine: result.document.endLine,
                 language: result.document.metadata.language || 'unknown',
-                score: result.score
+                score: result.score,
+                breadcrumbs: normalizeBreadcrumbs(result.document.metadata.breadcrumbs)
             }));
 
             console.log(`[Context] ✅ Found ${results.length} relevant hybrid results`);
@@ -448,7 +461,8 @@ export class Context {
                 startLine: result.document.startLine,
                 endLine: result.document.endLine,
                 language: result.document.metadata.language || 'unknown',
-                score: result.score
+                score: result.score,
+                breadcrumbs: normalizeBreadcrumbs(result.document.metadata.breadcrumbs)
             }));
 
             console.log(`[Context] ✅ Found ${results.length} relevant results`);

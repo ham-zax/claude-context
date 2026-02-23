@@ -182,6 +182,33 @@ export class ToolHandlers {
         });
     }
 
+    private normalizeBreadcrumbs(breadcrumbs: unknown): string[] {
+        if (!Array.isArray(breadcrumbs)) {
+            return [];
+        }
+        return breadcrumbs
+            .filter((crumb): crumb is string => typeof crumb === 'string')
+            .map((crumb) => crumb.trim())
+            .filter((crumb) => crumb.length > 0)
+            .slice(-2);
+    }
+
+    private getBreadcrumbMergeKey(breadcrumbs: unknown): string {
+        return this.normalizeBreadcrumbs(breadcrumbs).join(' > ');
+    }
+
+    private formatScopeLine(breadcrumbs: unknown): string {
+        const normalized = this.normalizeBreadcrumbs(breadcrumbs);
+
+        if (normalized.length === 0) {
+            return '';
+        }
+
+        const joined = normalized.join(' > ');
+        const capped = joined.length > 220 ? `${joined.slice(0, 217)}...` : joined;
+        return `   🧬 Scope: ${capped}\n`;
+    }
+
     /**
      * Sync indexed codebases from Zilliz Cloud collections
      * This method fetches all collections from the vector database,
@@ -885,7 +912,11 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                     location: `${result.relativePath}:${result.startLine}-${result.endLine}`,
                     language: result.language,
                     score: result.score,
-                    content: result.content
+                    content: result.content,
+                    breadcrumbs: Array.isArray(result.breadcrumbs) ? result.breadcrumbs : undefined,
+                    metadata: {
+                        breadcrumbs: Array.isArray(result.breadcrumbs) ? result.breadcrumbs : undefined
+                    }
                 }));
 
                 const status = isIndexing ? 'indexing' : 'ready';
@@ -936,8 +967,13 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                     let currentCluster = [fileChunks[0]];
 
                     for (let i = 1; i < fileChunks.length; i++) {
+                        const previous = currentCluster[currentCluster.length - 1];
+                        const sameScope =
+                            this.getBreadcrumbMergeKey(fileChunks[i]?.breadcrumbs) ===
+                            this.getBreadcrumbMergeKey(previous?.breadcrumbs);
+
                         // Merge if within 20 lines (context window)
-                        if (fileChunks[i].startLine <= currentCluster[currentCluster.length - 1].endLine + 20) {
+                        if (fileChunks[i].startLine <= previous.endLine + 20 && sameScope) {
                             currentCluster.push(fileChunks[i]);
                         } else {
                             clusters.push(currentCluster);
@@ -951,6 +987,9 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                         const start = cluster[0].startLine;
                         const end = cluster[cluster.length - 1].endLine;
                         const maxScore = Math.max(...cluster.map((c: any) => c.score));
+                        const representative = cluster.reduce((best: any, candidate: any) => (
+                            candidate.score > best.score ? candidate : best
+                        ), cluster[0]);
 
                         let mergedContent = "";
                         try {
@@ -971,7 +1010,7 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                         }
 
                         mergedResults.push({
-                            ...result, // Keep metadata from primary match
+                            ...representative, // Keep metadata from highest-scoring chunk in this cluster
                             startLine: start,
                             endLine: end,
                             content: mergedContent,
@@ -1032,10 +1071,12 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
                 const codebaseInfo = path.basename(absolutePath);
 
                 const scoreInfo = showScores ? ` [Score: ${result.score.toFixed(4)}]` : '';
+                const scopeLine = this.formatScopeLine(result.breadcrumbs);
 
                 return `${index + 1}. Code snippet (${result.language}) [${codebaseInfo}]${scoreInfo}\n` +
                     `   Location: ${location}${matchInfo}\n` +
                     `   Rank: ${index + 1}\n` +
+                    scopeLine +
                     `   Context: \n\`\`\`${result.language}\n${context}\n\`\`\`\n`;
             }).join('\n');
 

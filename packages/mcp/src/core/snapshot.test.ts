@@ -11,7 +11,7 @@ const FINGERPRINT_A: IndexFingerprint = {
     embeddingModel: 'voyage-4-large',
     embeddingDimension: 1024,
     vectorStoreProvider: 'Milvus',
-    schemaVersion: 'hybrid_v1'
+    schemaVersion: 'hybrid_v2'
 };
 
 const FINGERPRINT_B: IndexFingerprint = {
@@ -19,7 +19,7 @@ const FINGERPRINT_B: IndexFingerprint = {
     embeddingModel: 'text-embedding-3-small',
     embeddingDimension: 1536,
     vectorStoreProvider: 'Milvus',
-    schemaVersion: 'hybrid_v1'
+    schemaVersion: 'hybrid_v2'
 };
 
 function withTempHome<T>(fn: (homeDir: string) => T): T {
@@ -94,6 +94,37 @@ test('fingerprint mismatch transitions searchable entry to requires_reindex', ()
         writer.saveCodebaseSnapshot();
 
         const reader = new SnapshotManager(FINGERPRINT_B);
+        reader.loadCodebaseSnapshot();
+
+        const gate = reader.ensureFingerprintCompatibilityOnAccess(codebase);
+        assert.equal(gate.allowed, false);
+        assert.equal(gate.reason, 'fingerprint_mismatch');
+
+        const updated = reader.getCodebaseInfo(codebase);
+        assert.ok(updated);
+        assert.equal(updated?.status, 'requires_reindex');
+    });
+});
+
+test('legacy schemaVersion v1 fingerprint transitions entry to requires_reindex under v2 runtime', () => {
+    withTempHome((homeDir) => {
+        const codebase = path.join(homeDir, 'repo');
+        fs.mkdirSync(codebase, { recursive: true });
+
+        const legacyFingerprint = {
+            ...FINGERPRINT_A,
+            schemaVersion: 'hybrid_v1'
+        } as unknown as IndexFingerprint;
+
+        const writer = new SnapshotManager(FINGERPRINT_A);
+        writer.setCodebaseIndexed(codebase, {
+            indexedFiles: 5,
+            totalChunks: 20,
+            status: 'completed'
+        }, legacyFingerprint, 'verified');
+        writer.saveCodebaseSnapshot();
+
+        const reader = new SnapshotManager(FINGERPRINT_A);
         reader.loadCodebaseSnapshot();
 
         const gate = reader.ensureFingerprintCompatibilityOnAccess(codebase);

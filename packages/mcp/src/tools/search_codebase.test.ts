@@ -105,3 +105,87 @@ test('search_codebase returns capability error and emits telemetry when rerank f
     assert.equal(typeof payload.error, 'string');
     assert.match(payload.error, /Reranking is unavailable/);
 });
+
+test('search_codebase rerank output renders scope line from raw result breadcrumbs', async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const ctx = {
+        capabilities,
+        reranker: {
+            rerank: async () => [{ index: 0, relevanceScore: 0.9876 }],
+            getModel: () => 'rerank-2.5'
+        },
+        toolHandlers: {
+            handleSearchCode: async () => ({
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        query: 'validate token',
+                        resultCount: 1,
+                        results: [{
+                            index: 0,
+                            language: 'typescript',
+                            location: 'src/auth/manager.ts:120-150',
+                            score: 0.75,
+                            content: 'const decoded = verify(token);',
+                            metadata: {
+                                breadcrumbs: ['class AuthManager', 'async function validateSession(token: string)']
+                            }
+                        }],
+                        documentsForReranking: ['const decoded = verify(token);']
+                    })
+                }]
+            })
+        }
+    } as unknown as ToolContext;
+
+    const response = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'validate token',
+        useReranker: true
+    }, ctx);
+
+    assert.equal(response.isError, undefined);
+    const text = response.content[0]?.text || '';
+    assert.match(text, /🧬 Scope: class AuthManager > async function validateSession\(token: string\)/);
+});
+
+test('search_codebase rerank output omits scope line when breadcrumbs are absent', async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const ctx = {
+        capabilities,
+        reranker: {
+            rerank: async () => [{ index: 0, relevanceScore: 0.8877 }],
+            getModel: () => 'rerank-2.5'
+        },
+        toolHandlers: {
+            handleSearchCode: async () => ({
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        query: 'token check',
+                        resultCount: 1,
+                        results: [{
+                            index: 0,
+                            language: 'typescript',
+                            location: 'src/auth/manager.ts:90-95',
+                            score: 0.7,
+                            content: 'return true;',
+                            metadata: {}
+                        }],
+                        documentsForReranking: ['return true;']
+                    })
+                }]
+            })
+        }
+    } as unknown as ToolContext;
+
+    const response = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'token check',
+        useReranker: true
+    }, ctx);
+
+    assert.equal(response.isError, undefined);
+    const text = response.content[0]?.text || '';
+    assert.doesNotMatch(text, /🧬 Scope:/);
+});

@@ -23,6 +23,8 @@ Maintainer: `ham-zax` (`@zokizuan`).
   - optional `start_line` / `end_line` (1-based, inclusive)
   - default auto-truncation for large files via `READ_FILE_MAX_LINES` (default `1000`)
   - deterministic continuation hints including `path` + next `start_line`
+- Index-time AST breadcrumbs for TS/JS/Python chunks, surfaced in search output as `🧬 Scope: ...`.
+- Fingerprint schema upgrade to `dense_v2`/`hybrid_v2`, with strict reindex gating for legacy `*_v1` indexes.
 - Multi-provider embedding support (OpenAI, VoyageAI, Gemini, Ollama) with Milvus/Zilliz vector storage.
 - Background sync worker for incremental refresh.
 

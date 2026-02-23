@@ -30,6 +30,27 @@ function safeNumber(value: unknown, fallback = 0): number {
     return value;
 }
 
+function normalizeBreadcrumbs(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .filter((crumb): crumb is string => typeof crumb === 'string')
+        .map((crumb) => crumb.trim())
+        .filter((crumb) => crumb.length > 0)
+        .slice(-2);
+}
+
+function formatScopeLine(breadcrumbs: unknown): string {
+    const normalized = normalizeBreadcrumbs(breadcrumbs);
+    if (normalized.length === 0) {
+        return '';
+    }
+    const joined = normalized.join(' > ');
+    const capped = joined.length > 220 ? `${joined.slice(0, 217)}...` : joined;
+    return `   🧬 Scope: ${capped}\n`;
+}
+
 function extractDiagnostics(response: ToolResponse): SearchDiagnostics {
     const fallback: SearchDiagnostics = {
         resultsBeforeFilter: 0,
@@ -282,8 +303,10 @@ export const searchCodebaseTool: McpTool = {
                 }
 
                 const contentPreview = String(original.content || '').slice(0, 2000);
+                const scopeLine = formatScopeLine(original?.metadata?.breadcrumbs ?? original?.breadcrumbs);
                 return `${index + 1}. [Relevance: ${item.relevanceScore.toFixed(4)}] ${original.language}\n` +
                     `   📍 ${original.location}\n` +
+                    scopeLine +
                     `   \`\`\`${original.language}\n${contentPreview}${String(original.content || '').length > 2000 ? '...' : ''}\n\`\`\``;
             }).join('\n\n');
 

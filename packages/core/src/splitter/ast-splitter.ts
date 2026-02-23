@@ -25,6 +25,9 @@ const SPLITTABLE_NODE_TYPES = {
     scala: ['method_declaration', 'class_declaration', 'interface_declaration', 'constructor_declaration']
 };
 
+const MAX_BREADCRUMB_DEPTH = 2;
+const MAX_BREADCRUMB_LENGTH = 120;
+
 export class AstCodeSplitter implements Splitter {
     private chunkSize: number = 2500;
     private chunkOverlap: number = 300;
@@ -115,13 +118,18 @@ export class AstCodeSplitter implements Splitter {
     ): CodeChunk[] {
         const chunks: CodeChunk[] = [];
         const codeLines = code.split('\n');
+        const normalizedLanguage = language.toLowerCase();
 
-        const traverse = (currentNode: Parser.SyntaxNode) => {
+        const traverse = (currentNode: Parser.SyntaxNode, scopeStack: string[]) => {
+            const scopeLabel = this.getScopeLabel(currentNode, code, normalizedLanguage);
+            const nextScope = scopeLabel ? [...scopeStack, scopeLabel] : scopeStack;
+
             // Check if this node type should be split into a chunk
             if (splittableTypes.includes(currentNode.type)) {
                 const startLine = currentNode.startPosition.row + 1;
                 const endLine = currentNode.endPosition.row + 1;
                 const nodeText = code.slice(currentNode.startIndex, currentNode.endIndex);
+                const breadcrumbs = this.buildBreadcrumbs(nextScope);
 
                 // Only create chunk if it has meaningful content
                 if (nodeText.trim().length > 0) {
@@ -132,6 +140,7 @@ export class AstCodeSplitter implements Splitter {
                             endLine,
                             language,
                             filePath,
+                            breadcrumbs,
                         }
                     });
                 }
@@ -139,11 +148,11 @@ export class AstCodeSplitter implements Splitter {
 
             // Continue traversing child nodes
             for (const child of currentNode.children) {
-                traverse(child);
+                traverse(child, nextScope);
             }
         };
 
-        traverse(node);
+        traverse(node, []);
 
         // If no meaningful chunks found, create a single chunk with the entire code
         if (chunks.length === 0) {
@@ -197,6 +206,7 @@ export class AstCodeSplitter implements Splitter {
                         endLine: currentStartLine + currentLineCount - 1,
                         language: chunk.metadata.language,
                         filePath: chunk.metadata.filePath,
+                        breadcrumbs: chunk.metadata.breadcrumbs,
                     }
                 });
 
@@ -218,6 +228,7 @@ export class AstCodeSplitter implements Splitter {
                     endLine: currentStartLine + currentLineCount - 1,
                     language: chunk.metadata.language,
                     filePath: chunk.metadata.filePath,
+                    breadcrumbs: chunk.metadata.breadcrumbs,
                 }
             });
         }
@@ -255,6 +266,204 @@ export class AstCodeSplitter implements Splitter {
 
     private getLineCount(text: string): number {
         return text.split('\n').length;
+    }
+
+    private buildBreadcrumbs(scopeStack: string[]): string[] | undefined {
+        if (scopeStack.length === 0) {
+            return undefined;
+        }
+
+        const normalized = scopeStack
+            .map((scope) => this.normalizeBreadcrumbText(scope))
+            .filter((scope) => scope.length > 0);
+
+        if (normalized.length === 0) {
+            return undefined;
+        }
+
+        const deduped = normalized.filter((scope, index) => index === 0 || scope !== normalized[index - 1]);
+        const sliced = deduped.slice(-MAX_BREADCRUMB_DEPTH);
+        return sliced.length > 0 ? sliced : undefined;
+    }
+
+    private normalizeBreadcrumbText(value: string): string {
+        const compact = value.replace(/\s+/g, ' ').trim();
+        if (compact.length <= MAX_BREADCRUMB_LENGTH) {
+            return compact;
+        }
+        return `${compact.slice(0, MAX_BREADCRUMB_LENGTH - 3)}...`;
+    }
+
+    private getScopeLabel(currentNode: Parser.SyntaxNode, code: string, language: string): string | null {
+        if (language === 'javascript' || language === 'js' || language === 'typescript' || language === 'ts') {
+            return this.getJavaScriptScopeLabel(currentNode, code);
+        }
+        if (language === 'python' || language === 'py') {
+            return this.getPythonScopeLabel(currentNode, code);
+        }
+        return null;
+    }
+
+    private getJavaScriptScopeLabel(currentNode: Parser.SyntaxNode, code: string): string | null {
+        switch (currentNode.type) {
+            case 'class_declaration':
+                return `class ${this.getNodeName(currentNode, code) || '<anonymous>'}`;
+            case 'function_declaration':
+                return this.buildFunctionLabel(currentNode, code, this.getNodeName(currentNode, code) || '<anonymous>');
+            case 'method_definition': {
+                const methodName = this.getMethodName(currentNode, code) || '<anonymous>';
+                const params = this.getFunctionParameters(currentNode, code);
+                const asyncPrefix = this.isAsyncNode(currentNode, code) ? 'async ' : '';
+                return `${asyncPrefix}method ${methodName}${params}`;
+            }
+            case 'arrow_function': {
+                const functionName = this.getArrowFunctionName(currentNode, code) || '<anonymous>';
+                return this.buildFunctionLabel(currentNode, code, functionName);
+            }
+            case 'interface_declaration':
+                return `interface ${this.getNodeName(currentNode, code) || '<anonymous>'}`;
+            case 'type_alias_declaration':
+                return `type ${this.getNodeName(currentNode, code) || '<anonymous>'}`;
+            case 'export_statement': {
+                const declaration = currentNode.namedChildren.find((child) =>
+                    child.type === 'class_declaration'
+                    || child.type === 'function_declaration'
+                    || child.type === 'interface_declaration'
+                    || child.type === 'type_alias_declaration'
+                );
+                if (declaration) {
+                    return this.getJavaScriptScopeLabel(declaration, code);
+                }
+                return null;
+            }
+            default:
+                return null;
+        }
+    }
+
+    private getPythonScopeLabel(currentNode: Parser.SyntaxNode, code: string): string | null {
+        switch (currentNode.type) {
+            case 'class_definition':
+                return this.extractPythonSignature(currentNode, code, 'class');
+            case 'function_definition':
+                return this.extractPythonSignature(currentNode, code, 'function');
+            case 'async_function_definition':
+                return this.extractPythonSignature(currentNode, code, 'async function');
+            case 'decorated_definition': {
+                const decorated = currentNode.namedChildren.find((child) =>
+                    child.type === 'class_definition'
+                    || child.type === 'function_definition'
+                    || child.type === 'async_function_definition'
+                );
+                if (!decorated) {
+                    return null;
+                }
+                return this.getPythonScopeLabel(decorated, code);
+            }
+            default:
+                return null;
+        }
+    }
+
+    private buildFunctionLabel(node: Parser.SyntaxNode, code: string, functionName: string): string {
+        const asyncPrefix = this.isAsyncNode(node, code) ? 'async ' : '';
+        const params = this.getFunctionParameters(node, code);
+        return `${asyncPrefix}function ${functionName}${params}`;
+    }
+
+    private extractPythonSignature(node: Parser.SyntaxNode, code: string, kind: 'class' | 'function' | 'async function'): string {
+        const raw = this.getNodeText(code, node);
+        const firstLine = raw.split('\n')[0]?.trim() || '';
+        const header = (firstLine.endsWith(':') ? firstLine.slice(0, -1) : firstLine).replace(/\s+/g, ' ').trim();
+        if (!header) {
+            return `${kind} <anonymous>`;
+        }
+        if (kind === 'class') {
+            return header.startsWith('class ') ? header : `class ${header}`;
+        }
+        if (kind === 'async function') {
+            if (header.startsWith('async def ')) {
+                return `async function ${header.replace(/^async def\s+/, '')}`;
+            }
+            if (header.startsWith('def ')) {
+                return `async function ${header.replace(/^def\s+/, '')}`;
+            }
+            return `async function ${header}`;
+        }
+        if (header.startsWith('async def ')) {
+            return `async function ${header.replace(/^async def\s+/, '')}`;
+        }
+        if (header.startsWith('def ')) {
+            return `function ${header.replace(/^def\s+/, '')}`;
+        }
+        return `function ${header}`;
+    }
+
+    private getFunctionParameters(node: Parser.SyntaxNode, code: string): string {
+        const paramsNode = node.childForFieldName('parameters');
+        if (!paramsNode) {
+            return '(...)';
+        }
+        const paramsText = this.getNodeText(code, paramsNode).replace(/\s+/g, ' ').trim();
+        return paramsText.length > 0 ? paramsText : '(...)';
+    }
+
+    private getMethodName(node: Parser.SyntaxNode, code: string): string | null {
+        const nameNode = node.childForFieldName('name');
+        if (!nameNode) {
+            return null;
+        }
+        return this.getNodeText(code, nameNode).replace(/\s+/g, ' ').trim() || null;
+    }
+
+    private getArrowFunctionName(node: Parser.SyntaxNode, code: string): string | null {
+        const parent = node.parent;
+        if (!parent) {
+            return null;
+        }
+
+        if (parent.type === 'variable_declarator') {
+            const nameNode = parent.childForFieldName('name');
+            if (nameNode) {
+                return this.getNodeText(code, nameNode).trim() || null;
+            }
+        }
+
+        if (parent.type === 'assignment_expression') {
+            const leftNode = parent.childForFieldName('left');
+            if (leftNode) {
+                const left = this.getNodeText(code, leftNode).replace(/\s+/g, ' ').trim();
+                return left.length > 0 ? left : null;
+            }
+        }
+
+        if (parent.type === 'pair' || parent.type === 'property_assignment') {
+            const keyNode = parent.childForFieldName('key');
+            if (keyNode) {
+                const key = this.getNodeText(code, keyNode).replace(/\s+/g, ' ').trim();
+                return key.length > 0 ? key : null;
+            }
+        }
+
+        return null;
+    }
+
+    private getNodeName(node: Parser.SyntaxNode, code: string): string | null {
+        const nameNode = node.childForFieldName('name');
+        if (!nameNode) {
+            return null;
+        }
+        const value = this.getNodeText(code, nameNode).replace(/\s+/g, ' ').trim();
+        return value.length > 0 ? value : null;
+    }
+
+    private isAsyncNode(node: Parser.SyntaxNode, code: string): boolean {
+        const preview = this.getNodeText(code, node).slice(0, 30);
+        return /^\s*async\b/.test(preview);
+    }
+
+    private getNodeText(code: string, node: Parser.SyntaxNode): string {
+        return code.slice(node.startIndex, node.endIndex);
     }
 
     /**

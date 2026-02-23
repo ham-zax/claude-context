@@ -9,7 +9,7 @@ export interface IndexFingerprint {
     embeddingModel: string;
     embeddingDimension: number;
     vectorStoreProvider: VectorStoreProvider;
-    schemaVersion: 'dense_v1' | 'hybrid_v1';
+    schemaVersion: 'dense_v2' | 'hybrid_v2';
 }
 
 export interface ContextMcpConfig {
@@ -150,12 +150,12 @@ export function getEmbeddingModelForProvider(provider: string): string {
     }
 }
 
-function getSchemaVersionFromEnv(): 'dense_v1' | 'hybrid_v1' {
+function getSchemaVersionFromEnv(): 'dense_v2' | 'hybrid_v2' {
     const hybridModeRaw = envManager.get('HYBRID_MODE');
     if (!hybridModeRaw) {
-        return 'hybrid_v1';
+        return 'hybrid_v2';
     }
-    return hybridModeRaw.toLowerCase() === 'true' ? 'hybrid_v1' : 'dense_v1';
+    return hybridModeRaw.toLowerCase() === 'true' ? 'hybrid_v2' : 'dense_v2';
 }
 
 export function buildRuntimeIndexFingerprint(config: ContextMcpConfig, embeddingDimension: number): IndexFingerprint {
