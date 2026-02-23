@@ -1,6 +1,7 @@
 # Satori Architecture
 
 Visual-first architecture summary for the `satori` monorepo.
+Satori means "sudden insight"; this architecture is designed to deliver that insight with strict safety and predictable agent behavior.
 
 Source basis:
 - Manual code discovery (`rg`, targeted reads).

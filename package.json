@@ -1,7 +1,7 @@
 {
     "name": "satori",
     "version": "0.1.4",
-    "description": "Satori: focused code indexing engine + MCP integration",
+    "description": "Satori: sudden-insight semantic code indexing + MCP integration",
     "private": true,
     "scripts": {
         "build": "pnpm -r build",
@@ -42,11 +42,11 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/ham-zax/claude-context.git"
+        "url": "https://github.com/ham-zax/satori.git"
     },
-    "homepage": "https://github.com/ham-zax",
+    "homepage": "https://github.com/ham-zax/satori",
     "bugs": {
-        "url": "https://github.com/ham-zax/claude-context/issues"
+        "url": "https://github.com/ham-zax/satori/issues"
     },
     "license": "MIT",
     "author": "ham-zax"

@@ -1,6 +1,7 @@
 # @zokizuan/satori-mcp
 
 MCP server for Satori.
+Satori means "sudden insight"; this package turns core indexing/search into agent-safe MCP actions.
 
 Maintained by: `ham-zax` (`@zokizuan`).
 

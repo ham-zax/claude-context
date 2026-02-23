@@ -1,7 +1,7 @@
 {
     "name": "@zokizuan/satori-mcp",
     "version": "1.0.0",
-    "description": "Model Context Protocol integration for Satori",
+    "description": "MCP server for Satori with agent-safe semantic search and indexing",
     "type": "module",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -41,12 +41,12 @@
     ],
     "repository": {
         "type": "git",
-        "url": "https://github.com/ham-zax/claude-context.git",
+        "url": "https://github.com/ham-zax/satori.git",
         "directory": "packages/mcp"
     },
-    "homepage": "https://github.com/ham-zax/claude-context",
+    "homepage": "https://github.com/ham-zax/satori",
     "bugs": {
-        "url": "https://github.com/ham-zax/claude-context/issues"
+        "url": "https://github.com/ham-zax/satori/issues"
     },
     "author": "ham-zax",
     "license": "MIT",

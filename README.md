@@ -1,5 +1,7 @@
 # Satori
 
+Satori means "sudden insight." This project applies that idea to code retrieval: high-signal answers, safe state handling, and predictable agent workflows.
+
 Satori is a semantic code indexing system focused on two runtime packages:
 
 - `@zokizuan/satori-core`: indexing, chunking, embeddings, vector storage, and incremental sync
@@ -8,6 +10,12 @@ Satori is a semantic code indexing system focused on two runtime packages:
 This repository intentionally excludes UI extensions and evaluation sidecars. It is optimized for production MCP + core workflows.
 
 Maintainer: `ham-zax` (`@zokizuan`).
+
+## Why Satori
+
+- Insight-first retrieval, not raw chunk dumping.
+- Safe-by-default index access via fingerprints and reindex gates.
+- Agent-native tool design with a small deterministic MCP surface.
 
 ## Key Features
 

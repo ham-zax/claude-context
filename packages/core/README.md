@@ -1,6 +1,7 @@
 # @zokizuan/satori-core
 
 Core semantic indexing engine for Satori.
+Satori means "sudden insight"; this package is the indexing/search foundation that produces that insight.
 
 Maintained by: `ham-zax` (`@zokizuan`).
 

@@ -1,6 +1,7 @@
 # MCP Architecture Evolution
 
 Comprehensive architectural evolution of `@zokizuan/satori-mcp`, from the pre-v1.0.0 monolithic phase through Phases 1, 2, and 3 into the current agent-optimized design.
+Satori means "sudden insight"; this evolution shows how the MCP layer was reshaped to produce that insight reliably for autonomous agents.
 
 ---
 
@@ -198,4 +199,3 @@ The system evolved from a tightly coupled MCP script into a resilient integratio
 - reduced tool-surface ambiguity.
 - deterministic self-healing error pathways.
 - schema-driven docs and telemetry-backed observability.
-
