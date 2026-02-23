@@ -1,6 +1,6 @@
 {
     "name": "@zokizuan/satori-mcp",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "MCP server for Satori with agent-safe semantic search and indexing",
     "type": "module",
     "main": "dist/index.js",
@@ -9,7 +9,7 @@
         "satori": "dist/index.js"
     },
     "scripts": {
-        "build": "pnpm clean && tsc --build --force && pnpm docs:generate",
+        "build": "pnpm clean && tsc --build --force && pnpm fix:bin-perms && pnpm docs:generate",
         "dev": "tsx --watch src/index.ts",
         "clean": "rimraf dist",
         "lint": "eslint src --ext .ts",
@@ -19,6 +19,7 @@
         "start:with-env": "OPENAI_API_KEY=${OPENAI_API_KEY:your-api-key-here} MILVUS_ADDRESS=${MILVUS_ADDRESS:localhost:19530} tsx src/index.ts",
         "docs:generate": "tsx scripts/generate-docs.ts",
         "docs:check": "tsx scripts/generate-docs.ts --check",
+        "fix:bin-perms": "node -e \"const fs=require('fs');try{fs.chmodSync('dist/index.js',0o755);}catch(e){console.error(e);process.exit(1);}\"",
         "prepublishOnly": "pnpm build && pnpm docs:check",
         "test": "tsx --test --test-concurrency=1 src/**/*.test.ts"
     },
