@@ -27,7 +27,7 @@ export class SyncManager {
         this.context = context;
         this.snapshotManager = snapshotManager;
         this.watchEnabled = options.watchEnabled === true;
-        this.watchDebounceMs = Math.max(1, options.watchDebounceMs ?? 1000);
+        this.watchDebounceMs = Math.max(1, options.watchDebounceMs ?? 5000);
     }
 
     /**

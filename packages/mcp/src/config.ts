@@ -171,7 +171,7 @@ export function buildRuntimeIndexFingerprint(config: ContextMcpConfig, embedding
 export function createMcpConfig(): ContextMcpConfig {
     const defaultProvider = (envManager.get('EMBEDDING_PROVIDER') as EmbeddingProvider) || 'VoyageAI';
     const defaultReadFileMaxLines = 1000;
-    const defaultWatchDebounceMs = 1000;
+    const defaultWatchDebounceMs = 5000;
 
     // Parse output dimension from env var
     const outputDimensionStr = envManager.get('EMBEDDING_OUTPUT_DIMENSION');
@@ -263,7 +263,7 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP]   Embedding Provider: ${config.encoderProvider}`);
     console.log(`[MCP]   Embedding Model: ${config.encoderModel}`);
     console.log(`[MCP]   Milvus Address: ${config.milvusEndpoint || (config.milvusApiToken ? '[Auto-resolve from token]' : '[Not configured]')}`);
-    console.log(`[MCP]   Proactive Watcher: ${config.watchSyncEnabled ? `enabled (${config.watchDebounceMs || 1000}ms debounce)` : 'disabled'}`);
+    console.log(`[MCP]   Proactive Watcher: ${config.watchSyncEnabled ? `enabled (${config.watchDebounceMs || 5000}ms debounce)` : 'disabled'}`);
 
     // Log provider-specific configuration without exposing sensitive data
     switch (config.encoderProvider) {
@@ -328,7 +328,7 @@ Environment Variables:
 
   Proactive Sync Configuration:
   MCP_ENABLE_WATCHER      Enable filesystem watch mode for near-real-time sync (default: true)
-  MCP_WATCH_DEBOUNCE_MS   Debounce window for watch-triggered sync in milliseconds (default: 1000)
+  MCP_WATCH_DEBOUNCE_MS   Debounce window for watch-triggered sync in milliseconds (default: 5000)
 
 Examples:
   # Start MCP server with OpenAI and explicit Milvus address

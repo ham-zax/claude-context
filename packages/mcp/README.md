@@ -88,7 +88,7 @@ Removed tools from pre-1.0 releases are no longer routed.
 ## Proactive Sync (Optional)
 
 - Enabled by default. Set `MCP_ENABLE_WATCHER=false` to disable.
-- Debounce window via `MCP_WATCH_DEBOUNCE_MS` (default `1000`).
+- Debounce window via `MCP_WATCH_DEBOUNCE_MS` (default `5000`).
 - Watch events reuse the same incremental sync pipeline (`reindexByChange`) and keep `manage_index(action="sync")` as explicit fallback.
 - Safety gates:
   - watch-triggered sync only runs for `indexed`/`sync_completed` codebases.

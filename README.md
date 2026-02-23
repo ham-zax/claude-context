@@ -105,7 +105,7 @@ Key environment variables:
 - `VOYAGEAI_RERANKER_MODEL` (optional)
 - `READ_FILE_MAX_LINES` (optional, default `1000`)
 - `MCP_ENABLE_WATCHER` (optional, default `true`)
-- `MCP_WATCH_DEBOUNCE_MS` (optional, default `1000`)
+- `MCP_WATCH_DEBOUNCE_MS` (optional, default `5000`)
 
 ## Release
 

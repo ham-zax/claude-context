@@ -70,7 +70,7 @@ class ContextMcpServer {
         this.runtimeFingerprint = buildRuntimeIndexFingerprint(config, embedding.getDimension());
         this.readFileMaxLines = Math.max(1, config.readFileMaxLines ?? 1000);
         this.watchSyncEnabled = config.watchSyncEnabled === true;
-        this.watchDebounceMs = Math.max(1, config.watchDebounceMs ?? 1000);
+        this.watchDebounceMs = Math.max(1, config.watchDebounceMs ?? 5000);
         console.log(`[FINGERPRINT] Runtime index fingerprint: ${JSON.stringify(this.runtimeFingerprint)}`);
 
         const vectorDatabase = new MilvusVectorDatabase({
