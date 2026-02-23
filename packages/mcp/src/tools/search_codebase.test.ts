@@ -189,3 +189,107 @@ test('search_codebase rerank output omits scope line when breadcrumbs are absent
     const text = response.content[0]?.text || '';
     assert.doesNotMatch(text, /🧬 Scope:/);
 });
+
+test('search_codebase rerank prefers breadcrumb-bearing source when duplicate documents exist', async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const sharedDoc = 'return this.runSharedCheck(token);';
+    const ctx = {
+        capabilities,
+        reranker: {
+            rerank: async () => [{ index: 0, relevanceScore: 0.9012 }],
+            getModel: () => 'rerank-2.5'
+        },
+        toolHandlers: {
+            handleSearchCode: async () => ({
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        query: 'shared check',
+                        resultCount: 2,
+                        results: [{
+                            index: 0,
+                            language: 'typescript',
+                            location: 'src/auth/fixture.ts:10-12',
+                            score: 0.95,
+                            content: sharedDoc,
+                            metadata: {}
+                        }, {
+                            index: 1,
+                            language: 'typescript',
+                            location: 'src/auth/fixture.ts:40-44',
+                            score: 0.93,
+                            content: sharedDoc,
+                            metadata: {
+                                breadcrumbs: ['class AuthFixture', 'method sharedCheck(token: string)']
+                            }
+                        }],
+                        documentsForReranking: [sharedDoc, sharedDoc]
+                    })
+                }]
+            })
+        }
+    } as unknown as ToolContext;
+
+    const response = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'shared check',
+        useReranker: true
+    }, ctx);
+
+    assert.equal(response.isError, undefined);
+    const text = response.content[0]?.text || '';
+    assert.match(text, /🧬 Scope: class AuthFixture > method sharedCheck\(token: string\)/);
+});
+
+test('search_codebase rerank falls back to nearby breadcrumb metadata for same file cluster', async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const ctx = {
+        capabilities,
+        reranker: {
+            rerank: async () => [{ index: 0, relevanceScore: 0.845 }],
+            getModel: () => 'rerank-2.5'
+        },
+        toolHandlers: {
+            handleSearchCode: async () => ({
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        query: 'branch token',
+                        resultCount: 2,
+                        results: [{
+                            index: 0,
+                            language: 'typescript',
+                            location: 'src/auth/fixture.ts:120-130',
+                            score: 0.82,
+                            content: 'if (branchToken) { return true; }',
+                            metadata: {}
+                        }, {
+                            index: 1,
+                            language: 'typescript',
+                            location: 'src/auth/fixture.ts:118-140',
+                            score: 0.81,
+                            content: 'function wrapper() { if (branchToken) { return true; } }',
+                            metadata: {
+                                breadcrumbs: ['class AuthFixture', 'method handleBranchToken()']
+                            }
+                        }],
+                        documentsForReranking: [
+                            'if (branchToken) { return true; }',
+                            'function wrapper() { if (branchToken) { return true; } }'
+                        ]
+                    })
+                }]
+            })
+        }
+    } as unknown as ToolContext;
+
+    const response = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'branch token',
+        useReranker: true
+    }, ctx);
+
+    assert.equal(response.isError, undefined);
+    const text = response.content[0]?.text || '';
+    assert.match(text, /🧬 Scope: class AuthFixture > method handleBranchToken\(\)/);
+});

@@ -9,6 +9,18 @@ interface SearchDiagnostics {
     resultsReturned: number;
 }
 
+interface RerankCandidate {
+    doc: string;
+    index: number;
+    hasBreadcrumbs: boolean;
+    score: number;
+}
+
+interface RerankItem {
+    index: number;
+    relevanceScore: number;
+}
+
 function getProfile(ctx: ToolContext): string {
     const locality = ctx.capabilities.getEmbeddingLocality();
     const profile = ctx.capabilities.getPerformanceProfile();
@@ -49,6 +61,70 @@ function formatScopeLine(breadcrumbs: unknown): string {
     const joined = normalized.join(' > ');
     const capped = joined.length > 220 ? `${joined.slice(0, 217)}...` : joined;
     return `   🧬 Scope: ${capped}\n`;
+}
+
+function getResultBreadcrumbs(result: any): string[] {
+    if (!result || typeof result !== 'object') {
+        return [];
+    }
+    return normalizeBreadcrumbs(result?.metadata?.breadcrumbs ?? result?.breadcrumbs);
+}
+
+function parseLocation(location: unknown): { relativePath: string; startLine: number; endLine: number } | null {
+    if (typeof location !== 'string' || location.trim().length === 0) {
+        return null;
+    }
+    const trimmed = location.trim();
+    const match = trimmed.match(/^(.*):(\d+)-(\d+)$/);
+    if (!match) {
+        return null;
+    }
+    const relativePath = match[1];
+    const startLine = Number.parseInt(match[2], 10);
+    const endLine = Number.parseInt(match[3], 10);
+    if (!relativePath || !Number.isFinite(startLine) || !Number.isFinite(endLine)) {
+        return null;
+    }
+    return { relativePath, startLine, endLine };
+}
+
+function findNearbyBreadcrumbs(rawResults: any[], sourceResult: any): string[] {
+    const sourceLoc = parseLocation(sourceResult?.location);
+    if (!sourceLoc) {
+        return [];
+    }
+
+    const candidates = Array.isArray(rawResults) ? rawResults : [];
+    let best: { crumbs: string[]; distance: number; score: number } | null = null;
+
+    for (const candidate of candidates) {
+        const crumbs = getResultBreadcrumbs(candidate);
+        if (crumbs.length === 0) {
+            continue;
+        }
+        const candidateLoc = parseLocation(candidate?.location);
+        if (!candidateLoc || candidateLoc.relativePath !== sourceLoc.relativePath) {
+            continue;
+        }
+
+        const overlap = candidateLoc.startLine <= sourceLoc.endLine && sourceLoc.startLine <= candidateLoc.endLine;
+        const distance = overlap
+            ? 0
+            : Math.min(
+                Math.abs(candidateLoc.startLine - sourceLoc.endLine),
+                Math.abs(sourceLoc.startLine - candidateLoc.endLine)
+            );
+        if (distance > 20) {
+            continue;
+        }
+
+        const score = safeNumber(candidate?.score, 0);
+        if (!best || distance < best.distance || (distance === best.distance && score > best.score)) {
+            best = { crumbs, distance, score };
+        }
+    }
+
+    return best?.crumbs ?? [];
 }
 
 function extractDiagnostics(response: ToolResponse): SearchDiagnostics {
@@ -267,10 +343,29 @@ export const searchCodebaseTool: McpTool = {
                 return fallbackResponse;
             }
 
-            const validDocs = rawDocuments
-                .map((doc: string, index: number) => ({ doc, index }))
-                .filter((entry: { doc: string; index: number }) => entry.doc && entry.doc.trim().length > 0)
-                .slice(0, 100);
+            const rawResults = Array.isArray(rawData.results) ? rawData.results : [];
+            const dedupedByDoc = new Map<string, RerankCandidate>();
+            for (let index = 0; index < rawDocuments.length; index++) {
+                const doc = rawDocuments[index];
+                if (typeof doc !== 'string' || doc.trim().length === 0) {
+                    continue;
+                }
+
+                const original = rawResults[index];
+                const hasBreadcrumbs = getResultBreadcrumbs(original).length > 0;
+                const score = safeNumber(original?.score, 0);
+                const existing = dedupedByDoc.get(doc);
+                if (!existing) {
+                    dedupedByDoc.set(doc, { doc, index, hasBreadcrumbs, score });
+                    continue;
+                }
+
+                if ((hasBreadcrumbs && !existing.hasBreadcrumbs) || (hasBreadcrumbs === existing.hasBreadcrumbs && score > existing.score)) {
+                    dedupedByDoc.set(doc, { doc, index, hasBreadcrumbs, score });
+                }
+            }
+
+            const validDocs = Array.from(dedupedByDoc.values()).slice(0, 100);
 
             if (validDocs.length === 0) {
                 const fallbackResponse = await ctx.toolHandlers.handleSearchCode({
@@ -295,15 +390,20 @@ export const searchCodebaseTool: McpTool = {
                 }
             );
 
-            const mapped = reranked.map((item, index) => {
-                const originalIndex = validDocs[item.index].index;
-                const original = rawData.results?.[originalIndex];
+            const mapped = (reranked as RerankItem[]).map((item: RerankItem, index: number) => {
+                const selected = validDocs[item.index];
+                const originalIndex = selected?.index;
+                const original = originalIndex === undefined ? undefined : rawResults[originalIndex];
                 if (!original) {
                     return `${index + 1}. [Relevance: ${item.relevanceScore.toFixed(4)}]\n   (No source metadata available)`;
                 }
 
                 const contentPreview = String(original.content || '').slice(0, 2000);
-                const scopeLine = formatScopeLine(original?.metadata?.breadcrumbs ?? original?.breadcrumbs);
+                let breadcrumbs = getResultBreadcrumbs(original);
+                if (breadcrumbs.length === 0) {
+                    breadcrumbs = findNearbyBreadcrumbs(rawResults, original);
+                }
+                const scopeLine = formatScopeLine(breadcrumbs);
                 return `${index + 1}. [Relevance: ${item.relevanceScore.toFixed(4)}] ${original.language}\n` +
                     `   📍 ${original.location}\n` +
                     scopeLine +

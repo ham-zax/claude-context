@@ -33,6 +33,7 @@ Removed tools from pre-1.0 releases are no longer routed.
 - Optional proactive sync watcher mode (debounced filesystem events).
 - Index-time AST scope breadcrumbs (TS/JS/Python) rendered in search output as `🧬 Scope`.
 - Fingerprint schema bump to `dense_v2`/`hybrid_v2` with strict reindex gate for legacy `*_v1` indexes.
+- Non-AST files (for example Markdown) remain searchable when included and not ignored; they simply omit `🧬 Scope`.
 
 ## Architecture Evolution
 
