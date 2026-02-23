@@ -184,17 +184,30 @@ No parameters.
 pnpm --filter @zokizuan/satori-mcp start
 ```
 
-## Example MCP Configuration
+## Quickstart (Beginner)
+
+1. Add an MCP server entry that runs the published package with `npx`.
+2. Set your provider and Milvus credentials in the MCP `env` block.
+3. Use a higher startup timeout on first run (package download + dependency install can take longer).
+4. Restart your MCP client and call `list_codebases` to confirm the server is healthy.
+
+## MCP Config Examples
+
+### JSON-style MCP config
 
 ```json
 {
   "mcpServers": {
     "satori": {
       "command": "npx",
-      "args": ["@zokizuan/satori-mcp@latest"],
+      "args": ["-y", "@zokizuan/satori-mcp@1.0.2"],
+      "timeout": 180000,
       "env": {
         "EMBEDDING_PROVIDER": "VoyageAI",
+        "EMBEDDING_MODEL": "voyage-4-large",
+        "EMBEDDING_OUTPUT_DIMENSION": "1024",
         "VOYAGEAI_API_KEY": "your-api-key",
+        "VOYAGEAI_RERANKER_MODEL": "rerank-2.5",
         "MILVUS_ADDRESS": "your-milvus-endpoint",
         "MILVUS_TOKEN": "your-milvus-token"
       }
@@ -202,6 +215,43 @@ pnpm --filter @zokizuan/satori-mcp start
   }
 }
 ```
+
+### TOML-style MCP config (Codex/CLI style)
+
+```toml
+[mcp_servers.satori]
+command = "npx"
+args = ["-y", "@zokizuan/satori-mcp@1.0.2"]
+startup_timeout_ms = 180000
+env = { EMBEDDING_PROVIDER = "VoyageAI", EMBEDDING_MODEL = "voyage-4-large", EMBEDDING_OUTPUT_DIMENSION = "1024", VOYAGEAI_API_KEY = "your-api-key", VOYAGEAI_RERANKER_MODEL = "rerank-2.5", MILVUS_ADDRESS = "your-milvus-endpoint", MILVUS_TOKEN = "your-milvus-token" }
+```
+
+### Local development config (when working on this repo)
+
+Use this only while developing locally:
+
+```json
+{
+  "mcpServers": {
+    "satori": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-context/packages/mcp/dist/index.js"],
+      "timeout": 180000,
+      "env": {
+        "EMBEDDING_PROVIDER": "VoyageAI",
+        "EMBEDDING_MODEL": "voyage-4-large",
+        "EMBEDDING_OUTPUT_DIMENSION": "1024",
+        "VOYAGEAI_API_KEY": "your-api-key",
+        "VOYAGEAI_RERANKER_MODEL": "rerank-2.5",
+        "MILVUS_ADDRESS": "your-milvus-endpoint",
+        "MILVUS_TOKEN": "your-milvus-token"
+      }
+    }
+  }
+}
+```
+
+Never commit real API keys/tokens into repo config files.
 
 ## Development
 

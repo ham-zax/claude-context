@@ -118,6 +118,50 @@ Key environment variables:
 - `MCP_ENABLE_WATCHER` (optional, default `true`)
 - `MCP_WATCH_DEBOUNCE_MS` (optional, default `5000`)
 
+## MCP Quickstart (Published Package)
+
+Use this for first-time setup (recommended for non-dev users).
+
+1. Add `satori` to your MCP config with `npx`.
+2. Set `startup_timeout_ms` / `timeout` to `180000` for cold starts.
+3. Add provider + Milvus env vars.
+4. Restart MCP client and call `list_codebases`.
+
+JSON-style example:
+
+```json
+{
+  "mcpServers": {
+    "satori": {
+      "command": "npx",
+      "args": ["-y", "@zokizuan/satori-mcp@1.0.2"],
+      "timeout": 180000,
+      "env": {
+        "EMBEDDING_PROVIDER": "VoyageAI",
+        "EMBEDDING_MODEL": "voyage-4-large",
+        "EMBEDDING_OUTPUT_DIMENSION": "1024",
+        "VOYAGEAI_API_KEY": "your-api-key",
+        "VOYAGEAI_RERANKER_MODEL": "rerank-2.5",
+        "MILVUS_ADDRESS": "your-milvus-endpoint",
+        "MILVUS_TOKEN": "your-milvus-token"
+      }
+    }
+  }
+}
+```
+
+TOML-style example:
+
+```toml
+[mcp_servers.satori]
+command = "npx"
+args = ["-y", "@zokizuan/satori-mcp@1.0.2"]
+startup_timeout_ms = 180000
+env = { EMBEDDING_PROVIDER = "VoyageAI", EMBEDDING_MODEL = "voyage-4-large", EMBEDDING_OUTPUT_DIMENSION = "1024", VOYAGEAI_API_KEY = "your-api-key", VOYAGEAI_RERANKER_MODEL = "rerank-2.5", MILVUS_ADDRESS = "your-milvus-endpoint", MILVUS_TOKEN = "your-milvus-token" }
+```
+
+For package-specific docs and local dev config, see `packages/mcp/README.md`.
+
 ## Release
 
 ```bash
