@@ -1,6 +1,6 @@
-# @zokizuan/claude-context-core
+# @zokizuan/satori-core
 
-Core semantic indexing engine for Claude Context.
+Core semantic indexing engine for Satori.
 
 Maintained by: `ham-zax` (`@zokizuan`).
 
@@ -15,13 +15,13 @@ Maintained by: `ham-zax` (`@zokizuan`).
 ## Install
 
 ```bash
-npm install @zokizuan/claude-context-core
+npm install @zokizuan/satori-core
 ```
 
 ## Minimal Usage
 
 ```ts
-import { Context, OpenAIEmbedding, MilvusVectorDatabase } from '@zokizuan/claude-context-core';
+import { Context, OpenAIEmbedding, MilvusVectorDatabase } from '@zokizuan/satori-core';
 
 const context = new Context({
   embedding: new OpenAIEmbedding({

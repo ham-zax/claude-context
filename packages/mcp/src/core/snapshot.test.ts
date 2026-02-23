@@ -24,7 +24,7 @@ const FINGERPRINT_B: IndexFingerprint = {
 
 function withTempHome<T>(fn: (homeDir: string) => T): T {
     const prevHome = process.env.HOME;
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-context-mcp-test-'));
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-mcp-test-'));
     process.env.HOME = tempHome;
     try {
         return fn(tempHome);
@@ -43,7 +43,7 @@ test('v2 snapshot migrates to v3 and first access hard-blocks assumed_v2 entries
         const codebase = path.join(homeDir, 'repo');
         fs.mkdirSync(codebase, { recursive: true });
 
-        const snapshotDir = path.join(homeDir, '.context');
+        const snapshotDir = path.join(homeDir, '.satori');
         fs.mkdirSync(snapshotDir, { recursive: true });
         const snapshotFile = path.join(snapshotDir, 'mcp-codebase-snapshot.json');
 

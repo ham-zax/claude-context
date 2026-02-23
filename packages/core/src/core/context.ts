@@ -914,7 +914,7 @@ export class Context {
                 fileBasedPatterns.push(...patterns);
             }
 
-            // Load global ~/.context/.contextignore
+            // Load global ~/.satori/.contextignore
             const globalIgnorePatterns = await this.loadGlobalIgnoreFile();
             fileBasedPatterns.push(...globalIgnorePatterns);
 
@@ -961,13 +961,13 @@ export class Context {
     }
 
     /**
-     * Load global ignore file from ~/.context/.contextignore
+     * Load global ignore file from ~/.satori/.contextignore
      * @returns Array of ignore patterns
      */
     private async loadGlobalIgnoreFile(): Promise<string[]> {
         try {
             const homeDir = require('os').homedir();
-            const globalIgnorePath = path.join(homeDir, '.context', '.contextignore');
+            const globalIgnorePath = path.join(homeDir, '.satori', '.contextignore');
             return await this.loadIgnoreFile(globalIgnorePath, 'global .contextignore');
         } catch (error) {
             // Global ignore file is optional, don't log warnings

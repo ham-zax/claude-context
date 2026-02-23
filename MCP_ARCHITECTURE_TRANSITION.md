@@ -1,6 +1,6 @@
 # MCP Architecture Evolution
 
-Comprehensive architectural evolution of `@zokizuan/claude-context-mcp`, from the pre-v1.0.0 monolithic phase through Phases 1, 2, and 3 into the current agent-optimized design.
+Comprehensive architectural evolution of `@zokizuan/satori-mcp`, from the pre-v1.0.0 monolithic phase through Phases 1, 2, and 3 into the current agent-optimized design.
 
 ---
 

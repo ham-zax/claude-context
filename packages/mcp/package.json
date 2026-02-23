@@ -1,11 +1,13 @@
 {
-    "name": "@zokizuan/claude-context-mcp",
+    "name": "@zokizuan/satori-mcp",
     "version": "1.0.0",
-    "description": "Model Context Protocol integration for Claude Context",
+    "description": "Model Context Protocol integration for Satori",
     "type": "module",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
-    "bin": "dist/index.js",
+    "bin": {
+        "satori": "dist/index.js"
+    },
     "scripts": {
         "build": "pnpm clean && tsc --build --force && pnpm docs:generate",
         "dev": "tsx --watch src/index.ts",
@@ -22,7 +24,7 @@
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.1",
-        "@zokizuan/claude-context-core": "workspace:*",
+        "@zokizuan/satori-core": "workspace:*",
         "chokidar": "^5.0.0",
         "ignore": "^7.0.5",
         "zod": "^3.25.55",

@@ -1,7 +1,7 @@
-# Claude Context MCP - Changes Summary
+# Satori MCP - Changes Summary
 
 ## Package Information
-- **Package Name**: `@zokizuan/claude-context-mcp`
+- **Package Name**: `@zokizuan/satori-mcp`
 - **Version**: 0.2.0
 - **Published**: January 8, 2026
 
@@ -91,7 +91,7 @@ To force rebuild from scratch: Use index_codebase with force=true
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Claude Context MCP                        │
+│                        Satori MCP                            │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
@@ -162,7 +162,7 @@ cd packages/mcp && pnpm run build
 npm link --prefix packages/mcp
 
 # Use in Claude Desktop
-claude-context-mcp
+satori-mcp
 ```
 
 ### Publishing
@@ -186,8 +186,8 @@ cd ../mcp && npm publish
 | `packages/mcp/src/index.ts` | Added `verifyCloudState()`, improved tool descriptions |
 | `packages/mcp/src/handlers.ts` | Fixed `syncIndexedCodebasesFromCloud()` to mark interrupted indexing as indexed |
 | `packages/mcp/src/snapshot.ts` | Already had v2 format support |
-| `packages/core/package.json` | Renamed to `@zokizuan/claude-context-core` |
-| `packages/mcp/package.json` | Updated dependency to published core, renamed to `@zokizuan/claude-context-mcp` |
+| `packages/core/package.json` | Renamed to `@zokizuan/satori-core` |
+| `packages/mcp/package.json` | Updated dependency to published core, renamed to `@zokizuan/satori-mcp` |
 
 ---
 
@@ -195,8 +195,8 @@ cd ../mcp && npm publish
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| `@zokizuan/claude-context-core` | 0.1.3 | Core indexing engine |
-| `@zokizuan/claude-context-mcp` | 0.2.0 | MCP server integration |
+| `@zokizuan/satori-core` | 0.1.3 | Core indexing engine |
+| `@zokizuan/satori-mcp` | 0.2.0 | MCP server integration |
 
 ---
 

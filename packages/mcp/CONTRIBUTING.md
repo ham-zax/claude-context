@@ -1,6 +1,6 @@
-# Contributing to @zokizuan/claude-context-mcp
+# Contributing to @zokizuan/satori-mcp
 
-Thanks for contributing to the Claude Context MCP server.
+Thanks for contributing to the Satori MCP server.
 
 ## Current Tool Surface (v1.0.0+)
 
@@ -23,19 +23,19 @@ pnpm build:mcp
 pnpm dev:mcp
 
 # Start server
-pnpm --filter @zokizuan/claude-context-mcp start
+pnpm --filter @zokizuan/satori-mcp start
 
 # Typecheck
-pnpm --filter @zokizuan/claude-context-mcp typecheck
+pnpm --filter @zokizuan/satori-mcp typecheck
 
 # Unit tests
-pnpm --filter @zokizuan/claude-context-mcp test
+pnpm --filter @zokizuan/satori-mcp test
 
 # Check README tool docs are in sync
-pnpm --filter @zokizuan/claude-context-mcp docs:check
+pnpm --filter @zokizuan/satori-mcp docs:check
 ```
 
-`pnpm --filter @zokizuan/claude-context-mcp build` already runs docs generation.
+`pnpm --filter @zokizuan/satori-mcp build` already runs docs generation.
 
 ## Development Notes
 

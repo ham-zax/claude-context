@@ -1,6 +1,6 @@
-# Contributing to @zokizuan/claude-context-core
+# Contributing to @zokizuan/satori-core
 
-Thanks for your interest in contributing to the Claude Context core package!
+Thanks for your interest in contributing to the Satori core package!
 
 > 📖 **First time contributing?** Please read the [main contributing guide](../../CONTRIBUTING.md) first for general setup and workflow.
 
@@ -27,7 +27,7 @@ pnpm dev:core
 
 ## Project Structure
 
-- `src/context.ts` - Main Claude Context class
+- `src/context.ts` - Main Satori context class
 - `src/embedding/` - Embedding providers (OpenAI, VoyageAI, Ollama)
 - `src/vectordb/` - Vector database implementations (Milvus)
 - `src/splitter/` - Code splitting logic

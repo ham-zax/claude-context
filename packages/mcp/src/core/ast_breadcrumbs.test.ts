@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AstCodeSplitter } from '@zokizuan/claude-context-core';
+import { AstCodeSplitter } from '@zokizuan/satori-core';
 
 test('AstCodeSplitter emits TS class/method breadcrumbs', async () => {
     const splitter = new AstCodeSplitter();

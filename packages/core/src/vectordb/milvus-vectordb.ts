@@ -269,7 +269,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
 
         const createCollectionParams = {
             collection_name: collectionName,
-            description: description || `Claude Context collection: ${collectionName}`,
+            description: description || `Satori collection: ${collectionName}`,
             fields: schema,
         };
 

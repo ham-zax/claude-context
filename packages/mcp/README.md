@@ -1,6 +1,6 @@
-# @zokizuan/claude-context-mcp
+# @zokizuan/satori-mcp
 
-MCP server for Claude Context.
+MCP server for Satori.
 
 Maintained by: `ham-zax` (`@zokizuan`).
 
@@ -179,7 +179,7 @@ No parameters.
 ## Run Locally
 
 ```bash
-pnpm --filter @zokizuan/claude-context-mcp start
+pnpm --filter @zokizuan/satori-mcp start
 ```
 
 ## Example MCP Configuration
@@ -187,9 +187,9 @@ pnpm --filter @zokizuan/claude-context-mcp start
 ```json
 {
   "mcpServers": {
-    "claude-context": {
+    "satori": {
       "command": "npx",
-      "args": ["@zokizuan/claude-context-mcp@latest"],
+      "args": ["@zokizuan/satori-mcp@latest"],
       "env": {
         "EMBEDDING_PROVIDER": "VoyageAI",
         "VOYAGEAI_API_KEY": "your-api-key",
@@ -204,10 +204,10 @@ pnpm --filter @zokizuan/claude-context-mcp start
 ## Development
 
 ```bash
-pnpm --filter @zokizuan/claude-context-mcp build
-pnpm --filter @zokizuan/claude-context-mcp typecheck
-pnpm --filter @zokizuan/claude-context-mcp test
-pnpm --filter @zokizuan/claude-context-mcp docs:check
+pnpm --filter @zokizuan/satori-mcp build
+pnpm --filter @zokizuan/satori-mcp typecheck
+pnpm --filter @zokizuan/satori-mcp test
+pnpm --filter @zokizuan/satori-mcp docs:check
 ```
 
 `build` automatically runs docs generation from tool schemas.

@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import chokidar, { FSWatcher } from "chokidar";
 import ignore from "ignore";
-import { Context } from "@zokizuan/claude-context-core";
+import { Context } from "@zokizuan/satori-core";
 import { SnapshotManager } from "./snapshot.js";
 
 interface SyncManagerOptions {

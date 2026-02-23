@@ -1,6 +1,6 @@
-# Claude Context Architecture
+# Satori Architecture
 
-Visual-first architecture summary for the `claude-context` monorepo.
+Visual-first architecture summary for the `satori` monorepo.
 
 Source basis:
 - Manual code discovery (`rg`, targeted reads).
@@ -31,14 +31,14 @@ MCP Client
                       |                      |
                       v                      v
       +------------------------------+   +----------------------+
-      | `~/.context` local state     |   | Milvus / Zilliz      |
+      | `~/.satori` local state      |   | Milvus / Zilliz      |
       | snapshot + merkle sync files |   | dense/hybrid indexes |
       +------------------------------+   +----------------------+
 ```
 
 Control/state paths:
-- `~/.context/mcp-codebase-snapshot.json`
-- `~/.context/merkle/<md5(codebasePath)>.json`
+- `~/.satori/mcp-codebase-snapshot.json`
+- `~/.satori/merkle/<md5(codebasePath)>.json`
 
 ## 2) Repository Layout
 
@@ -95,7 +95,7 @@ Effective matching source order:
 2. constructor overrides
 3. env custom values (`CUSTOM_EXTENSIONS`, `CUSTOM_IGNORE_PATTERNS`)
 4. repo root `.*ignore` files
-5. global `~/.context/.contextignore`
+5. global `~/.satori/.contextignore`
 
 ### 3.4 Splitter, Embedding, Vector Abstractions
 
@@ -374,4 +374,3 @@ Key files:
 - `packages/mcp/src/core/snapshot.ts`
 - `packages/mcp/src/core/sync.ts`
 - `packages/mcp/src/tools/*`
-

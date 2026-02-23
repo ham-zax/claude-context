@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import ignore from "ignore";
-import { Context, COLLECTION_LIMIT_MESSAGE } from "@zokizuan/claude-context-core";
+import { Context, COLLECTION_LIMIT_MESSAGE } from "@zokizuan/satori-core";
 import { SnapshotManager } from "./snapshot.js";
 import { ensureAbsolutePath, truncateContent, trackCodebasePath } from "../utils.js";
 import { SyncManager } from "./sync.js";
@@ -585,7 +585,7 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
             await this.context.loadResolvedIgnorePatterns(absolutePath);
 
             // Initialize file synchronizer with proper ignore patterns (including project-specific patterns)
-            const { FileSynchronizer } = await import("@zokizuan/claude-context-core");
+            const { FileSynchronizer } = await import("@zokizuan/satori-core");
             const ignorePatterns = this.context.getActiveIgnorePatterns() || [];
             console.log(`[BACKGROUND-INDEX] Using ignore patterns: ${ignorePatterns.join(', ')}`);
             const synchronizer = new FileSynchronizer(absolutePath, ignorePatterns);

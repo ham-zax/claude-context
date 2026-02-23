@@ -32,7 +32,7 @@ function esc(value: unknown): string {
 
 function buildToolDocsSection(): string {
     const config: ContextMcpConfig = {
-        name: 'Context MCP Server',
+        name: 'Satori MCP Server',
         version: '1.0.0',
         encoderProvider: 'VoyageAI',
         encoderModel: 'voyage-4-large',

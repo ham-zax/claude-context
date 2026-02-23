@@ -25,7 +25,7 @@ export class FileSynchronizer {
 
     private getSnapshotPath(codebasePath: string): string {
         const homeDir = os.homedir();
-        const merkleDir = path.join(homeDir, '.context', 'merkle');
+        const merkleDir = path.join(homeDir, '.satori', 'merkle');
 
         const normalizedPath = path.resolve(codebasePath);
         const hash = crypto.createHash('md5').update(normalizedPath).digest('hex');
@@ -259,7 +259,7 @@ export class FileSynchronizer {
      */
     static async deleteSnapshot(codebasePath: string): Promise<void> {
         const homeDir = os.homedir();
-        const merkleDir = path.join(homeDir, '.context', 'merkle');
+        const merkleDir = path.join(homeDir, '.satori', 'merkle');
         const normalizedPath = path.resolve(codebasePath);
         const hash = crypto.createHash('md5').update(normalizedPath).digest('hex');
         const snapshotPath = path.join(merkleDir, `${hash}.json`);

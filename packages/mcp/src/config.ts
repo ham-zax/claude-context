@@ -1,4 +1,4 @@
-import { envManager } from "@zokizuan/claude-context-core";
+import { envManager } from "@zokizuan/satori-core";
 
 export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama';
 export type VectorStoreProvider = 'Milvus';
@@ -225,7 +225,7 @@ export function createMcpConfig(): ContextMcpConfig {
     }
 
     const config: ContextMcpConfig = {
-        name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
+        name: envManager.get('MCP_SERVER_NAME') || "Satori MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || "1.0.0",
         // Embedding provider configuration
         encoderProvider: defaultProvider,
@@ -257,7 +257,7 @@ export function createMcpConfig(): ContextMcpConfig {
 
 export function logConfigurationSummary(config: ContextMcpConfig): void {
     // Log configuration summary before starting server
-    console.log(`[MCP] 🚀 Starting Context MCP Server`);
+    console.log(`[MCP] 🚀 Starting Satori MCP Server`);
     console.log(`[MCP] Configuration Summary:`);
     console.log(`[MCP]   Server: ${config.name} v${config.version}`);
     console.log(`[MCP]   Embedding Provider: ${config.encoderProvider}`);
@@ -293,9 +293,9 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
 
 export function showHelpMessage(): void {
     console.log(`
-Context MCP Server
+Satori MCP Server
 
-Usage: npx @zokizuan/claude-context-mcp@latest [options]
+Usage: npx @zokizuan/satori-mcp@latest [options]
 
 Options:
   --help, -h                          Show this help message
@@ -332,15 +332,15 @@ Environment Variables:
 
 Examples:
   # Start MCP server with OpenAI and explicit Milvus address
-  OPENAI_API_KEY=sk-xxx MILVUS_ADDRESS=localhost:19530 npx @zokizuan/claude-context-mcp@latest
+  OPENAI_API_KEY=sk-xxx MILVUS_ADDRESS=localhost:19530 npx @zokizuan/satori-mcp@latest
 
   # Start MCP server with VoyageAI and specific model
-  EMBEDDING_PROVIDER=VoyageAI VOYAGEAI_API_KEY=pa-xxx EMBEDDING_MODEL=voyage-4-large MILVUS_TOKEN=your-token npx @zokizuan/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=VoyageAI VOYAGEAI_API_KEY=pa-xxx EMBEDDING_MODEL=voyage-4-large MILVUS_TOKEN=your-token npx @zokizuan/satori-mcp@latest
 
   # Start MCP server with Gemini and specific model
-  EMBEDDING_PROVIDER=Gemini GEMINI_API_KEY=xxx EMBEDDING_MODEL=gemini-embedding-001 MILVUS_TOKEN=your-token npx @zokizuan/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=Gemini GEMINI_API_KEY=xxx EMBEDDING_MODEL=gemini-embedding-001 MILVUS_TOKEN=your-token npx @zokizuan/satori-mcp@latest
 
   # Start MCP server with Ollama and specific model
-  EMBEDDING_PROVIDER=Ollama EMBEDDING_MODEL=nomic-embed-text MILVUS_TOKEN=your-token npx @zokizuan/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=Ollama EMBEDDING_MODEL=nomic-embed-text MILVUS_TOKEN=your-token npx @zokizuan/satori-mcp@latest
         `);
 }

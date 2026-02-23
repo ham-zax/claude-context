@@ -21,10 +21,10 @@
         "incremental": true,
         "tsBuildInfoFile": ".tsbuildinfo",
         "paths": {
-            "@zokizuan/claude-context-core": [
+            "@zokizuan/satori-core": [
                 "./packages/core/src"
             ],
-            "@zokizuan/claude-context-core/*": [
+            "@zokizuan/satori-core/*": [
                 "./packages/core/src/*"
             ]
         }

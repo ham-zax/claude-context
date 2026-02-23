@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Context, VoyageAIReranker } from "@zokizuan/claude-context-core";
+import { Context, VoyageAIReranker } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";

@@ -15,7 +15,7 @@ const RUNTIME_FINGERPRINT: IndexFingerprint = {
 };
 
 function withTempRepo<T>(fn: (repoPath: string) => Promise<T>): Promise<T> {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-context-mcp-handlers-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-mcp-handlers-'));
     const repoPath = path.join(tempDir, 'repo');
     fs.mkdirSync(repoPath, { recursive: true });
     return fn(repoPath).finally(() => {

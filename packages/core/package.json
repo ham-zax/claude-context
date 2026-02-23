@@ -1,7 +1,7 @@
 {
-    "name": "@zokizuan/claude-context-core",
+    "name": "@zokizuan/satori-core",
     "version": "0.1.3",
-    "description": "Core indexing engine for Claude Context",
+    "description": "Core indexing engine for Satori",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "scripts": {

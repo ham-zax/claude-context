@@ -16,7 +16,10 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { Context, MilvusVectorDatabase, VoyageAIReranker } from "@zokizuan/claude-context-core";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Context, MilvusVectorDatabase, VoyageAIReranker } from "@zokizuan/satori-core";
 
 import {
     buildRuntimeIndexFingerprint,
@@ -33,6 +36,32 @@ import { SyncManager } from "./core/sync.js";
 import { ToolHandlers } from "./core/handlers.js";
 import { ToolContext } from "./tools/types.js";
 import { getMcpToolList, toolRegistry } from "./tools/registry.js";
+
+function migrateLegacyStateDir(): void {
+    const homeDir = os.homedir();
+    const legacyDir = path.join(homeDir, '.context');
+    const newDir = path.join(homeDir, '.satori');
+
+    if (fs.existsSync(newDir) || !fs.existsSync(legacyDir)) {
+        return;
+    }
+
+    try {
+        fs.renameSync(legacyDir, newDir);
+        console.log(`[MIGRATION] Moved legacy state directory '${legacyDir}' -> '${newDir}'`);
+        return;
+    } catch {
+        // Fallback for cross-device moves: copy then remove.
+    }
+
+    try {
+        fs.cpSync(legacyDir, newDir, { recursive: true, force: false, errorOnExist: true });
+        fs.rmSync(legacyDir, { recursive: true, force: true });
+        console.log(`[MIGRATION] Copied legacy state directory '${legacyDir}' -> '${newDir}' and removed source`);
+    } catch (copyError: any) {
+        console.error(`[MIGRATION] Failed to migrate '${legacyDir}' -> '${newDir}':`, copyError?.message || copyError);
+    }
+}
 
 class ContextMcpServer {
     private server: Server;
@@ -203,7 +232,7 @@ class ContextMcpServer {
     }
 
     async start(): Promise<void> {
-        console.log('Starting Context MCP server...');
+        console.log('Starting Satori MCP server...');
 
         const transport = new StdioServerTransport();
         await this.server.connect(transport);
@@ -216,7 +245,7 @@ class ContextMcpServer {
     }
 
     async shutdown(): Promise<void> {
-        console.log('Shutting down Context MCP server...');
+        console.log('Shutting down Satori MCP server...');
         this.syncManager.stopBackgroundSync();
         await this.syncManager.stopWatcherMode();
     }
@@ -229,6 +258,8 @@ async function main(): Promise<void> {
         showHelpMessage();
         process.exit(0);
     }
+
+    migrateLegacyStateDir();
 
     const config = createMcpConfig();
     logConfigurationSummary(config);
