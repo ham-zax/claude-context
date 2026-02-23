@@ -57,7 +57,7 @@
     "bugs": {
         "url": "https://github.com/ham-zax/satori/issues"
     },
-    "author": "ham-zax",
+    "author": "Hamza (@ham-zax)",
     "license": "MIT",
     "publishConfig": {
         "access": "public"
