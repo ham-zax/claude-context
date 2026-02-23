@@ -32,7 +32,7 @@ Maintainer: `ham-zax` (`@zokizuan`).
   - default auto-truncation for large files via `READ_FILE_MAX_LINES` (default `1000`)
   - deterministic continuation hints including `path` + next `start_line`
 - Index-time AST breadcrumbs for TS/JS/Python chunks, surfaced in search output as `🧬 Scope: ...`.
-- Non-AST text files remain searchable when indexed and not ignored; they do not emit scope breadcrumbs.
+- Non-AST files (for example Markdown/HTML) remain searchable when indexed and not ignored; they do not emit `🧬 Scope`.
 - Fingerprint schema upgrade to `dense_v2`/`hybrid_v2`, with strict reindex gating for legacy `*_v1` indexes.
 - Multi-provider embedding support (OpenAI, VoyageAI, Gemini, Ollama) with Milvus/Zilliz vector storage.
 - Background sync worker for incremental refresh.
@@ -161,6 +161,17 @@ env = { EMBEDDING_PROVIDER = "VoyageAI", EMBEDDING_MODEL = "voyage-4-large", EMB
 ```
 
 For package-specific docs and local dev config, see `packages/mcp/README.md`.
+
+### Startup Troubleshooting (`initialize response` closed)
+
+If your MCP client reports startup/handshake failure:
+
+1. Pin a published version in config (for example `@zokizuan/satori-mcp@1.0.2`).
+2. Use a larger startup timeout for cold starts (`180000` recommended).
+3. Remove local link shadowing so `npx` resolves the published package:
+   - `npm unlink -g @zokizuan/satori-mcp`
+   - `npm unlink @zokizuan/satori-mcp` (inside project repo if linked)
+4. Restart MCP client after config changes.
 
 ## Release
 

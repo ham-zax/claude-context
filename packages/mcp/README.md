@@ -33,7 +33,7 @@ Removed tools from pre-1.0 releases are no longer routed.
 - Optional proactive sync watcher mode (debounced filesystem events).
 - Index-time AST scope breadcrumbs (TS/JS/Python) rendered in search output as `🧬 Scope`.
 - Fingerprint schema bump to `dense_v2`/`hybrid_v2` with strict reindex gate for legacy `*_v1` indexes.
-- Non-AST files (for example Markdown) remain searchable when included and not ignored; they simply omit `🧬 Scope`.
+- Non-AST files (for example Markdown/HTML) remain searchable when included and not ignored; they simply omit `🧬 Scope`.
 
 ## Architecture Evolution
 
@@ -190,6 +190,17 @@ pnpm --filter @zokizuan/satori-mcp start
 2. Set your provider and Milvus credentials in the MCP `env` block.
 3. Use a higher startup timeout on first run (package download + dependency install can take longer).
 4. Restart your MCP client and call `list_codebases` to confirm the server is healthy.
+
+### Startup Troubleshooting (`initialize response` closed)
+
+If MCP fails during startup/handshake:
+
+1. Pin a published version in your config (for example `@zokizuan/satori-mcp@1.0.2`).
+2. Increase startup timeout for first run (`timeout`/`startup_timeout_ms` = `180000`).
+3. Remove local npm link shadowing:
+   - `npm unlink -g @zokizuan/satori-mcp`
+   - `npm unlink @zokizuan/satori-mcp` (inside linked repo if present)
+4. Restart your MCP client.
 
 ## MCP Config Examples
 

@@ -114,7 +114,19 @@ VectorDatabase adapters:
   - MilvusRestfulVectorDatabase (HTTP)
 ```
 
-### 3.5 Dense vs Hybrid Storage
+### 3.5 Breadcrumb Metadata (Index-Time)
+
+`AstCodeSplitter` writes `metadata.breadcrumbs` at index time with strict bounds:
+- scope depth capped at 2 (`outer > inner`).
+- each breadcrumb label truncated to max length.
+- label extraction is signature-focused for TS/JS/PY scopes.
+
+Important behavior:
+- Scope breadcrumbs are emitted for TS/JS/PY label mappers.
+- Other languages/files can still be chunked and searched, but typically omit scope breadcrumbs.
+- Breadcrumbs are metadata for retrieval/rendering context and are not a separate semantic signal source.
+
+### 3.6 Dense vs Hybrid Storage
 
 ```text
 Dense collection fields:
@@ -125,7 +137,7 @@ Hybrid collection adds:
   dense+sparse index path with RRF rerank strategy
 ```
 
-### 3.6 Incremental Sync (Core)
+### 3.7 Incremental Sync (Core)
 
 `FileSynchronizer` keeps file hashes + Merkle DAG per codebase and returns:
 - `added`
@@ -146,6 +158,7 @@ Hybrid collection adds:
 - builds runtime fingerprint.
 - wires `Context`, `SnapshotManager`, `SyncManager`, `ToolHandlers`, optional `VoyageAIReranker`.
 - starts background sync loop.
+- enables watcher mode by default (`MCP_ENABLE_WATCHER=true`) with debounce (`MCP_WATCH_DEBOUNCE_MS`, default `5000`).
 
 ### 4.2 Public Tool Surface
 
@@ -263,6 +276,8 @@ search_codebase
       -> ensureFreshness(sync-on-read)
       -> semantic/hybrid search
       -> filter + format or raw payload
+      -> merge nearby same-scope chunks
+      -> render optional `🧬 Scope: ...` for breadcrumbed results
   -> optional VoyageAI rerank
   -> telemetry emit
 ```
@@ -324,7 +339,7 @@ embeddingProvider
 embeddingModel
 embeddingDimension
 vectorStoreProvider
-schemaVersion (dense_v1 | hybrid_v1)
+schemaVersion (dense_v2 | hybrid_v2)
 ```
 
 Mismatch -> `requires_reindex`.
@@ -339,7 +354,8 @@ file -> CodeChunk -> EmbeddingVector -> VectorDocument -> Milvus row
 ## 7) Operational Notes and Edge Cases
 
 - Search can run while indexing; results may be incomplete.
-- Non-AST splitter requests currently fall back to AST path in background indexing flow.
+- Unsupported or failed AST parsing falls back to LangChain splitting.
+- Scope line rendering (`🧬 Scope`) is expected on breadcrumbed TS/JS/PY results; non-breadcrumbed results omit it.
 - REST adapter currently treats `checkCollectionLimit` as non-blocking (`true`).
 - Search-time exclude patterns are normalized/validated; invalid patterns generate warnings.
 
