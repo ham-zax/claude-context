@@ -96,7 +96,7 @@ Effective matching source order:
 2. constructor overrides
 3. env custom values (`CUSTOM_EXTENSIONS`, `CUSTOM_IGNORE_PATTERNS`)
 4. repo root `.*ignore` files
-5. global `~/.satori/.contextignore`
+5. global `~/.satori/.satoriignore`
 
 ### 3.4 Splitter, Embedding, Vector Abstractions
 

@@ -907,14 +907,14 @@ export class Context {
         try {
             let fileBasedPatterns: string[] = [];
 
-            // Load all .xxxignore files in codebase directory
+            // Load all .xxxignore files in codebase directory (excluding legacy .contextignore)
             const ignoreFiles = await this.findIgnoreFiles(codebasePath);
             for (const ignoreFile of ignoreFiles) {
                 const patterns = await this.loadIgnoreFile(ignoreFile, path.basename(ignoreFile));
                 fileBasedPatterns.push(...patterns);
             }
 
-            // Load global ~/.satori/.contextignore
+            // Load global ~/.satori/.satoriignore
             const globalIgnorePatterns = await this.loadGlobalIgnoreFile();
             fileBasedPatterns.push(...globalIgnorePatterns);
 
@@ -944,7 +944,8 @@ export class Context {
             for (const entry of entries) {
                 if (entry.isFile() &&
                     entry.name.startsWith('.') &&
-                    entry.name.endsWith('ignore')) {
+                    entry.name.endsWith('ignore') &&
+                    entry.name !== '.contextignore') {
                     ignoreFiles.push(path.join(codebasePath, entry.name));
                 }
             }
@@ -961,14 +962,14 @@ export class Context {
     }
 
     /**
-     * Load global ignore file from ~/.satori/.contextignore
+     * Load global ignore file from ~/.satori/.satoriignore
      * @returns Array of ignore patterns
      */
     private async loadGlobalIgnoreFile(): Promise<string[]> {
         try {
             const homeDir = require('os').homedir();
-            const globalIgnorePath = path.join(homeDir, '.satori', '.contextignore');
-            return await this.loadIgnoreFile(globalIgnorePath, 'global .contextignore');
+            const globalIgnorePath = path.join(homeDir, '.satori', '.satoriignore');
+            return await this.loadIgnoreFile(globalIgnorePath, 'global .satoriignore');
         } catch (error) {
             // Global ignore file is optional, don't log warnings
             return [];
