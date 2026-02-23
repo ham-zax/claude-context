@@ -35,6 +35,9 @@ export interface ContextMcpConfig {
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
     // read_file behavior
     readFileMaxLines?: number;
+    // Proactive sync watcher behavior
+    watchSyncEnabled?: boolean;
+    watchDebounceMs?: number;
 }
 
 // Legacy format (v1) - for backward compatibility
@@ -168,6 +171,7 @@ export function buildRuntimeIndexFingerprint(config: ContextMcpConfig, embedding
 export function createMcpConfig(): ContextMcpConfig {
     const defaultProvider = (envManager.get('EMBEDDING_PROVIDER') as EmbeddingProvider) || 'VoyageAI';
     const defaultReadFileMaxLines = 1000;
+    const defaultWatchDebounceMs = 1000;
 
     // Parse output dimension from env var
     const outputDimensionStr = envManager.get('EMBEDDING_OUTPUT_DIMENSION');
@@ -204,6 +208,22 @@ export function createMcpConfig(): ContextMcpConfig {
         }
     }
 
+    const watchSyncEnabledRaw = envManager.get('MCP_ENABLE_WATCHER');
+    const watchSyncEnabled = watchSyncEnabledRaw
+        ? watchSyncEnabledRaw.toLowerCase() === 'true'
+        : true;
+
+    let watchDebounceMs = defaultWatchDebounceMs;
+    const watchDebounceRaw = envManager.get('MCP_WATCH_DEBOUNCE_MS');
+    if (watchDebounceRaw) {
+        const parsed = Number.parseInt(watchDebounceRaw, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            watchDebounceMs = parsed;
+        } else {
+            console.warn(`[WARN] Invalid MCP_WATCH_DEBOUNCE_MS value: ${watchDebounceRaw}. Using default ${defaultWatchDebounceMs}.`);
+        }
+    }
+
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || "1.0.0",
@@ -227,6 +247,9 @@ export function createMcpConfig(): ContextMcpConfig {
         rankerModel,
         // read_file behavior
         readFileMaxLines,
+        // proactive sync watcher behavior
+        watchSyncEnabled,
+        watchDebounceMs,
     };
 
     return config;
@@ -240,6 +263,7 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP]   Embedding Provider: ${config.encoderProvider}`);
     console.log(`[MCP]   Embedding Model: ${config.encoderModel}`);
     console.log(`[MCP]   Milvus Address: ${config.milvusEndpoint || (config.milvusApiToken ? '[Auto-resolve from token]' : '[Not configured]')}`);
+    console.log(`[MCP]   Proactive Watcher: ${config.watchSyncEnabled ? `enabled (${config.watchDebounceMs || 1000}ms debounce)` : 'disabled'}`);
 
     // Log provider-specific configuration without exposing sensitive data
     switch (config.encoderProvider) {
@@ -298,6 +322,13 @@ Environment Variables:
   Vector Database Configuration:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
+
+  Read File Configuration:
+  READ_FILE_MAX_LINES     Max lines returned by read_file when no explicit range is provided (default: 1000)
+
+  Proactive Sync Configuration:
+  MCP_ENABLE_WATCHER      Enable filesystem watch mode for near-real-time sync (default: true)
+  MCP_WATCH_DEBOUNCE_MS   Debounce window for watch-triggered sync in milliseconds (default: 1000)
 
 Examples:
   # Start MCP server with OpenAI and explicit Milvus address

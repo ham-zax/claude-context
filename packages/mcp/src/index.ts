@@ -44,6 +44,8 @@ class ContextMcpServer {
     private capabilities: CapabilityResolver;
     private runtimeFingerprint: IndexFingerprint;
     private readFileMaxLines: number;
+    private watchSyncEnabled: boolean;
+    private watchDebounceMs: number;
 
     constructor(config: ContextMcpConfig) {
         this.server = new Server(
@@ -67,6 +69,8 @@ class ContextMcpServer {
         this.capabilities = new CapabilityResolver(config);
         this.runtimeFingerprint = buildRuntimeIndexFingerprint(config, embedding.getDimension());
         this.readFileMaxLines = Math.max(1, config.readFileMaxLines ?? 1000);
+        this.watchSyncEnabled = config.watchSyncEnabled === true;
+        this.watchDebounceMs = Math.max(1, config.watchDebounceMs ?? 1000);
         console.log(`[FINGERPRINT] Runtime index fingerprint: ${JSON.stringify(this.runtimeFingerprint)}`);
 
         const vectorDatabase = new MilvusVectorDatabase({
@@ -80,7 +84,10 @@ class ContextMcpServer {
         });
 
         this.snapshotManager = new SnapshotManager(this.runtimeFingerprint);
-        this.syncManager = new SyncManager(this.context, this.snapshotManager);
+        this.syncManager = new SyncManager(this.context, this.snapshotManager, {
+            watchEnabled: this.watchSyncEnabled,
+            watchDebounceMs: this.watchDebounceMs,
+        });
         this.toolHandlers = new ToolHandlers(this.context, this.snapshotManager, this.syncManager, this.runtimeFingerprint);
 
         if (this.capabilities.hasReranker()) {
@@ -203,6 +210,15 @@ class ContextMcpServer {
 
         console.log('MCP server started and listening on stdio.');
         this.syncManager.startBackgroundSync();
+        if (this.watchSyncEnabled) {
+            await this.syncManager.startWatcherMode();
+        }
+    }
+
+    async shutdown(): Promise<void> {
+        console.log('Shutting down Context MCP server...');
+        this.syncManager.stopBackgroundSync();
+        await this.syncManager.stopWatcherMode();
     }
 }
 
@@ -218,17 +234,37 @@ async function main(): Promise<void> {
     logConfigurationSummary(config);
 
     const server = new ContextMcpServer(config);
+    activeServer = server;
     await server.start();
 }
 
+let activeServer: ContextMcpServer | null = null;
+let shuttingDown = false;
+
+async function handleShutdownSignal(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+    if (shuttingDown) {
+        return;
+    }
+    shuttingDown = true;
+
+    console.error(`Received ${signal}, shutting down gracefully...`);
+    try {
+        if (activeServer) {
+            await activeServer.shutdown();
+        }
+    } catch (error) {
+        console.error('Error during graceful shutdown:', error);
+    } finally {
+        process.exit(0);
+    }
+}
+
 process.on('SIGINT', () => {
-    console.error('Received SIGINT, shutting down gracefully...');
-    process.exit(0);
+    void handleShutdownSignal('SIGINT');
 });
 
 process.on('SIGTERM', () => {
-    console.error('Received SIGTERM, shutting down gracefully...');
-    process.exit(0);
+    void handleShutdownSignal('SIGTERM');
 });
 
 main().catch((error) => {

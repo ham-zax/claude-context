@@ -29,6 +29,7 @@ Removed tools from pre-1.0 releases are no longer routed.
 - Zod-first tool schemas converted to MCP JSON Schema for `ListTools`.
 - Auto-generated tool docs in this README from live tool schemas.
 - `read_file` line-range retrieval with default large-file truncation guard.
+- Optional proactive sync watcher mode (debounced filesystem events).
 
 ## Architecture Evolution
 
@@ -83,6 +84,17 @@ Removed tools from pre-1.0 releases are no longer routed.
 
 - Supports optional `start_line` and `end_line` (1-based, inclusive).
 - When no range is provided and file length exceeds `READ_FILE_MAX_LINES` (default `1000`), output is truncated and includes a continuation hint with `path` and next `start_line`.
+
+## Proactive Sync (Optional)
+
+- Enabled by default. Set `MCP_ENABLE_WATCHER=false` to disable.
+- Debounce window via `MCP_WATCH_DEBOUNCE_MS` (default `1000`).
+- Watch events reuse the same incremental sync pipeline (`reindexByChange`) and keep `manage_index(action="sync")` as explicit fallback.
+- Safety gates:
+  - watch-triggered sync only runs for `indexed`/`sync_completed` codebases.
+  - events are dropped for `indexing`, `indexfailed`, and `requires_reindex`.
+  - ignored/hidden paths are excluded to avoid watcher explosion (`node_modules`, `.git`, build artifacts, dotfiles).
+- On shutdown (`SIGINT`/`SIGTERM`), watchers are explicitly closed.
 
 ## Future Plan
 

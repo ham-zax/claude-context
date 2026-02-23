@@ -46,3 +46,4 @@ pnpm --filter @zokizuan/claude-context-mcp docs:check
 - Do not reintroduce compatibility aliases for removed tools.
 - Keep `search_codebase` telemetry as structured stderr JSON (`event=search_executed`).
 - Keep `read_file` range semantics as 1-based inclusive (`start_line`/`end_line`) with deterministic truncation hints when capped by `READ_FILE_MAX_LINES`.
+- If watcher mode is enabled, keep it debounced (`MCP_WATCH_DEBOUNCE_MS`) and status-gated (`indexed`/`sync_completed` only), and ensure ignored/hidden paths are excluded from watch triggers.

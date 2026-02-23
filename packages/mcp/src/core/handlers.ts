@@ -602,6 +602,7 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
 
             // Save snapshot after updating codebase lists
             this.snapshotManager.saveCodebaseSnapshot();
+            await this.syncManager.registerCodebaseWatcher(absolutePath);
 
             let message = `Background indexing completed for '${absolutePath}' using ${splitterType.toUpperCase()} splitter.\nIndexed ${stats.indexedFiles} files, ${stats.totalChunks} chunks.`;
             if (stats.status === 'limit_reached') {
@@ -1160,6 +1161,7 @@ To force rebuild from scratch: call manage_index with {"action":"create","path":
 
             // Save snapshot after clearing index
             this.snapshotManager.saveCodebaseSnapshot();
+            await this.syncManager.unregisterCodebaseWatcher(absolutePath);
 
             let resultText = `Successfully cleared codebase '${absolutePath}'`;
 
