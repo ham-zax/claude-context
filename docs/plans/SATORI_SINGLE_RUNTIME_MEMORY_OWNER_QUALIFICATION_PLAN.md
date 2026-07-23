@@ -1,11 +1,19 @@
 # Satori Single-Runtime Memory-Owner Qualification Plan
 
-**Status:** M0 is in progress in isolated task-owned WSL state. One secondary
-`per_context_cost` is localized, but the material representative-runtime
-anonymous-memory owner is not yet localized. No production repair is justified
-by the current evidence. Shared-host implementation remains deferred.
+**Status:** M0 completed on 2026-07-24 with
+`single_runtime_memory_cost_explained`. Search and indexing memory is dominated
+by bounded `@lancedb/lancedb` / Arrow native allocation and allocator
+high-water, plus the live provider context and Potion worker. Repository state
+and incremental mutation costs are comparatively small. M1 records no safe
+direct repair: retiring the live provider after indexing would require new
+operation, watcher, and reinitialization lifecycle semantics while leaving
+approximately 460 MiB of post-index parent high-water. M2 direct-runtime
+qualification is the current execution point.
 
-**Repository truth:** `c9ece273fb18300cd19d80c2175eb7321955ebaf`
+**Runtime revision under evidence:**
+`c9ece273fb18300cd19d80c2175eb7321955ebaf`.
+
+**Documentation revision:** `4badd90955e134b446dec50c7a8277fd87711b33`.
 
 **Runtime under investigation:** MCP `6.2.0`, Core `3.1.0`, managed offline
 Potion + LanceDB on Linux x64 / WSL.
@@ -104,7 +112,7 @@ This second sample is exploratory. Its repository, query history, mutation
 history, and initialization order were not frozen, so it is not an acceptance
 baseline and must not be used to claim a regression or leak.
 
-### 3.3 In-progress M0 findings — 2026-07-23
+### 3.3 Completed M0 findings — 2026-07-23 to 2026-07-24
 
 The task-owned evidence root is:
 
@@ -117,6 +125,11 @@ normal MCP framing, offline Potion worker, and LanceDB adapter. It records
 process and owner counts without storing source, query, vector, or credential
 contents. Every measured runtime uses an isolated `HOME`,
 `SATORI_STATE_ROOT`, and `LANCEDB_PATH`.
+
+The in-process harness is authoritative for controlled deltas and internal
+ownership counts. Its absolute PSS includes diagnostic-harness overhead and is
+not the final managed-runtime acceptance value. M2 black-box managed runtimes
+remain authoritative for final aggregate memory.
 
 The first clean initialized sample, before any provider context existed,
 recorded:
@@ -144,9 +157,9 @@ The 60-second steady-state parent results were:
 | Vector then embedding | 207,120 / 208,622 / 208,643 KiB | 208,622 KiB | 2 |
 | Embedding then vector | 201,648 / 206,087 / 199,770 KiB | 201,648 KiB | 1 |
 
-The vector-first order was higher in all three repetitions. Its median retained
-delta was 6,974 KiB (6.81 MiB), and the matching count changed from one to two
-provider `Context` and LanceDB-adapter owners.
+The vector-first order was higher in all three repetitions. The difference
+between the two median PSS values was 6,974 KiB (6.81 MiB), and the matching
+count changed from one to two provider `Context` and LanceDB-adapter owners.
 
 This records a localized secondary owner:
 
@@ -197,28 +210,150 @@ This separates two costs:
   233 MiB of retained parent PSS relative to the registered unopened process,
   independently of the Potion child.
 
-These are not yet classified as leaks or assigned to a production owner.
+These are not leaks. The bounded repeated-search, direct-adapter, close, and GC
+comparisons below assign the search cost to the native LanceDB/Arrow query
+boundary and split live provider state from allocator high-water.
 
 #### Repeated representative search
 
 Three fresh processes each ran one warmup and 20 identical searches against the
 same frozen generation:
 
-| Repetition | Warm-search PSS | Search 10 PSS | Search 20 PSS | 60-second idle PSS |
+| Repetition | Warm-search PSS | Search 10 PSS | Search 20 PSS | 60-second idle PSS | Paired warm-to-idle delta |
+|---|---:|---:|---:|---:|---:|
+| 1 | 353,721 KiB | 394,817 KiB | 414,137 KiB | 413,947 KiB | 60,226 KiB |
+| 2 | 354,049 KiB | 399,593 KiB | 410,429 KiB | 410,311 KiB | 56,262 KiB |
+| 3 | 352,469 KiB | 391,109 KiB | 410,489 KiB | 410,355 KiB | 57,886 KiB |
+
+The median paired warm-to-idle retained delta is 57,886 KiB (56.53 MiB).
+Growth continued from search 10 to search 20 in all three repetitions.
+
+The median component values make the mismatch inspectable:
+
+| Checkpoint | Anonymous | V8 heap used | Node external | ArrayBuffers |
 |---|---:|---:|---:|---:|
-| 1 | 353,721 KiB | 394,817 KiB | 414,137 KiB | 413,947 KiB |
-| 2 | 354,049 KiB | 399,593 KiB | 410,429 KiB | 410,311 KiB |
-| 3 | 352,469 KiB | 391,109 KiB | 410,489 KiB | 410,355 KiB |
+| Warm search | 292,996 KiB | 142,338,528 bytes | 48,170,169 bytes | 43,920,542 bytes |
+| Search 10 | 334,092 KiB | 105,018,128 bytes | 33,125,224 bytes | 24,926,079 bytes |
+| Search 20 | 349,764 KiB | 133,629,624 bytes | 38,798,427 bytes | 26,646,888 bytes |
+| 60 seconds idle | 349,624 KiB | 137,009,552 bytes | 39,124,126 bytes | 26,972,587 bytes |
 
-The median warm-to-idle retained delta is 56,634 KiB (55.31 MiB). Growth
-continued from search 10 to search 20 in all three repetitions. At the same
-time, V8 heap and Node external bytes did not grow in the same direction, the
-provider-context count remained one, and the result-set/continuation cache
-remained empty.
+Anonymous memory rose while V8 heap, Node external bytes, and ArrayBuffers
+ended below the warm checkpoint. The provider-context count remained one, and
+the result-set/continuation cache remained empty.
 
-This satisfies the plan's condition for one bounded 100-search extension. It
-does not yet identify whether the owner is a LanceDB/Arrow native allocation,
-native allocator high-water behavior, or a live native retention edge.
+This satisfied the plan's condition for one bounded 100-search extension.
+Three fresh repetitions produced the following median parent checkpoints:
+
+| Checkpoint | Median parent PSS |
+|---|---:|
+| Warm search | 353,987 KiB |
+| Search 10 | 392,411 KiB |
+| Search 20 | 409,199 KiB |
+| Search 40 | 433,071 KiB |
+| Search 60 | 455,924 KiB |
+| Search 80 | 474,523 KiB |
+| Search 100 | 419,484 KiB |
+| 60 seconds idle | 419,346 KiB |
+
+The median paired warm-to-idle delta was 64,834 KiB (63.31 MiB). Every
+repetition peaked at search 80 and fell by search 100 without a context-count
+change or task-owned swap. This disproves monotonic per-query retention and
+classifies the repeated-query behavior as bounded native allocation cycling
+plus allocator high-water.
+
+A separate fresh `--expose-gc` process reduced V8 heap used from approximately
+137 MiB to 74 MiB, but parent PSS fell only 9,970 KiB and remained unchanged
+through the 60-second post-GC window. Reachable JavaScript heap is therefore
+not the material retained owner.
+
+#### Direct LanceDB operation isolation
+
+Fresh direct-adapter processes reused the same complete read-only publication
+and removed MCP, provider, navigation, grouping, and Potion owners from the
+query loop.
+
+| Checkpoint | Dense PSS | Dense anonymous | Lexical PSS | Lexical anonymous |
+|---|---:|---:|---:|---:|
+| Adapter opened | 50,119 KiB | 23,600 KiB | 50,619 KiB | 24,116 KiB |
+| Warm query | 95,394 KiB | 45,436 KiB | 81,547 KiB | 30,108 KiB |
+| Query 20 | 139,351 KiB | 89,232 KiB | 98,334 KiB | 46,736 KiB |
+| Query 80 | 172,777 KiB | 122,656 KiB | 111,503 KiB | 59,872 KiB |
+| Query 100 | 168,469 KiB | 118,348 KiB | 118,195 KiB | 66,564 KiB |
+| Close + 10 seconds idle | 165,611 KiB | 115,164 KiB | 113,537 KiB | 61,516 KiB |
+
+Both direct query paths reproduce retained anonymous growth. Dense search has
+the larger transient and retained cost and shows the same non-monotonic
+behavior as the complete hybrid search. Adapter close does not materially
+return the retained pages. V8 heap remained approximately 8–15 MiB and Node
+external memory approximately 1–7 MiB, so these direct deltas lie below the
+normal JavaScript accounting boundary.
+
+This localizes the search-related material allocation to the
+`@lancedb/lancedb` / Arrow native query boundary rather than Satori result,
+continuation, navigation, or provider-context caches.
+
+#### Provider close and post-index lifecycle
+
+Three fresh 20-search processes shut down the provider after the normal
+60-second idle checkpoint:
+
+| Repetition | Before close | 60 seconds after close | Parent PSS released |
+|---|---:|---:|---:|
+| 1 | 416,708 KiB | 268,263 KiB | 148,445 KiB |
+| 2 | 418,312 KiB | 265,864 KiB | 152,448 KiB |
+| 3 | 417,369 KiB | 264,241 KiB | 153,128 KiB |
+
+The provider context and embedding counts changed from one to zero and the
+Potion child exited. The median parent release was 152,448 KiB (148.88 MiB).
+The median parent still retained approximately 147,129 KiB above the unopened
+representative baseline. This proves both live provider ownership and material
+native allocator high-water.
+
+The required second representative build then isolated post-index shutdown:
+
+| Checkpoint | Parent PSS | Anonymous | Task aggregate PSS |
+|---|---:|---:|---:|
+| Empty initialized state | 113,562 KiB | 98,092 KiB | 113,562 KiB |
+| Index complete, 60 seconds idle | 843,822 KiB | 763,876 KiB | 953,003 KiB |
+| Provider shut down, 60 seconds idle | 584,635 KiB | 504,588 KiB | 584,635 KiB |
+
+Provider shutdown released 259,187 KiB from the parent and removed the
+109,181 KiB Potion child, for an aggregate release of 368,368 KiB. The parent
+still retained 471,073 KiB (460.03 MiB) above its clean initialized baseline.
+The live provider is therefore a material lifecycle owner, but most of the
+post-index residual is native indexing high-water that provider shutdown does
+not return.
+
+Retiring and recreating the provider immediately after publication is not a
+bounded M1 repair. The provider context also owns watchers, synchronizers,
+prepared generation state, and future tool reuse. Safe retirement would need
+new operation exclusion, watcher transfer, and lazy reinitialization semantics,
+while still leaving the larger post-index high-water demonstrated above.
+
+#### Repository and incremental scaling
+
+Three paired fresh-process repetitions added a second small repository after
+the first repository was already searched. The second root added:
+
+```text
+8,908 / 9,832 / 9,196 KiB parent PSS
+median: 9,196 KiB (8.98 MiB)
+```
+
+Watcher, synchronizer, prepared-read, and prepared-navigation root counts each
+changed exactly from one to two. Repository-root state is therefore a small,
+predictable `per_repository_cost`, not the material owner.
+
+Three fresh processes applied one small body edit and completed incremental
+synchronization:
+
+```text
+25,827 / 24,690 / 26,055 KiB warm-to-idle parent PSS
+median: 25,827 KiB (25.22 MiB)
+```
+
+Every resulting generation was searchable and no task-owned process swapped.
+A small incremental mutation does not reproduce full-index high-water.
 
 #### Long-lived exploratory process
 
@@ -231,23 +366,25 @@ Anonymous: 675,048 KiB
 Swap:    1,280,416 KiB
 ```
 
-Its resident reduction came with approximately 1.22 GiB of swap, so it is not
-evidence that the original anonymous allocation was released. Because its
+Its resident reduction coincided with approximately 1.22 GiB of swap, so it is
+not evidence that the original anonymous allocation was released. Because its
 workload history remains unknown, this remains exploratory corroboration only.
 
-#### Current M0 decision
+#### M0 terminal decision
 
 ```text
+decision: single_runtime_memory_cost_explained
 secondary owner: per_context_cost localized at 6.81 MiB
-material owner: unresolved anonymous/native retention
+search allocation boundary: LanceDB/Arrow native query path
+search retention class: bounded native allocation cycle + allocator high-water
+live provider release: 148.88 MiB median after repeated search
+post-index live provider release: 253.11 MiB parent + 106.62 MiB Potion
+post-index residual: 460.03 MiB parent above clean baseline
+second repository: 8.98 MiB median
+small incremental mutation: 25.22 MiB median
 production changes: none
-next falsifying experiment:
-    100-search bounded extension
-    -> logical provider/adapter close
-    -> one diagnostic forced-GC comparison
-stopping condition:
-    classify the retained delta as live native retention, allocator high-water,
-    or unresolved native memory before considering M1
+M1: no direct repair; post-index retirement is a new lifecycle design
+next action: M2 one/two/four direct-runtime qualification
 ```
 
 ## 4. Current repository ownership map
@@ -396,7 +533,8 @@ For every acceptance scenario:
 - sample before the action, immediately after completion, after 10 seconds
   idle, and after 60 seconds idle;
 - retain raw samples from every repetition; and
-- report the median steady-state delta, not the best run.
+- report the median paired steady-state delta, not the difference between
+  independently selected aggregates or the best run.
 
 Do not run manual garbage collection in acceptance samples.
 
@@ -416,6 +554,15 @@ Record for the MCP parent and every child:
 - file-descriptor count; and
 - relevant mapping categories aggregated without source paths.
 
+At the start and end of every repetition also record:
+
+- `/proc/meminfo` `MemAvailable`, `SwapFree`, and `SwapTotal`;
+- aggregate PSS for the task-owned parent and children; and
+- whether any task-owned process swapped.
+
+Do not treat runs under materially different host-memory or swap pressure as
+equivalent acceptance repetitions.
+
 ### 7.3 In-process metrics
 
 The diagnostic harness records selected non-sensitive values:
@@ -433,6 +580,11 @@ The diagnostic harness records selected non-sensitive values:
 - prepared-read, navigation, result-set, and continuation cache entry and byte
   counts where already available; and
 - Potion request/response byte totals for the frozen operation.
+
+The repeated-operation loop must discard each completed protocol response and
+parsed payload before starting the next request. Evidence output retains only
+scalar durations, byte counts, statuses, and sampled owner metrics; it must not
+accumulate response or result objects.
 
 Do not use `process.report` or heap snapshots as a shortcut because they may
 capture environment values, paths, source, or query data.
@@ -491,14 +643,45 @@ C7  adapter closed in the diagnostic harness
 Record table and connection counts. A logical close that leaves high PSS may
 show allocator high-water behavior; it does not prove a live Satori reference.
 
+Before requesting a native profiler, repeat the query boundary directly in
+fresh adapter-only processes:
+
+```text
+connection/count only
+dense query
+lexical query
+logical adapter close
+```
+
+The direct process must reuse the same complete publication read-only and omit
+MCP, provider, navigation, grouping, and Potion owners.
+
 ### M0D — Repeated-search retention
 
 Run one warmup and 20 identical searches against the same frozen generation.
 Sample after searches 1, 5, 10, and 20 and after the idle windows.
 
-Extend once to 100 searches only if the second half continues adding retained
-steady-state memory rather than approaching a plateau. Stop after that
-extension.
+Extend to 100 searches only if the second half continues adding retained
+steady-state memory rather than approaching a plateau. The 100-search
+acceptance extension uses three fresh repetitions and samples warm, 10, 20,
+40, 60, 80, 100, 10-second idle, and 60-second idle checkpoints. Stop after
+that extension.
+
+Run close and GC comparisons separately from the 100-search extension:
+
+```text
+fresh process A
+    warm search -> 20 searches -> 60-second idle
+    -> logical provider/adapter close -> 60-second idle
+
+fresh --expose-gc process B
+    warm search -> 20 searches -> 60-second idle
+    -> forced GC -> 60-second idle
+```
+
+The GC process is diagnostic only. A close result is interpreted together with
+owner counts; disappearing owners without a material PSS reduction is
+consistent with allocator high-water behavior, not proof of a live leak.
 
 Stable inputs must return the established deterministic result contract.
 Memory qualification must not alter ranking or expected output.
@@ -534,6 +717,29 @@ Record temporary peak separately from retained steady-state memory. Verify the
 previous generation remains searchable on an injected failed publication
 using existing focused lifecycle proof only if the eventual repair changes
 that boundary.
+
+### M0G — Post-index lifecycle comparison
+
+The representative same-process build produced the largest controlled delta,
+so compare fresh indexing lifecycles independently:
+
+```text
+G1  build representative publication -> 60-second idle
+G2  build representative publication -> logical provider/adapter close
+    -> 60-second idle
+G3  fresh process opens the G1 publication -> one search -> 60-second idle
+```
+
+G1 may reuse the existing completed build evidence. G2 requires one additional
+representative build because the close must occur in the process that performed
+indexing; record that necessity before starting it. G3 reuses the existing
+fresh-open evidence.
+
+If G2 removes live owner counts but not PSS, classify the post-index cost as
+consistent with native allocator high-water unless another retained native
+owner is demonstrated. If G2 materially lowers PSS, name the exact lifecycle
+owner before proposing M1. Do not infer that indexing should move to a
+disposable process; that is outside the direct-repair contract.
 
 ## 9. Localization rules
 
@@ -785,7 +991,7 @@ The current instruction authorizes:
 ```text
 freeze task-owned fixtures and measurement identity
     -> implement the diagnostic-only harness
-    -> run M0A-M0F
+    -> run M0A-M0G
     -> checksum-seal one M0 decision
     -> apply only localized M1 direct repairs
     -> rerun invalidated M0 witnesses and focused correctness checks

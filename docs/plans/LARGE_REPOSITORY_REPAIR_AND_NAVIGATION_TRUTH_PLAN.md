@@ -12,20 +12,25 @@ Correct the verified operational truth gaps exposed by
 `docs/plans/report.md` without reopening retrieval qualification, general type
 inference, ranking, or index architecture.
 
-The program is complete when:
+Operational remediation is complete when:
 
-1. repair can prove exact payload equality for a healthy 19,741-row
-   publication without an unbounded response;
-2. an empty inbound call graph explicitly states that caller coverage is
+1. an empty inbound call graph explicitly states that caller coverage is
    advisory and recommends deterministic verification;
-3. the two proven constructor-derived Python receiver forms produce
+2. repair can prove exact payload equality for a healthy 19,741-row
+   publication without an unbounded response on adapters with same-state
+   payload authority, while other adapters report a truthful proof limit; and
+3. the immediately corresponding inbound and repair guidance is current.
+
+The follow-up navigation-truth milestone is complete when:
+
+1. the two proven constructor-derived Python receiver forms produce
    relationships only when their class authority is unique;
-4. generated symbol registries bind a child to its concrete lexical parent
+2. generated symbol registries bind a child to its concrete lexical parent
    when that parent is uniquely present;
-5. definition-free files do not degrade a language while structural analysis
+3. definition-free files do not degrade a language while structural analysis
    failures remain visible;
-6. changed-code diagnostics state that their file set is Git-tracked-only; and
-7. directly invalidated documentation and compatibility identities are
+4. changed-code diagnostics state that their file set is Git-tracked-only; and
+5. directly invalidated documentation and compatibility identities are
    current.
 
 This plan does not claim comprehensive retrieval quality, call-graph
@@ -47,8 +52,11 @@ implement:
 - bounded Python constructor-derived receiver evidence;
 - population and exact projection of the existing `parentKey` contract;
 - capability classification that distinguishes definition-free files from
-  structural extraction failures; and
-- explicit basis disclosure for `changedCode`.
+  structural extraction failures;
+- explicit basis disclosure for `changedCode`; and
+- documentation of recursive `/**` directory syntax, bounded debug-mode
+  selection, and guidance directly invalidated by repair and inbound-disclosure
+  changes.
 
 The previous relationship program deliberately deferred broader receiver/type
 inference. This plan admits only the two syntactic constructor forms frozen in
@@ -94,15 +102,24 @@ E = R
 ```
 
 Repair already proves the subset relation. An exact equal count completes the
-proof without enumerating all remote IDs in one response.
+set-equality argument without enumerating all remote IDs in one response, but a
+successful repair proof additionally requires evidence that membership and
+count observed the same remote payload state.
 
 The MCP repair entrypoint already acquires the root mutation lease and passes
-`assertMutationCurrent` into `Context.repairIndex()`. The current payload proof
-does not assert that authority between membership enumeration and the final
-payload observation. The equality proof therefore needs an explicit
-same-state boundary rather than only a different counting primitive.
+`assertMutationCurrent` into `Context.repairIndex()`. That lease excludes
+Satori-owned writers but does not detect external backend mutation between
+membership enumeration and the final payload observation. LanceDB exposes
+`getCollectionDataObservation()`; the shipped Milvus adapters do not. Exact
+count therefore completes equality only when it is paired with adapter-provided
+same-state payload authority. Other adapters must report a proof limit rather
+than treating lease continuity as remote snapshot evidence.
 
-Decision: `repair_exact_count_path_required`.
+Decisions:
+
+- `repair_exact_count_path_required`;
+- `repair_same_state_adapter_authority_required`;
+- `repair_proof_limit_projection_required`.
 
 ### 3.2 Inbound Python relationships
 
@@ -281,14 +298,19 @@ Decision: `documentation_ranking_deferred`.
 
 ### 5.1 Exact repair proof
 
-For shipped backends with exact count authority:
+Successful membership-plus-count proof requires both exact count authority and
+a same-state payload authority. The latter is either an adapter snapshot read
+covering membership and count or an immutable collection-data observation that
+is equal before and after those reads.
 
 ```text
 acquire and assert the existing repair mutation authority
-    -> bind the source/checkpoint, collection and completion marker
+    -> bind the expected-ID source observation, collection and completion marker
+    -> capture the adapter's same-state payload authority
     -> query all expected IDs in bounded batches
     -> fail requires_reindex on any missing expected ID
     -> read exact remote payload count
+    -> recapture or close the same-state payload authority
     -> reassert the same mutation, source, collection and marker authority
     -> fail requires_reindex when count differs
     -> mark payload and staleRemoteChunks matched when count equals expected
@@ -296,23 +318,27 @@ acquire and assert the existing repair mutation authority
 
 All membership batches and the exact count must describe the same expected set
 and remote payload state. B1 must reuse the established root mutation lease;
-it must not introduce a second transaction or lock system.
+it must not introduce a second transaction or lock system. The root lease
+excludes Satori-owned writers but is not evidence against an external backend
+writer.
 
 Before success, repair must reassert:
 
 - the exact selected collection;
 - the completion marker and publication binding used to enter repair;
-- the source/checkpoint observation from which the expected IDs were derived;
+- the source observation from which the expected IDs were derived, using the
+  repair owner's existing freshness authority rather than a new checkpoint
+  lifecycle;
 - `assertMutationCurrent()` after membership enumeration and after the exact
   count; and
-- when the backend exposes an immutable collection-data observation, that its
-  value did not change across membership and count.
+- an adapter-provided immutable collection-data observation or equivalent
+  snapshot authority spanning membership and count.
 
-Within Satori's mutation model the root lease is the authority that excludes a
-concurrent payload writer. A lost lease, changed source observation, changed
-marker/publication binding, changed collection-data observation, or different
-collection cannot complete equality. External mutation outside the established
-Satori authority is not silently treated as the same publication.
+A lost lease, changed source observation, changed marker/publication binding,
+changed collection-data observation, or different collection cannot complete
+equality. An adapter without same-state payload authority cannot silently rely
+on the root lease to classify externally mutable backend data as one
+publication.
 
 The exact count must exclude control records under the existing backend
 contract.
@@ -321,16 +347,25 @@ Repair must distinguish:
 
 - `requires_reindex`: a missing expected ID, count mismatch, unexpected
   payload, fingerprint mismatch, or another demonstrated incompatibility;
-- `repair_proof_limit`: the active adapter cannot provide exact count and its
-  bounded query fallback cannot prove equality;
-- successful matched proof: complete expected membership and exact equal
-  count.
+- `repair_proof_limit`: the active adapter lacks exact count or same-state
+  payload authority and its single-response bounded query fallback cannot prove
+  equality;
+- successful matched proof: complete expected membership and exact equal count
+  under one same-state payload authority.
 
-`repair_proof_limit` must not claim stale payload and must not recommend a full
-reindex as though incompatibility had been demonstrated.
+`repair_proof_limit` is an additive Core result with `status="blocked"` and
+`reason="repair_proof_limit"`. MCP projects it as response format version 1
+with `status="blocked"`, `reason="repair_proof_limit"`, the proof attached, and
+the repair operation terminally `blocked`. Its hints may identify the missing
+proof capability and suggest retrying repair after adapter support changes, but
+must not contain create, reindex, or `nextAction` guidance that implies stale
+payload was demonstrated.
 
-No higher fixed all-row query limit and no new vector backend method are
-needed.
+LanceDB's existing `getCollectionDataObservation()` is the current same-state
+authority. Milvus adapters have exact count but no equivalent observation, so
+they take the truthful `repair_proof_limit` path unless repository evidence
+establishes a supported snapshot mechanism. B1 does not require adding a new
+backend method merely to complete this program.
 
 ### 5.2 Empty inbound disclosure
 
@@ -454,9 +489,10 @@ For every non-root registry symbol with a parent path:
 If there is no unique candidate, retain `parentResolution="missing"` or
 `"ambiguous"` honestly.
 
-`parentKey` in B3 means a concrete same-file containing lexical parent
-instance. It does not bind a non-containing semantic owner, including an
-out-of-class qualified C++ method definition.
+`parentKey` identifies the stable key of the same-file containing lexical
+parent. Canonical projection selects the concrete containing instance by span.
+It does not bind a non-containing semantic owner, including an out-of-class
+qualified C++ method definition.
 
 Adding `parentKey` must not change:
 
@@ -541,6 +577,19 @@ shape.
 No extractor, registry, relationship, or public index fingerprint changes.
 This is proof-control behavior over the existing backend contract.
 
+The additive public contract is frozen as follows:
+
+- Core `RepairIndexResult` adds `reason="repair_proof_limit"` on
+  `status="blocked"`;
+- MCP `ManageIndexReason` adds `repair_proof_limit` while
+  `ManageIndexResponseEnvelope.version` remains `1`;
+- the operation phase is `blocked`;
+- the response carries `repairProof` and capability-oriented hints only;
+- create, reindex, and stale-payload guidance are prohibited for this reason;
+- focused Core and MCP contract tests cover the mapping; and
+- public repair descriptions are updated only where they enumerate possible
+  repair outcomes.
+
 ### B2 inbound relationships
 
 The disclosure-only change does not change persisted relationships.
@@ -605,7 +654,7 @@ Completed evidence:
 - revision and generation inputs are recorded;
 - unsupported reliability and freshness-latency claims are removed;
 - missing request/artifact provenance is disclosed;
-- the sealed manifest identifies the 13 file-only Python paths and source
+- the sealed manifest identifies the 13 file-owner-only Python paths and source
   inspection at the recorded revision classifies their contents; and
 - verified code owners are recorded.
 
@@ -620,52 +669,62 @@ capability_report_reconciled
 Owners:
 
 - `packages/core/src/core/context.ts`
-- the existing MCP repair mutation-lease owner in
+- `packages/core/src/core/repair-proof.ts`
+- existing adapter same-state observation owner; currently
+  `packages/core/src/vectordb/lancedb-vectordb.ts`
+- the existing MCP repair mutation-lease and response owner in
   `packages/mcp/src/core/manage-indexing-handlers.ts`
-- the existing read-only source observation from
-  `FileSynchronizer.prepareChanges()` and
-  `PreparedFileChangeSet.assertSourceObservationCurrent()` in
-  `packages/core/src/sync/synchronizer.ts`
-- nearest focused Core repair tests
-- manage-index response projection only if required for proof-limit truth
+- `packages/mcp/src/core/manage-types.ts`
+- nearest focused Core and MCP repair tests
 
 Bounded owner expansion:
 
 ```text
 authorized outcome: exact repair equality for one immutable publication
-evidence: membership and count observed across different source/payload states
-          cannot establish set equality
-required additional owner: existing repair mutation lease and source/checkpoint
-                           observation boundary
-stopping condition: the expected set, membership batches, exact count,
-                    completion marker, and collection are reasserted under one
-                    current repair authority
+evidence: membership and count prove equality only when they observe one
+          remote payload state
+required additional owner: existing same-state adapter observation and the
+                           additive repair-proof-limit response projection
+stopping condition: LanceDB proves the large healthy fixture under one stable
+                    data observation; adapters without equivalent authority
+                    return repair_proof_limit without reindex guidance
 ```
 
-The prepared source observation is used only to prove that the expected set
-remained current. B1 does not commit or advance a source checkpoint.
+B1 uses the expected IDs already derived by the repair owner and reasserts the
+existing completion/publication authority. It does not add a new source
+checkpoint lifecycle, commit or advance a checkpoint, or add a second mutation
+system.
 
 Tasks:
 
 1. bind the expected set and remote observations to the current repair lease,
-   source/checkpoint observation, selected collection, and completion marker;
-2. route exact remote payload count through
+   selected collection, completion marker, and publication binding;
+2. require and capture the adapter's same-state payload authority before
+   membership enumeration;
+3. route exact remote payload count through
    `countIndexedPayloadExactly()`;
-3. combine count equality with complete expected-ID membership;
-4. reassert the same authority after membership and exact count;
-5. retain the query-only bounded fallback for adapters without exact count;
-6. report proof-limit without false reindex guidance;
-7. replace the existing 16,384-row oracle with:
-   - a healthy publication above 16,384 rows that passes through exact count;
+4. combine count equality with complete expected-ID membership;
+5. reassert the repair/publication authority and verify the same-state adapter
+   observation after membership and exact count;
+6. retain the single-response bounded query fallback where it can prove the
+   entire payload; otherwise report proof-limit;
+7. add the frozen additive Core/MCP proof-limit reason and prohibit false
+   create/reindex guidance;
+8. replace the existing 16,384-row oracle with:
+   - a healthy LanceDB publication above 16,384 rows that passes through exact
+     count under one stable data observation;
    - one equal-count/missing-ID mismatch;
-   - one count mismatch; and
-   - one query-only proof-limit result;
-8. reuse an existing repair lease-loss test if it invalidates the proof between
+   - one count mismatch;
+   - one changed-data-observation result; and
+   - one exact-count adapter without same-state authority returning
+     `repair_proof_limit`;
+9. reuse an existing repair lease-loss test if it invalidates the proof between
    membership and count; otherwise add one focused interleaving at that exact
    boundary.
 
-Stop when the large healthy fixture passes and demonstrated mismatch still
-fails closed.
+Stop when the large healthy same-state fixture passes, demonstrated mismatch
+still fails closed, and adapters without same-state authority return the frozen
+proof-limit response without reindex guidance.
 
 Terminal decisions:
 
@@ -695,6 +754,10 @@ Terminal decisions:
 - `empty_inbound_disclosure_blocked`
 
 ### B2B — Bounded Python constructor receivers
+
+Sequence this batch after B3 and B4 so its final relationship compatibility
+cutover binds to the resulting registry manifest once rather than being
+invalidated by each registry transition.
 
 Owners:
 
@@ -729,6 +792,7 @@ Terminal decisions:
 
 - `python_constructor_receiver_pass`
 - `python_constructor_receiver_ambiguous`
+- `python_constructor_contribution_contract_blocked`
 
 ### B3 — Concrete lexical parents
 
@@ -799,7 +863,10 @@ Tasks:
 - document the independent watcher/untracked freshness boundary;
 - document recursive directory operator syntax with `/**`;
 - document bounded diagnostic mode selection;
-- update repair and inbound-call guidance after those batches pass.
+- publish the directly invalidated inbound guidance immediately after B2A;
+- publish the directly invalidated repair guidance immediately after B1; and
+- complete the remaining changed-code, path, and debug documentation after
+  their owning behavior passes.
 
 Do not normalize trailing-slash path operators; current glob semantics are
 internally consistent and documentation is sufficient.
@@ -808,8 +875,14 @@ Terminal decisions:
 
 - `operational_truth_docs_pass`
 - `operational_truth_contract_blocked`
+- `operational_truth_documentation_blocked`
 
 ### B6 — Consolidation
+
+Execution order is B2A, B1, B3, B4, B2B, then B5. B2A publishes the immediate
+caller-safety correction first. B3 and B4 perform the registry compatibility
+transitions before B2B finalizes relationship contributions and manifests
+against the resulting registry authority.
 
 Run only checks invalidated by B1-B5, then one non-overlapping affected Core
 and MCP checkpoint.
@@ -834,8 +907,13 @@ Terminal decisions:
 
 - existing repair test owner;
 - exact-count backend contract tests already present and reused;
-- one same-state/lease-loss proof only if the existing repair suite does not
-  already invalidate membership-plus-count on lease loss;
+- stable and changed `getCollectionDataObservation()` fixtures around
+  membership plus exact count;
+- one exact-count adapter fixture without same-state authority that proves the
+  additive Core/MCP `repair_proof_limit` mapping and absence of create/reindex
+  guidance;
+- one lease-loss proof only if the existing repair suite does not already
+  invalidate membership-plus-count on lease loss;
 - no live reindex of tradingview_ratio.
 
 ### B2A
@@ -887,47 +965,61 @@ qualification, or another live target-repository reindex.
 
 ## 9. Acceptance gates
 
-1. Membership and exact count are bound to one current repair lease, expected
-   source observation, collection, and completion marker.
-2. A healthy exact-count publication above 16,384 rows no longer receives
-   false `requires_reindex`.
-3. A missing expected ID or unequal exact count still fails closed.
-4. An adapter proof limit is distinct from proven incompatibility.
+1. Successful membership-plus-count proof is bound to one current repair
+   lease, expected-ID source observation, selected collection, completion
+   marker, and adapter-provided same-state payload authority.
+2. A healthy LanceDB publication above 16,384 rows no longer receives false
+   `requires_reindex`.
+3. A missing expected ID, unequal exact count, changed payload observation, or
+   lost repair/publication authority still fails closed.
+4. An adapter without exact count or same-state payload authority returns
+   additive `status=blocked`, `reason=repair_proof_limit` under manage response
+   version 1, with no create, reindex, or stale-payload guidance.
 5. Every zero-edge inbound traversal contains actionable verification
    guidance without fake edges.
-6. Only the two frozen constructor receiver shapes produce new relationships.
-7. Constructor evidence survives contribution serialization and full versus
+6. The directly invalidated inbound guidance is published with B2A, making the
+   operational caller-safety correction independently complete.
+7. Only the two frozen constructor receiver shapes produce new relationships.
+8. Constructor evidence survives contribution serialization and full versus
    incremental construction agrees.
-8. Conflicting or unresolved receiver authority emits no relationship.
-9. Child identity is unchanged when `parentKey` is added.
-10. Reopened containers resolve only the exact containing parent instance.
-11. Definition-free files do not degrade language capability.
-12. Recovered/failed structural analysis remains degraded.
-13. Definition status does not manufacture capability-specific readiness.
-14. Old incompatible registry/relationship artifacts are rejected.
-15. `changedCode` states its Git-tracked-only basis under response format 2.
-16. Directly invalidated documentation matches shipped behavior.
-17. No semantic threshold, ranking change, progress redesign, debug artifact
-    system, or generalized receiver inference enters the diff.
+9. Conflicting or unresolved receiver authority emits no relationship.
+10. Child identity is unchanged when `parentKey` is added.
+11. Reopened containers resolve only the exact containing parent instance.
+12. Definition-free files do not degrade language capability.
+13. Recovered/failed structural analysis remains degraded.
+14. Definition status does not manufacture capability-specific readiness.
+15. B3 and B4 registry transitions precede B2B's final relationship
+    compatibility cutover, and old incompatible registry/relationship
+    artifacts are rejected through the resulting manifest bindings.
+16. `changedCode` states its Git-tracked-only basis under response format 2.
+17. Directly invalidated documentation matches each shipped behavior at its
+    milestone boundary.
+18. No semantic threshold, ranking change, progress redesign, debug artifact
+    system, generalized receiver inference, new repair lock system, or new
+    source-checkpoint lifecycle enters the diff.
 
 ## 10. Terminal decisions
 
 ### `large_repair_exactness_pass`
 
-One current repair authority binds the expected set, exact membership, selected
-collection, completion marker, and backend exact count; healthy large payload
-equality passes and all demonstrated mismatch paths remain fail-closed.
+For adapters with same-state payload authority, one current repair authority
+binds the expected set, exact membership, selected collection, completion
+marker, stable payload observation, and backend exact count. The healthy large
+payload passes, all demonstrated mismatch paths remain fail-closed, and adapters
+without that authority return the frozen proof-limit response without implying
+incompatibility.
 
 ### `repair_count_authority_blocked`
 
-A shipped backend cannot provide the exact count its declared interface
-requires, and the bounded query fallback cannot prove the target result.
+A shipped backend that declares exact-count support cannot provide a truthful
+exact count, and neither the bounded query fallback nor the proof-limit mapping
+can represent the result without changing an unauthorized contract.
 
 ### `repair_same_state_authority_blocked`
 
-The existing repair lease and source/publication observations cannot bind the
-expected-ID membership batches and exact count to one payload state without a
-new transaction or architecture outside B1.
+The adapter boundary cannot distinguish support for a same-state payload
+observation from its absence, or cannot project absence as the frozen
+`repair_proof_limit`, without a new transaction or architecture outside B1.
 
 ### `empty_inbound_truth_pass`
 
@@ -948,6 +1040,12 @@ near-miss cases remain unresolved.
 
 The current analysis/registry model cannot bind one frozen constructor form
 without alias, data-flow, or name-only inference.
+
+### `python_constructor_contribution_contract_blocked`
+
+The existing per-file contribution owner cannot persist and reject the frozen
+constructor evidence shapes through an explicit compatibility transition
+without changing unrelated relationship or symbol contracts.
 
 ### `lexical_parent_binding_pass`
 
@@ -977,20 +1075,27 @@ public schema or architecture change.
 
 ### `operational_truth_docs_pass`
 
-Changed-code, path, debug, repair, and inbound guidance match implemented
-behavior.
+Inbound guidance is current when B2A lands, repair guidance is current when B1
+lands, and changed-code, path, and debug guidance match their implemented
+behavior by B5 completion.
 
 ### `operational_truth_contract_blocked`
 
-The existing additive debug response or documentation authority cannot express
-the frozen changed-code basis without an unauthorized response-version or tool
-schema change.
+The existing additive debug response cannot express the frozen changed-code
+basis without an unauthorized response-version or tool schema change.
+
+### `operational_truth_documentation_blocked`
+
+An authoritative generated documentation owner cannot be updated consistently,
+or directly affected public guidance cannot be made truthful without expanding
+beyond the implemented repair, inbound, path, debug, or changed-code behavior.
 
 ### `large_repository_navigation_truth_complete`
 
-Every authorized batch has a terminal decision, affected compatibility
-identities and docs are current, and the smallest non-overlapping affected
-checks pass.
+The operational-remediation milestone and follow-up navigation-truth milestone
+are both complete; every authorized batch has a terminal decision, affected
+compatibility identities and docs are current, and the smallest non-overlapping
+affected checks pass.
 
 ### `navigation_truth_consolidation_blocked`
 
@@ -1000,11 +1105,21 @@ out-of-scope architecture or public contract.
 
 ## 11. Implementation entry
 
-Begin with B1 after implementation is explicitly authorized.
+Begin with B2A after implementation is explicitly authorized. It is the
+smallest independently deliverable correction for the report's immediate
+caller-safety gap: every zero-edge inbound result becomes explicitly advisory
+and receives deterministic verification guidance without changing persisted
+relationships.
 
-It has one proof owner plus existing mutation/source-observation authorities,
-requires no schema or identity change, and its success condition is fully
-determined by existing exact membership, exact-count, and same-state
-authorities.
+After B2A and its directly invalidated guidance pass, implement B1 under the
+frozen backend-aware proof contract. LanceDB may complete large-payload equality
+through its existing data observation; adapters without equivalent same-state
+authority must return `repair_proof_limit` rather than false reindex guidance.
 
-B1 completion does not itself authorize B2-B6.
+Then implement B3 and B4 before B2B so the final constructor-derived
+relationship artifacts bind once to the resulting registry authority. Finish
+with B5's remaining changed-code, path, and debug truth updates, followed by B6
+consolidation.
+
+Each batch retains its independent terminal decision. Completion of one batch
+does not authorize work outside B1-B6 or any finding listed in Section 4.
