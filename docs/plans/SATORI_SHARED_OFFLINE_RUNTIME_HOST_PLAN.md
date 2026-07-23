@@ -1,18 +1,19 @@
 # Satori Shared Offline Runtime Host Plan
 
-**Status:** proposed and deferred pending the single-runtime memory-owner
-qualification in
+**Status:** proposed; H0 contract freeze reactivated on 2026-07-24 by
+`shared_runtime_host_recommended` in
 `docs/plans/SATORI_SINGLE_RUNTIME_MEMORY_OWNER_QUALIFICATION_PLAN.md`.
-H0-H4 are inactive. Reactivate this plan only if that prerequisite records
-`shared_runtime_host_recommended`. This document does not authorize
-implementation by itself.
+H1-H4 remain inactive. This document does not authorize implementation by
+itself.
 
 **Repository truth:** `c9ece273fb18300cd19d80c2175eb7321955ebaf`
 
-The diagnostic evidence, host/session ownership model, socket-security
-contract, offline-only sharing gate, and publication/upgrade constraints below
-remain preserved. Deferral does not reject the architecture; it prevents the
-architecture from masking an unexplained single-process memory owner.
+The single-runtime program established that search memory is dominated by
+bounded LanceDB/Arrow native allocation and valid live provider state rather
+than a Satori result cache or monotonic JavaScript leak. It also established
+that no safe bounded direct repair removes the material cost. The host design
+is therefore reactivated to remove process multiplication, not to hide an
+unexplained single-process owner.
 
 ## 1. Decision
 
@@ -89,9 +90,36 @@ The active MCP runtime itself accounted for approximately 732.5 MiB. Therefore
 sharing only the 106.6 MiB Potion worker would not solve the demonstrated
 problem. The provider/Lance/runtime authority must also be shared.
 
-These live readings are diagnostic, not release benchmarks. They establish the
-owner and the multiplicative failure mode. Qualification must use a
-task-owned repository and a frozen workload.
+The later task-owned direct-runtime qualification recorded:
+
+| Direct runtime workload | Aggregate PSS | Potion workers |
+|---|---:|---:|
+| One active client, clean range | 418,170–468,017 KiB | 1 |
+| Two active clients, clean range | 859,629–884,208 KiB | 2 |
+| Four active clients, clean run | 1,575,695 KiB | 4 |
+
+All accepted searches returned the same five stable result identities. A
+four-session host projected from the upper clean one-client result and the
+32 MiB incremental-session gate is 566,321 KiB, a 64.1% reduction from the
+clean four-runtime aggregate.
+
+The third four-client repetition was excluded because WSL swap was nearly
+exhausted and the task itself swapped; it is retained as a resource-ceiling
+observation, not substituted with an assumed value.
+
+The qualification also established:
+
+- a second repository adds only 8.98 MiB median in one existing context;
+- one small incremental mutation adds 25.22 MiB median;
+- one full in-process build reaches approximately 953 MiB aggregate;
+- provider shutdown releases hundreds of MiB but leaves approximately 460 MiB
+  of post-index parent high-water; and
+- safe post-index provider retirement would itself require new lifecycle and
+  operation-ownership semantics.
+
+These readings justify sharing the provider/runtime authority while keeping
+repository state root-keyed and avoiding speculative provider-reset or native
+allocator tuning.
 
 The diagnostic used `ps` to identify managed launcher, MCP runtime, and Potion
 worker descendants, then read `Rss` and `Pss` from each live process's

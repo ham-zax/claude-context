@@ -1,14 +1,15 @@
 # Satori Single-Runtime Memory-Owner Qualification Plan
 
-**Status:** M0 completed on 2026-07-24 with
+**Status:** complete. M0 completed on 2026-07-24 with
 `single_runtime_memory_cost_explained`. Search and indexing memory is dominated
 by bounded `@lancedb/lancedb` / Arrow native allocation and allocator
 high-water, plus the live provider context and Potion worker. Repository state
 and incremental mutation costs are comparatively small. M1 records no safe
 direct repair: retiring the live provider after indexing would require new
 operation, watcher, and reinitialization lifecycle semantics while leaving
-approximately 460 MiB of post-index parent high-water. M2 direct-runtime
-qualification is the current execution point.
+approximately 460 MiB of post-index parent high-water. M2 records
+`shared_runtime_host_recommended`. The shared-host plan is reactivated at H0
+only; this plan authorizes no host implementation.
 
 **Runtime revision under evidence:**
 `c9ece273fb18300cd19d80c2175eb7321955ebaf`.
@@ -20,24 +21,31 @@ Potion + LanceDB on Linux x64 / WSL.
 
 ## 1. Decision
 
-Defer
-`docs/plans/SATORI_SHARED_OFFLINE_RUNTIME_HOST_PLAN.md`.
-
-Before adding a persistent host, private socket, startup lock, or multi-session
-lifecycle, determine why one initialized MCP runtime retains far more memory
-than an idle runtime and the Potion worker.
-
-Use this sequence:
+The completed decision sequence was:
 
 ```text
 M0  localize the single-runtime memory owner
-    -> M1 apply only evidence-backed direct repairs
+    -> single_runtime_memory_cost_explained
+    -> M1 no safe bounded direct repair
     -> M2 remeasure one/two/four direct runtimes
-    -> decide whether shared-host complexity is still justified
+    -> shared_runtime_host_recommended
 ```
 
-The shared-host plan remains the preserved conditional design. It is not the
-default next implementation.
+Reactivate H0 of
+`docs/plans/SATORI_SHARED_OFFLINE_RUNTIME_HOST_PLAN.md`.
+
+The balanced product boundary is:
+
+- keep the current direct runtime for excluded configurations;
+- do not add speculative LanceDB tuning, forced GC, provider idle timers, or a
+  post-index context reset;
+- share the already-valid offline Potion + LanceDB provider/runtime authority
+  only across compatible active MCP sessions; and
+- keep repository state root-keyed and session protocol state independent.
+
+H0 must still freeze the host/session ownership, transport, lifecycle, and
+resource contracts before implementation. This decision does not authorize
+H1-H4.
 
 ## 2. Observable outcome
 
@@ -386,6 +394,126 @@ production changes: none
 M1: no direct repair; post-index retirement is a new lifecycle design
 next action: M2 one/two/four direct-runtime qualification
 ```
+
+### 3.4 M2 direct-runtime qualification — 2026-07-24
+
+The black-box harness started the installed MCP `6.2.0` runtime entry directly
+with isolated task-owned state. Every client completed a readiness warm-up
+before the measured simultaneous search so a shared freshness check could not
+turn first-use `not_ready` responses into false retrieval differences.
+
+The clean and comparable results were:
+
+| Clients | Idle aggregate PSS | Active aggregate PSS | Potion workers | Search result |
+|---:|---:|---:|---:|---|
+| 1, repetition 1 | 114,185 KiB | 418,170 KiB | 1 | 5 identical identities |
+| 1, repetition 2 | 114,811 KiB | 468,017 KiB | 1 | 5 identical identities |
+| 2, repetition 1 | 210,250 KiB | 884,208 KiB | 2 | identical across clients |
+| 2, repetition 2 | 210,479 KiB | 859,629 KiB | 2 | identical across clients |
+| 4, clean repetition | 401,801 KiB | 1,575,695 KiB | 4 | identical across clients |
+
+No task-owned process swapped in those rows. Direct active memory and Potion
+worker count scale with process count. The second four-client run corroborated
+the active aggregate at 1,632,273 KiB, but the host was near its resource
+ceiling (`SwapFree=65,504 KiB`) and the task recorded 64 KiB of swap, so it is
+not used as an acceptance aggregate.
+
+The third four-client run completed but is explicitly excluded:
+
+```text
+task aggregate PSS: 1,209,510 KiB
+task swap at completion: 5,352 KiB
+SwapFree: 59,880 KiB
+empirical p95 latency: 42.86 seconds
+```
+
+That run measured WSL memory pressure and swapping rather than an equivalent
+runtime state. It is not replaced with an assumed value and is not included in
+an aggregate. The filesystem was not the limiting resource: the evidence root
+was 2.8 GiB and the filesystem still had approximately 850 GiB available.
+
+The clean one-client upper result plus the preserved 32 MiB incremental-session
+gate projects a four-session shared host no larger than:
+
+```text
+468,017 KiB + (3 * 32,768 KiB) = 566,321 KiB
+```
+
+Against the clean measured four-runtime aggregate of 1,575,695 KiB, this is a
+projected reduction of 64.1%. The projection exceeds the 40% reactivation gate
+without assuming any LanceDB or Potion optimization.
+
+Measured direct-runtime p95 latency was 258–348 ms for one client, 954–1,763 ms
+for two simultaneous clients, and 1,618 ms for the clean four-client run.
+Every accepted response contained the same five stable result identities.
+
+M2 therefore records:
+
+```text
+decision: shared_runtime_host_recommended
+basis:
+    valid memory is duplicated per direct process
+    Potion workers scale exactly 1:1 with active processes
+    one Context already owns two roots with only 8.98 MiB median added cost
+    projected four-session PSS reduction is 64.1%
+boundary:
+    reactivate H0 only
+    no direct-runtime or retrieval semantic change
+```
+
+### 3.5 Experiment inventory
+
+The conclusion is based on 50 sealed JSONL scenario records and 21 per-client
+runtime logs, not one favorable process sample.
+
+| Experiment group | Recorded runs |
+|---|---:|
+| Harness smoke and publication/setup preparation | 6 |
+| Provider initialization order | 6 |
+| First-use and representative first-search ladders | 2 |
+| Repeated 20-search qualification | 3 |
+| Exploratory and accepted 100-search extensions | 4 |
+| Dense, lexical, and hybrid native-boundary isolation | 3 |
+| Fresh provider-close repetitions | 3 |
+| Forced-GC comparison | 1 |
+| Representative post-index close comparison | 1 |
+| One-root/two-root scaling | 6 |
+| Incremental mutation | 3 |
+| Exploratory direct-runtime client matrix | 3 |
+| Corrected direct-runtime acceptance matrix | 9 |
+| **Total JSONL scenario records** | **50** |
+
+Of these, six were smoke/setup/publication preparation and 44 were diagnostic
+or qualification runs. The matrix covered:
+
+- two full representative publication builds;
+- three 20-search repetitions;
+- four 100-search histories;
+- three fresh provider-close histories;
+- three repository-scaling pairs;
+- three incremental mutations;
+- direct LanceDB dense and lexical execution outside MCP;
+- one forced-GC control;
+- one-, two-, and four-client direct-runtime execution; and
+- both clean and resource-pressure boundary observations.
+
+Exploratory, pressure-contaminated, and acceptance evidence remain separately
+labelled. No paid provider, user index, user repository mutation, or production
+telemetry was used.
+
+The final seal covers 128 fixture, log, and measurement files:
+
+```text
+manifest:
+    /home/hamza/repo/satori-single-runtime-memory-evidence/
+    20260723-c9ece27/manifests/final-evidence.sha256
+manifest SHA-256:
+    c9f0187c64236e1114d447d4a5cf771cbe94f87b2e967de2915b775bfc576814
+```
+
+Disposable LanceDB/state copies are preserved outside Git but excluded from the
+content manifest because the sealed measurements already bind their
+task-specific hashes and runtime identities.
 
 ## 4. Current repository ownership map
 
@@ -781,10 +909,19 @@ program.
 
 ## 10. M1 — Evidence-backed direct repair
 
-M1 begins only after M0 records `single_runtime_memory_owner_localized`. The
-current program authorization permits the smallest direct production repair
-whose owner and witness satisfy Section 9; it does not authorize adjacent
-memory cleanup.
+M1 ended without a production edit. M0 did not identify a safe bounded repair
+for the material owner:
+
+- the duplicate provider order costs only 6.81 MiB;
+- forced GC does not return the native allocation;
+- provider shutdown is already the terminal lifecycle and cannot be inserted
+  after publication without new operation, watcher, and reinitialization
+  semantics; and
+- most post-index high-water remains after provider shutdown.
+
+The following contract is retained for any separately authorized future direct
+repair. Such work begins only after a new witness records
+`single_runtime_memory_owner_localized`.
 
 Freeze for each repair:
 
@@ -821,38 +958,40 @@ After each localized repair, rerun only its M0 witness and directly affected
 correctness/performance checks. Stop repairing that owner once its witness and
 must-preserve checks pass, then continue to M2.
 
-## 11. M2 — Direct-runtime requalification
+## 11. Completed M2 direct-runtime requalification
 
-After all authorized M1 repairs, run fresh direct runtimes with identical
-configuration and task-owned state:
+Fresh direct runtimes used identical configuration and task-owned state.
 
 ### Workload I — Connected but idle
 
-Start one, two, and four MCP clients, initialize them, and keep them idle for
-the frozen 60-second window without provider-backed work.
+One, two, and four MCP clients were initialized and kept idle for the frozen
+60-second window without provider-backed work.
 
 ### Workload II — Simultaneously active
 
-Start one, two, and four MCP clients. Give each the same frozen warm search
-workload concurrently against the same complete publication.
+One, two, and four MCP clients received the same frozen warm search workload
+concurrently against the same complete publication.
 
-For both workloads:
+Three repetitions were scheduled and completed for every client count. Runs
+under materially different WSL memory pressure remain recorded but are
+excluded from comparable aggregates. The evidence retains:
 
-- run three repetitions;
-- retain every process and child row;
-- report aggregate RSS and PSS;
-- report incremental PSS per additional direct runtime;
-- report Potion-worker count;
-- report warm-search p50 and empirical p95;
-- verify deterministic result equality;
-- verify zero external network attempts; and
-- keep publication and mutation behavior unchanged.
+- every process and child row;
+- aggregate RSS and PSS;
+- incremental PSS per additional direct runtime;
+- Potion-worker count;
+- warm-search p50 and empirical p95;
+- deterministic result identities; and
+- unchanged publication and mutation behavior.
+
+The child environments used only offline Potion + LanceDB configuration and
+removed connected-provider credentials. This memory program did not add a
+network tracer; it reuses the installed offline runtime contract rather than
+claiming a new packet-level qualification.
 
 ## 12. Shared-host reactivation gate
 
-Reactivate
-`docs/plans/SATORI_SHARED_OFFLINE_RUNTIME_HOST_PLAN.md`
-only when all of these are established after direct repair:
+The gate required:
 
 - the majority of remaining active-runtime memory is valid, retained, and not
   removable by a smaller direct fix;
@@ -870,11 +1009,18 @@ The observed existence of several idle client connections is not sufficient.
 The decision depends on the simultaneously active workload because idle direct
 runtimes are already approximately 71–84 MiB PSS.
 
-If the gate passes, record `shared_runtime_host_recommended` and reactivate H0
-only. It does not authorize H1-H4 automatically.
+The gate passed:
 
-If the gate does not pass, record `shared_runtime_host_deferred` and retain the
-host plan as a frozen design.
+- bounded LanceDB/Arrow and live-provider state explains the majority of the
+  remaining active cost;
+- exact provider and Potion owner counts multiply per direct process;
+- clean one-, two-, and four-client execution reproduces the multiplication;
+- the existing Context handled two canonical roots without Core redesign;
+- the 32 MiB thin-session ceiling projects a 64.1% four-client reduction; and
+- results remained stable across accepted simultaneous searches.
+
+Decision: `shared_runtime_host_recommended`. H0 is reactivated; H1-H4 are not
+authorized automatically.
 
 ## 13. Verification ownership
 
@@ -962,8 +1108,8 @@ repair success nor shared-host value can be claimed.
 
 ## 15. Evidence record
 
-Store task evidence outside the repository and checksum-seal the completed
-decision. Record:
+Task evidence is stored outside the repository and checksum-sealed. The record
+contains:
 
 - starting and ending revisions;
 - installed/runtime package identities;
@@ -984,16 +1130,16 @@ decision. Record:
 
 Do not commit evidence directories.
 
-## 16. Execution authority and boundary
+## 16. Completed execution boundary
 
-The current instruction authorizes:
+This program executed:
 
 ```text
 freeze task-owned fixtures and measurement identity
     -> implement the diagnostic-only harness
     -> run M0A-M0G
     -> checksum-seal one M0 decision
-    -> apply only localized M1 direct repairs
+    -> record that no localized safe M1 direct repair exists
     -> rerun invalidated M0 witnesses and focused correctness checks
     -> run M2 direct-runtime qualification
     -> checksum-seal one final decision
@@ -1006,7 +1152,6 @@ diagnostic state inside the isolated WSL environment. It does not authorize
 paid providers, mutation or deletion of active user indexes, new dependencies,
 or the deferred shared-host implementation.
 
-If M0 records `single_runtime_memory_owner_unresolved` and the smallest next
-step requires a new native profiler or dependency, stop with
-`single_runtime_memory_qualification_incomplete` rather than installing it
-implicitly.
+The program stopped before shared-host implementation. No native profiler,
+dependency, production telemetry, retrieval change, or user-index mutation was
+introduced.
