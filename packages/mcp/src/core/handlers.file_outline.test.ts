@@ -201,6 +201,7 @@ async function writeTestSymbolRegistry(
             hash: metadata.hash,
             language: metadata.language,
             symbolCount: metadata.symbolCount,
+            definitionStatus: 'definitions_present',
         })),
     };
 
@@ -1698,6 +1699,7 @@ test('handleFileOutline can read registry-backed outline from an injected naviga
                     hash: alpha.fileHash,
                     language: alpha.language,
                     symbolCount: 1,
+                    definitionStatus: 'definitions_present',
                 }],
             },
             symbols: [alpha],

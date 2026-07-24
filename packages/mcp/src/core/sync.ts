@@ -149,6 +149,17 @@ interface SyncStats {
     generationReceipt?: ProvenGenerationReceipt;
 }
 
+type SourceFreshnessCheckpointEvidence = Awaited<
+    ReturnType<Context['inspectSourceFreshnessCheckpoint']>
+>;
+type ValidSourceFreshnessCheckpointEvidence = Extract<
+    SourceFreshnessCheckpointEvidence,
+    { status: 'valid' }
+>;
+type SourceFreshnessCheckpointValidation =
+    | { checkpoint: ValidSourceFreshnessCheckpointEvidence | null }
+    | { failure: FreshnessDecision };
+
 type WatchSyncReason = 'watch_event' | 'ignore_rules_changed';
 
 interface EnsureFreshnessOptions {
@@ -369,7 +380,7 @@ export class SyncManager {
         checkedAt: string,
         thresholdMs: number,
         preparedVectorReceipt?: ProvenVectorGenerationReceipt,
-    ): Promise<FreshnessDecision | null> {
+    ): Promise<SourceFreshnessCheckpointValidation> {
         const checkpointEvidence = await this.inspectSourceFreshnessCheckpoint(
             codebasePath,
             preparedVectorReceipt,
@@ -381,20 +392,22 @@ export class SyncManager {
             if (previousObservation && previousObservation !== checkpointEvidence.observationToken) {
                 this.bumpFreshnessEpoch(codebasePath);
             }
-            return null;
+            return { checkpoint: checkpointEvidence };
         }
-        if (!checkpointEvidence) return null;
+        if (!checkpointEvidence) return { checkpoint: null };
 
         this.sourceCheckpointStatuses.set(codebasePath, checkpointEvidence.status);
         this.sourceCheckpointObservations.delete(codebasePath);
         this.lastSyncTimes.delete(codebasePath);
         this.bumpFreshnessEpoch(codebasePath);
         return {
-            mode: 'skipped_source_checkpoint_unavailable',
-            checkedAt,
-            thresholdMs,
-            checkpointStatus: checkpointEvidence.status,
-            errorMessage: checkpointEvidence.message,
+            failure: {
+                mode: 'skipped_source_checkpoint_unavailable',
+                checkedAt,
+                thresholdMs,
+                checkpointStatus: checkpointEvidence.status,
+                errorMessage: checkpointEvidence.message,
+            },
         };
     }
 
@@ -518,14 +531,20 @@ export class SyncManager {
         const checkedAt = new Date(checkedAtMs).toISOString();
 
         if (options.reason === 'ignore_change') {
-            const checkpointFailure = await this.validateSourceFreshnessCheckpoint(
+            const checkpointValidation = await this.validateSourceFreshnessCheckpoint(
                 codebasePath,
                 checkedAt,
                 thresholdMs,
                 options.preparedVectorReceipt,
             );
-            if (checkpointFailure) return checkpointFailure;
-            return this.runIgnoreReconcile(codebasePath, options.coalescedEdits, undefined, options.mutationLease);
+            if ('failure' in checkpointValidation) return checkpointValidation.failure;
+            return this.runIgnoreReconcile(
+                codebasePath,
+                options.coalescedEdits,
+                undefined,
+                options.mutationLease,
+                checkpointValidation.checkpoint?.generationReceipt,
+            );
         }
 
         // Join a live mutation before inspecting its checkpoint. The owner may be
@@ -553,13 +572,13 @@ export class SyncManager {
         // Source-freshness ownership is a precondition for every incremental path,
         // including ignore reconciliation. The identity comes from Core authority,
         // never from the lifecycle snapshot.
-        const checkpointFailure = await this.validateSourceFreshnessCheckpoint(
+        const checkpointValidation = await this.validateSourceFreshnessCheckpoint(
             codebasePath,
             checkedAt,
             thresholdMs,
             options.preparedVectorReceipt,
         );
-        if (checkpointFailure) return checkpointFailure;
+        if ('failure' in checkpointValidation) return checkpointValidation.failure;
 
         let currentIgnoreControlSignature: string | undefined;
         if (options.skipIgnoreControlCheck !== true) {
@@ -568,7 +587,13 @@ export class SyncManager {
 
             if (typeof persistedIgnoreControlSignature === 'string') {
                 if (persistedIgnoreControlSignature !== currentIgnoreControlSignature) {
-                    return this.runIgnoreReconcile(codebasePath, 1, currentIgnoreControlSignature, options.mutationLease);
+                    return this.runIgnoreReconcile(
+                        codebasePath,
+                        1,
+                        currentIgnoreControlSignature,
+                        options.mutationLease,
+                        checkpointValidation.checkpoint?.generationReceipt,
+                    );
                 }
             } else if (
                 (this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexed'
@@ -583,7 +608,13 @@ export class SyncManager {
                     : false;
 
                 if (indexedPaths.length > 0 || hasSynchronizer) {
-                    return this.runIgnoreReconcile(codebasePath, 1, currentIgnoreControlSignature, options.mutationLease);
+                    return this.runIgnoreReconcile(
+                        codebasePath,
+                        1,
+                        currentIgnoreControlSignature,
+                        options.mutationLease,
+                        checkpointValidation.checkpoint?.generationReceipt,
+                    );
                 }
 
             }
@@ -636,6 +667,7 @@ export class SyncManager {
                     {
                         exactSourceComparisonPaths: options.exactSourceComparisonPaths,
                     },
+                    checkpointValidation.checkpoint?.generationReceipt,
                 );
             } catch (e) {
                 // Log and rethrow to allow callers to handle/see failure
@@ -685,6 +717,7 @@ export class SyncManager {
         coalescedEdits: number = 1,
         nextIgnoreControlSignature?: string,
         existingLease?: RootMutationLease,
+        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<FreshnessDecision> {
         const reconcileKey = this.normalizeReconcileKey(codebasePath);
         const inFlight = this.activeIgnoreReconciles.get(reconcileKey);
@@ -725,7 +758,13 @@ export class SyncManager {
         try {
             lastDurableOperation = this.persistOwnedOperationStart(lease, releaseLease);
             console.log(`[SYNC] 🔁 Ignore control files changed for '${codebasePath}', running reconciliation.`);
-            const promise = this.reconcileIgnoreRulesChange(codebasePath, coalescedEdits, nextIgnoreControlSignature, lease);
+            const promise = this.reconcileIgnoreRulesChange(
+                codebasePath,
+                coalescedEdits,
+                nextIgnoreControlSignature,
+                lease,
+                preparedVectorReceipt,
+            );
             this.activeIgnoreReconciles.set(reconcileKey, promise);
             const decision = await promise;
             const phase = decision.mode === "ignore_reload_failed" ? "failed" : "completed";
@@ -759,6 +798,7 @@ export class SyncManager {
         coalescedEdits: number = 1,
         nextIgnoreControlSignature?: string,
         mutationLease?: RootMutationLease,
+        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<FreshnessDecision> {
         const checkedAtMs = this.now();
         const checkedAt = new Date(checkedAtMs).toISOString();
@@ -832,9 +872,13 @@ export class SyncManager {
             this.assertMutationCurrent(mutationLease);
             this.snapshotManager.saveCodebaseSnapshot();
 
+            // Deleting newly ignored payload invalidates ordinary live proof.
+            // Carry the pre-delete receipt so Core can revalidate that exact
+            // source generation after the mutation lease is held.
             const syncDecision = await this.ensureFreshness(codebasePath, 0, {
                 skipIgnoreControlCheck: true,
                 mutationLease,
+                preparedVectorReceipt,
             });
             const lastSyncAt = syncDecision.lastSyncAt;
             const lastSyncMs = lastSyncAt ? Date.parse(lastSyncAt) : undefined;
@@ -910,6 +954,7 @@ export class SyncManager {
         existingLease?: RootMutationLease,
         currentIgnoreControlSignature?: string,
         joinRequest: CrossProcessSyncJoinRequest = {},
+        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<SyncExecutionOutcome> {
         if (this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexing') {
             console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because indexing is active.`);
@@ -991,7 +1036,10 @@ export class SyncManager {
                     this.mutationLeaseCoordinator.publishWhileCurrent(lease, publish);
                 }
                 : undefined;
-            const fencedCheckpoint = await this.inspectSourceFreshnessCheckpoint(codebasePath);
+            const fencedCheckpoint = await this.inspectSourceFreshnessCheckpoint(
+                codebasePath,
+                preparedVectorReceipt,
+            );
             if (fencedCheckpoint && fencedCheckpoint.status !== 'valid') {
                 throw new Error(
                     `Incremental sync cannot continue because its authoritative source checkpoint is ${fencedCheckpoint.status}: ${fencedCheckpoint.message}`,

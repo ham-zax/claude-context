@@ -299,7 +299,7 @@ test("manage_index response shape is a JSON envelope in MCP text content", async
 
 test("public product docs and skills list manage_index repair and do not claim text-only responses", () => {
     const e2e = fs.readFileSync(
-        path.join(REPO_ROOT, "docs/SATORI_END_TO_END_FEATURE_BEHAVIOR_SPEC.md"),
+        path.join(REPO_ROOT, "docs/SATORI_FEATURES_AND_USE_CASES.md"),
         "utf8",
     );
     assert.match(e2e, /create\|reindex\|sync\|status\|clear\|repair/);

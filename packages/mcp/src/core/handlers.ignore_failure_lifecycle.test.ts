@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
     Context,
     Embedding,
@@ -138,6 +139,20 @@ class InMemoryVectorDatabase implements VectorDatabase {
 
     async hasCollection(collectionName: string): Promise<boolean> {
         return this.collections.has(collectionName);
+    }
+
+    async getPublicationObservation(collectionName: string): Promise<string | null> {
+        const collection = this.collections.get(collectionName);
+        if (!collection) return null;
+        return createHash('sha256')
+            .update(JSON.stringify(
+                [...collection.entries()].sort(([left], [right]) => left.localeCompare(right)),
+            ))
+            .digest('hex');
+    }
+
+    async getCollectionDataObservation(collectionName: string): Promise<string | null> {
+        return this.getPublicationObservation(collectionName);
     }
 
     async listCollections(): Promise<string[]> {
@@ -349,44 +364,10 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
         });
         await context.recreateSynchronizerForCodebase(repoPath);
         await context.indexCodebase(repoPath);
+        const checkpointReceipt = await context.proveIndexedGeneration(repoPath);
+        assert.ok(checkpointReceipt, 'expected the indexed fixture to publish one proven generation');
         const activeCollectionName = context.resolveCollectionName(repoPath);
-        const checkpointMarker = {
-            kind: 'satori_index_completion_v3' as const,
-            codebasePath: fs.realpathSync(repoPath),
-            runId: 'run_ignore_failure_fixture',
-            indexPolicyHash: 'a'.repeat(64),
-            indexedFiles: 3,
-            totalChunks: 6,
-            completedAt: '2026-06-18T00:00:00.000Z',
-            indexStatus: 'completed' as const,
-            navigation: { status: 'not_bound' as const },
-            fingerprint: {
-                embeddingProvider: 'TestEmbedding',
-                embeddingModel: 'test',
-                embeddingDimension: 4,
-                embeddingArtifactDigest: null,
-                embeddingNormalizationPolicy: 'provider_output_v1',
-                vectorStoreProvider: 'InMemory',
-                schemaVersion: 'hybrid_v3',
-                parserVersion: 'test',
-                extractorVersion: 'test',
-                relationshipVersion: 'test',
-                embeddingProjectionVersion: 'embedding-projection-v1',
-                lexicalProjectionVersion: 'lexical-projection-v1',
-            },
-        };
-        const checkpointReceipt = {
-            collectionName: activeCollectionName,
-            policyDocumentDigest: 'b'.repeat(64),
-            marker: checkpointMarker,
-        };
-        (context as unknown as {
-            proveVectorGeneration: () => Promise<typeof checkpointReceipt>;
-            proveIndexedGeneration: () => Promise<typeof checkpointReceipt>;
-        }).proveVectorGeneration = async () => checkpointReceipt;
-        (context as unknown as {
-            proveIndexedGeneration: () => Promise<typeof checkpointReceipt>;
-        }).proveIndexedGeneration = async () => checkpointReceipt;
+        assert.equal(checkpointReceipt.collectionName, activeCollectionName);
         const checkpointSynchronizer = new FileSynchronizer(
             repoPath,
             [],
@@ -395,8 +376,8 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
                 checkpointIdentity: activeCollectionName,
                 checkpointAuthority: {
                     collectionName: activeCollectionName,
-                    markerRunId: checkpointMarker.runId,
-                    indexPolicyHash: checkpointMarker.indexPolicyHash,
+                    markerRunId: checkpointReceipt.marker.runId,
+                    indexPolicyHash: checkpointReceipt.marker.indexPolicyHash,
                 },
             },
         );
@@ -424,12 +405,16 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
             CAPABILITIES,
             () => Date.parse('2026-06-18T00:00:00.000Z'),
         );
-        // Incomplete completion proof (no generation receipt) models genuinely unavailable
-        // prepared authority; exact opens must fail closed as NAVIGATION_UNAVAILABLE.
         const testHandlers = handlers as unknown as {
             validateCompletionProof: (codebasePath: string) => Promise<CompletionProofValidationResult>;
         };
-        testHandlers.validateCompletionProof = async () => ({ outcome: 'valid' });
+        testHandlers.validateCompletionProof = async () => ({
+            outcome: 'valid',
+            navigationStatus: 'valid',
+            collectionName: checkpointReceipt.collectionName,
+            vectorReceipt: checkpointReceipt,
+            generationReceipt: checkpointReceipt,
+        });
 
         const initialOutline = parsePayload(await handlers.handleFileOutline({
             path: repoPath,
@@ -439,7 +424,8 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
         const ignoredSymbol = findSymbol(initialOutline, 'ignoredLogin');
         const oldSymbolInstanceId = ignoredSymbol.symbolId;
 
-        // Before ignore reconciliation, incomplete authority still cannot prove exact opens.
+        // This fixture does not model a prepared-read observation, so exact
+        // opens remain unavailable even though the indexed generation is real.
         const unavailableBeforeIgnore = await readFileTool.execute({
             path: ignoredFilePath,
             mode: 'plain',

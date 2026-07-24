@@ -13,6 +13,7 @@ import {
     createSymbolKey,
     resetSharedRuntimeNavigationStoreForTests,
     resolveNavigationSidecarRoot,
+    writeNavigationSidecarGeneration,
     writeRelationshipSidecar,
     writeSymbolRegistrySidecar,
 } from '@zokizuan/satori-core';
@@ -170,6 +171,7 @@ async function writeNavigationSidecars(input: {
     symbols: SymbolRecord[];
     records?: RelationshipRecord[];
     relationshipManifestHash?: string;
+    generation?: boolean;
 }) {
     const filesByPath = new Map<string, { hash: string; language: string; symbolCount: number }>();
     for (const symbol of input.symbols) {
@@ -199,10 +201,30 @@ async function writeNavigationSidecars(input: {
             hash: metadata.hash,
             language: metadata.language,
             symbolCount: metadata.symbolCount,
+            definitionStatus: 'definitions_present',
         })),
     };
 
     const registry = buildSymbolRegistry({ manifest, symbols: input.symbols });
+    if (input.generation) {
+        const generation = await writeNavigationSidecarGeneration({
+            stateRoot: input.stateRoot,
+            registry,
+            records: input.records || [],
+            analysisByFile: new Map(manifest.files.map((file) => [file.path, {
+                moduleBindings: [],
+                callSites: [],
+            }])),
+        });
+        return {
+            registry,
+            manifestHash: generation.manifestHash,
+            relationshipManifestHash: generation.relationshipManifestHash,
+            generationId: generation.generationId,
+            generationRoot: path.join(generation.rootPath, 'generations', generation.generationId),
+            navigationSealHash: generation.navigationSealHash,
+        };
+    }
     const registryResult = await writeSymbolRegistrySidecar({
         stateRoot: input.stateRoot,
         registry,
@@ -283,6 +305,9 @@ function createSnapshotManager(repoPath: string, info: Record<string, unknown> =
 type PreparedAuthorityFixture = {
     symbolRegistryManifestHash: string;
     relationshipManifestHash: string;
+    generationId: string;
+    generationRoot: string;
+    navigationSealHash: string;
 };
 
 function createGenerationReceipt(
@@ -309,11 +334,11 @@ function createGenerationReceipt(
         policyDocumentDigest: '1'.repeat(64),
         exactPayloadCount: 1,
         navigation: {
-            generationId: 'navigation-generation-golden',
-            generationRoot: path.join(repoPath, '.satori-navigation-generation-golden'),
+            generationId: preparedAuthority.generationId,
+            generationRoot: preparedAuthority.generationRoot,
             symbolRegistryManifestHash: preparedAuthority.symbolRegistryManifestHash,
             relationshipManifestHash: preparedAuthority.relationshipManifestHash,
-            navigationSealHash: '3'.repeat(64),
+            navigationSealHash: preparedAuthority.navigationSealHash,
         },
         observations: {
             profileFileToken: null,
@@ -1303,10 +1328,18 @@ test('golden MCP read_file open_symbol current id returns bounded symbol_context
             fileHash: sha256Content(source),
             label: 'function run()',
         });
-        const sidecars = await writeNavigationSidecars({ stateRoot, repoPath, symbols: [run] });
+        const sidecars = await writeNavigationSidecars({
+            stateRoot,
+            repoPath,
+            symbols: [run],
+            generation: true,
+        });
         const { handlers, snapshotManager, syncManager } = createHandlers(repoPath, [], {
             symbolRegistryManifestHash: sidecars.manifestHash,
             relationshipManifestHash: sidecars.relationshipManifestHash,
+            generationId: sidecars.generationId!,
+            generationRoot: sidecars.generationRoot!,
+            navigationSealHash: sidecars.navigationSealHash!,
         });
 
         const response = await readFileTool.execute({
@@ -1344,10 +1377,18 @@ test('golden MCP read_file open_symbol stale id shape', async () => {
             fileHash: 'hash-runtime',
             label: 'function run()',
         });
-        const sidecars = await writeNavigationSidecars({ stateRoot, repoPath, symbols: [run] });
+        const sidecars = await writeNavigationSidecars({
+            stateRoot,
+            repoPath,
+            symbols: [run],
+            generation: true,
+        });
         const { handlers, snapshotManager, syncManager } = createHandlers(repoPath, [], {
             symbolRegistryManifestHash: sidecars.manifestHash,
             relationshipManifestHash: sidecars.relationshipManifestHash,
+            generationId: sidecars.generationId!,
+            generationRoot: sidecars.generationRoot!,
+            navigationSealHash: sidecars.navigationSealHash!,
         });
 
         const response = await readFileTool.execute({

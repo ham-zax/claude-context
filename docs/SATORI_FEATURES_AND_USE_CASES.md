@@ -2,7 +2,9 @@
 
 Satori helps coding agents find behavioral owners, navigate exact source, and detect when index evidence is stale. It is a read-only evidence layer, not a source editor and not a replacement for exact native lookup after a file is known.
 
-This guide covers common tasks. The authoritative tool contracts and edge-case behavior remain in [SATORI_END_TO_END_FEATURE_BEHAVIOR_SPEC.md](./SATORI_END_TO_END_FEATURE_BEHAVIOR_SPEC.md).
+This guide covers common tasks. The generated MCP tool schemas and descriptions
+are the authoritative input and response contracts; this document owns the
+public workflows that use them.
 
 ## Public Surface
 
@@ -40,6 +42,8 @@ Supported clients are `codex`, `claude`, and `opencode`. The installer:
 
 Public installer/doctor ownership is `packages/cli`; the MCP package owns the
 server and tool contracts, not client configuration.
+The legacy install and uninstall entrypoints under `packages/mcp` are
+hard-deprecated and direct users to `satori-cli`.
 
 On Linux x64/WSL2, the default offline Potion + LanceDB install shares one
 private local host across compatible Codex, Claude Code, OpenCode, and subagent
@@ -79,6 +83,12 @@ If the root is not indexed and provider configuration is complete, explicitly st
 `create` is a kickoff operation. Its response includes a durable operation receipt. Use `manage_index status` later to inspect the same operation, phase, durable transition, and terminal result.
 
 Do not repeatedly call `create` while indexing. A per-root mutation lease allows many readers but only one create, reindex, sync, repair, or clear operation at a time.
+
+The canonical lifecycle action set is
+`create|reindex|sync|status|clear|repair`. Every action returns a JSON envelope (serialized in `content[0].text`);
+clients must branch on its structured fields rather than parse prose. Repair responses may include optional `repairProof`
+evidence. No related collection routes to create, while an
+existing generation with a malformed completion marker routes to reindex.
 
 ### Index Policy
 

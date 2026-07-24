@@ -176,6 +176,7 @@ async function writeNavigationSidecars(input: {
             hash: symbol.fileHash,
             language: symbol.language,
             symbolCount: 1,
+            definitionStatus: 'definitions_present',
         })),
     };
     const registry = buildSymbolRegistry({ manifest, symbols: input.symbols });

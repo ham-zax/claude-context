@@ -5,6 +5,7 @@ import { ToolHandlers } from "./handlers.js";
 import type { PrepareSymbolContextSnapshotResult } from "./symbol-context-composer.js";
 
 type SnapshotAdapterHost = {
+    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
     prepareNavigationRead(absolutePath: string): Promise<unknown>;
     getPreparedNavigationIdentity(preparedRead: unknown): string | null;
     loadPreparedNavigationSymbolsByFile(
@@ -78,6 +79,10 @@ test("symbol-context handler adapter binds prepared navigation and relationship 
     let navigationIdentity: string | null = "prepared-generation";
     let loadedRelationshipManifestHash = "relationship-manifest";
     const host: SnapshotAdapterHost = {
+        acquirePublicationReadLease: async (codebasePath) => {
+            assert.equal(codebasePath, "/repo");
+            return undefined;
+        },
         prepareNavigationRead: async (absolutePath) => {
             assert.equal(absolutePath, "/repo/src/example.ts");
             return preparedRead;

@@ -1155,14 +1155,24 @@ provider-runtime, shared-identity, host, and session tests passed, as did all
 205 CLI tests, MCP and CLI typecheck, focused lint, generated documentation and
 manifest checks, the installed packed-closure release smoke, and diff checks.
 
-The complete MCP run remains red only in
-`handlers.golden.test.ts`, `handlers.ignore_failure_lifecycle.test.ts`,
-`handlers.symbol_context.test.ts`, `handlers.watchers.test.ts`, and
-`manage_index.test.ts`. The same failing file set and failure mechanisms
-reproduce on the updated main branch: stale navigation fixtures and the
-already-recorded missing public-documentation fixture. They are not evidence
-against the shared-host lifecycle repair, but they supersede the earlier claim
-that the missing documentation fixture was the complete run's sole failure.
+The inherited MCP failures were subsequently repaired at their current owners.
+Navigation fixtures now publish schema-v3 definition status and real sealed
+generations where exact reads require them; the symbol-context adapter models
+the publication read lease; and the public documentation assertion targets the
+maintained workflow guide instead of the intentionally removed archive.
+
+The ignore-reconciliation integration fixture also exposed a production flow
+gap. Reconciliation proved a source generation before deleting newly ignored
+payload, but discarded that receipt before recovery. The post-delete checkpoint
+gate then prevented both the intended incremental recovery and its fallback
+from running. `SyncManager` now carries the proven receipt through
+reconciliation and revalidates it after acquiring the mutation lease before
+calling Core. If both recovery attempts fail, the root is again marked
+`requires_reindex` and stale navigation remains unavailable.
+
+The repaired state passed the 43-test formerly failing fixture set, all 33
+file-outline tests, all 48 synchronization tests, MCP typecheck, and the
+complete 1,046-test MCP suite with zero failures.
 
 Because the lifecycle repair changes production runtime code after the initial
 H4 digest, the initial receipt remains historical evidence and does not qualify
@@ -1193,3 +1203,9 @@ The final decision applies only while the independently recomputed receipt
 identity matches its clean non-receipt parent, the evidence commit contains no
 other change, and every frozen correctness, memory, latency, process-count, and
 searchable-mutation gate passes.
+
+The post-merge `SyncManager` repair above changes production synchronization
+after that sealed receipt. The receipt remains historical evidence for its
+named clean parent, but it does not qualify this follow-up worktree. Extending
+`shared_runtime_pass` to a commit containing this repair requires a new clean
+parent and a new independently recomputed H4 receipt.
