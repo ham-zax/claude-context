@@ -23,13 +23,6 @@ type MutationCounters = {
 type RuntimeOwnerHint = Array<{ pid?: number }>;
 type BackendHint = { nextSteps: string[] };
 type RuntimeMismatchHint = { indexedFingerprint?: string };
-type ToolHandlersWithManageIndexingHost = {
-    manageIndexingHandlers: {
-        host: {
-            rebuildCallGraphForIndex(codebasePath: string): Promise<void>;
-        };
-    };
-};
 type ToolHandlersTestOverrides = {
     startBackgroundIndexing: (codebasePath: string, forceReindex: boolean, writeCollectionName?: string) => void;
 };
@@ -1466,9 +1459,19 @@ test('handleSyncCodebase surfaces coalesced in-flight reconcile failure from ens
     });
 });
 
-test('handleRepairIndex parses, executes, and rebuilds call graph on success', async () => {
+test('handleRepairIndex parses, executes, and proves the repaired generation on success', async () => {
     await withTempRepo(async (repoPath) => {
-        let rebuildCallGraphCalled = false;
+        const collectionName = 'repair-collection';
+        let proveIndexedGenerationCalled = false;
+        const repairProof = {
+            collection: { status: 'matched', basis: 'selected_active_collection' },
+            snapshot: { status: 'matched', basis: 'verified_snapshot_fingerprint' },
+            marker: { status: 'matched', basis: 'completion_marker_valid' },
+            fingerprint: { status: 'matched', basis: 'completion_marker_fingerprint' },
+            payload: { status: 'matched', expectedCount: 10, observedCount: 10, missingCount: 0 },
+            staleRemoteChunks: { status: 'matched', observedCount: 0 },
+            navigation: { status: 'matched', basis: 'activated_generation_proven' },
+        } as const;
 
         const context = {
             repairIndex: async (codebasePath: string) => {
@@ -1478,9 +1481,30 @@ test('handleRepairIndex parses, executes, and rebuilds call graph on success', a
                     message: 'readiness repaired',
                     indexedFiles: 5,
                     totalChunks: 10,
+                    collectionName,
                     warnings: [],
+                    proof: repairProof,
                 };
-            }
+            },
+            proveIndexedGeneration: async (codebasePath: string) => {
+                assert.equal(codebasePath, repoPath);
+                proveIndexedGenerationCalled = true;
+                return {
+                    collectionName,
+                    marker: {
+                        runId: 'repair-run',
+                        indexedFiles: 5,
+                        totalChunks: 10,
+                    },
+                    exactPayloadCount: 10,
+                    navigation: {
+                        generationId: 'repair-navigation',
+                        navigationSealHash: 'a'.repeat(64),
+                        symbolRegistryManifestHash: 'b'.repeat(64),
+                        relationshipManifestHash: 'c'.repeat(64),
+                    },
+                };
+            },
         } as unknown as HandlerContext;
 
         const snapshotManager = {
@@ -1507,19 +1531,14 @@ test('handleRepairIndex parses, executes, and rebuilds call graph on success', a
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES);
 
-        // Mock rebuildCallGraphForIndex
-        (handlers as unknown as ToolHandlersWithManageIndexingHost).manageIndexingHandlers.host.rebuildCallGraphForIndex = async (codebasePath: string) => {
-            assert.equal(codebasePath, repoPath);
-            rebuildCallGraphCalled = true;
-        };
-
         const response = await handlers.handleRepairIndex({ path: repoPath });
         const envelope = parseManageEnvelope(response);
 
         assert.equal(envelope.status, 'ok');
         assert.equal(envelope.action, 'repair');
         assert.match(envelope.message, /readiness repaired/i);
-        assert.ok(rebuildCallGraphCalled);
+        assert.equal(envelope.repairProof?.navigation.basis, 'activated_generation_proven');
+        assert.ok(proveIndexedGenerationCalled);
     });
 });
 

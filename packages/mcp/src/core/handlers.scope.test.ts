@@ -4098,6 +4098,7 @@ test('handleSearchCode debug exposes tracked lexical scan caps when the bounded 
             resultMode: 'grouped',
             groupBy: 'symbol',
             limit: 20,
+            disclosureLimit: 20,
             debugMode: 'full',
         });
 
