@@ -6556,6 +6556,7 @@ test('changed-code debug derives symbols and callers from the prepared relations
             files: new Set(['src/changed.ts']),
         }) as SearchDebugChangedCodeView;
 
+        assert.equal(changedCode.basis, 'git_tracked_worktree');
         assert.deepEqual(changedCode.files, ['src/changed.ts']);
         assert.deepEqual(changedCode.symbols, [
             {

@@ -109,6 +109,7 @@ export function buildChangedCodeDebug(input: {
     const cappedDirectCallers = directCallers.slice(0, input.maxDirectCallers);
 
     return {
+        basis: "git_tracked_worktree",
         files,
         symbols,
         directCallers: cappedDirectCallers,

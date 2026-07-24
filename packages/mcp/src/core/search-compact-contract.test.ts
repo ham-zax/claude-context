@@ -175,7 +175,7 @@ test("debug modes are projected from explicit source-level whitelists", () => {
         operatorSummary: {},
         filterSummary: {},
         changedFilesBoost: { enabled: true, applied: false, available: true, changedCount: 1, maxChangedFilesForBoost: 40, skippedForLargeChangeSet: false, multiplier: 1.1, boostedCandidates: 0 },
-        changedCode: { files: ["src/a.ts"], truncated: false },
+        changedCode: { basis: "git_tracked_worktree", files: ["src/a.ts"], truncated: false },
         rerank: { enabledByPolicy: false, skippedByScopeDocs: false, skippedByIdentifierIntent: true, capabilityPresent: true, rerankerPresent: true, enabled: false, attempted: false, applied: false, exactMatchPinningEnabled: true, exactMatchPinningApplied: false, candidatesIn: 1, candidatesReranked: 0, topK: 10, rankK: 60, weight: 0.5, docMaxLines: 40, docMaxChars: 4000 },
     } as unknown as SearchDebugHint;
     const build = (debugMode: "summary" | "ranking" | "freshness" | "full") => buildGroupedSearchEnvelope({

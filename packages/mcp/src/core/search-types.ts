@@ -503,6 +503,7 @@ export interface SearchDebugHint {
         boostedCandidates: number;
     };
     changedCode?: {
+        basis: "git_tracked_worktree";
         files: string[];
         symbols: Array<{
             file: string;

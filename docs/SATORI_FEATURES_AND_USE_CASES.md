@@ -102,7 +102,11 @@ Narrow with deterministic prefix operators when needed:
 lang:typescript path:packages/mcp/src must:lease interrupted indexing recovery
 ```
 
-Supported operators are `lang:`, `path:`, `-path:`, `must:`, and `exclude:`. Inspect:
+Supported operators are `lang:`, `path:`, `-path:`, `must:`, and `exclude:`. A directory operator is exact-prefix scoped; use `path:packages/mcp/src/**` (or `-path:.../**`) when recursive descendants are intended rather than relying on a trailing slash.
+
+When diagnostic output includes `changedCode`, its `basis="git_tracked_worktree"` means the changed-file set comes from Git-tracked worktree changes only. Untracked files are intentionally excluded from this ranking/debug signal; watcher and read-time freshness checks remain separate authority. Diagnostic modes are bounded projections: request the smallest useful mode (`summary`, `ranking`, or `freshness`) and use `full` only when those projections are insufficient.
+
+Inspect:
 
 - `warnings` and each warning action;
 - the envelope `recommendedNextAction`;
@@ -126,7 +130,7 @@ For grouped `formatVersion: 2` results, build reads from the envelope `codebaseR
 
 ### Inspect Relationships
 
-When a grouped result has `navigation.graph="ready"`, pass its `target` directly to `call_graph` with the envelope `codebaseRoot`. Relationship records use exact symbol identities, but coverage remains conservative: Python includes direct calls, exact same-class `self`/`cls`, uniquely authorized class-qualified calls, exact relative-import aliases, and simple identifier-typed parameters. String, generic, union, optional, chained, dynamic, external, and ambiguous receivers remain unresolved. Resolved calls from admitted test/fixture paths are also exposed separately as root-target `testReferences`; they do not become traversal edges. The target therefore carries `navigation.inbound="verify"`. Treat graph output as context, then confirm inbound impact with scoped text search, tests, or direct references. If `callerSearchTerm` is present, a separate `must:<term> <term>` search is the compact verification path. A successful `callers` or `both` traversal with zero inbound edges returns `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and an executable `hints.nextSteps` `search_codebase` action; run that deterministic `must:<identifier> <identifier>` verification instead of interpreting the empty edge list as proof that no caller exists.
+When a grouped result has `navigation.graph="ready"`, pass its `target` directly to `call_graph` with the envelope `codebaseRoot`. Relationship records use exact symbol identities, but coverage remains conservative: Python includes direct calls, exact same-class `self`/`cls`, uniquely authorized class-qualified calls, exact relative-import aliases, simple identifier-typed parameters, same-block direct constructor locals, and direct `self.<field>` constructor assignments from the exact class `__init__`. String, generic, union, optional, arbitrary chained, factory-return, cross-block, external, conflicting, and ambiguous receivers remain unresolved. Resolved calls from admitted test/fixture paths are also exposed separately as root-target `testReferences`; they do not become traversal edges. The target therefore carries `navigation.inbound="verify"`. Treat graph output as context, then confirm inbound impact with scoped text search, tests, or direct references. If `callerSearchTerm` is present, a separate `must:<term> <term>` search is the compact verification path. A successful `callers` or `both` traversal with zero inbound edges returns `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and an executable `hints.nextSteps` `search_codebase` action; run that deterministic `must:<identifier> <identifier>` verification instead of interpreting the empty edge list as proof that no caller exists.
 
 ### Read The Proof
 
@@ -154,7 +158,7 @@ Start with `manage_index status`. Use its proof and mechanically recommended nex
 
 ### Repair
 
-`repair` rebuilds local readiness only when vector payload, fingerprint, completion marker, and snapshot evidence satisfy the repair contract. A refusal identifies which proof failed and directs the next valid action. It does not guess or silently create a new index.
+`repair` rebuilds local readiness only when vector payload, fingerprint, completion marker, and snapshot evidence satisfy the repair contract. Exact payload proof requires complete expected-ID membership, an exact remote payload count, and adapter evidence that both observations saw one unchanged remote state. If the backend cannot provide that authority, repair returns `status="blocked"` with `reason="repair_proof_limit"`; this does not mean the payload is stale and does not recommend create or reindex. A refusal identifies which proof failed and directs the next valid action. It does not guess or silently create a new index.
 
 ### Reindex
 

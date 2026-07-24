@@ -1,6 +1,6 @@
 # Large-Repository Repair and Navigation Truth Plan
 
-Status: implementation-ready for B1-B5; B0 documentation complete
+Status: B1-B6 implementation and focused verification complete
 Created: 2026-07-23
 Repository baseline reviewed: `c9ece273fb18300cd19d80c2175eb7321955ebaf`
 Operational witness: `/home/hamza/repo/tradingview_ratio` at
@@ -895,6 +895,25 @@ Record:
 - focused tests added;
 - reused evidence;
 - final status of every terminal decision.
+
+Completion record (2026-07-24):
+
+- `SYMBOL_EXTRACTOR_VERSION` remains
+  `language-analysis-v15+${LANGUAGE_PARSER_VERSION}`;
+- the final registry identity is `symbol_registry_v3`;
+- the final relationship identities are
+  `relationship-v8+python-constructor-receivers` and
+  `relationship_file_contribution_v3`;
+- older registry and relationship-contribution artifacts remain rejected
+  through the existing incompatibility and reindex path;
+- 328 non-overlapping focused Core and MCP tests passed, along with Core/MCP
+  typechecking, changed-file ESLint, and `git diff --check`;
+- the terminal outcomes are `large_repair_exactness_pass`,
+  `empty_inbound_truth_pass`, `python_constructor_receiver_pass`,
+  `lexical_parent_binding_pass`, `definition_aware_capability_pass`,
+  `operational_truth_docs_pass`, and
+  `large_repository_navigation_truth_complete`; and
+- no B1-B6 blocker outcome remains active.
 
 Terminal decisions:
 
