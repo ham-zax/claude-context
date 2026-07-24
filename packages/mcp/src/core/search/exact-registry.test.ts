@@ -20,7 +20,7 @@ function manifest(files: SymbolRegistryManifest["files"]): SymbolRegistryManifes
         extractorVersion: "test-extractor",
         relationshipVersion: "test-relationships",
         builtAt: "2026-01-01T00:00:00.000Z",
-        files,
+        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
     };
 }
 

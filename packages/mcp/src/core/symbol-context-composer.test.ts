@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
 import test from "node:test";
-import type { SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
+import { SYMBOL_REGISTRY_SCHEMA_VERSION, type SymbolRecord, type SymbolRegistry } from "@zokizuan/satori-core";
 import type { CallGraphEdge } from "./call-graph.js";
 import type { CurrentSourceSymbolValidation } from "./current-source-symbols.js";
 import type {
@@ -52,7 +52,7 @@ function registry(symbols: SymbolRecord[]): SymbolRegistry {
     }
     return {
         manifest: {
-            schemaVersion: "symbol_registry_v1",
+            schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
             normalizedRootPath: "/repo",
             rootFingerprint: "root",
             indexPolicyHash: "policy",

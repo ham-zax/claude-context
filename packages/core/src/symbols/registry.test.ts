@@ -22,7 +22,7 @@ function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifes
         extractorVersion: 'extractor-v1',
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
-        files,
+        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
     };
 }
 
@@ -181,6 +181,63 @@ test('extracted namespace occurrences retain one stable key and distinct exact i
     const invoice = records.find((record) => record.name === 'Invoice');
     assert.equal(invoice?.qualifiedName, 'Billing.Invoice');
     assert.deepEqual(invoice?.parentQualifiedNamePath, ['Billing']);
+
+    const registry = buildSymbolRegistry({
+        manifest: manifest([{ path: 'src/namespaces.ts', hash: 'file-hash', language: 'typescript', symbolCount: records.length }]),
+        symbols: records,
+    });
+    const registeredInvoice = registry.symbols.find((record) => record.name === 'Invoice');
+    const containingNamespace = registry.symbols.find((record) => (
+        record.kind === 'namespace'
+        && record.span.startByte === 0
+    ));
+    assert.equal(registeredInvoice?.parentKey, containingNamespace?.symbolKey);
+    assert.equal(namespaces[0]?.extractorVersion, 'extractor-v2');
+    assert.equal(registeredInvoice?.symbolKey, invoice?.symbolKey);
+    assert.equal(registeredInvoice?.symbolInstanceId, invoice?.symbolInstanceId);
+});
+
+test('symbol registry populates an ordinary lexical parent without changing child identity', () => {
+    const records = buildSymbolRecordsForFile({
+        relativePath: 'src/service.ts',
+        language: 'typescript',
+        content: 'class Service { run() {} }',
+        fileHash: 'file-hash',
+        extractorVersion: 'extractor-v2',
+        chunks: [],
+        extractedSymbols: [
+            {
+                kind: 'class',
+                name: 'Service',
+                label: 'class Service',
+                qualifiedName: 'Service',
+                parentQualifiedNamePath: [],
+                span: { startLine: 1, endLine: 1, startByte: 0, endByte: 27 },
+            },
+            {
+                kind: 'method',
+                name: 'run',
+                label: 'method run()',
+                qualifiedName: 'Service.run',
+                parentQualifiedNamePath: ['Service'],
+                span: { startLine: 1, endLine: 1, startByte: 16, endByte: 24 },
+            },
+        ],
+    });
+    const originalMethod = records.find((record) => record.name === 'run');
+    const registry = buildSymbolRegistry({
+        manifest: manifest([{ path: 'src/service.ts', hash: 'file-hash', language: 'typescript', symbolCount: records.length }]),
+        symbols: records,
+    });
+    const service = registry.symbols.find((record) => record.name === 'Service');
+    const method = registry.symbols.find((record) => record.name === 'run');
+
+    assert.equal(service?.parentKey, undefined);
+    assert.equal(method?.parentKey, service?.symbolKey);
+    assert.equal(method?.symbolKey, originalMethod?.symbolKey);
+    assert.equal(method?.symbolInstanceId, originalMethod?.symbolInstanceId);
+    assert.equal(method?.qualifiedName, originalMethod?.qualifiedName);
+    assert.deepEqual(method?.span, originalMethod?.span);
 });
 
 test('extracted Rust macro retains its persisted macro kind and module ownership', () => {

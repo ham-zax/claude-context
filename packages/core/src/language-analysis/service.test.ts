@@ -1200,6 +1200,52 @@ test('Tree-sitter Python import-from bindings retain exact names without authori
     );
 });
 
+test('Tree-sitter Python records bounded constructor receiver evidence', async () => {
+    const result = await createLanguageAnalysisService().analyze({
+        content: [
+            'class Runner:',
+            '    def __init__(self):',
+            '        self.signal_gen = SignalGenerator()',
+            '        if enabled:',
+            '            self.nested = SignalGenerator()',
+            '',
+            '    def run(self):',
+            '        local = SignalGenerator()',
+            '        local.check_entry()',
+            '        if enabled:',
+            '            nested = SignalGenerator()',
+            '            nested.check_entry()',
+            '        factory = make_generator()',
+            '        factory.check_entry()',
+        ].join('\n'),
+        language: 'python',
+        relativePath: 'src/receivers.py',
+    });
+
+    assert.deepEqual(
+        result.receiverTypeBindings.map((binding) => [
+            binding.localName,
+            binding.typeName,
+            binding.kind,
+            'statementBlockSpan' in binding ? binding.statementBlockSpan.startLine : undefined,
+        ]),
+        [
+            ['self.signal_gen', 'SignalGenerator', 'self_field_constructor', undefined],
+            ['local', 'SignalGenerator', 'local_constructor', 8],
+            ['nested', 'SignalGenerator', 'local_constructor', 11],
+        ],
+    );
+    const memberCalls = result.callSites.filter((call) => call.kind === 'member');
+    assert.deepEqual(
+        memberCalls.map((call) => [call.qualifiedCallee, call.statementBlockSpan?.startLine]),
+        [
+            ['local.check_entry', 8],
+            ['nested.check_entry', 11],
+            ['factory.check_entry', 8],
+        ],
+    );
+});
+
 test('Tree-sitter Python records only simple directly annotated parameter receiver types', async () => {
     const result = await createLanguageAnalysisService().analyze({
         content: [

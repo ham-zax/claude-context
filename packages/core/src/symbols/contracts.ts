@@ -2,9 +2,9 @@ import { isRepositoryRelativePath } from '../paths/repository-path';
 
 export { isRepositoryRelativePath } from '../paths/repository-path';
 
-export const SYMBOL_REGISTRY_SCHEMA_VERSION = 'symbol_registry_v1';
+export const SYMBOL_REGISTRY_SCHEMA_VERSION = 'symbol_registry_v3';
 export const RELATIONSHIP_MANIFEST_SCHEMA_VERSION = 'relationship_v2';
-export const RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION = 'relationship_file_contribution_v2';
+export const RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION = 'relationship_file_contribution_v3';
 
 export const SYMBOL_KINDS = [
     'file',
@@ -82,11 +82,26 @@ export interface SymbolRecord {
     ontologyTags?: RepositoryOntologyTag[];
 }
 
+export const STRUCTURAL_DEFINITION_STATUSES = [
+    'definitions_present',
+    'definition_free',
+    'structural_unavailable',
+] as const;
+
+export type StructuralDefinitionStatus = typeof STRUCTURAL_DEFINITION_STATUSES[number];
+
+const STRUCTURAL_DEFINITION_STATUS_SET = new Set<string>(STRUCTURAL_DEFINITION_STATUSES);
+
+export function isStructuralDefinitionStatus(value: unknown): value is StructuralDefinitionStatus {
+    return typeof value === 'string' && STRUCTURAL_DEFINITION_STATUS_SET.has(value);
+}
+
 export interface SymbolRegistryManifestFile {
     path: string;
     hash: string;
     language: string;
     symbolCount: number;
+    definitionStatus: StructuralDefinitionStatus;
 }
 
 export interface SymbolRegistryManifest {
@@ -208,6 +223,7 @@ export function isSymbolRegistryManifest(value: unknown): value is SymbolRegistr
         && isNonEmptyString(file.hash)
         && isNonEmptyString(file.language)
         && isNonNegativeInteger(file.symbolCount)
+        && isStructuralDefinitionStatus(file.definitionStatus)
         && !seenPaths.has(file.path)
         && Boolean(seenPaths.add(file.path))
     ));

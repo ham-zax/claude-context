@@ -1,5 +1,6 @@
 import { readRelationshipSidecar, readSymbolRegistrySidecar } from '../symbols/sidecar';
 import type { ReadSymbolRegistrySidecarResult } from '../symbols/sidecar';
+import type { StructuralDefinitionStatus } from '../symbols/contracts';
 import type { PublicLanguageClaim } from './types';
 import { getLanguageCapabilityDeclaration } from './capabilities';
 
@@ -13,6 +14,9 @@ export interface LanguageCapabilityEvidenceEntry {
     symbolEvidence: {
         eligibleFiles: number;
         filesWithNonFileSymbols: number;
+        definitionBearingFiles: number;
+        definitionFreeFiles: number;
+        structurallyUnavailableFiles: number;
         status: 'symbol_rich' | 'mixed' | 'symbol_sparse' | 'search_only' | 'unknown';
     };
     relationshipEvidence: NavigationEvidenceStatus | 'not_applicable';
@@ -36,7 +40,7 @@ export interface LanguageCapabilityEvidenceInput {
     searchable: boolean;
     registryStatus: Exclude<NavigationEvidenceStatus, 'not_checked'>;
     relationshipStatus: NavigationEvidenceStatus;
-    files: readonly { language: string }[];
+    files: readonly { language: string; definitionStatus: StructuralDefinitionStatus }[];
     symbols: readonly { language: string; kind: string; file?: string }[];
 }
 
@@ -63,21 +67,35 @@ function symbolState(input: {
 }
 
 function navigationState(input: {
-    eligibleFiles: number;
-    filesWithNonFileSymbols: number;
+    definitionBearingFiles: number;
+    structurallyUnavailableFiles: number;
 }): EffectiveLanguageCapabilityState {
-    if (input.eligibleFiles > 0 && input.filesWithNonFileSymbols === input.eligibleFiles) return 'ready';
-    if (input.filesWithNonFileSymbols > 0) return 'degraded';
-    return 'unavailable';
+    if (input.definitionBearingFiles <= 0) return 'unavailable';
+    return input.structurallyUnavailableFiles > 0 ? 'degraded' : 'ready';
 }
 
 export function computeLanguageCapabilityEvidence(
     input: LanguageCapabilityEvidenceInput,
 ): LanguageCapabilityEvidenceSummary {
-    const filesByLanguage = new Map<string, number>();
+    const filesByLanguage = new Map<string, {
+        indexedFileCount: number;
+        definitionBearingFiles: number;
+        definitionFreeFiles: number;
+        structurallyUnavailableFiles: number;
+    }>();
     for (const file of input.files) {
         const language = canonicalLanguage(file.language);
-        filesByLanguage.set(language, (filesByLanguage.get(language) || 0) + 1);
+        const stats = filesByLanguage.get(language) || {
+            indexedFileCount: 0,
+            definitionBearingFiles: 0,
+            definitionFreeFiles: 0,
+            structurallyUnavailableFiles: 0,
+        };
+        stats.indexedFileCount += 1;
+        if (file.definitionStatus === 'definitions_present') stats.definitionBearingFiles += 1;
+        if (file.definitionStatus === 'definition_free') stats.definitionFreeFiles += 1;
+        if (file.definitionStatus === 'structural_unavailable') stats.structurallyUnavailableFiles += 1;
+        filesByLanguage.set(language, stats);
     }
 
     const nonFileSymbolFilesByLanguage = new Map<string, Set<string>>();
@@ -90,18 +108,22 @@ export function computeLanguageCapabilityEvidence(
     }
 
     const languages = Array.from(filesByLanguage.entries())
-        .map(([language, indexedFileCount]): LanguageCapabilityEvidenceEntry => {
+        .map(([language, fileStats]): LanguageCapabilityEvidenceEntry => {
             const declaration = getLanguageCapabilityDeclaration(language);
             const declaredClaim = declaration?.publicClaim || 'undeclared';
             const searchOnly = declaredClaim === 'search_only';
-            const eligibleFiles = searchOnly ? 0 : indexedFileCount;
+            const indexedFileCount = fileStats.indexedFileCount;
+            const definitionBearingFiles = searchOnly ? 0 : fileStats.definitionBearingFiles;
+            const definitionFreeFiles = searchOnly ? 0 : fileStats.definitionFreeFiles;
+            const structurallyUnavailableFiles = searchOnly ? 0 : fileStats.structurallyUnavailableFiles;
+            const eligibleFiles = definitionBearingFiles + structurallyUnavailableFiles;
             const filesWithNonFileSymbols = searchOnly
                 ? 0
-                : Math.min(indexedFileCount, nonFileSymbolFilesByLanguage.get(language)?.size || 0);
+                : Math.min(definitionBearingFiles, nonFileSymbolFilesByLanguage.get(language)?.size || 0);
             const status = symbolState({ eligibleFiles, filesWithNonFileSymbols, searchOnly });
             const symbolNavigation = searchOnly
                 ? 'not_applicable'
-                : navigationState({ eligibleFiles, filesWithNonFileSymbols });
+                : navigationState({ definitionBearingFiles, structurallyUnavailableFiles });
             const effectiveSymbolNavigation = input.searchable || symbolNavigation === 'not_applicable'
                 ? symbolNavigation
                 : 'unavailable';
@@ -124,8 +146,8 @@ export function computeLanguageCapabilityEvidence(
             const degradationReasons: string[] = [];
             if (!input.searchable) degradationReasons.push('index_not_searchable');
             if (!declaration) degradationReasons.push('undeclared_language');
-            if (symbolNavigation === 'degraded') degradationReasons.push('symbol_evidence_partial');
-            if (!searchOnly && filesWithNonFileSymbols === 0) degradationReasons.push('symbol_evidence_missing');
+            if (structurallyUnavailableFiles > 0) degradationReasons.push('structural_evidence_unavailable');
+            if (!searchOnly && definitionBearingFiles === 0) degradationReasons.push('definition_evidence_missing');
             if (supportsCallGraph && input.relationshipStatus !== 'compatible') {
                 degradationReasons.push(`relationship_sidecar_${input.relationshipStatus}`);
             }
@@ -134,7 +156,14 @@ export function computeLanguageCapabilityEvidence(
                 language,
                 declaredClaim,
                 indexedFileCount,
-                symbolEvidence: { eligibleFiles, filesWithNonFileSymbols, status },
+                symbolEvidence: {
+                    eligibleFiles,
+                    filesWithNonFileSymbols,
+                    definitionBearingFiles,
+                    definitionFreeFiles,
+                    structurallyUnavailableFiles,
+                    status,
+                },
                 relationshipEvidence,
                 capabilities: {
                     semanticSearch: input.searchable ? 'ready' : 'unavailable',

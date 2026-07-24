@@ -563,6 +563,87 @@ function compareSymbols(a: SymbolRecord, b: SymbolRecord): number {
     return compareStrings(a.symbolInstanceId, b.symbolInstanceId);
 }
 
+function parentQualifiedName(parentPath: readonly string[]): string {
+    return parentPath
+        .map((segment) => parseSymbolLabel(segment)?.name || segment.trim())
+        .filter((segment) => segment.length > 0)
+        .join('.');
+}
+
+function symbolContains(parent: SymbolRecord, child: SymbolRecord): boolean {
+    if (parent.file !== child.file || parent.symbolInstanceId === child.symbolInstanceId) {
+        return false;
+    }
+    if (
+        parent.span.startByte !== undefined
+        && parent.span.endByte !== undefined
+        && child.span.startByte !== undefined
+        && child.span.endByte !== undefined
+    ) {
+        return parent.span.startByte <= child.span.startByte
+            && child.span.endByte <= parent.span.endByte;
+    }
+    return parent.span.startLine <= child.span.startLine
+        && child.span.endLine <= parent.span.endLine;
+}
+
+function containingSpanSize(symbol: SymbolRecord, useBytes: boolean): number {
+    return useBytes
+        ? Math.max(0, symbol.span.endByte! - symbol.span.startByte!)
+        : Math.max(0, symbol.span.endLine - symbol.span.startLine);
+}
+
+function withoutParentKey(symbol: SymbolRecord): SymbolRecord {
+    const clone = { ...symbol };
+    delete clone.parentKey;
+    return clone;
+}
+
+function populateParentKeys(symbols: readonly SymbolRecord[]): SymbolRecord[] {
+    const symbolsByFileAndQualifiedName = new Map<string, SymbolRecord[]>();
+    for (const symbol of symbols) {
+        const key = `${symbol.file}\0${symbol.qualifiedName}`;
+        const candidates = symbolsByFileAndQualifiedName.get(key);
+        if (candidates) {
+            candidates.push(symbol);
+        } else {
+            symbolsByFileAndQualifiedName.set(key, [symbol]);
+        }
+    }
+
+    return symbols.map((symbol) => {
+        if (symbol.parentQualifiedNamePath.length === 0) {
+            if (!symbol.parentKey) return symbol;
+            return withoutParentKey(symbol);
+        }
+        const expectedParentQualifiedName = parentQualifiedName(symbol.parentQualifiedNamePath);
+        const containingCandidates = (symbolsByFileAndQualifiedName.get(
+            `${symbol.file}\0${expectedParentQualifiedName}`,
+        ) || []).filter((candidate) => symbolContains(candidate, symbol));
+        if (containingCandidates.length === 0) {
+            return symbol.parentKey ? withoutParentKey(symbol) : symbol;
+        }
+        const byteCandidates = containingCandidates.filter((candidate) => (
+            candidate.span.startByte !== undefined
+            && candidate.span.endByte !== undefined
+            && symbol.span.startByte !== undefined
+            && symbol.span.endByte !== undefined
+        ));
+        const candidates = byteCandidates.length > 0 ? byteCandidates : containingCandidates;
+        const useBytes = byteCandidates.length > 0;
+        const innermostSize = Math.min(...candidates.map((candidate) => (
+            containingSpanSize(candidate, useBytes)
+        )));
+        const parentKeys = new Set(candidates
+            .filter((candidate) => containingSpanSize(candidate, useBytes) === innermostSize)
+            .map((candidate) => candidate.symbolKey));
+        if (parentKeys.size !== 1) {
+            return symbol.parentKey ? withoutParentKey(symbol) : symbol;
+        }
+        return { ...symbol, parentKey: [...parentKeys][0] };
+    });
+}
+
 function appendToMap(map: Map<string, SymbolRecord[]>, key: string, symbol: SymbolRecord): void {
     const existing = map.get(key);
     if (existing) {
@@ -573,7 +654,7 @@ function appendToMap(map: Map<string, SymbolRecord[]>, key: string, symbol: Symb
 }
 
 export function buildSymbolRegistry(input: BuildSymbolRegistryInput): SymbolRegistry {
-    const symbols = [...input.symbols].sort(compareSymbols);
+    const symbols = populateParentKeys(input.symbols).sort(compareSymbols);
     const symbolsByInstanceId = new Map<string, SymbolRecord>();
     const symbolsByKey = new Map<string, SymbolRecord[]>();
     const symbolsByFile = new Map<string, SymbolRecord[]>();
@@ -619,6 +700,7 @@ export function computeSymbolRegistryManifestHash(manifest: SymbolRegistryManife
                 hash: file.hash,
                 language: file.language,
                 symbolCount: file.symbolCount,
+                definitionStatus: file.definitionStatus,
             }))
             .sort((a, b) => compareStrings(a.path, b.path)),
     };

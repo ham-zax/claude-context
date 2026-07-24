@@ -13,6 +13,8 @@ function createSymbol(input: {
     qualifiedName: string;
     parentKey?: string;
     parentQualifiedNamePath?: string[];
+    file?: string;
+    span?: SymbolRecord["span"];
 }): SymbolRecord {
     return {
         symbolKey: input.symbolKey,
@@ -22,8 +24,8 @@ function createSymbol(input: {
         name: input.name,
         qualifiedName: input.qualifiedName,
         label: `${input.parentKey ? "method" : "class"} ${input.name}`,
-        file: "src/service.ts",
-        span: { startLine: 1, endLine: 3, startByte: 0, endByte: 20 },
+        file: input.file || "src/service.ts",
+        span: input.span || { startLine: 1, endLine: 3, startByte: 0, endByte: 20 },
         ...(input.parentKey ? { parentKey: input.parentKey } : {}),
         parentQualifiedNamePath: input.parentQualifiedNamePath || [],
         fileHash: "file-hash",
@@ -37,6 +39,7 @@ test("canonical symbol identity projects registry metadata and uniquely resolved
         symbolInstanceId: "parent-instance",
         name: "Service",
         qualifiedName: "Service",
+        span: { startLine: 1, endLine: 10, startByte: 0, endByte: 100 },
     });
     const child: SymbolRecord = {
         ...createSymbol({
@@ -112,6 +115,40 @@ test("canonical symbol identity reports ambiguous, missing, and non-applicable p
         symbol: firstParent,
         registry: buildCanonicalSymbolRegistryView([firstParent]),
     }).parentResolution, "not_applicable");
+});
+
+test("canonical symbol identity resolves the containing reopened parent instance", () => {
+    const firstNamespace = createSymbol({
+        symbolKey: "namespace-key",
+        symbolInstanceId: "namespace-one",
+        name: "Billing",
+        qualifiedName: "Billing",
+        span: { startLine: 1, endLine: 5, startByte: 0, endByte: 50 },
+    });
+    const secondNamespace = createSymbol({
+        symbolKey: "namespace-key",
+        symbolInstanceId: "namespace-two",
+        name: "Billing",
+        qualifiedName: "Billing",
+        span: { startLine: 10, endLine: 15, startByte: 100, endByte: 150 },
+    });
+    const child = createSymbol({
+        symbolKey: "child-key",
+        symbolInstanceId: "child-instance",
+        name: "run",
+        qualifiedName: "Billing.run",
+        parentKey: "namespace-key",
+        parentQualifiedNamePath: ["namespace Billing"],
+        span: { startLine: 11, endLine: 12, startByte: 110, endByte: 130 },
+    });
+
+    const identity = projectCanonicalSymbolIdentity({
+        symbol: child,
+        registry: buildCanonicalSymbolRegistryView([firstNamespace, secondNamespace, child]),
+    });
+
+    assert.equal(identity.parentResolution, "resolved");
+    assert.equal(identity.parentSymbolId, "namespace-two");
 });
 
 test("canonical symbol identity does not resolve a self-referential parent", () => {

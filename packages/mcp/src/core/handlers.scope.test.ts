@@ -289,6 +289,7 @@ async function writeSearchSymbolRegistry(input: {
             hash: fileHash,
             language,
             symbolCount: symbols.length,
+            definitionStatus: 'definitions_present',
         }],
     };
 
@@ -360,6 +361,7 @@ async function writeSearchSymbolRegistryForFiles(input: {
             hash: fileHash,
             language,
             symbolCount: symbols.length,
+            definitionStatus: 'definitions_present',
         });
     }
 
@@ -481,6 +483,7 @@ async function writeSearchRelationshipSidecar(input: {
             hash: input.fileHash,
             language: input.language,
             symbolCount: input.symbolCount,
+            definitionStatus: 'definitions_present',
         }],
         records: input.records,
         analysisByFile: new Map([[input.relativePath, {
@@ -539,6 +542,7 @@ async function writeSearchNavigationSidecars(input: {
             hash: fileHash,
             language,
             symbolCount: symbols.length,
+            definitionStatus: 'definitions_present',
         }],
     };
     const registry = buildSymbolRegistry({ manifest, symbols });
@@ -3246,6 +3250,7 @@ test('handleSearchCode declines an invalid exact registry target and continues n
                     hash: 'invalid-registry-hash',
                     language: 'typescript',
                     symbolCount: 1,
+                    definitionStatus: 'definitions_present',
                 }],
             };
             const invalidSymbol: SymbolRecord = {

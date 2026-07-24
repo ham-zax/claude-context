@@ -38,7 +38,7 @@ function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifes
         extractorVersion: 'extractor-v1',
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
-        files,
+        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
     };
 }
 
@@ -228,7 +228,7 @@ test('writeSymbolRegistrySidecar writes sharding-ready registry files and read r
         const manifestPath = path.join(result.rootPath, 'manifest.json');
         const indexPath = path.join(result.rootPath, 'symbols', 'index.json');
 
-        assert.equal(JSON.parse(await fs.promises.readFile(manifestPath, 'utf8')).schemaVersion, 'symbol_registry_v1');
+        assert.equal(JSON.parse(await fs.promises.readFile(manifestPath, 'utf8')).schemaVersion, 'symbol_registry_v3');
         const index = JSON.parse(await fs.promises.readFile(indexPath, 'utf8'));
         assert.equal(index.schemaVersion, 'symbol_index_v3');
         assert.equal(index.manifestHash, result.manifestHash);
@@ -426,6 +426,70 @@ test('writeRelationshipSidecar preserves evidence-only files when manifest files
 
         assert.equal(loaded.status, 'ok');
         assert.deepEqual(loaded.analysisByFile?.get('src/unrelated.ts'), analysisEvidence);
+    });
+});
+
+test('relationship sidecars preserve canonical constructor receiver evidence', async () => {
+    await withTempDir(async (stateRoot) => {
+        const span = {
+            startLine: 2,
+            endLine: 2,
+            startByte: 10,
+            endByte: 38,
+            startColumn: 4,
+            endColumn: 32,
+        };
+        const statementBlockSpan = {
+            startLine: 1,
+            endLine: 5,
+            startByte: 0,
+            endByte: 80,
+            startColumn: 0,
+            endColumn: 0,
+        };
+        await writeRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            symbolRegistryManifestHash: 'manifest-hash',
+            relationshipVersion: 'relationship-v8',
+            builtAt: '2026-07-24T00:00:00.000Z',
+            records: [],
+            analysisByFile: new Map([['src/runtime.py', {
+                moduleBindings: [],
+                callSites: [],
+                receiverTypeBindings: [{
+                    localName: 'signal_gen',
+                    typeName: 'SignalGenerator',
+                    kind: 'local_constructor',
+                    span,
+                    statementBlockSpan,
+                }, {
+                    localName: 'self.signal_gen',
+                    typeName: 'SignalGenerator',
+                    kind: 'self_field_constructor',
+                    span,
+                }],
+            }]]),
+        });
+
+        const loaded = await readRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            expectedSymbolRegistryManifestHash: 'manifest-hash',
+        });
+        assert.equal(loaded.status, 'ok');
+        assert.deepEqual(loaded.analysisByFile?.get('src/runtime.py')?.receiverTypeBindings, [{
+            localName: 'signal_gen',
+            typeName: 'SignalGenerator',
+            kind: 'local_constructor',
+            span,
+            statementBlockSpan,
+        }, {
+            localName: 'self.signal_gen',
+            typeName: 'SignalGenerator',
+            kind: 'self_field_constructor',
+            span,
+        }]);
     });
 });
 
@@ -968,7 +1032,7 @@ test('readSymbolRegistrySidecar reports missing and incompatible registry states
 
         const rootPath = resolveNavigationSidecarRoot(stateRoot, '/repo');
         await fs.promises.mkdir(rootPath, { recursive: true });
-        await fs.promises.writeFile(path.join(rootPath, 'manifest.json'), JSON.stringify({ schemaVersion: 'wrong' }), 'utf8');
+        await fs.promises.writeFile(path.join(rootPath, 'manifest.json'), JSON.stringify({ schemaVersion: 'symbol_registry_v1' }), 'utf8');
 
         const incompatible = await readSymbolRegistrySidecar({ stateRoot, normalizedRootPath: '/repo' });
         assert.equal(incompatible.status, 'incompatible');
@@ -1397,7 +1461,17 @@ test('writeNavigationSidecarGeneration publishes symbols and relationships throu
             extractorVersion: 'extractor-v1',
         });
         const secondRegistry = buildSymbolRegistry({
-            manifest: { ...firstRegistry.manifest, builtAt: '2026-06-18T00:00:00.000Z', files: [{ path: 'src/auth.ts', hash: 'hash-auth-v2', language: 'typescript', symbolCount: 1 }] },
+            manifest: {
+                ...firstRegistry.manifest,
+                builtAt: '2026-06-18T00:00:00.000Z',
+                files: [{
+                    path: 'src/auth.ts',
+                    hash: 'hash-auth-v2',
+                    language: 'typescript',
+                    symbolCount: 1,
+                    definitionStatus: 'definitions_present',
+                }],
+            },
             symbols: [secondSymbol],
         });
         await assert.rejects(

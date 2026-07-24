@@ -2985,6 +2985,7 @@ test('Context navigation publication fails closed when relationship evidence can
                     hash: crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
                     language: 'typescript',
                     symbolCount: 0,
+                    definitionStatus: 'definitions_present',
                 }],
                 undefined,
                 new Map(),
@@ -3019,7 +3020,13 @@ test('Context advances a complete navigation generation through the supplied mut
         await (context as unknown as ContextWithNavigationPublisher).writeSymbolRegistryForCompletedIndex(
             codebasePath,
             [],
-            [{ path: relativePath, hash: crypto.createHash('sha256').update(content, 'utf8').digest('hex'), language: 'typescript', symbolCount: 0 }],
+            [{
+                path: relativePath,
+                hash: crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
+                language: 'typescript',
+                symbolCount: 0,
+                definitionStatus: 'definitions_present',
+            }],
             undefined,
             new Map([[relativePath, { moduleBindings: [], callSites: [] }]]),
             (publish) => {
@@ -3118,6 +3125,66 @@ test('Context.processFileList returns symbol records, manifest files, and comple
         assert.ok(result.symbolRecords.length > 0);
         assert.equal(result.symbolManifestFiles.length, 1);
         assert.equal(result.symbolManifestFiles[0]?.path, 'src/auth.ts');
+        assert.equal(result.symbolManifestFiles[0]?.definitionStatus, 'definitions_present');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context persists definition-free and unavailable structural evidence in manifest files', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-definition-status-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const emptyPath = path.join(codebasePath, 'src', 'empty.py');
+    const recoveredPath = path.join(codebasePath, 'src', 'recovered.py');
+    const analysisStatusByPath = new Map<string, 'complete' | 'recovered'>([
+        ['src/empty.py', 'complete'],
+        ['src/recovered.py', 'recovered'],
+    ]);
+    const analyzer: LanguageAnalysisPort = {
+        async analyze(input) {
+            const structuralStatus = analysisStatusByPath.get(input.relativePath);
+            assert.ok(structuralStatus);
+            const common = {
+                backend: 'bounded_text' as const,
+                symbols: [],
+                moduleBindings: [],
+                callSites: [],
+                receiverTypeBindings: [],
+                chunks: [{
+                    content: input.content,
+                    metadata: {
+                        startLine: 1,
+                        endLine: 1,
+                        language: input.language,
+                        filePath: input.relativePath,
+                    },
+                }],
+            };
+            return structuralStatus === 'complete'
+                ? { ...common, structuralStatus }
+                : { ...common, structuralStatus, structuralReason: 'syntax_error' as const };
+        },
+        getDescription() { return 'definition-status analyzer'; },
+        getStrategyForLanguage() { return { backend: 'bounded_text' as const, structural: true }; },
+    };
+
+    try {
+        fs.mkdirSync(path.dirname(emptyPath), { recursive: true });
+        fs.writeFileSync(emptyPath, 'from .types import Model\n', 'utf8');
+        fs.writeFileSync(recoveredPath, 'def broken(:\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({ embedding: new TestEmbedding(), vectorDatabase, languageAnalyzer: analyzer });
+        await vectorDatabase.createHybridCollection(context.resolveCollectionName(codebasePath));
+
+        const result = await (context as unknown as ContextWithProcessFileList)
+            .processFileList([emptyPath, recoveredPath], codebasePath);
+        assert.deepEqual(
+            result.symbolManifestFiles.map((file) => [file.path, file.definitionStatus]),
+            [
+                ['src/empty.py', 'definition_free'],
+                ['src/recovered.py', 'structural_unavailable'],
+            ],
+        );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

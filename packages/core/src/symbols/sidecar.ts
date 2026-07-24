@@ -6,6 +6,7 @@ import {
     RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION,
     RELATIONSHIP_MANIFEST_SCHEMA_VERSION,
     isRelationshipManifest,
+    isStructuralDefinitionStatus,
     isSymbolKind,
     isSymbolRegistryManifest,
 } from './contracts';
@@ -73,6 +74,7 @@ interface SymbolIndexFileEntry {
     hash: string;
     language: string;
     symbolCount: number;
+    definitionStatus: SymbolRegistryManifestFile['definitionStatus'];
     shardPath: string;
     shardHash: string;
 }
@@ -466,6 +468,7 @@ function buildSymbolIndex(
                 hash: file.hash,
                 language: file.language,
                 symbolCount: file.symbolCount,
+                definitionStatus: file.definitionStatus,
                 shardPath: path.posix.join(SYMBOLS_DIR_NAME, 'by-file', fileShardName(file.path, file.hash)),
                 shardHash: shardHashes.get(file.path) ?? '',
             }))
@@ -613,6 +616,7 @@ async function writeSymbolRegistrySidecarInternal(
                         || source.hash !== file.hash
                         || source.language !== file.language
                         || source.symbolCount !== file.symbolCount
+                        || source.definitionStatus !== file.definitionStatus
                         || path.basename(source.shardPath) !== shardFileName
                     ) {
                         throw new Error(`Reusable symbol contribution is incompatible for '${file.path}'; reindex is required.`);
@@ -1107,6 +1111,7 @@ function isSymbolIndexFile(value: unknown): value is SymbolIndexFile {
             && isNonEmptyString(file.hash)
             && isNonEmptyString(file.language)
             && isNonNegativeInteger(file.symbolCount)
+            && isStructuralDefinitionStatus(file.definitionStatus)
             && isRepositoryRelativePath(file.shardPath)
             && typeof file.shardHash === 'string'
             && /^[a-f0-9]{64}$/.test(file.shardHash)
@@ -1135,6 +1140,7 @@ function symbolIndexMatchesManifest(
             && actual.hash === file.hash
             && actual.language === file.language
             && actual.symbolCount === file.symbolCount
+            && actual.definitionStatus === file.definitionStatus
             && actual.shardPath === file.shardPath;
     });
 }
@@ -1721,14 +1727,21 @@ function isRelationshipAnalysisEvidence(value: unknown): value is RelationshipAn
         && isNonEmptyString(call.calleeName)
         && isSourceSpan(call.span)
     ));
-    const receiverTypesValid = value.receiverTypeBindings.every((binding) => (
-        isRecord(binding)
-        && Object.keys(binding).length === 4
-        && isNonEmptyString(binding.localName)
-        && isNonEmptyString(binding.typeName)
-        && binding.kind === 'parameter_annotation'
-        && isSourceSpan(binding.span)
-    ));
+    const receiverTypesValid = value.receiverTypeBindings.every((binding) => {
+        if (
+            !isRecord(binding)
+            || !isNonEmptyString(binding.localName)
+            || !isNonEmptyString(binding.typeName)
+            || !isSourceSpan(binding.span)
+        ) {
+            return false;
+        }
+        if (binding.kind === 'local_constructor') {
+            return Object.keys(binding).length === 5 && isSourceSpan(binding.statementBlockSpan);
+        }
+        return Object.keys(binding).length === 4
+            && (binding.kind === 'parameter_annotation' || binding.kind === 'self_field_constructor');
+    });
     return bindingsValid && callsValid && receiverTypesValid;
 }
 

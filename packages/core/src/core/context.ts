@@ -168,6 +168,7 @@ interface AnalyzedIndexedFile {
     /** Decoded UTF-8 identity retained by navigation manifest compatibility. */
     readonly contentHash: string;
     readonly language: string;
+    readonly structuralStatus: LanguageAnalysisResult['structuralStatus'];
     readonly chunks: CodeChunk[];
     readonly extractedSymbols: LanguageAnalysisResult['symbols'];
     readonly moduleBindings: LanguageAnalysisResult['moduleBindings'];
@@ -6266,6 +6267,7 @@ export class Context {
             sourceHash: sourceObservation.sourceHash,
             contentHash: crypto.createHash('sha256').update(source, 'utf8').digest('hex'),
             language,
+            structuralStatus: analysis.structuralStatus,
             chunks: chunksWithTrustedRelativePath(analysis.chunks, relativePath),
             extractedSymbols: analysis.symbols,
             moduleBindings: analysis.moduleBindings,
@@ -6284,6 +6286,10 @@ export class Context {
             extractedSymbols: analyzed.extractedSymbols,
             chunks: analyzed.chunks,
         });
+        const hasDefinitions = symbolRecords.some((symbol) => symbol.kind !== 'file');
+        const definitionStatus = analyzed.structuralStatus !== 'complete'
+            ? 'structural_unavailable'
+            : hasDefinitions ? 'definitions_present' : 'definition_free';
         return {
             symbolRecords,
             manifestFile: {
@@ -6291,6 +6297,7 @@ export class Context {
                 hash: analyzed.contentHash,
                 language: analyzed.language,
                 symbolCount: symbolRecords.length,
+                definitionStatus,
             },
             relationshipEvidence: {
                 moduleBindings: analyzed.moduleBindings,

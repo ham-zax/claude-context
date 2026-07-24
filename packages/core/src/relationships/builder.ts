@@ -288,6 +288,60 @@ function relationshipSpan(binding: ModuleBinding | CallSite): RelationshipRecord
     return { ...binding.span };
 }
 
+function spansEqual(
+    left: CallSite['span'] | undefined,
+    right: CallSite['span'] | undefined,
+): boolean {
+    return Boolean(left && right
+        && left.startLine === right.startLine
+        && left.endLine === right.endLine
+        && left.startByte === right.startByte
+        && left.endByte === right.endByte
+        && left.startColumn === right.startColumn
+        && left.endColumn === right.endColumn);
+}
+
+function resolvePythonClassReference(input: {
+    classReference: string;
+    source: SymbolRecord;
+    evidence: RelationshipAnalysisEvidence;
+    registry: SymbolRegistry;
+    classesByName: ReadonlyMap<string, readonly SymbolRecord[]>;
+    availableFiles: ReadonlySet<string>;
+}): SymbolRecord | undefined {
+    const classCandidatesById = new Map<string, SymbolRecord>();
+    for (const candidate of input.classesByName.get(input.classReference) ?? []) {
+        if (candidate.file === input.source.file) {
+            classCandidatesById.set(candidate.symbolInstanceId, candidate);
+        }
+    }
+    for (const binding of input.evidence.moduleBindings) {
+        if (
+            (binding.kind !== 'import' && binding.kind !== 'reexport')
+            || !binding.moduleSpecifier
+            || !binding.importedName
+            || binding.localName !== input.classReference
+        ) {
+            continue;
+        }
+        const importedFile = resolveRelativeModulePath(
+            input.source.file,
+            binding.moduleSpecifier,
+            input.registry,
+            input.source.language,
+            input.availableFiles,
+        );
+        if (!importedFile) continue;
+        for (const candidate of input.classesByName.get(binding.importedName) ?? []) {
+            if (candidate.file === importedFile) {
+                classCandidatesById.set(candidate.symbolInstanceId, candidate);
+            }
+        }
+    }
+    const classCandidates = [...classCandidatesById.values()];
+    return classCandidates.length === 1 ? classCandidates[0] : undefined;
+}
+
 function resolvePythonMemberTarget(input: {
     call: CallSite;
     source: SymbolRecord;
@@ -307,10 +361,7 @@ function resolvePythonMemberTarget(input: {
     }
 
     const receiver = input.call.receiverText.trim();
-    if (
-        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(receiver)
-        || input.call.qualifiedCallee?.trim() !== `${receiver}.${input.call.calleeName}`
-    ) {
+    if (input.call.qualifiedCallee?.trim() !== `${receiver}.${input.call.calleeName}`) {
         return undefined;
     }
 
@@ -319,52 +370,61 @@ function resolvePythonMemberTarget(input: {
         if (input.source.kind !== 'method') return undefined;
         targetClass = enclosingClassForSymbol(input.source, input.classesByFile);
     } else {
-        const scopedReceiverTypes = new Set(
-            (input.evidence.receiverTypeBindings ?? [])
-                .filter((binding) => (
-                    binding.localName === receiver
-                    && ownerForCall(
-                        input.registry.symbolsByFile.get(input.source.file) ?? [],
-                        { calleeName: '', span: binding.span },
-                    )?.symbolInstanceId === input.source.symbolInstanceId
-                ))
-                .map((binding) => binding.typeName),
-        );
-        if (scopedReceiverTypes.size > 1) return undefined;
-        const classReference = [...scopedReceiverTypes][0] ?? receiver;
-        const classCandidatesById = new Map<string, SymbolRecord>();
-        for (const candidate of input.classesByName.get(classReference) ?? []) {
-            if (candidate.file === input.source.file) {
-                classCandidatesById.set(candidate.symbolInstanceId, candidate);
-            }
-        }
-        for (const binding of input.evidence.moduleBindings) {
-            if (
-                (binding.kind !== 'import' && binding.kind !== 'reexport')
-                || !binding.moduleSpecifier
-                || !binding.importedName
-                || binding.localName !== classReference
-            ) {
-                continue;
-            }
-            const importedFile = resolveRelativeModulePath(
-                input.source.file,
-                binding.moduleSpecifier,
-                input.registry,
-                input.source.language,
-                input.availableFiles,
+        const fileSymbols = input.registry.symbolsByFile.get(input.source.file) ?? [];
+        let classReference: string | undefined;
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(receiver)) {
+            const scopedBindings = (input.evidence.receiverTypeBindings ?? []).filter((binding) => (
+                binding.localName === receiver
+                && ownerForCall(fileSymbols, { calleeName: '', span: binding.span })?.symbolInstanceId
+                    === input.source.symbolInstanceId
+            ));
+            const annotatedTypes = new Set(
+                scopedBindings
+                    .filter((binding) => binding.kind === 'parameter_annotation')
+                    .map((binding) => binding.typeName),
             );
-            if (!importedFile) continue;
-            for (const candidate of input.classesByName.get(binding.importedName) ?? []) {
-                if (candidate.file === importedFile) {
-                    classCandidatesById.set(candidate.symbolInstanceId, candidate);
-                }
-            }
+            const localBindings = scopedBindings.filter((binding) => binding.kind === 'local_constructor');
+            const localTypes = new Set(localBindings.map((binding) => binding.typeName));
+            if (annotatedTypes.size + localTypes.size > 1) return undefined;
+            const preceding = localBindings
+                .filter((binding) => (
+                    binding.span.endByte <= input.call.span.startByte
+                    && spansEqual(binding.statementBlockSpan, input.call.statementBlockSpan)
+                    && !localBindings.some((other) => (
+                        other.span.startByte > binding.span.endByte
+                        && other.span.endByte <= input.call.span.startByte
+                    ))
+                ))
+                .sort((left, right) => right.span.endByte - left.span.endByte)[0];
+            classReference = [...annotatedTypes][0]
+                ?? (preceding && localTypes.size === 1 ? preceding.typeName : undefined)
+                ?? (localBindings.length === 0 ? receiver : undefined);
+        } else if (/^self\.[A-Za-z_][A-Za-z0-9_]*$/.test(receiver) && input.source.kind === 'method') {
+            const sourceClass = enclosingClassForSymbol(input.source, input.classesByFile);
+            if (!sourceClass) return undefined;
+            const fieldBindings = (input.evidence.receiverTypeBindings ?? []).filter((binding) => {
+                if (binding.kind !== 'self_field_constructor' || binding.localName !== receiver) return false;
+                const bindingOwner = ownerForCall(fileSymbols, { calleeName: '', span: binding.span });
+                return bindingOwner?.kind === 'method'
+                    && bindingOwner.name === '__init__'
+                    && enclosingClassForSymbol(bindingOwner, input.classesByFile)?.symbolInstanceId
+                        === sourceClass.symbolInstanceId;
+            });
+            const fieldTypes = new Set(fieldBindings.map((binding) => binding.typeName));
+            if (fieldBindings.length === 0 || fieldTypes.size !== 1) return undefined;
+            [classReference] = fieldTypes;
+        } else {
+            return undefined;
         }
-        const classCandidates = [...classCandidatesById.values()];
-        if (classCandidates.length === 1) {
-            [targetClass] = classCandidates;
-        }
+        if (!classReference) return undefined;
+        targetClass = resolvePythonClassReference({
+            classReference,
+            source: input.source,
+            evidence: input.evidence,
+            registry: input.registry,
+            classesByName: input.classesByName,
+            availableFiles: input.availableFiles,
+        });
     }
     if (!targetClass) return undefined;
 

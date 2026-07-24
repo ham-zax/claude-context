@@ -593,15 +593,26 @@ function nodeSpan(node: Node, sourceMap: Utf8SourceMap) {
     return sourceMap.spanFromUtf16(node.startIndex, node.endIndex);
 }
 
-function extractCallSites(root: Node, sourceMap: Utf8SourceMap): CallSite[] {
+function nearestPythonStatementBlock(node: Node): Node | undefined {
+    let current = node.parent;
+    while (current) {
+        if (current.type === 'block' || current.type === 'module') return current;
+        current = current.parent;
+    }
+    return undefined;
+}
+
+function extractCallSites(root: Node, sourceMap: Utf8SourceMap, language: string): CallSite[] {
     const calls: CallSite[] = [];
     const visit = (node: Node): void => {
         if (CALL_NODE_TYPES.has(node.type)) {
             const name = callableName(node);
+            const statementBlock = language === 'python' ? nearestPythonStatementBlock(node) : undefined;
             if (name) calls.push({
                 calleeName: name,
                 ...callSiteEvidence(node),
                 span: nodeSpan(node, sourceMap),
+                ...(statementBlock ? { statementBlockSpan: nodeSpan(statementBlock, sourceMap) } : {}),
             });
         }
         for (const child of node.namedChildren) visit(child);
@@ -673,6 +684,32 @@ function extractPythonModuleBindings(
     return bindings;
 }
 
+function directPythonConstructorType(node: Node): string | undefined {
+    if (node.type !== 'call') return undefined;
+    const callable = node.childForFieldName('function');
+    if (callable?.type !== 'identifier') return undefined;
+    const typeName = callable.text.trim();
+    return /^[A-Z][A-Za-z0-9_]*$/.test(typeName) ? typeName : undefined;
+}
+
+function enclosingPythonFunction(node: Node): Node | undefined {
+    let current = node.parent;
+    while (current) {
+        if (current.type === 'function_definition') return current;
+        current = current.parent;
+    }
+    return undefined;
+}
+
+function enclosingPythonClass(node: Node): Node | undefined {
+    let current = node.parent;
+    while (current) {
+        if (current.type === 'class_definition') return current;
+        current = current.parent;
+    }
+    return undefined;
+}
+
 function extractPythonReceiverTypeBindings(
     root: Node,
     sourceMap: Utf8SourceMap,
@@ -702,6 +739,51 @@ function extractPythonReceiverTypeBindings(
             typeName,
             kind: 'parameter_annotation',
             span: nodeSpan(node, sourceMap),
+        });
+    }
+    for (const assignment of root.descendantsOfType('assignment')) {
+        const target = assignment.childForFieldName('left');
+        const value = assignment.childForFieldName('right');
+        const typeName = value ? directPythonConstructorType(value) : undefined;
+        const statementBlock = nearestPythonStatementBlock(assignment);
+        const containingFunction = enclosingPythonFunction(assignment);
+        if (!target || !typeName || !statementBlock || !containingFunction) continue;
+
+        if (target.type === 'identifier') {
+            const localName = target.text.trim();
+            if (!localName) continue;
+            bindings.push({
+                localName,
+                typeName,
+                kind: 'local_constructor',
+                span: nodeSpan(assignment, sourceMap),
+                statementBlockSpan: nodeSpan(statementBlock, sourceMap),
+            });
+            continue;
+        }
+
+        if (target.type !== 'attribute') continue;
+        const object = target.childForFieldName('object');
+        const attribute = target.childForFieldName('attribute');
+        const localName = target.text.trim();
+        const functionName = containingFunction.childForFieldName('name')?.text.trim();
+        const functionBody = containingFunction.childForFieldName('body');
+        if (
+            object?.type !== 'identifier'
+            || object.text.trim() !== 'self'
+            || attribute?.type !== 'identifier'
+            || !localName
+            || functionName !== '__init__'
+            || statementBlock.id !== functionBody?.id
+            || !enclosingPythonClass(containingFunction)
+        ) {
+            continue;
+        }
+        bindings.push({
+            localName,
+            typeName,
+            kind: 'self_field_constructor',
+            span: nodeSpan(assignment, sourceMap),
         });
     }
     return bindings;
@@ -797,7 +879,7 @@ export async function analyzeWithTreeSitter(
                 moduleBindings: input.language === 'python'
                     ? extractPythonModuleBindings(tree.rootNode, symbols, sourceMap)
                     : [],
-                callSites: extractCallSites(tree.rootNode, sourceMap),
+                callSites: extractCallSites(tree.rootNode, sourceMap, input.language),
                 receiverTypeBindings: input.language === 'python'
                     ? extractPythonReceiverTypeBindings(tree.rootNode, sourceMap)
                     : [],

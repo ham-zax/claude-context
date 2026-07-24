@@ -19,6 +19,29 @@ export function buildCanonicalSymbolRegistryView(
     return symbolsByKey;
 }
 
+function spanContains(parent: SymbolRecord, child: SymbolRecord): boolean {
+    if (parent.file !== child.file) {
+        return false;
+    }
+    if (
+        parent.span.startByte !== undefined
+        && parent.span.endByte !== undefined
+        && child.span.startByte !== undefined
+        && child.span.endByte !== undefined
+    ) {
+        return parent.span.startByte <= child.span.startByte
+            && child.span.endByte <= parent.span.endByte;
+    }
+    return parent.span.startLine <= child.span.startLine
+        && child.span.endLine <= parent.span.endLine;
+}
+
+function spanSize(symbol: SymbolRecord, useBytes: boolean): number {
+    return useBytes
+        ? Math.max(0, symbol.span.endByte! - symbol.span.startByte!)
+        : Math.max(0, symbol.span.endLine - symbol.span.startLine);
+}
+
 function resolveParent(input: {
     symbol: SymbolRecord;
     registry: CanonicalSymbolRegistryView;
@@ -35,17 +58,30 @@ function resolveParent(input: {
         };
     }
 
-    const candidates = (input.registry.get(symbol.parentKey) || [])
-        .filter((candidate) => candidate.symbolInstanceId !== symbol.symbolInstanceId);
-    if (candidates.length === 0) {
+    const containingCandidates = (input.registry.get(symbol.parentKey) || [])
+        .filter((candidate) => (
+            candidate.symbolInstanceId !== symbol.symbolInstanceId
+            && spanContains(candidate, symbol)
+        ));
+    if (containingCandidates.length === 0) {
         return { state: "missing" };
     }
-    if (candidates.length > 1) {
+    const byteCandidates = containingCandidates.filter((candidate) => (
+        candidate.span.startByte !== undefined
+        && candidate.span.endByte !== undefined
+        && symbol.span.startByte !== undefined
+        && symbol.span.endByte !== undefined
+    ));
+    const candidates = byteCandidates.length > 0 ? byteCandidates : containingCandidates;
+    const useBytes = byteCandidates.length > 0;
+    const innermostSize = Math.min(...candidates.map((candidate) => spanSize(candidate, useBytes)));
+    const innermost = candidates.filter((candidate) => spanSize(candidate, useBytes) === innermostSize);
+    if (innermost.length !== 1) {
         return { state: "ambiguous" };
     }
     return {
         state: "resolved",
-        parentSymbolId: candidates[0].symbolInstanceId,
+        parentSymbolId: innermost[0].symbolInstanceId,
     };
 }
 

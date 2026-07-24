@@ -56,6 +56,9 @@ async function buildAnalyzedPythonRegistry(
             hash: fileHash,
             language: 'python',
             symbolCount: fileSymbols.length,
+            definitionStatus: analysis.structuralStatus === 'complete'
+                ? 'definitions_present'
+                : 'structural_unavailable',
         });
     }
 
@@ -132,8 +135,20 @@ function manifest(): SymbolRegistryManifest {
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
         files: [
-            { path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 3 },
-            { path: 'src/routes.ts', hash: 'hash-routes', language: 'typescript', symbolCount: 2 },
+            {
+                path: 'src/auth.ts',
+                hash: 'hash-auth',
+                language: 'typescript',
+                symbolCount: 3,
+                definitionStatus: 'definitions_present',
+            },
+            {
+                path: 'src/routes.ts',
+                hash: 'hash-routes',
+                language: 'typescript',
+                symbolCount: 2,
+                definitionStatus: 'definitions_present',
+            },
         ],
     };
 }
@@ -931,6 +946,46 @@ test('buildCallRelationshipsForRegistry treats components and hooks as callable 
     ]));
 });
 
+test('buildCallRelationshipsForRegistry resolves bounded Python constructor receivers', async () => {
+    const source = [
+        'class SignalGenerator:',
+        '    def check_entry(self):',
+        '        return True',
+        '',
+        'class Runner:',
+        '    def __init__(self):',
+        '        self.signal_gen = SignalGenerator()',
+        '',
+        '    def run(self):',
+        '        local = SignalGenerator()',
+        '        local.check_entry()',
+        '        self.signal_gen.check_entry()',
+        '',
+        '        if enabled:',
+        '            nested = SignalGenerator()',
+        '            nested.check_entry()',
+        '',
+        '        conflict = SignalGenerator()',
+        '        conflict = OtherGenerator()',
+        '        conflict.check_entry()',
+        '',
+        '        factory = make_generator()',
+        '        factory.check_entry()',
+    ].join('\n');
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({ 'src/runner.py': source });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const checkEntryCalls = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.qualifiedName
+            === 'SignalGenerator.check_entry'
+    ));
+
+    assert.deepEqual(checkEntryCalls.map((record) => record.span?.startLine), [11, 12, 16]);
+    assert.deepEqual(checkEntryCalls.map((record) => (
+        registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName
+    )), ['Runner.run', 'Runner.run', 'Runner.run']);
+});
+
 test('buildRelationshipsForRegistry creates conservative IMPORTS and EXPORTS file-owner records', async () => {
     const authContent = [
         'export function login(token: string) {',
@@ -1336,6 +1391,42 @@ test('buildRelationshipDelta matches a full rebuild when a call target becomes a
     });
     assert.deepEqual(resolvedDelta.records, uniqueRecords);
     assert.deepEqual(resolvedDelta.affectedFiles, [callerPath, targetBPath]);
+});
+
+test('buildRelationshipDelta matches a full rebuild for constructor-derived receiver evidence', async () => {
+    const path = 'src/runner.py';
+    const before = await buildAnalyzedPythonRegistry({
+        [path]: [
+            'class SignalGenerator:',
+            '    def check_entry(self): pass',
+            '',
+            'def run():',
+            '    signal_gen = SignalGenerator()',
+            '    signal_gen.check_entry()',
+        ].join('\n'),
+    });
+    const after = await buildAnalyzedPythonRegistry({
+        [path]: [
+            'class SignalGenerator:',
+            '    def check_entry(self): pass',
+            '',
+            'def run():',
+            '    signal_gen = SignalGenerator()',
+            '    signal_gen.check_entry()',
+            '    signal_gen.check_entry()',
+        ].join('\n'),
+    });
+    const previousRecords = buildRelationshipsForRegistry(before);
+    const delta = buildRelationshipDelta({
+        previousRegistry: before.registry,
+        registry: after.registry,
+        existingRecords: previousRecords,
+        analysisByFile: after.analysisByFile,
+        changedFiles: new Set([path]),
+    });
+
+    assert.deepEqual(delta.records, buildRelationshipsForRegistry(after));
+    assert.deepEqual(delta.affectedFiles, [path]);
 });
 
 test('buildRelationshipDelta matches a full rebuild when a Python class receiver becomes ambiguous and resolves again', async () => {

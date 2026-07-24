@@ -16,7 +16,7 @@ import type {
 } from './contracts';
 
 test('symbol contract exports stable schema versions and validates registry manifests', () => {
-    assert.equal(SYMBOL_REGISTRY_SCHEMA_VERSION, 'symbol_registry_v1');
+    assert.equal(SYMBOL_REGISTRY_SCHEMA_VERSION, 'symbol_registry_v3');
 
     const manifest: SymbolRegistryManifest = {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
@@ -32,11 +32,16 @@ test('symbol contract exports stable schema versions and validates registry mani
             hash: 'file-hash',
             language: 'typescript',
             symbolCount: 2,
+            definitionStatus: 'definitions_present',
         }],
     };
 
     assert.equal(isSymbolRegistryManifest(manifest), true);
     assert.equal(isSymbolRegistryManifest({ ...manifest, schemaVersion: 'wrong' }), false);
+    assert.equal(isSymbolRegistryManifest({
+        ...manifest,
+        files: [{ ...manifest.files[0], definitionStatus: undefined }],
+    }), false);
     assert.equal(isSymbolRegistryManifest({ ...manifest, files: [{ path: 'src/app.ts' }] }), false);
 });
 

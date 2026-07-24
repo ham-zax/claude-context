@@ -54,14 +54,29 @@ export interface CallSite {
     readonly receiverText?: string;
     readonly qualifiedCallee?: string;
     readonly span: SourceSpan;
+    readonly statementBlockSpan?: SourceSpan;
 }
 
-export interface ReceiverTypeBinding {
-    readonly localName: string;
-    readonly typeName: string;
-    readonly kind: 'parameter_annotation';
-    readonly span: SourceSpan;
-}
+export type ReceiverTypeBinding =
+    | {
+        readonly localName: string;
+        readonly typeName: string;
+        readonly kind: 'parameter_annotation';
+        readonly span: SourceSpan;
+    }
+    | {
+        readonly localName: string;
+        readonly typeName: string;
+        readonly kind: 'local_constructor';
+        readonly span: SourceSpan;
+        readonly statementBlockSpan: SourceSpan;
+    }
+    | {
+        readonly localName: string;
+        readonly typeName: string;
+        readonly kind: 'self_field_constructor';
+        readonly span: SourceSpan;
+    };
 
 export interface LanguageAnalysisInput {
     readonly content: string;
