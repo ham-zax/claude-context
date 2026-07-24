@@ -241,6 +241,9 @@ export async function runInstallPostflight(options: InstallPostflightOptions): P
                 ...options.env,
                 HOME: options.homeDir,
                 SATORI_RUN_MODE: "postflight",
+                // Candidate/postflight verification must execute the candidate
+                // itself rather than attach to an already-running shared host.
+                SATORI_SHARED_RUNTIME_DISABLE: "1",
             },
             startupTimeoutMs: options.startupTimeoutMs,
             callTimeoutMs: options.callTimeoutMs,

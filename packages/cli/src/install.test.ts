@@ -1425,6 +1425,229 @@ test("managed launcher closes the real postflight runtime on stdin EOF and unreg
     }
 });
 
+test("managed offline launchers attach independent sessions to one shared runtime host", {
+    skip: process.platform !== "linux" || process.arch !== "x64"
+        ? "shared offline runtime is supported on Linux x64"
+        : false,
+    timeout: 30_000,
+}, async (t) => {
+    const runtimeEntry = path.resolve(PACKAGE_ROOT, "..", "mcp", "dist", "index.js");
+    if (!fs.existsSync(runtimeEntry)) {
+        t.skip("built MCP runtime is required");
+        return;
+    }
+
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-cli-shared-host-"));
+    const runtimeDirectory = path.join(homeDir, "runtime");
+    fs.mkdirSync(runtimeDirectory, { mode: 0o700 });
+    const stateRoot = path.join(homeDir, ".satori");
+    const managedEnv = {
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        LANCEDB_PATH: path.join(stateRoot, "vector", "lancedb"),
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: path.join(homeDir, "potion-helper"),
+        POTION_MODEL_PATH: path.join(homeDir, "potion-model"),
+        POTION_REQUEST_TIMEOUT_MS: "5000",
+        MCP_ENABLE_WATCHER: "false",
+        MCP_WATCH_DEBOUNCE_MS: "5000",
+    };
+    let first: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;
+    let second: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;
+    let replacement: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;
+    let replacementSecond: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;
+    let hostPid: number | undefined;
+    try {
+        fs.mkdirSync(path.dirname(launcherPath(homeDir)), { recursive: true });
+        fs.writeFileSync(launcherPath(homeDir), buildLauncherScript({
+            command: process.execPath,
+            args: [runtimeEntry],
+            managedEnv,
+        }), "utf8");
+        fs.chmodSync(launcherPath(homeDir), 0o755);
+        const clientEnv = {
+            HOME: homeDir,
+            SATORI_STATE_ROOT: stateRoot,
+            XDG_RUNTIME_DIR: runtimeDirectory,
+        };
+        [first, second] = await Promise.all([
+            connectCliMcpSession({
+                command: process.execPath,
+                args: [launcherPath(homeDir)],
+                env: clientEnv,
+                startupTimeoutMs: 15_000,
+                callTimeoutMs: 5_000,
+                writeStderr: () => {},
+            }),
+            connectCliMcpSession({
+                command: process.execPath,
+                args: [launcherPath(homeDir)],
+                env: clientEnv,
+                startupTimeoutMs: 15_000,
+                callTimeoutMs: 5_000,
+                writeStderr: () => {},
+            }),
+        ]);
+
+        assert.equal((await first.listTools()).tools.length, 7);
+        assert.equal((await second.listTools()).tools.length, 7);
+        assert.notEqual(first.launcherPid, second.launcherPid);
+
+        const metadataRoot = path.join(stateRoot, "runtime-host");
+        const identities = fs.readdirSync(metadataRoot);
+        assert.equal(identities.length, 1);
+        const metadata = JSON.parse(fs.readFileSync(
+            path.join(metadataRoot, identities[0]!, "host.json"),
+            "utf8",
+        )) as { hostPid: number };
+        hostPid = metadata.hostPid;
+        assert.equal(isProcessLive(hostPid), true);
+
+        await first.close();
+        first = undefined;
+        assert.equal((await second.listTools()).tools.length, 7);
+        await second.close();
+        second = undefined;
+
+        process.kill(hostPid, "SIGKILL");
+        assert.equal(await waitForProcessExit(hostPid, 5_000), true);
+
+        [replacement, replacementSecond] = await Promise.all([
+            connectCliMcpSession({
+                command: process.execPath,
+                args: [launcherPath(homeDir)],
+                env: clientEnv,
+                startupTimeoutMs: 15_000,
+                callTimeoutMs: 5_000,
+                writeStderr: () => {},
+            }),
+            connectCliMcpSession({
+                command: process.execPath,
+                args: [launcherPath(homeDir)],
+                env: clientEnv,
+                startupTimeoutMs: 15_000,
+                callTimeoutMs: 5_000,
+                writeStderr: () => {},
+            }),
+        ]);
+        assert.equal((await replacement.listTools()).tools.length, 7);
+        assert.equal((await replacementSecond.listTools()).tools.length, 7);
+        const replacementMetadata = JSON.parse(fs.readFileSync(
+            path.join(metadataRoot, identities[0]!, "host.json"),
+            "utf8",
+        )) as { hostPid: number };
+        assert.notEqual(replacementMetadata.hostPid, hostPid);
+        hostPid = replacementMetadata.hostPid;
+        await replacement.close();
+        replacement = undefined;
+        await replacementSecond.close();
+        replacementSecond = undefined;
+        process.kill(hostPid, "SIGTERM");
+        assert.equal(await waitForProcessExit(hostPid, 5_000), true);
+    } finally {
+        await first?.close();
+        await second?.close();
+        await replacement?.close();
+        await replacementSecond?.close();
+        if (hostPid !== undefined && isProcessLive(hostPid)) {
+            process.kill(hostPid, "SIGKILL");
+        }
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("eligible shared launcher failure does not execute a direct runtime fallback", {
+    skip: process.platform !== "linux" || process.arch !== "x64"
+        ? "shared offline runtime is supported on Linux x64"
+        : false,
+}, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-cli-shared-fail-closed-"));
+    try {
+        const markerPath = path.join(root, "direct-runtime-ran");
+        const runtimeEntry = path.join(root, "runtime", "dist", "index.js");
+        fs.mkdirSync(path.dirname(runtimeEntry), { recursive: true });
+        fs.writeFileSync(runtimeEntry, `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "ran");\n`);
+        const launcher = path.join(root, "launcher.js");
+        fs.writeFileSync(launcher, buildLauncherScript({
+            command: process.execPath,
+            args: [runtimeEntry],
+            managedEnv: {
+                SATORI_RUNTIME_PROFILE: "offline",
+                VECTOR_STORE_PROVIDER: "LanceDB",
+                LANCEDB_PATH: path.join(root, "lancedb"),
+                EMBEDDING_PROVIDER: "Potion",
+                EMBEDDING_MODEL: "potion-test",
+                EMBEDDING_OUTPUT_DIMENSION: "256",
+                POTION_HELPER_PATH: path.join(root, "helper"),
+                POTION_MODEL_PATH: path.join(root, "model"),
+                POTION_REQUEST_TIMEOUT_MS: "5000",
+            },
+        }));
+
+        assert.throws(() => execFileSync(process.execPath, [launcher], {
+            env: {
+                ...process.env,
+                HOME: root,
+                SATORI_STATE_ROOT: path.join(root, "state"),
+            },
+            stdio: "pipe",
+        }));
+        assert.equal(fs.existsSync(markerPath), false);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("managed offline Ollama launcher preserves the direct runtime lifecycle", (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-cli-ollama-direct-"));
+    try {
+        const sourceIdentityModule = path.resolve(
+            PACKAGE_ROOT,
+            "..",
+            "mcp",
+            "dist",
+            "server",
+            "shared-runtime-identity.js",
+        );
+        if (!fs.existsSync(sourceIdentityModule)) {
+            t.skip("built MCP shared-runtime identity module is required");
+            return;
+        }
+        const runtimeEntry = path.join(root, "runtime.cjs");
+        const markerPath = path.join(root, "direct-runtime-ran");
+        const serverDirectory = path.join(root, "server");
+        fs.mkdirSync(serverDirectory);
+        fs.writeFileSync(path.join(root, "package.json"), '{"type":"module"}\n');
+        fs.copyFileSync(
+            sourceIdentityModule,
+            path.join(serverDirectory, "shared-runtime-identity.js"),
+        );
+        fs.writeFileSync(
+            runtimeEntry,
+            `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "ran");\n`,
+        );
+        const launcher = path.join(root, "launcher.cjs");
+        fs.writeFileSync(launcher, buildLauncherScript({
+            command: process.execPath,
+            args: [runtimeEntry],
+            managedEnv: {
+                SATORI_RUNTIME_PROFILE: "offline",
+                VECTOR_STORE_PROVIDER: "LanceDB",
+                LANCEDB_PATH: path.join(root, "lancedb"),
+                EMBEDDING_PROVIDER: "Ollama",
+                EMBEDDING_MODEL: "nomic-embed-text",
+            },
+        }));
+
+        execFileSync(process.execPath, [launcher], { stdio: "pipe" });
+        assert.equal(fs.readFileSync(markerPath, "utf8"), "ran");
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("install launcher embeds shared SIGKILL grace path", async () => {
     await withTempHome(async (homeDir) => {
         await executeInstallCommand({

@@ -69,6 +69,7 @@ test("install postflight verifies launcher, clients, tools, owner, config, and t
                 assert.equal(command, process.execPath);
                 assert.equal(args[0], path.join(homeDir, ".satori", "bin", "satori-mcp.js"));
                 assert.equal(env.SATORI_RUN_MODE, "postflight");
+                assert.equal(env.SATORI_SHARED_RUNTIME_DISABLE, "1");
                 return createSession(homeDir);
             },
             isProcessLive: () => false,

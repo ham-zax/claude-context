@@ -902,7 +902,8 @@ test("successful offline install persists its non-secret identity in the shared 
         const launcher = fs.readFileSync(path.join(homeDir, ".satori", "bin", "satori-mcp.js"), "utf8");
         assert.match(launcher, /"SATORI_RUNTIME_PROFILE":"offline"/);
         assert.match(launcher, new RegExp(`"OLLAMA_MODEL_DIGEST":"${DIGEST}"`));
-        assert.match(launcher, /env: \{ \.\.\.process\.env, \.\.\.managedEnv \}/);
+        assert.match(launcher, /const effectiveEnv = \{ \.\.\.process\.env, \.\.\.managedEnv \}/);
+        assert.match(launcher, /env: effectiveEnv/);
         assert.equal(result.runtime, "offline");
         assert.equal(result.runtimeEnvironment?.OLLAMA_MODEL_DIGEST, DIGEST);
         assert.doesNotMatch(launcher, /VOYAGEAI_API_KEY/);
