@@ -22,6 +22,11 @@ type CodebaseStatus = 'indexed' | 'indexing' | 'indexfailed' | 'sync_completed' 
 type SyncContext = ConstructorParameters<typeof SyncManager>[0];
 type SyncSnapshotManager = ConstructorParameters<typeof SyncManager>[1];
 type SyncManagerTestAccess = {
+    backgroundSyncEnabled: boolean;
+    backgroundSyncTimer: NodeJS.Timeout | null;
+    runBackgroundSync(): Promise<void>;
+    handleSyncIndex(): Promise<void>;
+    ensureFreshness(codebasePath: string, thresholdMs: number): Promise<{ mode: 'synced' }>;
     watcherModeStarted: boolean;
     watchers: Map<string, { close: () => Promise<void> | void }>;
     watchedCodebases: Set<string>;
@@ -1256,6 +1261,77 @@ test('stopWatcherMode closes active watchers and clears timers', async () => {
     assert.equal(access.debounceTimers.size, 0);
     assert.equal(access.sourceCheckpointObservations.size, 0);
     assert.equal(access.sourceCheckpointStatuses.size, 0);
+});
+
+test('stopAndDrainLifecycle joins active background and watcher work without rearming timers', async () => {
+    const codebasePath = createTempDir();
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const context = createContext();
+    const snapshot = createSnapshot(statusByPath);
+    let activityChanges = 0;
+    const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
+        watchEnabled: true,
+        watchDebounceMs: 1,
+        onLifecycleActivityChanged: () => {
+            activityChanges += 1;
+        },
+    });
+    const access = manager as unknown as SyncManagerTestAccess;
+    let releaseBackground!: () => void;
+    let releaseWatcher!: () => void;
+    let markBackgroundStarted!: () => void;
+    let markWatcherStarted!: () => void;
+    const backgroundGate = new Promise<void>((resolve) => {
+        releaseBackground = resolve;
+    });
+    const watcherGate = new Promise<void>((resolve) => {
+        releaseWatcher = resolve;
+    });
+    const backgroundStarted = new Promise<void>((resolve) => {
+        markBackgroundStarted = resolve;
+    });
+    const watcherStarted = new Promise<void>((resolve) => {
+        markWatcherStarted = resolve;
+    });
+    access.handleSyncIndex = async () => {
+        markBackgroundStarted();
+        await backgroundGate;
+    };
+    access.ensureFreshness = async () => {
+        markWatcherStarted();
+        await watcherGate;
+        return { mode: 'synced' };
+    };
+    access.backgroundSyncEnabled = true;
+    access.watcherModeStarted = true;
+
+    const background = access.runBackgroundSync();
+    manager.scheduleWatcherSync(codebasePath, 'watch_event');
+    await Promise.all([backgroundStarted, watcherStarted]);
+    assert.equal(manager.getActiveLifecycleOperationCount(), 2);
+
+    let drainCompleted = false;
+    const drain = manager.stopAndDrainLifecycle().then(() => {
+        drainCompleted = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(drainCompleted, false);
+
+    releaseBackground();
+    await background;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(drainCompleted, false);
+    assert.equal(manager.getActiveLifecycleOperationCount(), 1);
+
+    releaseWatcher();
+    await drain;
+    assert.equal(drainCompleted, true);
+    assert.equal(manager.getActiveLifecycleOperationCount(), 0);
+    assert.equal(activityChanges, 4);
+    assert.equal(access.backgroundSyncEnabled, false);
+    assert.equal(access.backgroundSyncTimer, null);
+
+    fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
 test('watch filter allowlists root ignore controls and hidden supported files', async () => {

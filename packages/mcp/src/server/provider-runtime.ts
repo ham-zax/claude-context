@@ -8,6 +8,8 @@ import {
     VectorDatabase,
     VoyageAIReranker,
 } from "@zokizuan/satori-core";
+import fs from "node:fs";
+import { createRequire } from "node:module";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { CallGraphSidecarManager } from "../core/call-graph.js";
 import {
@@ -35,6 +37,8 @@ type ProviderSyncLifecycle = Pick<
 type SyncCompletionHook = NonNullable<
     NonNullable<ConstructorParameters<typeof SyncManager>[2]>['onSyncCompleted']
 >;
+
+const requireFromProviderRuntime = createRequire(import.meta.url);
 
 type ResolvedProviderRuntimeBootstrap = Readonly<{
     embedding: Readonly<
@@ -222,6 +226,7 @@ export class ProviderRuntime {
     private readonly mutationLeaseCoordinator: MutationLeaseCoordinator;
     private readonly now: () => number;
     private readonly searchContinuationCoordinator: SearchContinuationCoordinator;
+    private readonly onLifecycleActivityChanged?: () => void;
     private readonly generationProofCoordinator = createGenerationProofCoordinator();
     private embeddingRuntimePromise: Promise<ToolContext> | null = null;
     private vectorRuntimePromise: Promise<ToolContext> | null = null;
@@ -241,6 +246,7 @@ export class ProviderRuntime {
         runtimeOwnerGate?: RuntimeOwnerMutationGate | null;
         mutationLeaseCoordinator?: MutationLeaseCoordinator;
         searchContinuationCoordinator?: SearchContinuationCoordinator;
+        onLifecycleActivityChanged?: () => void;
         now?: () => number;
     }) {
         this.config = args.config;
@@ -256,6 +262,7 @@ export class ProviderRuntime {
         this.mutationLeaseCoordinator = args.mutationLeaseCoordinator || new MutationLeaseCoordinator();
         this.searchContinuationCoordinator = args.searchContinuationCoordinator
             ?? new SearchContinuationCoordinator();
+        this.onLifecycleActivityChanged = args.onLifecycleActivityChanged;
         this.now = args.now || (() => Date.now());
     }
 
@@ -343,6 +350,7 @@ export class ProviderRuntime {
                 watchDebounceMs: this.watchDebounceMs,
                 onSyncCompleted: this.createSyncCompletionHook(context),
                 mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+                onLifecycleActivityChanged: this.onLifecycleActivityChanged,
             });
             const reranker = this.createReranker(bootstrap);
             if (reranker) {
@@ -459,9 +467,29 @@ export class ProviderRuntime {
         switch (bootstrap.vectorBackend.kind) {
             case 'lancedb': {
                 const moduleSpecifier = '@zokizuan/satori-core/lancedb';
-                const { LanceDbVectorDatabase } = await import(moduleSpecifier) as {
-                    LanceDbVectorDatabase: new (config: { databasePath: string }) => VectorDatabase;
-                };
+                // Core deliberately publishes this native boundary as CommonJS.
+                // Requiring it lazily avoids Node's synthetic ESM named-export
+                // snapshot, which can observe getter-backed exports as undefined
+                // in a detached compiled host.
+                let LanceDbVectorDatabase: new (
+                    config: { databasePath: string },
+                ) => VectorDatabase;
+                try {
+                    const resolvedModule = fs.realpathSync(
+                        requireFromProviderRuntime.resolve(moduleSpecifier),
+                    );
+                    const requireFromResolvedModule = createRequire(resolvedModule);
+                    ({ LanceDbVectorDatabase } = requireFromResolvedModule(resolvedModule) as {
+                        LanceDbVectorDatabase: new (
+                            config: { databasePath: string },
+                        ) => VectorDatabase;
+                    });
+                } catch (error) {
+                    throw new Error(
+                        `${error instanceof Error ? error.message : String(error)} `
+                        + `(resolved through ${moduleSpecifier})`,
+                    );
+                }
                 return new LanceDbVectorDatabase({
                     databasePath: bootstrap.vectorBackend.databasePath,
                 });
@@ -496,12 +524,18 @@ export class ProviderRuntime {
         };
     }
 
+    public getActiveLifecycleOperationCount(): number {
+        return this.activeContexts.reduce(
+            (count, toolContext) => count + toolContext.syncManager.getActiveLifecycleOperationCount(),
+            0,
+        );
+    }
+
     public async shutdown(): Promise<void> {
         await Promise.all([
             Promise.all(this.activeContexts.map(async (toolContext) => {
                 toolContext.toolHandlers.releaseSearchContinuationOwnership();
-                toolContext.syncManager.stopBackgroundSync();
-                await toolContext.syncManager.stopWatcherMode();
+                await toolContext.syncManager.stopAndDrainLifecycle();
                 await toolContext.context.getVectorStore().close?.();
             })),
             Promise.all([...this.activeEmbeddings].map((embedding) => embedding.close())),

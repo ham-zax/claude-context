@@ -250,6 +250,48 @@ test("runtime shutdown closes each provider-owned embedding once", async () => {
     assert.equal(closeCalls, 1);
 });
 
+test("runtime shutdown drains provider synchronization before closing its vector backend", async () => {
+    const runtime = createRuntime(baseConfig());
+    let releaseDrain!: () => void;
+    let markDrainStarted!: () => void;
+    const drainGate = new Promise<void>((resolve) => {
+        releaseDrain = resolve;
+    });
+    const drainStarted = new Promise<void>((resolve) => {
+        markDrainStarted = resolve;
+    });
+    let backendClosed = false;
+    const runtimeInternals = runtime as unknown as {
+        activeContexts: ToolContext[];
+    };
+    runtimeInternals.activeContexts.push({
+        toolHandlers: {
+            releaseSearchContinuationOwnership() {},
+        },
+        syncManager: {
+            stopAndDrainLifecycle: async () => {
+                markDrainStarted();
+                await drainGate;
+            },
+        },
+        context: {
+            getVectorStore: () => ({
+                close: async () => {
+                    backendClosed = true;
+                },
+            }),
+        },
+    } as unknown as ToolContext);
+
+    const shutdown = runtime.shutdown();
+    await drainStarted;
+    assert.equal(backendClosed, false);
+
+    releaseDrain();
+    await shutdown;
+    assert.equal(backendClosed, true);
+});
+
 function createSyncLifecycle(options: { watcherStartError?: Error } = {}) {
     const calls: string[] = [];
     return {

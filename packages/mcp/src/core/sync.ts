@@ -36,6 +36,7 @@ interface SyncManagerOptions {
     mutationLeaseCoordinator?: MutationLeaseCoordinator;
     crossProcessJoinTimeoutMs?: number;
     crossProcessJoinPollMs?: number;
+    onLifecycleActivityChanged?: () => void;
 }
 
 export type FreshnessDecisionMode =
@@ -216,6 +217,8 @@ export class SyncManager {
     private activeSyncs: Map<string, Promise<SyncExecutionOutcome>> = new Map();
     private lastSyncTimes: Map<string, number> = new Map();
     private backgroundSyncTimer: NodeJS.Timeout | null = null;
+    private backgroundSyncEnabled = false;
+    private backgroundSyncFlight: Promise<void> | null = null;
     private watcherModeStarted = false;
     private watchEnabled: boolean;
     private watchDebounceMs: number;
@@ -228,6 +231,7 @@ export class SyncManager {
     private ignoreRulesVersions: Map<string, number> = new Map();
     private pendingIgnoreChangeEdits: Map<string, number> = new Map();
     private activeIgnoreReconciles: Map<string, Promise<FreshnessDecision>> = new Map();
+    private activeWatcherSyncs: Set<Promise<void>> = new Set();
     private freshnessEpochs: Map<string, number> = new Map();
     private sourceCheckpointObservations: Map<string, string> = new Map();
     private sourceCheckpointStatuses: Map<string, 'valid' | 'missing' | 'corrupt'> = new Map();
@@ -236,6 +240,7 @@ export class SyncManager {
     private readonly mutationLeaseCoordinator?: MutationLeaseCoordinator;
     private readonly crossProcessJoinTimeoutMs: number;
     private readonly crossProcessJoinPollMs: number;
+    private readonly onLifecycleActivityChanged?: () => void;
 
     constructor(context: Context, snapshotManager: SnapshotManager, options: SyncManagerOptions = {}) {
         this.context = context;
@@ -245,6 +250,7 @@ export class SyncManager {
         this.now = options.now || (() => Date.now());
         this.onSyncCompleted = options.onSyncCompleted;
         this.mutationLeaseCoordinator = options.mutationLeaseCoordinator;
+        this.onLifecycleActivityChanged = options.onLifecycleActivityChanged;
         this.crossProcessJoinTimeoutMs = Math.max(
             1,
             options.crossProcessJoinTimeoutMs ?? DEFAULT_CROSS_PROCESS_JOIN_TIMEOUT_MS,
@@ -1349,26 +1355,79 @@ export class SyncManager {
     }
 
     public startBackgroundSync(): void {
-        if (this.backgroundSyncTimer) {
+        if (this.backgroundSyncEnabled) {
             return;
         }
 
-        const run = async () => {
-            await this.handleSyncIndex();
+        this.backgroundSyncEnabled = true;
+        this.scheduleBackgroundSync(BACKGROUND_SYNC_INITIAL_DELAY_MS);
+    }
 
-            // recursive schedule to prevent overlap
-            this.backgroundSyncTimer = setTimeout(run, BACKGROUND_SYNC_INTERVAL_MS);
-        };
+    private scheduleBackgroundSync(delayMs: number): void {
+        if (!this.backgroundSyncEnabled) return;
+        this.backgroundSyncTimer = setTimeout(() => {
+            this.backgroundSyncTimer = null;
+            void this.runBackgroundSync();
+        }, delayMs);
+    }
 
-        // Initial delay
-        this.backgroundSyncTimer = setTimeout(run, BACKGROUND_SYNC_INITIAL_DELAY_MS);
+    private runBackgroundSync(): Promise<void> {
+        const flight = (async () => {
+            try {
+                await this.handleSyncIndex();
+            } catch (error) {
+                console.error('[SYNC] Periodic synchronization pass failed:', error);
+            }
+        })();
+        this.backgroundSyncFlight = flight;
+        this.onLifecycleActivityChanged?.();
+        void flight.finally(() => {
+            if (this.backgroundSyncFlight === flight) {
+                this.backgroundSyncFlight = null;
+                this.onLifecycleActivityChanged?.();
+            }
+            this.scheduleBackgroundSync(BACKGROUND_SYNC_INTERVAL_MS);
+        });
+        return flight;
     }
 
     public stopBackgroundSync(): void {
+        this.backgroundSyncEnabled = false;
         if (this.backgroundSyncTimer) {
             clearTimeout(this.backgroundSyncTimer);
             this.backgroundSyncTimer = null;
         }
+    }
+
+    /**
+     * Stops new provider-owned synchronization work and joins every lifecycle
+     * flight that may still hold mutation or backend authority.
+     */
+    public async stopAndDrainLifecycle(): Promise<void> {
+        this.stopBackgroundSync();
+        await this.stopWatcherMode();
+
+        for (;;) {
+            const pending = new Set<Promise<unknown>>();
+            if (this.backgroundSyncFlight) {
+                pending.add(this.backgroundSyncFlight);
+            }
+            for (const flight of this.activeWatcherSyncs) {
+                pending.add(flight);
+            }
+            for (const flight of this.activeSyncs.values()) {
+                pending.add(flight);
+            }
+            for (const flight of this.activeIgnoreReconciles.values()) {
+                pending.add(flight);
+            }
+            if (pending.size === 0) return;
+            await Promise.allSettled(pending);
+        }
+    }
+
+    public getActiveLifecycleOperationCount(): number {
+        return (this.backgroundSyncFlight ? 1 : 0) + this.activeWatcherSyncs.size;
     }
 
     public getWatchDebounceMs(): number {
@@ -1553,28 +1612,37 @@ export class SyncManager {
             this.pendingIgnoreChangeEdits.set(codebasePath, current + 1);
         }
 
-        const timer = setTimeout(async () => {
+        const timer = setTimeout(() => {
             this.debounceTimers.delete(codebasePath);
-            const coalescedIgnoreEdits = this.pendingIgnoreChangeEdits.get(codebasePath) || 0;
-            this.pendingIgnoreChangeEdits.delete(codebasePath);
-            try {
-                if (coalescedIgnoreEdits > 0) {
-                    const decision = await this.ensureFreshness(codebasePath, 0, {
-                        reason: 'ignore_change',
-                        coalescedEdits: coalescedIgnoreEdits,
-                    });
-                    if (decision.mode === 'ignore_reload_failed') {
-                        console.warn(`[SYNC-WATCH] Ignore-rule reconcile failed for '${codebasePath}': ${decision.errorMessage || 'unknown_error'} (fallbackSyncExecuted=${decision.fallbackSyncExecuted === true})`);
-                    } else {
-                        console.log(`[SYNC-WATCH] Ignore-rule reconcile completed for '${codebasePath}' (version=${decision.ignoreRulesVersion ?? 'n/a'}, deleted=${decision.deletedFiles ?? 0}, added=${decision.addedFiles ?? 0}, coalesced=${decision.coalescedEdits ?? 1})`);
+            const flight = (async () => {
+                const coalescedIgnoreEdits = this.pendingIgnoreChangeEdits.get(codebasePath) || 0;
+                this.pendingIgnoreChangeEdits.delete(codebasePath);
+                try {
+                    if (coalescedIgnoreEdits > 0) {
+                        const decision = await this.ensureFreshness(codebasePath, 0, {
+                            reason: 'ignore_change',
+                            coalescedEdits: coalescedIgnoreEdits,
+                        });
+                        if (decision.mode === 'ignore_reload_failed') {
+                            console.warn(`[SYNC-WATCH] Ignore-rule reconcile failed for '${codebasePath}': ${decision.errorMessage || 'unknown_error'} (fallbackSyncExecuted=${decision.fallbackSyncExecuted === true})`);
+                        } else {
+                            console.log(`[SYNC-WATCH] Ignore-rule reconcile completed for '${codebasePath}' (version=${decision.ignoreRulesVersion ?? 'n/a'}, deleted=${decision.deletedFiles ?? 0}, added=${decision.addedFiles ?? 0}, coalesced=${decision.coalescedEdits ?? 1})`);
+                        }
+                        return;
                     }
-                    return;
-                }
 
-                await this.ensureFreshness(codebasePath, 0);
-            } catch (error) {
-                console.error(`[SYNC-WATCH] Debounced sync failed for '${codebasePath}':`, error);
-            }
+                    await this.ensureFreshness(codebasePath, 0);
+                } catch (error) {
+                    console.error(`[SYNC-WATCH] Debounced sync failed for '${codebasePath}':`, error);
+                }
+            })();
+            this.activeWatcherSyncs.add(flight);
+            this.onLifecycleActivityChanged?.();
+            void flight.finally(() => {
+                if (this.activeWatcherSyncs.delete(flight)) {
+                    this.onLifecycleActivityChanged?.();
+                }
+            });
         }, this.watchDebounceMs);
 
         this.debounceTimers.set(codebasePath, timer);
@@ -1762,7 +1830,6 @@ export class SyncManager {
         this.debounceTimers.clear();
         this.watcherIgnoreMatchers.clear();
         this.pendingIgnoreChangeEdits.clear();
-        this.activeIgnoreReconciles.clear();
         this.lastSyncTimes.clear();
         this.ignoreRulesVersions.clear();
         this.freshnessEpochs.clear();

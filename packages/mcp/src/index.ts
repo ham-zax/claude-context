@@ -14,7 +14,10 @@ const bootstrapKeepAlive = setInterval(() => {
     // The server owns steady-state lifetime after startMcpServerFromEnv resolves.
 }, 60 * 60 * 1000);
 
-function resolveRunMode(): "mcp" | "cli" | "postflight" {
+function resolveRunMode(): "mcp" | "cli" | "postflight" | "host" {
+    if (process.env.SATORI_RUN_MODE === "host") {
+        return "host";
+    }
     if (process.env.SATORI_RUN_MODE === "cli") {
         return "cli";
     }
@@ -69,6 +72,11 @@ async function handleShutdown(reason: "SIGINT" | "SIGTERM" | "STDIN_EOF"): Promi
 
 async function main(): Promise<void> {
     const runMode = resolveRunMode();
+    if (runMode === "host") {
+        const { startSharedRuntimeHostFromEnv } = await import("./server/shared-runtime-host.js");
+        activeServer = await startSharedRuntimeHostFromEnv();
+        return;
+    }
     const originalStdoutWrite = process.stdout.write.bind(process.stdout);
     const protocolStdout = createProtocolStdout(originalStdoutWrite);
 
@@ -100,15 +108,33 @@ process.on("SIGTERM", () => {
     void handleShutdown("SIGTERM");
 });
 
-process.stdin.once("end", () => {
-    void handleShutdown("STDIN_EOF");
-});
+if (resolveRunMode() !== "host") {
+    process.stdin.once("end", () => {
+        void handleShutdown("STDIN_EOF");
+    });
+}
 
 main().then(() => {
     clearInterval(bootstrapKeepAlive);
-}).catch((error) => {
+}).catch(async (error) => {
     clearInterval(bootstrapKeepAlive);
     const message = error instanceof Error ? error.message : String(error);
+    if (resolveRunMode() === "host" && process.env.SATORI_SHARED_RUNTIME_ERROR_PATH) {
+        try {
+            const fs = await import("node:fs");
+            const boundedMessage = message.slice(0, 4096);
+            const errorPath = process.env.SATORI_SHARED_RUNTIME_ERROR_PATH!;
+            const temporaryPath = `${errorPath}.${process.pid}.tmp`;
+            fs.writeFileSync(temporaryPath, `${JSON.stringify({
+                formatVersion: 1,
+                recordedAt: new Date().toISOString(),
+                message: boundedMessage,
+            })}\n`, { encoding: "utf8", mode: 0o600 });
+            fs.renameSync(temporaryPath, errorPath);
+        } catch {
+            // Startup diagnostics are best-effort and must not mask the owner failure.
+        }
+    }
     if (message.includes("E_PROTOCOL_FAILURE")) {
         console.error(`E_PROTOCOL_FAILURE ${message}`);
     } else {
