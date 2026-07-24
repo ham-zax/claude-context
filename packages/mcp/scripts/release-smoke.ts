@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 function npmOutput(error: unknown): string {
     if (!(error instanceof Error)) {
@@ -150,6 +150,7 @@ function installPackedRuntimeClosure(
 ): {
     runtimeRoot: string;
     serverEntry: string;
+    sharedRuntimeClientEntry: string;
     satoriBin: string;
 } {
     const runtimeRoot = path.join(smokeExecDir, ".satori", "mcp-runtime", "release-smoke");
@@ -175,13 +176,30 @@ function installPackedRuntimeClosure(
         stdio: ["ignore", "pipe", "pipe"],
     });
     const serverEntry = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-mcp", "dist", "index.js");
+    const sharedRuntimeClientEntry = path.join(
+        runtimeRoot,
+        "node_modules",
+        "@zokizuan",
+        "satori-mcp",
+        "dist",
+        "server",
+        "shared-runtime-client.js",
+    );
     const satoriBin = path.join(runtimeRoot, "node_modules", ".bin", process.platform === "win32" ? "satori.cmd" : "satori");
-    if (!fs.existsSync(serverEntry) || !fs.existsSync(satoriBin)) {
-        throw new Error(`Packed runtime smoke could not find the server entry or executable bin under ${runtimeRoot}.`);
+    if (
+        !fs.existsSync(serverEntry)
+        || !fs.existsSync(sharedRuntimeClientEntry)
+        || !fs.existsSync(satoriBin)
+    ) {
+        throw new Error(
+            `Packed runtime smoke could not find the server entry, shared-runtime client, `
+            + `or executable bin under ${runtimeRoot}.`,
+        );
     }
     return {
         runtimeRoot,
         serverEntry,
+        sharedRuntimeClientEntry,
         satoriBin,
     };
 }
@@ -229,6 +247,17 @@ async function main(): Promise<void> {
         const tarballPath = packPackage(packageRoot, smokePackDir);
         const packedRuntime = installPackedRuntimeClosure(coreTarballPath, tarballPath, smokeExecDir);
         runPackedCoreParserSmoke(packedRuntime.runtimeRoot);
+        execFileSync(process.execPath, [
+            "-e",
+            `import(${JSON.stringify(pathToFileURL(packedRuntime.sharedRuntimeClientEntry).href)})`
+            + ".then((module) => { if (typeof module.runSharedRuntimeClient !== 'function') process.exit(2); })"
+            + ".catch((error) => { console.error(error); process.exit(3); });",
+        ], {
+            cwd: packedRuntime.runtimeRoot,
+            encoding: "utf8",
+            env: process.env,
+            stdio: ["ignore", "pipe", "pipe"],
+        });
         execFileSync(packedRuntime.satoriBin, ["--help"], {
             cwd: packedRuntime.runtimeRoot,
             encoding: "utf8",
@@ -236,7 +265,10 @@ async function main(): Promise<void> {
             stdio: ["ignore", "pipe", "pipe"],
         });
         await runInitializeSmoke(process.execPath, [packedRuntime.serverEntry], smokeExecDir, 30000);
-        console.log("[release:smoke] One installed packed closure passed Core parser, MCP executable-bin, and direct runtime initialization checks.");
+        console.log(
+            "[release:smoke] One installed packed closure passed Core parser, "
+            + "MCP executable-bin, shared-runtime client import, and direct runtime initialization checks.",
+        );
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const detail = error instanceof Error ? npmOutput(error) : "";
