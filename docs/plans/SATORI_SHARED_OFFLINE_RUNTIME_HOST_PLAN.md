@@ -1150,12 +1150,19 @@ fixture now proves the activated generation, and the grouped lexical-debug
 fixture explicitly requests enough disclosure for its asserted result count.
 Those two files passed 191 of 191 tests.
 
-The current complete MCP run passed 1,037 of 1,042 tests. Its five failures are
-four pre-existing handler-fixture mismatches, whose corresponding failures
-reproduce in the untouched main worktree, plus the already-recorded missing
-public-documentation fixture. They are not evidence against the shared-host
-lifecycle repair, but they supersede the earlier claim that the missing
-documentation fixture was the complete run's sole failure.
+After rebasing onto the current main branch, 77 focused synchronization,
+provider-runtime, shared-identity, host, and session tests passed, as did all
+205 CLI tests, MCP and CLI typecheck, focused lint, generated documentation and
+manifest checks, the installed packed-closure release smoke, and diff checks.
+
+The complete MCP run remains red only in
+`handlers.golden.test.ts`, `handlers.ignore_failure_lifecycle.test.ts`,
+`handlers.symbol_context.test.ts`, `handlers.watchers.test.ts`, and
+`manage_index.test.ts`. The same failing file set and failure mechanisms
+reproduce on the updated main branch: stale navigation fixtures and the
+already-recorded missing public-documentation fixture. They are not evidence
+against the shared-host lifecycle repair, but they supersede the earlier claim
+that the missing documentation fixture was the complete run's sole failure.
 
 Because the lifecycle repair changes production runtime code after the initial
 H4 digest, the initial receipt remains historical evidence and does not qualify
