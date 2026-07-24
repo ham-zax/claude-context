@@ -23,7 +23,7 @@ import {
     buildSourceBackedPythonCallerFallback,
     type PythonSourceBackedSpanRepair,
 } from "./python-call-fallback.js";
-import { buildInboundNotesOnlySearchQuery } from "./search-response-helpers.js";
+import { buildInboundVerificationSearchQuery } from "./search-response-helpers.js";
 
 type RelationshipBackedCallGraphHost = {
     navigationStore: NavigationStore;
@@ -94,7 +94,7 @@ export function uniqueInboundCallerSiteFile(notes: readonly CallGraphNote[]): st
             continue;
         }
         const file = typeof note.file === "string" ? note.file.trim() : "";
-        if (!file) {
+        if (!file || file === "(aggregate)") {
             continue;
         }
         allSites.add(file);
@@ -110,6 +110,7 @@ export function uniqueInboundCallerSiteFile(notes: readonly CallGraphNote[]): st
 }
 
 const MAX_DETAILED_TEST_SUPPRESSED_CALLER_NOTES = 3;
+const INBOUND_COVERAGE_PARTIAL_WARNING = "CALL_GRAPH_INBOUND_COVERAGE_PARTIAL";
 
 /**
  * Production suppressed callers first; collapse excess test/fixture caller notes into one summary.
@@ -513,11 +514,17 @@ export class RelationshipBackedCallGraph {
         const combinedNodes = this.sortNodes(
             [...nodeById.values()].filter((node) => referencedNodeIds.has(node.symbolId))
         );
+        const hasNoInboundEdges = (
+            input.direction === "callers" || input.direction === "both"
+        ) && !combinedEdges.some((edge) => (
+            edge.dstSymbolId === input.resolvedSymbol.symbolInstanceId
+        ));
         const warnings = [...new Set([
             ...neighbors.warnings,
             ...(droppedEdgesOutsideSourceSpan > 0 ? [`CALL_GRAPH_EDGE_OUTSIDE_SOURCE_SPAN:${droppedEdgesOutsideSourceSpan}`] : []),
             ...(addedDynamicCalleeEdges.length > 0 ? [`SOURCE_BACKED_DYNAMIC_CALLEES:${addedDynamicCalleeEdges.length}`] : []),
             ...(addedDynamicCallerEdges.length > 0 ? [`SOURCE_BACKED_DYNAMIC_CALLERS:${addedDynamicCallerEdges.length}`] : []),
+            ...(hasNoInboundEdges ? [INBOUND_COVERAGE_PARTIAL_WARNING] : []),
         ])].sort(compareContractStrings);
         // Sort first for determinism within bands, then production-first inbound note priority.
         const combinedNotes = prioritizeInboundSuppressedNotes(this.sortNotes([
@@ -526,21 +533,13 @@ export class RelationshipBackedCallGraph {
             ...(addedDynamicCallerEdges.length > 0 ? dynamicCallerFallback.notes : []),
         ]));
 
-        const wantsInbound = input.direction === "callers" || input.direction === "both";
-        const inboundEdgeCount = combinedEdges.filter((edge) => (
-            edge.dstSymbolId === input.resolvedSymbol.symbolInstanceId
-        )).length;
-        const hasInboundSuppressedNotes = combinedNotes.some((note) => (
-            note.type === "suppressed_edge"
-            && typeof note.detail === "string"
-            && note.detail.includes("caller candidate")
-        ));
-        // Notes-only inbound: promote executable must: identifier search (no fake edges).
-        // path: uses unique suppressed *caller site* file when available — prefer production
-        // over test/fixture sites (never the callee defining file alone).
+        // Empty inbound traversal: disclose advisory coverage and promote executable
+        // must: identifier search without fabricating an edge. path: uses a unique
+        // suppressed caller site when proven, never the callee defining file alone.
         let hints: Record<string, unknown> | undefined;
-        if (wantsInbound && inboundEdgeCount === 0 && hasInboundSuppressedNotes) {
-            const constructed = buildInboundNotesOnlySearchQuery({
+        if (hasNoInboundEdges) {
+            const constructed = buildInboundVerificationSearchQuery({
+                symbolName: input.resolvedSymbol.name,
                 symbolLabel: input.resolvedSymbol.label,
                 symbolId: input.resolvedSymbol.symbolInstanceId,
                 file: uniqueInboundCallerSiteFile(combinedNotes),
@@ -556,7 +555,7 @@ export class RelationshipBackedCallGraph {
                                 scope: "runtime",
                                 resultMode: "grouped",
                             },
-                            reason: "Inbound graph edges were suppressed as low-confidence or incomplete; use deterministic must: search to find production call sites.",
+                            reason: "Inbound graph coverage is partial and returned no callers; use deterministic must: search to verify production call sites.",
                         },
                     ],
                 };

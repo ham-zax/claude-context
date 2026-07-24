@@ -108,12 +108,20 @@ test("prioritizeInboundSuppressedNotes puts production callers first and collaps
     assert.ok(prioritized.some((n) => n.detail?.includes("callee candidate")));
 });
 
-test("uniqueInboundCallerSiteFile ignores callee-only suppressed notes", () => {
-    const calleeOnly: CallGraphNote[] = [{
-        type: "suppressed_edge",
-        file: "src/callee.ts",
-        startLine: 5,
-        detail: "Suppressed low-confidence callee candidate function helper() at src/callee.ts:5.",
-    }];
-    assert.equal(uniqueInboundCallerSiteFile(calleeOnly), undefined);
+test("uniqueInboundCallerSiteFile ignores callee-only and aggregate notes", () => {
+    const ignored: CallGraphNote[] = [
+        {
+            type: "suppressed_edge",
+            file: "src/callee.ts",
+            startLine: 5,
+            detail: "Suppressed low-confidence callee candidate function helper() at src/callee.ts:5.",
+        },
+        {
+            type: "suppressed_edge",
+            file: "(aggregate)",
+            startLine: 0,
+            detail: "Suppressed 2 additional low-confidence test/fixture caller candidate(s).",
+        },
+    ];
+    assert.equal(uniqueInboundCallerSiteFile(ignored), undefined);
 });

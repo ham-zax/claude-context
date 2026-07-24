@@ -4,7 +4,7 @@ import {
     OVERSIZED_SYMBOL_LINE_THRESHOLD,
     SEARCH_CALLER_TERM_MAX_BYTES,
     buildCallerSearchTerm,
-    buildInboundNotesOnlySearchQuery,
+    buildInboundVerificationSearchQuery,
     buildSearchGraphNavigation,
     buildSearchGroupPreview,
     buildSearchGroupRecommendedAction,
@@ -87,6 +87,7 @@ function baseGroup(partial: Partial<SearchGroupResult> = {}): SearchGroupResult 
         navigation: { graph: "ready", inbound: "verify", callerSearchTerm: "ToolHandlers" },
         __groupId: "g1",
         __symbolInstanceId: "sym_tool_handlers",
+        __candidateIds: [],
         __exactLexicalMatch: false,
         ...partial,
     };
@@ -211,9 +212,27 @@ test("UTF-8 truncation and score serialization are deterministic", () => {
     assert.equal(roundSearchScore(0.123456789), 0.123457);
 });
 
-test("buildInboundNotesOnlySearchQuery extracts identifier and rejects unsafe paths", () => {
+test("buildInboundVerificationSearchQuery uses exact symbol names and rejects unsafe paths", () => {
     assert.deepEqual(
-        buildInboundNotesOnlySearchQuery({
+        buildInboundVerificationSearchQuery({
+            symbolName: "café",
+            symbolLabel: "function café()",
+        }),
+        { query: "must:café café", pathFilterIncluded: false },
+    );
+    assert.deepEqual(
+        buildInboundVerificationSearchQuery({
+            symbolName: "Status",
+            symbolLabel: "enum Status",
+            file: "src/search-query-planning.ts",
+        }),
+        {
+            query: "must:Status Status path:src/search-query-planning.ts",
+            pathFilterIncluded: true,
+        },
+    );
+    assert.deepEqual(
+        buildInboundVerificationSearchQuery({
             symbolLabel: "method buildOperatorSummary(operators: ParsedSearchOperators)",
             file: "src/search-query-planning.ts",
         }),
@@ -223,11 +242,11 @@ test("buildInboundNotesOnlySearchQuery extracts identifier and rejects unsafe pa
         },
     );
     assert.deepEqual(
-        buildInboundNotesOnlySearchQuery({ symbolLabel: "function login()", file: "/absolute/root" }),
+        buildInboundVerificationSearchQuery({ symbolLabel: "function login()", file: "/absolute/root" }),
         { query: "must:login login", pathFilterIncluded: false },
     );
     assert.deepEqual(
-        buildInboundNotesOnlySearchQuery({ symbolLabel: "???", file: "src/a.ts" }),
+        buildInboundVerificationSearchQuery({ symbolLabel: "???", file: "src/a.ts" }),
         { query: "", pathFilterIncluded: false },
     );
 });

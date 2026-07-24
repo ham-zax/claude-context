@@ -84,7 +84,7 @@ function navigationManifest(files: SymbolRegistryManifest['files']): SymbolRegis
         extractorVersion: 'extractor-v1',
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
-        files,
+        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
     };
 }
 
@@ -597,6 +597,115 @@ test('handleCallGraph traverses compatible relationship sidecars without requiri
     }));
 });
 
+test('handleCallGraph discloses partial inbound coverage and verification for zero-edge callers and both', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const source = [
+            'export function orphanTarget() { return normalize(); }',
+            'export function normalize() { return true; }',
+            '',
+        ].join('\n');
+        fs.writeFileSync(path.join(repoPath, 'src', 'runtime.ts'), source);
+        const fileHash = sha256Content(source);
+        const target = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'orphanTarget',
+            label: 'function orphanTarget()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const normalize = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'normalize',
+            label: 'function normalize()',
+            startLine: 2,
+            endLine: 2,
+            fileHash,
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [target, normalize],
+            records: [{
+                sourceKey: target.symbolKey,
+                sourceInstanceId: target.symbolInstanceId,
+                targetKey: normalize.symbolKey,
+                targetInstanceId: normalize.symbolInstanceId,
+                type: 'CALLS',
+                file: 'src/runtime.ts',
+                span: { startLine: 1, endLine: 1 },
+                confidence: 'high',
+            }],
+        });
+
+        const handlers = new ToolHandlers(
+            {
+                getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+                getVectorStore: () => ({ listCollections: async () => [] }),
+            } as unknown as HandlerContext,
+            {
+                getIndexedCodebases: () => [repoPath],
+                getCodebaseInfo: () => undefined,
+                getCodebaseCallGraphSidecar: () => undefined,
+                ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+                saveCodebaseSnapshot: () => undefined,
+                getAllCodebases: () => [],
+            } as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+
+        for (const direction of ['callers', 'both'] as const) {
+            const response = await handlers.handleCallGraph({
+                path: repoPath,
+                symbolRef: {
+                    file: 'src/runtime.ts',
+                    symbolId: target.symbolInstanceId,
+                    symbolLabel: target.label,
+                },
+                direction,
+                depth: 1,
+                limit: 20,
+            });
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            assert.equal(payload.status, 'ok');
+            assert.equal(payload.edges.length, direction === 'both' ? 1 : 0);
+            if (direction === 'both') {
+                assert.equal(payload.edges[0]?.srcSymbolId, target.symbolInstanceId);
+                assert.equal(payload.edges[0]?.dstSymbolId, normalize.symbolInstanceId);
+            }
+            assert.deepEqual(payload.notes, []);
+            assert.ok(payload.warnings.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+            const nextStep = payload.hints?.nextSteps?.[0];
+            assert.equal(nextStep?.tool, 'search_codebase');
+            assert.deepEqual(nextStep?.args, {
+                path: repoPath,
+                query: 'must:orphanTarget orphanTarget',
+                scope: 'runtime',
+                resultMode: 'grouped',
+            });
+            assert.match(String(nextStep?.reason || ''), /coverage is partial/i);
+        }
+
+        const calleesResponse = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: target.symbolInstanceId,
+                symbolLabel: target.label,
+            },
+            direction: 'callees',
+            depth: 1,
+            limit: 20,
+        });
+        const calleesPayload = JSON.parse(calleesResponse.content[0]?.text || '{}');
+        assert.equal(calleesPayload.edges.length, 1);
+        assert.ok(!calleesPayload.warnings?.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+        assert.equal(calleesPayload.hints?.nextSteps, undefined);
+    }));
+});
+
 test('handleCallGraph synthesizes source-backed Python callees when stored span only covers multiline signature', async () => {
     await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
         const source = [
@@ -963,6 +1072,8 @@ test('handleCallGraph surfaces suppressed low-confidence Python candidates and r
         assert.equal(callersPayload.edges[0].site.startLine, 10);
         assert.ok(callersPayload.warnings.includes('RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:1'));
         assert.ok(callersPayload.warnings.includes('SOURCE_BACKED_DYNAMIC_CALLERS:1'));
+        assert.ok(!callersPayload.warnings.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+        assert.equal(callersPayload.hints?.nextSteps, undefined);
         assert.deepEqual(
             callersPayload.nodes.map((node: CallGraphNodeView) => node.symbolId).sort(),
             [attach.symbolInstanceId, build.symbolInstanceId].sort()

@@ -448,16 +448,19 @@ export function buildTopRecommendedRawSearchAction(
 }
 
 /**
- * Build a must: identifier query for notes-only inbound graph recovery (M7/C1).
+ * Build a must: identifier query for empty inbound graph verification.
  * Never feeds raw multi-token labels into must: (operator tokenizer is whitespace-based).
  */
-export function buildInboundNotesOnlySearchQuery(input: {
+export function buildInboundVerificationSearchQuery(input: {
+    symbolName?: string;
     symbolLabel?: string;
     symbolId?: string;
     file?: string;
 }): { query: string; pathFilterIncluded: boolean } {
+    const symbolName = input.symbolName?.trim();
     const identifier =
-        extractIdentifierFromSymbolLabel(input.symbolLabel)
+        (symbolName && !/\s/.test(symbolName) ? symbolName : undefined)
+        || extractIdentifierFromSymbolLabel(input.symbolLabel)
         || extractIdentifierFromSymbolLabel(input.symbolId);
     if (!identifier) {
         return { query: "", pathFilterIncluded: false };
