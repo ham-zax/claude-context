@@ -29,6 +29,13 @@ Index /absolute/path/to/repo with Satori, then find where auth refresh is handle
 
 That is the complete local path. Satori installs a stable launcher under `~/.satori/`; your agent does not download the server again on every startup.
 
+On Linux x64 and WSL2, the default offline Potion + LanceDB runtime is shared
+behind that launcher. Multiple compatible Codex, Claude Code, OpenCode, or
+subagent sessions attach as independent MCP sessions to one private local host,
+shared provider/LanceDB state, and one Potion worker. The host uses a user-only
+Unix-domain socket, idles out after clients disconnect, and is not used for
+connected Voyage/Milvus or explicit Ollama runtimes.
+
 Upgrade the installed CLI, MCP runtime, and its compatible Core dependency:
 
 ```bash
@@ -83,6 +90,8 @@ Satori does not edit source code. It gives the agent better evidence before the 
 - Open exact symbols or bounded line ranges instead of dumping entire files.
 - Detect source drift and publish complete searchable generations atomically.
 - Run fully local retrieval with Potion Code 16M v2 and LanceDB on Linux x64.
+- Share the managed offline runtime across compatible local agent sessions
+  instead of starting one heavy runtime per session.
 - Install one managed MCP runtime for Codex, Claude Code, OpenCode, or all three.
 
 <details>

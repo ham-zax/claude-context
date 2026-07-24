@@ -7,11 +7,17 @@ Most users should install Satori through `@zokizuan/satori-cli`. The installer w
 ## Install
 
 ```bash
-npx -y @zokizuan/satori-cli@latest install --client all --runtime offline
-npx -y @zokizuan/satori-cli@latest doctor
+npm install -g @zokizuan/satori-cli@latest
+satori install --client all
+satori doctor
 ```
 
 The local Potion runtime currently supports Linux x64, including Windows through WSL2. Connected Voyage and explicit local Ollama configurations are also available. See the [main README](https://github.com/ham-zax/satori#quick-start) for runtime choices.
+
+When installed through the CLI, compatible offline Potion + LanceDB clients
+share one private local host, provider/LanceDB state, and one Potion worker. Each
+client remains an independent MCP session. Direct `npx @zokizuan/satori-mcp`
+execution is still isolated and does not join the managed host.
 
 Direct package execution is intended for inspection and custom harnesses:
 
@@ -64,6 +70,9 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
 - Inbound call-graph evidence is advisory and should be verified before blast-radius edits.
 - Provider, model, dimensions, projection, and vector backend are persisted compatibility identities; changing them requires a reindex.
 - Multiple incompatible live Satori runtimes are blocked from mutating the same publication.
+- Managed offline Potion + LanceDB clients on Linux x64/WSL2 share one private
+  local host. Connected providers, Milvus, and explicit Ollama runtimes keep
+  the direct per-client lifecycle.
 - Offline neural reranking is not shipped today. The candidate boundary permits a future complete-set local scorer to fail back atomically to exact + BM25 + single-vector ordering.
 
 ## Development

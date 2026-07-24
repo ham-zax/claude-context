@@ -25,8 +25,9 @@ Filesystem `path` inputs are always absolute, but their targets differ by tool. 
 Use the installer rather than copying runtime paths into MCP client configuration:
 
 ```bash
-npx -y @zokizuan/satori-cli@latest install --client all
-npx -y @zokizuan/satori-cli@latest doctor
+npm install -g @zokizuan/satori-cli@latest
+satori install --client all
+satori doctor
 ```
 
 Supported clients are `codex`, `claude`, and `opencode`. The installer:
@@ -36,6 +37,15 @@ Supported clients are `codex`, `claude`, and `opencode`. The installer:
 - updates supported client configuration;
 - verifies the launcher, MCP handshake, canonical tool list, runtime-owner registration, and shutdown;
 - checks provider configuration without indexing or searching.
+
+Public installer/doctor ownership is `packages/cli`; the MCP package owns the
+server and tool contracts, not client configuration.
+
+On Linux x64/WSL2, the default offline Potion + LanceDB install shares one
+private local host across compatible Codex, Claude Code, OpenCode, and subagent
+sessions. Sessions stay independent, but the provider/LanceDB state and Potion
+worker are not multiplied per session. Connected provider, Milvus, and
+explicit Ollama configurations keep the existing direct per-client runtime.
 
 Restart configured MCP clients after installation or after changing provider settings. A postflight warning about incomplete provider configuration means the launcher is installed but indexing is not ready.
 
@@ -50,7 +60,7 @@ export OLLAMA_HOST=http://127.0.0.1:11434
 export MILVUS_ADDRESS=localhost:19530
 ```
 
-Run `satori-cli doctor` after changing environment variables, then restart every resident Satori MCP client so all processes use one runtime identity.
+Run `satori doctor` after changing environment variables, then restart every resident Satori MCP client so all processes use one runtime identity.
 
 ## 2. Create The First Index
 

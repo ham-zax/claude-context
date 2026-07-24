@@ -17,6 +17,12 @@ satori doctor
 The package installs the `satori` command. Run `satori` without arguments for
 human-readable help.
 
+For the default offline Potion + LanceDB runtime on Linux x64/WSL2, compatible
+clients attach through one private local host instead of each starting a full
+MCP runtime. Each client still has its own MCP session and continuations. The
+shared host idles out after disconnect and is not used for Voyage, Milvus, or
+explicit Ollama runtimes.
+
 Connected Voyage runtime:
 
 ```bash

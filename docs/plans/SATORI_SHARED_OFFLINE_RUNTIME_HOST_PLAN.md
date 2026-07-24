@@ -1,12 +1,17 @@
 # Satori Shared Offline Runtime Host Plan
 
-**Status:** proposed; H0 contract freeze reactivated on 2026-07-24 by
-`shared_runtime_host_recommended` in
-`docs/plans/SATORI_SINGLE_RUNTIME_MEMORY_OWNER_QUALIFICATION_PLAN.md`.
-H1-H4 remain inactive. This document does not authorize implementation by
-itself.
+**Status:** complete on 2026-07-24 in the isolated
+`feat/shared-offline-runtime-host` worktree. H0-H4 ended in
+`shared_runtime_pass`.
 
-**Repository truth:** `c9ece273fb18300cd19d80c2175eb7321955ebaf`
+**Starting repository revision:** `f4ba3bf`
+
+## Completion authority boundary
+
+This document is the completed contract and evidence record for the private
+shared host. Sections retaining imperative language record the contract used
+during implementation; they do not authorize broader daemon, transport,
+provider, platform, or retrieval work.
 
 The single-runtime program established that search memory is dominated by
 bounded LanceDB/Arrow native allocation and valid live provider state rather
@@ -32,7 +37,7 @@ Codex / Claude Code / OpenCode / subagent
     MCP session  MCP session  MCP session
          \        |          /
           one provider/runtime authority
-          one LanceDB context and cache
+          bounded shared LanceDB contexts and caches
           one Potion worker
           one root-keyed repository-state authority
           one watcher coordinator
@@ -52,7 +57,8 @@ runtime:
 
 - they use one Satori runtime host;
 - they use one persistent Potion worker;
-- they share one LanceDB/provider context and its bounded caches;
+- they share the host-owned LanceDB/provider contexts and bounded caches rather
+  than multiplying them per session;
 - repository-specific synchronization, watcher, snapshot, proof, and mutation
   state remains keyed by canonical root;
 - each retains an independent MCP session;
@@ -203,13 +209,16 @@ this task.
 
 ### 6.1 Shared-runtime identity
 
-The host identity must compose, not replace, the existing
-`RuntimeOwnerIdentity`.
+The lightweight attachment identity and the full in-host
+`RuntimeOwnerIdentity` have different jobs. The attachment identity prevents
+incompatible launchers from sharing a process before the expensive runtime is
+loaded. The host then constructs the existing full runtime-owner identity and
+keeps it authoritative for publication mutations.
 
 It contains:
 
 - current MCP package version;
-- current runtime-owner identity hash;
+- canonical Satori state root;
 - execution and network profile;
 - embedding provider, model, inference digest, and dimension;
 - vector provider and canonical LanceDB path;
@@ -220,12 +229,14 @@ It contains:
 
 It contains no credential value, source path, query, source content, or vector.
 
-One lightweight pure identity owner must derive this identity from the
-effective launch-time configuration for both launcher attachment and host
-startup. The generated launcher must not independently reimplement
-`RuntimeOwnerIdentity` normalization, and it must not load the expensive MCP
-server merely to discover the socket. The host recomputes and verifies the
-identity before accepting a session.
+One lightweight pure identity owner derives this identity from the effective
+launch-time configuration for both launcher attachment and host startup. MCP
+package version seals package-owned parser, extractor, relationship, schema,
+projection, and pinned Potion contract changes; the effective state, provider,
+model, vector, watcher, and read-policy inputs are included directly. The
+generated launcher imports this owner from the installed MCP package instead
+of reimplementing it or loading the expensive server. The host recomputes and
+verifies the identity before accepting a session.
 
 The durable host metadata uses the full identity hash under `~/.satori`, but
 the Unix socket uses a short fixed-length digest because Linux socket paths
@@ -309,10 +320,13 @@ Exactly one runtime host owns:
 - normalized configuration and shared-runtime identity;
 - `RuntimeOwnerRegistry` registration;
 - provider bootstrap and `ProviderRuntime`;
-- one embedding-capable `Context`;
-- one LanceDB vector backend;
+- the existing bounded lazy provider contexts: at most one metadata-only vector
+  context and one embedding-capable context, independent of session count;
+- the corresponding bounded LanceDB vector backends and caches;
 - one `PotionEmbedding` worker;
-- one provider `SyncManager` acting as a root-keyed coordinator;
+- one embedding-capable provider `SyncManager` acting as a root-keyed lifecycle
+  coordinator; the optional metadata-only vector context never starts sync or
+  watcher work;
 - one watcher coordinator;
 - startup recovery coordination; and
 - the lifecycle lock, listener, metadata, and host diagnostics.
@@ -612,9 +626,11 @@ The host design does not broaden the current CLI/runtime two-phase transaction.
 H3 must identify the existing CLI runtime-retention owner and change only the
 checks invalidated by this host lifecycle.
 
-## 11. Implementation batches
+## 11. Completed implementation batches
 
 ### H0 — Freeze host/session and memory contracts
+
+Terminal decision: `shared_runtime_contract_pass`.
 
 - Add a task-owned fixture and deterministic 1/2/4-client workload.
 - Inventory every mutable runtime field and freeze its host-global, root-keyed,
@@ -637,18 +653,23 @@ Exit: `shared_runtime_contract_pass`,
 
 ### H1 — Separate host and MCP session in one process
 
+Terminal decision: `shared_runtime_session_pass`.
+
 - Extract `SharedRuntimeHost` from `ContextMcpServer`.
 - Construct independent `McpSession` instances over the same host.
 - Keep ordinary direct stdio startup working through one host plus one session.
 - Prove independent initialization, request IDs, disconnect, errors, and
   continuation ownership.
-- Prove one provider context and one Potion worker under concurrent sessions.
+- Prove provider contexts are bounded by capability rather than session count,
+  with one Potion worker under concurrent sessions.
 - Prove two canonical roots remain isolated behind the shared provider.
 - Prove one session cannot cancel shared initialization required by another.
 
 Exit: `shared_runtime_session_pass` or `shared_runtime_protocol_fail`.
 
 ### H2 — Add the private host socket and thin launcher
+
+Terminal decision: `shared_runtime_transport_pass`.
 
 - Add internal host mode to the MCP package.
 - Add the live handshake, lifecycle lock, metadata, stale recovery, detached
@@ -664,6 +685,8 @@ Exit: `shared_runtime_transport_pass`,
 
 ### H3 — Preserve lifecycle and upgrade safety
 
+Terminal decision: `shared_runtime_lifecycle_pass`.
+
 - Run startup recovery once per host.
 - Prove mutation serialization across sessions.
 - Prove failed publication preserves the prior searchable generation.
@@ -678,6 +701,8 @@ Exit: `shared_runtime_lifecycle_pass` or
 `shared_runtime_lifecycle_blocked`.
 
 ### H4 — Memory and latency qualification
+
+Terminal decision: `shared_runtime_pass`.
 
 - Run the frozen 1/2/4-client workload.
 - Run three repetitions after the frozen warmup.
@@ -721,9 +746,10 @@ Required focused proofs:
 - a connection arriving during cancellable idle shutdown keeps the host alive;
 - an old host cannot remove replacement-host socket or metadata;
 - stale cleanup is serialized with replacement-host creation;
-- one runtime owner, provider context, watcher coordinator, LanceDB context,
-  and Potion worker exist for matching clients, with at most one watcher per
-  active canonical root;
+- one runtime owner, provider runtime, watcher coordinator, and Potion worker
+  exist for matching clients; provider/LanceDB contexts remain bounded by
+  capability rather than session count, with at most one watcher per active
+  canonical root;
 - oversized handshake and JSON-RPC frames fail without unbounded buffering;
 - per-session pending requests remain within the frozen bound;
 - one repository mutation runs at a time;
@@ -784,7 +810,8 @@ Memory:
   active client under the same frozen workload;
 - each additional connected session adds at most 32 MiB PSS after the host is
   warm;
-- no additional Potion worker or provider/Lance context appears; and
+- no additional Potion worker or provider/Lance context appears when sessions
+  are added after the frozen warmup; and
 - one-host PSS does not exceed the direct one-client baseline by more than 10%.
 
 Performance:
@@ -884,11 +911,11 @@ express the frozen contract.
 
 ## 16. Final report
 
-Report:
+The implementation report records:
 
 - starting and ending revisions;
 - direct and shared process trees;
-- runtime, launcher, Potion-worker, watcher, and Lance context counts;
+- runtime, launcher, Potion-worker, watcher, and provider/Lance context counts;
 - one/four-client RSS and PSS;
 - incremental PSS per client;
 - warm search p95;
@@ -900,3 +927,262 @@ Report:
 - commits;
 - repository status; and
 - one final decision.
+
+## 17. Completed execution record
+
+### H0 ownership and bounds
+
+The implemented ownership split is:
+
+| Scope | Frozen owners |
+|---|---|
+| Host-global | normalized configuration and attachment identity, runtime-owner registry, mutation-lease coordinator, provider runtime, embedding-capable context, LanceDB adapter, Potion worker, capability resolver, snapshot manager, call-graph sidecar manager, startup recovery |
+| Root-keyed | context synchronizers, proof/read-gate/retention state, synchronization flights, watchers and debounce state, snapshots, mutation leases and generations, navigation and call-graph publications |
+| Session-local | MCP SDK server and transport, initialization and request identifiers, tool-handler facade, continuation coordinator and token namespace, active-call bound, disconnect state |
+| Operation-local | response delivery, cancellation observation, active-operation count, read-generation lease, and mutation authority through commit or rollback |
+
+The field audit behind that classification found:
+
+- `ProviderRuntime`'s bootstrap promises, active contexts, embeddings, and
+  generation-proof coordinator are host-global and bounded by capability, not
+  repository or session;
+- `Context`'s policy, ignore, synchronizer, publication, proof, read-gate,
+  retention, and collection-override maps are keyed by canonical root or
+  collection. Its one navigation-delta warm cache carries and verifies its
+  canonical root before reuse;
+- `SyncManager`'s flights, timestamps, watchers, debounce state, ignore state,
+  freshness epochs, and source observations are root-keyed. Its background
+  timer and watcher-start flag coordinate that root-keyed registry;
+- `SnapshotManager` stores codebase entries, operations, tombstones, and
+  pending metadata by root. Its dirty flag and loaded-state token describe the
+  single durable snapshot document rather than one repository;
+- `CallGraphSidecarManager` retains only immutable configuration and resolves
+  sidecars from each requested root;
+- `MutationLeaseCoordinator` derives every lease and lock record from the
+  canonical root; and
+- `SharedRuntimeHost` alone owns aggregate session/operation counts, while
+  `McpSession` owns request counts, transport state, and continuation state.
+
+No mutable repository-specific field remains keyed only by the current
+session or by an implicit current repository.
+
+The private protocol uses:
+
+- one full SHA-256 attachment identity including the canonical Satori state
+  root and installed MCP runtime root;
+- a nonce-bound live handshake before MCP framing;
+- a 16 KiB handshake limit;
+- an 8 MiB inbound JSON-RPC frame limit;
+- at most 16 pending JSON-RPC requests and 16 active tool calls per session;
+- the existing continuation count, byte, and lifetime limits;
+- Linux process identity composed from boot ID plus
+  `/proc/<pid>/stat` start time; and
+- an atomically published complete startup-lock record with stale-owner proof.
+
+The host process is detached from the first launcher. Its protocol streams are
+not inherited, and bounded startup failure evidence is written under the
+identity-owned metadata directory. Idle shutdown begins after 60 seconds with
+no sessions or operations and removes only socket and metadata identities still
+owned by the exiting host.
+
+### H1-H3 implementation evidence
+
+`SharedRuntimeHost` now owns the expensive and root-keyed authorities.
+`McpSession` owns one SDK server, transport, continuation coordinator, and
+bounded request lifecycle. Direct stdio remains one host plus one session.
+
+Eligible managed offline Potion + LanceDB launchers on Linux x64 attach through
+the private Unix-domain socket. Connected, Ollama, unsupported-platform, and
+explicit candidate-preflight executions retain the direct child lifecycle.
+Eligible attachment/startup failures do not create a full direct fallback.
+
+Focused evidence proves:
+
+- two in-process sessions share one provider runtime while retaining
+  independent initialization and continuation ownership;
+- filesystem aliases for the same state, runtime, model, helper, and LanceDB
+  paths converge on one canonical attachment identity, while every effective
+  offline runtime, indexing, navigation, watcher, and measurement override
+  that can change host behavior is sealed into that identity;
+- six concurrent stale-lock contenders serialize behind one owner without
+  deleting a replacement lock;
+- rejected or timed-out handshakes do not suppress idle shutdown, and a host
+  startup failure closes its listener and releases provider/runtime-owner
+  authorities;
+- the transport applies its byte limit to each JSON-RPC frame rather than a
+  coalesced socket read;
+- two session facades share the same root-keyed context, snapshot,
+  synchronization, provider, and mutation authorities while retaining
+  separate continuation state;
+- session shutdown waits for an active operation to reach its normal boundary
+  without stopping the host;
+- disconnecting one session leaves a shared provider-bootstrap flight alive
+  for another session and releases the disconnected session only after its
+  active call reaches that boundary;
+- a launcher never waits for a closing host while holding the lifecycle lock
+  that host needs to finish shutdown;
+- concurrent real managed launchers create one host;
+- closing the first launcher leaves the second session usable;
+- a killed host is replaced only after PID, boot, and process-start proof;
+- live identity mismatch, malformed/oversized handshake, and stale lifecycle
+  ownership fail closed;
+- startup recovery runs once per host;
+- the existing single mutation coordinator, publication-generation gates, and
+  runtime-owner registry remain the host authorities;
+- candidate postflight sets `SATORI_SHARED_RUNTIME_DISABLE=1`, so it executes
+  the candidate rather than attaching to an active host; and
+- uninstall remains client-configuration-only while upgrade retains prior
+  installed runtime roots, so neither path deletes a live host's runtime.
+
+Existing mutation-lease, publication, recovery, runtime-owner, upgrade, and
+uninstall tests remain the reusable proof for their unchanged algorithms. The
+shared-host tests prove that all sessions reach the same existing authorities;
+no second mutation or publication mechanism was added.
+
+### H4 qualification evidence
+
+The final task-owned qualification used:
+
+- WSL2 kernel `6.18.33.2-microsoft-standard-WSL2`;
+- AMD Ryzen 7 3800X, 16 logical CPUs;
+- 8 GiB WSL memory and 4 GiB swap allocation;
+- Node `v24.13.0`;
+- MCP `6.2.0`, Core `3.1.0`, and CLI `1.3.1`;
+- the bundled pinned Potion model/helper and one task-owned LanceDB;
+- one three-file TypeScript fixture;
+- watcher disabled;
+- query `calculate invoice total`, runtime scope, limit five;
+- three warmup searches;
+- ten measured sequential searches for one client;
+- five rounds of two concurrent searches for two clients;
+- five rounds of four concurrent searches for four clients;
+- one real incremental `sync`, followed by a search that returned five results
+  from the completed publication;
+- one-second steady-state sampling; and
+- three independent one/two/four-client repetitions with the host restarted
+  between repetitions.
+
+The initial raw evidence was written to
+[`docs/evidence/2026-07-24-shared-runtime-qualification.json`](../evidence/2026-07-24-shared-runtime-qualification.json),
+with SHA-256
+`7c591ddcec25d1ad1485d95e1ae9a7dcf5999c38211842d45f45973c5e0ba487`.
+It binds the run to HEAD
+`f4ba3bfa7f7c9b5b61876c2cb30d8cfb83ebabe8` plus dirty-worktree digest
+`d3f2d458caca90421cf9635031b3ab2596c8cd2ec5913d0864bc85c90fdc0ace`,
+and retains raw per-process rows and system memory/swap observations for every
+sample. That receipt was later superseded at the same task-owned path by the
+post-repair qualification described below; these checksum and result values
+remain the historical initial-run record.
+
+At the time that receipt was sealed, only this evidence record and
+`shared-runtime.test.ts` changed afterward to record and prove the
+already-implemented shared-bootstrap ownership contract. The receipt is durable
+evidence for the bound HEAD and dirty-worktree digest; it is not automatically
+reusable for later production changes.
+
+| Gate | Result | Decision |
+|---|---:|---|
+| Median one-client aggregate PSS | 359,241 KiB | baseline |
+| Median two-client aggregate PSS | 376,036 KiB | observation |
+| Median four-client aggregate PSS | 408,722 KiB | pass |
+| Four/one PSS ratio | 1.138x | pass (`<=1.25x`) |
+| Incremental PSS per added client | 16,494 KiB | pass (`<=32 MiB`) |
+| One-host PSS versus 468,017 KiB direct upper baseline | 23.2% lower | pass (`<=10% above`) |
+| Median one-client warm-search p95 | 35.441 ms | pass (`<=500 ms`) |
+| Median two-client warm-search p95 | 46.911 ms | observation |
+| Median four-client warm-search p95 | 79.890 ms | pass (`<=500 ms`) |
+| Host count across all nine samples | 1 each | pass |
+| Potion worker count across all nine samples | 1 each | pass |
+| Incremental mutation | completed and searchable | pass |
+
+These absolute memory values belong to the frozen small fixture and machine.
+The product conclusion is the measured removal of per-client process
+multiplication, not a universal memory or latency number for every repository.
+
+### Final verification record
+
+The final implementation state passed:
+
+- MCP and CLI typecheck;
+- MCP and CLI focused lint;
+- 14 shared identity, lifecycle-lock, transport, host, and session tests;
+- 193 affected provider, startup, synchronization, snapshot, mutation,
+  runtime-owner, prepared-read-cache, and shared-host tests;
+- all 205 CLI tests, including concurrent cold launch, host replacement,
+  fail-closed eligible routing, direct Ollama preservation, candidate
+  isolation, upgrade, and uninstall;
+- generated MCP documentation and server-manifest checks;
+- the installed packed-closure release smoke, including import of the shipped
+  shared-runtime client and direct candidate initialization;
+- the three-repetition H4 qualification above; and
+- `git diff --check`.
+
+The complete 206-test MCP run passed 205 tests. Its sole failure is the
+pre-existing missing
+`docs/SATORI_END_TO_END_FEATURE_BEHAVIOR_SPEC.md` fixture required by one
+public-documentation assertion. The same focused test fails with the same
+`ENOENT` in the untouched original worktree, so it is recorded as unrelated
+baseline evidence and was not repaired by this lifecycle program.
+
+### Recorded decision for the sealed receipt
+
+`shared_runtime_pass`
+
+No public MCP tool or response schema changed. No connected-provider,
+credential-sharing, Ollama, Windows-native, remote-service, ranking, indexing,
+or retrieval semantic work was introduced.
+
+### Post-record lifecycle repair and current decision
+
+A subsequent review found that host idle shutdown counted session tool calls
+but not provider-owned background or watcher synchronization. A running
+provider lifecycle operation could therefore overlap provider shutdown or
+re-arm a timer after shutdown began.
+
+The lifecycle owner now stops new background and watcher admission, exposes
+those flights to host activity accounting, drains active provider
+synchronization before closing the backend, and starts a fresh idle grace
+period when the last host-owned operation completes. Focused synchronization,
+provider-runtime, host, and session verification passed 72 of 72 tests.
+
+The same review repaired two stale test fixtures: the repair-index success
+fixture now proves the activated generation, and the grouped lexical-debug
+fixture explicitly requests enough disclosure for its asserted result count.
+Those two files passed 191 of 191 tests.
+
+The current complete MCP run passed 1,037 of 1,042 tests. Its five failures are
+four pre-existing handler-fixture mismatches, whose corresponding failures
+reproduce in the untouched main worktree, plus the already-recorded missing
+public-documentation fixture. They are not evidence against the shared-host
+lifecycle repair, but they supersede the earlier claim that the missing
+documentation fixture was the complete run's sole failure.
+
+Because the lifecycle repair changes production runtime code after the initial
+H4 digest, the initial receipt remains historical evidence and does not qualify
+the repaired worktree.
+
+The post-repair qualification harness also corrected its identity seal. The
+receipt output is excluded consistently from Git status, tracked diff, and
+untracked-file inputs, so a staged receipt cannot make its own recorded
+worktree digest stale when the harness publishes new evidence.
+
+After all non-receipt task changes are committed, the frozen
+three-repetition qualification is run at that clean revision into
+[`docs/evidence/2026-07-24-shared-runtime-qualification.json`](../evidence/2026-07-24-shared-runtime-qualification.json).
+That receipt's repository identity, raw scenarios, recomputable summary, and
+file checksum are the authoritative post-repair H4 evidence. The receipt is
+then published in one evidence-only child commit, because a commit cannot
+contain a receipt that names its own commit hash. Independent validation must
+prove that the receipt names that commit's first parent, that the child changes
+only the receipt, that the parent worktree digest recomputes while excluding
+only the receipt, and that every summary value and unchanged Section 13 gate
+recomputes from the raw scenarios.
+
+### Final post-repair decision
+
+`shared_runtime_pass`
+
+The final decision applies only while the independently recomputed receipt
+identity matches its clean non-receipt parent, the evidence commit contains no
+other change, and every frozen correctness, memory, latency, process-count, and
+searchable-mutation gate passes.
