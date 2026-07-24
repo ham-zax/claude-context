@@ -7146,15 +7146,83 @@ export class Context {
         const trackedRelativePaths = this.normalizeRelativePathsForCodebase(canonicalPath, codeFiles);
 
         if (codeFiles.length === 0 && !relationshipOnlyUpgrade) {
-            if (await this.collectionHasAnyIndexedPayload(selectedCollection)) {
+            if (
+                typeof this.vectorDatabase.getCollectionDataObservation !== 'function'
+            ) {
+                proof.payload = {
+                    status: 'unproven',
+                    basis: 'same_state_payload_authority_unavailable',
+                    expectedCount: 0,
+                };
+                proof.staleRemoteChunks = {
+                    status: 'unproven',
+                    basis: 'same_state_payload_authority_unavailable',
+                };
+                return withProof({
+                    status: 'blocked',
+                    reason: 'repair_proof_limit',
+                    message: `Repair cannot prove exact remote payload equality for collection '${selectedCollection}' because this vector backend does not expose same-state payload observation authority.`,
+                    missingCount: 0,
+                    trackedRelativePaths,
+                });
+            }
+            const payloadObservationBefore = await this.vectorDatabase.getCollectionDataObservation(selectedCollection);
+            options.assertMutationCurrent?.();
+            const observedPayloadCount = await this.countIndexedPayloadExactly(selectedCollection, undefined, 0);
+            options.assertMutationCurrent?.();
+            const payloadObservationAfter = await this.vectorDatabase.getCollectionDataObservation(selectedCollection);
+            if (
+                !payloadObservationBefore
+                || !payloadObservationAfter
+                || payloadObservationAfter !== payloadObservationBefore
+            ) {
+                proof.payload = {
+                    status: 'unproven',
+                    basis: 'remote_payload_changed_during_proof',
+                    expectedCount: 0,
+                    ...(observedPayloadCount !== null ? { observedCount: observedPayloadCount } : {}),
+                };
+                proof.staleRemoteChunks = {
+                    status: 'unproven',
+                    basis: 'remote_payload_changed_during_proof',
+                };
+                return withProof({
+                    status: 'blocked',
+                    reason: 'repair_proof_limit',
+                    message: `Repair could not prove collection '${selectedCollection}' from one stable remote payload state.`,
+                    missingCount: 0,
+                    trackedRelativePaths,
+                });
+            }
+            if (observedPayloadCount === null) {
+                proof.payload = {
+                    status: 'unproven',
+                    basis: 'exact_payload_count_unavailable',
+                    expectedCount: 0,
+                };
+                proof.staleRemoteChunks = {
+                    status: 'unproven',
+                    basis: 'exact_payload_count_unavailable',
+                };
+                return withProof({
+                    status: 'blocked',
+                    reason: 'repair_proof_limit',
+                    message: `Repair cannot prove the exact remote payload count for collection '${selectedCollection}'.`,
+                    missingCount: 0,
+                    trackedRelativePaths,
+                });
+            }
+            if (observedPayloadCount !== 0) {
                 proof.payload = {
                     status: 'failed',
                     basis: 'remote_payload_without_indexable_source',
                     expectedCount: 0,
+                    observedCount: observedPayloadCount,
                 };
                 proof.staleRemoteChunks = {
                     status: 'failed',
                     basis: 'remote_payload_without_indexable_source',
+                    extraCount: observedPayloadCount,
                 };
                 return withProof({
                     status: 'requires_reindex',
@@ -7242,7 +7310,50 @@ export class Context {
             });
         }
 
-        // 5. Query vector backend for expected chunk IDs.
+        // 5. Prove expected-ID membership and exact cardinality against one
+        // observed remote payload state. A mutation lease excludes Satori writers,
+        // but only the adapter can prove that the backend payload stayed unchanged.
+        if (
+            typeof this.vectorDatabase.getCollectionDataObservation !== 'function'
+            || typeof this.vectorDatabase.countDocuments !== 'function'
+        ) {
+            proof.payload = {
+                status: 'unproven',
+                basis: 'same_state_payload_authority_unavailable',
+                expectedCount: expectedChunks.length,
+            };
+            proof.staleRemoteChunks = {
+                status: 'unproven',
+                basis: 'same_state_payload_authority_unavailable',
+            };
+            return withProof({
+                status: 'blocked',
+                reason: 'repair_proof_limit',
+                message: `Repair cannot prove exact remote payload equality for collection '${selectedCollection}' because this vector backend does not expose same-state payload observation authority.`,
+                missingCount: 0,
+                trackedRelativePaths,
+            });
+        }
+        const payloadObservationBefore = await this.vectorDatabase.getCollectionDataObservation(selectedCollection);
+        if (!payloadObservationBefore) {
+            proof.payload = {
+                status: 'unproven',
+                basis: 'same_state_payload_observation_unavailable',
+                expectedCount: expectedChunks.length,
+            };
+            proof.staleRemoteChunks = {
+                status: 'unproven',
+                basis: 'same_state_payload_observation_unavailable',
+            };
+            return withProof({
+                status: 'blocked',
+                reason: 'repair_proof_limit',
+                message: `Repair cannot observe a stable remote payload state for collection '${selectedCollection}'.`,
+                missingCount: 0,
+                trackedRelativePaths,
+            });
+        }
+
         const existingIds = new Set<string>();
         const expectedIds = expectedChunks.map((chunk) => chunk.id);
         const chunkIdBatchSize = 512;
@@ -7291,6 +7402,56 @@ export class Context {
             }
         }
 
+        options.assertMutationCurrent?.();
+        const observedPayloadCount = await this.countIndexedPayloadExactly(
+            selectedCollection,
+            undefined,
+            expectedChunks.length,
+        );
+        options.assertMutationCurrent?.();
+        const payloadObservationAfter = await this.vectorDatabase.getCollectionDataObservation(selectedCollection);
+        if (!payloadObservationAfter || payloadObservationAfter !== payloadObservationBefore) {
+            proof.payload = {
+                status: 'unproven',
+                basis: 'remote_payload_changed_during_proof',
+                expectedCount: expectedChunks.length,
+                ...(observedPayloadCount !== null ? { observedCount: observedPayloadCount } : {}),
+                missingCount: missingChunksCount,
+            };
+            proof.staleRemoteChunks = {
+                status: 'unproven',
+                basis: 'remote_payload_changed_during_proof',
+            };
+            return withProof({
+                status: 'blocked',
+                reason: 'repair_proof_limit',
+                message: `Repair could not prove collection '${selectedCollection}' from one stable remote payload state.`,
+                missingCount: missingChunksCount,
+                trackedRelativePaths,
+            });
+        }
+
+        if (observedPayloadCount === null) {
+            proof.payload = {
+                status: 'unproven',
+                basis: 'exact_payload_count_unavailable',
+                expectedCount: expectedChunks.length,
+                observedCount: existingIds.size,
+                missingCount: missingChunksCount,
+            };
+            proof.staleRemoteChunks = {
+                status: 'unproven',
+                basis: 'exact_payload_count_unavailable',
+            };
+            return withProof({
+                status: 'blocked',
+                reason: 'repair_proof_limit',
+                message: `Repair cannot prove the exact remote payload count for collection '${selectedCollection}'.`,
+                missingCount: missingChunksCount,
+                trackedRelativePaths,
+            });
+        }
+
         if (missingChunksCount > 0 || hasFileCoverageIssue) {
             const effectiveMissingCount = missingChunksCount || 1;
             proof.payload = {
@@ -7308,85 +7469,40 @@ export class Context {
             });
         }
 
-        proof.payload = {
-            status: 'unproven',
-            basis: 'expected_chunk_coverage_only',
-            expectedCount: expectedChunks.length,
-            observedCount: existingIds.size,
-            missingCount: 0,
-        };
-        publishProof();
-
-        const expectedIdsSet = new Set(expectedChunks.map(c => c.id));
-        const maxExactPayloadProbeRows = 16384;
-        const remotePayloadLimit = expectedChunks.length + 1;
-        if (remotePayloadLimit > maxExactPayloadProbeRows) {
-            proof.payload = {
-                status: 'unproven',
-                basis: 'exact_payload_query_limit_exceeded',
-                expectedCount: expectedChunks.length,
-                observedCount: existingIds.size,
-                missingCount: 0,
-            };
-            proof.staleRemoteChunks = {
-                status: 'unproven',
-                basis: 'exact_payload_query_limit_exceeded',
-            };
-            return withProof({
-                status: 'requires_reindex',
-                reason: 'requires_reindex',
-                message: `Coverage verification failed: repair cannot prove exact remote payload equality for ${expectedChunks.length} expected chunks with the current vector query limit.`,
-                missingCount: 0,
-                trackedRelativePaths,
-            });
-        }
-        // Repair relies on query(filter, limit=N+1) returning N+1 rows when more than N payload rows exist.
-        const remotePayloadRows = await this.vectorDatabase.queryDocuments(selectedCollection, {
-            fields: ['id'],
-            limit: remotePayloadLimit,
-        });
-        const extraRemoteIds = new Set<string>();
-        for (const row of remotePayloadRows) {
-            const id = typeof row?.id === 'string' ? row.id : '';
-            if (id && !expectedIdsSet.has(id)) {
-                extraRemoteIds.add(id);
-            }
-        }
-
-        if (remotePayloadRows.length !== expectedChunks.length || extraRemoteIds.size > 0) {
-            const extraCount = Math.max(0, remotePayloadRows.length - expectedChunks.length, extraRemoteIds.size);
+        if (observedPayloadCount !== expectedChunks.length) {
+            const extraCount = Math.max(0, observedPayloadCount - expectedChunks.length);
             proof.payload = {
                 status: 'failed',
-                basis: 'remote_payload_not_exact',
+                basis: 'remote_payload_count_mismatch',
                 expectedCount: expectedChunks.length,
-                observedCount: remotePayloadRows.length,
+                observedCount: observedPayloadCount,
                 missingCount: 0,
                 extraCount,
             };
             proof.staleRemoteChunks = {
                 status: 'failed',
-                basis: 'unexpected_remote_chunks',
+                basis: 'unexpected_remote_chunk_count',
                 extraCount,
             };
             return withProof({
                 status: 'requires_reindex',
                 reason: 'requires_reindex',
-                message: `Coverage verification failed: collection '${selectedCollection}' contains ${extraCount || 'unexpected'} stale remote chunk(s) outside the current indexable source set.`,
+                message: `Coverage verification failed: collection '${selectedCollection}' has ${extraCount || 'unexpected'} stale remote chunk(s) beyond the ${expectedChunks.length} chunks required by current source.`,
                 missingCount: 0,
                 trackedRelativePaths,
             });
         }
         proof.payload = {
             status: 'matched',
-            basis: 'exact_remote_payload_equality',
+            basis: 'same_state_membership_and_exact_count',
             expectedCount: expectedChunks.length,
-            observedCount: remotePayloadRows.length,
+            observedCount: observedPayloadCount,
             missingCount: 0,
             extraCount: 0,
         };
         proof.staleRemoteChunks = {
             status: 'matched',
-            basis: 'no_unexpected_remote_chunks',
+            basis: 'same_state_exact_count_no_extras',
             extraCount: 0,
         };
         proof.navigation = {
@@ -7469,7 +7585,7 @@ export class Context {
                     preparedChanges.fileHashes,
                     expectedChunks.length,
                     navigationCandidate,
-                    remotePayloadRows.length,
+                    observedPayloadCount,
                 );
                 const authority = options.publicationAuthority;
                 if (!authority) {

@@ -1357,6 +1357,19 @@ export class ManageIndexingHandlers {
                 );
             } else {
                 const operation = persistOperation("blocked");
+                if (result.reason === "repair_proof_limit") {
+                    return this.host.manageResponse(
+                        "repair",
+                        absolutePath,
+                        "blocked",
+                        result.message,
+                        {
+                            reason: "repair_proof_limit",
+                            repairProof: result.proof,
+                            ...(operation ? { operation } : {}),
+                        },
+                    );
+                }
                 const createHint = this.host.buildCreateHint(absolutePath);
                 return this.host.manageResponse(
                     "repair",

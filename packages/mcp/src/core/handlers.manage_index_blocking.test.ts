@@ -1579,6 +1579,52 @@ test('handleRepairIndex returns structured proof and reindex action when existin
     });
 });
 
+test('handleRepairIndex returns versioned proof-limit block without create or reindex guidance', async () => {
+    await withTempRepo(async (repoPath) => {
+        const repairProof = {
+            collection: { status: 'matched', basis: 'selected_active_collection' },
+            snapshot: { status: 'matched', basis: 'verified_snapshot_fingerprint' },
+            marker: { status: 'missing', basis: 'completion_marker_missing' },
+            fingerprint: { status: 'matched', basis: 'verified_snapshot_fingerprint' },
+            payload: { status: 'unproven', basis: 'same_state_payload_authority_unavailable' },
+            staleRemoteChunks: { status: 'unproven', basis: 'same_state_payload_authority_unavailable' },
+            navigation: { status: 'not_checked' },
+        } as const;
+        const context = {
+            repairIndex: async () => ({
+                status: 'blocked',
+                reason: 'repair_proof_limit',
+                message: 'The backend cannot prove one stable payload state.',
+                proof: repairProof,
+            }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getAllCodebases: () => [{ path: repoPath, info: { status: 'stale_local' } }],
+            getIndexingCodebases: () => [],
+            getIndexedCodebases: () => [],
+            getCodebaseStatus: () => 'stale_local',
+            getCodebaseInfo: () => ({ status: 'stale_local', lastUpdated: new Date().toISOString() }),
+            ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+            saveCodebaseSnapshot: () => undefined,
+        } as unknown as HandlerSnapshotManager;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            { getWatchDebounceMs: () => 2000 } as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+
+        const envelope = parseManageEnvelope(await handlers.handleRepairIndex({ path: repoPath }));
+
+        assert.equal(envelope.version, 1);
+        assert.equal(envelope.status, 'blocked');
+        assert.equal(envelope.reason, 'repair_proof_limit');
+        assert.equal(envelope.repairProof?.payload.status, 'unproven');
+        assert.equal(envelope.hints, undefined);
+    });
+});
+
 test('handleRepairIndex recommends create only when collection proof is missing', async () => {
     await withTempRepo(async (repoPath) => {
         const repairProof = {

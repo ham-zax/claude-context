@@ -47,7 +47,8 @@ export type ManageIndexReason =
     | "vector_backend_unavailable"
     | "runtime_owner_conflict"
     | "mutation_in_progress"
-    | "needs_create";
+    | "needs_create"
+    | "repair_proof_limit";
 
 export type VectorBackendResponseCode =
     | "ZILLIZ_CLUSTER_STOPPED"

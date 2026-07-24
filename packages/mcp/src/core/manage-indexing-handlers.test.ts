@@ -2513,6 +2513,42 @@ test("handleRepairIndex publishes blocked receipt when proof requires reindex", 
     });
 });
 
+test("handleRepairIndex publishes blocked proof-limit receipt without remediation hints", async () => {
+    await withTempRepo(async (repoPath) => {
+        const harness = createRepairReceiptHarness(repoPath, {
+            repairIndex: async () => ({
+                status: "blocked",
+                reason: "repair_proof_limit",
+                message: "backend cannot prove one stable payload state",
+                proof: {
+                    ...REPAIR_PROOF,
+                    payload: { status: "unproven", basis: "same_state_payload_authority_unavailable" },
+                    staleRemoteChunks: { status: "unproven", basis: "same_state_payload_authority_unavailable" },
+                    navigation: { status: "not_checked" },
+                },
+            }),
+        });
+
+        const response = await harness.handler.handleRepairIndex({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text) as {
+            version: number;
+            status: string;
+            reason?: string;
+            hints?: Record<string, unknown>;
+            operation?: IndexOperationReceipt;
+            repairProof?: typeof REPAIR_PROOF;
+        };
+
+        assert.equal(payload.status, "blocked");
+        assert.equal(payload.reason, "repair_proof_limit");
+        assert.equal(payload.operation?.phase, "blocked");
+        assert.equal(payload.repairProof?.payload.status, "unproven");
+        assert.equal(payload.hints, undefined);
+        assert.equal(harness.persisted.at(-1)?.phase, "blocked");
+        assert.equal(harness.coordinator?.getActiveLease(repoPath), undefined);
+    });
+});
+
 test("handleRepairIndex publishes failed receipt when repair throws", async () => {
     await withTempRepo(async (repoPath) => {
         const harness = createRepairReceiptHarness(repoPath, {

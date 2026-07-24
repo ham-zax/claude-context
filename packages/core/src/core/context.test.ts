@@ -468,6 +468,10 @@ class InMemoryVectorDatabase implements VectorDatabase {
         return rows;
     }
 
+    async countDocuments(collectionName: string, filter?: VectorFilter): Promise<number> {
+        return this.listDocuments(collectionName, filter).length;
+    }
+
     async checkCollectionLimit(): Promise<boolean> {
         return true;
     }
@@ -9001,7 +9005,7 @@ test('Context.repairIndex uses the snapshot-selected staged collection when mult
     }
 });
 
-test('Context.repairIndex requires reindex when exact payload equality exceeds the query ceiling', async () => {
+test('Context.repairIndex proves large exact payload equality with same-state count authority', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-query-limit-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -9035,7 +9039,9 @@ test('Context.repairIndex requires reindex when exact payload equality exceeds t
             expectedChunks,
             symbolRecords: [],
             symbolManifestFiles: [],
+            analysisByFile: new Map(),
         });
+        vectorDatabase.countDocuments = async () => expectedChunks.length;
         const originalQuery = vectorDatabase.queryDocuments.bind(vectorDatabase);
         vectorDatabase.queryDocuments = async (collectionName, request) => {
             if (request.filter?.kind === 'in' && request.filter.field === 'id') {
@@ -9050,13 +9056,89 @@ test('Context.repairIndex requires reindex when exact payload equality exceeds t
             snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
         });
 
-        assert.equal(result.status, 'requires_reindex');
-        assert.equal(result.reason, 'requires_reindex');
-        assert.equal(result.proof.payload.status, 'unproven');
-        assert.equal(result.proof.payload.basis, 'exact_payload_query_limit_exceeded');
+        assert.equal(result.status, 'ok');
+        assert.equal(result.proof.payload.status, 'matched');
+        assert.equal(result.proof.payload.basis, 'same_state_membership_and_exact_count');
         assert.equal(result.proof.payload.expectedCount, 16384);
+        assert.equal(result.proof.payload.observedCount, 16384);
+        assert.equal(result.proof.staleRemoteChunks.status, 'matched');
+        assert.equal(result.proof.staleRemoteChunks.basis, 'same_state_exact_count_no_extras');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context.repairIndex blocks when the backend lacks same-state payload authority', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-proof-limit-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'src', 'auth.ts');
+
+    try {
+        fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+        fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        const fingerprint = await readTrustedFingerprint(context, codebasePath);
+        await context.clearIndexCompletionMarker(codebasePath);
+        vectorDatabase.getCollectionDataObservation = undefined as never;
+
+        const result = await context.repairIndex(codebasePath, {
+            snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
+        });
+
+        assert.equal(result.status, 'blocked');
+        assert.equal(result.reason, 'repair_proof_limit');
+        assert.equal(result.proof.payload.status, 'unproven');
+        assert.equal(result.proof.payload.basis, 'same_state_payload_authority_unavailable');
         assert.equal(result.proof.staleRemoteChunks.status, 'unproven');
-        assert.equal(result.proof.staleRemoteChunks.basis, 'exact_payload_query_limit_exceeded');
+        assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context.repairIndex blocks when remote payload changes during equality proof', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-changing-payload-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'src', 'auth.ts');
+
+    try {
+        fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+        fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        const fingerprint = await readTrustedFingerprint(context, codebasePath);
+        await context.clearIndexCompletionMarker(codebasePath);
+        const originalObservation = vectorDatabase.getCollectionDataObservation.bind(vectorDatabase);
+        let observations = 0;
+        vectorDatabase.getCollectionDataObservation = async (collectionName) => {
+            observations++;
+            return `${await originalObservation(collectionName)}:${observations}`;
+        };
+
+        const result = await context.repairIndex(codebasePath, {
+            snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
+        });
+
+        assert.equal(result.status, 'blocked');
+        assert.equal(result.reason, 'repair_proof_limit');
+        assert.equal(result.proof.payload.status, 'unproven');
+        assert.equal(result.proof.payload.basis, 'remote_payload_changed_during_proof');
+        assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

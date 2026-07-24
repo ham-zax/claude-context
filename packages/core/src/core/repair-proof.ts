@@ -47,7 +47,7 @@ export interface RepairActivatedGeneration {
 
 export interface RepairIndexResult {
     status: 'ok' | 'blocked' | 'requires_reindex';
-    reason?: 'needs_create' | 'requires_reindex';
+    reason?: 'needs_create' | 'requires_reindex' | 'repair_proof_limit';
     message: string;
     proof: RepairProof;
     missingCount?: number;
