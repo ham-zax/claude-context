@@ -1,5 +1,5 @@
 {
-  "outcome": "native_python_l4_pass",
+  "outcome": "native_python_product_projection_blocked",
   "checkpointBaseline": "074bed62f723e8b04ec36f3467417cba632687ae",
   "nativeL3Commit": "1fd06ad4756ff84027674e06e6e5875f9f458249",
   "l4CorrectionCommit": "8d320c1b3f4d398198bad1cd945a93caf1d5bc85",
@@ -83,7 +83,17 @@
       347209728
     ],
     "finalProcessRssBytes": 483307520,
-    "numericRelationshipBudgetFound": false
+    "numericRelationshipBudgetFound": false,
+    "baselineAvailable": false,
+    "inboundTraversalBaselineMs": null,
+    "inboundTraversalCandidateMs": null,
+    "frozenGates": {
+      "relationshipStageMedianRatio": "<=1.20x",
+      "peakRssDifferenceBytes": "<=67108864",
+      "oneFileDelta": "<=max(1.25x baseline, baseline+50ms)",
+      "inboundTraversal": "<=max(1.10x baseline, baseline+5ms)"
+    },
+    "qualification": "unqualified_missing_original_r0_baseline"
   },
   "coreResult": {
     "exitCode": 1,
@@ -94,6 +104,131 @@
       "Context bounds deferred atomic publication generations without pruning active authority",
       "Context completion validation propagates transient and unavailable payload probes",
       "Context receipt-driven generation proof reuses activation authority and single-flights cold validation"
+    ]
+  },
+  "followUp": {
+    "outcome": "native_python_product_projection_blocked",
+    "candidateSourceRevision": "7b8bb425b6b2ee96ce301a3e2f691984ba67d205",
+    "nativeImplementationCommit": "cff16aca4d406f2f9b2a1fa2900aa14f972ae1ad",
+    "builtPackages": {
+      "core": {
+        "name": "@zokizuan/satori-core",
+        "version": "3.2.0",
+        "entry": "/home/hamza/repo/satori-worktrees/native-python-l4-20260725/packages/core/dist/index.js",
+        "sha256": "44eb799f1ccdb475b409e804884f0a310d9081adaacbf3fa761f2a595482bc7e"
+      },
+      "mcp": {
+        "name": "@zokizuan/satori-mcp",
+        "version": "6.3.0",
+        "entry": "/home/hamza/repo/satori-worktrees/native-python-l4-20260725/packages/mcp/dist/index.js",
+        "sha256": "56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823"
+      }
+    },
+    "runtime": {
+      "node": "v24.13.0",
+      "pnpm": "10.28.2",
+      "relationshipVersion": "relationship-v8+python-constructor-receivers",
+      "relationshipContributionSchema": "relationship_file_contribution_v3",
+      "relationshipManifestSchema": "relationship_v2",
+      "environmentConfigId": "python-native-resolution-v1",
+      "fingerprint": {
+        "embeddingProvider": "Potion",
+        "embeddingModel": "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        "embeddingDimension": 256,
+        "embeddingArtifactDigest": "bfda80d97aeb585e20650b1c54e9063a65068ce284317f0e0a812e20964dcee7",
+        "vectorStoreProvider": "LanceDB",
+        "schemaVersion": "hybrid_v3",
+        "relationshipVersion": "relationship-v8+python-constructor-receivers"
+      }
+    },
+    "publishedGeneration": {
+      "stateRoot": "/tmp/satori-native-python-l4-followup-state-20260725-KIlKqo",
+      "targetRoot": "/tmp/satori-native-python-l4-target-20260725-lbEBpS",
+      "generationId": "symmanifest_7058-8445b0bea0ab9797",
+      "symbolRegistryManifestHash": "symmanifest_7058a1f3e8530da38d756cd989a45263",
+      "relationshipManifestHash": "45ff76835cfbcb10b41c5a7f7d7167120ffd241a27c09f363f34bd2fc49cc28b",
+      "navigationSealHash": "73e5edf496252e3953272cbc22711b9cde4ae270ff17c381a1ee6addf6a977ed",
+      "relationshipSidecarTreeDigest": "2e0643da7159bbcd4cd473e7114a277b52b8e43f83cb8e89cd60221a190be7a0",
+      "reloadStatus": "ok",
+      "reloadedRecords": 4977,
+      "reloadedCallsRecords": 2690
+    },
+    "trace": {
+      "resolutionClaims": 14876,
+      "serializedContributions": 279,
+      "authoritativeRecords": 4977,
+      "directReverseLookup": {
+        "SignalGenerator.check_entry": 3,
+        "BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant": 2,
+        "SignalLedger.record": 2
+      },
+      "graphNeighborsCalls": {
+        "SignalGenerator.check_entry": 3,
+        "BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant": 0,
+        "SignalLedger.record": 2
+      },
+      "firstMissingBoundary": "getGraphNeighbors low-confidence relationship support selection"
+    },
+    "mcpHandlerWitness": {
+      "arguments": {
+        "direction": "callers",
+        "depth": 3,
+        "limit": 100,
+        "path": "/tmp/satori-native-python-l4-target-20260725-lbEBpS"
+      },
+      "targetResults": {
+        "SignalGenerator.check_entry": {
+          "status": "ok",
+          "authoritativeCallEdges": 3,
+          "requiredCallers": 3,
+          "warnings": ["RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:1"]
+        },
+        "BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant": {
+          "status": "ok",
+          "authoritativeCallEdges": 0,
+          "dynamicFallbackEdges": 2,
+          "requiredCallers": 2,
+          "warnings": ["RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:2", "SOURCE_BACKED_DYNAMIC_CALLERS:2"]
+        },
+        "SignalLedger.record": {
+          "status": "ok",
+          "authoritativeCallEdges": 2,
+          "requiredCallers": 1,
+          "validAdditionalCallers": 1,
+          "warnings": []
+        }
+      },
+      "negativeControls": {
+        "hurstReceiverToSignalGenerator": "absent",
+        "unrelatedRoundingRecord": "zero edges, partial-coverage warning and search hint",
+        "sameNameConflictingUseBeforeAssignmentUnsupportedDynamic": "no authoritative CALLS"
+      }
+    },
+    "stdioObservation": {
+      "runtimeInitialized": true,
+      "tools": ["manage_index", "search_codebase", "continue_search", "call_graph", "file_outline", "read_file", "list_codebases"],
+      "firstReindex": "blocked: runtime_owner_conflict on pid 1412",
+      "retryReindex": "accepted with IGNORE_POLICY_PROBE_FAILED",
+      "finalStatus": "index_failed",
+      "reason": "Interrupted indexing detected without completion marker proof",
+      "callGraphStatus": "not_indexed",
+      "interpretation": "transport readiness/publication failure, not no-callers evidence"
+    },
+    "compatibility": {
+      "builderVersion": "unchanged checkpoint -> candidate",
+      "contributionSchema": "unchanged checkpoint -> candidate",
+      "manifestSchema": "unchanged checkpoint -> candidate",
+      "oldSameSchemaSidecar": "accepted status=ok with 4977 records",
+      "requiredReindex": "not enforced for semantic native-analysis change",
+      "environmentDigestBinding": "missing from top-level runtime/manifest compatibility key"
+    },
+    "commands": [
+      {"command": "pnpm --filter @zokizuan/satori-core build", "exitCode": 0},
+      {"command": "pnpm --filter @zokizuan/satori-mcp run build:runtime", "exitCode": 0},
+      {"command": "node /tmp/satori-native-l4-followup-build-generation.mjs", "exitCode": 0},
+      {"command": "node /tmp/satori-native-l4-followup-mcp-witness.mjs", "exitCode": 0},
+      {"command": "node /tmp/satori-native-l4-followup-compatibility-probe.mjs", "exitCode": 0},
+      {"command": "node /tmp/satori-native-l4-followup-real-mcp.mjs", "exitCode": 0, "note": "serialized MCP timeout/error"}
     ]
   }
 }
