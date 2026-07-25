@@ -1257,6 +1257,15 @@ export class ManageIndexingHandlers {
                 ) {
                     throw new Error(`Repair completion for '${absolutePath}' did not match an exact proven generation.`);
                 }
+                assertMutationCurrent?.();
+                const checkpoint = await this.host.context.inspectSourceFreshnessCheckpoint(
+                    absolutePath,
+                    proven.collectionName,
+                    proven,
+                );
+                if (checkpoint.status !== "valid") {
+                    throw new Error(`Repair completion for '${absolutePath}' did not preserve a valid source checkpoint.`);
+                }
                 if (result.activatedGeneration) {
                     const activated = result.activatedGeneration;
                     if (
@@ -1270,18 +1279,10 @@ export class ManageIndexingHandlers {
                         || activated.navigation.relationshipManifestHash
                             !== proven.navigation.relationshipManifestHash
                     ) {
-                        throw new Error(`Relationship-only repair for '${absolutePath}' did not prove its activated navigation generation.`);
+                        throw new Error(`V4 repair for '${absolutePath}' did not prove its activated navigation generation.`);
                     }
-                    const checkpoint = await this.host.context.inspectSourceFreshnessCheckpoint(
-                        absolutePath,
-                        proven.collectionName,
-                        proven,
-                    );
-                    if (
-                        checkpoint.status !== "valid"
-                        || checkpoint.documentDigest !== activated.sourceCheckpointDocumentDigest
-                    ) {
-                        throw new Error(`Relationship-only repair for '${absolutePath}' did not preserve its source checkpoint identity.`);
+                    if (checkpoint.documentDigest !== activated.sourceCheckpointDocumentDigest) {
+                        throw new Error(`V4 repair for '${absolutePath}' did not preserve its source checkpoint identity.`);
                     }
                 }
                 assertMutationCurrent?.();

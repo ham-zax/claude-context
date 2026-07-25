@@ -2134,6 +2134,10 @@ test("handleRepairIndex saves the manifest paths verified by repair", async () =
                 proveIndexedGeneration: async () => provenRepairGeneration(
                     "snapshot-selected-collection",
                 ),
+                inspectSourceFreshnessCheckpoint: async () => ({
+                    status: "valid",
+                    documentDigest: "c".repeat(64),
+                }),
             },
             snapshotManager: {
                 setCodebaseIndexed: () => undefined,
@@ -2238,6 +2242,10 @@ test("handleRepairIndex recovers abandoned indexing before the indexing gate", a
                 proveIndexedGeneration: async () => provenRepairGeneration(
                     "snapshot-selected-collection",
                 ),
+                inspectSourceFreshnessCheckpoint: async () => ({
+                    status: "valid",
+                    documentDigest: "c".repeat(64),
+                }),
             },
             snapshotManager: {
                 setCodebaseIndexed: () => undefined,
@@ -2454,6 +2462,27 @@ test("handleRepairIndex accepts a relationship-only repair only after exact gene
             "activated_generation_proven",
         );
         assert.equal(harness.events.includes("rebuild:call-graph"), false);
+    });
+});
+
+test("handleRepairIndex rejects generic repair success when the effective source checkpoint is invalid", async () => {
+    await withTempRepo(async (repoPath) => {
+        const harness = createRepairReceiptHarness(repoPath, {
+            inspectSourceFreshnessCheckpoint: async () => ({
+                status: "corrupt",
+            }),
+        });
+
+        const response = await harness.handler.handleRepairIndex({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text) as {
+            status: string;
+            operation?: IndexOperationReceipt;
+        };
+
+        assert.equal(payload.status, "error");
+        assert.match(payload.message, /did not preserve a valid source checkpoint/i);
+        assert.equal(payload.operation?.phase, "failed");
+        assert.equal(harness.persisted.at(-1)?.indexed, false);
     });
 });
 

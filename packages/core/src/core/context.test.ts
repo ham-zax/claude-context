@@ -292,6 +292,24 @@ async function publishCurrentAuthorityCheckpoint(
     context.registerSynchronizer(context.resolveCollectionName(codebasePath), synchronizer);
 }
 
+async function publishV4TestGeneration(
+    context: Context,
+    codebasePath: string,
+    sourcePath: string,
+    nextContent: string,
+    generation: number,
+): Promise<void> {
+    await publishCurrentAuthorityCheckpoint(context, codebasePath);
+    fs.writeFileSync(sourcePath, nextContent, 'utf8');
+    await context.reindexByChange(codebasePath, undefined, {
+        publicationAuthority: {
+            ownerId: 'v4-test-owner',
+            generation,
+            operationId: `v4-test-operation-${generation}`,
+        },
+    });
+}
+
 class InMemoryVectorDatabase implements VectorDatabase {
     readonly collections = new Map<string, Map<string, VectorDocument>>();
     readonly indexedDocuments: IndexedVectorDocument[] = [];
@@ -8627,7 +8645,7 @@ test('Context.repairIndex requires reindex when the snapshot-selected collection
     }
 });
 
-test('Context.repairIndex missing_marker_doc + complete collection repairs marker and sidecars without embedding chunk writes', async () => {
+test('Context.repairIndex missing marker requires reindex without embedding or authority writes', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-ok-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -8683,20 +8701,20 @@ test('Context.repairIndex missing_marker_doc + complete collection repairs marke
         const repairResult = await context.repairIndex(codebasePath, {
             snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
         });
-        assert.equal(repairResult.status, 'ok');
-        assert.match(repairResult.message, /readiness repaired/i);
+        assert.equal(repairResult.status, 'requires_reindex');
+        assert.match(repairResult.message, /exact marker-owned v4 publication/i);
         assert.equal(repairResult.proof.collection.status, 'matched');
         assert.equal(repairResult.proof.snapshot.status, 'matched');
         assert.equal(repairResult.proof.marker.status, 'missing');
         assert.equal(repairResult.proof.fingerprint.status, 'matched');
-        assert.equal(repairResult.proof.payload.status, 'matched');
-        assert.equal(repairResult.proof.staleRemoteChunks.status, 'matched');
-        assert.equal(repairResult.proof.navigation.status, 'matched');
+        assert.equal(repairResult.proof.payload.status, 'not_checked');
+        assert.equal(repairResult.proof.staleRemoteChunks.status, 'not_checked');
+        assert.equal(repairResult.proof.navigation.status, 'failed');
 
-        // 4. Verify marker and sidecars are rebuilt
+        // 4. Verify no marker or sidecar authority was fabricated.
         const activeCollection = await context.getActiveIndexedCollectionName(codebasePath);
-        assert.ok(activeCollection);
-        assert.equal(fs.existsSync(sqlitePath), true);
+        assert.equal(activeCollection, null);
+        assert.equal(fs.existsSync(sqlitePath), false);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -8858,7 +8876,7 @@ test('Context.repairIndex publishes partial proof before a backend payload probe
     try {
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
         fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
-        const vectorDatabase = new InMemoryVectorDatabase();
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
@@ -8866,8 +8884,13 @@ test('Context.repairIndex publishes partial proof before a backend payload probe
         });
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const fingerprint = await readTrustedFingerprint(context, codebasePath);
-        await context.clearIndexCompletionMarker(codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            sourcePath,
+            'export function auth() { return false; }\n',
+            21,
+        );
 
         const originalQuery = vectorDatabase.queryDocuments.bind(vectorDatabase);
         vectorDatabase.queryDocuments = async (collectionName, request) => {
@@ -8880,7 +8903,6 @@ test('Context.repairIndex publishes partial proof before a backend payload probe
 
         await assert.rejects(
             context.repairIndex(codebasePath, {
-                snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
                 onProofUpdate: (proof) => {
                     proofUpdates.push(proof);
                 },
@@ -8889,8 +8911,8 @@ test('Context.repairIndex publishes partial proof before a backend payload probe
         );
         const partialProof = proofUpdates.at(-1);
         assert.equal(partialProof?.collection.status, 'matched');
-        assert.equal(partialProof?.snapshot.status, 'matched');
-        assert.equal(partialProof?.marker.status, 'missing');
+        assert.equal(partialProof?.snapshot.status, 'missing');
+        assert.equal(partialProof?.marker.status, 'matched');
         assert.equal(partialProof?.fingerprint.status, 'matched');
         assert.equal(partialProof?.payload.status, 'not_checked');
     } finally {
@@ -8912,27 +8934,28 @@ test('Context.repairIndex blocks when deleted source leaves extra remote chunks'
 
         const context = new Context({
             embedding: new TestEmbedding(),
-            vectorDatabase: new InMemoryVectorDatabase(),
+            vectorDatabase: new ForkingInMemoryLanceVectorDatabase(),
             symbolRegistryStateRoot: stateRoot,
         });
 
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const trustedFingerprint = await readTrustedFingerprint(context, codebasePath);
-        await context.clearIndexCompletionMarker(codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            authPath,
+            'export function auth() { return false; }\n',
+            22,
+        );
         fs.rmSync(oldPath);
 
-        const repairResult = await context.repairIndex(codebasePath, {
-            snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
-        });
+        const repairResult = await context.repairIndex(codebasePath);
 
         assert.equal(repairResult.status, 'requires_reindex');
         assert.equal(repairResult.reason, 'requires_reindex');
-        assert.match(repairResult.message, /stale remote chunk/i);
-        assert.equal(repairResult.proof.payload.status, 'failed');
-        assert.ok((repairResult.proof.staleRemoteChunks.extraCount || 0) > 0);
-        assert.equal(repairResult.proof.staleRemoteChunks.status, 'failed');
-        assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+        assert.match(repairResult.message, /zero-change source observation/i);
+        assert.equal(repairResult.proof.snapshot.basis, 'source_observation_changed');
+        assert.equal(repairResult.proof.payload.status, 'not_checked');
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -8950,32 +8973,34 @@ test('Context.repairIndex blocks zero-file repair when remote chunks remain', as
 
         const context = new Context({
             embedding: new TestEmbedding(),
-            vectorDatabase: new InMemoryVectorDatabase(),
+            vectorDatabase: new ForkingInMemoryLanceVectorDatabase(),
             symbolRegistryStateRoot: stateRoot,
         });
 
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const trustedFingerprint = await readTrustedFingerprint(context, codebasePath);
-        await context.clearIndexCompletionMarker(codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            sourcePath,
+            'export function auth() { return false; }\n',
+            23,
+        );
         fs.rmSync(sourcePath);
 
-        const repairResult = await context.repairIndex(codebasePath, {
-            snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
-        });
+        const repairResult = await context.repairIndex(codebasePath);
 
         assert.equal(repairResult.status, 'requires_reindex');
         assert.equal(repairResult.reason, 'requires_reindex');
-        assert.match(repairResult.message, /no indexable files/i);
-        assert.equal(repairResult.proof.payload.status, 'failed');
-        assert.equal(repairResult.proof.staleRemoteChunks.status, 'failed');
-        assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+        assert.match(repairResult.message, /zero-change source observation/i);
+        assert.equal(repairResult.proof.snapshot.basis, 'source_observation_changed');
+        assert.equal(repairResult.proof.payload.status, 'not_checked');
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
 
-test('Context.repairIndex writes the completion marker to the staged collection it verified', async () => {
+test('Context.repairIndex refuses a staged collection without exact v4 authority', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-staged-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -9009,16 +9034,17 @@ test('Context.repairIndex writes the completion marker to the staged collection 
             snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
         });
 
-        assert.equal(repairResult.status, 'ok');
+        assert.equal(repairResult.status, 'requires_reindex');
+        assert.equal(repairResult.proof.navigation.basis, 'v4_repair_authority_missing');
         assert.equal(vectorDatabase.collections.has(stableCollection), false);
-        assert.equal(vectorDatabase.collections.get(stagedCollection)?.has(INDEX_COMPLETION_MARKER_DOC_ID), true);
-        assert.equal(await context.getActiveIndexedCollectionName(codebasePath), stagedCollection);
+        assert.equal(vectorDatabase.collections.get(stagedCollection)?.has(INDEX_COMPLETION_MARKER_DOC_ID), false);
+        assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
 
-test('Context.repairIndex uses the snapshot-selected staged collection when multiple generations exist', async () => {
+test('Context.repairIndex refuses snapshot-selected staged vectors without exact v4 authority', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-preferred-stage-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -9063,8 +9089,8 @@ test('Context.repairIndex uses the snapshot-selected staged collection when mult
             preferredCollectionName: selectedCollection,
         });
 
-        assert.equal(repairResult.status, 'ok');
-        assert.equal(repairResult.collectionName, selectedCollection);
+        assert.equal(repairResult.status, 'requires_reindex');
+        assert.equal(repairResult.proof.navigation.basis, 'v4_repair_authority_missing');
         assert.equal(vectorDatabase.collections.get(selectedCollection)?.has(INDEX_COMPLETION_MARKER_DOC_ID), true);
         assert.equal(vectorDatabase.collections.get(staleCollection)?.has('stale-extra'), true);
     } finally {
@@ -9081,7 +9107,7 @@ test('Context.repairIndex proves large exact payload equality with same-state co
     try {
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
         fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
-        const vectorDatabase = new InMemoryVectorDatabase();
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
@@ -9089,8 +9115,13 @@ test('Context.repairIndex proves large exact payload equality with same-state co
         });
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const fingerprint = await readTrustedFingerprint(context, codebasePath);
-        await context.clearIndexCompletionMarker(codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            sourcePath,
+            'export function auth() { return false; }\n',
+            24,
+        );
 
         const expectedChunks = Array.from({ length: 16384 }, (_, index) => ({
             id: `expected-${index}`,
@@ -9109,6 +9140,13 @@ test('Context.repairIndex proves large exact payload equality with same-state co
             analysisByFile: new Map(),
         });
         vectorDatabase.countDocuments = async () => expectedChunks.length;
+        const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
+        assert.ok(collectionName);
+        const markerDocument = vectorDatabase.collections
+            .get(collectionName)
+            ?.get(INDEX_COMPLETION_MARKER_DOC_ID);
+        assert.ok(markerDocument);
+        (markerDocument.metadata as { totalChunks: number }).totalChunks = expectedChunks.length;
         const originalQuery = vectorDatabase.queryDocuments.bind(vectorDatabase);
         vectorDatabase.queryDocuments = async (collectionName, request) => {
             if (request.filter?.kind === 'in' && request.filter.field === 'id') {
@@ -9119,9 +9157,7 @@ test('Context.repairIndex proves large exact payload equality with same-state co
             return originalQuery(collectionName, request);
         };
 
-        const result = await context.repairIndex(codebasePath, {
-            snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
-        });
+        const result = await context.repairIndex(codebasePath);
 
         assert.equal(result.status, 'ok');
         assert.equal(result.proof.payload.status, 'matched');
@@ -9144,7 +9180,7 @@ test('Context.repairIndex blocks when the backend lacks same-state payload autho
     try {
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
         fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
-        const vectorDatabase = new InMemoryVectorDatabase();
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
@@ -9152,20 +9188,23 @@ test('Context.repairIndex blocks when the backend lacks same-state payload autho
         });
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const fingerprint = await readTrustedFingerprint(context, codebasePath);
-        await context.clearIndexCompletionMarker(codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            sourcePath,
+            'export function auth() { return false; }\n',
+            25,
+        );
         vectorDatabase.getCollectionDataObservation = undefined as never;
 
-        const result = await context.repairIndex(codebasePath, {
-            snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
-        });
+        const result = await context.repairIndex(codebasePath);
 
         assert.equal(result.status, 'blocked');
         assert.equal(result.reason, 'repair_proof_limit');
         assert.equal(result.proof.payload.status, 'unproven');
         assert.equal(result.proof.payload.basis, 'same_state_payload_authority_unavailable');
         assert.equal(result.proof.staleRemoteChunks.status, 'unproven');
-        assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
+        assert.ok(await context.getIndexCompletionMarker(codebasePath));
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -9180,7 +9219,7 @@ test('Context.repairIndex blocks when remote payload changes during equality pro
     try {
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
         fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
-        const vectorDatabase = new InMemoryVectorDatabase();
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
@@ -9188,8 +9227,13 @@ test('Context.repairIndex blocks when remote payload changes during equality pro
         });
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const fingerprint = await readTrustedFingerprint(context, codebasePath);
-        await context.clearIndexCompletionMarker(codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            sourcePath,
+            'export function auth() { return false; }\n',
+            26,
+        );
         const originalObservation = vectorDatabase.getCollectionDataObservation.bind(vectorDatabase);
         let observations = 0;
         vectorDatabase.getCollectionDataObservation = async (collectionName) => {
@@ -9197,21 +9241,19 @@ test('Context.repairIndex blocks when remote payload changes during equality pro
             return `${await originalObservation(collectionName)}:${observations}`;
         };
 
-        const result = await context.repairIndex(codebasePath, {
-            snapshotEvidence: verifiedSnapshotEvidence(fingerprint),
-        });
+        const result = await context.repairIndex(codebasePath);
 
         assert.equal(result.status, 'blocked');
         assert.equal(result.reason, 'repair_proof_limit');
         assert.equal(result.proof.payload.status, 'unproven');
         assert.equal(result.proof.payload.basis, 'remote_payload_changed_during_proof');
-        assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
+        assert.ok(await context.getIndexCompletionMarker(codebasePath));
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
 
-test('Context.repairIndex missing_marker_doc + missing expected chunk requires reindex with structured proof', async () => {
+test('Context.repairIndex v4 publication + missing expected chunk requires reindex with structured proof', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-missing-chunk-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -9221,7 +9263,7 @@ test('Context.repairIndex missing_marker_doc + missing expected chunk requires r
         fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
         fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
 
-        const vectorDatabase = new InMemoryVectorDatabase();
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
@@ -9231,10 +9273,17 @@ test('Context.repairIndex missing_marker_doc + missing expected chunk requires r
         // 1. Initial complete index
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
-        const trustedFingerprint = await readTrustedFingerprint(context, codebasePath);
+        await publishV4TestGeneration(
+            context,
+            codebasePath,
+            sourcePath,
+            'export function auth() { return false; }\n',
+            27,
+        );
 
         // 2. Delete all chunks from vector database manually to simulate incomplete/missing chunk rows
-        const collectionName = context.resolveCollectionName(codebasePath);
+        const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
+        assert.ok(collectionName);
         const documents = vectorDatabase.collections.get(collectionName);
         assert.ok(documents);
         for (const id of Array.from(documents.keys())) {
@@ -9243,13 +9292,8 @@ test('Context.repairIndex missing_marker_doc + missing expected chunk requires r
             }
         }
 
-        // Clear completion marker
-        await context.clearIndexCompletionMarker(codebasePath);
-
         // 3. Run repairIndex - coverage failure requires a full rebuild.
-        const repairResult = await context.repairIndex(codebasePath, {
-            snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
-        });
+        const repairResult = await context.repairIndex(codebasePath);
         assert.equal(repairResult.status, 'requires_reindex');
         assert.equal(repairResult.reason, 'requires_reindex');
         assert.ok(repairResult.missingCount && repairResult.missingCount > 0);
@@ -9261,7 +9305,7 @@ test('Context.repairIndex missing_marker_doc + missing expected chunk requires r
     }
 });
 
-test('Context.repairIndex valid marker + missing symbol registry rebuilds navigation only and preserves vector rows', async () => {
+test('Context.repairIndex legacy v3 + missing symbol registry requires reindex and preserves vector rows', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-missing-registry-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -9295,15 +9339,223 @@ test('Context.repairIndex valid marker + missing symbol registry rebuilds naviga
 
         // 3. Run repairIndex
         const repairResult = await context.repairIndex(codebasePath);
-        assert.equal(repairResult.status, 'ok');
+        assert.equal(repairResult.status, 'requires_reindex');
+        assert.equal(repairResult.proof.navigation.basis, 'v4_repair_authority_missing');
 
-        // 4. Verify symbol registry SQLite is rebuilt and vector rows are preserved
-        assert.equal(fs.existsSync(sqlitePath), true);
+        // 4. Verify repair leaves the legacy authority and vector rows untouched.
+        assert.equal(fs.existsSync(sqlitePath), false);
         const chunkIdsAfter = Array.from(docsMap.keys()).filter(id => id !== INDEX_COMPLETION_MARKER_DOC_ID);
         assert.deepEqual(chunkIdsAfter.sort(), chunkIdsBefore.sort());
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
+});
+
+async function assertGenericV4RepairPreservesCheckpoint(removeNavigation: boolean): Promise<void> {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-v4-checkpoint-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'src', 'auth.ts');
+
+    try {
+        fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+        fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
+
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        fs.writeFileSync(sourcePath, 'export function auth() { return false; }\n', 'utf8');
+        await context.reindexByChange(codebasePath, undefined, {
+            publicationAuthority: {
+                ownerId: 'initial-owner',
+                generation: 11,
+                operationId: 'initial-operation',
+            },
+        });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        await (context as unknown as ContextWithRelationshipVersionOverride)
+            .waitForPublicationRetention(canonicalRoot);
+
+        const before = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(before);
+        const checkpointBefore = await context.inspectSourceFreshnessCheckpoint(
+            codebasePath,
+            before.collectionName,
+            before,
+        );
+        assert.equal(checkpointBefore.status, 'valid');
+        const checkpointPath = FileSynchronizer.getSnapshotPathForGeneration(
+            codebasePath,
+            before.collectionName,
+        );
+        const checkpointBytesBefore = fs.readFileSync(checkpointPath, 'utf8');
+        const authorityBefore = context.captureDurableIndexAuthority(codebasePath);
+
+        if (removeNavigation) {
+            await clearSymbolRegistrySidecar({ stateRoot, normalizedRootPath: codebasePath });
+        }
+
+        vectorDatabase.mutationCalls.length = 0;
+        const repair = await context.repairIndex(codebasePath, {
+            publicationAuthority: {
+                ownerId: 'repair-owner',
+                generation: 12,
+                operationId: 'repair-operation',
+            },
+        });
+        assert.equal(repair.status, 'ok', repair.message);
+
+        const after = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(after);
+        const policyFile = fs.readdirSync(policyRoot).find((file) => file.endsWith('.json'));
+        assert.ok(policyFile);
+        const policy = JSON.parse(
+            fs.readFileSync(path.join(policyRoot, policyFile), 'utf8'),
+        ) as CanonicalIndexPolicyDocument;
+
+        const restarted = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        const checkpointAfter = await restarted.inspectSourceFreshnessCheckpoint(codebasePath);
+        const authorityAfter = restarted.captureDurableIndexAuthority(codebasePath);
+        let zeroChangeSyncError: string | null = null;
+        try {
+            await restarted.recreateSynchronizerForCodebase(
+                codebasePath,
+                undefined,
+                undefined,
+                { requireAuthorityCheckpoint: true },
+            );
+        } catch (error) {
+            zeroChangeSyncError = error instanceof Error ? error.message : String(error);
+        }
+
+        const evidence = JSON.stringify({
+            removeNavigation,
+            repairStatus: repair.status,
+            policySchema: policy.schemaVersion,
+            markerRunIdBefore: before.marker.runId,
+            markerRunIdAfter: after.marker.runId,
+            publicationCheckpointMarkerRunId: policy.schemaVersion === 'satori_index_policy_v4'
+                ? policy.publication.sourceCheckpoint.markerRunId
+                : null,
+            checkpointAfter,
+            zeroChangeSyncError,
+        });
+        assert.equal(checkpointAfter.status, 'valid', evidence);
+        assert.equal(zeroChangeSyncError, null, evidence);
+        assert.equal(policy.schemaVersion, 'satori_index_policy_v4', evidence);
+        assert.equal(after.marker.runId, before.marker.runId, evidence);
+        assert.equal(fs.readFileSync(checkpointPath, 'utf8'), checkpointBytesBefore, evidence);
+        assert.deepEqual(vectorDatabase.mutationCalls, [], evidence);
+        assert.equal(
+            repair.proof.navigation.basis,
+            removeNavigation
+                ? 'v4_navigation_activated_and_proven'
+                : 'v4_navigation_already_activated',
+            evidence,
+        );
+        if (removeNavigation) {
+            assert.notEqual(after.navigation.generationId, before.navigation.generationId, evidence);
+        } else {
+            assert.equal(after.navigation.generationId, before.navigation.generationId, evidence);
+            assert.deepEqual(authorityAfter, authorityBefore, evidence);
+        }
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
+
+test('Context.repairIndex generic navigation repair preserves a valid v4 source checkpoint', async () => {
+    await assertGenericV4RepairPreservesCheckpoint(true);
+});
+
+test('Context.repairIndex healthy generic repair preserves a valid v4 source checkpoint', async () => {
+    await assertGenericV4RepairPreservesCheckpoint(false);
+});
+
+async function assertV4RepairRejectsInvalidCheckpoint(
+    checkpointState: 'missing' | 'corrupt',
+): Promise<void> {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-v4-invalid-checkpoint-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'src', 'auth.ts');
+
+    try {
+        fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+        fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        fs.writeFileSync(sourcePath, 'export function auth() { return false; }\n', 'utf8');
+        await context.reindexByChange(codebasePath, undefined, {
+            publicationAuthority: {
+                ownerId: 'initial-owner',
+                generation: 15,
+                operationId: 'initial-operation',
+            },
+        });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        await (context as unknown as ContextWithRelationshipVersionOverride)
+            .waitForPublicationRetention(canonicalRoot);
+        const before = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(before);
+        const authorityBefore = context.captureDurableIndexAuthority(codebasePath);
+        const checkpointPath = FileSynchronizer.getSnapshotPathForGeneration(
+            codebasePath,
+            before.collectionName,
+        );
+        if (checkpointState === 'missing') {
+            fs.rmSync(checkpointPath);
+        } else {
+            fs.writeFileSync(checkpointPath, '{"snapshotVersion":3}', 'utf8');
+        }
+        vectorDatabase.mutationCalls.length = 0;
+
+        const repair = await context.repairIndex(codebasePath, {
+            publicationAuthority: {
+                ownerId: 'repair-owner',
+                generation: 16,
+                operationId: 'repair-operation',
+            },
+        });
+
+        assert.equal(repair.status, 'requires_reindex');
+        assert.equal(repair.proof.snapshot.basis, 'v4_source_checkpoint_unavailable');
+        assert.deepEqual(context.captureDurableIndexAuthority(codebasePath), authorityBefore);
+        assert.deepEqual(vectorDatabase.mutationCalls, []);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
+
+test('Context.repairIndex requires reindex for a missing v4 source checkpoint', async () => {
+    await assertV4RepairRejectsInvalidCheckpoint('missing');
+});
+
+test('Context.repairIndex requires reindex for a corrupt v4 source checkpoint', async () => {
+    await assertV4RepairRejectsInvalidCheckpoint('corrupt');
 });
 
 test('Context.repairIndex atomically upgrades only relationship navigation under a proven v4 publication', async () => {
@@ -9350,6 +9602,7 @@ test('Context.repairIndex atomically upgrades only relationship navigation under
 
         const before = await context.proveIndexedGeneration(codebasePath);
         assert.ok(before);
+        const authorityBefore = context.captureDurableIndexAuthority(codebasePath);
         const markerBefore = structuredClone(before.marker);
         const checkpointPath = FileSynchronizer.getSnapshotPathForGeneration(
             codebasePath,
@@ -9430,6 +9683,150 @@ test('Context.repairIndex atomically upgrades only relationship navigation under
             () => nextRelationshipVersion;
         const restartedProof = await restarted.proveIndexedGeneration(codebasePath);
         assert.equal(restartedProof?.navigation.generationId, after.navigation.generationId);
+        await restarted.recreateSynchronizerForCodebase(
+            codebasePath,
+            undefined,
+            undefined,
+            { requireAuthorityCheckpoint: true },
+        );
+        const restartedSynchronizer = restarted.getActiveSynchronizers().get(
+            restarted.resolveCollectionName(codebasePath),
+        );
+        assert.ok(restartedSynchronizer);
+        const zeroChange = await restartedSynchronizer.prepareChanges({ forceFullHash: true });
+        assert.deepEqual(zeroChange.changes.added, []);
+        assert.deepEqual(zeroChange.changes.removed, []);
+        assert.deepEqual(zeroChange.changes.modified, []);
+
+        await (upgraded as unknown as ContextWithRelationshipVersionOverride)
+            .waitForPublicationRetention(canonicalRoot);
+        const candidateAuthority = restarted.captureDurableIndexAuthority(codebasePath);
+        const rollback = await restarted.restoreDurableIndexAuthority(
+            authorityBefore,
+            (publish) => publish(),
+            candidateAuthority,
+            {
+                ownerId: 'rollback-owner',
+                generation: 6,
+                operationId: 'rollback-operation',
+            },
+        );
+        assert.deepEqual(rollback, { status: 'restored_current' });
+
+        const rolledBack = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        const rolledBackProof = await rolledBack.proveIndexedGeneration(codebasePath);
+        assert.equal(rolledBackProof?.navigation.generationId, before.navigation.generationId);
+        assert.deepEqual(rolledBackProof?.marker, markerBefore);
+        const rolledBackCheckpoint = await rolledBack.inspectSourceFreshnessCheckpoint(
+            codebasePath,
+            before.collectionName,
+            rolledBackProof ?? undefined,
+        );
+        assert.equal(rolledBackCheckpoint.status, 'valid');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context.repairIndex leaves a post-validation source write as an observable next delta', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-source-race-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'src', 'auth.ts');
+
+    try {
+        fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+        fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
+
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        fs.writeFileSync(sourcePath, 'export function auth() { return false; }\n', 'utf8');
+        await context.reindexByChange(codebasePath, undefined, {
+            publicationAuthority: {
+                ownerId: 'initial-owner',
+                generation: 13,
+                operationId: 'initial-operation',
+            },
+        });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        await (context as unknown as ContextWithRelationshipVersionOverride)
+            .waitForPublicationRetention(canonicalRoot);
+
+        const before = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(before);
+        const upgraded = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        (upgraded as unknown as ContextWithRelationshipVersionOverride).getRelationshipVersion =
+            () => `${RELATIONSHIP_BUILDER_VERSION}+source-race-test`;
+
+        let wroteSourceBeforeActivation = false;
+        const repair = await upgraded.repairIndex(codebasePath, {
+            publicationAuthority: {
+                ownerId: 'repair-owner',
+                generation: 14,
+                operationId: 'repair-operation',
+            },
+            publishMutation: (publish) => {
+                fs.writeFileSync(sourcePath, 'export function auth() { return "changed during activation"; }\n', 'utf8');
+                wroteSourceBeforeActivation = true;
+                publish();
+            },
+        });
+        const after = await upgraded.proveIndexedGeneration(codebasePath);
+        assert.ok(after);
+        const checkpointAfter = await upgraded.inspectSourceFreshnessCheckpoint(
+            codebasePath,
+            after.collectionName,
+            after,
+        );
+        await upgraded.recreateSynchronizerForCodebase(
+            codebasePath,
+            undefined,
+            undefined,
+            { requireAuthorityCheckpoint: true },
+        );
+        const synchronizer = upgraded.getActiveSynchronizers().get(
+            upgraded.resolveCollectionName(codebasePath),
+        );
+        assert.ok(synchronizer);
+        const nextDelta = await synchronizer.prepareChanges({ forceFullHash: true });
+
+        const evidence = JSON.stringify({
+            wroteSourceBeforeActivation,
+            repairStatus: repair.status,
+            markerRunIdBefore: before.marker.runId,
+            markerRunIdAfter: after.marker.runId,
+            navigationGenerationBefore: before.navigation.generationId,
+            navigationGenerationAfter: after.navigation.generationId,
+            checkpointStatus: checkpointAfter.status,
+            nextDelta: nextDelta.changes,
+        });
+        assert.equal(repair.status, 'ok', evidence);
+        assert.equal(after.marker.runId, before.marker.runId, evidence);
+        assert.equal(checkpointAfter.status, 'valid', evidence);
+        assert.notEqual(after.navigation.generationId, before.navigation.generationId, evidence);
+        assert.deepEqual(nextDelta.changes.added, [], evidence);
+        assert.deepEqual(nextDelta.changes.removed, [], evidence);
+        assert.deepEqual(nextDelta.changes.modified, ['src/auth.ts'], evidence);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

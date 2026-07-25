@@ -1505,6 +1505,10 @@ test('handleRepairIndex parses, executes, and proves the repaired generation on 
                     },
                 };
             },
+            inspectSourceFreshnessCheckpoint: async () => ({
+                status: 'valid',
+                documentDigest: 'd'.repeat(64),
+            }),
         } as unknown as HandlerContext;
 
         const snapshotManager = {

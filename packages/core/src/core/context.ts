@@ -1781,23 +1781,52 @@ export class Context {
         )) return null;
 
         if (compatibility.status === 'compatible') {
+            if (publication) {
+                if (
+                    marker.indexStatus !== 'completed'
+                    || marker.navigation.status !== 'sealed'
+                    || binding.navigation.status !== 'sealed'
+                ) return null;
+                if (
+                    policyNavigationBindingsEqual(
+                        binding.navigation,
+                        policyNavigationBindingFromMarker(marker.navigation),
+                    )
+                    && publication.graph.manifestHash
+                        === marker.navigation.relationshipManifestHash
+                ) {
+                    return {
+                        status: 'sealed',
+                        generationId: marker.navigation.generationId,
+                        sealHash: marker.navigation.sealHash,
+                        expectedSymbolRegistryManifestHash:
+                            marker.navigation.symbolRegistryManifestHash,
+                        expectedRelationshipManifestHash:
+                            marker.navigation.relationshipManifestHash,
+                        relationshipOnlyUpgrade: false,
+                        useBoundGeneration: true,
+                    };
+                }
+                return {
+                    status: 'sealed',
+                    generationId: binding.navigation.generationId,
+                    sealHash: binding.navigation.sealHash,
+                    expectedRelationshipManifestHash: publication.graph.manifestHash,
+                    relationshipOnlyUpgrade: false,
+                    useBoundGeneration: true,
+                };
+            }
             if (!policyNavigationBindingsEqual(
                 binding.navigation,
                 policyNavigationBindingFromMarker(marker.navigation),
             )) return null;
             if (marker.navigation.status === 'not_bound') {
-                return publication
-                    ? null
-                    : {
-                        status: 'not_bound',
-                        relationshipOnlyUpgrade: false,
-                        useBoundGeneration: false,
-                    };
+                return {
+                    status: 'not_bound',
+                    relationshipOnlyUpgrade: false,
+                    useBoundGeneration: false,
+                };
             }
-            if (
-                publication
-                && publication.graph.manifestHash !== marker.navigation.relationshipManifestHash
-            ) return null;
             return {
                 status: 'sealed',
                 generationId: marker.navigation.generationId,
@@ -1805,7 +1834,7 @@ export class Context {
                 expectedSymbolRegistryManifestHash: marker.navigation.symbolRegistryManifestHash,
                 expectedRelationshipManifestHash: marker.navigation.relationshipManifestHash,
                 relationshipOnlyUpgrade: false,
-                useBoundGeneration: publication !== undefined,
+                useBoundGeneration: false,
             };
         }
 
@@ -7035,38 +7064,39 @@ export class Context {
             });
         }
         const repairBinding = this.publishedPolicyBindingsByCodebase.get(canonicalPath);
-        let relationshipRepairSource: {
+        let v4RepairSource: {
             marker: IndexCompletionMarkerDocument;
             binding: IndexPolicyBinding & { policyHash: string };
             preparedChanges: Awaited<ReturnType<FileSynchronizer['prepareChanges']>>;
             checkpointDocumentDigest: string;
         } | null = null;
-        if (relationshipOnlyUpgrade) {
-            const publication = repairBinding?.publication;
-            if (
-                !trustedMarker
-                || !repairBinding
-                || !publication
-                || repairBinding.collectionName !== selectedCollection
-                || repairBinding.navigation.status !== 'sealed'
-                || trustedMarker.navigation.status !== 'sealed'
-                || publication.sourceCheckpoint.collectionName !== selectedCollection
-                || publication.sourceCheckpoint.markerRunId !== trustedMarker.runId
-                || publication.sourceCheckpoint.indexPolicyHash !== trustedMarker.indexPolicyHash
-                || repairPolicy.policyHash !== trustedMarker.indexPolicyHash
-                || !options.publicationAuthority
-            ) {
-                proof.navigation = {
-                    status: 'failed',
-                    basis: 'relationship_upgrade_v4_authority_missing',
-                };
-                return withProof({
-                    status: 'requires_reindex',
-                    reason: 'requires_reindex',
-                    message: 'Relationship-only repair requires the exact marker-owned v4 publication and mutation authority.',
-                    trackedRelativePaths: [],
-                });
-            }
+        const publication = repairBinding?.publication;
+        if (
+            !trustedMarker
+            || !repairBinding
+            || !publication
+            || repairBinding.collectionName !== selectedCollection
+            || repairBinding.navigation.status !== 'sealed'
+            || trustedMarker.navigation.status !== 'sealed'
+            || publication.sourceCheckpoint.collectionName !== selectedCollection
+            || publication.sourceCheckpoint.markerRunId !== trustedMarker.runId
+            || publication.sourceCheckpoint.indexPolicyHash !== trustedMarker.indexPolicyHash
+            || repairPolicy.policyHash !== trustedMarker.indexPolicyHash
+        ) {
+            proof.navigation = {
+                status: 'failed',
+                basis: relationshipOnlyUpgrade
+                    ? 'relationship_upgrade_v4_authority_missing'
+                    : 'v4_repair_authority_missing',
+            };
+            return withProof({
+                status: 'requires_reindex',
+                reason: 'requires_reindex',
+                message: 'Repair requires one exact marker-owned v4 publication and source checkpoint.',
+                trackedRelativePaths: [],
+            });
+        }
+        {
             const synchronizer = new FileSynchronizer(
                 canonicalPath,
                 repairPolicy.effectiveIgnorePatterns,
@@ -7097,7 +7127,7 @@ export class Context {
                     return withProof({
                         status: 'requires_reindex',
                         reason: 'requires_reindex',
-                        message: 'Relationship-only repair cannot prove the marker-owned source checkpoint.',
+                        message: 'Repair cannot prove the marker-owned v4 source checkpoint.',
                     });
                 }
                 const preparedChanges = await synchronizer.prepareChanges({ forceFullHash: true });
@@ -7122,10 +7152,10 @@ export class Context {
                     return withProof({
                         status: 'requires_reindex',
                         reason: 'requires_reindex',
-                        message: 'Relationship-only repair requires a complete zero-change source observation.',
+                        message: 'Repair requires a complete zero-change source observation.',
                     });
                 }
-                relationshipRepairSource = {
+                v4RepairSource = {
                     marker: trustedMarker,
                     binding: repairBinding,
                     preparedChanges,
@@ -7145,14 +7175,14 @@ export class Context {
                 return withProof({
                     status: 'requires_reindex',
                     reason: 'requires_reindex',
-                    message: `Relationship-only repair cannot reopen its marker-owned source checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+                    message: `Repair cannot reopen its marker-owned v4 source checkpoint: ${error instanceof Error ? error.message : String(error)}`,
                 });
             }
         }
         const codeFiles = await this.getCodeFiles(canonicalPath, repairPolicy);
         const trackedRelativePaths = this.normalizeRelativePathsForCodebase(canonicalPath, codeFiles);
 
-        if (codeFiles.length === 0 && !relationshipOnlyUpgrade) {
+        if (codeFiles.length === 0 && !v4RepairSource) {
             if (
                 typeof this.vectorDatabase.getCollectionDataObservation !== 'function'
             ) {
@@ -7296,18 +7326,18 @@ export class Context {
             analysisByFile,
         } = await this.getExpectedChunksAndSymbols(codeFiles, canonicalPath, repairPolicy);
         if (
-            relationshipRepairSource
+            v4RepairSource
             && (
-                relationshipRepairSource.marker.indexedFiles !== codeFiles.length
-                || relationshipRepairSource.marker.totalChunks !== expectedChunks.length
-                || relationshipRepairSource.preparedChanges.fileHashes.size !== codeFiles.length
+                v4RepairSource.marker.indexedFiles !== codeFiles.length
+                || v4RepairSource.marker.totalChunks !== expectedChunks.length
+                || v4RepairSource.preparedChanges.fileHashes.size !== codeFiles.length
             )
         ) {
             proof.payload = {
                 status: 'failed',
                 basis: 'marker_source_count_mismatch',
                 expectedCount: expectedChunks.length,
-                observedCount: relationshipRepairSource.marker.totalChunks,
+                observedCount: v4RepairSource.marker.totalChunks,
             };
             return withProof({
                 status: 'requires_reindex',
@@ -7518,13 +7548,13 @@ export class Context {
         };
         publishProof();
 
-        if (relationshipRepairSource) {
+        if (v4RepairSource) {
             const {
                 marker,
                 binding,
                 preparedChanges,
                 checkpointDocumentDigest,
-            } = relationshipRepairSource;
+            } = v4RepairSource;
             const toActivatedGeneration = (
                 receipt: ProvenGenerationReceipt,
             ): RepairActivatedGeneration => ({
@@ -7548,11 +7578,11 @@ export class Context {
             ) {
                 proof.navigation = {
                     status: 'matched',
-                    basis: 'relationship_navigation_already_activated',
+                    basis: 'v4_navigation_already_activated',
                 };
                 return withProof({
                     status: 'ok',
-                    message: 'Relationship-only navigation repair was already activated and remains exactly proven.',
+                    message: 'The existing v4 publication and navigation are already exactly proven; repair made no changes.',
                     indexedFiles: codeFiles.length,
                     totalChunks: expectedChunks.length,
                     warnings: [],
@@ -7566,7 +7596,7 @@ export class Context {
                 ? binding.navigation.generationId
                 : null;
             if (!previousNavigationGenerationId) {
-                throw new Error('Relationship-only repair lost its sealed source navigation binding.');
+                throw new Error('V4 navigation repair lost its sealed source navigation binding.');
             }
             await this.waitForPublicationRetention(canonicalPath);
             options.assertMutationCurrent?.();
@@ -7584,7 +7614,7 @@ export class Context {
                     repairPolicy,
                 );
                 if (!navigationCandidate) {
-                    throw new Error('Relationship-only repair did not stage a navigation generation.');
+                    throw new Error('V4 navigation repair did not stage a navigation generation.');
                 }
                 await this.verifyPreparedSyncPublication(
                     canonicalPath,
@@ -7596,7 +7626,7 @@ export class Context {
                 );
                 const authority = options.publicationAuthority;
                 if (!authority) {
-                    throw new Error('Relationship-only repair lost its publication authority.');
+                    throw new Error('V4 navigation repair requires publication authority.');
                 }
                 const activationId = crypto.randomUUID();
                 const publication: CanonicalPublicationBinding = {
@@ -7669,7 +7699,7 @@ export class Context {
                     || proven.navigation.relationshipManifestHash
                         !== navigationCandidate.relationshipManifestHash
                 ) {
-                    throw new Error('Relationship-only repair activation could not be proven exactly.');
+                    throw new Error('V4 navigation repair activation could not be proven exactly.');
                 }
                 const activeDataObservation = this.vectorDatabase.getCollectionDataObservation
                     ? await this.vectorDatabase.getCollectionDataObservation(selectedCollection)
@@ -7685,11 +7715,11 @@ export class Context {
                 });
                 proof.navigation = {
                     status: 'matched',
-                    basis: 'relationship_navigation_activated_and_proven',
+                    basis: 'v4_navigation_activated_and_proven',
                 };
                 return withProof({
                     status: 'ok',
-                    message: 'Relationship-only navigation repair activated a new proven generation without vector or checkpoint writes.',
+                    message: 'V4 navigation repair activated a new proven graph without vector, marker, or checkpoint writes.',
                     indexedFiles: codeFiles.length,
                     totalChunks: expectedChunks.length,
                     warnings: [],
