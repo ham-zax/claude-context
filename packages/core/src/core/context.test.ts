@@ -314,6 +314,7 @@ class InMemoryVectorDatabase implements VectorDatabase {
     readonly collections = new Map<string, Map<string, VectorDocument>>();
     readonly indexedDocuments: IndexedVectorDocument[] = [];
     readonly queryCalls: Array<{ collectionName: string; request: VectorDocumentQuery }> = [];
+    readonly countDocumentsCalls: Array<{ collectionName: string; filter?: VectorFilter }> = [];
     listCollectionsCalls = 0;
     getControlCalls = 0;
     searchCalls = 0;
@@ -321,6 +322,9 @@ class InMemoryVectorDatabase implements VectorDatabase {
     readonly denseRequests: DenseCandidateRequest[] = [];
     readonly lexicalRequests: LexicalCandidateRequest[] = [];
     queryHook?: (call: { collectionName: string; request: VectorDocumentQuery }) => void | Promise<void>;
+    countDocumentsHook?: (
+        call: { collectionName: string; filter?: VectorFilter },
+    ) => void | Promise<void>;
     controlReadHook?: (call: { collectionName: string; id: string }) => void | Promise<void>;
     readonly mutationCalls: Array<
         'payload_insert' | 'payload_delete' | 'marker_insert' | 'marker_delete'
@@ -487,6 +491,9 @@ class InMemoryVectorDatabase implements VectorDatabase {
     }
 
     async countDocuments(collectionName: string, filter?: VectorFilter): Promise<number> {
+        const call = { collectionName, filter };
+        this.countDocumentsCalls.push(call);
+        await this.countDocumentsHook?.(call);
         return this.listDocuments(collectionName, filter).length;
     }
 
@@ -1764,8 +1771,10 @@ test('Context bounds deferred atomic publication generations without pruning act
             waitForPublicationRetention(canonicalRoot: string): Promise<void>;
         }).waitForPublicationRetention(fs.realpathSync(codebasePath));
         vectorDatabase.queryCalls.length = 0;
+        vectorDatabase.countDocumentsCalls.length = 0;
         assert.equal(await context.proveIndexedGeneration(codebasePath), null);
-        assert.ok(vectorDatabase.queryCalls.length > 0);
+        assert.ok(vectorDatabase.countDocumentsCalls.length > 0);
+        assert.equal(vectorDatabase.queryCalls.length, 0);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -4710,6 +4719,8 @@ test('Context completion validation preserves vector authority when navigation i
 test('Context completion validation propagates transient and unavailable payload probes', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-validation-probe-failed-'));
     const codebasePath = path.join(tempRoot, 'repo');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const navigationRoot = path.join(tempRoot, 'navigation');
     try {
         fs.mkdirSync(codebasePath, { recursive: true });
         fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const value = 1;\n', 'utf8');
@@ -4717,25 +4728,39 @@ test('Context completion validation propagates transient and unavailable payload
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
-            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
-            symbolRegistryStateRoot: path.join(tempRoot, 'navigation'),
+            indexPolicyStateRoot: policyRoot,
+            symbolRegistryStateRoot: navigationRoot,
         });
         await context.indexCodebase(codebasePath);
-        vectorDatabase.queryHook = () => {
+        const restarted = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            indexPolicyStateRoot: policyRoot,
+            symbolRegistryStateRoot: navigationRoot,
+        });
+        vectorDatabase.countDocumentsHook = () => {
             throw new Error('temporary count failure');
         };
         await assert.rejects(
-            () => context.getIndexCompletionMarkerForValidation(codebasePath),
+            () => restarted.getIndexCompletionMarkerForValidation(codebasePath),
             /temporary count failure/,
         );
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 1);
+        assert.equal(vectorDatabase.queryCalls.length, 0);
 
-        vectorDatabase.queryHook = undefined;
+        vectorDatabase.countDocumentsHook = undefined;
+        // Exercise the bounded query-only fallback separately from the exact
+        // count capability used by the normal in-memory fixture.
+        Object.defineProperty(vectorDatabase, 'countDocuments', {
+            value: undefined,
+            configurable: true,
+        });
         const collectionName = context.resolveCollectionName(codebasePath);
         const markerDocument = vectorDatabase.collections.get(collectionName)?.get(INDEX_COMPLETION_MARKER_DOC_ID);
         assert.ok(markerDocument && typeof markerDocument.metadata === 'object');
         (markerDocument!.metadata as Record<string, unknown>).totalChunks = 16384;
         await assert.rejects(
-            () => context.getIndexCompletionMarkerForValidation(codebasePath),
+            () => restarted.getIndexCompletionMarkerForValidation(codebasePath),
             /Exact indexed payload count is unavailable/,
         );
     } finally {
@@ -5345,6 +5370,7 @@ test('Context receipt-driven generation proof reuses activation authority and si
         vectorDatabase.listCollectionsCalls = 0;
         vectorDatabase.getControlCalls = 0;
         vectorDatabase.queryCalls.length = 0;
+        vectorDatabase.countDocumentsCalls.length = 0;
         const first = await context.proveIndexedGeneration(codebasePath);
         assert.ok(first);
         const authorityObservation = context.getIndexAuthorityObservation(codebasePath);
@@ -5353,11 +5379,13 @@ test('Context receipt-driven generation proof reuses activation authority and si
         assert.equal(first.exactPayloadCount, first.marker.totalChunks);
         assert.equal(vectorDatabase.listCollectionsCalls, 0);
         assert.equal(vectorDatabase.getControlCalls, 2);
-        assert.equal(vectorDatabase.queryCalls.length, 1);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 1);
+        assert.equal(vectorDatabase.queryCalls.length, 0);
 
         vectorDatabase.listCollectionsCalls = 0;
         vectorDatabase.getControlCalls = 0;
         vectorDatabase.queryCalls.length = 0;
+        vectorDatabase.countDocumentsCalls.length = 0;
         const second = await context.proveIndexedGeneration(codebasePath, first);
         assert.ok(second);
         assert.equal(second.marker.runId, first.marker.runId);
@@ -5366,12 +5394,14 @@ test('Context receipt-driven generation proof reuses activation authority and si
         assert.equal(context.getIndexAuthorityObservation(codebasePath), authorityObservation);
         assert.equal(vectorDatabase.listCollectionsCalls, 0);
         assert.equal(vectorDatabase.getControlCalls, 0);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 0);
         assert.equal(vectorDatabase.queryCalls.length, 0);
         mutationGeneration += 1;
         mutationActive = true;
         const duringUnpublishedMutation = await context.proveIndexedGeneration(codebasePath, second);
         assert.ok(duringUnpublishedMutation);
         assert.equal(vectorDatabase.getControlCalls, 0);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 0);
         assert.equal(vectorDatabase.queryCalls.length, 0);
         mutationActive = false;
         const compatiblePeer = new Context({
@@ -5384,12 +5414,15 @@ test('Context receipt-driven generation proof reuses activation authority and si
         const peerProof = await compatiblePeer.proveIndexedGeneration(codebasePath, second);
         assert.ok(peerProof);
         assert.equal(vectorDatabase.getControlCalls, 0);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 0);
         assert.equal(vectorDatabase.queryCalls.length, 0);
         vectorDatabase.queryCalls.length = 0;
+        vectorDatabase.countDocumentsCalls.length = 0;
         vectorDatabase.getControlCalls = 0;
         const warm = await context.revalidateProvenGeneration(codebasePath, second);
         assert.ok(warm);
         assert.equal(vectorDatabase.getControlCalls, 0);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 0);
         assert.equal(vectorDatabase.queryCalls.length, 0);
         assert.equal(await context.revalidateProvenGeneration(codebasePath, {
             ...second,
@@ -5420,9 +5453,11 @@ test('Context receipt-driven generation proof reuses activation authority and si
         );
         vectorDatabase.getControlCalls = 0;
         vectorDatabase.queryCalls.length = 0;
+        vectorDatabase.countDocumentsCalls.length = 0;
         const restoredAfterAba = await context.proveIndexedGeneration(codebasePath, second);
         assert.ok(restoredAfterAba);
-        assert.equal(vectorDatabase.queryCalls.length, 1);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 1);
+        assert.equal(vectorDatabase.queryCalls.length, 0);
         assert.equal(vectorDatabase.getControlCalls, 2);
 
         const restarted = new Context({
@@ -5433,7 +5468,8 @@ test('Context receipt-driven generation proof reuses activation authority and si
         });
         vectorDatabase.getControlCalls = 0;
         vectorDatabase.queryCalls.length = 0;
-        vectorDatabase.queryHook = async () => {
+        vectorDatabase.countDocumentsCalls.length = 0;
+        vectorDatabase.countDocumentsHook = async () => {
             await new Promise((resolve) => setTimeout(resolve, 20));
         };
         const cold = await Promise.all([
@@ -5442,9 +5478,10 @@ test('Context receipt-driven generation proof reuses activation authority and si
             restarted.proveIndexedGeneration(codebasePath),
         ]);
         assert.equal(cold.every(Boolean), true);
-        assert.equal(vectorDatabase.queryCalls.length, 1);
+        assert.equal(vectorDatabase.countDocumentsCalls.length, 1);
+        assert.equal(vectorDatabase.queryCalls.length, 0);
         assert.equal(vectorDatabase.getControlCalls, 2);
-        vectorDatabase.queryHook = undefined;
+        vectorDatabase.countDocumentsHook = undefined;
 
         await vectorDatabase.dropCollection(second.collectionName);
         assert.equal(await context.revalidateProvenGeneration(codebasePath, second), null);
