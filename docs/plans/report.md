@@ -8,18 +8,18 @@ below, but it does not rewrite that historical evidence.
 
 ### Decision
 
-Satori 6.3.0 closes the large-repository repair-proof defect and the
-empty-inbound-graph disclosure defect. It does **not** qualify the system as
-fully resolved:
+The recorded Satori 6.3.0 runtime closed the large-repository repair-proof
+defect and the empty-inbound-graph disclosure defect. That historical run did
+**not** qualify the system as fully resolved:
 
-- Python inbound caller coverage still has demonstrated false negatives.
+- Python inbound caller coverage had demonstrated false negatives.
 - The active source freshness checkpoint was corrupt, so incremental sync and
   freshness timing failed.
 - Semantic search still has no calibrated abstention/no-answer contract.
 
-The original two production-completeness findings therefore cannot both be
-retired. The 16,384-row repair-proof finding can be retired; inbound caller
-coverage cannot.
+The original two production-completeness findings therefore could not both be
+retired by that run. The later implementation disposition below records the
+bounded repairs without rewriting this historical evidence.
 
 ### Current implementation disposition (2026-07-25)
 
@@ -37,21 +37,37 @@ C1/C2 execution record now reports the following frozen V4 model:
 - MCP repair success now validates the effective source checkpoint and, for a
   V4 activation, its exact document digest.
 
-The reported bounded verification passed 27 focused Core repair tests, 13
-focused MCP repair-handler tests, and all 1,047 MCP package tests. The Core
-package result was 584 passed, 3 failed, and 1 skipped out of 588; a controlled
-run with the prior navigation-resolver behavior reported the same three
-failures. Those residual failures remain an integration record, not evidence
-of a fully green product qualification. The implementation is not yet merged.
+The checkpoint implementation landed in
+`074bed62f723e8b04ec36f3467417cba632687ae` and remains the publication
+baseline for the later language qualification.
 
-The current relationship disposition is `native_python_bounded`: bounded
-native Python implementation is authorized after the architecture corrections,
-while no Python implementation is present in the current shared-worktree
-change set. Production SCIP integration remains unauthorized. Semantic S0 is
-deferred, with no runtime abstention-policy change authorized. The checkpoint
-must merge and establish its version/fingerprint/reindex consequence before
-language qualification proceeds; the decision ledger records the ownership and
-merge gates.
+The bounded native Python relationship implementation is integrated by
+`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. It closes the six recorded
+production false negatives for:
+
+- absolute-import constructor receivers;
+- bounded direct service/callback value-origin flow; and
+- the recorded signal-ledger value-origin flow.
+
+The integration retained exact relationship and claim digests, full/delta
+equality, sidecar reload, restart readback, and all frozen wrong-target
+controls. MCP passed 1,047/1,047 tests. Core passed 592 tests with one skipped
+and the same three checkpoint-baseline failures recorded before this
+integration. Typecheck, changed-file lint, Core/MCP builds, and diff integrity
+passed.
+
+This is not general Python call-graph completeness. Reflection, arbitrary
+factories, collections, monkeypatching, unbounded aliases, and unsupported or
+ambiguous environments remain outside the static support model. Individual
+edges may be exact under that model while the inbound result set remains
+non-exhaustive.
+
+The native implementation is approved only under the absolute product budgets
+recorded in the
+[integration receipt](../evidence/python-native-integration-20260725/NATIVE_PYTHON_INTEGRATION_RECEIPT.md)
+and a runtime allowance of at least 2 GiB. It is not approved for a roughly
+1 GiB deployment. Production CodeQL/SCIP integration remains unauthorized.
+Semantic S0 is deferred, with no runtime abstention-policy change authorized.
 
 ### Requalification evidence boundary
 
@@ -102,7 +118,7 @@ The evidence levels below mean:
 | Finding | Observed evidence | Result | Evidence level | Current decision |
 | --- | --- | --- | --- | --- |
 | Large-repository repair proof | Repair returned `status=ok`; payload basis `same_state_membership_and_exact_count`; expected and observed 19,741; missing and extra zero; stale payload matched; no reindex hint | Pass | Intervention-proven | Retire the specific 16,384-row proof-limit defect |
-| Python inbound caller coverage | All three target symbols returned zero inbound edges despite exact production callers confirmed by Satori search and reads | Fail | Observed | Keep inbound graph non-exhaustive; establish the first wrong relationship/graph boundary before repair |
+| Python inbound caller coverage | The historical runtime returned zero inbound edges despite exact production callers; the later bounded native integration returns all six recorded sites after publication and restart with frozen negatives preserved | Pass for the six qualified static patterns; general coverage remains partial | Intervention-proven by the later integration receipt | Retire the sampled six-site defect only; keep absence non-authoritative outside the declared support model |
 | Empty-graph disclosure | Every empty inbound response included `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and an executable `must:` verification search | Pass | Observed | Retire the missing-disclosure defect, not the coverage defect |
 | Semantic abstention | All four negative controls returned ten nearest-neighbour groups without a zero-result, weak-relevance, or no-answer warning | Unqualified: `nearest_neighbor_without_calibrated_no_answer_contract` | Observed | Define and validate a calibrated contract before making a production no-answer claim |
 | Freshness timing and checkpoint integrity | Five corrected add/modify/delete cycles produced no observable indexed transition; recovery sync returned `requires_reindex` because the active source checkpoint was corrupt | Fail | Observed | Isolate and repair the responsible checkpoint lifecycle owner, then repeat timing qualification |
@@ -149,6 +165,10 @@ same-state observation or exact-count authority must still return a bounded
 proof-limit result rather than falsely claim equality.
 
 ### Python inbound caller coverage
+
+The observations in this subsection describe the pre-repair qualification
+generation. The current bounded implementation disposition is recorded above
+and in the native integration receipt.
 
 The active post-reindex symbol identities and results were:
 
@@ -230,11 +250,11 @@ Implementation defects verified closed in the historical requalification:
 
 Demonstrated defects or closure gates still open:
 
-- Python inbound caller coverage on the recorded production call sites.
-- Final merged acceptance of the source-checkpoint correction and its
-  incremental-freshness consequence; the historical checkpoint failure is
-  addressed by the current frozen C1/C2 implementation but not yet a merged
-  product qualification.
+- General Python inbound completeness outside the bounded static patterns.
+- Incremental freshness timing after the merged source-checkpoint correction;
+  the historical corrupt-checkpoint cause is repaired, but the original
+  add/modify/delete latency qualification has not been repeated as its own
+  authorized batch.
 
 Product behavior still unqualified:
 

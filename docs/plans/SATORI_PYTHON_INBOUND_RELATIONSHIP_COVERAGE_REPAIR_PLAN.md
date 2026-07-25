@@ -1,6 +1,6 @@
 # Satori Python inbound relationship coverage repair plan
 
-Status: proposed
+Status: bounded implementation qualified and integrated
 
 Created: 2026-07-25
 
@@ -48,17 +48,17 @@ authorized provider comparison.
 The source-checkpoint defect and semantic-abstention contract have different
 owners and are excluded. They require separate plans.
 
-Current batch authorization:
+Final batch disposition:
 
-| Batch | Authorization |
+| Batch | Decision |
 | --- | --- |
-| R0 | Authorized after the documentation amendments in this revision |
-| R1 | Conditional on R0 proving the constructor boundary and freezing stable semantic identities, Python scope rules, absolute runtime budgets, and the final support contract |
-| R2 | Not authorized until R0 freezes a precision-safe value-origin context, the actual ledger chain, and the flow bound |
-| R3 | Not authorized until the evidence schema, unresolved dependency invalidation, proof-size policy, and R1/R2 component outcomes are frozen |
-| R4 | Not authorized until the implemented components pass their lower-layer correctness, determinism, incremental, resource, and rollback gates |
+| R0 | Passed; the first wrong boundaries, support model, identities, and exact positive/negative witnesses were frozen |
+| R1 | Passed for the three recorded absolute-import constructor-receiver sites |
+| R2 | Passed for the two recorded residual callback sites and the recorded ledger site under bounded value-origin flow |
+| R3 | Passed for relationship-v9/contribution-v4 persistence, deterministic reload, and full/incremental equivalence |
+| R4 | Passed for the six recorded production sites under the absolute product budgets recorded in section 13 |
 | R5a | Applied in the current working tree |
-| R5b | Deferred until R4 produces a durable qualification receipt |
+| R5b | Applied by the bounded integration record in section 13 |
 
 ## 2. Repair contract
 
@@ -1277,3 +1277,46 @@ frozen components. `python_inbound_supported_patterns_pass` records their
 aggregate support boundary.
 `python_inbound_recorded_sites_pass` alone retires the six-site sampled
 finding. None qualifies complete Python call-graph coverage.
+
+## 13. Completed execution record
+
+The bounded native implementation is integrated by
+`cbde1a890aa81ebaffaf9deae92eab650ca61bd0` on checkpoint-integrated base
+`c07eb3807639810a08f59d2ce73825bc5de8caba`.
+
+Final component decisions:
+
+```text
+python_constructor_supported_patterns_pass
+python_service_binding_supported_patterns_pass
+python_inbound_supported_patterns_pass
+python_inbound_recorded_sites_pass
+```
+
+All six recorded production callers survived clean publication, sidecar
+reload, MCP process restart, and reverse traversal. Frozen wrong-receiver,
+same-name, ambiguous, reassigned, and unsupported controls remained
+non-authoritative. Full and incremental relationship construction produced
+the same normalized digest.
+
+The implementation is approved under explicit absolute product budgets for
+the frozen repository class and a runtime allowance of at least 2 GiB. It is
+not approved for a roughly 1 GiB deployment. The original relative
+relationship-stage and frozen-harness RSS gates remain recorded as failures;
+they were replaced only by the explicit product-budget decision, not rewritten
+as passes.
+
+The compatibility owner changed to
+`relationship-v9+python-constructor-receivers+python-native-resolution-v1`
+with relationship contribution schema `relationship_file_contribution_v4`.
+Older incompatible relationship evidence returns `requires_reindex`.
+
+The complete changed-file list, test results, performance measurements,
+compatibility decision, target readback, limitations, and raw-artifact digests
+are retained in the
+[native Python integration receipt](../evidence/python-native-integration-20260725/NATIVE_PYTHON_INTEGRATION_RECEIPT.md).
+
+This closes only the recorded constructor, direct service/callback, and ledger
+patterns. Python inbound results remain non-exhaustive for reflection,
+arbitrary factories, collections, monkeypatching, unbounded aliases, and
+unsupported or ambiguous environments.

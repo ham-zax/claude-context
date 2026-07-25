@@ -6,9 +6,11 @@ Created: 2026-07-25
 
 Current status: checkpoint C1/C2 passed under the selected
 V4/no-op/graph-only/fail-reindex model; C3/C4 remain unauthorized. Bounded
-native Python implementation is separately authorized after architecture
-corrections. Production SCIP integration and semantic S0 remain deferred or
-unauthorized as recorded below.
+native Python relationship coverage is integrated and qualified for the six
+recorded production sites under the declared static support model and absolute
+product budgets. General Python inbound coverage remains partial. Production
+CodeQL/SCIP integration and semantic S0 remain deferred or unauthorized as
+recorded below.
 
 ## 1. Purpose
 
@@ -142,9 +144,10 @@ its exact terminal outcome and stopping reason.
 
 | Work | Current decision |
 | --- | --- |
-| Python R0/P0 | `native_python_bounded`; proceed with bounded native architecture qualification and preserve partial-coverage disclosure |
-| Bounded native language implementation | Authorized after the architecture corrections are accepted; keep Satori as the owner of normalized relationship identity, publication, traversal, provenance, and completeness disclosure |
-| Production SCIP integration | Not authorized; the offline provider spike does not create a production provider or external graph authority |
+| Python R0–R4 | `python_inbound_recorded_sites_pass`; constructor, bounded service/callback, and ledger patterns passed while partial-coverage disclosure remains authoritative for unsupported patterns |
+| Bounded native language implementation | Integrated by `cbde1a890aa81ebaffaf9deae92eab650ca61bd0`; Satori remains the owner of normalized relationship identity, publication, traversal, provenance, and completeness disclosure |
+| Product budget | Approved only for the frozen repository class with at least 2 GiB runtime allowance; not approved for a roughly 1 GiB deployment |
+| Production CodeQL/SCIP integration | Not authorized; the offline experiments do not create a production provider or external graph authority |
 
 ## 5. Current report status
 
@@ -153,34 +156,35 @@ qualification record. Its checkpoint-identity and semantic-solution discussion
 is not implementation authorization. The two dedicated plans supersede those
 design recommendations.
 
-The Python caller-coverage finding remains governed only by its separate
-Python plan. The general watcher-latency contract remains governed by the
-incremental freshness plan after checkpoint integrity is restored.
+The six-site Python caller-coverage finding is closed only for the static
+patterns qualified by its separate Python plan. General Python inbound
+coverage remains partial and non-exhaustive. The general watcher-latency
+contract remains governed by the incremental freshness plan after checkpoint
+integrity is restored.
 
 ## 6. Integration stewardship and merge/version ledger
 
 This ledger is the integration boundary for the authorized work. C1/C2 are
-implemented in the current worktree and have passed their bounded acceptance
-checks; they have not been committed or merged by this record. The native
-Python implementation remains separately owned.
+present in base `c07eb3807639810a08f59d2ce73825bc5de8caba`. The optimized
+native Python implementation and its retained evidence were integrated by
+`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. The CodeQL experiment remains on
+its evidence-only branch and was not merged.
 
 ### Ownership and merge order
 
 - Preserve branch, worktree, staging, and untracked-file ownership. Do not
   rebase, stash, stage, clean, or rewrite another owner's work as part of
   integration.
-- Merge the checkpoint implementation and its focused acceptance evidence
-  first. Language qualification and implementation must use the merged
-  checkpoint baseline, not a pre-merge publication contract.
-- Merge the bounded native Python implementation only after the checkpoint
-  acceptance gate passes and the post-merge baseline is recorded.
-- After both implementations, run the affected full package/integration test
-  suites and reconcile current documentation with the merged public and
-  persisted contracts.
+- The checkpoint implementation and its focused acceptance evidence landed
+  first.
+- Native qualification used that merged checkpoint baseline.
+- The native integration passed the affected Core and MCP checks, real
+  candidate-built publication, restart, six controlled syncs with source
+  restoration, and full/incremental equality.
 
-No implementation merge occurred in this ledger update. Record each future
-merge with the owner, source branch, base revision, resulting revision, test
-receipt, and the version/reindex consequence below.
+The exact source/base revisions, changed files, checks, resource observations,
+compatibility decision, and artifact digests are recorded in the
+[native integration receipt](../evidence/python-native-integration-20260725/NATIVE_PYTHON_INTEGRATION_RECEIPT.md).
 
 ### Version and compatibility consequences
 
