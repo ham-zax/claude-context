@@ -1,0 +1,7 @@
+name: codeql-python-experiment
+version: 0.0.1
+dependencies:
+  codeql/python-all: 7.2.1
+  codeql/python-queries: 1.8.6
+extractor: python
+warnOnImplicitThis: true

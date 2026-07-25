@@ -147,7 +147,7 @@ its exact terminal outcome and stopping reason.
 | Python R0–R4 | `python_inbound_recorded_sites_pass`; constructor, bounded service/callback, and ledger patterns passed while partial-coverage disclosure remains authoritative for unsupported patterns |
 | Bounded native language implementation | Integrated by `cbde1a890aa81ebaffaf9deae92eab650ca61bd0`; Satori remains the owner of normalized relationship identity, publication, traversal, provenance, and completeness disclosure |
 | Product budget | Approved only for the frozen repository class with at least 2 GiB runtime allowance; not approved for a roughly 1 GiB deployment |
-| Production CodeQL/SCIP integration | Not authorized; the offline experiments do not create a production provider or external graph authority |
+| Production CodeQL/SCIP integration | Not authorized; the [portable CodeQL receipt](../evidence/codeql-python-20260725/CODEQL_PYTHON_RECEIPT.md) and [provider disposition](./CODEQL_RELATIONSHIP_PROVIDER_DISPOSITION.md) reject CodeQL as authoritative Python `CALLS` while retaining only optional offline/asynchronous advisory use under separate qualification |
 
 ## 5. Current report status
 
@@ -167,8 +167,11 @@ integrity is restored.
 This ledger is the integration boundary for the authorized work. C1/C2 are
 present in base `c07eb3807639810a08f59d2ce73825bc5de8caba`. The optimized
 native Python implementation and its retained evidence were integrated by
-`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. The CodeQL experiment remains on
-its evidence-only branch and was not merged.
+`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. The CodeQL experiment did not
+become runtime authority; its portable evidence is integrated from
+`cfa9491bdd4c119b96b9ede2524f0e88c4bf1a9f` through the
+[receipt](../evidence/codeql-python-20260725/CODEQL_PYTHON_RECEIPT.md) and
+[provider disposition](./CODEQL_RELATIONSHIP_PROVIDER_DISPOSITION.md).
 
 ### Ownership and merge order
 
