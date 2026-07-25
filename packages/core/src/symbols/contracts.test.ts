@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION,
     RELATIONSHIP_MANIFEST_SCHEMA_VERSION,
     SYMBOL_KINDS,
     SYMBOL_REGISTRY_SCHEMA_VERSION,
@@ -87,6 +88,7 @@ test('relationship manifest validates compatibility anchor', () => {
 
     const manifest: RelationshipManifest = {
         schemaVersion: RELATIONSHIP_MANIFEST_SCHEMA_VERSION,
+        fileContributionSchemaVersion: RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION,
         symbolRegistryManifestHash: 'registry-manifest-hash',
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
@@ -103,6 +105,10 @@ test('relationship manifest validates compatibility anchor', () => {
     assert.equal(isRelationshipManifest(manifest), true);
     assert.equal(isRelationshipManifest({ ...manifest, symbolRegistryManifestHash: '' }), false);
     assert.equal(isRelationshipManifest({ ...manifest, schemaVersion: 'relationship_v1' }), false);
+    assert.equal(isRelationshipManifest({
+        ...manifest,
+        fileContributionSchemaVersion: 'relationship_file_contribution_v3',
+    }), false);
     assert.equal(isRelationshipManifest({ ...manifest, files: [] }), true);
     assert.equal(isRelationshipManifest({ ...manifest, files: [{ ...manifest.files[0], relationshipCount: -1 }] }), false);
 });

@@ -9,7 +9,9 @@ import type {
     CallSite,
     LanguageAnalysisInput,
     ModuleBinding,
+    PythonFlowFact,
     ReceiverTypeBinding,
+    SourceSpan,
 } from './types';
 
 const localRequire = createRequire(__filename);
@@ -789,6 +791,107 @@ function extractPythonReceiverTypeBindings(
     return bindings;
 }
 
+function pythonFlowValueKind(node: Node): {
+    valueKind: 'constructor' | 'call' | 'member' | 'identifier' | 'unknown';
+    constructorTypeName?: string;
+    calleeName?: string;
+} {
+    const constructorTypeName = directPythonConstructorType(node);
+    if (constructorTypeName) {
+        return { valueKind: 'constructor', constructorTypeName };
+    }
+    if (node.type === 'call') {
+        return {
+            valueKind: 'call',
+            ...(callableName(node) ? { calleeName: callableName(node) } : {}),
+        };
+    }
+    if (node.type === 'attribute') return { valueKind: 'member' };
+    if (node.type === 'identifier') return { valueKind: 'identifier' };
+    return { valueKind: 'unknown' };
+}
+
+function pythonContextSpan(node: Node, root: Node, sourceMap: Utf8SourceMap): SourceSpan {
+    return nodeSpan(enclosingPythonFunction(node) ?? root, sourceMap);
+}
+
+function extractPythonFlowFacts(
+    root: Node,
+    sourceMap: Utf8SourceMap,
+): PythonFlowFact[] {
+    const facts: PythonFlowFact[] = [];
+    for (const assignment of root.descendantsOfType('assignment')) {
+        const target = assignment.childForFieldName('left');
+        const value = assignment.childForFieldName('right');
+        const targetText = target?.text.trim();
+        const valueText = value?.text.trim();
+        if (!targetText || !valueText) continue;
+        const valueEvidence = value ? pythonFlowValueKind(value) : { valueKind: 'unknown' as const };
+        facts.push({
+            kind: 'assignment_origin',
+            targetText,
+            valueText,
+            ...valueEvidence,
+            span: nodeSpan(assignment, sourceMap),
+            contextSpan: pythonContextSpan(assignment, root, sourceMap),
+        });
+    }
+
+    for (const call of root.descendantsOfType('call')) {
+        const calleeText = call.childForFieldName('function')?.text.trim();
+        const argumentsNode = call.childForFieldName('arguments')
+            ?? call.namedChildren.find((child) => child.type === 'argument_list');
+        if (!calleeText || !argumentsNode) continue;
+        let argumentIndex = 0;
+        for (const argument of argumentsNode.namedChildren) {
+            if (argument.type === 'keyword_argument') {
+                const argumentName = argument.childForFieldName('name')?.text.trim();
+                const valueText = argument.childForFieldName('value')?.text.trim();
+                if (argumentName && valueText) {
+                    facts.push({
+                        kind: 'call_argument',
+                        calleeText,
+                        argumentName,
+                        valueText,
+                        span: nodeSpan(call, sourceMap),
+                        contextSpan: pythonContextSpan(call, root, sourceMap),
+                    });
+                }
+            } else if (argument.type !== 'list_splat' && argument.type !== 'dictionary_splat') {
+                const valueText = argument.text.trim();
+                if (valueText) {
+                    facts.push({
+                        kind: 'call_argument',
+                        calleeText,
+                        argumentIndex,
+                        valueText,
+                        span: nodeSpan(call, sourceMap),
+                        contextSpan: pythonContextSpan(call, root, sourceMap),
+                    });
+                }
+            }
+            argumentIndex += 1;
+        }
+    }
+
+    for (const classNode of root.descendantsOfType('class_definition')) {
+        const className = classNode.childForFieldName('name')?.text.trim();
+        const superclasses = classNode.childForFieldName('superclasses');
+        const baseNames = (superclasses?.namedChildren ?? [])
+            .map((base) => base.text.trim())
+            .filter(Boolean);
+        if (!className || baseNames.length === 0) continue;
+        facts.push({
+            kind: 'class_bases',
+            className,
+            baseNames,
+            span: nodeSpan(classNode, sourceMap),
+            contextSpan: nodeSpan(root, sourceMap),
+        });
+    }
+    return facts;
+}
+
 export async function analyzeWithTreeSitter(
     input: LanguageAnalysisInput,
     assetRoot?: string,
@@ -798,6 +901,7 @@ export async function analyzeWithTreeSitter(
     moduleBindings: readonly ModuleBinding[];
     callSites: readonly CallSite[];
     receiverTypeBindings: readonly ReceiverTypeBinding[];
+    pythonFlowFacts: readonly PythonFlowFact[];
 } | {
     complete: false;
     reason: 'syntax_error' | 'parser_unavailable' | 'analysis_failure';
@@ -805,6 +909,7 @@ export async function analyzeWithTreeSitter(
     moduleBindings: readonly [];
     callSites: readonly [];
     receiverTypeBindings: readonly [];
+    pythonFlowFacts: readonly [];
 }> {
     let language: Language;
     try {
@@ -817,6 +922,7 @@ export async function analyzeWithTreeSitter(
             moduleBindings: [],
             callSites: [],
             receiverTypeBindings: [],
+            pythonFlowFacts: [],
         };
     }
     let parser!: Parser;
@@ -832,6 +938,7 @@ export async function analyzeWithTreeSitter(
             moduleBindings: [],
             callSites: [],
             receiverTypeBindings: [],
+            pythonFlowFacts: [],
         };
     }
     let tree: ReturnType<Parser['parse']>;
@@ -846,6 +953,7 @@ export async function analyzeWithTreeSitter(
             moduleBindings: [],
             callSites: [],
             receiverTypeBindings: [],
+            pythonFlowFacts: [],
         };
     }
     if (!tree) {
@@ -857,6 +965,7 @@ export async function analyzeWithTreeSitter(
             moduleBindings: [],
             callSites: [],
             receiverTypeBindings: [],
+            pythonFlowFacts: [],
         };
     }
     try {
@@ -869,6 +978,7 @@ export async function analyzeWithTreeSitter(
                     moduleBindings: [],
                     callSites: [],
                     receiverTypeBindings: [],
+                    pythonFlowFacts: [],
                 };
             }
             const sourceMap = new Utf8SourceMap(input.content);
@@ -883,6 +993,9 @@ export async function analyzeWithTreeSitter(
                 receiverTypeBindings: input.language === 'python'
                     ? extractPythonReceiverTypeBindings(tree.rootNode, sourceMap)
                     : [],
+                pythonFlowFacts: input.language === 'python'
+                    ? extractPythonFlowFacts(tree.rootNode, sourceMap)
+                    : [],
             };
         } catch {
             return {
@@ -892,6 +1005,7 @@ export async function analyzeWithTreeSitter(
                 moduleBindings: [],
                 callSites: [],
                 receiverTypeBindings: [],
+                pythonFlowFacts: [],
             };
         }
     } finally {

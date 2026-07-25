@@ -19,6 +19,7 @@ export type OxcEvidence = {
     readonly moduleBindings: readonly ModuleBinding[];
     readonly callSites: readonly CallSite[];
     readonly receiverTypeBindings: readonly [];
+    readonly pythonFlowFacts: readonly [];
 } | {
     readonly complete: false;
     readonly reason: 'syntax_error';
@@ -26,6 +27,7 @@ export type OxcEvidence = {
     readonly moduleBindings: readonly [];
     readonly callSites: readonly [];
     readonly receiverTypeBindings: readonly [];
+    readonly pythonFlowFacts: readonly [];
 };
 
 function isAstNode(value: unknown): value is AstNode {
@@ -167,6 +169,7 @@ export function analyzeWithOxc(input: LanguageAnalysisInput): OxcEvidence {
             moduleBindings: [],
             callSites: [],
             receiverTypeBindings: [],
+            pythonFlowFacts: [],
         };
     }
 
@@ -249,5 +252,5 @@ export function analyzeWithOxc(input: LanguageAnalysisInput): OxcEvidence {
         }
     }
 
-    return { complete: true, symbols, moduleBindings, callSites, receiverTypeBindings: [] };
+    return { complete: true, symbols, moduleBindings, callSites, receiverTypeBindings: [], pythonFlowFacts: [] };
 }

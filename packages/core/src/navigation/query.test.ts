@@ -309,6 +309,113 @@ test('getGraphNeighbors excludes low-confidence relationships by default and rep
     });
 });
 
+test('getGraphNeighbors admits categorical proof authority without admitting legacy or ambiguous low-confidence edges', async () => {
+    await withTempDir(async (stateRoot) => {
+        const caller = createFunctionSymbol({
+            file: 'src/caller.py',
+            name: 'caller',
+            startLine: 1,
+            endLine: 4,
+            fileHash: 'hash-caller',
+            language: 'python',
+        });
+        const proofTarget = createFunctionSymbol({
+            file: 'src/residual.py',
+            name: 'proof_target',
+            startLine: 1,
+            endLine: 4,
+            fileHash: 'hash-residual',
+            language: 'python',
+        });
+        const legacyTarget = createFunctionSymbol({
+            file: 'src/legacy.py',
+            name: 'legacy_target',
+            startLine: 1,
+            endLine: 4,
+            fileHash: 'hash-legacy',
+            language: 'python',
+        });
+        const ambiguousTarget = createFunctionSymbol({
+            file: 'src/ambiguous.py',
+            name: 'ambiguous_target',
+            startLine: 1,
+            endLine: 4,
+            fileHash: 'hash-ambiguous',
+            language: 'python',
+        });
+        const registry = buildSymbolRegistry({
+            manifest: manifest([
+                { path: 'src/caller.py', hash: 'hash-caller', language: 'python', symbolCount: 1 },
+                { path: 'src/residual.py', hash: 'hash-residual', language: 'python', symbolCount: 1 },
+                { path: 'src/legacy.py', hash: 'hash-legacy', language: 'python', symbolCount: 1 },
+                { path: 'src/ambiguous.py', hash: 'hash-ambiguous', language: 'python', symbolCount: 1 },
+            ]),
+            symbols: [caller, proofTarget, legacyTarget, ambiguousTarget],
+        });
+        const registryResult = await writeSymbolRegistrySidecar({ stateRoot, registry });
+        await writeRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            symbolRegistryManifestHash: registryResult.manifestHash,
+            relationshipVersion: 'relationship-v9',
+            builtAt: '2026-07-25T00:00:00.000Z',
+            files: registry.manifest.files,
+            records: [
+                {
+                    sourceKey: caller.symbolKey,
+                    sourceInstanceId: caller.symbolInstanceId,
+                    targetKey: proofTarget.symbolKey,
+                    targetInstanceId: proofTarget.symbolInstanceId,
+                    type: 'CALLS',
+                    file: caller.file,
+                    span: { startLine: 2, endLine: 2 },
+                    confidence: 'low',
+                    resolutionAuthority: 'origin_flow',
+                },
+                {
+                    sourceKey: caller.symbolKey,
+                    sourceInstanceId: caller.symbolInstanceId,
+                    targetKey: legacyTarget.symbolKey,
+                    targetInstanceId: legacyTarget.symbolInstanceId,
+                    type: 'CALLS',
+                    file: caller.file,
+                    span: { startLine: 3, endLine: 3 },
+                    confidence: 'low',
+                },
+                {
+                    sourceKey: caller.symbolKey,
+                    sourceInstanceId: caller.symbolInstanceId,
+                    targetKey: ambiguousTarget.symbolKey,
+                    targetInstanceId: ambiguousTarget.symbolInstanceId,
+                    type: 'CALLS',
+                    file: caller.file,
+                    span: { startLine: 4, endLine: 4 },
+                    confidence: 'low',
+                    resolutionAuthority: 'ambiguous',
+                },
+            ],
+        });
+
+        const neighbors = await getGraphNeighbors({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            expectedSymbolRegistryManifestHash: registryResult.manifestHash,
+            symbolInstanceId: caller.symbolInstanceId,
+            depth: 2,
+            direction: 'callees',
+            allowedTypes: ['CALLS'],
+        });
+
+        assert.equal(neighbors.status, 'ok');
+        assert.deepEqual(neighbors.records.map((record) => record.targetInstanceId), [proofTarget.symbolInstanceId]);
+        assert.deepEqual(
+            neighbors.suppressedLowConfidenceRecords.map((record) => record.targetInstanceId).sort(),
+            [ambiguousTarget.symbolInstanceId, legacyTarget.symbolInstanceId].sort(),
+        );
+        assert.deepEqual(neighbors.warnings, ['RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:2']);
+    });
+});
+
 test('getGraphNeighbors upgrades import/export-backed cross-file CALLS v0 edges for traversal', async () => {
     await withTempDir(async (stateRoot) => {
         const authContent = [
