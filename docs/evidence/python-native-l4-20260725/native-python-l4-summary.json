@@ -1,0 +1,99 @@
+{
+  "outcome": "native_python_l4_pass",
+  "checkpointBaseline": "074bed62f723e8b04ec36f3467417cba632687ae",
+  "nativeL3Commit": "1fd06ad4756ff84027674e06e6e5875f9f458249",
+  "l4CorrectionCommit": "8d320c1b3f4d398198bad1cd945a93caf1d5bc85",
+  "nativeCandidateCommit": "cff16aca4d406f2f9b2a1fa2900aa14f972ae1ad",
+  "branch": "candidate/native-python-l4-20260725",
+  "target": {
+    "repository": "/home/hamza/repo/tradingview_ratio",
+    "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+    "materialization": "/tmp/satori-native-python-l4-target-20260725-lbEBpS",
+    "statusBeforeAndAfter": [
+      "## main...origin/main [ahead 1]",
+      " M opencode.jsonc",
+      "?? cc.json"
+    ]
+  },
+  "runtime": {
+    "satoriMcp": "6.3.0",
+    "provider": "Potion/minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+    "collection": "hybrid_code_chunks_2770b293__gen_run_dd045824_2e78_40ab_ab6c_a49490873ab6",
+    "generationMarker": "c5363d9d-5282-42ae-9123-5be671fca64c",
+    "status": "ready",
+    "relationshipVersion": "relationship-v8+python-constructor-receivers",
+    "contributionSchema": "relationship_file_contribution_v3",
+    "extractorVersion": "language-analysis-v15+oxc-0.139.0+web-tree-sitter-0.26.10+vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3",
+    "nativeProvider": "satori-native-python",
+    "nativeProviderVersion": "bounded-origin-v1",
+    "environmentConfigId": "python-native-resolution-v1"
+  },
+  "nativeBuild": {
+    "files": 279,
+    "symbols": 3311,
+    "records": 4977,
+    "claims": 14876,
+    "recordDigest": "5f612be1e1090a336bedc25c33dae6a1ee2a93afab6e6a6cbdff3b4052f31492",
+    "claimDigest": "11c42e343aa9b7501be35e42291e739c14ff442338e5763e1b36642638ac6fdb",
+    "repeatDeterministic": true,
+    "sidecarReloadRecordDigest": "5f612be1e1090a336bedc25c33dae6a1ee2a93afab6e6a6cbdff3b4052f31492",
+    "symbolManifest": "symmanifest_15e17bc6250a5fba52399825bd0ecb0f",
+    "relationshipManifest": "a8a6709d8bd53146c02b5064a53d067199d336dfca4dafab992bf8392f714e8f"
+  },
+  "requiredInboundCounts": {
+    "SignalGenerator.check_entry": 3,
+    "BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant": 2,
+    "SignalLedger.record": 1
+  },
+  "additionalInbound": {
+    "SignalLedger.record": [
+      "_record_shadow_suppression@src/python/core/shadow_runner.py:550 (valid additional caller)"
+    ]
+  },
+  "negativeControls": {
+    "hurstGateCheckEntry": "ambiguous REFERENCES, no authoritative CALLS",
+    "sameName": "no authoritative CALLS",
+    "conflictingReassignment": "no authoritative CALLS",
+    "useBeforeAssignment": "no authoritative CALLS",
+    "unsupportedDynamicReceiver": "no authoritative CALLS",
+    "unrelatedRecordReceivers": "no authoritative CALLS to SignalLedger.record"
+  },
+  "incremental": {
+    "mutationFile": "src/python/core/opportunity_ranker.py",
+    "fullDigest": "2c8a030831a4343da104a152e06efacbabb871c2c693c1ecfe13e84e33f4e316",
+    "deltaDigest": "2c8a030831a4343da104a152e06efacbabb871c2c693c1ecfe13e84e33f4e316",
+    "equal": true,
+    "missing": 0,
+    "extra": 0,
+    "deltaRelationshipMs": 5307.841279,
+    "sourceRestored": true,
+    "sourceDigest": "7d0a0a452889b4d78edc4594bc09c5c62b5f9a1ff72eeba5c734a0c9b048293a"
+  },
+  "performance": {
+    "analysisMs": [
+      2793.813466,
+      2706.620484
+    ],
+    "relationshipMs": [
+      14375.471847,
+      13878.353553
+    ],
+    "rssAfterBytes": [
+      302784512,
+      347209728
+    ],
+    "finalProcessRssBytes": 483307520,
+    "numericRelationshipBudgetFound": false
+  },
+  "coreResult": {
+    "exitCode": 1,
+    "passed": 590,
+    "failed": 3,
+    "skipped": 1,
+    "baselineFailures": [
+      "Context bounds deferred atomic publication generations without pruning active authority",
+      "Context completion validation propagates transient and unavailable payload probes",
+      "Context receipt-driven generation proof reuses activation authority and single-flights cold validation"
+    ]
+  }
+}
