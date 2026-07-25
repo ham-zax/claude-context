@@ -493,6 +493,222 @@ test('relationship sidecars preserve canonical constructor receiver evidence', a
     });
 });
 
+test('relationship sidecars preserve bounded Python flow facts and ordered resolution proofs', async () => {
+    await withTempDir(async (stateRoot) => {
+        const span = (startByte: number, endByte: number) => ({
+            startLine: 2,
+            endLine: 2,
+            startByte,
+            endByte,
+            startColumn: 4,
+            endColumn: 20,
+        });
+        const resolutionClaims = [
+            {
+                providerId: 'satori-native-python',
+                providerVersion: 'bounded-origin-v1',
+                environmentConfigId: 'python-native-resolution-v1',
+                sourceFile: 'src/runtime.py',
+                sourceInstanceId: 'source-ambiguous',
+                callSpan: span(80, 100),
+                decision: 'ambiguous' as const,
+                relationshipType: 'REFERENCES' as const,
+                proofSteps: [
+                    { kind: 'call_site' as const, subject: 'record', span: span(80, 100) },
+                    { kind: 'ambiguity' as const, subject: 'services.signal_ledger.record' },
+                ],
+                dependencyKeys: ['src/runtime.py:80:100:services.signal_ledger:record'],
+                flowHops: 2,
+            },
+            {
+                providerId: 'satori-native-python',
+                providerVersion: 'bounded-origin-v1',
+                environmentConfigId: 'python-native-resolution-v1',
+                sourceFile: 'src/runtime.py',
+                sourceInstanceId: 'source-resolved',
+                targetInstanceId: 'target-record',
+                targetSymbol: 'SignalLedger.record',
+                callSpan: span(10, 30),
+                decision: 'resolved' as const,
+                relationshipType: 'CALLS' as const,
+                proofSteps: [
+                    { kind: 'call_site' as const, subject: 'record', span: span(10, 30) },
+                    { kind: 'flow_hop' as const, subject: 'SignalRecordingServices.signal_ledger', hop: 1 },
+                    { kind: 'field_origin' as const, subject: 'engine.signal_ledger' },
+                ],
+                dependencyKeys: ['src/engine.py:10:30:engine.signal_ledger'],
+                flowHops: 1,
+            },
+            {
+                providerId: 'satori-native-python',
+                providerVersion: 'bounded-origin-v1',
+                environmentConfigId: 'python-native-resolution-v1',
+                sourceFile: 'src/runtime.py',
+                sourceInstanceId: 'source-unresolved',
+                callSpan: span(50, 70),
+                decision: 'unresolved' as const,
+                relationshipType: 'REFERENCES' as const,
+                proofSteps: [
+                    { kind: 'call_site' as const, subject: 'check_entry', span: span(50, 70) },
+                    { kind: 'unresolved_dependency' as const, subject: 'src/runtime.py:50:70:self.signal_gen:check_entry' },
+                ],
+                dependencyKeys: ['src/runtime.py:50:70:self.signal_gen:check_entry'],
+                flowHops: 1,
+            },
+        ];
+        const pythonFlowFacts = [
+            {
+                kind: 'assignment_origin' as const,
+                targetText: 'self.signal_gen',
+                valueText: 'SignalGenerator(config)',
+                valueKind: 'constructor' as const,
+                constructorTypeName: 'SignalGenerator',
+                span: span(1, 30),
+                contextSpan: span(0, 100),
+            },
+            {
+                kind: 'call_argument' as const,
+                calleeText: 'SignalRecordingServices',
+                argumentName: 'signal_ledger',
+                valueText: 'engine.signal_ledger',
+                span: span(31, 60),
+                contextSpan: span(0, 100),
+            },
+            {
+                kind: 'class_bases' as const,
+                className: 'BacktestEngine',
+                baseNames: ['BacktestEngineGateRuntimeApiMixin'],
+                span: span(61, 90),
+                contextSpan: span(0, 100),
+            },
+        ];
+        await writeRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            symbolRegistryManifestHash: 'manifest-hash',
+            relationshipVersion: 'relationship-v9',
+            builtAt: '2026-07-25T00:00:00.000Z',
+            records: [],
+            analysisByFile: new Map([['src/runtime.py', {
+                moduleBindings: [],
+                callSites: [],
+                receiverTypeBindings: [],
+                pythonFlowFacts,
+                resolutionClaims,
+            }]]),
+        });
+
+        const loaded = await readRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            expectedSymbolRegistryManifestHash: 'manifest-hash',
+        });
+        assert.equal(loaded.status, 'ok');
+        assert.deepEqual(loaded.analysisByFile?.get('src/runtime.py')?.pythonFlowFacts, pythonFlowFacts);
+        assert.deepEqual(
+            loaded.analysisByFile?.get('src/runtime.py')?.resolutionClaims?.map((claim) => ({
+                decision: claim.decision,
+                startByte: claim.callSpan.startByte,
+                proof: claim.proofSteps.map((step) => step.kind),
+                dependencies: claim.dependencyKeys,
+            })),
+            [
+                { decision: 'resolved', startByte: 10, proof: ['call_site', 'flow_hop', 'field_origin'], dependencies: ['src/engine.py:10:30:engine.signal_ledger'] },
+                { decision: 'unresolved', startByte: 50, proof: ['call_site', 'unresolved_dependency'], dependencies: ['src/runtime.py:50:70:self.signal_gen:check_entry'] },
+                { decision: 'ambiguous', startByte: 80, proof: ['call_site', 'ambiguity'], dependencies: ['src/runtime.py:80:100:services.signal_ledger:record'] },
+            ],
+        );
+    });
+});
+
+test('navigation restart and no-op delta preserve native resolution claims', async () => {
+    await withTempDir(async (stateRoot) => {
+        const content = 'def run():\n    unknown.receiver()\n';
+        const symbol = createSynthesizedFileSymbol({
+            relativePath: 'src/runtime.py',
+            language: 'python',
+            content,
+            fileHash: 'runtime-hash',
+            extractorVersion: 'extractor-v1',
+        });
+        const registry = buildSymbolRegistry({
+            manifest: manifest([{
+                path: 'src/runtime.py',
+                hash: 'runtime-hash',
+                language: 'python',
+                symbolCount: 1,
+            }]),
+            symbols: [symbol],
+        });
+        const claim = {
+            providerId: 'satori-native-python',
+            providerVersion: 'bounded-origin-v1',
+            environmentConfigId: 'python-native-resolution-v1',
+            sourceFile: 'src/runtime.py',
+            sourceInstanceId: symbol.symbolInstanceId,
+            callSpan: {
+                startLine: 2,
+                endLine: 2,
+                startByte: 12,
+                endByte: 30,
+                startColumn: 4,
+                endColumn: 22,
+            },
+            decision: 'unresolved' as const,
+            relationshipType: 'REFERENCES' as const,
+            proofSteps: [
+                { kind: 'call_site' as const, subject: 'receiver' },
+                { kind: 'unresolved_dependency' as const, subject: 'src/runtime.py:12:30:unknown:receiver' },
+            ],
+            dependencyKeys: ['src/runtime.py:12:30:unknown:receiver'],
+            flowHops: 0,
+        };
+        const analysisByFile = new Map([['src/runtime.py', {
+            moduleBindings: [],
+            callSites: [],
+            receiverTypeBindings: [],
+            resolutionClaims: [claim],
+        }]]);
+        const first = await writeNavigationSidecarGeneration({
+            stateRoot,
+            registry,
+            records: [],
+            analysisByFile,
+        });
+        const expectedManifestHash = computeSymbolRegistryManifestHash(registry.manifest);
+        const firstRead = await readRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            expectedSymbolRegistryManifestHash: expectedManifestHash,
+            generationId: first.generationId,
+        });
+        assert.equal(firstRead.status, 'ok');
+        assert.deepEqual(firstRead.analysisByFile?.get('src/runtime.py')?.resolutionClaims, [claim]);
+
+        const second = await writeNavigationSidecarGeneration({
+            stateRoot,
+            registry,
+            records: [],
+            analysisByFile,
+            deltaReuse: {
+                baseGenerationId: first.generationId,
+                symbolFilesToRewrite: [],
+                relationshipFilesToRewrite: [],
+            },
+        });
+        const secondRead = await readRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            expectedSymbolRegistryManifestHash: expectedManifestHash,
+            generationId: second.generationId,
+        });
+        assert.equal(secondRead.status, 'ok');
+        assert.deepEqual(secondRead.analysisByFile?.get('src/runtime.py')?.resolutionClaims, [claim]);
+        assert.equal(second.relationshipManifestHash, first.relationshipManifestHash);
+        assert.ok(second.physical.sharedFiles >= 2);
+    });
+});
+
 test('readRelationshipSidecar requires canonical receiver-type contribution evidence', async () => {
     const span = {
         startLine: 1,

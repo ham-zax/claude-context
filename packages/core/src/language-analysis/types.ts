@@ -57,6 +57,36 @@ export interface CallSite {
     readonly statementBlockSpan?: SourceSpan;
 }
 
+export type PythonFlowFact =
+    | {
+        readonly kind: 'assignment_origin';
+        readonly targetText: string;
+        readonly valueText: string;
+        readonly valueKind: 'constructor' | 'call' | 'member' | 'identifier' | 'unknown';
+        readonly constructorTypeName?: string;
+        readonly calleeName?: string;
+        readonly span: SourceSpan;
+        /** The callable or module scope in which this value was allocated. */
+        readonly contextSpan: SourceSpan;
+    }
+    | {
+        readonly kind: 'call_argument';
+        readonly calleeText: string;
+        readonly argumentName?: string;
+        readonly argumentIndex?: number;
+        readonly valueText: string;
+        readonly span: SourceSpan;
+        /** The callable or module scope from which the call was made. */
+        readonly contextSpan: SourceSpan;
+    }
+    | {
+        readonly kind: 'class_bases';
+        readonly className: string;
+        readonly baseNames: readonly string[];
+        readonly span: SourceSpan;
+        readonly contextSpan: SourceSpan;
+    };
+
 export type ReceiverTypeBinding =
     | {
         readonly localName: string;
@@ -90,6 +120,8 @@ interface LanguageAnalysisEvidence {
     readonly moduleBindings: readonly ModuleBinding[];
     readonly callSites: readonly CallSite[];
     readonly receiverTypeBindings: readonly ReceiverTypeBinding[];
+    /** Python-only bounded origin facts; absent for non-Python adapters. */
+    readonly pythonFlowFacts?: readonly PythonFlowFact[];
     readonly chunks: readonly CodeChunk[];
 }
 

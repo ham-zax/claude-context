@@ -174,6 +174,7 @@ interface AnalyzedIndexedFile {
     readonly moduleBindings: LanguageAnalysisResult['moduleBindings'];
     readonly callSites: LanguageAnalysisResult['callSites'];
     readonly receiverTypeBindings: LanguageAnalysisResult['receiverTypeBindings'];
+    readonly pythonFlowFacts: LanguageAnalysisResult['pythonFlowFacts'];
 }
 
 interface AnalyzedFileSymbolFacts {
@@ -6302,6 +6303,7 @@ export class Context {
             moduleBindings: analysis.moduleBindings,
             callSites: analysis.callSites,
             receiverTypeBindings: analysis.receiverTypeBindings,
+            pythonFlowFacts: analysis.pythonFlowFacts ?? [],
         };
     }
 
@@ -6332,6 +6334,7 @@ export class Context {
                 moduleBindings: analyzed.moduleBindings,
                 callSites: analyzed.callSites,
                 receiverTypeBindings: analyzed.receiverTypeBindings,
+                pythonFlowFacts: analyzed.pythonFlowFacts ?? [],
             },
         };
     }
@@ -7887,6 +7890,7 @@ export class Context {
             ...rebuiltManifestFiles.map((file) => file.path),
         ]);
         const retainedAnalysisByFile = new Map<string, RelationshipAnalysisEvidence>();
+        const previousAnalysisByFile = new Map<string, RelationshipAnalysisEvidence>();
         const existingRelationships = existingRelationshipState
             ? {
                 status: 'ok' as const,
@@ -7901,8 +7905,9 @@ export class Context {
             });
         if (existingRelationships.status === 'ok') {
             for (const file of existingRegistry.manifest.files) {
-                if (replacedPaths.has(file.path)) continue;
                 const evidence = existingRelationships.analysisByFile.get(file.path);
+                if (evidence) previousAnalysisByFile.set(file.path, evidence);
+                if (replacedPaths.has(file.path)) continue;
                 if (evidence) retainedAnalysisByFile.set(file.path, evidence);
             }
         }
@@ -7953,6 +7958,7 @@ export class Context {
                 existingRecords: existingRelationships.records,
                 analysisByFile: retainedAnalysisByFile,
                 changedFiles: replacedPaths,
+                previousAnalysisByFile,
             });
             assertMutationCurrent?.();
             const candidate = await stageNavigationSidecarGeneration({
@@ -8057,6 +8063,7 @@ export class Context {
                 moduleBindings: analysis.moduleBindings,
                 callSites: analysis.callSites,
                 receiverTypeBindings: analysis.receiverTypeBindings,
+                pythonFlowFacts: analysis.pythonFlowFacts ?? [],
             });
         }
         const relationshipRecords = buildRelationshipsForRegistry({ registry, analysisByFile });

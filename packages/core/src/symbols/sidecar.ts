@@ -25,6 +25,15 @@ import type {
 } from './contracts';
 import type { SymbolRegistry } from './registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
+import { MAX_PYTHON_FLOW_HOPS } from '../relationships/resolution';
+import type {
+    PythonFlowFact,
+    SourceSpan,
+} from '../language-analysis';
+import type {
+    ResolutionClaim,
+    ResolutionProofStep,
+} from '../relationships/resolution';
 
 const NAVIGATION_DIR_NAME = 'navigation';
 const SYMBOLS_DIR_NAME = 'symbols';
@@ -535,6 +544,79 @@ function getRelationshipAnalysisEvidencePaths(
         : Object.keys(analysisByFile);
 }
 
+function canonicalizeSourceSpan(span: SourceSpan): SourceSpan {
+    return { ...span };
+}
+
+function canonicalizePythonFlowFact(fact: PythonFlowFact): PythonFlowFact {
+    if (fact.kind === 'assignment_origin') {
+        return {
+            kind: fact.kind,
+            targetText: fact.targetText,
+            valueText: fact.valueText,
+            valueKind: fact.valueKind,
+            ...(fact.constructorTypeName === undefined ? {} : { constructorTypeName: fact.constructorTypeName }),
+            ...(fact.calleeName === undefined ? {} : { calleeName: fact.calleeName }),
+            span: canonicalizeSourceSpan(fact.span),
+            contextSpan: canonicalizeSourceSpan(fact.contextSpan),
+        };
+    }
+    if (fact.kind === 'call_argument') {
+        return {
+            kind: fact.kind,
+            calleeText: fact.calleeText,
+            ...(fact.argumentName === undefined ? {} : { argumentName: fact.argumentName }),
+            ...(fact.argumentIndex === undefined ? {} : { argumentIndex: fact.argumentIndex }),
+            valueText: fact.valueText,
+            span: canonicalizeSourceSpan(fact.span),
+            contextSpan: canonicalizeSourceSpan(fact.contextSpan),
+        };
+    }
+    return {
+        kind: fact.kind,
+        className: fact.className,
+        baseNames: [...fact.baseNames],
+        span: canonicalizeSourceSpan(fact.span),
+        contextSpan: canonicalizeSourceSpan(fact.contextSpan),
+    };
+}
+
+function compareResolutionClaims(left: ResolutionClaim, right: ResolutionClaim): number {
+    if (left.sourceFile !== right.sourceFile) return compareStrings(left.sourceFile, right.sourceFile);
+    if (left.callSpan.startByte !== right.callSpan.startByte) return left.callSpan.startByte - right.callSpan.startByte;
+    if (left.callSpan.endByte !== right.callSpan.endByte) return left.callSpan.endByte - right.callSpan.endByte;
+    if (left.decision !== right.decision) return compareStrings(left.decision, right.decision);
+    return compareStrings(left.targetSymbol ?? '', right.targetSymbol ?? '');
+}
+
+function canonicalizeResolutionProofStep(step: ResolutionProofStep): ResolutionProofStep {
+    return {
+        kind: step.kind,
+        subject: step.subject,
+        ...(step.detail === undefined ? {} : { detail: step.detail }),
+        ...(step.span === undefined ? {} : { span: canonicalizeSourceSpan(step.span) }),
+        ...(step.hop === undefined ? {} : { hop: step.hop }),
+    };
+}
+
+function canonicalizeResolutionClaim(claim: ResolutionClaim): ResolutionClaim {
+    return {
+        providerId: claim.providerId,
+        providerVersion: claim.providerVersion,
+        environmentConfigId: claim.environmentConfigId,
+        sourceFile: claim.sourceFile,
+        ...(claim.sourceInstanceId === undefined ? {} : { sourceInstanceId: claim.sourceInstanceId }),
+        ...(claim.targetInstanceId === undefined ? {} : { targetInstanceId: claim.targetInstanceId }),
+        ...(claim.targetSymbol === undefined ? {} : { targetSymbol: claim.targetSymbol }),
+        callSpan: canonicalizeSourceSpan(claim.callSpan),
+        decision: claim.decision,
+        relationshipType: claim.relationshipType,
+        proofSteps: claim.proofSteps.map((step) => canonicalizeResolutionProofStep(step)),
+        dependencyKeys: [...claim.dependencyKeys].sort(compareStrings),
+        flowHops: claim.flowHops,
+    };
+}
+
 function canonicalizeRelationshipAnalysisEvidence(
     evidence: RelationshipAnalysisEvidence | undefined,
 ): RelationshipAnalysisEvidence | undefined {
@@ -543,6 +625,16 @@ function canonicalizeRelationshipAnalysisEvidence(
         moduleBindings: [...evidence.moduleBindings],
         callSites: [...evidence.callSites],
         receiverTypeBindings: [...(evidence.receiverTypeBindings ?? [])],
+        ...(evidence.pythonFlowFacts && evidence.pythonFlowFacts.length > 0
+            ? { pythonFlowFacts: evidence.pythonFlowFacts.map((fact) => canonicalizePythonFlowFact(fact)) }
+            : {}),
+        ...(evidence.resolutionClaims === undefined
+            ? {}
+            : {
+                resolutionClaims: [...evidence.resolutionClaims]
+                    .sort(compareResolutionClaims)
+                    .map((claim) => canonicalizeResolutionClaim(claim)),
+            }),
     };
 }
 
@@ -1705,10 +1797,145 @@ function isSourceSpan(value: unknown): boolean {
         .every((field) => isNonNegativeInteger(value[field]));
 }
 
+const PYTHON_FLOW_VALUE_KINDS = new Set(['constructor', 'call', 'member', 'identifier', 'unknown']);
+const RESOLUTION_DECISIONS = new Set(['resolved', 'unresolved', 'ambiguous']);
+const RESOLUTION_PROOF_STEP_KINDS = new Set([
+    'call_site',
+    'containing_caller',
+    'absolute_import',
+    'relative_import',
+    'same_file_definition',
+    'constructor_origin',
+    'parameter_annotation',
+    'allocation_origin',
+    'field_origin',
+    'callback_origin',
+    'class_inheritance',
+    'flow_hop',
+    'candidate_set',
+    'ambiguity',
+    'unresolved_dependency',
+]);
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+    const allowed = new Set(keys);
+    return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isPythonFlowFact(value: unknown): value is PythonFlowFact {
+    if (!isRecord(value) || typeof value.kind !== 'string') return false;
+    if (value.kind === 'assignment_origin') {
+        return hasOnlyKeys(value, [
+            'kind',
+            'targetText',
+            'valueText',
+            'valueKind',
+            'constructorTypeName',
+            'calleeName',
+            'span',
+            'contextSpan',
+        ])
+            && isNonEmptyString(value.targetText)
+            && isNonEmptyString(value.valueText)
+            && typeof value.valueKind === 'string'
+            && PYTHON_FLOW_VALUE_KINDS.has(value.valueKind)
+            && isOptionalNonEmptyString(value.constructorTypeName)
+            && isOptionalNonEmptyString(value.calleeName)
+            && isSourceSpan(value.span)
+            && isSourceSpan(value.contextSpan);
+    }
+    if (value.kind === 'call_argument') {
+        return hasOnlyKeys(value, [
+            'kind',
+            'calleeText',
+            'argumentName',
+            'argumentIndex',
+            'valueText',
+            'span',
+            'contextSpan',
+        ])
+            && isNonEmptyString(value.calleeText)
+            && isOptionalNonEmptyString(value.argumentName)
+            && (value.argumentIndex === undefined || isNonNegativeInteger(value.argumentIndex))
+            && isNonEmptyString(value.valueText)
+            && isSourceSpan(value.span)
+            && isSourceSpan(value.contextSpan);
+    }
+    if (value.kind !== 'class_bases') return false;
+    return hasOnlyKeys(value, ['kind', 'className', 'baseNames', 'span', 'contextSpan'])
+        && isNonEmptyString(value.className)
+        && Array.isArray(value.baseNames)
+        && value.baseNames.every(isNonEmptyString)
+        && isSourceSpan(value.span)
+        && isSourceSpan(value.contextSpan);
+}
+
+function isResolutionProofStep(value: unknown): value is ResolutionProofStep {
+    if (!isRecord(value)
+        || !hasOnlyKeys(value, ['kind', 'subject', 'detail', 'span', 'hop'])
+        || typeof value.kind !== 'string'
+        || !RESOLUTION_PROOF_STEP_KINDS.has(value.kind)
+        || !isNonEmptyString(value.subject)
+        || !isOptionalNonEmptyString(value.detail)
+        || (value.span !== undefined && !isSourceSpan(value.span))
+        || (value.hop !== undefined && !isNonNegativeInteger(value.hop))) {
+        return false;
+    }
+    return true;
+}
+
+function isResolutionClaim(value: unknown): value is ResolutionClaim {
+    if (!isRecord(value)
+        || !hasOnlyKeys(value, [
+            'providerId',
+            'providerVersion',
+            'environmentConfigId',
+            'sourceFile',
+            'sourceInstanceId',
+            'targetInstanceId',
+            'targetSymbol',
+            'callSpan',
+            'decision',
+            'relationshipType',
+            'proofSteps',
+            'dependencyKeys',
+            'flowHops',
+        ])
+        || !isNonEmptyString(value.providerId)
+        || !isNonEmptyString(value.providerVersion)
+        || !isNonEmptyString(value.environmentConfigId)
+        || !isRepositoryRelativePath(value.sourceFile)
+        || !isOptionalNonEmptyString(value.sourceInstanceId)
+        || !isOptionalNonEmptyString(value.targetInstanceId)
+        || !isOptionalNonEmptyString(value.targetSymbol)
+        || !isSourceSpan(value.callSpan)
+        || typeof value.decision !== 'string'
+        || !RESOLUTION_DECISIONS.has(value.decision)
+        || (value.relationshipType !== 'CALLS' && value.relationshipType !== 'REFERENCES')
+        || !Array.isArray(value.proofSteps)
+        || value.proofSteps.length === 0
+        || !value.proofSteps.every(isResolutionProofStep)
+        || !Array.isArray(value.dependencyKeys)
+        || !value.dependencyKeys.every(isNonEmptyString)
+        || !isNonNegativeInteger(value.flowHops)
+        || value.flowHops > MAX_PYTHON_FLOW_HOPS) {
+        return false;
+    }
+    if (value.decision === 'resolved') {
+        return value.relationshipType === 'CALLS'
+            && isNonEmptyString(value.targetInstanceId)
+            && isNonEmptyString(value.targetSymbol);
+    }
+    return value.relationshipType === 'REFERENCES'
+        && value.dependencyKeys.length > 0
+        && value.targetInstanceId === undefined
+        && value.targetSymbol === undefined;
+}
+
 function isRelationshipAnalysisEvidence(value: unknown): value is RelationshipAnalysisEvidence {
     if (
         !isRecord(value)
-        || Object.keys(value).length !== 3
+        || !hasOnlyKeys(value, ['moduleBindings', 'callSites', 'receiverTypeBindings', 'pythonFlowFacts', 'resolutionClaims'])
         || !Array.isArray(value.moduleBindings)
         || !Array.isArray(value.callSites)
         || !Array.isArray(value.receiverTypeBindings)
@@ -1742,7 +1969,11 @@ function isRelationshipAnalysisEvidence(value: unknown): value is RelationshipAn
         return Object.keys(binding).length === 4
             && (binding.kind === 'parameter_annotation' || binding.kind === 'self_field_constructor');
     });
-    return bindingsValid && callsValid && receiverTypesValid;
+    const flowFactsValid = value.pythonFlowFacts === undefined
+        || (Array.isArray(value.pythonFlowFacts) && value.pythonFlowFacts.every(isPythonFlowFact));
+    const claimsValid = value.resolutionClaims === undefined
+        || (Array.isArray(value.resolutionClaims) && value.resolutionClaims.every(isResolutionClaim));
+    return bindingsValid && callsValid && receiverTypesValid && flowFactsValid && claimsValid;
 }
 
 export async function readRelationshipSidecar(input: ReadRelationshipSidecarInput): Promise<ReadRelationshipSidecarResult> {
@@ -1919,6 +2150,13 @@ export async function readRelationshipSidecar(input: ReadRelationshipSidecarInpu
                         status: 'incompatible',
                         rootPath,
                         reason: `relationship analysis evidence is invalid for ${file.path}`,
+                    };
+                }
+                if ((shard.analysisEvidence.resolutionClaims ?? []).some((claim) => claim.sourceFile !== shard.path)) {
+                    return {
+                        status: 'incompatible',
+                        rootPath,
+                        reason: `relationship resolution claim source does not match ${file.path}`,
                     };
                 }
                 analysisByFile.set(shard.path, shard.analysisEvidence);

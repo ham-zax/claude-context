@@ -530,6 +530,51 @@ test('buildCallRelationshipsForRegistry resolves exact Python aliases and parame
     );
 });
 
+test('buildCallRelationshipsForRegistry records exact Python parameter proof and abstains without it', async () => {
+    const sources = {
+        'src/ledger.py': [
+            'class SignalLedger:',
+            '    def record(self): pass',
+            '',
+            'class OtherLedger:',
+            '    def record(self): pass',
+        ].join('\n'),
+        'src/caller.py': [
+            'from .ledger import SignalLedger',
+            '',
+            'def typed(ledger: SignalLedger):',
+            '    ledger.record()',
+            '',
+            'def untyped(ledger):',
+            '    ledger.record()',
+        ].join('\n'),
+    };
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry(sources);
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const symbolsById = registry.symbolsByInstanceId;
+    const signalLedgerRecord = registry.symbols.find((symbol) => symbol.qualifiedName === 'SignalLedger.record');
+
+    assert.ok(signalLedgerRecord);
+    assert.deepEqual(
+        records
+            .filter((record) => record.targetInstanceId === signalLedgerRecord.symbolInstanceId)
+            .map((record) => symbolsById.get(record.sourceInstanceId ?? '')?.qualifiedName),
+        ['typed'],
+    );
+
+    const claims = analysisByFile.get('src/caller.py')?.resolutionClaims ?? [];
+    const typedClaim = claims.find((claim) => claim.callSpan.startLine === 4);
+    const untypedClaim = claims.find((claim) => claim.callSpan.startLine === 7);
+    assert.equal(typedClaim?.decision, 'resolved');
+    assert.deepEqual(typedClaim?.proofSteps.map((step) => step.kind), [
+        'call_site',
+        'containing_caller',
+        'parameter_annotation',
+    ]);
+    assert.equal(untypedClaim?.decision, 'ambiguous');
+    assert.equal(untypedClaim?.relationshipType, 'REFERENCES');
+});
+
 test('buildCallRelationshipsForRegistry assigns same-line calls by byte containment', async () => {
     const content = [
         'function targetA() {}',
@@ -1560,10 +1605,12 @@ test('buildRelationshipDelta keeps TESTS records equivalent across add, delete, 
         'def replacement(): pass',
     ].join('\n');
     const testSource = [
+        'from src.runtime import target',
         'def test_runtime():',
         '    target()',
     ].join('\n');
     const retargetedTestSource = [
+        'from src.runtime import replacement',
         'def test_runtime():',
         '    replacement()',
     ].join('\n');
@@ -1707,4 +1754,67 @@ test('buildRelationshipDelta keeps typed receiver evidence equivalent across ann
     assert.deepEqual(delta.records, buildRelationshipsForRegistry(next));
     assert.ok(delta.affectedFiles.includes('src/caller.py'));
     assert.equal(delta.records.some((record) => record.type === 'CALLS'), false);
+});
+
+test('buildRelationshipDelta invalidates callers through persisted Python flow dependencies', async () => {
+    const ledgerSource = [
+        'class SignalLedger:',
+        '    def record(self): pass',
+        '',
+        'class OtherLedger:',
+        '    def record(self): pass',
+    ].join('\n');
+    const servicesSource = [
+        'class Services:',
+        '    pass',
+        '',
+        'def consume(services: Services):',
+        '    services.signal_ledger.record()',
+    ].join('\n');
+    const engineSource = (ledgerType: 'SignalLedger' | 'OtherLedger') => [
+        'from .ledger import OtherLedger, SignalLedger',
+        'from .services import Services',
+        '',
+        'class Engine:',
+        '    def __init__(self):',
+        `        self.signal_ledger = ${ledgerType}()`,
+        '',
+        'def build_services(engine: Engine):',
+        '    return Services(signal_ledger=engine.signal_ledger)',
+        '',
+        'def run():',
+        '    engine = Engine()',
+        '    build_services(engine=engine)',
+    ].join('\n');
+    const previous = await buildAnalyzedPythonRegistry({
+        'src/ledger.py': ledgerSource,
+        'src/services.py': servicesSource,
+        'src/engine.py': engineSource('SignalLedger'),
+    });
+    const next = await buildAnalyzedPythonRegistry({
+        'src/ledger.py': ledgerSource,
+        'src/services.py': servicesSource,
+        'src/engine.py': engineSource('OtherLedger'),
+    });
+    const previousRecords = buildRelationshipsForRegistry(previous);
+    const fullRecords = buildRelationshipsForRegistry(next);
+    const delta = buildRelationshipDelta({
+        previousRegistry: previous.registry,
+        registry: next.registry,
+        existingRecords: previousRecords,
+        analysisByFile: next.analysisByFile,
+        previousAnalysisByFile: previous.analysisByFile,
+        changedFiles: new Set(['src/engine.py']),
+    });
+
+    assert.deepEqual(delta.records, fullRecords);
+    assert.ok(delta.affectedFiles.includes('src/services.py'));
+    assert.equal(
+        fullRecords.some((record) => (
+            record.file === 'src/services.py'
+            && record.type === 'CALLS'
+            && next.registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.qualifiedName === 'OtherLedger.record'
+        )),
+        true,
+    );
 });

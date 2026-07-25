@@ -51,6 +51,7 @@ function fallbackResult(
         moduleBindings: [],
         callSites: [],
         receiverTypeBindings: [],
+        pythonFlowFacts: [],
         chunks: buildAnalysisChunks(
             input.content,
             input.relativePath,
@@ -193,6 +194,7 @@ function emergencyFallbackResult(
         moduleBindings: [],
         callSites: [],
         receiverTypeBindings: [],
+        pythonFlowFacts: [],
         chunks,
     };
 }
@@ -242,6 +244,7 @@ export function createLanguageAnalysisService(
                     moduleBindings: evidence.moduleBindings,
                     callSites: evidence.callSites,
                     receiverTypeBindings: evidence.receiverTypeBindings,
+                    pythonFlowFacts: evidence.pythonFlowFacts ?? [],
                     chunks: buildAnalysisChunks(
                         normalizedInput.content,
                         normalizedInput.relativePath,
