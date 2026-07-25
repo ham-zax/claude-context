@@ -49,6 +49,7 @@ const CURRENT_GENERATION_SCHEMA_VERSION = 'navigation_current_v3';
 const NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION = 'navigation_generation_seal_v1';
 const NAVIGATION_GENERATION_SEAL_FILE_NAME = 'seal.json';
 const SHARD_IO_CONCURRENCY = 64;
+const RELATIONSHIP_SHARD_IO_CONCURRENCY = 8;
 
 export class RetiredNavigationPointerError extends Error {}
 
@@ -270,6 +271,11 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
     await fs.promises.writeFile(filePath, serializeJson(value), 'utf8');
 }
 
+async function writeSerializedJson(filePath: string, serialized: string): Promise<void> {
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.promises.writeFile(filePath, serialized, 'utf8');
+}
+
 async function fsyncPath(targetPath: string): Promise<void> {
     const handle = await fs.promises.open(targetPath, 'r');
     try {
@@ -344,6 +350,10 @@ function serializeJson(value: unknown): string {
 
 function hashSerializedJson(value: unknown): string {
     return crypto.createHash('sha256').update(serializeJson(value), 'utf8').digest('hex');
+}
+
+function hashSerializedString(serialized: string): string {
+    return crypto.createHash('sha256').update(serialized, 'utf8').digest('hex');
 }
 
 export function computeNavigationSourceFilesDigest(
@@ -804,8 +814,12 @@ async function writeRelationshipSidecarInternal(
         const manifestFiles: RelationshipManifestFile[] = [];
 
         const sortedShardPaths = [...shardPaths].sort(compareStrings);
-        for (let offset = 0; offset < sortedShardPaths.length; offset += SHARD_IO_CONCURRENCY) {
-            const batch = sortedShardPaths.slice(offset, offset + SHARD_IO_CONCURRENCY);
+        for (
+            let offset = 0;
+            offset < sortedShardPaths.length;
+            offset += RELATIONSHIP_SHARD_IO_CONCURRENCY
+        ) {
+            const batch = sortedShardPaths.slice(offset, offset + RELATIONSHIP_SHARD_IO_CONCURRENCY);
             const batchFiles = await Promise.all(batch.map(async (filePath): Promise<RelationshipManifestFile> => {
                 const fileHash = filesByPath.get(filePath)?.hash || input.symbolRegistryManifestHash;
                 const shardPath = path.posix.join(RELATIONSHIPS_DIR_NAME, 'by-file', fileShardName(filePath, fileHash));
@@ -842,8 +856,9 @@ async function writeRelationshipSidecarInternal(
                     relationships: records,
                     analysisEvidence,
                 };
-                const shardHash = hashSerializedJson(shard);
-                await writeJson(targetPath, shard);
+                const serializedShard = serializeJson(shard);
+                const shardHash = hashSerializedString(serializedShard);
+                await writeSerializedJson(targetPath, serializedShard);
                 return {
                     path: filePath,
                     hash: fileHash,
@@ -862,8 +877,12 @@ async function writeRelationshipSidecarInternal(
             input.builtAt,
             manifestFiles,
         );
-        manifestHash = hashSerializedJson(manifest);
-        await writeJson(path.join(temporaryRelationshipsDir, 'manifest.json'), manifest);
+        const serializedManifest = serializeJson(manifest);
+        manifestHash = hashSerializedString(serializedManifest);
+        await writeSerializedJson(
+            path.join(temporaryRelationshipsDir, 'manifest.json'),
+            serializedManifest,
+        );
 
         await replaceDirectoryWithRollback(relationshipsDir, temporaryRelationshipsDir, undefined, input.beforePublish);
     } catch (error) {

@@ -128,7 +128,12 @@ function buildTargetIndex(symbols: readonly SymbolRecord[]): Map<string, SymbolR
     const targets = new Map<string, SymbolRecord[]>();
     for (const symbol of symbols.filter((candidate) => candidate.kind !== 'file')) {
         const key = symbol.name;
-        targets.set(key, [...(targets.get(key) ?? []), symbol]);
+        const entries = targets.get(key);
+        if (entries) {
+            entries.push(symbol);
+        } else {
+            targets.set(key, [symbol]);
+        }
     }
     return targets;
 }
@@ -230,8 +235,18 @@ function buildClassIndex(symbols: readonly SymbolRecord[]): {
     const byName = new Map<string, SymbolRecord[]>();
     for (const symbol of symbols) {
         if (symbol.kind !== 'class') continue;
-        byFile.set(symbol.file, [...(byFile.get(symbol.file) ?? []), symbol]);
-        byName.set(symbol.name, [...(byName.get(symbol.name) ?? []), symbol]);
+        const fileClasses = byFile.get(symbol.file);
+        if (fileClasses) {
+            fileClasses.push(symbol);
+        } else {
+            byFile.set(symbol.file, [symbol]);
+        }
+        const namedClasses = byName.get(symbol.name);
+        if (namedClasses) {
+            namedClasses.push(symbol);
+        } else {
+            byName.set(symbol.name, [symbol]);
+        }
     }
     return { byFile, byName };
 }
@@ -259,9 +274,37 @@ function pythonModuleNameForPath(filePath: string): string | undefined {
     return packagePath.replace(/\//g, '.');
 }
 
-type PythonModuleResolutionCache = WeakMap<object, WeakMap<object, Map<string, string | null>>>;
+type PythonModuleResolutionCache = WeakMap<object, WeakMap<object, ReadonlyMap<string, string | null>>>;
 
 const pythonModuleResolutionCache: PythonModuleResolutionCache = new WeakMap();
+
+function buildPythonModuleResolutionIndex(
+    registry: SymbolRegistry,
+    availableFiles: ReadonlySet<string>,
+): ReadonlyMap<string, string | null> {
+    const pythonFiles = new Set(
+        registry.manifest.files
+            .filter((entry) => entry.language === 'python')
+            .map((entry) => entry.path),
+    );
+    const filesByModuleSuffix = new Map<string, string | null>();
+    for (const file of availableFiles) {
+        if (!pythonFiles.has(file)) continue;
+        const moduleName = pythonModuleNameForPath(file);
+        if (!moduleName) continue;
+        const segments = moduleName.split('.');
+        for (let offset = 0; offset < segments.length; offset += 1) {
+            const suffix = segments.slice(offset).join('.');
+            const existing = filesByModuleSuffix.get(suffix);
+            if (existing === undefined) {
+                filesByModuleSuffix.set(suffix, file);
+            } else if (existing !== file) {
+                filesByModuleSuffix.set(suffix, null);
+            }
+        }
+    }
+    return filesByModuleSuffix;
+}
 
 function resolvePythonAbsoluteModulePath(
     specifier: string,
@@ -273,35 +316,16 @@ function resolvePythonAbsoluteModulePath(
         byAvailableFiles = new WeakMap();
         pythonModuleResolutionCache.set(registry, byAvailableFiles);
     }
-    let bySpecifier = byAvailableFiles.get(availableFiles);
-    if (!bySpecifier) {
-        bySpecifier = new Map();
-        byAvailableFiles.set(availableFiles, bySpecifier);
+    let filesByModuleSuffix = byAvailableFiles.get(availableFiles);
+    if (!filesByModuleSuffix) {
+        filesByModuleSuffix = buildPythonModuleResolutionIndex(registry, availableFiles);
+        byAvailableFiles.set(availableFiles, filesByModuleSuffix);
     }
-    const cached = bySpecifier.get(specifier);
-    if (cached !== undefined || bySpecifier.has(specifier)) return cached ?? undefined;
 
     const normalizedSpecifier = specifier.trim().replace(/^\.+/, '');
-    if (!normalizedSpecifier) {
-        bySpecifier.set(specifier, null);
-        return undefined;
-    }
-    const pythonFiles = new Set(
-        registry.manifest.files
-            .filter((entry) => entry.language === 'python')
-            .map((entry) => entry.path),
-    );
-    const matches = [...availableFiles]
-        .filter((file) => pythonFiles.has(file))
-        .filter((file) => {
-            const moduleName = pythonModuleNameForPath(file);
-            return moduleName === normalizedSpecifier
-                || moduleName?.endsWith(`.${normalizedSpecifier}`) === true;
-        })
-        .sort(compareStrings);
-    const result = matches.length === 1 ? matches[0] : undefined;
-    bySpecifier.set(specifier, result ?? null);
-    return result;
+    return normalizedSpecifier
+        ? filesByModuleSuffix.get(normalizedSpecifier) ?? undefined
+        : undefined;
 }
 
 function resolvePythonModulePath(
@@ -601,6 +625,8 @@ interface PythonFlowContext {
     readonly classesByName: ReadonlyMap<string, readonly SymbolRecord[]>;
     readonly availableFiles: ReadonlySet<string>;
     readonly classBasesByName: ReadonlyMap<string, readonly string[]>;
+    readonly classClosureByName: Map<string, ReadonlySet<string>>;
+    readonly runtimeTypesByClassName: ReadonlyMap<string, readonly string[]>;
     readonly exactCallableTargetsCache: Map<string, readonly SymbolRecord[]>;
     readonly pythonEvidenceEntries: readonly [string, RelationshipAnalysisEvidence][];
     readonly callArgumentsByName: ReadonlyMap<string, readonly [string, PythonCallArgumentFact][]>;
@@ -728,49 +754,81 @@ function deduplicateOrigins(origins: readonly PythonValueOrigin[]): PythonValueO
     return [...byIdentity.values()];
 }
 
-function classBasesFor(
+function classNamesWithBases(
     className: string,
     classBasesByName: ReadonlyMap<string, readonly string[]>,
-): readonly string[] {
-    return classBasesByName.get(className) ?? [];
+    classClosureByName: Map<string, ReadonlySet<string>>,
+): ReadonlySet<string> {
+    const cached = classClosureByName.get(className);
+    if (cached) return cached;
+    const names = new Set([className]);
+    const pending = [className];
+    while (pending.length > 0) {
+        const nextClassName = pending.pop()!;
+        for (const baseName of classBasesByName.get(nextClassName) ?? []) {
+            if (!names.has(baseName)) {
+                names.add(baseName);
+                pending.push(baseName);
+            }
+        }
+    }
+    classClosureByName.set(className, names);
+    return names;
 }
 
-function classNamesWithBases(
+function expandedClassNames(
     typeNames: readonly string[],
     classBasesByName: ReadonlyMap<string, readonly string[]>,
-): Set<string> {
-    const names = new Set(typeNames);
-    let changed = true;
-    while (changed) {
-        changed = false;
-        for (const className of [...names]) {
-            for (const baseName of classBasesFor(className, classBasesByName)) {
-                if (!names.has(baseName)) {
-                    names.add(baseName);
-                    changed = true;
-                }
-            }
+    classClosureByName: Map<string, ReadonlySet<string>>,
+): ReadonlySet<string> {
+    if (typeNames.length === 1) {
+        return classNamesWithBases(typeNames[0], classBasesByName, classClosureByName);
+    }
+    const names = new Set<string>();
+    for (const typeName of typeNames) {
+        for (const className of classNamesWithBases(typeName, classBasesByName, classClosureByName)) {
+            names.add(className);
         }
     }
     return names;
 }
 
+function buildRuntimeTypesByClassName(
+    classesByName: ReadonlyMap<string, readonly SymbolRecord[]>,
+    classBasesByName: ReadonlyMap<string, readonly string[]>,
+    classClosureByName: Map<string, ReadonlySet<string>>,
+): Map<string, readonly string[]> {
+    const runtimeTypes = new Map<string, Set<string>>();
+    for (const className of classesByName.keys()) {
+        for (const inheritedClassName of classNamesWithBases(
+            className,
+            classBasesByName,
+            classClosureByName,
+        )) {
+            const entries = runtimeTypes.get(inheritedClassName);
+            if (entries) {
+                entries.add(className);
+            } else {
+                runtimeTypes.set(inheritedClassName, new Set([className]));
+            }
+        }
+    }
+    return new Map(
+        [...runtimeTypes].map(([className, entries]) => [
+            className,
+            [...entries].sort(compareStrings),
+        ]),
+    );
+}
+
 function runtimeReceiverTypeNames(
     owner: SymbolRecord,
     classesByFile: ReadonlyMap<string, readonly SymbolRecord[]>,
-    classesByName: ReadonlyMap<string, readonly SymbolRecord[]>,
-    classBasesByName: ReadonlyMap<string, readonly string[]>,
+    runtimeTypesByClassName: ReadonlyMap<string, readonly string[]>,
 ): readonly string[] {
     const enclosingClass = enclosingClassForSymbol(owner, classesByFile);
     if (!enclosingClass) return [];
-    const possible = [...classesByName.values()]
-        .flat()
-        .filter((candidate) => {
-            const inherited = classNamesWithBases([candidate.name], classBasesByName);
-            return candidate.name === enclosingClass.name || inherited.has(enclosingClass.name);
-        })
-        .map((candidate) => candidate.name);
-    return [...new Set(possible)].sort(compareStrings);
+    return runtimeTypesByClassName.get(enclosingClass.name) ?? [];
 }
 
 function appendFlowHop(
@@ -950,8 +1008,7 @@ function resolvePythonExpressionOrigins(
         const typeNames = runtimeReceiverTypeNames(
             owner,
             context.classesByFile,
-            context.classesByName,
-            context.classBasesByName,
+            context.runtimeTypesByClassName,
         );
         return typeNames.length > 0
             ? [{
@@ -1039,9 +1096,10 @@ function resolvePythonExpressionOrigins(
             stack,
         );
         origins.push(...fieldOrigins);
-        const inheritedClassNames = classNamesWithBases(
+        const inheritedClassNames = expandedClassNames(
             receiverOrigin.typeNames,
             context.classBasesByName,
+            context.classClosureByName,
         );
         const targets = [...(context.targetIndex.get(member.member) ?? [])].filter((candidate) => {
             if (!isSourceOwner(candidate)) return false;
@@ -1081,7 +1139,12 @@ function buildPythonCallArgumentIndex(
     for (const [file, evidence] of entries) {
         for (const fact of evidence.pythonFlowFacts ?? []) {
             if (fact.kind !== 'call_argument' || !fact.argumentName) continue;
-            index.set(fact.argumentName, [...(index.get(fact.argumentName) ?? []), [file, fact]]);
+            const entriesForArgument = index.get(fact.argumentName);
+            if (entriesForArgument) {
+                entriesForArgument.push([file, fact]);
+            } else {
+                index.set(fact.argumentName, [[file, fact]]);
+            }
         }
     }
     return index;
@@ -1096,7 +1159,12 @@ function buildPythonAssignmentOriginIndex(
             if (fact.kind !== 'assignment_origin') continue;
             const member = pythonMemberExpression(fact.targetText);
             if (!member) continue;
-            index.set(member.member, [...(index.get(member.member) ?? []), [file, fact]]);
+            const entriesForMember = index.get(member.member);
+            if (entriesForMember) {
+                entriesForMember.push([file, fact]);
+            } else {
+                index.set(member.member, [[file, fact]]);
+            }
         }
     }
     return index;
@@ -1189,7 +1257,11 @@ function resolvePythonServiceMemberTarget(input: {
             }
             continue;
         }
-        const inherited = classNamesWithBases(origin.typeNames, input.context.classBasesByName);
+        const inherited = expandedClassNames(
+            origin.typeNames,
+            input.context.classBasesByName,
+            input.context.classClosureByName,
+        );
         for (const target of input.context.targetIndex.get(input.call.calleeName) ?? []) {
             if (!isSourceOwner(target)) continue;
             const targetClass = enclosingClassForSymbol(target, input.context.classesByFile);
@@ -1245,9 +1317,10 @@ function resolvePythonOriginMemberTarget(input: {
             if (target?.name === input.call.calleeName) targets.set(target.symbolInstanceId, target);
         }
         if (origin.kind !== 'instance') continue;
-        const inheritedClassNames = classNamesWithBases(
+        const inheritedClassNames = expandedClassNames(
             origin.typeNames,
             input.context.classBasesByName,
+            input.context.classClosureByName,
         );
         for (const target of input.context.targetIndex.get(input.call.calleeName) ?? []) {
             if (!isSourceOwner(target) || target.symbolInstanceId === input.source.symbolInstanceId) continue;
@@ -1320,7 +1393,14 @@ function appendClaim(
     file: string,
     claim: ResolutionClaim,
 ): void {
-    claimsByFile.set(file, [...(claimsByFile.get(file) ?? []), claim]);
+    // Claims are build-local and sorted before publication; appending in place
+    // avoids quadratic array copying without changing durable order.
+    const claims = claimsByFile.get(file);
+    if (claims) {
+        claims.push(claim);
+    } else {
+        claimsByFile.set(file, [claim]);
+    }
 }
 
 function attachResolutionClaims(
@@ -1501,6 +1581,8 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
     const availableFiles = new Set(input.registry.manifest.files.map((file) => file.path));
     const pythonEvidenceEntries = getEvidenceEntries(input.analysisByFile)
         .filter(([, evidence]) => (evidence.pythonFlowFacts?.length ?? 0) > 0);
+    const classBasesByName = buildPythonClassBases(input.analysisByFile);
+    const classClosureByName = new Map<string, ReadonlySet<string>>();
     const flowContext: PythonFlowContext = {
         registry: input.registry,
         analysisByFile: input.analysisByFile,
@@ -1508,7 +1590,13 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
         classesByFile: classes.byFile,
         classesByName: classes.byName,
         availableFiles,
-        classBasesByName: buildPythonClassBases(input.analysisByFile),
+        classBasesByName,
+        classClosureByName,
+        runtimeTypesByClassName: buildRuntimeTypesByClassName(
+            classes.byName,
+            classBasesByName,
+            classClosureByName,
+        ),
         exactCallableTargetsCache: new Map(),
         pythonEvidenceEntries,
         callArgumentsByName: buildPythonCallArgumentIndex(pythonEvidenceEntries),

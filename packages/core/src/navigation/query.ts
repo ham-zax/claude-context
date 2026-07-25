@@ -185,6 +185,14 @@ interface RelationshipSupportIndex {
     fileByOwnerInstanceId: Map<string, string>;
 }
 
+interface PreparedRelationshipIndex {
+    support: RelationshipSupportIndex;
+    outgoing: ReadonlyMap<string, readonly RelationshipRecord[]>;
+    incoming: ReadonlyMap<string, readonly RelationshipRecord[]>;
+}
+
+const preparedRelationshipIndexByRecords = new WeakMap<RelationshipRecord[], PreparedRelationshipIndex>();
+
 /**
  * Names that are too ambiguous for import-unique method promotion without EXPORTS evidence.
  * Keeps CALLS v0 from linking e.g. Array.push to unrelated fixtures.
@@ -247,6 +255,28 @@ function buildRelationshipSupportIndex(records: RelationshipRecord[]): Relations
         exportedSymbolIdsByOwner,
         fileByOwnerInstanceId,
     };
+}
+
+function prepareRelationshipIndex(records: RelationshipRecord[]): PreparedRelationshipIndex {
+    const cached = preparedRelationshipIndexByRecords.get(records);
+    if (cached) return cached;
+    const outgoing = new Map<string, RelationshipRecord[]>();
+    const incoming = new Map<string, RelationshipRecord[]>();
+    for (const record of records) {
+        if (record.sourceInstanceId) {
+            appendToMap(outgoing, record.sourceInstanceId, record);
+        }
+        if (record.targetInstanceId) {
+            appendToMap(incoming, record.targetInstanceId, record);
+        }
+    }
+    const prepared = {
+        support: buildRelationshipSupportIndex(records),
+        outgoing,
+        incoming,
+    };
+    preparedRelationshipIndexByRecords.set(records, prepared);
+    return prepared;
 }
 
 function buildSymbolSupportIndex(symbols: Iterable<{
@@ -480,7 +510,8 @@ export async function getGraphNeighbors(input: GetGraphNeighborsInput): Promise<
     const allowedConfidences = new Set(input.allowedConfidences && input.allowedConfidences.length > 0
         ? input.allowedConfidences
         : ['high']);
-    const supportIndex = buildRelationshipSupportIndex(relationshipSidecar.records);
+    const preparedIndex = prepareRelationshipIndex(relationshipSidecar.records);
+    const supportIndex = preparedIndex.support;
 
     // Lazy: only load matching registry when Path 2 (import-unique method) may be needed.
     let symbolSupport: SymbolSupportIndex | undefined;
@@ -500,21 +531,6 @@ export async function getGraphNeighbors(input: GetGraphNeighborsInput): Promise<
         return symbolSupport;
     };
 
-    const outgoing = new Map<string, RelationshipRecord[]>();
-    const incoming = new Map<string, RelationshipRecord[]>();
-
-    for (const record of relationshipSidecar.records) {
-        if (!matchesType(record, input.allowedTypes)) {
-            continue;
-        }
-        if (record.sourceInstanceId) {
-            appendToMap(outgoing, record.sourceInstanceId, record);
-        }
-        if (record.targetInstanceId) {
-            appendToMap(incoming, record.targetInstanceId, record);
-        }
-    }
-
     const visited = new Set<string>([input.symbolInstanceId]);
     const visitedSymbolInstanceIds = [input.symbolInstanceId];
     const selectedRecords = new Map<string, RelationshipRecord>();
@@ -528,13 +544,16 @@ export async function getGraphNeighbors(input: GetGraphNeighborsInput): Promise<
         for (const symbolInstanceId of frontier) {
             const recordList: RelationshipRecord[] = [];
             if (includeCallees) {
-                recordList.push(...(outgoing.get(symbolInstanceId) || []));
+                recordList.push(...(preparedIndex.outgoing.get(symbolInstanceId) || []));
             }
             if (includeCallers) {
-                recordList.push(...(incoming.get(symbolInstanceId) || []));
+                recordList.push(...(preparedIndex.incoming.get(symbolInstanceId) || []));
             }
 
             for (const record of recordList) {
+                if (!matchesType(record, input.allowedTypes)) {
+                    continue;
+                }
                 const recordKey = buildRelationshipRecordKey(record);
                 if (!allowedConfidences.has(record.confidence)) {
                     let supported = isProofBackedAuthoritativeCall(record);

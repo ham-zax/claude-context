@@ -172,6 +172,26 @@ function buildFailure(rootPath: string, reason: string, status: 'missing' | 'inc
     };
 }
 
+function relationshipQueryCacheIdentity(input: NavigationRelationshipsQueryInput): string | undefined {
+    if (!input.generationId || !input.expectedSymbolRegistryManifestHash) {
+        return undefined;
+    }
+    return [
+        input.generationId,
+        input.expectedSymbolRegistryManifestHash,
+        input.direction || 'both',
+        input.sourceInstanceId || '',
+        input.sourceKey || '',
+        input.targetInstanceId || '',
+        input.targetKey || '',
+        [...(input.types ?? [])].sort(compareStrings).join(','),
+    ].join('\0');
+}
+
+function relationshipQueryCacheRoot(input: NavigationRelationshipsQueryInput): string {
+    return `${input.stateRoot || ''}\0${input.normalizedRootPath}`;
+}
+
 async function readRegistryState(input: NavigationStoreInput): Promise<NavigationRegistryState> {
     const result = await readSymbolRegistrySidecar(input);
     if (result.status !== 'ok') {
@@ -249,6 +269,11 @@ async function readRelationshipState(input: NavigationRelationshipsQueryInput): 
 }
 
 export class JsonNavigationStore implements NavigationStore {
+    private readonly relationshipStateByRoot = new Map<string, {
+        identity: string;
+        result: Promise<NavigationRelationshipsState>;
+    }>();
+
     public async getManifest(input: NavigationStoreInput): Promise<NavigationRegistryState> {
         return readRegistryState(input);
     }
@@ -329,7 +354,29 @@ export class JsonNavigationStore implements NavigationStore {
     }
 
     public async getRelationships(input: NavigationRelationshipsQueryInput): Promise<NavigationRelationshipsState> {
-        return readRelationshipState(input);
+        const identity = relationshipQueryCacheIdentity(input);
+        if (!identity) {
+            return readRelationshipState(input);
+        }
+        const root = relationshipQueryCacheRoot(input);
+        const cached = this.relationshipStateByRoot.get(root);
+        if (cached?.identity === identity) {
+            return cached.result;
+        }
+
+        // Published generation directories are immutable. Cache only reads that
+        // bind both the generation and registry manifest, and replace the prior
+        // generation entry so lifecycle transitions cannot reuse stale state.
+        const result = readRelationshipState(input);
+        this.relationshipStateByRoot.set(root, { identity, result });
+        const resolved = await result;
+        if (
+            resolved.status !== 'ok'
+            && this.relationshipStateByRoot.get(root)?.result === result
+        ) {
+            this.relationshipStateByRoot.delete(root);
+        }
+        return resolved;
     }
 
     public async getCompatibilityState(input: NavigationCompatibilityInput): Promise<NavigationCompatibilityState> {
@@ -350,7 +397,7 @@ export class JsonNavigationStore implements NavigationStore {
             };
         }
 
-        const relationships = await readRelationshipState({
+        const relationships = await this.getRelationships({
             normalizedRootPath: input.normalizedRootPath,
             stateRoot: input.stateRoot,
             generationId: input.generationId,
