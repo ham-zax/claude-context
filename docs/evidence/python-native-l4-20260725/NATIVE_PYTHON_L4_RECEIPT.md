@@ -1,409 +1,412 @@
 # Native Python L4 qualification receipt
 
-Outcome: native_python_product_projection_blocked
+Outcome: `native_python_performance_blocked`
 
-This is a current-version qualification artifact for the bounded native Python
-relationship implementation. Historical reports, plans, checkpoint semantics,
-and the target repository were not edited.
+This is a separate current-version qualification artifact. It does not edit
+the historical report, checkpoint files, or the target repository.
 
-## Identity
+## Identity and scope
 
 | Item | Value |
 |---|---|
-| Checkpoint baseline | 074bed62f723e8b04ec36f3467417cba632687ae — fix(core): preserve V4 checkpoint authority during repair |
-| Original native L3 commit | 1fd06ad4756ff84027674e06e6e5875f9f458249 |
-| Transplanted candidate | 797802e757f8b2661de8f71c747ed07561f73535 |
-| L4 correction commit | 8d320c1b3f4d398198bad1cd945a93caf1d5bc85 |
-| Final native implementation candidate | cff16aca4d406f2f9b2a1fa2900aa14f972ae1ad |
-| Candidate branch/worktree | candidate/native-python-l4-20260725 / /home/hamza/repo/satori-worktrees/native-python-l4-20260725 |
-| Frozen target | /home/hamza/repo/tradingview_ratio@8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7 |
-| Task-owned target materialization | /tmp/satori-native-python-l4-target-20260725-lbEBpS |
-| Initial native base | 3764b740d0f55081f98cc33fd4f6236046de8712 |
-| Checkpoint Satori source revision | 074bed62f723e8b04ec36f3467417cba632687ae |
+| Checkpoint baseline | `074bed62f723e8b04ec36f3467417cba632687ae` |
+| Prior evidence head | `cfc26397979738507986b692c5ed070bbdb312f0` |
+| Final native candidate | `35cc98c45928eed3eaebe1028dca3f390388417e` |
+| Candidate branch | `candidate/native-python-l4-20260725` |
+| Candidate worktree | `/home/hamza/repo/satori-worktrees/native-python-l4-20260725` |
+| Candidate range | `074bed62f723e8b04ec36f3467417cba632687ae..35cc98c45928eed3eaebe1028dca3f390388417e` |
+| Frozen target revision | `/home/hamza/repo/tradingview_ratio@8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7` |
+| Target materialization | `/tmp/satori-native-python-l4-target-20260725-lbEBpS` |
+| Native provider | `satori-native-python` / `bounded-origin-v1` |
+| External providers | Not instantiated |
 
-The provider-neutral boundary is ResolutionClaim. Satori owns symbol
-identity, normalization, publication, traversal, provenance, and completeness
-disclosure. Native Python is the only instantiated production provider;
-external providers remain an uninstantiated interface.
+The final code commit contains only these eleven owned files:
 
-## Changed files relative to the checkpoint
+```text
+packages/core/src/core/persisted-index-authority.test.ts
+packages/core/src/language-analysis/versions.ts
+packages/core/src/navigation/query.test.ts
+packages/core/src/navigation/query.ts
+packages/core/src/relationships/builder.test.ts
+packages/core/src/relationships/builder.ts
+packages/core/src/relationships/resolution.ts
+packages/core/src/symbols/contracts.test.ts
+packages/core/src/symbols/contracts.ts
+packages/core/src/symbols/sidecar.test.ts
+packages/core/src/symbols/sidecar.ts
+```
 
-    M packages/core/src/core/context.ts
-    M packages/core/src/language-analysis/oxc-adapter.ts
-    M packages/core/src/language-analysis/service.ts
-    M packages/core/src/language-analysis/tree-sitter-adapter.ts
-    M packages/core/src/language-analysis/types.ts
-    M packages/core/src/relationships/builder.test.ts
-    M packages/core/src/relationships/builder.ts
-    M packages/core/src/relationships/index.ts
-    A packages/core/src/relationships/resolution.ts
-    M packages/core/src/symbols/sidecar.test.ts
-    M packages/core/src/symbols/sidecar.ts
+The worktree was clean at `cfc26397979738507986b692c5ed070bbdb312f0` before
+these edits. No unrelated staged, unstaged, or untracked candidate changes were
+present.
 
-The L4 source correction makes publication source-scoped while retaining the
-complete current analysis map as cross-file semantic context. The L4 tests
-cover that boundary and an unassigned receiver. No checkpoint repair,
-publication authority, MCP checkpoint validation, or review-document file was
-changed.
+## Runtime, publication, and compatibility identity
 
-## Runtime and MCP identity
+The candidate-built process used the candidate worktree directly:
 
-The installed Satori MCP reported runtime 6.3.0, owner satori@6.3.0, and one
-idle live owner (PID 1412). That explicitly identified conflicting process was
-terminated during the bounded follow-up after user authorization; no target
-files or Satori source were changed. The task-owned index was ready with:
+```text
+source revision: 35cc98c45928eed3eaebe1028dca3f390388417e
+Core entry: /home/hamza/repo/satori-worktrees/native-python-l4-20260725/packages/core/dist/index.js
+MCP entry: /home/hamza/repo/satori-worktrees/native-python-l4-20260725/packages/mcp/dist/index.js
+Core package: @zokizuan/satori-core 3.2.0
+MCP package: @zokizuan/satori-mcp 6.3.0
+Core dist-tree SHA-256: ebfe5139e2bf0bcfd639703ccadd052dd444a82bc14900a102b1553d18e35fc4
+MCP dist-tree SHA-256: 92de68460e2265c5fec16dfefb726b9eb3500ff17f3d1dbe0386c92ffb8e2858
+Node: v24.13.0
+pnpm: 10.28.2
+state root: /tmp/satori-native-l4-mcp-candidate-final3-NwWVUs
+Lance root: /tmp/satori-native-l4-mcp-lance-candidate-final3-u6XCbS
+target root: /tmp/satori-native-python-l4-target-20260725-lbEBpS
+```
 
-    files: 1519
-    chunks: 19741
-    collection: hybrid_code_chunks_2770b293__gen_run_dd045824_2e78_40ab_ab6c_a49490873ab6
-    generation marker: c5363d9d-5282-42ae-9123-5be671fca64c
-    indexPolicyHash: 0e19e8c19c7dbc7c7625e297278984859ddffd9276e7ed498d64c391176a4092
-    policyDocumentDigest: a82e7dc465ddc4aeef85c63c2515734723f4b6b6150b3c33601a60aecfcc725f
-    provider: Potion / minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b
-    dimension/database/schema: 256 / LanceDB / hybrid_v3
-    parser/extractor: oxc-0.139.0+web-tree-sitter-0.26.10+vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3
-    relationship runtime: relationship-v8+python-constructor-receivers
-    status: ready / completed
+The runtime fingerprint and published relationship identity were:
 
-Exact operations and fixed query arguments were:
+```text
+relationship builder: relationship-v9+python-constructor-receivers+python-native-resolution-v1
+file contribution schema: relationship_file_contribution_v4
+relationship manifest schema: relationship_v2
+environment configuration: python-native-resolution-v1
+symbol extractor: language-analysis-v15+oxc-0.139.0+web-tree-sitter-0.26.10+vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3
+selected navigation generation: symmanifest_a8b0-6c88fb52e55c66d7
+symbol registry manifest hash: symmanifest_a8b0395159cbaaad4c793c468aff8ac8
+relationship manifest hash: de6d078cde24dfc2f15da89c01d4f61811b9f1eff29d690644d07ba6c32f62af
+navigation seal hash: 9e9fc9c89a3499532f1af571918e96773c565bb1c8edf891f6085959d9f7c924
+relationship manifest files: 1519
+published relationship entries: 27732
+```
 
-    list_codebases({})
-    manage_index({action: "reindex", path: "/tmp/satori-native-python-l4-target-20260725-lbEBpS"})
-    search_codebase("lang:python path:src/python must:SignalGenerator must:check_entry")
-    search_codebase("lang:python path:src/python must:_evaluate_residual_type_invariant")
-    search_codebase("lang:python path:src/python must:SignalLedger must:record")
-    search_codebase("lang:python path:src/python must:check_entry check_entry")
-    search_codebase("lang:python path:src/python must:_evaluate_residual_type_invariant _evaluate_residual_type_invariant")
-    search_codebase("lang:python path:src/python must:record record")
-    call_graph(direction="callers", depth=3, limit=100) for each exact target
-    call_graph(direction="both", depth=3, limit=100) for each exact target
-    read_file(open_symbol=true) for each exact target identity
+The runtime fingerprint binds the effective Python semantic configuration
+through the relationship builder version and every new claim persists the
+`environmentConfigId`. Publication generation remains separate from that
+identity.
 
-The reindex response warned IGNORE_POLICY_PROBE_FAILED with
-preflight=probe_failed; prescribed status polling continued until ready. A
-later search preflight performed a zero-change sync to generation 2 with
-added/removed/modified all zero. No further reindex was performed.
+Compatibility was corrected as follows:
 
-The Satori inbound graph was advisory. For all three targets, inbound traversal
-returned only the target node, no inbound edges, warning
-CALL_GRAPH_INBOUND_COVERAGE_PARTIAL, and the executable must: search hint.
-The both traversal for SignalGenerator.check_entry additionally exposed three
-outbound edges to _map_dual_mi_to_intent, _map_mi_to_intent, and
-_apply_meta_filter; it did not expose authoritative inbound edges. Exact
-Satori read_file spans and the deterministic native build below are the
-qualification evidence.
+```text
+RELATIONSHIP_BUILDER_VERSION:
+  relationship-v8+python-constructor-receivers
+  -> relationship-v9+python-constructor-receivers+python-native-resolution-v1
 
-## Complete authoritative target enumeration
+RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION:
+  relationship_file_contribution_v3
+  -> relationship_file_contribution_v4
 
-The native build produced exactly three, two, and two authoritative inbound
-edges for the three target symbols. The first six rows are the required
-positive matrix; the last row is a valid additional caller.
+RELATIONSHIP_MANIFEST_SCHEMA_VERSION:
+  relationship_v2 -> relationship_v2
+```
 
-| Target | Caller / source ID / source span | Target ID | Ordered proof steps | Dependency keys |
+The manifest shape did not need a version advance: v4 is required by the v2
+manifest validator, so a checkpoint v3 contribution is incompatible. The
+checkpoint fingerprint probe returns:
+
+```json
+{"status":"requires_reindex","differingFields":["relationshipVersion"]}
+```
+
+The sidecar contract rejects a v3 contribution manifest, and new v4
+contributions reload successfully. Old relationship evidence is not accepted
+as satisfying the new semantic contract.
+
+## Resolution and publication trace
+
+The first missing boundary was the low-confidence relationship-support filter
+in `getGraphNeighbors`. The correction admits only categorical
+`direct_binding` or `origin_flow` authority for new low-confidence exact
+Python `CALLS` records. Legacy low-confidence records without proof authority
+retain the prior suppression paths. Ambiguous, unresolved, heuristic,
+unsupported, name-only, suffix, and dynamic-fallback evidence remains
+non-authoritative.
+
+The final clean build produced:
+
+```text
+Python files: 279
+symbols: 3311
+ResolutionClaims: 14876
+serialized relationship contributions: 279
+relationship records: 4977
+relationship digest: 6b0167425bf7abd85d5b8d9e607178dab327327f028449e498d1c65a7f5bb81c
+claim digest: efbc54f93d7936968679a5c5a825342ce14e068f737721aa0a13a77a27fbed32
+full/incremental digest equality: true
+```
+
+The trace is:
+
+```text
+ResolutionClaim
+  -> RelationshipRecord
+  -> relationship_file_contribution_v4 shard
+  -> relationship_v2 manifest
+  -> navigation generation symmanifest_a8b0-6c88fb52e55c66d7
+  -> sidecar/navigation reload
+  -> getGraphNeighbors reverse lookup
+  -> MCP relationship-backed call_graph
+```
+
+The six required records are:
+
+| Target | Caller | Call-site span | Authority | Proof summary |
 |---|---|---|---|---|
-| SignalGenerator.check_entry | OpportunityRanker.rank / syminst_81bf00a45cc16be4bd2cf289abc309ee / src/python/core/opportunity_ranker.py:256–261, bytes 9560–9750 | syminst_db0684c3f6f05b6df0addc5c3cb17e8e | call_site → containing_caller → constructor_origin(SignalGenerator) → flow_hop(self.signal_gen,1) → field_origin(self.signal_gen) | src/python/core/opportunity_ranker.py:4364:4410:self.signal_gen |
-| SignalGenerator.check_entry | _compute_entry_decision / syminst_deceb42dfbb753758536f4d4967acac8 / src/python/core/pair_evaluator.py:738–743, bytes 28755–28957 | same | call_site → containing_caller → constructor_origin(SignalGenerator) → flow_hop(signal_gen,1) → allocation_origin(signal_gen) | src/python/core/pair_evaluator.py:28491:28536:signal_gen |
-| SignalGenerator.check_entry | TradingCore._evaluate_entry_authority_and_post_signal / syminst_d3d8cfbb7bb9c88406e2ca10618544a7 / src/python/core/trading_core.py:675–682, bytes 25582–25910 | same | call_site → containing_caller → constructor_origin(SignalGenerator) → flow_hop(self.signal_generator,1) → field_origin(self.signal_generator) | src/python/core/trading_core.py:9138:9215:self.signal_generator |
-| BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant | evaluate_bar_entry_gate_stack / syminst_5ba8f6c2246ea628bfb350f8a85ca28d / src/python/core/backtest/gate_coordinator.py:475, bytes 17603–17661 | syminst_5aaccd6ad2e7203a385dbce56e6a9861 | call_site → containing_caller → parameter_annotation(services:GateStackServices) → allocation_origin(GateStackServices._evaluate_residual_type_invariant) → allocation_origin(self) → flow_hop/callback(run_backtest_simulation.engine,1) → flow_hop/callback(build_gate_stack_services.engine,2) → field_origin → flow_hop/allocation(...,3) | src/python/core/backtest/engine.py:24069:25003:run_backtest_simulation.engine; src/python/core/run_coordinator.py:14322:14362:build_gate_stack_services.engine; src/python/core/backtest/gate_coordinator.py:2052:2794:GateStackServices._evaluate_residual_type_invariant |
-| BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant | process_pending_execution_phase / syminst_03fa3dcbb31cbb16085af4eb0b58d3ed / src/python/core/backtest/phases.py:129, bytes 4787–4837 | same | call_site → containing_caller → parameter_annotation(services:PendingExecutionPhaseServices) → allocation_origin(PendingExecutionPhaseServices._evaluate_residual_type_invariant) → allocation_origin(self) → flow_hop/callback(run_backtest_simulation.engine,1) → flow_hop/callback(build_pending_execution_phase_services.engine,2) → field_origin → flow_hop/allocation(...,3) | src/python/core/backtest/engine.py:24069:25003:run_backtest_simulation.engine; src/python/core/run_coordinator.py:14095:14148:build_pending_execution_phase_services.engine; src/python/core/backtest/phase_services.py:2461:3157:PendingExecutionPhaseServices._evaluate_residual_type_invariant |
-| SignalLedger.record | record_signal_event / syminst_7e54780bc1fa02fdd11e8dcf6c440950 / src/python/core/backtest/signal_recording.py:435–462, bytes 15471–16436 | syminst_10e3a141c4858369056b1655a60bb999 | call_site → containing_caller → parameter_annotation(services:SignalRecordingServices) → allocation_origin(SignalRecordingServices.signal_ledger) → constructor_origin(SignalLedger) → flow_hop(engine.signal_ledger,1) → field_origin(engine.signal_ledger) → flow_hop(SignalRecordingServices.signal_ledger,2) → allocation_origin(SignalRecordingServices.signal_ledger) | src/python/core/backtest/engine_init.py:2991:3113:engine.signal_ledger; src/python/core/backtest/runtime_state.py:1477:1613:engine.signal_ledger; src/python/core/backtest/signal_recording.py:1851:2518:SignalRecordingServices.signal_ledger |
-| SignalLedger.record — valid additional caller | _record_shadow_suppression / syminst_be889acccf17f0a3ef3b3b28f2e9631e / src/python/core/shadow_runner.py:550, bytes 20907–20928 | syminst_10e3a141c4858369056b1655a60bb999 | call_site → containing_caller → parameter_annotation(ledger:SignalLedger) | none |
+| `SignalGenerator.check_entry` | `OpportunityRanker.rank` | `src/python/core/opportunity_ranker.py:256–261` | `origin_flow` | call site → containing caller → `constructor_origin(SignalGenerator)` → flow hop → `field_origin(self.signal_gen)` |
+| `SignalGenerator.check_entry` | `_compute_entry_decision` | `src/python/core/pair_evaluator.py:738–743` | `origin_flow` | call site → containing caller → constructor origin → flow hop → allocation origin (`signal_gen`) |
+| `SignalGenerator.check_entry` | `TradingCore._evaluate_entry_authority_and_post_signal` | `src/python/core/trading_core.py:675–682` | `origin_flow` | call site → containing caller → constructor origin → flow hop → field origin (`self.signal_generator`) |
+| `BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant` | `evaluate_bar_entry_gate_stack` | `src/python/core/backtest/gate_coordinator.py:475` | `origin_flow` | parameter annotation → service allocation → callback flow hops → field origin |
+| `BacktestEngineGateRuntimeApiMixin._evaluate_residual_type_invariant` | `process_pending_execution_phase` | `src/python/core/backtest/phases.py:129` | `origin_flow` | parameter annotation → service allocation → callback flow hops → field origin |
+| `SignalLedger.record` | `record_signal_event` | `src/python/core/backtest/signal_recording.py:435–462` | `origin_flow` | parameter annotation → ledger allocation → constructor origin → bounded field-flow hops |
 
-All rows are decision=resolved, relationshipType=CALLS, provider
-satori-native-python, version bounded-origin-v1, environment
-python-native-resolution-v1, and bounded flowHops. No unexplained or wrong
-authoritative extra edge was found.
+Each record retains the exact caller and target instance IDs, call-site span,
+ordered proof steps, environment identity, and relationship builder identity.
 
-## Required negatives
+## Candidate-built MCP witness
 
-| Control | Evidence/result |
-|---|---|
-| self.hurst_gate.check_entry | decision=ambiguous, relationshipType=REFERENCES, no target and no authoritative record; dependency src/python/core/trading_entry_vetoes.py:2813:2861:self.hurst_gate:check_entry. |
-| Same-name unrelated methods | No authoritative CALLS; focused ambiguous-same-name test passed. |
-| Conflicting reassignment | SignalGenerator() → OtherGenerator() → check_entry() produced no authoritative edge. |
-| Use before assignment | before.check_entry() produced no authoritative edge. |
-| Unsupported dynamic flow | factory = make_generator(); factory.check_entry() produced no authoritative edge. |
-| Unrelated/counterfactual .record receivers | No authoritative edge to SignalLedger.record; complete enumeration contains only the required ledger caller and valid typed shadow caller. |
-| Ambiguous receiver | Advisory REFERENCES only; no ambiguous target enters authoritative CALLS. |
+The exact public arguments were:
 
-The controlled mutation changed the known positive
-self.signal_gen.check_entry(...) to self.hurst_gate.check_entry(...). Before
-mutation it resolved to SignalGenerator.check_entry; after mutation it was
-ambiguous REFERENCES with no record. The frozen source digest remained
-7d0a0a452889b4d78edc4594bc09c5c62b5f9a1ff72eeba5c734a0c9b048293a.
+```json
+{
+  "path":"/tmp/satori-native-python-l4-target-20260725-lbEBpS",
+  "symbolRef":{"file":"src/python/core/signals.py","symbolId":"syminst_db0684c3f6f05b6df0addc5c3cb17e8e"},
+  "direction":"callers","depth":3,"limit":100
+}
+```
 
-## Persistence and incremental equivalence
+Equivalent calls used these symbol references:
 
-    clean snapshot: 279 files, 3311 symbols, 4977 records, 14876 claims
-    record digest: 5f612be1e1090a336bedc25c33dae6a1ee2a93afab6e6a6cbdff3b4052f31492
-    claim digest:  11c42e343aa9b7501be35e42291e739c14ff442338e5763e1b36642638ac6fdb
-    repeat records/claims: identical
-    symbol manifest: symmanifest_15e17bc6250a5fba52399825bd0ecb0f
-    relationship manifest: a8a6709d8bd53146c02b5064a53d067199d336dfca4dafab992bf8392f714e8f
-    in-process reload: status=ok, record digest identical, 4977 records
-    child-process reload: status=ok, record digest identical, 4977 records, 3311 symbols
+```text
+residual:
+  file=src/python/core/backtest/engine_gate_runtime_api.py
+  symbolId=syminst_5aaccd6ad2e7203a385dbce56e6a9861
+ledger:
+  file=src/python/core/ssot/signal_ledger.py
+  symbolId=syminst_10e3a141c4858369056b1655a60bb999
+```
 
-The sidecar focused suite additionally compared ordered proof steps and
-dependency keys, including unresolved and ambiguous claims.
+The fresh candidate-built reindex emitted the exact ordered progress tail
+`100.0% -> Indexing complete -> navigation generation published`. It published
+`symmanifest_a8b0-6c88fb52e55c66d7`. The first immediate status poll correctly
+reported `status=not_ready, reason=indexing` while the asynchronous operation
+was still running. After restart, the status call returned `status=ok` with an
+owned `sync` operation at `phase=completed`, generation `35`, and the v9
+relationship fingerprint. This distinguishes an asynchronous client poll from
+a publication failure.
 
-Controlled one-file mutation:
+The lifecycle MCP arguments were:
 
-    file: src/python/core/opportunity_ranker.py
-    full mutated digest: 2c8a030831a4343da104a152e06efacbabb871c2c693c1ecfe13e84e33f4e316
-    delta digest:        2c8a030831a4343da104a152e06efacbabb871c2c693c1ecfe13e84e33f4e316
-    equal: true
-    missing in delta: 0
-    extra in delta: 0
-    delta relationship-stage time: 5307.841279 ms
-    source restored: true
-    source digest before/after: 7d0a0a452889b4d78edc4594bc09c5c62b5f9a1ff72eeba5c734a0c9b048293a
+```json
+{"action":"reindex","path":"/tmp/satori-native-python-l4-target-20260725-lbEBpS"}
+{"action":"status","path":"/tmp/satori-native-python-l4-target-20260725-lbEBpS","detail":"full"}
+```
 
-The correction retains complete current analysis context while limiting
-re-emission to affected source files. This removes the observed partial-map
-incremental mismatch without adding name or suffix inference.
+The reindex response was accepted with warning `IGNORE_POLICY_PROBE_FAILED`;
+the prescribed status polling was followed. No `clear` operation was called.
 
-## Performance
+The public responses returned `status=ok`, `supported=true`, and no notes. The
+depth-3 response includes upstream caller paths; direct inbound records are
+identified by `dstSymbolId` equal to the requested target:
 
-The bounded follow-up could not adjudicate the frozen numeric gates because no
-original R0 baseline artifact containing relationship-stage median, peak RSS,
-one-file delta, and inbound traversal measurements was present. Candidate-only
-measurements retained from the native runner are:
+| Target | Public response edge count | Direct inbound `CALLS` | Required production callers | Additional exact callers |
+|---|---:|---:|---:|---:|
+| `SignalGenerator.check_entry` | 62 | 34 | 3 | 31 valid test/fixture callers |
+| `_evaluate_residual_type_invariant` | 7 | 2 | 2 | 0 |
+| `SignalLedger.record` | 40 | 17 | 1 | 16 valid production/test callers |
 
-    analysis ms: 2793.813466 / 2706.620484
-    relationship-stage ms: 14375.471847 / 13878.353553
-    RSS after run: 302784512 / 347209728 bytes
-    final process RSS: 483307520 bytes
-    one-file delta relationship-stage ms: 5307.841279
-    inbound traversal baseline/candidate: unavailable
+The MCP response only exposes the numeric projection (`kind=call`,
+`confidence=0.65`); categorical authority was verified against the v4
+relationship shards before classifying these edges. No authoritative wrong
+target was found.
 
-The frozen gates are relationship median <=1.20x baseline, peak RSS <= baseline
-+64 MiB, one-file delta <= max(1.25x baseline, baseline+50 ms), and inbound
-traversal <= max(1.10x baseline, baseline+5 ms). No ratio was invented. The
-performance gate is therefore secondary-unqualified; the terminal outcome is
-the stronger product-projection block below.
+All additional direct edges were classified as valid exact callers:
 
-## Compatibility decision
+```text
+SignalGenerator.check_entry — valid additional test/fixture callers:
+tests/core/test_tail_dependence_guardrails.py:127
+tests/invariants/test_economic_primacy.py:142
+tests/invariants/test_economic_primacy.py:154
+tests/invariants/test_gate_behavior.py:192
+tests/invariants/test_gate_behavior.py:230
+tests/invariants/test_gate_behavior.py:269
+tests/invariants/test_legacy_fencing.py:212
+tests/invariants/test_legacy_fencing.py:237
+tests/invariants/test_mi_provenance.py:100
+tests/invariants/test_mi_provenance.py:136
+tests/invariants/test_mi_provenance.py:175
+tests/invariants/test_mi_provenance.py:224
+tests/invariants/test_p0_defect_fixes.py:148
+tests/invariants/test_p0_defect_fixes.py:178
+tests/invariants/test_signal_authority.py:107
+tests/invariants/test_signal_authority.py:154
+tests/stress/test_copula_stress_surfaces.py:460
+tests/stress/test_copula_stress_surfaces.py:520
+tests/stress/test_copula_stress_surfaces.py:606
+tests/stress/test_copula_stress_surfaces.py:643
+tests/stress/test_copula_stress_surfaces.py:681
+tests/stress/test_copula_stress_surfaces.py:721
+tests/stress/test_copula_stress_surfaces.py:761
+tests/stress/test_copula_stress_surfaces.py:1088
+tests/stress/test_copula_stress_surfaces.py:1214
+tests/test_core_conventions.py:360
+tests/test_core_conventions.py:393
+tests/test_core_conventions.py:430
+tests/test_regime_quantitative.py:136
+tests/test_regime_quantitative.py:152
+tests/test_regime_quantitative.py:176
 
-    RELATIONSHIP_BUILDER_VERSION: relationship-v8+python-constructor-receivers
-      checkpoint -> candidate: unchanged (semantic change without identity bump)
-    relationship contribution schema: relationship_file_contribution_v3
-      checkpoint -> candidate: unchanged
-    relationship manifest: relationship_v2
-      checkpoint -> candidate: unchanged
-    Python environment-analysis digest: python-native-resolution-v1
-      present as claim environmentConfigId, not bound into the runtime or
-      manifest compatibility fingerprint
-    publication generation: separate from environment identity
-    navigation/reindex: structural pointer/schema/hash mismatches are rejected;
-      a same-schema sidecar with the unchanged relationship identity is accepted
-      even when it represents the pre-repair semantic contract. A forced reindex
-      for the native semantic change is therefore missing.
-    symbol extractor: language-analysis-v15+oxc-0.139.0+web-tree-sitter-0.26.10+
-      vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3
+SignalLedger.record — valid additional callers:
+src/python/core/pair_evaluator.py:1096
+src/python/core/shadow_runner.py:550
+tests/cli/test_risk_explain_command.py:81–95
+tests/core/backtest/test_engine_run_state_reset.py:60–73
+tests/core/test_external_paper_executor_contract.py:105
+tests/core/test_external_paper_executor_contract.py:242
+tests/core/test_external_paper_executor_contract.py:243
+tests/core/test_external_paper_executor_contract.py:405
+tests/core/test_external_paper_executor_contract.py:406
+tests/core/test_external_paper_executor_contract.py:463
+tests/core/test_shadow_executor_deterministic_ids.py:61
+tests/core/test_signal_ledger_idempotency.py:39
+tests/core/test_signal_ledger_idempotency.py:40
+tests/core/test_signal_ledger_idempotency.py:50
+tests/core/test_signal_ledger_idempotency.py:53
+tests/invariants/test_constitution.py:231
+```
 
-## Commands and exit codes
+The three required production `check_entry` source spans were independently
+read and contain `self.signal_gen.check_entry`, `signal_gen.check_entry`, and
+`self.signal_generator.check_entry`. The additional spans contain exact
+`SignalGenerator` receiver bindings. The ledger additions contain exact
+`SignalLedger` bindings or test calls. No suffix/name-only edge was promoted.
 
-    pnpm install --frozen-lockfile --offline                                      0
-    pnpm --filter @zokizuan/satori-core exec tsc --noEmit --pretty false         0
-    pnpm --filter @zokizuan/satori-core exec eslint src/relationships/builder.ts src/relationships/builder.test.ts  0
-    pnpm --filter @zokizuan/satori-core exec tsx --test src/relationships/builder.test.ts  0 (28 passed)
-    pnpm --filter @zokizuan/satori-core exec tsx --test src/symbols/sidecar.test.ts  0 (44 passed)
-    pnpm --filter @zokizuan/satori-core exec tsx --test src/language-analysis/service.test.ts  0 (60 passed)
-    pnpm --filter @zokizuan/satori-core test                                  1 (590 passed, 3 baseline failures, 1 skipped)
-    git diff --check                                                           0
-    native relationship/restart/incremental runner                               0
+## Negative controls
 
-The three Core failures matched the checkpoint by exact name, assertion, and
-materially equivalent stack/output:
+The following remained non-authoritative:
 
-    Context bounds deferred atomic publication generations without pruning active authority
-      vectorDatabase.queryCalls.length > 0
-    Context completion validation propagates transient and unavailable payload probes
-      expected rejection /temporary count failure/
-    Context receipt-driven generation proof reuses activation authority and single-flights cold validation
-      0 !== 1
+```text
+self.hurst_gate.check_entry:
+  ambiguous REFERENCES; no target; no v4 CALLS record to SignalGenerator.check_entry.
+same-name unrelated methods:
+  no authoritative CALLS; focused ambiguous-name test passed.
+conflicting reassignment:
+  no authoritative CALLS.
+use before assignment:
+  no authoritative CALLS.
+unsupported dynamic receiver/factory:
+  no authoritative CALLS.
+unrelated/counterfactual .record receivers:
+  no authoritative CALLS to SignalLedger.record.
+ambiguous receiver bindings:
+  REFERENCES evidence only; never enters authoritative traversal.
+```
 
-They are checkpoint baseline failures, not native relationship regressions.
+The public product call graph was not used as proof of absence for a negative
+target when the client could not resolve a separate negative symbol identity.
+Absence was established from persisted v4 records, exact source-span reads,
+and the focused fail-closed tests. An empty inbound graph was not treated as
+proof of no callers.
+
+## Persistence, restart, invalidation, and determinism
+
+The final native harness and sidecar tests established:
+
+```text
+fresh build: 279 files, 3311 symbols, 4977 relationship records, 14876 claims
+repeat clean relationship digest: 6b0167425bf7abd85d5b8d9e607178dab327327f028449e498d1c65a7f5bb81c
+claim digest: efbc54f93d7936968679a5c5a825342ce14e068f737721aa0a13a77a27fbed32
+sidecar/navigation reload: successful
+controlled mutation: src/python/core/opportunity_ranker.py
+full mutation digest == incremental digest: true
+missing delta records: 0
+extra delta records: 0
+source restored: true
+```
+
+The restart witness reloaded the same published navigation generation and
+returned the same direct edge sets.
+
+## Recreated frozen performance baseline
+
+The baseline was recreated from a clean worktree at the exact checkpoint
+commit:
+
+```text
+baseline worktree: /home/hamza/repo/satori-worktrees/native-python-l4-baseline-20260725-01
+baseline revision: 074bed62f723e8b04ec36f3467417cba632687ae
+target revision: 8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7
+same Node/pnpm: v24.13.0 / 10.28.2
+same harness: /tmp/satori-native-l4-performance-harness.mjs
+warmup: one; measured repetitions: three
+```
+
+The final comparable measurements were:
+
+| Metric | Baseline | Candidate | Gate | Result |
+|---|---:|---:|---:|---|
+| relationship-stage median | 29.886162 ms | 545.456508 ms | <= 35.863394 ms | FAIL; 18.2511x |
+| peak RSS | 321608 KiB | 600376 KiB | <= 387144 KiB | FAIL; +278768 KiB / +272.234375 MiB |
+| one-file delta median | 19.231731 ms | 287.157419 ms | <= 69.231731 ms | FAIL; 14.9314x |
+| inbound traversal median | 161.342201 ms | 471.422230 ms | <= 177.476421 ms | FAIL; 2.9219x |
+
+The performance investigation did not stop at the first bad measurement. CPU
+profiling identified repeated Python origin/class-base work, claim creation,
+and sidecar serialization. Bounded caches and pre-indexed Python facts reduced
+the relationship stage from the earlier multi-second candidate run to roughly
+0.55 seconds, but the candidate still fails every frozen relative gate. The
+baseline was not tuned and no unfavorable samples were discarded.
+
+## Verification commands
+
+```text
+focused Core relationship/navigation/sidecar/compatibility tests: exit 0 (100 passed)
+Core full test, checkpoint baseline: exit 1 (584 passed, 3 failed, 1 skipped)
+Core full test, candidate: exit 1 (592 passed, 3 failed, 1 skipped)
+MCP complete affected package: exit 0 (1047 passed, 0 failed, 0 skipped)
+owned-file ESLint: exit 0
+Core typecheck: exit 0
+MCP typecheck: exit 0
+Core build: exit 0
+MCP build: exit 0
+git diff --check: exit 0
+candidate-built MCP restart witness: exit 0
+```
+
+The three candidate Core failures reproduce the checkpoint exactly by test
+name, assertion, and materially equivalent stack/output:
+
+```text
+Context bounds deferred atomic publication generations without pruning active authority
+  vectorDatabase.queryCalls.length > 0
+Context completion validation propagates transient and unavailable payload probes
+  expected rejection /temporary count failure/
+Context receipt-driven generation proof reuses activation authority and single-flights cold validation
+  0 !== 1
+```
+
+No native relationship regression was found in the affected package tests.
 
 ## Git-status proof
 
-The transplanted candidate was clean before L4 edits. The candidate worktree
-was clean after the two implementation/test commits; this receipt is the only
-new owned evidence change until its separate evidence-seal commit.
+Target repository status before and after the qualification:
 
-The target repository was preserved exactly. Initial and final target status:
+```text
+## main...origin/main [ahead 1]
+ M opencode.jsonc
+?? cc.json
+```
 
-    ## main...origin/main [ahead 1]
-     M opencode.jsonc
-    ?? cc.json
+Those target changes were never staged, edited, or removed. The candidate
+worktree was clean after the code commit and will be clean again after the
+separate evidence commit. The evidence commit contains only this receipt and
+its JSON summary.
 
-Those pre-existing target changes were never staged, edited, or removed.
+## Terminal decision
 
-## Follow-up contradiction resolution — 2026-07-25
+The authoritative projection defect is closed: the candidate-built MCP
+returns the required exact residual and ledger edges and the required three
+production `check_entry` edges. Compatibility/reindex behavior, persistence,
+determinism, negative controls, and the real MCP publication witness are also
+closed for this bounded batch.
 
-The original pass was withdrawn. The required candidate-built MCP product
-projection is not closed.
+The candidate is not L4-pass because all four frozen performance gates fail.
+The terminal outcome is therefore:
 
-### Candidate runtime identity
-
-    candidate source revision: 7b8bb425b6b2ee96ce301a3e2f691984ba67d205
-    native implementation commit: cff16aca4d406f2f9b2a1fa2900aa14f972ae1ad
-    built Core package: @zokizuan/satori-core 3.2.0
-    built Core entry: /home/hamza/repo/satori-worktrees/native-python-l4-20260725/packages/core/dist/index.js
-    built Core SHA-256: 44eb799f1ccdb475b409e804884f0a310d9081adaacbf3fa761f2a595482bc7e
-    built MCP package: @zokizuan/satori-mcp 6.3.0
-    built MCP entry: /home/hamza/repo/satori-worktrees/native-python-l4-20260725/packages/mcp/dist/index.js
-    built MCP SHA-256: 56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823
-    package manifest SHA-256: core=416eb05511c4a99c01a01e87b69f36e67df0ac3d8b5c05ace64c74b4690958de; mcp=b53e8f015c037459bd90256aaf671a537536dcc034b5930157da4cc539f9dccd
-    pnpm lock SHA-256: ae791d83663e216686eb35f20e2e9f446791bf695b0ae2e339ec85159c43334e
-    Node: v24.13.0; pnpm: 10.28.2
-    runtime relationship fingerprint: relationship-v8+python-constructor-receivers
-    relationship contribution schema: relationship_file_contribution_v3
-    relationship manifest schema: relationship_v2
-    symbol extractor: language-analysis-v15+oxc-0.139.0+web-tree-sitter-0.26.10+vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3
-
-The candidate entry paths above were imported directly by the product-handler
-witness and were also used as the stdio server entry. The candidate runtime
-fingerprint in the stdio run was:
-
-    {"embeddingProvider":"Potion","embeddingModel":"minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b","embeddingDimension":256,"embeddingArtifactDigest":"bfda80d97aeb585e20650b1c54e9063a65068ce284317f0e0a812e20964dcee7","embeddingNormalizationPolicy":"provider_output_v1","vectorStoreProvider":"LanceDB","schemaVersion":"hybrid_v3","parserVersion":"oxc-0.139.0+web-tree-sitter-0.26.10+vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3","extractorVersion":"language-analysis-v15+oxc-0.139.0+web-tree-sitter-0.26.10+vscode-grammars-0.3.1+scala-0.24.0-sha256-b7ec2bb29c19827abcefd18ed5cb5a43596009f96a5d53c5b9d1f9676d7521c3","relationshipVersion":"relationship-v8+python-constructor-receivers","embeddingProjectionVersion":"embedding_projection_v1","lexicalProjectionVersion":"lexical_projection_v1"}
-
-### Published-generation trace
-
-Task-owned roots and generation:
-
-    target: /tmp/satori-native-python-l4-target-20260725-lbEBpS
-    state: /tmp/satori-native-python-l4-followup-state-20260725-KIlKqo
-    generation: symmanifest_7058-8445b0bea0ab9797
-    generation root: .../navigation/2770b2933bbb3d50d71957fcbf5d42db/generations/symmanifest_7058-8445b0bea0ab9797
-    symbol registry manifest: symmanifest_7058a1f3e8530da38d756cd989a45263
-    relationship manifest hash: 45ff76835cfbcb10b41c5a7f7d7167120ffd241a27c09f363f34bd2fc49cc28b
-    navigation seal hash: 73e5edf496252e3953272cbc22711b9cde4ae270ff17c381a1ee6addf6a977ed
-    relationship-sidecar tree digest: 2e0643da7159bbcd4cd473e7114a277b52b8e43f83cb8e89cd60221a190be7a0
-    complete generation tree digest: 4aaa23977228923adee6a2cc88891b9bbef52cdd55f7bd62433b2b71a3da3715
-    current-generation pointer SHA-256: 6d82207fcd4b04c2598699e823532117d79103a8b4286a5b4f7f50dad47e2d85
-
-The trace was observed as:
-
-    14,876 native ResolutionClaims
-      -> 4,977 authoritative relationship records
-      -> 279 serialized relationship contributions, all with analysis evidence
-      -> relationship_v2 manifest and relationship_file_contribution_v3 shards
-      -> current pointer and generation seal
-      -> sidecar reload status=ok, 4,977 records (2,690 CALLS records)
-      -> direct reverse lookup: check_entry=3, residual=2, ledger=2
-      -> getGraphNeighbors(CALLS): check_entry=3, residual=0, ledger=2
-      -> built MCP handler: check_entry=3 exact call edges, residual=2 dynamic
-         fallback edges, ledger=2 exact call edges
-
-The first missing boundary is `getGraphNeighbors` relationship support
-selection. The residual sidecar records are present and reverse-readable, but
-both have low relationship confidence and are filtered with
-`RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:2`. The MCP layer then synthesizes
-`dynamic` source-backed fallback edges. This is not an authoritative `CALLS`
-projection, so no downstream MCP patch was made.
-
-### Candidate-built MCP handler witness
-
-Exact arguments for every handler call were:
-
-    {
-      "path": "/tmp/satori-native-python-l4-target-20260725-lbEBpS",
-      "symbolRef": {"file": "<target file>", "symbolId": "<exact syminst id>"},
-      "direction": "callers",
-      "depth": 3,
-      "limit": 100
-    }
-
-Target-directed authoritative edge enumeration, after excluding transitive
-edges whose destination was not the queried target:
-
-| Target | Authoritative target-directed result | Classification |
-|---|---|---|
-| `SignalGenerator.check_entry` | `OpportunityRanker.rank` → target at `opportunity_ranker.py:256–261`; `_compute_entry_decision` → target at `pair_evaluator.py:738–743`; `TradingCore._evaluate_entry_authority_and_post_signal` → target at `trading_core.py:675–682` | 3 valid required callers |
-| `_evaluate_residual_type_invariant` | No authoritative `CALLS`; sidecar has `evaluate_bar_entry_gate_stack` at `gate_coordinator.py:475` and `process_pending_execution_phase` at `phases.py:129`, both suppressed; handler returns both as `kind=dynamic` fallback | required two callers not closed |
-| `SignalLedger.record` | `record_signal_event` → target at `signal_recording.py:435–462`; `_record_shadow_suppression` → target at `shadow_runner.py:550` | 1 required caller plus 1 valid additional caller |
-
-The check-entry response had 9 bounded depth-3 edges, ledger had 6, and the
-residual response had 2. Edges not ending at the queried target were transitive
-edges, not additional inbound callers. No wrong-target authoritative edge was
-found. The residual response fields were:
-
-    status=ok, supported=true
-    edges: 2, both kind=dynamic, confidence=0.65
-    warnings: RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:2, SOURCE_BACKED_DYNAMIC_CALLERS:2
-    notes: two suppressed low-confidence caller candidates and two dynamic_edge notes
-
-Negative product-handler controls remained non-authoritative: the false
-`self.hurst_gate.check_entry` receiver did not appear as an inbound edge to
-`SignalGenerator.check_entry`; the Hurst target only exposed its own valid
-`check_hurst_gate` caller. The unrelated `rounding.record` query returned zero
-edges with `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and the executable deterministic
-search hint. The prior focused controls for same-name methods, conflicting
-reassignment, use-before-assignment, and unsupported dynamic receivers remained
-zero authoritative `CALLS`.
-
-### Real stdio MCP observation
-
-The candidate stdio process initialized from the candidate entry and exposed:
-
-    manage_index, search_codebase, continue_search, call_graph,
-    file_outline, read_file, list_codebases
-
-The first task-owned reindex was correctly blocked by the unrelated installed
-PID 1412 with `reason=runtime_owner_conflict`; that exact idle process was later
-terminated by explicit user authorization. A retry accepted reindex with
-`warnings=["IGNORE_POLICY_PROBE_FAILED"]`, reached 100% file processing, and
-logged `Codebase indexing completed`. However, the client status request timed
-out during final publication; startup then recovered the isolated state as
-`index_failed` with `Interrupted indexing detected without completion marker
-proof`. The real stdio `call_graph` consequently returned
-`status=not_indexed`, `reason=index_failed`, empty nodes and edges for all three
-targets. This transport run is a readiness/publication failure, not evidence of
-no callers. The built public handler witness above is the decisive projection
-trace and already fails the residual exact-`CALLS` contract.
-
-### Compatibility follow-up
-
-The checkpoint and candidate both report:
-
-    RELATIONSHIP_BUILDER_VERSION: relationship-v8+python-constructor-receivers
-    RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION: relationship_file_contribution_v3
-    RELATIONSHIP_MANIFEST_SCHEMA_VERSION: relationship_v2
-
-The native semantic implementation changed without changing those identities.
-The compatibility probe loaded the current sidecar (`status=ok`, 4,977 records)
-and a copied same-schema generation retaining the checkpoint relationship
-identity (`status=ok`, 4,977 records). `isRelationshipManifest` requires a
-non-empty relationship version but does not compare it to the current native
-semantic configuration. The environment identity
-`python-native-resolution-v1` is stored in claims, not in the top-level runtime
-fingerprint or manifest compatibility key. Therefore old relationship evidence
-can be silently accepted; a fresh reindex is not currently forced by this
-semantic change. A malformed manifest schema was rejected as incompatible in
-the probe. This is a compatibility defect requiring a future version bump or
-explicit environment-analysis compatibility binding.
-
-### Follow-up commands and exit codes
-
-    pnpm --filter @zokizuan/satori-core build                         0
-    pnpm --filter @zokizuan/satori-mcp run build:runtime              0
-    node /tmp/satori-native-l4-followup-build-generation.mjs          0
-    node /tmp/satori-native-l4-followup-mcp-witness.mjs               0
-    node /tmp/satori-native-l4-followup-compatibility-probe.mjs       0
-    node /tmp/satori-native-l4-followup-real-mcp.mjs                  0 (serialized MCP timeout/error)
-
-The candidate worktree was clean before this receipt amendment and is clean
-after the evidence-only commit. The target status remained exactly:
-
-    ## main...origin/main [ahead 1]
-     M opencode.jsonc
-    ?? cc.json
-
-### Follow-up terminal decision
-
-    native_python_product_projection_blocked
-
-The implementation records and sidecar publication are present, but the
-candidate-built product projection does not expose all six required exact
-inbound `CALLS` relationships. `native_python_l4_pass` is withdrawn.
+```text
+native_python_performance_blocked
+```
