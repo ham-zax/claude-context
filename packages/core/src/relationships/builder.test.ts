@@ -1002,6 +1002,7 @@ test('buildCallRelationshipsForRegistry resolves bounded Python constructor rece
         '        self.signal_gen = SignalGenerator()',
         '',
         '    def run(self):',
+        '        before.check_entry()',
         '        local = SignalGenerator()',
         '        local.check_entry()',
         '        self.signal_gen.check_entry()',
@@ -1025,7 +1026,7 @@ test('buildCallRelationshipsForRegistry resolves bounded Python constructor rece
             === 'SignalGenerator.check_entry'
     ));
 
-    assert.deepEqual(checkEntryCalls.map((record) => record.span?.startLine), [11, 12, 16]);
+    assert.deepEqual(checkEntryCalls.map((record) => record.span?.startLine), [12, 13, 17]);
     assert.deepEqual(checkEntryCalls.map((record) => (
         registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName
     )), ['Runner.run', 'Runner.run', 'Runner.run']);
