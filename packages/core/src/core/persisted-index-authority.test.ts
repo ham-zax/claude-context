@@ -16,6 +16,7 @@ import {
     EMBEDDING_PROJECTION_VERSION,
     LEXICAL_PROJECTION_VERSION,
 } from './search-projections';
+import { RELATIONSHIP_BUILDER_VERSION } from '../language-analysis/versions';
 
 const SHA_A = 'a'.repeat(64);
 const SHA_B = 'b'.repeat(64);
@@ -178,6 +179,22 @@ test('fingerprint parsing and compatibility use one deterministic field contract
     assert.deepEqual(compareIndexCompatibility(future, current), {
         status: 'malformed',
         reason: 'persisted index fingerprint is malformed',
+    });
+});
+
+test('checkpoint native Python relationship fingerprint requires reindex under the new contract', () => {
+    const runtime = {
+        ...fingerprint(),
+        relationshipVersion: RELATIONSHIP_BUILDER_VERSION,
+    };
+    const checkpoint = {
+        ...runtime,
+        relationshipVersion: 'relationship-v8+python-constructor-receivers',
+    };
+
+    assert.deepEqual(compareIndexCompatibility(checkpoint, runtime), {
+        status: 'requires_reindex',
+        differingFields: ['relationshipVersion'],
     });
 });
 

@@ -15,6 +15,50 @@ export const MAX_PYTHON_FLOW_HOPS = 6;
 
 export type ResolutionDecision = 'resolved' | 'unresolved' | 'ambiguous';
 
+export const RESOLUTION_AUTHORITIES = [
+    'direct_binding',
+    'origin_flow',
+    'heuristic_reference',
+    'ambiguous',
+    'unresolved',
+    'unsupported',
+] as const;
+
+export type ResolutionAuthority = typeof RESOLUTION_AUTHORITIES[number];
+
+const RESOLUTION_AUTHORITY_SET = new Set<string>(RESOLUTION_AUTHORITIES);
+
+export function isResolutionAuthority(value: unknown): value is ResolutionAuthority {
+    return typeof value === 'string' && RESOLUTION_AUTHORITY_SET.has(value);
+}
+
+export function resolutionAuthorityForProof(input: {
+    decision: ResolutionDecision;
+    proofSteps: readonly ResolutionProofStep[];
+    flowHops: number;
+}): ResolutionAuthority {
+    if (input.decision === 'ambiguous') return 'ambiguous';
+    if (input.decision === 'unresolved') return 'unresolved';
+    if (input.flowHops > 0 || input.proofSteps.some((step) => (
+        step.kind === 'flow_hop'
+        || step.kind === 'callback_origin'
+        || step.kind === 'allocation_origin'
+        || step.kind === 'field_origin'
+    ))) {
+        return 'origin_flow';
+    }
+    if (input.proofSteps.some((step) => (
+        step.kind === 'absolute_import'
+        || step.kind === 'relative_import'
+        || step.kind === 'same_file_definition'
+        || step.kind === 'constructor_origin'
+        || step.kind === 'parameter_annotation'
+    ))) {
+        return 'direct_binding';
+    }
+    return 'heuristic_reference';
+}
+
 export type ResolutionProofStepKind =
     | 'call_site'
     | 'containing_caller'
@@ -56,6 +100,8 @@ export interface ResolutionClaim {
     readonly callSpan: SourceSpan;
     readonly decision: ResolutionDecision;
     readonly relationshipType: 'CALLS' | 'REFERENCES';
+    /** Categorical proof authority; publication must not infer this from locality. */
+    readonly resolutionAuthority: ResolutionAuthority;
     readonly proofSteps: readonly ResolutionProofStep[];
     /** Stable keys for unresolved/ambiguous and flow-origin dependencies. */
     readonly dependencyKeys: readonly string[];

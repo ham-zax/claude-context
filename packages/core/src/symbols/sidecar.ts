@@ -25,7 +25,7 @@ import type {
 } from './contracts';
 import type { SymbolRegistry } from './registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
-import { MAX_PYTHON_FLOW_HOPS } from '../relationships/resolution';
+import { isResolutionAuthority, MAX_PYTHON_FLOW_HOPS } from '../relationships/resolution';
 import type {
     PythonFlowFact,
     SourceSpan,
@@ -611,6 +611,7 @@ function canonicalizeResolutionClaim(claim: ResolutionClaim): ResolutionClaim {
         callSpan: canonicalizeSourceSpan(claim.callSpan),
         decision: claim.decision,
         relationshipType: claim.relationshipType,
+        resolutionAuthority: claim.resolutionAuthority,
         proofSteps: claim.proofSteps.map((step) => canonicalizeResolutionProofStep(step)),
         dependencyKeys: [...claim.dependencyKeys].sort(compareStrings),
         flowHops: claim.flowHops,
@@ -1788,7 +1789,8 @@ export function isRelationshipRecord(value: unknown): value is RelationshipRecor
         && isOptionalNonEmptyString(value.targetInstanceId)
         && isOptionalNonEmptyString(value.targetPath)
         && (value.span === undefined || isSymbolSpan(value.span))
-        && (value.confidence === 'high' || value.confidence === 'medium' || value.confidence === 'low');
+        && (value.confidence === 'high' || value.confidence === 'medium' || value.confidence === 'low')
+        && (value.resolutionAuthority === undefined || isResolutionAuthority(value.resolutionAuthority));
 }
 
 function isSourceSpan(value: unknown): boolean {
@@ -1897,6 +1899,7 @@ function isResolutionClaim(value: unknown): value is ResolutionClaim {
             'callSpan',
             'decision',
             'relationshipType',
+            'resolutionAuthority',
             'proofSteps',
             'dependencyKeys',
             'flowHops',
@@ -1912,6 +1915,7 @@ function isResolutionClaim(value: unknown): value is ResolutionClaim {
         || typeof value.decision !== 'string'
         || !RESOLUTION_DECISIONS.has(value.decision)
         || (value.relationshipType !== 'CALLS' && value.relationshipType !== 'REFERENCES')
+        || !isResolutionAuthority(value.resolutionAuthority)
         || !Array.isArray(value.proofSteps)
         || value.proofSteps.length === 0
         || !value.proofSteps.every(isResolutionProofStep)
@@ -1924,12 +1928,17 @@ function isResolutionClaim(value: unknown): value is ResolutionClaim {
     if (value.decision === 'resolved') {
         return value.relationshipType === 'CALLS'
             && isNonEmptyString(value.targetInstanceId)
-            && isNonEmptyString(value.targetSymbol);
+            && isNonEmptyString(value.targetSymbol)
+            && (value.resolutionAuthority === 'direct_binding' || value.resolutionAuthority === 'origin_flow');
     }
     return value.relationshipType === 'REFERENCES'
         && value.dependencyKeys.length > 0
         && value.targetInstanceId === undefined
-        && value.targetSymbol === undefined;
+        && value.targetSymbol === undefined
+        && (value.resolutionAuthority === 'ambiguous'
+            || value.resolutionAuthority === 'unresolved'
+            || value.resolutionAuthority === 'unsupported'
+            || value.resolutionAuthority === 'heuristic_reference');
 }
 
 function isRelationshipAnalysisEvidence(value: unknown): value is RelationshipAnalysisEvidence {

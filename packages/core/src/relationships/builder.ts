@@ -11,6 +11,7 @@ import {
     NATIVE_PYTHON_PROVIDER_VERSION,
     PYTHON_NATIVE_ENVIRONMENT_CONFIG_ID,
     type ResolutionClaim,
+    resolutionAuthorityForProof,
     type ResolutionProofStep,
     type ResolutionProofStepKind,
 } from './resolution';
@@ -258,24 +259,49 @@ function pythonModuleNameForPath(filePath: string): string | undefined {
     return packagePath.replace(/\//g, '.');
 }
 
+type PythonModuleResolutionCache = WeakMap<object, WeakMap<object, Map<string, string | null>>>;
+
+const pythonModuleResolutionCache: PythonModuleResolutionCache = new WeakMap();
+
 function resolvePythonAbsoluteModulePath(
     specifier: string,
     registry: SymbolRegistry,
     availableFiles: ReadonlySet<string>,
 ): string | undefined {
+    let byAvailableFiles = pythonModuleResolutionCache.get(registry);
+    if (!byAvailableFiles) {
+        byAvailableFiles = new WeakMap();
+        pythonModuleResolutionCache.set(registry, byAvailableFiles);
+    }
+    let bySpecifier = byAvailableFiles.get(availableFiles);
+    if (!bySpecifier) {
+        bySpecifier = new Map();
+        byAvailableFiles.set(availableFiles, bySpecifier);
+    }
+    const cached = bySpecifier.get(specifier);
+    if (cached !== undefined || bySpecifier.has(specifier)) return cached ?? undefined;
+
     const normalizedSpecifier = specifier.trim().replace(/^\.+/, '');
-    if (!normalizedSpecifier) return undefined;
+    if (!normalizedSpecifier) {
+        bySpecifier.set(specifier, null);
+        return undefined;
+    }
+    const pythonFiles = new Set(
+        registry.manifest.files
+            .filter((entry) => entry.language === 'python')
+            .map((entry) => entry.path),
+    );
     const matches = [...availableFiles]
+        .filter((file) => pythonFiles.has(file))
         .filter((file) => {
-            if (!registry.manifest.files.some((entry) => entry.path === file && entry.language === 'python')) {
-                return false;
-            }
             const moduleName = pythonModuleNameForPath(file);
             return moduleName === normalizedSpecifier
                 || moduleName?.endsWith(`.${normalizedSpecifier}`) === true;
         })
         .sort(compareStrings);
-    return matches.length === 1 ? matches[0] : undefined;
+    const result = matches.length === 1 ? matches[0] : undefined;
+    bySpecifier.set(specifier, result ?? null);
+    return result;
 }
 
 function resolvePythonModulePath(
@@ -575,7 +601,14 @@ interface PythonFlowContext {
     readonly classesByName: ReadonlyMap<string, readonly SymbolRecord[]>;
     readonly availableFiles: ReadonlySet<string>;
     readonly classBasesByName: ReadonlyMap<string, readonly string[]>;
+    readonly exactCallableTargetsCache: Map<string, readonly SymbolRecord[]>;
+    readonly pythonEvidenceEntries: readonly [string, RelationshipAnalysisEvidence][];
+    readonly callArgumentsByName: ReadonlyMap<string, readonly [string, PythonCallArgumentFact][]>;
+    readonly assignmentsByMemberName: ReadonlyMap<string, readonly [string, PythonAssignmentOriginFact][]>;
 }
+
+type PythonCallArgumentFact = Extract<PythonFlowFact, { kind: 'call_argument' }>;
+type PythonAssignmentOriginFact = Extract<PythonFlowFact, { kind: 'assignment_origin' }>;
 
 interface PythonValueOrigin {
     readonly kind: 'instance' | 'callable';
@@ -768,10 +801,19 @@ function exactPythonCallableTargets(
     file: string,
     calleeText: string,
 ): SymbolRecord[] {
+    const cacheKey = `${file}\u0000${calleeText}`;
+    const cached = context.exactCallableTargetsCache.get(cacheKey);
+    if (cached !== undefined) return [...cached];
     const simpleName = calleeText.split('.').at(-1);
-    if (!simpleName) return [];
+    if (!simpleName) {
+        context.exactCallableTargetsCache.set(cacheKey, []);
+        return [];
+    }
     const evidence = getEvidence(context.analysisByFile, file);
-    if (!evidence) return [];
+    if (!evidence) {
+        context.exactCallableTargetsCache.set(cacheKey, []);
+        return [];
+    }
     const imported = evidence.moduleBindings.filter((binding) => (
         (binding.kind === 'import' || binding.kind === 'reexport')
         && binding.localName === simpleName
@@ -797,12 +839,17 @@ function exactPythonCallableTargets(
             }
         }
     }
-    if (imported.length > 0) return [...importedTargets.values()];
+    if (imported.length > 0) {
+        const result = [...importedTargets.values()];
+        context.exactCallableTargetsCache.set(cacheKey, result);
+        return result;
+    }
 
     const sameFile = (context.registry.symbolsByFile.get(file) ?? [])
         .filter((candidate) => isSourceOwner(candidate) && candidate.name === simpleName);
-    if (sameFile.length > 0) return sameFile;
-    return [];
+    const result = sameFile.length > 0 ? sameFile : [];
+    context.exactCallableTargetsCache.set(cacheKey, result);
+    return result;
 }
 
 function resolvePythonParameterOrigins(
@@ -816,31 +863,28 @@ function resolvePythonParameterOrigins(
     const nextStack = new Set(stack);
     nextStack.add(targetKey);
     const origins: PythonValueOrigin[] = [];
-    for (const [file, evidence] of getEvidenceEntries(context.analysisByFile)) {
-        for (const fact of evidence.pythonFlowFacts ?? []) {
-            if (fact.kind !== 'call_argument' || fact.argumentName !== parameterName) continue;
-            const calledTargets = exactPythonCallableTargets(context, file, fact.calleeText);
-            if (!calledTargets.some((candidate) => candidate.symbolInstanceId === target.symbolInstanceId)) continue;
-            const caller = callableForContext(context.registry, file, fact.contextSpan);
-            if (!caller) continue;
-            const valueOrigins = resolvePythonExpressionOrigins(
-                context,
-                file,
-                caller,
-                fact.valueText,
+    for (const [file, fact] of context.callArgumentsByName.get(parameterName) ?? []) {
+        const calledTargets = exactPythonCallableTargets(context, file, fact.calleeText);
+        if (!calledTargets.some((candidate) => candidate.symbolInstanceId === target.symbolInstanceId)) continue;
+        const caller = callableForContext(context.registry, file, fact.contextSpan);
+        if (!caller) continue;
+        const valueOrigins = resolvePythonExpressionOrigins(
+            context,
+            file,
+            caller,
+            fact.valueText,
+            fact.span,
+            nextStack,
+        );
+        for (const origin of valueOrigins) {
+            const transferred = appendFlowHop(
+                origin,
+                'callback_origin',
+                `${target.name}.${parameterName}`,
                 fact.span,
-                nextStack,
+                flowDependencyKey(file, fact.span, `${target.name}.${parameterName}`),
             );
-            for (const origin of valueOrigins) {
-                const transferred = appendFlowHop(
-                    origin,
-                    'callback_origin',
-                    `${target.name}.${parameterName}`,
-                    fact.span,
-                    flowDependencyKey(file, fact.span, `${target.name}.${parameterName}`),
-                );
-                if (transferred) origins.push(transferred);
-            }
+            if (transferred) origins.push(transferred);
         }
     }
     return deduplicateOrigins(origins);
@@ -853,42 +897,39 @@ function resolvePythonFieldOrigins(
     stack: ReadonlySet<string>,
 ): PythonValueOrigin[] {
     const origins: PythonValueOrigin[] = [];
-    for (const [file, evidence] of getEvidenceEntries(context.analysisByFile)) {
-        for (const fact of evidence.pythonFlowFacts ?? []) {
-            if (fact.kind !== 'assignment_origin') continue;
-            const member = pythonMemberExpression(fact.targetText);
-            if (!member || member.member !== memberName) continue;
-            const assignmentContext = callableForContext(context.registry, file, fact.contextSpan);
-            const receiverOrigins = resolvePythonExpressionOrigins(
-                context,
-                file,
-                assignmentContext,
-                member.receiver,
+    for (const [file, fact] of context.assignmentsByMemberName.get(memberName) ?? []) {
+        const member = pythonMemberExpression(fact.targetText);
+        if (!member) continue;
+        const assignmentContext = callableForContext(context.registry, file, fact.contextSpan);
+        const receiverOrigins = resolvePythonExpressionOrigins(
+            context,
+            file,
+            assignmentContext,
+            member.receiver,
+            fact.span,
+            stack,
+        );
+        if (!receiverOrigins.some((origin) => (
+            origin.kind === 'instance'
+            && origin.typeNames.some((typeName) => receiverTypeNames.includes(typeName))
+        ))) continue;
+        const valueOrigins = resolvePythonExpressionOrigins(
+            context,
+            file,
+            assignmentContext,
+            fact.valueText,
+            fact.span,
+            stack,
+        );
+        for (const origin of valueOrigins) {
+            const transferred = appendFlowHop(
+                origin,
+                'field_origin',
+                fact.targetText,
                 fact.span,
-                stack,
+                flowDependencyKey(file, fact.span, fact.targetText),
             );
-            if (!receiverOrigins.some((origin) => (
-                origin.kind === 'instance'
-                && origin.typeNames.some((typeName) => receiverTypeNames.includes(typeName))
-            ))) continue;
-            const valueOrigins = resolvePythonExpressionOrigins(
-                context,
-                file,
-                assignmentContext,
-                fact.valueText,
-                fact.span,
-                stack,
-            );
-            for (const origin of valueOrigins) {
-                const transferred = appendFlowHop(
-                    origin,
-                    'field_origin',
-                    fact.targetText,
-                    fact.span,
-                    flowDependencyKey(file, fact.span, fact.targetText),
-                );
-                if (transferred) origins.push(transferred);
-            }
+            if (transferred) origins.push(transferred);
         }
     }
     return deduplicateOrigins(origins);
@@ -1033,6 +1074,34 @@ function getEvidenceEntries(
         : Object.entries(evidenceByFile);
 }
 
+function buildPythonCallArgumentIndex(
+    entries: readonly [string, RelationshipAnalysisEvidence][],
+): Map<string, readonly [string, PythonCallArgumentFact][]> {
+    const index = new Map<string, [string, PythonCallArgumentFact][]>();
+    for (const [file, evidence] of entries) {
+        for (const fact of evidence.pythonFlowFacts ?? []) {
+            if (fact.kind !== 'call_argument' || !fact.argumentName) continue;
+            index.set(fact.argumentName, [...(index.get(fact.argumentName) ?? []), [file, fact]]);
+        }
+    }
+    return index;
+}
+
+function buildPythonAssignmentOriginIndex(
+    entries: readonly [string, RelationshipAnalysisEvidence][],
+): Map<string, readonly [string, PythonAssignmentOriginFact][]> {
+    const index = new Map<string, [string, PythonAssignmentOriginFact][]>();
+    for (const [file, evidence] of entries) {
+        for (const fact of evidence.pythonFlowFacts ?? []) {
+            if (fact.kind !== 'assignment_origin') continue;
+            const member = pythonMemberExpression(fact.targetText);
+            if (!member) continue;
+            index.set(member.member, [...(index.get(member.member) ?? []), [file, fact]]);
+        }
+    }
+    return index;
+}
+
 function resolvePythonServiceMemberTarget(input: {
     call: CallSite;
     source: SymbolRecord;
@@ -1069,36 +1138,30 @@ function resolvePythonServiceMemberTarget(input: {
         subject: `${rootReceiver}:${serviceType}`,
         span: parameterBindings[0].span,
     }];
-    for (const [file, evidence] of getEvidenceEntries(input.context.analysisByFile)) {
-        for (const fact of evidence.pythonFlowFacts ?? []) {
-            if (
-                fact.kind !== 'call_argument'
-                || fact.calleeText.split('.').at(-1) !== serviceType
-                || fact.argumentName !== fieldName
-            ) continue;
-            sawAllocation = true;
-            allocationDependencyKeys.push(flowDependencyKey(file, fact.span, `${serviceType}.${fieldName}`));
-            const allocationContext = callableForContext(input.context.registry, file, fact.contextSpan);
-            const origins = resolvePythonExpressionOrigins(
-                input.context,
-                file,
-                allocationContext,
-                fact.valueText,
+    for (const [file, fact] of input.context.callArgumentsByName.get(fieldName) ?? []) {
+        if (fact.calleeText.split('.').at(-1) !== serviceType) continue;
+        sawAllocation = true;
+        allocationDependencyKeys.push(flowDependencyKey(file, fact.span, `${serviceType}.${fieldName}`));
+        const allocationContext = callableForContext(input.context.registry, file, fact.contextSpan);
+        const origins = resolvePythonExpressionOrigins(
+            input.context,
+            file,
+            allocationContext,
+            fact.valueText,
+            fact.span,
+            new Set(),
+        );
+        for (const origin of origins) {
+            const allocationOrigin = appendFlowHop(
+                origin,
+                'allocation_origin',
+                `${serviceType}.${fieldName}`,
                 fact.span,
-                new Set(),
+                flowDependencyKey(file, fact.span, `${serviceType}.${fieldName}`),
             );
-            for (const origin of origins) {
-                const allocationOrigin = appendFlowHop(
-                    origin,
-                    'allocation_origin',
-                    `${serviceType}.${fieldName}`,
-                    fact.span,
-                    flowDependencyKey(file, fact.span, `${serviceType}.${fieldName}`),
-                );
-                if (allocationOrigin) allocationOrigins.push(allocationOrigin);
-            }
-            allocationSteps.push({ kind: 'allocation_origin', subject: `${serviceType}.${fieldName}`, span: fact.span });
+            if (allocationOrigin) allocationOrigins.push(allocationOrigin);
         }
+        allocationSteps.push({ kind: 'allocation_origin', subject: `${serviceType}.${fieldName}`, span: fact.span });
     }
     const origins = deduplicateOrigins(allocationOrigins);
     if (!sawAllocation) return undefined;
@@ -1409,6 +1472,7 @@ function buildResolutionClaim(input: {
         ...(input.resolution?.dependencyKeys ?? []),
         ...(decision === 'resolved' ? [] : [dependencyKey]),
     ])];
+    const proofSteps = claimProofForCall(input);
     return {
         providerId: NATIVE_PYTHON_PROVIDER_ID,
         providerVersion: NATIVE_PYTHON_PROVIDER_VERSION,
@@ -1419,7 +1483,12 @@ function buildResolutionClaim(input: {
         callSpan: { ...input.call.span },
         decision,
         relationshipType: decision === 'resolved' ? 'CALLS' : 'REFERENCES',
-        proofSteps: claimProofForCall(input),
+        resolutionAuthority: resolutionAuthorityForProof({
+            decision,
+            proofSteps,
+            flowHops: input.resolution?.flowHops ?? 0,
+        }),
+        proofSteps,
         dependencyKeys,
         flowHops: input.resolution?.flowHops ?? 0,
     };
@@ -1430,6 +1499,8 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
     const symbolsByFile = input.registry.symbolsByFile;
     const classes = buildClassIndex(input.registry.symbols);
     const availableFiles = new Set(input.registry.manifest.files.map((file) => file.path));
+    const pythonEvidenceEntries = getEvidenceEntries(input.analysisByFile)
+        .filter(([, evidence]) => (evidence.pythonFlowFacts?.length ?? 0) > 0);
     const flowContext: PythonFlowContext = {
         registry: input.registry,
         analysisByFile: input.analysisByFile,
@@ -1438,6 +1509,10 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
         classesByName: classes.byName,
         availableFiles,
         classBasesByName: buildPythonClassBases(input.analysisByFile),
+        exactCallableTargetsCache: new Map(),
+        pythonEvidenceEntries,
+        callArgumentsByName: buildPythonCallArgumentIndex(pythonEvidenceEntries),
+        assignmentsByMemberName: buildPythonAssignmentOriginIndex(pythonEvidenceEntries),
     };
     const recordsByKey = new Map<string, RelationshipRecord>();
     const claimsByFile = new Map<string, ResolutionClaim[]>();
@@ -1538,15 +1613,18 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
                         flowHops: 0,
                         dependencyKeys: [],
                     });
-            if (source.language === 'python') {
-                appendClaim(claimsByFile, file.path, buildResolutionClaim({
+            const resolutionClaim = source.language === 'python'
+                ? buildResolutionClaim({
                     source,
                     call,
                     evidence,
                     registry: input.registry,
                     target,
                     resolution,
-                }));
+                })
+                : undefined;
+            if (resolutionClaim) {
+                appendClaim(claimsByFile, file.path, resolutionClaim);
             }
             if (!target) continue;
             const record: RelationshipRecord = {
@@ -1558,6 +1636,11 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
                 file: source.file,
                 span: relationshipSpan(call),
                 confidence: target.file === source.file ? 'high' : 'low',
+                ...(resolutionClaim
+                    && (resolutionClaim.resolutionAuthority === 'direct_binding'
+                        || resolutionClaim.resolutionAuthority === 'origin_flow')
+                    ? { resolutionAuthority: resolutionClaim.resolutionAuthority }
+                    : {}),
             };
             recordsByKey.set(relationshipKey(record), record);
             if (isTestOrFixturePath(source.file) && !isTestOrFixturePath(target.file)) {

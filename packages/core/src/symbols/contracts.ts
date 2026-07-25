@@ -1,10 +1,11 @@
 import { isRepositoryRelativePath } from '../paths/repository-path';
+import type { ResolutionAuthority } from '../relationships/resolution';
 
 export { isRepositoryRelativePath } from '../paths/repository-path';
 
 export const SYMBOL_REGISTRY_SCHEMA_VERSION = 'symbol_registry_v3';
 export const RELATIONSHIP_MANIFEST_SCHEMA_VERSION = 'relationship_v2';
-export const RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION = 'relationship_file_contribution_v3';
+export const RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION = 'relationship_file_contribution_v4';
 
 export const SYMBOL_KINDS = [
     'file',
@@ -138,6 +139,8 @@ export interface RelationshipRecord {
     file: string;
     span?: SymbolSpan;
     confidence: 'high' | 'medium' | 'low';
+    /** Present on new proof-backed native Python CALLS records. */
+    resolutionAuthority?: ResolutionAuthority;
 }
 
 export interface RelationshipManifest {
@@ -232,8 +235,7 @@ export function isSymbolRegistryManifest(value: unknown): value is SymbolRegistr
 export function isRelationshipManifest(value: unknown): value is RelationshipManifest {
     if (!(isRecord(value)
         && value.schemaVersion === RELATIONSHIP_MANIFEST_SCHEMA_VERSION
-        && (value.fileContributionSchemaVersion === undefined
-            || value.fileContributionSchemaVersion === RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION)
+        && value.fileContributionSchemaVersion === RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION
         && isNonEmptyString(value.symbolRegistryManifestHash)
         && isNonEmptyString(value.relationshipVersion)
         && isNonEmptyString(value.builtAt)

@@ -344,6 +344,12 @@ function isExportsBackedLowConfidenceCall(
     return false;
 }
 
+function isProofBackedAuthoritativeCall(record: RelationshipRecord): boolean {
+    return record.type === 'CALLS'
+        && (record.resolutionAuthority === 'direct_binding'
+            || record.resolutionAuthority === 'origin_flow');
+}
+
 function isImportUniqueMethodLowConfidenceCall(
     record: RelationshipRecord,
     index: RelationshipSupportIndex,
@@ -531,11 +537,17 @@ export async function getGraphNeighbors(input: GetGraphNeighborsInput): Promise<
             for (const record of recordList) {
                 const recordKey = buildRelationshipRecordKey(record);
                 if (!allowedConfidences.has(record.confidence)) {
-                    let supported = isExportsBackedLowConfidenceCall(record, supportIndex);
-                    if (!supported && record.type === 'CALLS' && record.confidence === 'low') {
-                        const loaded = await ensureSymbolSupport();
-                        if (loaded) {
-                            supported = isImportUniqueMethodLowConfidenceCall(record, supportIndex, loaded);
+                    let supported = isProofBackedAuthoritativeCall(record);
+                    // New categorical proof authority is required before a Python edge
+                    // can cross the low-confidence boundary. Legacy records without
+                    // that field retain the existing import/export compatibility paths.
+                    if (!record.resolutionAuthority) {
+                        supported = isExportsBackedLowConfidenceCall(record, supportIndex);
+                        if (!supported && record.type === 'CALLS' && record.confidence === 'low') {
+                            const loaded = await ensureSymbolSupport();
+                            if (loaded) {
+                                supported = isImportUniqueMethodLowConfidenceCall(record, supportIndex, loaded);
+                            }
                         }
                     }
                     if (supported) {

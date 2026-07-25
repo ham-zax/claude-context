@@ -566,6 +566,7 @@ test('buildCallRelationshipsForRegistry records exact Python parameter proof and
     const typedClaim = claims.find((claim) => claim.callSpan.startLine === 4);
     const untypedClaim = claims.find((claim) => claim.callSpan.startLine === 7);
     assert.equal(typedClaim?.decision, 'resolved');
+    assert.equal(typedClaim?.resolutionAuthority, 'direct_binding');
     assert.deepEqual(typedClaim?.proofSteps.map((step) => step.kind), [
         'call_site',
         'containing_caller',
@@ -573,6 +574,7 @@ test('buildCallRelationshipsForRegistry records exact Python parameter proof and
     ]);
     assert.equal(untypedClaim?.decision, 'ambiguous');
     assert.equal(untypedClaim?.relationshipType, 'REFERENCES');
+    assert.equal(untypedClaim?.resolutionAuthority, 'ambiguous');
 });
 
 test('buildCallRelationshipsForRegistry assigns same-line calls by byte containment', async () => {

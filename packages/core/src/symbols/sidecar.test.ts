@@ -268,6 +268,7 @@ test('readRelationshipSidecar reports missing and incompatible relationship stat
             path.join(rootPath, 'relationships', 'manifest.json'),
             JSON.stringify({
                 schemaVersion: 'relationship_v2',
+                fileContributionSchemaVersion: 'relationship_file_contribution_v4',
                 symbolRegistryManifestHash: 'other-manifest-hash',
                 relationshipVersion: 'relationship-v1',
                 builtAt: '2026-06-17T00:00:00.000Z',
@@ -513,6 +514,7 @@ test('relationship sidecars preserve bounded Python flow facts and ordered resol
                 callSpan: span(80, 100),
                 decision: 'ambiguous' as const,
                 relationshipType: 'REFERENCES' as const,
+                resolutionAuthority: 'ambiguous' as const,
                 proofSteps: [
                     { kind: 'call_site' as const, subject: 'record', span: span(80, 100) },
                     { kind: 'ambiguity' as const, subject: 'services.signal_ledger.record' },
@@ -531,6 +533,7 @@ test('relationship sidecars preserve bounded Python flow facts and ordered resol
                 callSpan: span(10, 30),
                 decision: 'resolved' as const,
                 relationshipType: 'CALLS' as const,
+                resolutionAuthority: 'origin_flow' as const,
                 proofSteps: [
                     { kind: 'call_site' as const, subject: 'record', span: span(10, 30) },
                     { kind: 'flow_hop' as const, subject: 'SignalRecordingServices.signal_ledger', hop: 1 },
@@ -548,6 +551,7 @@ test('relationship sidecars preserve bounded Python flow facts and ordered resol
                 callSpan: span(50, 70),
                 decision: 'unresolved' as const,
                 relationshipType: 'REFERENCES' as const,
+                resolutionAuthority: 'unresolved' as const,
                 proofSteps: [
                     { kind: 'call_site' as const, subject: 'check_entry', span: span(50, 70) },
                     { kind: 'unresolved_dependency' as const, subject: 'src/runtime.py:50:70:self.signal_gen:check_entry' },
@@ -656,6 +660,7 @@ test('navigation restart and no-op delta preserve native resolution claims', asy
             },
             decision: 'unresolved' as const,
             relationshipType: 'REFERENCES' as const,
+            resolutionAuthority: 'unresolved' as const,
             proofSteps: [
                 { kind: 'call_site' as const, subject: 'receiver' },
                 { kind: 'unresolved_dependency' as const, subject: 'src/runtime.py:12:30:unknown:receiver' },
