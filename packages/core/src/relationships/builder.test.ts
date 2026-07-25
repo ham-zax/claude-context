@@ -1354,6 +1354,39 @@ test('buildRelationshipsForRegistry resolves NodeNext source extensions and reje
     ]);
 });
 
+test('buildRelationshipsForRegistry retains complete semantic context when publication is source-scoped', async () => {
+    const analyzed = await buildAnalyzedPythonRegistry({
+        'src/model.py': [
+            'class CopulaNetwork:',
+            '    def calculate_metrics(self): pass',
+        ].join('\n'),
+        'src/caller.py': [
+            'from .model import CopulaNetwork',
+            '',
+            'def run(model: CopulaNetwork):',
+            '    model.calculate_metrics()',
+        ].join('\n'),
+    });
+    const fullRecords = buildRelationshipsForRegistry(analyzed);
+    const callerRecords = buildRelationshipsForRegistry({
+        ...analyzed,
+        sourceFiles: new Set(['src/caller.py']),
+    });
+
+    assert.deepEqual(
+        callerRecords,
+        fullRecords.filter((record) => record.file === 'src/caller.py'),
+    );
+    assert.equal(
+        callerRecords.some((record) => (
+            record.type === 'CALLS'
+            && analyzed.registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.qualifiedName
+                === 'CopulaNetwork.calculate_metrics'
+        )),
+        true,
+    );
+});
+
 test('buildRelationshipDelta matches a full rebuild when a call target becomes ambiguous and resolves again', async () => {
     const callerPath = 'src/caller.ts';
     const targetAPath = 'src/target-a.ts';
@@ -1527,6 +1560,32 @@ test('buildRelationshipDelta matches a full rebuild when a Python class receiver
     });
     assert.deepEqual(resolvedDelta.records, beforeRecords);
     assert.deepEqual(resolvedDelta.affectedFiles, [callerPath, targetBPath]);
+});
+
+test('buildRelationshipDelta invalidates absolute Python import dependents when a target file changes', async () => {
+    const callerPath = 'src/caller.py';
+    const targetPath = 'src/target.py';
+    const callerSource = 'from src.target import Target\n';
+    const before = await buildAnalyzedPythonRegistry({
+        [callerPath]: callerSource,
+        [targetPath]: 'class Target:\n    pass\n',
+    });
+    const after = await buildAnalyzedPythonRegistry({
+        [callerPath]: callerSource,
+        [targetPath]: 'class Target:\n    """Changed target snapshot."""\n    pass\n',
+    });
+    const previousRecords = buildRelationshipsForRegistry(before);
+    const delta = buildRelationshipDelta({
+        previousRegistry: before.registry,
+        registry: after.registry,
+        existingRecords: previousRecords,
+        analysisByFile: after.analysisByFile,
+        changedFiles: new Set([targetPath]),
+    });
+
+    assert.deepEqual(delta.records, buildRelationshipsForRegistry(after));
+    assert.deepEqual(delta.affectedFiles, [callerPath, targetPath]);
+    assert.equal(delta.records.filter((record) => record.type === 'IMPORTS').length, 1);
 });
 
 test('buildRelationshipDelta revisits an unresolved relative import when its target file appears', async () => {

@@ -25,6 +25,11 @@ export type RelationshipAnalysisEvidence =
 export interface BuildCallRelationshipsForRegistryInput {
     registry: SymbolRegistry;
     analysisByFile: Map<string, RelationshipAnalysisEvidence> | Record<string, RelationshipAnalysisEvidence>;
+    /**
+     * Restrict publication to these source files while retaining the complete
+     * analysis map as semantic context for cross-file resolution.
+     */
+    sourceFiles?: ReadonlySet<string>;
 }
 
 export type BuildRelationshipsForRegistryInput = BuildCallRelationshipsForRegistryInput;
@@ -282,6 +287,18 @@ function resolvePythonModulePath(
     return specifier.startsWith('.')
         ? resolveRelativeModulePath(sourceFile, specifier, registry, 'python', availableFiles)
         : resolvePythonAbsoluteModulePath(specifier, registry, availableFiles);
+}
+
+function resolveModulePathForDelta(
+    sourceFile: string,
+    specifier: string,
+    registry: SymbolRegistry,
+    language: string,
+    availableFiles: ReadonlySet<string>,
+): string | undefined {
+    return language === 'python'
+        ? resolvePythonModulePath(sourceFile, specifier, registry, availableFiles)
+        : resolveRelativeModulePath(sourceFile, specifier, registry, language, availableFiles);
 }
 
 function pathJoinPosix(...parts: string[]): string | undefined {
@@ -1426,6 +1443,7 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
     const claimsByFile = new Map<string, ResolutionClaim[]>();
 
     for (const file of input.registry.manifest.files) {
+        if (input.sourceFiles && !input.sourceFiles.has(file.path)) continue;
         if (!isLanguageCapabilitySupportedForLanguage(file.language, 'callGraphBuild')) continue;
         const evidence = getEvidence(input.analysisByFile, file.path);
         if (!evidence) continue;
@@ -1563,6 +1581,7 @@ function buildImportExportRelationshipsForRegistry(input: BuildRelationshipsForR
     const recordsByKey = new Map<string, RelationshipRecord>();
 
     for (const source of input.registry.symbols.filter((symbol) => symbol.kind === 'file')) {
+        if (input.sourceFiles && !input.sourceFiles.has(source.file)) continue;
         const evidence = getEvidence(input.analysisByFile, source.file);
         if (!evidence) continue;
         for (const binding of evidence.moduleBindings) {
@@ -1637,6 +1656,16 @@ export function buildRelationshipDelta(input: BuildRelationshipDeltaInput): Buil
     );
     const previousAvailableFiles = new Set(previousFilesByPath.keys());
     const availableFiles = new Set(input.registry.manifest.files.map((file) => file.path));
+    const changedPreviousTargetInstanceIds = new Set(
+        input.previousRegistry.symbols
+            .filter((symbol) => symbol.kind !== 'file' && input.changedFiles.has(symbol.file))
+            .map((symbol) => symbol.symbolInstanceId),
+    );
+    for (const record of input.existingRecords) {
+        if (record.targetInstanceId && changedPreviousTargetInstanceIds.has(record.targetInstanceId)) {
+            affectedFiles.add(record.file);
+        }
+    }
     for (const symbol of [...input.previousRegistry.symbols, ...input.registry.symbols]) {
         if (symbol.kind !== 'file' && input.changedFiles.has(symbol.file)) {
             changedTargetNames.add(symbol.name);
@@ -1669,14 +1698,14 @@ export function buildRelationshipDelta(input: BuildRelationshipDeltaInput): Buil
             if ((binding.kind !== 'import' && binding.kind !== 'reexport') || !binding.moduleSpecifier) {
                 return false;
             }
-            const previousTarget = resolveRelativeModulePath(
+            const previousTarget = resolveModulePathForDelta(
                 file.path,
                 binding.moduleSpecifier,
                 input.previousRegistry,
                 language,
                 previousAvailableFiles,
             );
-            const nextTarget = resolveRelativeModulePath(
+            const nextTarget = resolveModulePathForDelta(
                 file.path,
                 binding.moduleSpecifier,
                 input.registry,
@@ -1690,15 +1719,11 @@ export function buildRelationshipDelta(input: BuildRelationshipDeltaInput): Buil
         if (resolutionChanged) affectedFiles.add(file.path);
     }
 
-    const affectedEvidence = new Map<string, RelationshipAnalysisEvidence>();
-    for (const filePath of [...affectedFiles].sort(compareStrings)) {
-        const evidence = getEvidence(input.analysisByFile, filePath);
-        if (evidence) affectedEvidence.set(filePath, evidence);
-    }
     const retained = input.existingRecords.filter((record) => !affectedFiles.has(record.file));
     const rebuilt = buildRelationshipsForRegistry({
         registry: input.registry,
-        analysisByFile: affectedEvidence,
+        analysisByFile: input.analysisByFile,
+        sourceFiles: affectedFiles,
     });
     const recordsByKey = new Map<string, RelationshipRecord>();
     for (const record of [...retained, ...rebuilt]) {
