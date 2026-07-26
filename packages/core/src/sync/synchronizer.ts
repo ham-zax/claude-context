@@ -1376,6 +1376,40 @@ export class FileSynchronizer {
         return { status: 'matches' };
     }
 
+    /**
+     * Compare the complete source observation without rereading unchanged file
+     * bytes. File content is hashed whenever its size, mtime, or ctime differs
+     * from the owned checkpoint.
+     */
+    public async compareSourceObservationToOwnedCheckpoint(): Promise<SourceFreshnessPathComparison> {
+        const checkpointObservationBefore = this.getOwnedSnapshotObservationToken();
+        const checkpointVersionBefore = this.checkpointVersion;
+        if (!checkpointObservationBefore) {
+            return { status: 'unavailable' };
+        }
+
+        try {
+            const prepared = await this.prepareChanges();
+            const hasDiffs = prepared.changes.added.length > 0
+                || prepared.changes.removed.length > 0
+                || prepared.changes.modified.length > 0;
+            if (hasDiffs) {
+                return { status: 'differs' };
+            }
+            await prepared.assertSourceObservationCurrent();
+        } catch {
+            return { status: 'unavailable' };
+        }
+
+        if (
+            checkpointVersionBefore !== this.checkpointVersion
+            || checkpointObservationBefore !== this.getOwnedSnapshotObservationToken()
+        ) {
+            return { status: 'unavailable' };
+        }
+        return { status: 'matches' };
+    }
+
     private async observeExactPath(relativePath: string): Promise<ExactPathObservation> {
         const absolutePath = path.join(this.rootDir, relativePath);
         let pathStat: fsSync.Stats;

@@ -3137,12 +3137,16 @@ export class ToolHandlers {
         return parseGitStatusChangedPathsHelper(stdout, options);
     }
 
-    private getChangedFilesForCodebase(codebasePath: string): { available: boolean; files: Set<string> } {
+    private getChangedFilesForCodebase(
+        codebasePath: string,
+        options: { forceRefresh?: boolean } = {},
+    ): { available: boolean; files: Set<string> } {
         return getChangedFilesForCodebaseHelper({
             codebasePath,
             nowMs: this.now(),
             changedFilesCache: this.changedFilesCache,
             ttlMs: SEARCH_CHANGED_FILES_CACHE_TTL_MS,
+            forceRefresh: options.forceRefresh,
         });
     }
 
@@ -3851,7 +3855,10 @@ export class ToolHandlers {
                         const effectiveWatcherObservation = this.getWatcherObservation(effectiveRoot);
                         const fullSourceComparisonRequired = effectiveWatcherObservation.coverage !== 'ready'
                             || effectiveWatcherObservation.coverageGapSinceEpoch !== undefined;
-                        const changedFilesState = this.getChangedFilesForCodebase(effectiveRoot);
+                        const changedFilesState = this.getChangedFilesForCodebase(
+                            effectiveRoot,
+                            { forceRefresh: fullSourceComparisonRequired },
+                        );
                         observedChangedFilesForSearch = changedFilesState;
                         const exactSourceComparisonRequired = changedFilesState.available
                             && changedFilesState.files.size > 0;
@@ -4153,7 +4160,7 @@ export class ToolHandlers {
                 const comparison = await this.measureSearchPhase(
                     phaseTimings,
                     'finalSourceValidation',
-                    () => this.context.compareAllSourceToFreshnessCheckpoint(
+                    () => this.context.compareSourceObservationToFreshnessCheckpoint(
                         effectiveRoot,
                         vectorReceipt,
                     ),

@@ -896,6 +896,45 @@ test('FileSynchronizer forceFullHash hashes every selected source despite unchan
     }
 });
 
+test('FileSynchronizer source observation detects changed bytes when mtime and size are restored', async () => {
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-observation-state-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-observation-repo-'));
+    process.env.SATORI_STATE_ROOT = stateRoot;
+    try {
+        const sourcePath = path.join(tempRepo, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        const synchronizer = new FileSynchronizer(
+            tempRepo,
+            [],
+            ['.ts'],
+            checkpointOptions('source_observation_generation'),
+        );
+        await synchronizer.initialize(undefined, undefined, { deferSnapshotPublication: true });
+        await (await synchronizer.prepareChanges({ forceFullHash: true })).commit();
+        const originalStat = fs.statSync(sourcePath);
+
+        assert.deepEqual(
+            await synchronizer.compareSourceObservationToOwnedCheckpoint(),
+            { status: 'matches' },
+        );
+
+        fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
+        fs.utimesSync(sourcePath, originalStat.atime, originalStat.mtime);
+        assert.equal(fs.statSync(sourcePath).size, originalStat.size);
+        assert.ok(Math.abs(fs.statSync(sourcePath).mtimeMs - originalStat.mtimeMs) < 1);
+        assert.deepEqual(
+            await synchronizer.compareSourceObservationToOwnedCheckpoint(),
+            { status: 'differs' },
+        );
+    } finally {
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+});
+
 test('FileSynchronizer compares explicit paths to its owned checkpoint without advancing it', async () => {
     const previousStateRoot = process.env.SATORI_STATE_ROOT;
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-path-compare-state-'));

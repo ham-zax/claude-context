@@ -1031,6 +1031,8 @@ export class Context {
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
     private navigationDeltaState?: CachedNavigationDeltaState;
+    private readonly preparedNavigationDeltaStates =
+        new WeakMap<StagedNavigationSidecarGeneration, CachedNavigationDeltaState>();
     private writeCollectionOverrides = new Map<string, string>();
     private preparedIndexCollectionReceipts = new WeakSet<PreparedIndexCollectionReceipt>();
     private symbolRegistryStateRoot?: string;
@@ -1553,6 +1555,59 @@ export class Context {
         }
 
         const comparison = await synchronizer.compareAllSourceToOwnedCheckpoint();
+        if (comparison.status !== 'matches') {
+            return comparison;
+        }
+
+        const stillCurrent = await this.acceptPreparedSourceGenerationReceipt(
+            canonicalRoot,
+            receipt,
+        );
+        if (
+            !stillCurrent
+            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
+        ) {
+            return { status: 'unavailable' };
+        }
+        return comparison;
+    }
+
+    /**
+     * Compare the current searchable source observation with the checkpoint
+     * owned by the proven active publication. The synchronizer reuses sealed
+     * hashes for paths whose size, mtime, and ctime are unchanged and hashes
+     * every path whose observation changed.
+     */
+    async compareSourceObservationToFreshnessCheckpoint(
+        codebasePath: string,
+        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+    ): Promise<SourceFreshnessPathComparison> {
+        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
+        const checkpoint = await this.inspectSourceFreshnessCheckpoint(
+            canonicalRoot,
+            undefined,
+            requestBoundReceipt,
+        );
+        if (checkpoint.status !== 'valid' || !checkpoint.generationReceipt) {
+            return { status: 'unavailable' };
+        }
+
+        const receipt = checkpoint.generationReceipt;
+        const synchronizer = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
+        if (
+            !synchronizer
+            || !synchronizer.ownsCheckpointIdentity(receipt.collectionName)
+            || !synchronizer.ownsCheckpointAuthority({
+                collectionName: receipt.collectionName,
+                markerRunId: receipt.marker.runId,
+                indexPolicyHash: receipt.marker.indexPolicyHash,
+            })
+            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
+        ) {
+            return { status: 'unavailable' };
+        }
+
+        const comparison = await synchronizer.compareSourceObservationToOwnedCheckpoint();
         if (comparison.status !== 'matches') {
             return comparison;
         }
@@ -8248,6 +8303,16 @@ export class Context {
             records: relationshipRecords,
             analysisByFile,
         });
+        this.preparedNavigationDeltaStates.set(result, {
+            canonicalRoot,
+            generationId: result.generationId,
+            symbolRegistryManifestHash: result.manifestHash,
+            relationshipManifestHash: result.relationshipManifestHash,
+            navigationSealHash: result.navigationSealHash,
+            registry,
+            records: relationshipRecords,
+            analysisByFile,
+        });
         console.log(`[Context] 🧭 Staged navigation generation '${result.generationId}' with ${result.symbolCount} symbols across ${result.fileShardCount} symbol shards and ${result.relationshipCount} relationships across ${result.relationshipFileShardCount} relationship shards`);
         if (!deferPublication) {
             await this.publishNavigationCandidate(result, assertMutationCurrent, publishMutation);
@@ -8270,6 +8335,21 @@ export class Context {
             beforePublish: assertMutationCurrent,
             publishMutation,
         });
+        const preparedDeltaState = this.preparedNavigationDeltaStates.get(candidate);
+        const navigationObservationToken = preparedDeltaState
+            ? this.resolveNavigationObservationToken(
+                canonicalRoot,
+                candidate.generationId,
+                false,
+            )
+            : null;
+        if (preparedDeltaState && navigationObservationToken) {
+            this.navigationDeltaState = {
+                ...preparedDeltaState,
+                navigationObservationToken,
+            };
+        }
+        this.preparedNavigationDeltaStates.delete(candidate);
         console.log(`[Context] 🧭 Published navigation generation '${candidate.generationId}'.`);
         assertMutationCurrent?.();
         try {

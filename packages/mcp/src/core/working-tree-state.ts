@@ -34,6 +34,7 @@ type GetChangedFilesForCodebaseInput = {
     nowMs: number;
     changedFilesCache: Map<string, ChangedFilesCacheEntry>;
     ttlMs: number;
+    forceRefresh?: boolean;
 };
 
 type EvaluateReindexPreflightInput = {
@@ -89,7 +90,7 @@ export function parseGitStatusChangedPaths(
 export function getChangedFilesForCodebase(input: GetChangedFilesForCodebaseInput): ChangedFilesState {
     const cacheKey = path.resolve(input.codebasePath);
     const cached = input.changedFilesCache.get(cacheKey);
-    if (cached && cached.expiresAtMs > input.nowMs) {
+    if (!input.forceRefresh && cached && cached.expiresAtMs > input.nowMs) {
         return { available: cached.available, files: new Set(cached.files) };
     }
 

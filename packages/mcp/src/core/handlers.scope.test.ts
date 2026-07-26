@@ -143,7 +143,10 @@ type SortableGroupedSearchResult = {
 type ToolHandlersTestOverrides = {
     context: MutableHandlerContext;
     syncManager: HandlerSyncManager;
-    getChangedFilesForCodebase: (repoPath: string) => ChangedFilesState;
+    getChangedFilesForCodebase: (
+        repoPath: string,
+        options?: { forceRefresh?: boolean },
+    ) => ChangedFilesState;
     parseGitStatusChangedPaths: (status: string) => Set<string>;
     changedFilesCache: Map<string, ChangedFilesCacheEntry>;
     validateCompletionProof: () => Promise<{
@@ -3327,6 +3330,11 @@ test('handleSearchCode exact registry fast path returns a grouped symbol despite
             assert.equal(phaseTimings.semanticSearch, 0);
             assert.equal(phaseTimings.trackedLexical, 0);
             assert.equal(phaseTimings.rerank, 0);
+            assert.equal(phaseTimings.navigationValidation, 0);
+            assert.equal(
+                payload.hints?.debugSearch?.readiness?.operations?.navigationValidationRuns,
+                0,
+            );
 
             for (const mode of ['none', 'summary', 'ranking', 'freshness', 'full'] as const) {
                 const modeResponse = await handlers.handleSearchCode({
@@ -7151,6 +7159,38 @@ test('getChangedFilesForCodebase reuses stale cache on git status failure to avo
         const state = (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase(repoPath);
         assert.equal(state.available, true);
         assert.deepEqual(Array.from(state.files).sort(), ['src/changed.ts']);
+    });
+});
+
+test('getChangedFilesForCodebase bypasses its TTL cache for watcher-unavailable proof', async () => {
+    await withTempRepo(async (repoPath) => {
+        execFileSync('git', ['-C', repoPath, 'init'], { stdio: 'ignore' });
+        execFileSync('git', ['-C', repoPath, 'config', 'user.email', 'satori@example.invalid']);
+        execFileSync('git', ['-C', repoPath, 'config', 'user.name', 'Satori Test']);
+        const sourcePath = path.join(repoPath, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        execFileSync('git', ['-C', repoPath, 'add', 'source.ts']);
+        execFileSync('git', ['-C', repoPath, 'commit', '-m', 'fixture'], { stdio: 'ignore' });
+
+        const handlers = createHandlers(repoPath, []);
+        const internals = handlers as unknown as ToolHandlersTestOverrides;
+        assert.deepEqual(
+            Array.from(internals.getChangedFilesForCodebase(repoPath).files),
+            [],
+        );
+
+        fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
+        assert.deepEqual(
+            Array.from(internals.getChangedFilesForCodebase(repoPath).files),
+            [],
+        );
+        assert.deepEqual(
+            Array.from(internals.getChangedFilesForCodebase(
+                repoPath,
+                { forceRefresh: true },
+            ).files),
+            ['source.ts'],
+        );
     });
 });
 

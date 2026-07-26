@@ -278,13 +278,20 @@ export async function runExactRegistryFastPath(
     }
 
     const rerankDecision = host.searchQuerySupport.resolveRerankDecision(input.scope, input.queryPlan);
-    const callGraphNavigationState = await host.measureSearchPhase(
-        "navigationValidation",
-        () => host.loadRegistryValidatedCallGraphSidecar({
-            codebaseRoot: input.effectiveRoot,
-            registryManifestHash: registryState.manifestHash,
-        }),
-    );
+    const callGraphNavigationState = input.queryPlan.route.kind === "references"
+        ? await host.measureSearchPhase(
+            "navigationValidation",
+            () => host.loadRegistryValidatedCallGraphSidecar({
+                codebaseRoot: input.effectiveRoot,
+                registryManifestHash: registryState.manifestHash,
+            }),
+        )
+        : input.navigationAuthority === "valid"
+            ? { relationshipReady: true }
+            : {
+                relationshipReady: false,
+                relationshipUnavailableReason: "missing_relationship_sidecar" as const,
+            };
 
     let resultSymbols = [exactRegistrySymbol];
     let relationshipPassUsed = false;
