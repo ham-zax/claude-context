@@ -15,6 +15,12 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const CLI_PACKAGE_VERSION = (
     JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as { version: string }
 ).version;
+const MCP_PACKAGE_VERSION = (
+    JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "..", "mcp", "package.json"), "utf8")) as { version: string }
+).version;
+const CORE_PACKAGE_VERSION = (
+    JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "..", "core", "package.json"), "utf8")) as { version: string }
+).version;
 const [CLI_MAJOR, CLI_MINOR] = CLI_PACKAGE_VERSION.split(".").map((part) => Number.parseInt(part, 10));
 const FUTURE_CLI_VERSION = `${CLI_MAJOR}.${CLI_MINOR + 1}.0`;
 const SOURCE_SERVER_ENTRY = path.resolve(PACKAGE_ROOT, "..", "mcp", "src", "index.ts");
@@ -178,8 +184,8 @@ test("runCli defaults to human help and preserves structured help on request", a
 test("runCli version shortcuts report the installed CLI, MCP, and Core set", async () => {
     const versions = [
         { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
-        { name: "@zokizuan/satori-mcp", version: "6.4.0", source: "test" },
-        { name: "@zokizuan/satori-core", version: "3.3.0", source: "test" },
+        { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
     ];
     const textIo = captureIo();
     const textExitCode = await runCli(["-v"], {
@@ -192,7 +198,7 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
     assert.equal(textExitCode, 0);
     assert.equal(
         textIo.read().stdout,
-        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nMCP runtime: 6.4.0\nCore: 3.3.0\n`,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nMCP runtime: ${MCP_PACKAGE_VERSION}\nCore: ${CORE_PACKAGE_VERSION}\n`,
     );
     assert.equal(textIo.read().stderr, "");
 
@@ -210,8 +216,8 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         cli: "satori",
         version: CLI_PACKAGE_VERSION,
         cliVersion: CLI_PACKAGE_VERSION,
-        mcpVersion: "6.4.0",
-        coreVersion: "3.3.0",
+        mcpVersion: MCP_PACKAGE_VERSION,
+        coreVersion: CORE_PACKAGE_VERSION,
     });
 });
 
