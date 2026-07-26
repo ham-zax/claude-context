@@ -1095,3 +1095,49 @@ batch authorization decision
 
 Return an independent decision for W0, W1, W2, W3, and W4. Do not treat approval
 of evidence gathering as approval of production behavior changes.
+
+## 14. Execution record: observation-only candidate
+
+The user subsequently authorized the complete observation/publication
+decoupling as one end-to-end outcome, with W1-W4 treated as internal
+ownership-bounded stages.
+
+The candidate implemented the required root-keyed event state, flight-owned
+coverage, observation-gap handling, pending navigation guidance, removal of
+watcher-owned publication, and compatibility treatment for
+`MCP_WATCH_DEBOUNCE_MS`.
+
+Focused and package verification passed. A real Chokidar witness also waited
+longer than the former five-second debounce and observed no automatic
+comparison or publication.
+
+Final product qualification then reached the plan's explicit stopping
+condition. After the distinct background-startup pass was allowed to settle:
+
+```text
+ten-write event burst
+-> no publication during 5.3-second quiet interval
+-> search publishes added source
+-> search publishes modified source
+-> delete event remains pending
+-> search consumes event
+-> complete-generation validation fails closed
+```
+
+The exact failure class was:
+
+```text
+Incremental publication ... is not readable as one complete generation.
+```
+
+This is equivalent to the frozen W0 validation finding, but it now occurs
+through an allowed search freshness trigger. The candidate therefore stops at:
+
+```text
+watcher_decoupling_blocked
+```
+
+No product commit was created, and nothing was merged or published. The
+durable receipt is:
+
+`../evidence/watcher-observation-only-20260726/WATCHER_OBSERVATION_ONLY_RECEIPT.md`.
