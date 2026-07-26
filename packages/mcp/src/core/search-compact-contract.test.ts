@@ -211,6 +211,10 @@ test("debug modes are projected from explicit source-level whitelists", () => {
     });
 
     assert.equal(build("summary").hints?.debugSearch, undefined);
+    assert.equal(build("summary").freshnessDecision, undefined);
+    assert.equal(build("ranking").freshnessDecision, undefined);
+    assert.equal(build("freshness").freshnessDecision?.mode, "skipped_recent");
+    assert.equal(build("full").freshnessDecision?.mode, "skipped_recent");
     assert.deepEqual(Object.keys(build("freshness").hints?.debugSearch ?? {}).sort(), ["changedCode", "phaseTimingsMs", "readiness"]);
     const rankingKeys = Object.keys(build("ranking").hints?.debugSearch ?? {});
     assert.equal(rankingKeys.includes("phaseTimingsMs"), false);
@@ -219,7 +223,7 @@ test("debug modes are projected from explicit source-level whitelists", () => {
     assert.equal((build("full").hints?.debugSearch as SearchDebugHint).changedCode?.files[0], "src/a.ts");
 });
 
-test("grouped v2 keeps concrete symbol instances distinct and removes internal grouping identities", () => {
+test("grouped v3 keeps concrete symbol instances distinct and removes internal grouping identities", () => {
     const envelope = buildGroupedEnvelope([
         makeGroup(0, { file: "src/a.ts", symbolId: "instance_a", displayLabel: "function duplicate()" }),
         makeGroup(1, { file: "src/b.ts", symbolId: "instance_b", displayLabel: "function duplicate()" }),
@@ -227,7 +231,9 @@ test("grouped v2 keeps concrete symbol instances distinct and removes internal g
         makeGroup(3, { file: "src/overloads.ts", symbolId: "instance_overload_b", displayLabel: "function duplicate()", startLine: 20 }),
     ]);
 
-    assert.equal(envelope.formatVersion, 2);
+    assert.equal(envelope.formatVersion, 3);
+    assert.equal(envelope.freshnessDecision, undefined);
+    assert.equal(envelope.freshnessSummary, undefined);
     assert.equal(envelope.resultMode, "grouped");
     assert.deepEqual(
         envelope.results.map((result) => result.target.symbolId),
@@ -241,7 +247,7 @@ test("grouped v2 keeps concrete symbol instances distinct and removes internal g
     assert.equal(JSON.stringify(envelope.results).includes("internal_symbol_key_"), false);
 });
 
-test("grouped v2 projection never serializes newly added internal fields", () => {
+test("grouped v3 projection never serializes newly added internal fields", () => {
     const contaminated = makeGroup(0) as SearchGroupResult & {
         __candidateOwners: string[];
         retrievalVector: number[];
@@ -259,7 +265,7 @@ test("grouped v2 projection never serializes newly added internal fields", () =>
     assert.equal(serialized.includes("secret query text"), false);
 });
 
-test("grouped v2 emits canonical facts only and keeps degraded navigation explicit", () => {
+test("grouped v3 emits canonical facts only and keeps degraded navigation explicit", () => {
     const envelope = buildGroupedEnvelope([
         makeGroup(0),
         makeGroup(1, { symbolId: "", graph: "missing_symbol" }),
@@ -295,7 +301,7 @@ test("grouped v2 emits canonical facts only and keeps degraded navigation explic
     assert.equal(envelope.recommendedNextAction?.resultIndex, 0);
 });
 
-test("raw v2 preserves raw result objects while versioning the envelope", () => {
+test("raw v3 preserves raw result objects while versioning the envelope", () => {
     const raw: SearchChunkResult = {
         kind: "chunk",
         file: "src/raw.ts",
@@ -321,7 +327,9 @@ test("raw v2 preserves raw result objects while versioning the envelope", () => 
         results: [raw],
     });
 
-    assert.equal(envelope.formatVersion, 2);
+    assert.equal(envelope.formatVersion, 3);
+    assert.equal(envelope.freshnessDecision, undefined);
+    assert.equal(envelope.freshnessSummary, undefined);
     assert.equal(envelope.resultMode, "raw");
     assert.strictEqual(envelope.results[0], raw);
     assert.deepEqual(envelope.results[0], raw);

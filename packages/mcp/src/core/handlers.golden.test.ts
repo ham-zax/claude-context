@@ -89,6 +89,10 @@ type SearchFixtureResult = {
 };
 type ToolHandlersTestOverrides = {
     validateCompletionProof: (repoPath: string) => Promise<Record<string, unknown>>;
+    getPreparedReadCacheObservation: (repoPath: string) => {
+        observation: string;
+        sourceObservation: string;
+    };
 };
 
 function withTempRepo<T>(fn: (repoPath: string) => Promise<T>): Promise<T> {
@@ -428,11 +432,16 @@ function createHandlers(
         null,
         mutationLeaseCoordinator,
     );
-    (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+    const overrides = handlers as unknown as ToolHandlersTestOverrides;
+    overrides.validateCompletionProof = async () => ({
         outcome: 'valid',
         navigationStatus: 'valid',
         ...(vectorReceipt ? { collectionName: vectorReceipt.collectionName, vectorReceipt } : {}),
         generationReceipt,
+    });
+    overrides.getPreparedReadCacheObservation = () => ({
+        observation: 'golden-authority-observation',
+        sourceObservation: 'golden-source-observation',
     });
     return { handlers, snapshotManager, syncManager };
 }
@@ -636,7 +645,7 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
             symbols,
         });
         assert.deepEqual(payload, {
-            formatVersion: 2,
+            formatVersion: 3,
             status: 'ok',
             path: '<repo>',
             codebaseRoot: '<repo>',
@@ -645,19 +654,6 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
             groupBy: 'symbol',
             limit: 5,
             resultMode: 'grouped',
-            freshnessDecision: {
-                mode: 'skipped_recent',
-                checkedAt: '2026-01-01T00:00:00.000Z',
-                thresholdMs: 180000,
-            },
-            freshnessSummary: {
-                syncMode: 'skipped_recent',
-                lastSyncAt: null,
-                changedFileCount: 0,
-                gitDirtyFilesConsidered: false,
-                changedFilesBoostApplied: false,
-                changedFilesBoostSkippedForLargeChangeSet: false,
-            },
             recommendedNextAction: {
                 resultIndex: 0,
                 tool: 'read_file',
@@ -861,7 +857,7 @@ test('golden MCP search_codebase invalid root shape', async () => {
         assert.equal(response.isError, true);
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
         assert.deepEqual(payload, {
-            formatVersion: 2,
+            formatVersion: 3,
             status: 'not_indexed',
             reason: 'not_indexed',
             path: '<repo>/missing-root',
@@ -870,7 +866,6 @@ test('golden MCP search_codebase invalid root shape', async () => {
             groupBy: 'symbol',
             resultMode: 'grouped',
             limit: 10,
-            freshnessDecision: null,
             message: "Path '<repo>/missing-root' does not exist. search_codebase requires an existing directory root or subdirectory.",
             results: [],
         });
@@ -892,7 +887,7 @@ test('golden MCP search_codebase failed index shape', async () => {
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
         assert.deepEqual(payload, {
-            formatVersion: 2,
+            formatVersion: 3,
             status: 'not_indexed',
             reason: 'index_failed',
             codebasePath: '<repo>',
@@ -902,7 +897,6 @@ test('golden MCP search_codebase failed index shape', async () => {
             groupBy: 'symbol',
             resultMode: 'grouped',
             limit: 5,
-            freshnessDecision: null,
             message: "Codebase '<repo>' has a failed indexing attempt. Error: Interrupted indexing detected without completion marker proof. Failed at: 0.0% progress. Failed at: 2026-06-19T12:15:18.574Z. Satori will not serve semantic results from an unproven partial index. Run manage_index with {\"action\":\"create\",\"path\":\"<repo>\"} to restart indexing for this failed state.",
             indexingFailure: {
                 errorMessage: 'Interrupted indexing detected without completion marker proof.',
@@ -1203,7 +1197,6 @@ test('golden MCP call_graph missing relationship sidecar shape', async () => {
             nodes: [],
             edges: [],
             notes: [],
-            freshnessDecision: { mode: 'skipped_requires_reindex' },
             message: "Relationship sidecar is missing: relationship manifest is missing\n\nThe index at '<repo>' is missing navigation sidecars. Please run manage_index with {\"action\":\"repair\",\"path\":\"<repo>\"}.",
             hints: {
                 repair: {
@@ -1263,7 +1256,6 @@ test('golden MCP call_graph incompatible relationship sidecar shape', async () =
             nodes: [],
             edges: [],
             notes: [],
-            freshnessDecision: { mode: 'skipped_requires_reindex' },
             message: "Relationship sidecar is incompatible: relationship manifest hash does not match symbol registry manifest hash\n\nThe index at '<repo>' is incompatible with the current runtime and must be rebuilt. Please run manage_index with {\"action\":\"reindex\",\"path\":\"<repo>\"}.",
             hints: {
                 reindex: {

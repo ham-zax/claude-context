@@ -211,7 +211,7 @@ function createHandlers(repoPath: string) {
     return handlers;
 }
 
-test('handleCallGraph returns requires_reindex envelope with explicit freshnessDecision', async () => {
+test('handleCallGraph returns requires_reindex without internal freshness evidence', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath);
 
@@ -233,7 +233,7 @@ test('handleCallGraph returns requires_reindex envelope with explicit freshnessD
         assert.equal(payload.status, 'requires_reindex');
         assert.equal(payload.supported, false);
         assert.equal(payload.reason, 'requires_reindex');
-        assert.equal(payload.freshnessDecision.mode, 'skipped_requires_reindex');
+        assert.equal(payload.freshnessDecision, undefined);
         assert.deepEqual(payload.nodes, []);
         assert.deepEqual(payload.edges, []);
         assert.deepEqual(payload.notes, []);
@@ -406,7 +406,7 @@ test('handleCallGraph returns requires_reindex when snapshot marks codebase bloc
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
         assert.equal(payload.reason, 'requires_reindex');
-        assert.equal(payload.freshnessDecision.mode, 'skipped_requires_reindex');
+        assert.equal(payload.freshnessDecision, undefined);
         assert.equal(payload.hints.reindex.args.path, repoPath);
         assert.equal(payload.compatibility.runtimeFingerprint.schemaVersion, 'hybrid_v3');
         assert.equal(payload.compatibility.statusAtCheck, 'requires_reindex');

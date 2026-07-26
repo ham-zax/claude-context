@@ -18,6 +18,7 @@ const fileOutlineInputSchema = z.object({
     resolveMode: z.enum(['outline', 'exact']).default('outline').optional().describe('Outline mode returns all symbols (windowed/limited). Exact mode resolves deterministic symbol matches in this file.'),
     symbolIdExact: z.string().min(1).optional().describe('Used with resolveMode=\"exact\": exact symbol identifier match in the target file. On symbol-owned flows, pass the symbol\'s symbolInstanceId.'),
     symbolLabelExact: z.string().min(1).optional().describe('Used with resolveMode=\"exact\": exact symbol label match in the target file.'),
+    detail: z.enum(['summary', 'analysis']).default('summary').optional().describe('Summary returns the existing outline. Analysis adds Python structural-v1 metrics for one exact canonical symbol.'),
 }).superRefine((input, ctx) => {
     if (input.resolveMode === 'exact') {
         if (!input.symbolIdExact && !input.symbolLabelExact) {
@@ -28,11 +29,18 @@ const fileOutlineInputSchema = z.object({
             });
         }
     }
+    if (input.detail === 'analysis' && (input.resolveMode !== 'exact' || !input.symbolIdExact)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['detail'],
+            message: 'detail=\"analysis\" requires resolveMode=\"exact\" and symbolIdExact.'
+        });
+    }
 });
 
 export const fileOutlineTool: McpTool = {
     name: 'file_outline',
-    description: () => 'Return a sidecar-backed symbol outline for one file, including call_graph jump handles.',
+    description: () => 'Return a sidecar-backed symbol outline for one file, including call_graph jump handles. Use detail=\"analysis\" with exact canonical Python symbol identity for on-demand structural metrics.',
     inputSchemaZod: () => fileOutlineInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = fileOutlineInputSchema.safeParse(args || {});

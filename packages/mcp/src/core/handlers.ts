@@ -343,6 +343,10 @@ type ToolTextResponse = {
     isError?: boolean;
 };
 
+type SearchToolTextResponse = ToolTextResponse & {
+    meta?: Record<string, unknown>;
+};
+
 type IndexCodebaseArgs = {
     path: string;
     force?: boolean;
@@ -687,6 +691,7 @@ export class ToolHandlers {
             buildCreateHint: this.buildCreateHint.bind(this),
             buildReindexHint: this.buildReindexHint.bind(this),
             buildRepairHint: this.buildRepairHint.bind(this),
+            buildSyncHint: this.buildSyncHint.bind(this),
             buildStatusHint: this.buildStatusHint.bind(this),
             buildStaleLocalHint: this.buildStaleLocalHint.bind(this),
             buildStaleLocalMessage: this.buildStaleLocalMessage.bind(this),
@@ -769,6 +774,9 @@ export class ToolHandlers {
             trackedRootReadiness: this.trackedRootReadiness,
             prepareNavigationRead: this.prepareNavigationRead.bind(this),
             acquirePublicationReadLease: this.acquirePublicationReadLease.bind(this),
+            getPreparedReadCacheObservation: (codebasePath) => (
+                this.getPreparedReadCacheObservation(codebasePath)
+            ),
             loadPreparedNavigationSymbolsByFile: this.loadPreparedNavigationSymbolsByFile.bind(this),
             loadPreparedNavigationCompatibility: this.loadPreparedNavigationCompatibility.bind(this),
             stringifyToolJson: this.stringifyToolJson.bind(this),
@@ -3381,7 +3389,14 @@ export class ToolHandlers {
         return this.manageIndexingHandlers.handleRepairIndex(args);
     }
 
-    public async handleSearchCode(args: ToolArgs) {
+    public async handleSearchCode(args: ToolArgs): Promise<SearchToolTextResponse> {
+        return this.handleSearchCodeAttempt(args, 0);
+    }
+
+    private async handleSearchCodeAttempt(
+        args: ToolArgs,
+        sourceDriftRetryCount: 0 | 1,
+    ): Promise<SearchToolTextResponse> {
         const scope = (typeof args.scope === 'string' ? args.scope : 'runtime') as SearchScope;
         const resultMode = (typeof args.resultMode === 'string' ? args.resultMode : 'grouped') as SearchResultMode;
         const groupBy = (typeof args.groupBy === 'string' ? args.groupBy : 'symbol') as SearchGroupBy;
@@ -3589,7 +3604,11 @@ export class ToolHandlers {
                 ensureSearchFreshness: (effectiveRoot, preparedRead) => this.measureSearchPhase(
                     phaseTimings,
                     'ensureFreshness',
-                    () => {
+                    async () => {
+                        const watcherObservation = this.getWatcherObservation(effectiveRoot);
+                        if (watcherObservation.coverage !== 'ready') {
+                            await this.touchWatchedCodebaseBestEffort(effectiveRoot);
+                        }
                         const changedFilesState = this.getChangedFilesForCodebase(effectiveRoot);
                         observedChangedFilesForSearch = changedFilesState;
                         const exactSourceComparisonRequired = changedFilesState.available
@@ -3607,10 +3626,7 @@ export class ToolHandlers {
                         if (
                             preparedRead?.statusPrepared === true
                             && !exactSourceComparisonRequired
-                            && (
-                                typeof statusPreparedSourceObservation?.sourceObservation === 'string'
-                                || statusPreparedSourceObservation?.unavailableReason === 'watcher_disabled'
-                            )
+                            && typeof statusPreparedSourceObservation?.sourceObservation === 'string'
                         ) {
                             return Promise.resolve({
                                 mode: 'skipped_recent' as const,
@@ -3705,6 +3721,28 @@ export class ToolHandlers {
             } = frontDoor;
             releasePublicationReadLease = await this.acquirePublicationReadLease(effectiveRoot);
             const finalSourceObservation = this.getPreparedReadCacheObservation(effectiveRoot);
+            if (
+                finalSourceObservation.observation === null
+                || finalSourceObservation.sourceObservation === null
+                || finalSourceObservation.unavailableReason !== undefined
+            ) {
+                const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
+                    effectiveRoot,
+                    {
+                        path: absolutePath,
+                        query: input.query,
+                        scope: input.scope,
+                        groupBy: input.groupBy,
+                        resultMode: input.resultMode,
+                        limit: input.limit,
+                    },
+                    "Satori could not verify the active publication against the current source.",
+                );
+                return {
+                    content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                    meta: { searchDiagnostics },
+                };
+            }
             if (debugMode === 'full' && finalSourceObservation.unavailableReason) {
                 readinessDebug.observationUnavailableReason = finalSourceObservation.unavailableReason;
             }
@@ -3897,6 +3935,34 @@ export class ToolHandlers {
             let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
 
             if (exactFastPath.kind === 'handled') {
+                const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
+                const barrierChanged = currentBarrier.observation !== finalSourceObservation.observation
+                    || currentBarrier.sourceObservation !== finalSourceObservation.sourceObservation
+                    || currentBarrier.unavailableReason !== undefined;
+                if (barrierChanged) {
+                    releasePublicationReadLease?.();
+                    releasePublicationReadLease = undefined;
+                    if (sourceDriftRetryCount === 0) {
+                        return this.handleSearchCodeAttempt(args, 1);
+                    }
+                    const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
+                        effectiveRoot,
+                        {
+                            path: absolutePath,
+                            query: input.query,
+                            scope: input.scope,
+                            groupBy: input.groupBy,
+                            resultMode: input.resultMode,
+                            limit: input.limit,
+                        },
+                        "Source changed again while Satori was preparing this response.",
+                        "source_changed_during_request",
+                    );
+                    return {
+                        content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                        meta: { searchDiagnostics },
+                    };
+                }
                 await this.touchWatchedCodebaseBestEffort(effectiveRoot);
                 this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
                 return {
@@ -4102,6 +4168,34 @@ export class ToolHandlers {
                 now: this.now,
             });
             let envelope = finalized.envelope;
+            const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
+            const barrierChanged = currentBarrier.observation !== finalSourceObservation.observation
+                || currentBarrier.sourceObservation !== finalSourceObservation.sourceObservation
+                || currentBarrier.unavailableReason !== undefined;
+            if (barrierChanged) {
+                releasePublicationReadLease?.();
+                releasePublicationReadLease = undefined;
+                if (sourceDriftRetryCount === 0) {
+                    return this.handleSearchCodeAttempt(args, 1);
+                }
+                const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
+                    effectiveRoot,
+                    {
+                        path: absolutePath,
+                        query: input.query,
+                        scope: input.scope,
+                        groupBy: input.groupBy,
+                        resultMode: input.resultMode,
+                        limit: input.limit,
+                    },
+                    "Source changed again while Satori was preparing this response.",
+                    "source_changed_during_request",
+                );
+                return {
+                    content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                    meta: { searchDiagnostics },
+                };
+            }
             if (
                 finalized.resultSet
                 && envelope.resultMode === "grouped"

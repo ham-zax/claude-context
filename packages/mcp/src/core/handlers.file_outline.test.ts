@@ -30,6 +30,11 @@ type HandlerCallGraphManager = NonNullable<ConstructorParameters<typeof ToolHand
 type HandlerNavigationStore = NonNullable<ConstructorParameters<typeof ToolHandlers>[9]>;
 type ToolHandlersTestOverrides = {
     validateCompletionProof: (codebasePath: string) => Promise<unknown>;
+    getPreparedReadCacheObservation: (codebasePath: string) => {
+        observation: string | null;
+        sourceObservation: string | null;
+        unavailableReason?: string;
+    };
 };
 type SnapshotStub = Record<string, unknown>;
 
@@ -812,6 +817,114 @@ test('handleFileOutline repairs stale Python multiline-signature spans from sour
         assert.equal(payload.outline.symbols[0].callGraphHint.symbolRef.symbolId, attach.symbolInstanceId);
         assert.ok(payload.warnings.includes('OUTLINE_SPAN_START_BEFORE_DEF'));
         assert.ok(payload.warnings.includes('OUTLINE_TRUNCATED_SYMBOL_SPAN'));
+    }));
+});
+
+test('handleFileOutline returns Python structural analysis only for an exact canonical request', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const source = [
+            'def analyze(self, values: list[int], *, limit=3) -> int:',
+            '    total = 0',
+            '    for value in values:',
+            '        if value > limit:',
+            '            total += value',
+            '    return total',
+            '',
+        ].join('\n');
+        fs.writeFileSync(path.join(repoPath, 'src', 'analysis.py'), source);
+        const symbol = createTestSymbol({
+            file: 'src/analysis.py',
+            label: 'function analyze',
+            name: 'analyze',
+            qualifiedName: 'analyze',
+            startLine: 1,
+            endLine: 6,
+            fileHash: sha256Content(source),
+            language: 'python',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        (handlers as unknown as ToolHandlersTestOverrides).getPreparedReadCacheObservation = () => ({
+            observation: 'analysis-authority',
+            sourceObservation: 'analysis-source',
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/analysis.py',
+            resolveMode: 'exact',
+            symbolIdExact: symbol.symbolInstanceId,
+            detail: 'analysis',
+        });
+
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.outline.symbols.length, 1);
+        assert.equal(payload.outline.symbols[0].symbolId, symbol.symbolInstanceId);
+        assert.equal(payload.outline.symbols[0].analysis.analysisVersion, 'python_structural_v1');
+        assert.equal(payload.outline.symbols[0].analysis.metrics.parameterCount.value, 3);
+        assert.equal(payload.outline.symbols[0].analysis.metrics.loopCount.value, 1);
+        assert.equal(payload.outline.symbols[0].analysis.metrics.maxLoopDepth.value, 1);
+        assert.equal(payload.outline.symbols[0].analysis.metrics.cyclomaticComplexity.value, 3);
+        assert.equal(
+            payload.outline.symbols[0].analysis.metrics.signature.value,
+            'def analyze(self, values: list[int], *, limit=3) -> int:',
+        );
+        assert.equal(payload.outline.symbols[0].analysis.metrics.declaredReturnType.value, 'int');
+    }));
+});
+
+test('handleFileOutline discards structural analysis when its source barrier changes', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const source = 'def owner(value):\n    return value\n';
+        fs.writeFileSync(path.join(repoPath, 'src', 'analysis.py'), source);
+        const symbol = createTestSymbol({
+            file: 'src/analysis.py',
+            label: 'function owner',
+            name: 'owner',
+            qualifiedName: 'owner',
+            startLine: 1,
+            endLine: 2,
+            fileHash: sha256Content(source),
+            language: 'python',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        let barrierReads = 0;
+        (handlers as unknown as ToolHandlersTestOverrides).getPreparedReadCacheObservation = () => ({
+            observation: 'analysis-authority',
+            sourceObservation: barrierReads++ === 0 ? 'source-before' : 'source-after',
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/analysis.py',
+            resolveMode: 'exact',
+            symbolIdExact: symbol.symbolInstanceId,
+            detail: 'analysis',
+        });
+
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'analysis_unavailable');
+        assert.equal(payload.outline, null);
+        assert.match(payload.message, /source changed/i);
     }));
 });
 

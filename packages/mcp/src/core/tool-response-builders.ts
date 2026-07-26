@@ -50,6 +50,7 @@ export type ToolResponseBuildersHost = {
     buildCreateHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildReindexHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildRepairHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
+    buildSyncHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildStatusHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildStaleLocalHint(codebasePath: string, reason: CompletionProofReason): Record<string, unknown>;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: CompletionProofReason): string;
@@ -239,9 +240,6 @@ export class ToolResponseBuilders {
             reason: "requires_reindex" as NonOkReason,
             codebasePath,
             results: [],
-            freshnessDecision: {
-                mode: "skipped_requires_reindex",
-            },
             message,
             recommendedNextAction: runtimeMismatch
                 ? this.host.buildManageIndexRecommendedAction(
@@ -294,9 +292,6 @@ export class ToolResponseBuilders {
             nodes: [],
             edges: [],
             notes: [],
-            freshnessDecision: {
-                mode: "skipped_requires_reindex",
-            },
             message: preferRepair
                 ? `${detailLine}The index at '${codebasePath}' is missing navigation sidecars. Please run manage_index with {"action":"repair","path":"${codebasePath}"}.`
                 : `${detailLine}The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
@@ -323,9 +318,6 @@ export class ToolResponseBuilders {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            freshnessDecision: {
-                mode: "skipped_indexing",
-            },
             message: `Codebase '${codebasePath}' is currently indexing. Wait for indexing to complete, then retry.`,
             recommendedNextAction: this.host.buildManageIndexRecommendedAction(
                 "status",
@@ -357,10 +349,7 @@ export class ToolResponseBuilders {
                     ? `Search blocked because this codebase requires reindex (${freshnessDecision.errorMessage}).`
                     : "Search blocked because this codebase requires reindex.";
                 const payload = this.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope;
-                return {
-                    ...payload,
-                    freshnessDecision,
-                };
+                return payload;
             }
 
             case "skipped_missing_path":
@@ -375,7 +364,6 @@ export class ToolResponseBuilders {
                     groupBy: searchContext.groupBy,
                     resultMode: searchContext.resultMode,
                     limit: searchContext.limit,
-                    freshnessDecision,
                     message: `Indexed codebase path '${codebasePath}' no longer exists. Search cannot serve stale vector results for this path.`,
                     recommendedNextAction: this.host.buildManageIndexRecommendedAction(
                         "create",
@@ -394,10 +382,7 @@ export class ToolResponseBuilders {
                     : "";
                 const detail = `Search blocked because ignore-rule reconciliation failed (${freshnessDecision.errorMessage || "unknown_ignore_reload_error"}).${fallbackLine}`;
                 const payload = this.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope;
-                return {
-                    ...payload,
-                    freshnessDecision,
-                };
+                return payload;
             }
 
             case "coalesced":
@@ -408,26 +393,75 @@ export class ToolResponseBuilders {
                         : "";
                     const detail = `Search blocked because coalesced in-flight sync failed (${freshnessDecision.errorMessage}).${fallbackLine}`;
                     const payload = this.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope;
-                    return {
-                        ...payload,
-                        freshnessDecision,
-                    };
+                    return payload;
                 }
                 return null;
 
             case "synced":
             case "skipped_recent":
             case "skipped_source_unchanged":
-            case "skipped_source_checkpoint_unavailable":
             case "reconciled_ignore_change":
             case "skipped_mutation_in_progress":
                 return null;
+
+            case "skipped_source_checkpoint_unavailable":
+                return this.buildRequiresReindexPayload(
+                    codebasePath,
+                    freshnessDecision.errorMessage
+                        ? `Search blocked because the source checkpoint could not be verified (${freshnessDecision.errorMessage}).`
+                        : "Search blocked because the source checkpoint could not be verified.",
+                    searchContext,
+                ) as unknown as SearchResponseEnvelope;
 
             default: {
                 const exhaustive: never = freshnessDecision.mode;
                 return exhaustive;
             }
         }
+    }
+
+    public buildSourceStateUnverifiedSearchPayload(
+        codebasePath: string,
+        searchContext: SearchContext,
+        detail: string,
+        reason: Extract<NonOkReason, "source_changed_during_request" | "source_state_unverified">
+            = "source_state_unverified",
+    ): SearchResponseEnvelope {
+        return {
+            formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
+            status: "not_ready",
+            reason,
+            codebaseRoot: codebasePath,
+            path: searchContext.path,
+            query: searchContext.query,
+            scope: searchContext.scope,
+            groupBy: searchContext.groupBy,
+            resultMode: searchContext.resultMode,
+            limit: searchContext.limit,
+            message: detail,
+            recommendedNextAction: reason === "source_changed_during_request"
+                ? {
+                    tool: "search_codebase",
+                    args: {
+                        path: searchContext.path,
+                        query: searchContext.query,
+                        scope: searchContext.scope,
+                        groupBy: searchContext.groupBy,
+                        resultMode: searchContext.resultMode,
+                        limit: searchContext.limit,
+                    },
+                    reason: "Retry the search after active source editing settles.",
+                }
+                : this.host.buildManageIndexRecommendedAction(
+                    "sync",
+                    codebasePath,
+                    "Verify the active publication against the current source before retrying search.",
+                ),
+            hints: reason === "source_state_unverified"
+                ? { sync: this.host.buildSyncHint(codebasePath) }
+                : undefined,
+            results: [],
+        } as SearchResponseEnvelope;
     }
 
     public buildVectorBackendSearchPayload(
@@ -445,7 +479,6 @@ export class ToolResponseBuilders {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            freshnessDecision: null,
             message: diagnostic.message,
             hints: diagnostic.hints,
             results: [],
@@ -467,7 +500,6 @@ export class ToolResponseBuilders {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            freshnessDecision: null,
             message: diagnostic.message,
             hints: diagnostic.hints,
             results: [],
@@ -490,7 +522,6 @@ export class ToolResponseBuilders {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            freshnessDecision: null,
             message,
             results: [],
         } as SearchResponseEnvelope;
@@ -620,9 +651,6 @@ export class ToolResponseBuilders {
             nodes: [],
             edges: [],
             notes: [],
-            freshnessDecision: {
-                mode: "skipped_indexing",
-            },
             message: `Codebase '${codebasePath}' is currently indexing. Wait for indexing to complete, then retry.`,
             hints: {
                 status: this.host.buildStatusHint(codebasePath),

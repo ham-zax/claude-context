@@ -134,8 +134,7 @@ function buildReadinessWarnings(
 
 function freshnessDecisionPreservesAuthority(decision: FreshnessDecision): boolean {
     return decision.mode === 'skipped_recent'
-        || decision.mode === 'skipped_source_unchanged'
-        || decision.mode === 'skipped_source_checkpoint_unavailable';
+        || decision.mode === 'skipped_source_unchanged';
 }
 
 function buildBlockedReadinessPayload(
@@ -170,7 +169,6 @@ function buildBlockedReadinessPayload(
             groupBy: searchContext.groupBy,
             limit: searchContext.limit,
             resultMode: searchContext.resultMode,
-            freshnessDecision: null,
             message: `Codebase '${searchContext.path}' (or any parent) is not indexed.`,
             recommendedNextAction: host.buildManageIndexRecommendedAction(
                 "create",
@@ -198,7 +196,6 @@ function buildBlockedReadinessPayload(
             groupBy: searchContext.groupBy,
             limit: searchContext.limit,
             resultMode: searchContext.resultMode,
-            freshnessDecision: null,
             message: host.buildStaleLocalMessage(state.codebasePath, searchContext.path, state.reason),
             recommendedNextAction: host.buildManageIndexRecommendedAction(
                 action,

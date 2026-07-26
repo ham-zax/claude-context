@@ -218,7 +218,6 @@ export class TrackedRootReadiness {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            freshnessDecision: null,
             message: this.buildMissingLocalCollectionMessage(codebasePath, searchContext.path, collectionName),
             recommendedNextAction: this.host.buildManageIndexRecommendedAction(
                 "create",
@@ -275,7 +274,6 @@ export class TrackedRootReadiness {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            freshnessDecision: null,
             message: this.buildIndexFailedMessage(codebasePath, searchContext.path, info),
             indexingFailure: this.buildIndexingFailureMetadata(info),
             recommendedNextAction: this.host.buildManageIndexRecommendedAction(

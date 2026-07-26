@@ -154,6 +154,10 @@ type ToolHandlersTestOverrides = {
     }>;
     probeLocalSearchCollectionState: (codebasePath: string) => Promise<{ state: string; collectionName?: string }>;
     sortGroupedSearchResults: (grouped: SortableGroupedSearchResult[], debug: boolean) => boolean;
+    getPreparedReadCacheObservation: (repoPath: string) => {
+        observation: string;
+        sourceObservation: string;
+    };
 };
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
@@ -577,6 +581,7 @@ function createHandlers(
         };
         enableVectorReceipt?: boolean;
         searchContinuationCoordinator?: SearchContinuationCoordinator;
+        sourceBarrierMode?: 'verified' | 'native';
     }
 ) {
     const tracedSearchResults = searchResults.map((result, index) => ({
@@ -709,7 +714,8 @@ function createHandlers(
         null,
         options?.searchContinuationCoordinator,
     );
-    (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+    const overrides = handlers as unknown as ToolHandlersTestOverrides;
+    overrides.validateCompletionProof = async () => ({
         outcome: 'valid',
         navigationStatus: 'valid',
         generationReceipt: {
@@ -719,6 +725,12 @@ function createHandlers(
             ? { vectorReceipt: { collectionName: 'committed-v3' } as never }
             : {}),
     });
+    if (options?.sourceBarrierMode !== 'native') {
+        overrides.getPreparedReadCacheObservation = () => ({
+            observation: 'scope-authority-observation',
+            sourceObservation: 'scope-source-observation',
+        });
+    }
     return handlers;
 }
 
@@ -1364,11 +1376,12 @@ test('status-prepared search routes an untracked pending watcher event through f
             resultMode: 'grouped',
             groupBy: 'symbol',
             limit: 5,
+            debugMode: 'freshness',
         });
         const observedPayload = JSON.parse(observedResponse.content[0]?.text || '{}');
 
-        assert.equal(observedPayload.freshnessDecision.mode, 'skipped_recent');
-        assert.equal(freshnessCalls, 1);
+        assert.equal(observedPayload.freshnessDecision.mode, 'skipped_source_unchanged');
+        assert.equal(freshnessCalls, 2);
     });
 });
 
@@ -1816,7 +1829,7 @@ test('search continuation preserves the full grouped order without new retrieval
 
 test('warm prepared-read revalidation returns the authority snapshot it actually validated', async () => {
     await withTempRepo(async (repoPath) => {
-        const handlers = createHandlers(repoPath, []);
+        const handlers = createHandlers(repoPath, [], undefined, { sourceBarrierMode: 'native' });
         const vectorReceipt = { collectionName: 'committed-v3' } as never;
         const oldObservation = JSON.stringify({
             vectorAuthority: 'vector-1',
@@ -1899,7 +1912,7 @@ test('warm prepared-read revalidation returns the authority snapshot it actually
 
 test('prepared-read seeding uses one authority snapshot and source observation failures stay diagnostic', async () => {
     await withTempRepo(async (repoPath) => {
-        const handlers = createHandlers(repoPath, []);
+        const handlers = createHandlers(repoPath, [], undefined, { sourceBarrierMode: 'native' });
         const oldObservation = JSON.stringify({
             vectorAuthority: 'vector-1',
             navigationAuthority: 'navigation-1',
@@ -2010,7 +2023,7 @@ test('warm prepared-read reseed does not evict when end-of-search observation dr
     });
 });
 
-test('source observation failure preserves vector results with an unverified-freshness warning', async () => {
+test('source observation failure blocks without returning vector results', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [{
             content: 'export function owner() { return true; }',
@@ -2020,7 +2033,7 @@ test('source observation failure preserves vector results with an unverified-fre
             language: 'typescript',
             score: 0.99,
             indexedAt: '2026-01-01T00:30:00.000Z',
-        }]);
+        }], undefined, { sourceBarrierMode: 'native' });
         const internals = handlers as unknown as {
             context: HandlerContext & {
                 getIndexAuthorityObservations: () => { vector: string; navigation: string };
@@ -2056,12 +2069,12 @@ test('source observation failure preserves vector results with an unverified-fre
         });
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
-        assert.equal(payload.status, 'ok');
-        assert.ok(warningCodes(payload).includes('SOURCE_FRESHNESS_UNVERIFIED'));
-        assert.equal(
-            payload.hints?.debugSearch?.readiness?.observationUnavailableReason,
-            'source_observation_failed',
-        );
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'source_state_unverified');
+        assert.deepEqual(payload.results, []);
+        assert.equal(payload.freshnessDecision, undefined);
+        assert.equal(payload.hints.sync.tool, 'manage_index');
+        assert.equal(payload.hints.sync.args.action, 'sync');
     });
 });
 
@@ -6058,7 +6071,8 @@ test('handleSearchCode exposes freshness summary and warns when dirty files were
             scope: 'runtime',
             resultMode: 'grouped',
             groupBy: 'symbol',
-            limit: 1
+            limit: 1,
+            debugMode: 'freshness',
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
@@ -6118,6 +6132,7 @@ test('handleSearchCode forces an exact freshness comparison for a dirty working 
             resultMode: 'grouped',
             groupBy: 'symbol',
             limit: 5,
+            debugMode: 'freshness',
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
@@ -10624,10 +10639,15 @@ async function runSearchFreshnessDecisionCase(
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
-        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => {
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.validateCompletionProof = async () => {
             completionProofCalls += 1;
             return { outcome: 'ok' };
         };
+        overrides.getPreparedReadCacheObservation = () => ({
+            observation: 'freshness-case-authority',
+            sourceObservation: 'freshness-case-source',
+        });
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10646,7 +10666,7 @@ async function runSearchFreshnessDecisionCase(
         if (expected.reason) {
             assert.equal(payload.reason, expected.reason);
         }
-        assert.equal(payload.freshnessDecision?.mode, decision.mode);
+        assert.equal(payload.freshnessDecision, undefined);
         if (expected.messageIncludes) {
             assert.match(String(payload.message || ''), new RegExp(expected.messageIncludes));
         }
@@ -10668,6 +10688,24 @@ test('handleSearchCode blocks skipped_requires_reindex freshness before vector s
 
     assert.equal(payload.hints?.reindex?.tool, 'manage_index');
     assert.equal(payload.hints?.reindex?.args?.action, 'reindex');
+    assert.equal(payload.recommendedNextAction?.tool, 'manage_index');
+    assert.equal(payload.recommendedNextAction?.args?.action, 'reindex');
+});
+
+test('handleSearchCode requires reindex when the source checkpoint is unavailable', async () => {
+    const payload = await runSearchFreshnessDecisionCase({
+        mode: 'skipped_source_checkpoint_unavailable',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+        thresholdMs: 180000,
+        checkpointStatus: 'missing',
+        errorMessage: 'source checkpoint is missing',
+    }, {
+        status: 'requires_reindex',
+        reason: 'requires_reindex',
+        semanticSearchCalls: 0,
+        messageIncludes: 'source checkpoint could not be verified',
+    });
+
     assert.equal(payload.recommendedNextAction?.tool, 'manage_index');
     assert.equal(payload.recommendedNextAction?.args?.action, 'reindex');
 });

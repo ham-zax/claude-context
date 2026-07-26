@@ -594,7 +594,7 @@ test('search_codebase returns structured backend diagnostics when provider runti
         assert.equal(payload.status, 'not_ready');
         assert.equal(payload.reason, 'vector_backend_unavailable');
         assert.equal(payload.code, 'ZILLIZ_CLUSTER_STOPPED');
-        assert.equal(payload.freshnessDecision, null);
+        assert.equal(payload.freshnessDecision, undefined);
         assert.deepEqual(payload.results, []);
         assert.equal(payload.hints.backend.code, 'ZILLIZ_CLUSTER_STOPPED');
         assert.match(payload.hints.backend.nextSteps.join(' '), /Resume the Zilliz Cloud cluster/);

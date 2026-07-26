@@ -15,7 +15,6 @@ import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core
 import { ToolHandlers } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
 import { IndexFingerprint } from '../config.js';
-import type { CallGraphSymbolRef } from './call-graph.js';
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -39,6 +38,10 @@ type ToolHandlersTestOverrides = {
     evaluateReindexPreflight: (codebasePath: string) => unknown;
     clearAllCollectionsForForceReindex: (codebasePath: string) => Promise<unknown[]>;
     validateCompletionProof: (codebasePath: string) => Promise<unknown>;
+    getPreparedReadCacheObservation: (codebasePath: string) => {
+        observation: string;
+        sourceObservation: string;
+    };
 };
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
@@ -247,19 +250,26 @@ function createMutableSnapshot(repoPath: string, initialStatus: 'not_found' | 'i
     } as unknown as MutableSnapshot;
 }
 
-function createWatchRecorder(options: { pendingEvent?: boolean } = {}) {
+function createWatchRecorder(options: {
+    pendingEvent?: boolean;
+    initialCoverage?: 'ready' | 'starting';
+} = {}) {
     const touched: string[] = [];
     const unwatched: string[] = [];
+    const operations: string[] = [];
+    let coverage = options.initialCoverage ?? 'ready';
     let ensureCalls = 0;
     return {
         touched,
         unwatched,
+        operations,
         get ensureCalls() {
             return ensureCalls;
         },
         syncManager: {
             ensureFreshness: async () => {
                 ensureCalls += 1;
+                operations.push('ensure');
                 return {
                     mode: 'synced',
                     checkedAt: new Date('2026-03-16T00:00:00.000Z').toISOString(),
@@ -276,11 +286,13 @@ function createWatchRecorder(options: { pendingEvent?: boolean } = {}) {
                     ignore_rules_changed: 0,
                     directory_changed: 0,
                 },
-                coverage: 'ready',
+                coverage,
                 pending: options.pendingEvent === true,
             }),
             touchWatchedCodebase: async (codebasePath: string) => {
                 touched.push(codebasePath);
+                operations.push('touch');
+                coverage = 'ready';
             },
             unwatchCodebase: async (codebasePath: string) => {
                 unwatched.push(codebasePath);
@@ -291,13 +303,6 @@ function createWatchRecorder(options: { pendingEvent?: boolean } = {}) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
-}
-
-function isCallGraphSymbolRef(value: unknown): value is CallGraphSymbolRef {
-    if (!isRecord(value)) {
-        return false;
-    }
-    return typeof value.file === 'string' && typeof value.symbolId === 'string';
 }
 
 function parsePayload(response: ToolTextResponse): JsonPayload {
@@ -429,7 +434,12 @@ test('handleSearchCode touches the watch list only for successful indexed-root s
         } as unknown as HandlerContext;
 
         const indexedHandlers = new ToolHandlers(indexedContext, indexedSnapshot, indexedWatch.syncManager, RUNTIME_FINGERPRINT, CAPABILITIES);
-        (indexedHandlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({ outcome: 'valid' });
+        const indexedOverrides = indexedHandlers as unknown as ToolHandlersTestOverrides;
+        indexedOverrides.validateCompletionProof = async () => ({ outcome: 'valid' });
+        indexedOverrides.getPreparedReadCacheObservation = () => ({
+            observation: 'authority-observation',
+            sourceObservation: 'source-observation',
+        });
 
         const okResponse = await indexedHandlers.handleSearchCode({
             path: repoPath,
@@ -461,7 +471,158 @@ test('handleSearchCode touches the watch list only for successful indexed-root s
     });
 });
 
-test('navigation remains non-mutating and discloses pending watcher events', async () => {
+test('handleSearchCode establishes watcher coverage before its freshness comparison', async () => {
+    await withTempRepo(async (repoPath) => {
+        const snapshot = createMutableSnapshot(repoPath, 'indexed');
+        const watch = createWatchRecorder({ initialCoverage: 'starting' });
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            semanticSearch: async () => [],
+        } as unknown as HandlerContext;
+        const handlers = new ToolHandlers(
+            context,
+            snapshot,
+            watch.syncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.validateCompletionProof = async () => ({ outcome: 'valid' });
+        overrides.getPreparedReadCacheObservation = () => ({
+            observation: 'authority-observation',
+            sourceObservation: 'source-observation',
+        });
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'auth',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+        });
+        const payload = parsePayload(response);
+
+        assert.equal(payload.status, 'ok');
+        assert.deepEqual(watch.operations.slice(0, 2), ['touch', 'ensure']);
+    });
+});
+
+test('handleSearchCode retries once with a new source barrier and discards the first attempt', async () => {
+    await withTempRepo(async (repoPath) => {
+        const snapshot = createMutableSnapshot(repoPath, 'indexed');
+        const watch = createWatchRecorder();
+        let semanticSearchCalls = 0;
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            semanticSearch: async () => {
+                semanticSearchCalls += 1;
+                return [{
+                    content: 'return true;',
+                    relativePath: 'src/auth.ts',
+                    startLine: 1,
+                    endLine: 3,
+                    language: 'typescript',
+                    score: 0.9,
+                    indexedAt: '2026-03-16T00:00:00.000Z',
+                    symbolId: 'sym_auth',
+                    symbolLabel: 'function auth()',
+                }];
+            },
+        } as unknown as HandlerContext;
+        const handlers = new ToolHandlers(
+            context,
+            snapshot,
+            watch.syncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.validateCompletionProof = async () => ({ outcome: 'valid' });
+        overrides.getPreparedReadCacheObservation = () => ({
+            observation: 'authority-observation',
+            sourceObservation: semanticSearchCalls === 0
+                ? 'source-before-first-retrieval'
+                : 'source-after-first-retrieval',
+        });
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'auth',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+        });
+        const payload = parsePayload(response);
+
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.freshnessDecision, undefined);
+        assert.equal(semanticSearchCalls, 4);
+        assert.deepEqual(watch.touched, [repoPath]);
+    });
+});
+
+test('handleSearchCode blocks without results when source changes during both attempts', async () => {
+    await withTempRepo(async (repoPath) => {
+        const snapshot = createMutableSnapshot(repoPath, 'indexed');
+        const watch = createWatchRecorder();
+        let semanticSearchCalls = 0;
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            semanticSearch: async () => {
+                semanticSearchCalls += 1;
+                return [{
+                    content: 'return true;',
+                    relativePath: 'src/auth.ts',
+                    startLine: 1,
+                    endLine: 3,
+                    language: 'typescript',
+                    score: 0.9,
+                    indexedAt: '2026-03-16T00:00:00.000Z',
+                    symbolId: 'sym_auth',
+                    symbolLabel: 'function auth()',
+                }];
+            },
+        } as unknown as HandlerContext;
+        const handlers = new ToolHandlers(
+            context,
+            snapshot,
+            watch.syncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.validateCompletionProof = async () => ({ outcome: 'valid' });
+        overrides.getPreparedReadCacheObservation = () => ({
+            observation: 'authority-observation',
+            sourceObservation: `source-after-${semanticSearchCalls}-retrievals`,
+        });
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'auth',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+        });
+        const payload = parsePayload(response);
+
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'source_changed_during_request');
+        assert.deepEqual(payload.results, []);
+        assert.equal(payload.freshnessDecision, undefined);
+        assert.equal(
+            (payload.recommendedNextAction as { tool?: string } | undefined)?.tool,
+            'search_codebase',
+        );
+        assert.equal(semanticSearchCalls, 4);
+        assert.deepEqual(watch.touched, []);
+    });
+});
+
+test('navigation remains non-mutating and blocks while watcher events are pending', async () => {
     await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
         const filePath = path.join(repoPath, 'src', 'auth.ts');
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -497,13 +658,16 @@ test('navigation remains non-mutating and discloses pending watcher events', asy
             file: 'src/auth.ts'
         });
         const outlinePayload = parsePayload(outlineResponse);
-        assert.equal(outlinePayload.status, 'ok');
-        assert.deepEqual(outlinePayload.warnings, ['SOURCE_CHANGES_PENDING']);
+        assert.equal(outlinePayload.status, 'not_ready');
+        assert.equal(outlinePayload.reason, 'source_state_unverified');
+        assert.equal(outlinePayload.outline, null);
         assert.deepEqual(outlinePayload.hints, {
             sync: { tool: 'manage_index', args: { action: 'sync', path: repoPath } },
         });
-        const symbolRef = outlinePayload.outline?.symbols?.[0]?.callGraphHint?.symbolRef;
-        assert.equal(isCallGraphSymbolRef(symbolRef), true);
+        const symbolRef = {
+            file: authSymbol.file,
+            symbolId: authSymbol.symbolInstanceId,
+        };
 
         const graphResponse = await handlers.handleCallGraph({
             path: repoPath,
@@ -513,11 +677,10 @@ test('navigation remains non-mutating and discloses pending watcher events', asy
             limit: 5
         });
         const graphPayload = parsePayload(graphResponse);
-        assert.equal(graphPayload.status, 'ok');
-        assert.deepEqual(graphPayload.warnings, [
-            'CALL_GRAPH_INBOUND_COVERAGE_PARTIAL',
-            'SOURCE_CHANGES_PENDING',
-        ]);
+        assert.equal(graphPayload.status, 'not_ready');
+        assert.equal(graphPayload.reason, 'source_state_unverified');
+        assert.deepEqual(graphPayload.nodes, []);
+        assert.deepEqual(graphPayload.edges, []);
         assert.deepEqual((graphPayload.hints as Record<string, unknown>).sync, {
             tool: 'manage_index',
             args: { action: 'sync', path: repoPath },

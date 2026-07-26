@@ -16,7 +16,7 @@ import type { SemanticPassFailureDiagnostic } from "./backend-diagnostics.js";
 
 export type StalenessBucket = "fresh" | "aging" | "stale" | "unknown";
 
-export const SEARCH_RESPONSE_FORMAT_VERSION = 2 as const;
+export const SEARCH_RESPONSE_FORMAT_VERSION = 3 as const;
 
 export interface SearchSpan {
     startLine: number;
@@ -650,6 +650,10 @@ export type NonOkReason =
     | NavigationUnavailableReason
     | "missing_provider_config"
     | "search_backend_failed"
+    | "source_changed_during_request"
+    | "source_state_unverified"
+    | "analysis_unavailable"
+    | "unsupported_symbol_kind"
     | "embedding_provider_unavailable"
     | "vector_backend_unavailable";
 
@@ -670,7 +674,7 @@ interface SearchBaseResponseEnvelope {
     scope: SearchScope;
     groupBy: SearchGroupBy;
     limit: number;
-    freshnessDecision: FreshnessDecision | { mode: "skipped_requires_reindex" | "skipped_indexing" } | null;
+    freshnessDecision?: FreshnessDecision | { mode: "skipped_requires_reindex" | "skipped_indexing" } | null;
     freshnessSummary?: SearchFreshnessSummary;
     warnings?: SearchWarningDetail[];
     recommendedNextAction?: SearchRecommendedNextAction;
@@ -737,6 +741,7 @@ export interface FileOutlineInput {
     resolveMode?: "outline" | "exact";
     symbolIdExact?: string;
     symbolLabelExact?: string;
+    detail?: "summary" | "analysis";
 }
 
 export type FileOutlineStatus = "ok" | "not_found" | "requires_reindex" | "not_indexed" | "not_ready" | "unsupported" | "ambiguous";
@@ -763,6 +768,7 @@ export interface CanonicalSymbolIdentity {
 
 export interface FileOutlineSymbolResult extends CanonicalSymbolIdentity {
     callGraphHint: CallGraphHint;
+    analysis?: import("@zokizuan/satori-core").PythonStructuralAnalysis;
 }
 
 export interface FileOutlineResponseEnvelope {
@@ -796,6 +802,7 @@ export type CallGraphResponseReason =
     | "not_indexed"
     | "requires_reindex"
     | "partial_index_navigation_unavailable"
+    | "source_state_unverified"
     | "missing_provider_config"
     | "vector_backend_unavailable";
 

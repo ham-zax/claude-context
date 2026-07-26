@@ -1,8 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+    analyzePythonSymbolStructure,
     getSupportedExtensionsForCapability,
     type NavigationStore,
+    type PythonStructuralAnalysis,
     type SymbolRecord,
 } from "@zokizuan/satori-core";
 
@@ -35,7 +37,6 @@ import type {
     FileOutlineStatus,
 } from "./search-types.js";
 import { requireAbsoluteFilesystemPath, requireRepoRelativeFilePath, trackCodebasePath } from "../utils.js";
-import { WARNING_CODES } from "./warnings.js";
 
 type ToolArgs = Record<string, unknown>;
 
@@ -60,6 +61,11 @@ type NavigationHandlersHost = {
     >;
     prepareNavigationRead(absolutePath: string): Promise<TrackedRootReadinessState>;
     acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
+    getPreparedReadCacheObservation(codebasePath: string): {
+        observation: string | null;
+        sourceObservation: string | null;
+        unavailableReason?: string;
+    };
     loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         file: string,
@@ -182,30 +188,110 @@ type NavigationHandlersHost = {
     } | null>;
 };
 
-function withPendingSourceGuidance<
-    T extends { warnings?: string[]; hints?: Record<string, unknown> },
->(
-    host: Pick<NavigationHandlersHost, "getWatcherObservation" | "buildSyncHint">,
+function sourceObservationUnavailable(
+    host: Pick<NavigationHandlersHost, "getWatcherObservation">,
     codebasePath: string,
-    payload: T,
-): T {
+): boolean {
     const observation = host.getWatcherObservation(codebasePath);
     const hasPendingEvent = observation.observedEventEpoch > observation.comparedThroughEventEpoch;
     const observationUnavailable = observation.coverage !== "ready"
         || observation.coverageGapSinceEpoch !== undefined;
-    if (!hasPendingEvent && !observationUnavailable) {
+    return hasPendingEvent || observationUnavailable;
+}
+
+function buildSourceStateUnverifiedFileOutlinePayload(
+    host: Pick<NavigationHandlersHost, "buildSyncHint">,
+    codebasePath: string,
+    file: string,
+): FileOutlineResponseEnvelope {
+    return {
+        status: "not_ready",
+        reason: "source_state_unverified",
+        path: codebasePath,
+        file,
+        outline: null,
+        hasMore: false,
+        message: "Satori could not verify this outline against the current source.",
+        hints: {
+            sync: host.buildSyncHint(codebasePath),
+        },
+    };
+}
+
+function buildSourceStateUnverifiedCallGraphPayload(
+    host: Pick<NavigationHandlersHost, "buildSyncHint">,
+    codebasePath: string,
+    context: {
+        symbolRef: CallGraphSymbolRef;
+        direction: CallGraphDirection;
+        depth: number;
+        limit: number;
+    },
+): CallGraphResponseEnvelope {
+    return {
+        status: "not_ready",
+        supported: false,
+        reason: "source_state_unverified",
+        path: codebasePath,
+        codebaseRoot: codebasePath,
+        symbolRef: context.symbolRef,
+        direction: context.direction,
+        depth: context.depth,
+        limit: context.limit,
+        nodes: [],
+        edges: [],
+        notes: [],
+        message: "Satori could not verify this call graph against the current source.",
+        hints: {
+            sync: host.buildSyncHint(codebasePath),
+        },
+    };
+}
+
+function buildAnalysisUnavailableFileOutlinePayload(
+    codebasePath: string,
+    file: string,
+    message: string,
+    reason: "analysis_unavailable" | "unsupported_language" | "unsupported_symbol_kind"
+        = "analysis_unavailable",
+): FileOutlineResponseEnvelope {
+    return {
+        status: reason === "analysis_unavailable" ? "not_ready" : "unsupported",
+        reason,
+        path: codebasePath,
+        file,
+        outline: null,
+        hasMore: false,
+        message,
+    };
+}
+
+function sourceBarrierMatches(
+    left: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>,
+    right: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>,
+): boolean {
+    return left.observation !== null
+        && left.sourceObservation !== null
+        && left.unavailableReason === undefined
+        && right.observation === left.observation
+        && right.sourceObservation === left.sourceObservation
+        && right.unavailableReason === undefined;
+}
+
+function withPythonStructuralAnalysis(
+    payload: FileOutlineResponseEnvelope,
+    analysis: PythonStructuralAnalysis,
+): FileOutlineResponseEnvelope {
+    if (payload.status !== "ok" || payload.outline?.symbols.length !== 1) {
         return payload;
     }
     return {
         ...payload,
-        warnings: Array.from(new Set([
-            ...(payload.warnings ?? []),
-            ...(hasPendingEvent ? [WARNING_CODES.SOURCE_CHANGES_PENDING] : []),
-            ...(observationUnavailable ? [WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED] : []),
-        ])).sort(),
-        hints: {
-            ...(payload.hints ?? {}),
-            sync: host.buildSyncHint(codebasePath),
+        outline: {
+            symbols: [{
+                ...payload.outline.symbols[0],
+                analysis,
+            }],
         },
     };
 }
@@ -289,6 +375,7 @@ export class NavigationHandlers {
         const resolveMode = args?.resolveMode === "exact" ? "exact" : "outline";
         const symbolIdExact = typeof args?.symbolIdExact === "string" ? args.symbolIdExact.trim() : undefined;
         const symbolLabelExact = typeof args?.symbolLabelExact === "string" ? args.symbolLabelExact.trim() : undefined;
+        const detail = args?.detail === "analysis" ? "analysis" : "summary";
 
         let releasePublicationReadLease: (() => void) | undefined;
         try {
@@ -324,6 +411,19 @@ export class NavigationHandlers {
                 };
             }
             const normalizedFile = this.host.normalizeRelativeFilePath(relativeFileResult.relativePath);
+            if (detail === "analysis" && (resolveMode !== "exact" || !symbolIdExact)) {
+                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                    absoluteRoot,
+                    normalizedFile,
+                    'detail="analysis" requires resolveMode="exact" and symbolIdExact.',
+                    "not_ready",
+                    "invalid_request",
+                );
+                return {
+                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                    isError: true,
+                };
+            }
 
             if (!fs.existsSync(absoluteRoot)) {
                 const payload = this.host.buildInvalidFileOutlineRequestPayload(
@@ -418,6 +518,9 @@ export class NavigationHandlers {
             const matchedRoot = trackedRootState.root;
             const effectiveRoot = matchedRoot.path;
             releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
+            const analysisBarrier = detail === "analysis"
+                ? this.host.getPreparedReadCacheObservation(effectiveRoot)
+                : undefined;
             const absoluteFile = path.resolve(effectiveRoot, normalizedFile);
             const relativeToRoot = path.relative(effectiveRoot, absoluteFile);
             if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
@@ -538,11 +641,78 @@ export class NavigationHandlers {
                         buildOutlineSpanWarningCodes: (repair) => this.host.buildOutlineSpanWarningCodes(repair),
                     });
                     await this.host.touchWatchedCodebase(effectiveRoot);
-                    const guidedPayload = withPendingSourceGuidance(
-                        this.host,
-                        effectiveRoot,
-                        payload,
-                    );
+                    let projectedPayload = payload;
+                    if (detail === "analysis" && payload.status === "ok") {
+                        if (
+                            !analysisBarrier
+                            || analysisBarrier.observation === null
+                            || analysisBarrier.sourceObservation === null
+                            || analysisBarrier.unavailableReason !== undefined
+                        ) {
+                            projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                effectiveRoot,
+                                normalizedFile,
+                                "Satori could not verify this analysis against the current source.",
+                            );
+                        } else {
+                            const selectedSymbol = payload.outline?.symbols[0];
+                            if (!selectedSymbol) {
+                                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                    effectiveRoot,
+                                    normalizedFile,
+                                    "No exact canonical symbol was available for structural analysis.",
+                                );
+                            } else if (selectedSymbol.language !== "python") {
+                                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                    effectiveRoot,
+                                    normalizedFile,
+                                    "Structural analysis v1 is available only for Python symbols.",
+                                    "unsupported_language",
+                                );
+                            } else {
+                                const analysisResult = await analyzePythonSymbolStructure({
+                                    content: fs.readFileSync(absoluteFile, "utf8"),
+                                    symbol: {
+                                        kind: selectedSymbol.kind,
+                                        name: selectedSymbol.name,
+                                        qualifiedName: selectedSymbol.qualifiedName,
+                                        span: selectedSymbol.span,
+                                    },
+                                });
+                                const finalBarrier = this.host.getPreparedReadCacheObservation(effectiveRoot);
+                                if (!sourceBarrierMatches(analysisBarrier, finalBarrier)) {
+                                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                        effectiveRoot,
+                                        normalizedFile,
+                                        "Source changed while Satori was computing structural analysis.",
+                                    );
+                                } else if (analysisResult.status === "ok") {
+                                    projectedPayload = withPythonStructuralAnalysis(
+                                        payload,
+                                        analysisResult.analysis,
+                                    );
+                                } else {
+                                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                        effectiveRoot,
+                                        normalizedFile,
+                                        analysisResult.reason === "unsupported_symbol_kind"
+                                            ? "Structural analysis v1 supports Python functions and methods only."
+                                            : `Python structural analysis is unavailable (${analysisResult.reason}).`,
+                                        analysisResult.reason === "unsupported_symbol_kind"
+                                            ? "unsupported_symbol_kind"
+                                            : "analysis_unavailable",
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    const guidedPayload = sourceObservationUnavailable(this.host, effectiveRoot)
+                        ? buildSourceStateUnverifiedFileOutlinePayload(
+                            this.host,
+                            effectiveRoot,
+                            normalizedFile,
+                        )
+                        : projectedPayload;
                     return {
                         content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(guidedPayload, proofDebugHint)) }],
                     };
@@ -1071,11 +1241,18 @@ export class NavigationHandlers {
                 symbolRef,
                 ...relationshipBackedGraph,
             } satisfies CallGraphResponseEnvelope, proofDebugHint);
-            const guidedPayload = withPendingSourceGuidance(
-                this.host,
-                effectiveRoot,
-                payload,
-            );
+            const guidedPayload = sourceObservationUnavailable(this.host, effectiveRoot)
+                ? buildSourceStateUnverifiedCallGraphPayload(
+                    this.host,
+                    effectiveRoot,
+                    {
+                        symbolRef,
+                        direction,
+                        depth,
+                        limit,
+                    },
+                )
+                : payload;
             return {
                 content: [{ type: "text", text: this.host.stringifyToolJson(guidedPayload) }],
             };

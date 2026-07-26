@@ -83,6 +83,19 @@ test('file_outline validates resolveMode=exact requirements', async () => {
     assert.match(response.content[0]?.text || '', /symbolIdExact|resolveMode/);
 });
 
+test('file_outline requires a canonical exact symbol for structural analysis', async () => {
+    const response = await fileOutlineTool.execute({
+        path: '/repo',
+        file: 'src/runtime.py',
+        resolveMode: 'exact',
+        symbolLabelExact: 'function run()',
+        detail: 'analysis',
+    }, buildContext());
+
+    assert.equal(response.isError, true);
+    assert.match(response.content[0]?.text || '', /detail="analysis".*symbolIdExact/);
+});
+
 test('file_outline delegates to handlers with parsed input', async () => {
     let receivedArgs: Record<string, unknown> | undefined;
     const ctx = {
@@ -115,6 +128,42 @@ test('file_outline delegates to handlers with parsed input', async () => {
     assert.equal(receivedArgs?.limitSymbols, 25);
     assert.equal(receivedArgs?.resolveMode, 'exact');
     assert.equal(receivedArgs?.symbolLabelExact, 'function run()');
+});
+
+test('file_outline delegates an exact structural-analysis request unchanged', async () => {
+    let receivedArgs: Record<string, unknown> | undefined;
+    const ctx = {
+        toolHandlers: {
+            handleFileOutline: async (args: Record<string, unknown>) => {
+                receivedArgs = args;
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: 'ok',
+                            path: '/repo',
+                            file: 'src/runtime.py',
+                            outline: { symbols: [] },
+                            hasMore: false,
+                        }),
+                    }],
+                };
+            },
+        },
+    } as unknown as ToolContext;
+
+    const response = await fileOutlineTool.execute({
+        path: '/repo',
+        file: 'src/runtime.py',
+        resolveMode: 'exact',
+        symbolIdExact: 'syminst_python_run',
+        detail: 'analysis',
+    }, ctx);
+
+    assert.equal(response.isError, undefined);
+    assert.equal(receivedArgs?.resolveMode, 'exact');
+    assert.equal(receivedArgs?.symbolIdExact, 'syminst_python_run');
+    assert.equal(receivedArgs?.detail, 'analysis');
 });
 
 test('file_outline uses provider vector context when available', async () => {

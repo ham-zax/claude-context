@@ -182,6 +182,8 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
 }): SearchResponseEnvelope {
     const recommendedNextAction = buildTopRecommendedSearchAction(input.codebaseRoot, input.results);
     const results = input.results.map(projectGroupedResultV2);
+    const exposeFreshnessEvidence = input.debugSearch !== undefined
+        && "readiness" in input.debugSearch;
     return {
         formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
         status: "ok",
@@ -192,8 +194,10 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
         groupBy: input.groupBy,
         limit: input.limit,
         resultMode: "grouped",
-        freshnessDecision: input.freshnessDecision,
-        freshnessSummary: input.freshnessSummary,
+        ...(exposeFreshnessEvidence ? {
+            freshnessDecision: input.freshnessDecision,
+            freshnessSummary: input.freshnessSummary,
+        } : {}),
         ...(input.disclosure ? { disclosure: input.disclosure } : {}),
         ...buildWarnings(input.warnings),
         ...(recommendedNextAction ? { recommendedNextAction } : {}),
@@ -205,6 +209,8 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
 export function buildRawSearchEnvelope(input: SearchResponseCommonInput & {
     results: SearchChunkResult[];
 }): SearchResponseEnvelope {
+    const exposeFreshnessEvidence = input.debugSearch !== undefined
+        && "readiness" in input.debugSearch;
     return {
         formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
         status: "ok",
@@ -215,8 +221,10 @@ export function buildRawSearchEnvelope(input: SearchResponseCommonInput & {
         groupBy: input.groupBy,
         limit: input.limit,
         resultMode: "raw",
-        freshnessDecision: input.freshnessDecision,
-        freshnessSummary: input.freshnessSummary,
+        ...(exposeFreshnessEvidence ? {
+            freshnessDecision: input.freshnessDecision,
+            freshnessSummary: input.freshnessSummary,
+        } : {}),
         ...buildWarnings(input.warnings),
         recommendedNextAction: buildTopRecommendedRawSearchAction(input.codebaseRoot, input.results),
         ...buildSearchResponseHints(input),

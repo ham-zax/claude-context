@@ -61,7 +61,7 @@ test('search front door rebinds freshness when post-freshness root identity chan
     }
 });
 
-test('search front door preserves vector search with a source-checkpoint warning', async () => {
+test('search front door blocks when the source checkpoint is unavailable', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-search-frontdoor-checkpoint-warning-'));
     const ready = {
         state: 'ready' as const,
@@ -77,7 +77,11 @@ test('search front door preserves vector search with a source-checkpoint warning
             checkpointStatus: 'missing' as const,
         }),
         noteFreshnessMode: () => undefined,
-        buildFreshnessBlockedSearchPayload: () => null,
+        buildFreshnessBlockedSearchPayload: () => ({
+            status: 'requires_reindex',
+            reason: 'requires_reindex',
+            results: [],
+        }),
         isPartialIndexNavigationUnavailable: () => false,
         partialIndexWarnings: [],
         canSyncStaleLocal: () => false,
@@ -92,12 +96,11 @@ test('search front door preserves vector search with a source-checkpoint warning
             resultMode: 'grouped',
             limit: 5,
         }, host);
-        assert.equal(result.kind, 'ready');
-        if (result.kind !== 'ready') return;
-        assert.equal(
-            result.partialIndexSearchWarnings.includes('SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE'),
-            true,
-        );
+        assert.equal(result.kind, 'blocked');
+        if (result.kind !== 'blocked') return;
+        assert.equal(result.payload.status, 'requires_reindex');
+        assert.equal(result.payload.reason, 'requires_reindex');
+        assert.deepEqual(result.payload.results, []);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
