@@ -112,5 +112,5 @@ npx -y @zokizuan/satori-cli@latest upgrade
 
 The CLI update occurs first. The exact MCP/Core candidate is then installed,
 validated, and activated through the stable launcher. Client configuration,
-indexes, skills, hooks, and repository profiles are preserved. Running coding
+indexes, hooks, and repository profiles are preserved. Running coding
 agents must be restarted to use an activated runtime update.

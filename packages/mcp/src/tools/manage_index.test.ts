@@ -297,7 +297,7 @@ test("manage_index response shape is a JSON envelope in MCP text content", async
     );
 });
 
-test("public product docs and skills list manage_index repair and do not claim text-only responses", () => {
+test("public product docs list manage_index repair and do not claim text-only responses", () => {
     const e2e = fs.readFileSync(
         path.join(REPO_ROOT, "docs/SATORI_FEATURES_AND_USE_CASES.md"),
         "utf8",
@@ -319,17 +319,6 @@ test("public product docs and skills list manage_index repair and do not claim t
         e2e,
         /Shell CLI runtime \(`packages\/mcp\/src\/cli`\) is transport\/client glue plus install\/uninstall/,
     );
-
-    for (const skillRel of [
-        "packages/cli/assets/skills/satori/SKILL.md",
-        "packages/mcp/assets/skills/satori/SKILL.md",
-    ]) {
-        const skill = fs.readFileSync(path.join(REPO_ROOT, skillRel), "utf8");
-        assert.match(skill, /JSON envelopes/);
-        for (const action of MANAGE_INDEX_ACTIONS) {
-            assert.match(skill, new RegExp(`\`${action}\``));
-        }
-    }
 });
 
 test("manage_index returns structured backend diagnostics when provider runtime fails", async () => {

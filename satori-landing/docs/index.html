@@ -677,8 +677,8 @@
         <h2>Install the MCP Server</h2>
         <p class="lede">
           Satori runs as an MCP server. The easiest path is the CLI installer:
-          it writes managed client config and copies the first-party workflow
-          guidance without adding new MCP tools.
+          it writes managed client config and concise workflow guidance without
+          adding new MCP tools.
         </p>
         <div class="callout">
           <p>
@@ -695,9 +695,8 @@
             <pre><code>npx -y @zokizuan/satori-cli@latest install --client codex</code></pre>
             <p>
               Writes the Satori MCP entry to <code>~/.codex/config.toml</code>
-              and installs conditional workflow guidance in
-              <code>~/.codex/AGENTS.md</code> plus the Satori skill in
-              <code>~/.codex/skills</code>. Add
+              and a managed guidance block to
+              <code>~/.codex/AGENTS.md</code>. Add
               <code>--install-guidance-hook</code> only when you also want an
               opt-in session reminder in <code>~/.codex/hooks.json</code>.
             </p>
@@ -707,8 +706,7 @@
             <pre><code>npx -y @zokizuan/satori-cli@latest install --client claude</code></pre>
             <p>
               Writes the Satori MCP entry to
-              <code>~/.claude.json</code> and installs the Satori skill
-              in <code>~/.claude/skills</code>.
+              <code>~/.claude.json</code>.
             </p>
           </div>
           <div class="panel">
@@ -716,8 +714,8 @@
             <pre><code>npx -y @zokizuan/satori-cli@latest install --client opencode</code></pre>
             <p>
               Writes the Satori MCP entry to
-              <code>~/.config/opencode/opencode.json</code> and installs the
-              Satori workflow instructions in
+              <code>~/.config/opencode/opencode.json</code> and a managed
+              guidance block to
               <code>~/.config/opencode/AGENTS.md</code>.
             </p>
           </div>
@@ -726,7 +724,7 @@
           <p>
             Use <code>--client all</code> to install every supported client, and
             <code>uninstall</code> with the same selector to remove only
-            Satori-managed config and skills. Run
+            Satori-managed config and guidance. Run
             <code>npx -y @zokizuan/satori-cli@latest doctor</code> to check
             provider and Milvus setup without starting an MCP client.
           </p>
@@ -743,8 +741,8 @@
           <p>
             If you did not install the CLI globally, run
             <code>npx -y @zokizuan/satori-cli@latest upgrade</code>.
-            Upgrade does not rewrite client configuration, indexes, skills,
-            hooks, or repository profiles.
+            Upgrade does not rewrite client configuration, indexes, hooks, or
+            repository profiles.
           </p>
           <p>
             Satori follows the exact MCP/Core versions declared by the latest
@@ -813,10 +811,9 @@
             <h3>Managed Files</h3>
             <ul>
               <li>Codex config: <code>~/.codex/config.toml</code>.</li>
+              <li>Codex guidance: <code>~/.codex/AGENTS.md</code>.</li>
               <li>Optional Codex hook: <code>~/.codex/hooks.json</code>.</li>
-              <li>Codex skills: <code>~/.codex/skills</code>.</li>
               <li>Claude config: <code>~/.claude.json</code>.</li>
-              <li>Claude skills: <code>~/.claude/skills</code>.</li>
               <li>OpenCode config: <code>~/.config/opencode/opencode.json</code>.</li>
               <li>OpenCode instructions: <code>~/.config/opencode/AGENTS.md</code>.</li>
             </ul>

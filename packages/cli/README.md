@@ -32,7 +32,7 @@ satori doctor
 
 Restart the MCP client after installation.
 
-Use `satori upgrade` to update the globally installed CLI, then stage and activate that release's exact MCP and Core versions. The CLI update happens first. If MCP/Core verification fails, the updated CLI remains installed and the managed launcher is left unchanged; correct the reported problem and run the command again. `satori update` is an alias. Client configuration, indexes, skills, hooks, and repository profiles are not rewritten.
+Use `satori upgrade` to update the globally installed CLI, then stage and activate that release's exact MCP and Core versions. The CLI update happens first. If MCP/Core verification fails, the updated CLI remains installed and the managed launcher is left unchanged; correct the reported problem and run the command again. `satori update` is an alias. Client configuration, indexes, hooks, and repository profiles are not rewritten.
 
 The command reports progress before each potentially slow phase:
 
@@ -75,7 +75,12 @@ tool call <toolName> --args-file <path>
 <toolName> [schema-driven flags]
 ```
 
-Codex receives the Satori skill and a conditional AGENTS guidance block by default. `--install-guidance-hook` additionally writes one opt-in `SessionStart` reminder to `~/.codex/hooks.json`; it preserves unrelated hook entries and may require Codex's one-time hook trust review. The reminder presents Satori as an option for semantic or freshness-aware discovery rather than requiring it for every task.
+Codex receives one managed Satori block in `~/.codex/AGENTS.md` by default.
+The block recommends Satori for semantic ownership and freshness-aware
+discovery, and the usual/native workflow for known paths, exact literals, and
+small local edits. `--install-guidance-hook` additionally writes one opt-in
+`SessionStart` reminder to `~/.codex/hooks.json`; it preserves unrelated hook
+entries and may require Codex's one-time hook trust review.
 
 Global flags must precede the command token:
 

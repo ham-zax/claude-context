@@ -37,7 +37,6 @@
     "dist/**/*.js",
     "dist/**/*.mjs",
     "dist/**/*.d.ts",
-    "assets/skills/**/*.md",
     "README.md"
   ],
   "repository": {

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
 import { applyEdits, modify, parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { CliError } from "./errors.js";
@@ -40,7 +40,7 @@ const CODEX_GUIDANCE_HOOK_START = "# >>> satori-cli managed codex guidance hook 
 const CODEX_GUIDANCE_HOOK_END = "# <<< satori-cli managed codex guidance hook end <<<";
 const INSTRUCTIONS_BLOCK_START = "<!-- satori-mcp:start -->";
 const INSTRUCTIONS_BLOCK_END = "<!-- satori-mcp:end -->";
-const OWNED_SKILL_DIRS = ["satori"] as const;
+const LEGACY_SKILL_DIR_NAME = "satori";
 const MANAGED_RUNTIME_DIR = "mcp-runtime";
 const MANAGED_BIN_DIR = "bin";
 const MANAGED_LAUNCHER_FILE = "satori-mcp.js";
@@ -69,7 +69,7 @@ const SATORI_RUNTIME_ENV_VARS = [
     "MCP_ENABLE_WATCHER",
     "MCP_WATCH_DEBOUNCE_MS",
 ] as const;
-const CODEX_GUIDANCE_HOOK_MESSAGE = "Satori MCP is available. Consider search_codebase for unfamiliar behavior, semantic ownership, or freshness-aware discovery; for known paths and exact literals, native tools may be simpler. If used, follow recommendedNextAction for bounded proof, treat call_graph as advisory, and never create, reindex, or clear without explicit user approval.";
+const CODEX_GUIDANCE_HOOK_MESSAGE = "Satori MCP is available for semantic ownership and freshness-aware discovery. Prefer search_codebase for unfamiliar behavior; use the usual/native workflow for known paths, exact literals, or small local edits. Follow recommendedNextAction, verify call_graph inbound results, and ask before create, reindex, or clear.";
 const CODEX_GUIDANCE_HOOK_MATCHER = "startup|resume|clear|compact";
 const CODEX_GUIDANCE_HOOK_TIMEOUT_SECONDS = 5;
 const CODEX_GUIDANCE_HOOK_SCRIPT = [
@@ -89,53 +89,21 @@ const CODEX_GUIDANCE_HOOK_SCRIPT = [
     'printf "%s\\n" "$msg"',
 ].join("; ");
 const CODEX_GUIDANCE_HOOK_COMMAND = `sh -lc '${CODEX_GUIDANCE_HOOK_SCRIPT}'`;
-const CODEX_AGENT_INSTRUCTIONS = `# Satori MCP
+const SATORI_AGENT_INSTRUCTIONS = `# Satori MCP
 
-Satori MCP is available for semantic ownership discovery, freshness-aware navigation, and index lifecycle inspection. Use it when those capabilities help; known paths, exact literals, and small local edits may be simpler with native tools.
+Satori MCP is available for semantic ownership and freshness-aware code discovery. Prefer it for unfamiliar behavior, related implementation, or index state. Use the usual/native workflow for known paths, exact literals, and small local edits.
 
-## Suggested Satori Flow
-1. \`search_codebase\` - Start with plain-English behavior or ownership queries; narrow with \`lang:\`, \`path:\`, \`must:\`, and \`exclude:\`
-2. \`continue_search\` - reveal more groups from the same frozen ranking when a continuation is returned
-3. \`read_file\` - follow the canonical bounded request returned by search for final source evidence
-4. \`call_graph\` - inspect advisory callers/callees only for graph-ready targets
-5. \`file_outline\` - request file-wide outline metadata or exact disambiguation when needed
-6. \`list_codebases\` / \`manage_index\` - inspect lifecycle state; mutate it only when the task authorizes that action
+## Priority Order
+1. \`search_codebase\` — find behavior or ownership by intent
+2. \`continue_search\` — reveal more from the same frozen result when useful
+3. \`read_file\` / \`file_outline\` — inspect exact source or structure
+4. \`call_graph\` — inspect advisory relationships for graph-ready targets
+5. \`list_codebases\` / \`manage_index\` — inspect index state
 
-## When Satori Helps
-- Use Satori when semantic exploration would add value: finding behavioral owners, building context, or understanding an unfamiliar implementation.
-- Prefer plain-English queries first when the task is about intent, policy, ownership, runtime behavior, or unfamiliar code.
-- Switch to exact identifiers, constants, warning codes, and path-scoped operators when narrowing or proving a candidate result.
-
-## Verification Rules
-- Treat the envelope \`recommendedNextAction\` as the default next move unless the user requested a different proof path.
-- Read every \`warnings[].action\`; warnings are degraded, not fatal, unless \`blocksUse=true\`.
-- Grouped \`formatVersion: 2\` results expose one canonical \`target\`. Prefer the returned \`recommendedNextAction\`. For a concrete symbol, the canonical read uses \`mode="plain"\` and \`open_symbol={contractVersion:2,symbolId,context:{preset:"implementation"}}\`; otherwise read the 1-based inclusive \`target.span\`.
-- Pass \`target\` directly to \`call_graph\` only when \`navigation.graph="ready"\`; that state always carries \`navigation.inbound="verify"\`. Use optional \`callerSearchTerm\` in a separate \`must:<term> <term>\` search to verify inbound references.
-- If any tool returns \`requires_reindex\` or \`hints.reindex\`, stop and report the exact reason. Obtain explicit user approval before \`create\` or \`reindex\`; do not substitute \`sync\` for a required rebuild.
-- Never call \`manage_index(action="clear")\` without explicit user authorization.
-- Do not treat call_graph inbound results as sole authority for blast radius; verify inbound impact with rg, tests, or direct references.
-- For ultra-fast exact literal lookup, local lexical search may still be faster; use Satori when semantic ownership or freshness-aware navigation matters.
-`;
-const OPENCODE_INSTRUCTIONS = `# Satori MCP
-
-Satori MCP is available for plain-English semantic discovery, deterministic proof navigation, and index lifecycle inspection. Use it when those capabilities help; native tools remain appropriate for known paths and exact literals.
-
-## Suggested Satori Flow
-1. \`search_codebase\` - start with behavior/concept queries; use exact identifiers or constants when known
-2. \`continue_search\` - reveal more groups from the same frozen ranking when available
-3. \`read_file\` - follow the returned canonical bounded source request
-4. \`call_graph\` - inspect advisory callers/callees only for graph-ready targets
-5. \`file_outline\` - request outline metadata or exact disambiguation when needed
-6. \`list_codebases\` / \`manage_index\` - inspect lifecycle state; mutate it only with task authority
-
-## Rules
-- Consider Satori when the task needs semantic ownership discovery, unfamiliar-flow exploration, or freshness-aware navigation.
-- Start with plain-English behavior questions; switch to exact ids, constants, and operators for proof.
-- Prefer the envelope \`recommendedNextAction\` and inspect every \`warnings[].action\`.
-- In grouped \`formatVersion: 2\` output, use \`recommendedNextAction\`; exact-symbol reads require \`mode\`, \`contractVersion: 2\`, one identity, and one context or continuation operation. Pass \`target\` to \`call_graph\` only when \`navigation.graph="ready"\`.
-- Treat graph-ready \`navigation.inbound="verify"\` as mandatory caller verification. Use optional \`callerSearchTerm\` with a separate \`must:<term> <term>\` search before treating inbound graph results as complete.
-- If a tool returns \`requires_reindex\`, report the exact reason and obtain explicit user approval before reindexing. Never clear an index without explicit authorization.
-- Read the relevant implementation and call sites before editing behavior.
+## Boundaries
+- Follow \`recommendedNextAction\` and read \`warnings[].action\`.
+- Treat inbound \`call_graph\` results as leads to verify, not complete blast-radius proof.
+- If Satori reports \`requires_reindex\`, report the reason. Ask before \`create\`, \`reindex\`, or \`clear\`.
 `;
 
 type ExecFileSyncLike = typeof execFileSync;
@@ -178,7 +146,6 @@ export interface InstallCommandOptions {
     homeDir?: string;
     repoDir?: string;
     packageSpecifier?: string;
-    skillAssetRoot?: string;
     runtimeCommand?: ManagedRuntimeCommand;
     execFileSyncImpl?: ExecFileSyncLike;
     env?: NodeJS.ProcessEnv;
@@ -196,11 +163,9 @@ export interface InstallCommandOptions {
 export interface ClientInstallResult {
     client: ClientName;
     configPath: string;
-    skillsPath?: string;
     instructionsPath?: string;
     guidanceHookPath?: string;
     configChanged: boolean;
-    skillsChanged: boolean;
     instructionsChanged: boolean;
     guidanceHookChanged: boolean;
     status: "updated" | "unchanged";
@@ -252,7 +217,7 @@ interface ClientTarget {
 }
 
 type CompanionTarget =
-    | { kind: "skills"; path: string }
+    | { kind: "legacy-skill"; path: string }
     | { kind: "instructions"; path: string; instructions: string }
     | { kind: "guidance-hook"; path: string };
 
@@ -308,11 +273,6 @@ export interface ManagedClientConfigProof {
     usesManagedLauncher?: boolean;
 }
 
-function resolveDefaultSkillAssetRoot(): string {
-    const currentFile = fileURLToPath(import.meta.url);
-    return path.resolve(path.dirname(currentFile), "..", "assets", "skills");
-}
-
 function resolveDefaultPackageSpecifier(): string {
     try {
         return resolveManagedPackageSpecifier();
@@ -329,13 +289,13 @@ function resolveClientTargets(homeDir: string): ClientTarget[] {
             configPath: path.join(homeDir, ".codex", "config.toml"),
             companions: [
                 {
-                    kind: "skills",
-                    path: path.join(homeDir, ".codex", "skills"),
+                    kind: "legacy-skill",
+                    path: path.join(homeDir, ".codex", "skills", LEGACY_SKILL_DIR_NAME),
                 },
                 {
                     kind: "instructions",
                     path: path.join(homeDir, ".codex", "AGENTS.md"),
-                    instructions: CODEX_AGENT_INSTRUCTIONS,
+                    instructions: SATORI_AGENT_INSTRUCTIONS,
                 },
                 {
                     kind: "guidance-hook",
@@ -347,8 +307,8 @@ function resolveClientTargets(homeDir: string): ClientTarget[] {
             client: "claude",
             configPath: path.join(homeDir, ".claude.json"),
             companions: [{
-                kind: "skills",
-                path: path.join(homeDir, ".claude", "skills"),
+                kind: "legacy-skill",
+                path: path.join(homeDir, ".claude", "skills", LEGACY_SKILL_DIR_NAME),
             }],
         },
         {
@@ -357,7 +317,7 @@ function resolveClientTargets(homeDir: string): ClientTarget[] {
             companions: [{
                 kind: "instructions",
                 path: path.join(homeDir, ".config", "opencode", "AGENTS.md"),
-                instructions: OPENCODE_INSTRUCTIONS,
+                instructions: SATORI_AGENT_INSTRUCTIONS,
             }],
         },
     ];
@@ -1300,45 +1260,13 @@ function prepareOpenCodeUninstall(filePath: string): FileMutation {
     return mutateJsonc(filePath, current, ["mcp", "satori"], undefined);
 }
 
-function prepareSkillInstall(skillsPath: string, skillAssetRoot: string): FileMutation {
-    const writes: Array<{ destinationDir: string; destinationFile: string; content: string }> = [];
-    let changed = false;
-
-    for (const skillDirName of OWNED_SKILL_DIRS) {
-        const sourceFile = path.join(skillAssetRoot, skillDirName, "SKILL.md");
-        if (!fs.existsSync(sourceFile)) {
-            throw new CliError("E_USAGE", `Missing packaged skill asset: ${sourceFile}`, 2);
-        }
-        const content = fs.readFileSync(sourceFile, "utf8");
-        const destinationDir = path.join(skillsPath, skillDirName);
-        const destinationFile = path.join(destinationDir, "SKILL.md");
-        if (readTextIfExists(destinationFile) !== content) {
-            changed = true;
-            writes.push({ destinationDir, destinationFile, content });
-        }
-    }
-
+function prepareLegacySkillRemoval(skillPath: string): FileMutation {
+    const changed = fs.existsSync(skillPath);
     return {
         changed,
         apply: () => {
-            for (const write of writes) {
-                ensureDir(write.destinationDir);
-                fs.writeFileSync(write.destinationFile, write.content, "utf8");
-            }
-        },
-    };
-}
-
-function prepareSkillRemoval(skillsPath: string): FileMutation {
-    const removals = OWNED_SKILL_DIRS
-        .map((skillDirName) => path.join(skillsPath, skillDirName))
-        .filter((destinationDir) => fs.existsSync(destinationDir));
-
-    return {
-        changed: removals.length > 0,
-        apply: () => {
-            for (const destinationDir of removals) {
-                fs.rmSync(destinationDir, { recursive: true, force: true });
+            if (changed) {
+                fs.rmSync(skillPath, { recursive: true, force: true });
             }
         },
     };
@@ -1408,14 +1336,11 @@ function prepareInstructionsRemoval(filePath: string): FileMutation {
 function prepareCompanionMutation(
     companion: CompanionTarget,
     command: InstallCommandInput,
-    skillAssetRoot: string,
     installGuidanceHook: boolean,
 ): CompanionMutation {
     let mutation: FileMutation;
-    if (companion.kind === "skills") {
-        mutation = command.kind === "install"
-            ? prepareSkillInstall(companion.path, skillAssetRoot)
-            : prepareSkillRemoval(companion.path);
+    if (companion.kind === "legacy-skill") {
+        mutation = prepareLegacySkillRemoval(companion.path);
     } else if (companion.kind === "instructions") {
         mutation = command.kind === "install"
             ? prepareInstructionsInstall(companion.path, companion.instructions)
@@ -1462,7 +1387,6 @@ function prepareMutation(
     target: ClientTarget,
     command: InstallCommandInput,
     runtimeCommand: ManagedRuntimeCommand,
-    skillAssetRoot: string
 ): PreparedMutation {
     const legacyGuidanceHook = target.client === "codex"
         && (readTextIfExists(target.configPath)?.includes(CODEX_GUIDANCE_HOOK_START) ?? false);
@@ -1476,7 +1400,7 @@ function prepareMutation(
         );
     const configMutation = prepareConfigMutation(target, command, runtimeCommand);
     const companionMutations = target.companions.map((companion) => (
-        prepareCompanionMutation(companion, command, skillAssetRoot, installGuidanceHook)
+        prepareCompanionMutation(companion, command, installGuidanceHook)
     ));
 
     return {
@@ -1888,7 +1812,6 @@ export function createInstallPlan(
     const homeDir = options.homeDir ?? os.homedir();
     const repoDir = options.repoDir ?? process.cwd();
     const packageSpecifier = options.packageSpecifier ?? resolveDefaultPackageSpecifier();
-    const skillAssetRoot = options.skillAssetRoot ?? resolveDefaultSkillAssetRoot();
     const plannedRuntimeCommand = options.runtimeCommand ?? plannedManagedRuntimeCommand(homeDir, packageSpecifier);
     const clientCommand = resolveManagedClientCommand(homeDir);
     const profileMutation: FileMutation & { filePath?: string } = command.kind === "install"
@@ -1896,7 +1819,7 @@ export function createInstallPlan(
         : { changed: false, apply: () => {} };
 
     const prepared = selectTargets(homeDir, command.client).map((target) => (
-        prepareMutation(target, command, clientCommand, skillAssetRoot)
+        prepareMutation(target, command, clientCommand)
     ));
 
     return Object.freeze({
@@ -2034,11 +1957,9 @@ export function applyInstallPlan(
         results: prepared.map((mutation) => ({
             client: mutation.target.client,
             configPath: mutation.target.configPath,
-            skillsPath: mutation.target.companions.find((companion) => companion.kind === "skills")?.path,
             instructionsPath: mutation.target.companions.find((companion) => companion.kind === "instructions")?.path,
             guidanceHookPath: mutation.target.companions.find((companion) => companion.kind === "guidance-hook")?.path,
             configChanged: mutation.configChanged,
-            skillsChanged: mutation.companionMutations.some((entry) => entry.companion.kind === "skills" && entry.changed),
             instructionsChanged: mutation.companionMutations.some((entry) => entry.companion.kind === "instructions" && entry.changed),
             guidanceHookChanged: mutation.companionMutations.some((entry) => entry.companion.kind === "guidance-hook" && entry.changed),
             status: mutation.configChanged || mutation.companionMutations.some((entry) => entry.changed) || launcherMutation.changed || profileMutation.changed ? "updated" : "unchanged",
