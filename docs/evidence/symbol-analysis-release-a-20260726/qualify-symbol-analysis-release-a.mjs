@@ -304,9 +304,9 @@ async function main() {
             ),
         },
         runtime: {
-            core: "3.4.0",
-            mcp: "6.5.0",
-            cli: "1.6.0",
+            core: "3.5.0",
+            mcp: "6.6.0",
+            cli: "1.7.0",
             provider: "Potion",
             model: POTION_MODEL,
             vectorStore: "LanceDB",

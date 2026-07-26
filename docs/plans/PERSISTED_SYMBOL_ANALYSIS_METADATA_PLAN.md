@@ -1,9 +1,7 @@
 # Symbol Analysis Metadata Plan
 
-**Status:** M0 formally selects on-demand analysis and its production budgets
-passed; structural Release A qualification is blocked by an independent Core
-publication-read-lease test that does not complete; persisted analysis and
-graph-derived Release B remain unauthorized
+**Status:** M0 and Structural Release A passed on the isolated candidate;
+persisted analysis and graph-derived Release B remain unauthorized
 **Date:** 2026-07-26
 **Review base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
 **Base verification:** matched product `HEAD` when M0 and Release A began;
@@ -775,35 +773,36 @@ selected symbol:
     src/cli/main.py::cli_entry_point
 
 cold request:
-    49.810 ms
+    1306.404 ms
 
 repeated request:
-    p50 46.540 ms
-    p95 51.333 ms
+    p50 45.071 ms
+    p95 45.864 ms
 
 paired analysis overhead:
-    p95 1.235 ms
+    p95 2.350 ms
 
 large supported production file:
     src/cli/commands/discover.py
     123835 bytes
-    144.766 ms
+    143.488 ms
 
 process-tree peak RSS increase over paired summary:
-    0.219 MiB
+    0.094 MiB
 
 retained process-tree RSS increase:
-    7.059 MiB
+    13.012 MiB
 
 maximum response:
-    1611 bytes
+    1621 bytes
 
 unused default path:
     normalized payload equal
     zero latency regression
     no analysis field
     no persisted analysis artifact
-    no publication or operation change
+    no publication change
+    no analysis-owned synchronization
 ```
 
 The 525434-byte generated operations script was not used as a latency sample
@@ -820,8 +819,8 @@ ARCHITECTURE_DECISION=sealed_for_release_a
 PERSISTENCE_RECONSIDERATION=only_under_the_triggers_in_section_11_2
 ```
 
-Complete affected qualification then exposed an independent current-master
-regression:
+Complete affected qualification originally exposed the publication read-lease
+retention hang:
 
 ```text
 Core full suite:
@@ -838,13 +837,28 @@ MCP full suite:
     not run after the explicit stop condition fired
 ```
 
-This plan does not authorize changing that freshness/publication owner.
-Structural Release A remains unmodified and records:
+The authorized repair preserved the existing publication-read and retention
+owners. Activation now returns its generation-bound proof while active readers
+retain the prior publication; queued retention performs cleanup after the final
+reader releases. The repair does not delete leased generations, weaken
+validation, or add another authority.
 
 ```text
-RELEASE_A_OUTCOME=symbol_analysis_release_a_qualification_blocked
-BLOCKER=current Core read-lease retention test does not complete
-PACKAGE_VERSION_DECISION=hold Core 3.4.0 and MCP 6.5.0 release candidacy
+focused retention:
+    4 passed
+
+complete Core:
+    605 passed, 1 skipped, 0 failed
+
+complete MCP:
+    1057 passed, 0 failed
+
+complete CLI:
+    212 passed, 0 failed
+
+RELEASE_A_OUTCOME=symbol_analysis_release_a_pass
+BLOCKER=none
+PACKAGE_VERSION_DECISION=Core 3.5.0; MCP 6.6.0; CLI 1.7.0
 ```
 
 ## 12. Proposed release sequence

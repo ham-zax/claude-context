@@ -1,7 +1,8 @@
 {
   "schemaVersion": "symbol-analysis-release-a-summary-v1",
   "recordedAt": "2026-07-26",
-  "m0FinalizationBase": "e9745207b517e812cc7e5754ba536a9e32fdc182",
+  "structuralReleaseBase": "2a69144be52e0b4f9ea9894dd5695666c7f7dce9",
+  "qualifiedCandidate": "0873dd9ffb875ff3e8616db332641abe3df4b53c",
   "targetRevision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
   "trackedPythonFiles": 1013,
   "metricVersion": "python_structural_v1",
@@ -9,17 +10,21 @@
   "architectureDecision": "sealed_for_release_a",
   "compatibilityDecision": "additive_optional_route",
   "storedSchemaDecision": "no_change",
-  "packageVersionDecision": "hold_core_3_4_0_and_mcp_6_5_0_release_candidacy",
+  "packageVersionDecision": {
+    "core": "3.5.0",
+    "mcp": "6.6.0",
+    "cli": "1.7.0"
+  },
   "performance": {
     "outcome": "pass",
-    "coldRequestMs": 49.810327,
-    "repeatedP95Ms": 51.333314,
-    "pairedAnalysisOverheadP95Ms": 1.2348029999999994,
+    "coldRequestMs": 1306.403542,
+    "repeatedP95Ms": 45.864162,
+    "pairedAnalysisOverheadP95Ms": 2.3504120000000057,
     "largeFileBytes": 123835,
-    "largeFileRequestMs": 144.766095,
-    "peakRssIncreaseMiB": 0.21875,
-    "retainedRssIncreaseMiB": 7.05859375,
-    "responseBytes": 1611,
+    "largeFileRequestMs": 143.487657,
+    "peakRssIncreaseMiB": 0.09375,
+    "retainedRssIncreaseMiB": 13.01171875,
+    "responseBytes": 1621,
     "defaultSummaryRegressionMs": 0,
     "defaultSummaryRegressionPercent": 0
   },
@@ -28,21 +33,39 @@
     "allowedVolatileField": "outline.symbols[].callGraphHint.validatedAt",
     "analysisFieldAbsent": true,
     "persistedArtifactsAdded": 0,
-    "publicationChanged": false,
-    "operationChanged": false
+    "publicationChanged": false
+  },
+  "retentionRepair": {
+    "owner": "Context.performAtomicDeltaPublication and existing publication retention queue",
+    "rootCause": "activation awaited retention while retention waited for the active reader of the prior publication",
+    "newAuthorityAdded": false,
+    "leasedGenerationDeleted": false,
+    "focusedTests": "4_passed"
   },
   "verification": {
-    "coreBuild": "pass",
-    "mcpRuntimeBuild": "pass",
-    "coreFullSuite": "blocked_pending_promise",
-    "corePassedBeforeStall": 48,
-    "coreSuiteInterruptedAfterMs": 416735.750047,
-    "focusedReadLeaseTest": "timeout_60s",
-    "mcpFullSuite": "not_run_stop_condition"
+    "coreFullSuite": {
+      "passed": 605,
+      "skipped": 1,
+      "failed": 0
+    },
+    "mcpFullSuite": {
+      "passed": 1057,
+      "failed": 0
+    },
+    "cliFullSuite": {
+      "passed": 212,
+      "failed": 0
+    },
+    "typecheck": "pass",
+    "lint": "pass",
+    "builds": "pass",
+    "generatedContracts": "pass",
+    "packedReleaseSmoke": "pass"
   },
   "m0Outcome": "symbol_analysis_v1_contract_ready",
-  "releaseAOutcome": "symbol_analysis_release_a_qualification_blocked",
+  "releaseAOutcome": "symbol_analysis_release_a_pass",
   "persistedAnalysis": "not_implemented",
   "graphDerivedReleaseB": "not_implemented",
-  "blocker": "Context retention cannot pass an active publication reader through two activations does not complete"
+  "freshnessMemoryCandidateIncluded": false,
+  "blocker": null
 }

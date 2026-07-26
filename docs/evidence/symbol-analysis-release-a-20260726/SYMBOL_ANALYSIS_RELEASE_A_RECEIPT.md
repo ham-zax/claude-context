@@ -5,18 +5,20 @@ Date: 2026-07-26
 ## Identity
 
 ```text
-M0_FINALIZATION_BASE=e9745207b517e812cc7e5754ba536a9e32fdc182
+STRUCTURAL_RELEASE_BASE=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
+QUALIFIED_CANDIDATE=0873dd9ffb875ff3e8616db332641abe3df4b53c
 TARGET_REVISION=8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7
 TARGET_TRACKED_PYTHON_FILES=1013
-CORE_VERSION=3.4.0
-MCP_VERSION=6.5.0
-CLI_VERSION=1.6.0
+CORE_VERSION=3.5.0
+MCP_VERSION=6.6.0
+CLI_VERSION=1.7.0
 METRIC_VERSION=python_structural_v1
 ```
 
-No product code changed in this finalization batch. Watcher-unavailable
-freshness architecture and its open RSS blocker were not modified or
-requalified.
+This candidate was constructed from the released pre-freshness base and
+contains only Structural Release A, its Core read-lease retention repair, and
+the package-version closure. The blocked watcher-unavailable freshness-memory
+candidate is not an ancestor of this branch.
 
 ## Architecture decision
 
@@ -50,13 +52,13 @@ migration, retention, and rollback costs.
 
 | Measurement | Budget | Result | Decision |
 | --- | ---: | ---: | --- |
-| Cold selected-symbol request | 4,000 ms | 49.810 ms | Pass |
-| Repeated selected-symbol p95 | 250 ms | 51.333 ms | Pass |
-| Paired analysis overhead p95 | 150 ms | 1.235 ms | Pass |
-| 123,835-byte production file | 1,000 ms | 144.766 ms | Pass |
-| Peak RSS increase over summary | 64 MiB | 0.219 MiB | Pass |
-| Retained RSS increase | 32 MiB | 7.059 MiB | Pass |
-| Successful response size | 8,192 bytes | 1,611 bytes | Pass |
+| Cold selected-symbol request | 4,000 ms | 1,306.404 ms | Pass |
+| Repeated selected-symbol p95 | 250 ms | 45.864 ms | Pass |
+| Paired analysis overhead p95 | 150 ms | 2.350 ms | Pass |
+| 123,835-byte production file | 1,000 ms | 143.488 ms | Pass |
+| Peak RSS increase over summary | 64 MiB | 0.094 MiB | Pass |
+| Retained RSS increase | 32 MiB | 13.012 MiB | Pass |
+| Successful response size | 8,192 bytes | 1,621 bytes | Pass |
 | Default summary latency | <=5% and <=25 ms | 0% / 0 ms | Pass |
 
 The primary symbol was
@@ -89,8 +91,9 @@ persisted analysis artifacts:
 active publication:
     unchanged
 
-last operation:
-    unchanged
+setup synchronization:
+    harness-issued through manage_index
+    no analysis-owned synchronization
 
 latency regression:
     0 ms
@@ -115,37 +118,48 @@ Passed:
 production benchmark:
     all frozen budgets
 
-Core build:
-    passed
+focused Core retention:
+    4 passed
+    P -> Q -> R, reader multiplicity and release ordering,
+      cleanup failure/recovery, contrasting no-reader validation
 
-MCP runtime build:
-    passed
+focused Python structural analysis:
+    7 passed
 
-benchmark JSON:
-    valid
+focused MCP route:
+    3 passed
+
+complete Core:
+    605 passed, 1 skipped, 0 failed
+
+complete MCP:
+    1057 passed, 0 failed
+
+complete CLI:
+    212 passed, 0 failed
+
+Core, MCP, CLI:
+    typecheck passed
+    lint passed
+    builds passed
+
+generated contracts:
+    docs check passed
+    manifest check passed
+    version freshness passed
+
+packed release:
+    MCP installed packed closure passed
+    CLI -> MCP -> Core packed closure and offline Potion runtime passed
 ```
 
-The complete Core suite did not finish. It stalled in:
-
-```text
-Context retention cannot pass an active publication reader through two activations
-```
-
-The suite was interrupted after 416.736 seconds, with 48 tests passed before
-the stall. A focused reproduction of that exact existing test timed out after
-60 seconds with:
-
-```text
-Promise resolution is still pending but the event loop has already resolved
-```
-
-The second activation did not resolve after the test released its publication
-read lease. This is not owned by structural analysis, but the requested stop
-condition applies to any full-suite regression.
-
-The complete MCP suite was not run after the stop condition fired. No attempt
-was made to change the freshness, retention, checkpoint, publication, or
-synchronization owners.
+The demonstrated hang was owned by `performAtomicDeltaPublication`: activation
+waited for retention, while retention correctly waited for the active reader
+of P. Q therefore could not complete, so the test could not activate R and
+release P. The repair keeps the existing owners: activation returns its
+generation-bound proof while readers retain P; queued retention performs
+eventual cleanup only after the final reader releases. It does not delete a
+leased generation, weaken validation, or add another retention authority.
 
 ## Decision
 
@@ -154,13 +168,14 @@ M0_OUTCOME=symbol_analysis_v1_contract_ready
 STORAGE_MODEL=on_demand
 RELEASE_A_PERFORMANCE=pass
 RELEASE_A_COMPATIBILITY=additive_optional_route
-RELEASE_A_OUTCOME=symbol_analysis_release_a_qualification_blocked
-CORE_FULL_SUITE=blocked_pending_promise
-MCP_FULL_SUITE=not_run_stop_condition
-PACKAGE_VERSION_DECISION=hold Core 3.4.0 and MCP 6.5.0 release candidacy
+RELEASE_A_OUTCOME=symbol_analysis_release_a_pass
+CORE_FULL_SUITE=605_passed_1_skipped_0_failed
+MCP_FULL_SUITE=1057_passed_0_failed
+CLI_FULL_SUITE=212_passed_0_failed
+PACKAGE_VERSION_DECISION=Core 3.5.0; MCP 6.6.0; CLI 1.7.0
 PERSISTED_ANALYSIS=not_implemented
 GRAPH_DERIVED_RELEASE_B=not_implemented
-BLOCKER=Context retention cannot pass an active publication reader through two activations does not complete
+BLOCKER=none
 ```
 
 ## Raw evidence

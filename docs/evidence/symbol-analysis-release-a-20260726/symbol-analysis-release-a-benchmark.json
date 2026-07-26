@@ -1,15 +1,15 @@
 {
   "schemaVersion": "symbol-analysis-release-a-benchmark-v1",
-  "recordedAt": "2026-07-26T15:39:36.911Z",
-  "satoriRevision": "e9745207b517e812cc7e5754ba536a9e32fdc182",
+  "recordedAt": "2026-07-26T16:22:47.554Z",
+  "satoriRevision": "0873dd9ffb875ff3e8616db332641abe3df4b53c",
   "target": {
     "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
     "trackedPythonFileCount": 1013
   },
   "runtime": {
-    "core": "3.4.0",
-    "mcp": "6.5.0",
-    "cli": "1.6.0",
+    "core": "3.5.0",
+    "mcp": "6.6.0",
+    "cli": "1.7.0",
     "provider": "Potion",
     "model": "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
     "vectorStore": "LanceDB",
@@ -28,13 +28,14 @@
   },
   "serverInfo": {
     "name": "Satori MCP Server",
-    "version": "6.5.0"
+    "version": "6.6.0"
   },
+  "createWallMs": 75.246215,
   "publication": {
-    "collectionName": "hybrid_code_chunks_34c59846__gen_run_747f3ddc_8cb3_4939_af9d_c0bf25da27db",
-    "markerRunId": "0656f48d-a52c-4b6d-b7b4-f5a7ca409e99",
+    "collectionName": "hybrid_code_chunks_7b9805b6__gen_run_8060cb4a_07c6_4b88_b552_78b161934309",
+    "markerRunId": "cea27503-1d91-4770-aac1-8349550dd8fe",
     "indexPolicyHash": "0e19e8c19c7dbc7c7625e297278984859ddffd9276e7ed498d64c391176a4092",
-    "policyDocumentDigest": "84c7bf1fa867f40a64f1e7b0e0fbff8d14c52a26603e595022e73ab2396d6b51"
+    "policyDocumentDigest": "e30ee1b6755b040f690579619f598c1b14e752e2d146a88ec342dc1d758b62c6"
   },
   "symbols": {
     "primary": {
@@ -67,73 +68,73 @@
     }
   },
   "measurements": {
-    "coldRequestMs": 49.810327,
+    "coldRequestMs": 1306.403542,
     "repeated": {
       "sampleCount": 10,
       "wallMs": [
-        51.333314,
-        47.436055,
-        47.352976,
-        46.786634,
-        45.752525,
-        46.496064,
-        45.484214,
-        46.896804,
-        46.539609,
-        45.315443
+        45.802215,
+        44.741671,
+        45.071173,
+        45.864162,
+        44.413986,
+        45.197633,
+        45.004252,
+        45.564801,
+        45.231467,
+        44.72432
       ],
-      "p50Ms": 46.539609,
-      "p95Ms": 51.333314
+      "p50Ms": 45.071173,
+      "p95Ms": 45.864162
     },
     "pairedAnalysisOverhead": {
       "sampleCount": 10,
       "wallMs": [
-        0.281296999999995,
-        1.2348029999999994,
-        0.5916129999999953,
         0,
-        0.8197279999999978,
-        0,
-        0.11621399999999937,
-        0.46837500000000176,
-        0,
-        1.118749000000001
+        0.8450750000000014,
+        1.168996,
+        0.5837780000000024,
+        2.3504120000000057,
+        0.7892419999999944,
+        0.1411369999999934,
+        0.27465000000000117,
+        0.916364999999999,
+        0
       ],
-      "p50Ms": 0.281296999999995,
-      "p95Ms": 1.2348029999999994
+      "p50Ms": 0.5837780000000024,
+      "p95Ms": 2.3504120000000057
     },
     "largeFile": {
       "bytes": 123835,
-      "wallMs": 144.766095
+      "wallMs": 143.487657
     },
     "memory": {
-      "pairedSummaryPeakDeltaMiB": 0.32421875,
-      "pairedAnalysisPeakDeltaMiB": 0.54296875,
-      "analysisPeakOverSummaryMiB": 0.21875,
-      "preAnalysisRetainedMiB": 1065.5703125,
-      "postAnalysisRetainedMiB": 1072.62890625,
-      "retainedDeltaMiB": 7.05859375,
+      "pairedSummaryPeakDeltaMiB": 0.31640625,
+      "pairedAnalysisPeakDeltaMiB": 0.41015625,
+      "analysisPeakOverSummaryMiB": 0.09375,
+      "preAnalysisRetainedMiB": 1702.30859375,
+      "postAnalysisRetainedMiB": 1715.3203125,
+      "retainedDeltaMiB": 13.01171875,
       "peakProcesses": [
         {
-          "pid": 942427,
-          "ppid": 942411,
-          "rssKiB": 983856,
-          "args": "/home/hamza/.nvm/versions/node/v24.13.0/bin/node /home/hamza/repo/satori/packages/mcp/dist/index.js"
+          "pid": 989419,
+          "ppid": 989392,
+          "rssKiB": 1639900,
+          "args": "/home/hamza/.nvm/versions/node/v24.13.0/bin/node /home/hamza/repo/satori-worktrees/structural-analysis-release-a-clean-20260726/packages/mcp/dist/index.js"
         },
         {
-          "pid": 942458,
-          "ppid": 942427,
-          "rssKiB": 110296,
-          "args": "/home/hamza/repo/satori/packages/mcp/assets/potion/linux-x64/satori-potion worker /home/hamza/repo/satori/packages/mcp/assets/potion/linux-x64/model --block-network"
+          "pid": 989523,
+          "ppid": 989419,
+          "rssKiB": 110804,
+          "args": "/home/hamza/repo/satori-worktrees/structural-analysis-release-a-clean-20260726/packages/mcp/assets/potion/linux-x64/satori-potion worker /home/hamza/repo/satori-worktrees/structural-analysis-release-a-clean-20260726/packages/mcp/assets/potion/linux-x64/model --block-network"
         }
       ]
     },
-    "responseBytes": 1611,
+    "responseBytes": 1621,
     "unusedDefaultPath": {
       "normalizedByteIdentical": true,
       "allowedVolatileField": "outline.symbols[].callGraphHint.validatedAt",
-      "omittedP95Ms": 49.595816,
-      "explicitSummaryP95Ms": 46.943932,
+      "omittedP95Ms": 53.29204,
+      "explicitSummaryP95Ms": 45.558917,
       "regressionMs": 0,
       "regressionPercent": 0,
       "analysisFieldAbsent": true,
@@ -141,25 +142,25 @@
       "artifactsAfter": [],
       "persistentArtifactsAdded": [],
       "publicationBefore": {
-        "collectionName": "hybrid_code_chunks_34c59846__gen_run_747f3ddc_8cb3_4939_af9d_c0bf25da27db",
-        "markerRunId": "0656f48d-a52c-4b6d-b7b4-f5a7ca409e99",
+        "collectionName": "hybrid_code_chunks_7b9805b6__gen_run_8060cb4a_07c6_4b88_b552_78b161934309",
+        "markerRunId": "cea27503-1d91-4770-aac1-8349550dd8fe",
         "indexPolicyHash": "0e19e8c19c7dbc7c7625e297278984859ddffd9276e7ed498d64c391176a4092",
-        "policyDocumentDigest": "84c7bf1fa867f40a64f1e7b0e0fbff8d14c52a26603e595022e73ab2396d6b51"
+        "policyDocumentDigest": "e30ee1b6755b040f690579619f598c1b14e752e2d146a88ec342dc1d758b62c6"
       },
       "publicationAfter": {
-        "collectionName": "hybrid_code_chunks_34c59846__gen_run_747f3ddc_8cb3_4939_af9d_c0bf25da27db",
-        "markerRunId": "0656f48d-a52c-4b6d-b7b4-f5a7ca409e99",
+        "collectionName": "hybrid_code_chunks_7b9805b6__gen_run_8060cb4a_07c6_4b88_b552_78b161934309",
+        "markerRunId": "cea27503-1d91-4770-aac1-8349550dd8fe",
         "indexPolicyHash": "0e19e8c19c7dbc7c7625e297278984859ddffd9276e7ed498d64c391176a4092",
-        "policyDocumentDigest": "84c7bf1fa867f40a64f1e7b0e0fbff8d14c52a26603e595022e73ab2396d6b51"
+        "policyDocumentDigest": "e30ee1b6755b040f690579619f598c1b14e752e2d146a88ec342dc1d758b62c6"
       },
       "operationBefore": {
-        "id": "4e12e8a8-7b7f-4950-8dd9-d98687caefc1",
-        "action": "sync",
-        "canonicalRoot": "/tmp/satori-symbol-release-a.ZGc5uo/target",
-        "generation": 17,
-        "acceptedAt": "2026-07-26T15:39:45.550Z",
+        "id": "f0fdcaf5-c748-4ab7-99a3-0dd574a5d4eb",
+        "action": "create",
+        "canonicalRoot": "/tmp/satori-structural-release-a-final.phZgs5/target",
+        "generation": 1,
+        "acceptedAt": "2026-07-26T16:22:49.206Z",
         "phase": "completed",
-        "lastDurableTransitionAt": "2026-07-26T15:39:45.857Z",
+        "lastDurableTransitionAt": "2026-07-26T16:24:38.767Z",
         "runtimeFingerprint": {
           "embeddingProvider": "Potion",
           "embeddingModel": "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
@@ -175,19 +176,19 @@
           "lexicalProjectionVersion": "lexical_projection_v1"
         },
         "writer": {
-          "ownerId": "a736e058-1114-4844-b9ff-d0b852cfcf47",
-          "pid": 942427,
-          "satoriVersion": "6.5.0"
+          "ownerId": "3d804969-10ec-481e-b066-035b8494ff62",
+          "pid": 989419,
+          "satoriVersion": "6.6.0"
         }
       },
       "operationAfter": {
-        "id": "4e12e8a8-7b7f-4950-8dd9-d98687caefc1",
+        "id": "cc1eb715-ee80-4d32-9958-7cd6bff8df95",
         "action": "sync",
-        "canonicalRoot": "/tmp/satori-symbol-release-a.ZGc5uo/target",
-        "generation": 17,
-        "acceptedAt": "2026-07-26T15:39:45.550Z",
+        "canonicalRoot": "/tmp/satori-structural-release-a-final.phZgs5/target",
+        "generation": 2,
+        "acceptedAt": "2026-07-26T16:24:57.044Z",
         "phase": "completed",
-        "lastDurableTransitionAt": "2026-07-26T15:39:45.857Z",
+        "lastDurableTransitionAt": "2026-07-26T16:24:57.357Z",
         "runtimeFingerprint": {
           "embeddingProvider": "Potion",
           "embeddingModel": "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
@@ -203,9 +204,9 @@
           "lexicalProjectionVersion": "lexical_projection_v1"
         },
         "writer": {
-          "ownerId": "a736e058-1114-4844-b9ff-d0b852cfcf47",
-          "pid": 942427,
-          "satoriVersion": "6.5.0"
+          "ownerId": "3d804969-10ec-481e-b066-035b8494ff62",
+          "pid": 989419,
+          "satoriVersion": "6.6.0"
         }
       }
     }
