@@ -13,9 +13,15 @@ watcher candidate adds one Core regression and completes with Core 596 passed,
 1 skipped, 0 failed and MCP 1,051 passed, 0 failed. Watcher observation-only
 qualification passes: events no longer trigger automatic indexing after five
 seconds; search, explicit sync, and periodic background synchronization remain
-the only publication triggers. Pending events bypass search recency through
-the existing freshness owner, later events invalidate source-bound
-continuations, and `call_graph`/`file_outline` remain non-mutating.
+the only publication triggers. A later isolated external run found a
+search-front-door exception after a status-prepared read and writes to an
+untracked probe. The current candidate repairs it by allowing the prepared
+shortcut only with valid source observation or the established
+watcher-disabled fallback; pending or otherwise unavailable observation reaches
+the existing freshness owner. Explicit sync and concurrent-search consumption
+passed; periodic background consumption and provider-failure retention were
+not forced externally. Later events invalidate source-bound continuations, and
+`call_graph`/`file_outline` remain non-mutating.
 `MCP_WATCH_DEBOUNCE_MS` is accepted but ignored and excluded from effective
 shared-runtime identity. The delete-triggered completion race was repaired in
 the existing retention/V4 proof owner without weakening validation or adding a
@@ -180,7 +186,7 @@ its exact terminal outcome and stopping reason.
 | W0 | `watcher_decoupling_supported`; retained as the read-only baseline and cost record |
 | Historical observation-only qualification | `watcher_decoupling_blocked`; preserved as evidence that the existing incremental delete owner failed complete-generation validation through an allowed search trigger |
 | Incremental delete publication | `incremental_delete_publication_pass`; the retention-flight proof race is repaired through the existing canonical V4 owner, with validation unchanged |
-| Final observation-only qualification | `watcher_observation_only_pass`; watcher events are observation-only, existing freshness triggers consume pending evidence, and add/modify/delete/restart readback passes |
+| Final observation-only qualification | `watcher_observation_only_pass` for the sealed witnesses; watcher events are observation-only and add/modify/delete/restart readback passes. The later status-prepared/untracked-event exception is repaired and intervention-tested in the current candidate; its external MCP sequence has not been rerun |
 | Publication ownership | Unchanged; no watcher-owned timer publication, second synchronizer, or second publication authority remains |
 
 ### Python relationship coverage and provider disposition
@@ -203,7 +209,7 @@ its exact terminal outcome and stopping reason.
 | Runtime capacity | At least 2 GiB available capacity is required by the qualified deployment contract as an allowance, not measured steady use; earlier integration evidence observed a `1,447.21 MiB` incremental-publication peak |
 | Measurement applicability | Cold and memory measurements were not rerun after current master's full-reindex V4 authority-publication change; retain them as revision-`4138b1e…` release characterization, not strict current-master proof |
 | Semantic abstention | Deferred; no relevance-threshold, response-contract, or runtime-policy change is part of this release |
-| Watcher observation-only | Passed; no automatic work after the former debounce interval, existing freshness triggers consume pending events, continuations invalidate after later events, and navigation tools remain non-mutating |
+| Watcher observation-only | Timer removal, continuation invalidation, explicit-sync consumption, concurrent-search coalescing, and non-mutating navigation disclosure passed. Status-prepared search consumption is repaired and intervention-tested for an untracked pending event; periodic background consumption and provider-failure retention were not forced externally |
 | Incremental delete publication | Passed; the existing retention flight settles and reproves the active generation before completion, preserving fail-closed canonical V4 validation |
 | Package verification | Core 596 passed, 1 skipped, 0 failed; MCP 1,051 passed, 0 failed |
 
@@ -216,10 +222,13 @@ historical evidence and do not override it.
 The six-site Python caller-coverage finding is closed only for the static
 patterns qualified by its separate Python plan. General Python inbound
 coverage remains partial and non-exhaustive. Corrected controlled freshness
-passes. Watcher observation-only qualification also passes without adding
-publication authority; the historical blocked receipt remains preserved as the
-record of the independently repaired delete-publication race. No multi-day
-memory guarantee is claimed.
+passes. Watcher-owned publication removal and the sealed observation-only
+witnesses pass without adding publication authority. The later
+status-prepared/untracked-event search exception is repaired at the search
+freshness adapter and covered by a focused intervention test; its external MCP
+sequence has not been rerun. The historical blocked receipt remains preserved
+as the record of the independently repaired delete-publication race. No
+multi-day memory guarantee is claimed.
 
 ## 6. Integration stewardship and merge/version ledger
 

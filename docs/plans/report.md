@@ -14,14 +14,21 @@ This is the only current decision in this report:
 - Corrected C4 add/modify/delete freshness passed for a syntactically valid
   `.py` probe with `scope=runtime` and a `.txt` probe with `scope=mixed`,
   including restart and zero-change-sync readback.
-- Watcher observation-only qualification passed. Filesystem events now record
+- Watcher observation-only mechanics passed. Filesystem events now record
   root-keyed, process-local freshness evidence but do not start indexing after
   a five-second timer. Search, explicit `manage_index sync`, and periodic
   background synchronization remain the only publication triggers.
-- Pending watcher events bypass search recency through the existing freshness
-  owner. Later accepted events invalidate source-bound continuations and
-  prepared reads. `call_graph` and `file_outline` remain non-mutating and
-  disclose pending or unverified working-tree freshness.
+- Pending watcher events are consumed through the existing freshness owner in
+  the qualified paths. A later isolated external run found a search front-door
+  exception after a status-prepared read and writes to an untracked probe. The
+  current candidate repairs that exception: status-prepared search can skip
+  the freshness owner only when source observation is valid or watcher
+  observation is explicitly disabled. Pending or otherwise unavailable source
+  observation reaches the existing freshness owner. Periodic background
+  consumption and provider-failure retention were not forced externally.
+- Later accepted events invalidate source-bound continuations and prepared
+  reads. `call_graph` and `file_outline` remain non-mutating and disclose
+  pending or unverified working-tree freshness.
 - `MCP_WATCH_DEBOUNCE_MS` remains accepted for compatibility but is deprecated,
   ignored, and excluded from effective shared-runtime attachment identity.
 - The delete-triggered complete-generation failure was an existing
@@ -82,6 +89,92 @@ Current evidence:
 - [Watcher decoupling W0 baseline](../evidence/watcher-decoupling-w0-20260726/WATCHER_DECOUPLING_W0_RECEIPT.md)
 - [Historical blocked watcher qualification](../evidence/watcher-observation-only-20260726/WATCHER_OBSERVATION_ONLY_RECEIPT.md)
 - [Watcher observation/publication decoupling plan](./MCP_WATCHER_OBSERVATION_AND_SYNC_DECOUPLING_PLAN.md)
+
+## External isolated MCP qualification (2026-07-26)
+
+An external agent launched the candidate MCP runtime over isolated stdio and
+used isolated Satori state rather than the configured shared MCP state.
+`report.md` was not used as proof.
+
+The runtime was launched from Satori revision
+`2067e587c635e127236672221928466bcc542891`. A later CLI-only commit advanced
+the checkout to `985f0ad88bec91a8bbdf85716d0c246c0791526b`;
+`packages/mcp` was unchanged between those revisions. The target revision was
+`8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7`. The runtime used Core `3.3.0`,
+MCP `6.4.0`, CLI `1.5.0`, Potion
+`minishlab/potion-code-16M-v2@e9d2a44…`, 256 dimensions, LanceDB, and
+`hybrid_v3`. The watcher was enabled;
+`MCP_WATCH_DEBOUNCE_MS=5300` was accepted and ignored.
+
+| Finding | External evidence | Decision |
+| --- | --- | --- |
+| Delete-triggered complete-generation publication | Add generation 6, modify generation 7, and delete generation 8 completed; the deleted result remained absent after restart | Pass; closed |
+| Watcher automatic publication | A ten-write burst did not change the operation, generation, collection, or marker | Pass; closed |
+| Existing-trigger event consumption | Concurrent searches coalesced to one writer, explicit sync consumed a change, and zero-content sync completed. A later untracked-file burst followed by status inspection returned `skipped_recent` with `SOURCE_FRESHNESS_UNVERIFIED`; periodic background consumption and provider-failure retention were not forced | Incomplete at the tested revision; the status-prepared search exception is repaired and regression-tested in the current candidate, while the two unforced controls remain unqualified |
+| Continuation invalidation | The old continuation returned `SEARCH_RESULT_SET_STALE` | Pass; closed |
+| Navigation pending-change disclosure | `call_graph` and `file_outline` returned `SOURCE_CHANGES_PENDING` with sync guidance and did not publish | Pass; closed |
+| Python inbound callers | All six required bounded relationships were returned with exact identities and spans; additional real `SignalLedger.record` callers were found at `pair_evaluator.py:1096` and `shadow_runner.py:550` | Pass within the declared static support boundary |
+| Healthy V4 repair and large-index proof | Repair was an exact no-op over 1,519 files and 19,741 payload rows with zero missing or extra rows | Pass; closed |
+| Restart and zero-change readback | The deleted result remained absent, the positive control remained present, and both zero-change operations completed | Pass; closed |
+| Semantic abstention | Four nonsense controls each returned ten nearest-neighbour groups without a calibrated abstention decision | Unqualified; deferred limitation |
+| Cold and warm `call_graph` | Startup was `650.686 ms`; the first call was `3,694.624 ms`; warm samples were `10.404 ms` p50 and `16.933 ms` p95 | Repository-specific measurement, not a general performance claim |
+
+The raw JSON-RPC requests, responses, stderr, timestamps, warnings, operation
+receipts, and publication identities were reported under
+`/tmp/satori-mcp-qualification.iAP9mz/evidence`. They were available during
+this report update but are not repository-local durable evidence. The external
+summary therefore supplements rather than replaces the sealed receipts above.
+
+### Search-event consumption investigation
+
+The open search result has a demonstrated first wrong boundary:
+
+```text
+untracked watcher probe is written
+-> watcher/source observation is unavailable or pending
+-> manage_index status seeds a status-prepared publication read
+-> search sees no Git-tracked dirty files
+-> ToolHandlers returns synthetic skipped_recent
+-> SyncManager.ensureFreshness is not called
+-> pending observation cannot force threshold 0
+-> search returns SOURCE_FRESHNESS_UNVERIFIED
+```
+
+Runtime evidence shows the post-burst search returned
+`freshnessDecision.mode=skipped_recent`, emitted no `[SYNC]` invocation, and
+returned `SOURCE_FRESHNESS_UNVERIFIED`. Source inspection identifies the
+responsible boundary in `packages/mcp/src/core/handlers.ts`: the
+`preparedRead.statusPrepared && !exactSourceComparisonRequired` shortcut
+returns `skipped_recent` before calling `SyncManager.ensureFreshness`.
+`packages/mcp/src/core/working-tree-state.ts` intentionally runs Git status
+with `--untracked-files=no`, so the task-owned untracked probe cannot set
+`exactSourceComparisonRequired`. The pending-event and observation-gap
+override already exists inside `SyncManager.ensureFreshness`, but this shortcut
+bypasses it.
+
+The responsible owner is the search freshness adapter, not watcher event
+recording or Core publication. The current candidate prevents the
+status-prepared shortcut from claiming `skipped_recent` when source observation
+is unavailable or pending. It preserves the shortcut when source observation
+is valid and preserves the established watcher-disabled fallback.
+
+The repair is intervention-proven by the focused regression:
+
+```text
+ready watcher
+-> accepted event for an untracked file
+-> status-prepared read
+-> search
+-> exactly one existing freshness flight
+-> no synthetic skipped_recent
+```
+
+The regression initializes a real Git repository, leaves the probe untracked,
+records `watcher_event_pending`, and proves search returns
+`skipped_source_unchanged` after exactly one freshness-owner call without
+`SOURCE_FRESHNESS_UNVERIFIED`. The existing watcher-disabled status-prepared
+fast-path test remains green. The original external MCP sequence has not yet
+been rerun against the repaired candidate.
 
 ## Historical Satori 6.3.0 requalification
 
@@ -352,7 +445,7 @@ The historical bounded decision before the corrected C4 qualification was:
 | Python constructor-receiver callers | Intervention-proven integration returns all three recorded production callers with frozen negatives preserved | Closed for the qualified constructor pattern; general result-set completeness remains partial | No further experiment is authorized by this finding |
 | Python callback/service callers | Intervention-proven integration returns both residual callers and the recorded ledger caller with bounded value-origin proof | Closed for the qualified service/callback patterns; unsupported dynamic flows remain partial | No further experiment is authorized by this finding |
 | Source checkpoint corruption and corrected freshness | C1/C2 prove the selected V4 no-op/graph-only/fail-reindex model; the fresh-reindex owner correction publishes complete V4 authority; corrected C4 passes `.py`/runtime and `.txt`/mixed add-modify-delete lifecycles | Closed for the frozen repair model and corrected controlled freshness witness | No further checkpoint or freshness batch is authorized by this release |
-| Watcher-owned publication and delete completion | The final observation-only receipt proves no watcher-owned timer work, existing-trigger consumption, continuation invalidation, non-mutating navigation disclosure, and add/modify/delete/restart readback. The delete repair receipt isolates and repairs the retention-flight proof race without relaxing V4 validation | `watcher_observation_only_pass`; the earlier blocked receipt remains historical evidence and no second publication authority was introduced | No further watcher-decoupling work is authorized by this finding |
+| Watcher-owned publication and delete completion | The final observation-only receipt proves no watcher-owned timer work, bounded existing-trigger consumption, continuation invalidation, non-mutating navigation disclosure, and add/modify/delete/restart readback. The delete repair receipt isolates and repairs the retention-flight proof race without relaxing V4 validation. A later isolated run found that a status-prepared search for an untracked watcher probe could synthesize `skipped_recent` before the existing freshness owner saw the pending observation; the current candidate now routes that state through the owner | Timer removal and delete publication remain closed with no second publication authority. Status-prepared search consumption is intervention-proven in the focused regression; the external MCP sequence has not been rerun | No further product change is required by this boundary; retain periodic-background and provider-failure controls as unqualified until separately exercised |
 | Semantic no-answer behavior | Observed top-K retrieval has no calibrated relevance decision | Dedicated plan exists, but S0 is deferred and no runtime policy is authorized | Freeze the S0 ground truth, request applicability, risk bounds, holdout governance, and runtime budgets before candidate evaluation |
 
 ### Python inbound relationships: local source-supported evidence

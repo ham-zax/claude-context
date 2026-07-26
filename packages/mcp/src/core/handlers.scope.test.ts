@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
     SearchContinuationCoordinator,
     ToolHandlers,
@@ -1239,6 +1240,135 @@ test('manage status prepares one reusable proof and genuine authority drift stil
             changedPayload.hints.debugSearch.readiness.invalidationReason,
             'observation_changed',
         );
+    });
+});
+
+test('status-prepared search routes an untracked pending watcher event through freshness', async () => {
+    await withTempRepo(async (repoPath) => {
+        execFileSync('git', ['init', '--quiet'], { cwd: repoPath });
+        const handlers = createHandlers(repoPath, [{
+            content: 'return session.isValid();',
+            relativePath: 'src/auth.ts',
+            startLine: 3,
+            endLine: 6,
+            language: 'typescript',
+            score: 0.99,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }], undefined, { enableVectorReceipt: true });
+        const vectorReceipt = { collectionName: 'committed-v3' } as never;
+        let sourceEventPending = true;
+        let freshnessCalls = 0;
+        const internals = handlers as unknown as {
+            context: HandlerContext & {
+                getIndexAuthorityObservations: () => { vector: string; navigation: string } | null;
+                isPreparedVectorReceiptBoundToCurrentAuthority: () => boolean;
+            };
+            syncManager: HandlerSyncManager & {
+                ensureFreshness: () => Promise<{
+                    mode: 'skipped_source_unchanged';
+                    checkedAt: string;
+                    thresholdMs: number;
+                }>;
+                getPreparedReadObservation: () => {
+                    available: boolean;
+                    reason?: 'watcher_event_pending';
+                    freshnessEpoch?: number;
+                    watcherState?: 'ready';
+                    observation?: { freshnessEpoch: number; watcherState: 'ready' };
+                };
+            };
+            mutationLeaseCoordinator: {
+                observe: () => { mutationActive: boolean; generation: number };
+                getActiveLease: () => null;
+            };
+            validateCompletionProof: () => Promise<{
+                outcome: 'valid';
+                navigationStatus: 'not_bound';
+                vectorReceipt: never;
+            }>;
+        };
+        let authorityInitialized = false;
+        internals.context.getIndexAuthorityObservations = () => authorityInitialized
+            ? {
+                vector: 'vector-authority',
+                navigation: 'navigation-authority',
+            }
+            : null;
+        internals.context.isPreparedVectorReceiptBoundToCurrentAuthority = () => true;
+        internals.syncManager.getPreparedReadObservation = () => sourceEventPending
+            ? {
+                available: false,
+                reason: 'watcher_event_pending',
+                freshnessEpoch: 1,
+                watcherState: 'ready',
+            }
+            : {
+                available: true,
+                observation: { freshnessEpoch: 1, watcherState: 'ready' },
+            };
+        internals.syncManager.ensureFreshness = async () => {
+            freshnessCalls += 1;
+            sourceEventPending = false;
+            return {
+                mode: 'skipped_source_unchanged',
+                checkedAt: '2026-01-01T01:00:00.000Z',
+                thresholdMs: 0,
+            };
+        };
+        internals.mutationLeaseCoordinator = {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        };
+        internals.validateCompletionProof = async () => {
+            authorityInitialized = true;
+            return {
+                outcome: 'valid',
+                navigationStatus: 'not_bound',
+                vectorReceipt,
+            };
+        };
+
+        const probePath = path.join(repoPath, 'src', 'untracked-watcher-probe.ts');
+        fs.mkdirSync(path.dirname(probePath), { recursive: true });
+        fs.writeFileSync(
+            probePath,
+            'export const untrackedWatcherProbe = true;\n',
+            'utf8',
+        );
+        await handlers.handleGetIndexingStatus({ path: repoPath, detail: 'summary' });
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'where is session validation handled',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'freshness',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.freshnessDecision.mode, 'skipped_source_unchanged');
+        assert.equal(freshnessCalls, 1);
+        assert.equal(
+            warningCodes(payload).includes('SOURCE_FRESHNESS_UNVERIFIED'),
+            false,
+        );
+
+        await handlers.handleGetIndexingStatus({ path: repoPath, detail: 'summary' });
+        const observedResponse = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'where is session validation handled',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+        });
+        const observedPayload = JSON.parse(observedResponse.content[0]?.text || '{}');
+
+        assert.equal(observedPayload.freshnessDecision.mode, 'skipped_recent');
+        assert.equal(freshnessCalls, 1);
     });
 });
 

@@ -3594,11 +3594,24 @@ export class ToolHandlers {
                         observedChangedFilesForSearch = changedFilesState;
                         const exactSourceComparisonRequired = changedFilesState.available
                             && changedFilesState.files.size > 0;
+                        const statusPreparedSourceObservation = preparedRead?.statusPrepared === true
+                            ? this.getPreparedReadCacheObservation(effectiveRoot)
+                            : null;
 
                         // A recent sync timestamp does not prove that Git-dirty files still
                         // match the published generation. Compare them exactly so search does
                         // not suppress synchronized persisted evidence behind a bounded overlay.
-                        if (preparedRead?.statusPrepared === true && !exactSourceComparisonRequired) {
+                        // Status proves the publication, not current source. Preserve the
+                        // one-use shortcut only with a valid source observation or the
+                        // established watcher-disabled fallback.
+                        if (
+                            preparedRead?.statusPrepared === true
+                            && !exactSourceComparisonRequired
+                            && (
+                                typeof statusPreparedSourceObservation?.sourceObservation === 'string'
+                                || statusPreparedSourceObservation?.unavailableReason === 'watcher_disabled'
+                            )
+                        ) {
                             return Promise.resolve({
                                 mode: 'skipped_recent' as const,
                                 checkedAt: new Date(this.now()).toISOString(),
