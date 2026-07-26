@@ -1,8 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+    analyzePythonSymbolStructure,
     getSupportedExtensionsForCapability,
     type NavigationStore,
+    type PythonStructuralAnalysis,
     type SymbolRecord,
 } from "@zokizuan/satori-core";
 
@@ -60,6 +62,11 @@ type NavigationHandlersHost = {
     >;
     prepareNavigationRead(absolutePath: string): Promise<TrackedRootReadinessState>;
     acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
+    getPreparedReadCacheObservation(codebasePath: string): {
+        observation: string | null;
+        sourceObservation: string | null;
+        unavailableReason?: string;
+    };
     loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         file: string,
@@ -210,6 +217,59 @@ function withPendingSourceGuidance<
     };
 }
 
+function buildAnalysisUnavailableFileOutlinePayload(
+    codebasePath: string,
+    file: string,
+    message: string,
+    reason:
+        | "analysis_unavailable"
+        | "source_changed_during_request"
+        | "unsupported_language"
+        | "unsupported_symbol_kind" = "analysis_unavailable",
+): FileOutlineResponseEnvelope {
+    return {
+        status: reason === "unsupported_language" || reason === "unsupported_symbol_kind"
+            ? "unsupported"
+            : "not_ready",
+        reason,
+        path: codebasePath,
+        file,
+        outline: null,
+        hasMore: false,
+        message,
+    };
+}
+
+function sourceBarrierMatches(
+    left: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>,
+    right: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>,
+): boolean {
+    return left.observation !== null
+        && left.sourceObservation !== null
+        && left.unavailableReason === undefined
+        && right.observation === left.observation
+        && right.sourceObservation === left.sourceObservation
+        && right.unavailableReason === undefined;
+}
+
+function withPythonStructuralAnalysis(
+    payload: FileOutlineResponseEnvelope,
+    analysis: PythonStructuralAnalysis,
+): FileOutlineResponseEnvelope {
+    if (payload.status !== "ok" || payload.outline?.symbols.length !== 1) {
+        return payload;
+    }
+    return {
+        ...payload,
+        outline: {
+            symbols: [{
+                ...payload.outline.symbols[0],
+                analysis,
+            }],
+        },
+    };
+}
+
 function collectErrorFragments(
     value: unknown,
     output: string[],
@@ -289,6 +349,7 @@ export class NavigationHandlers {
         const resolveMode = args?.resolveMode === "exact" ? "exact" : "outline";
         const symbolIdExact = typeof args?.symbolIdExact === "string" ? args.symbolIdExact.trim() : undefined;
         const symbolLabelExact = typeof args?.symbolLabelExact === "string" ? args.symbolLabelExact.trim() : undefined;
+        const detail = args?.detail === "analysis" ? "analysis" : "summary";
 
         let releasePublicationReadLease: (() => void) | undefined;
         try {
@@ -324,6 +385,19 @@ export class NavigationHandlers {
                 };
             }
             const normalizedFile = this.host.normalizeRelativeFilePath(relativeFileResult.relativePath);
+            if (detail === "analysis" && (resolveMode !== "exact" || !symbolIdExact)) {
+                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                    absoluteRoot,
+                    normalizedFile,
+                    'detail="analysis" requires resolveMode="exact" and symbolIdExact.',
+                    "not_ready",
+                    "invalid_request",
+                );
+                return {
+                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                    isError: true,
+                };
+            }
 
             if (!fs.existsSync(absoluteRoot)) {
                 const payload = this.host.buildInvalidFileOutlineRequestPayload(
@@ -418,6 +492,9 @@ export class NavigationHandlers {
             const matchedRoot = trackedRootState.root;
             const effectiveRoot = matchedRoot.path;
             releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
+            const analysisBarrier = detail === "analysis"
+                ? this.host.getPreparedReadCacheObservation(effectiveRoot)
+                : undefined;
             const absoluteFile = path.resolve(effectiveRoot, normalizedFile);
             const relativeToRoot = path.relative(effectiveRoot, absoluteFile);
             if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
@@ -538,10 +615,78 @@ export class NavigationHandlers {
                         buildOutlineSpanWarningCodes: (repair) => this.host.buildOutlineSpanWarningCodes(repair),
                     });
                     await this.host.touchWatchedCodebase(effectiveRoot);
+                    let projectedPayload = payload;
+                    if (detail === "analysis" && payload.status === "ok") {
+                        if (
+                            !analysisBarrier
+                            || analysisBarrier.observation === null
+                            || analysisBarrier.sourceObservation === null
+                            || analysisBarrier.unavailableReason !== undefined
+                        ) {
+                            projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                effectiveRoot,
+                                normalizedFile,
+                                "Satori could not verify this analysis against the current source.",
+                            );
+                        } else {
+                            const selectedSymbol = payload.outline?.symbols[0];
+                            if (!selectedSymbol) {
+                                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                    effectiveRoot,
+                                    normalizedFile,
+                                    "No exact canonical symbol was available for structural analysis.",
+                                );
+                            } else if (selectedSymbol.language !== "python") {
+                                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                    effectiveRoot,
+                                    normalizedFile,
+                                    "Structural analysis v1 is available only for Python symbols.",
+                                    "unsupported_language",
+                                );
+                            } else {
+                                const analysisResult = await analyzePythonSymbolStructure({
+                                    content: fs.readFileSync(absoluteFile, "utf8"),
+                                    symbol: {
+                                        kind: selectedSymbol.kind,
+                                        name: selectedSymbol.name,
+                                        qualifiedName: selectedSymbol.qualifiedName,
+                                        span: selectedSymbol.span,
+                                    },
+                                });
+                                const finalBarrier = this.host.getPreparedReadCacheObservation(
+                                    effectiveRoot,
+                                );
+                                if (!sourceBarrierMatches(analysisBarrier, finalBarrier)) {
+                                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                        effectiveRoot,
+                                        normalizedFile,
+                                        "Source changed while Satori was computing structural analysis.",
+                                        "source_changed_during_request",
+                                    );
+                                } else if (analysisResult.status === "ok") {
+                                    projectedPayload = withPythonStructuralAnalysis(
+                                        payload,
+                                        analysisResult.analysis,
+                                    );
+                                } else {
+                                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                        effectiveRoot,
+                                        normalizedFile,
+                                        analysisResult.reason === "unsupported_symbol_kind"
+                                            ? "Structural analysis v1 supports Python functions and methods only."
+                                            : `Python structural analysis is unavailable (${analysisResult.reason}).`,
+                                        analysisResult.reason === "unsupported_symbol_kind"
+                                            ? "unsupported_symbol_kind"
+                                            : "analysis_unavailable",
+                                    );
+                                }
+                            }
+                        }
+                    }
                     const guidedPayload = withPendingSourceGuidance(
                         this.host,
                         effectiveRoot,
-                        payload,
+                        projectedPayload,
                     );
                     return {
                         content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(guidedPayload, proofDebugHint)) }],

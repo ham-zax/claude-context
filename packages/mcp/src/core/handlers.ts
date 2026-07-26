@@ -769,6 +769,9 @@ export class ToolHandlers {
             trackedRootReadiness: this.trackedRootReadiness,
             prepareNavigationRead: this.prepareNavigationRead.bind(this),
             acquirePublicationReadLease: this.acquirePublicationReadLease.bind(this),
+            getPreparedReadCacheObservation: (codebasePath) => (
+                this.getPreparedReadCacheObservation(codebasePath)
+            ),
             loadPreparedNavigationSymbolsByFile: this.loadPreparedNavigationSymbolsByFile.bind(this),
             loadPreparedNavigationCompatibility: this.loadPreparedNavigationCompatibility.bind(this),
             stringifyToolJson: this.stringifyToolJson.bind(this),

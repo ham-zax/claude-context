@@ -650,6 +650,9 @@ export type NonOkReason =
     | NavigationUnavailableReason
     | "missing_provider_config"
     | "search_backend_failed"
+    | "source_changed_during_request"
+    | "analysis_unavailable"
+    | "unsupported_symbol_kind"
     | "embedding_provider_unavailable"
     | "vector_backend_unavailable";
 
@@ -737,6 +740,7 @@ export interface FileOutlineInput {
     resolveMode?: "outline" | "exact";
     symbolIdExact?: string;
     symbolLabelExact?: string;
+    detail?: "summary" | "analysis";
 }
 
 export type FileOutlineStatus = "ok" | "not_found" | "requires_reindex" | "not_indexed" | "not_ready" | "unsupported" | "ambiguous";
@@ -763,6 +767,7 @@ export interface CanonicalSymbolIdentity {
 
 export interface FileOutlineSymbolResult extends CanonicalSymbolIdentity {
     callGraphHint: CallGraphHint;
+    analysis?: import("@zokizuan/satori-core").PythonStructuralAnalysis;
 }
 
 export interface FileOutlineResponseEnvelope {
