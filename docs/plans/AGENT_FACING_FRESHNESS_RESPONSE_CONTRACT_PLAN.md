@@ -883,3 +883,69 @@ SELECTED_NEXT_DECISION=A
 
 Decision A retains watcher-unavailable automatic freshness as a product goal
 but requires a separately approved performance architecture change.
+
+## 17. WU2 measured performance repair — 2026-07-26
+
+WU2 instrumented the production path before optimization. The dominant changed
+request owners were:
+
+```text
+relationship sidecar load:
+    3131 ms
+
+relationship delta:
+    1075 ms
+
+sidecar staging:
+    1887 ms
+
+post-publication relationship compatibility load:
+    3177 ms
+
+final full-source validation:
+    1932 ms
+```
+
+The focused candidate reused the existing generation-bound navigation-delta
+state, bypassed the stale Git changed-path cache while watcher evidence was
+unavailable, avoided the unused relationship load for exact ownership search,
+and replaced final byte rereads with the existing synchronizer's complete
+ctime/mtime/size-bound source observation.
+
+The identical quiet benchmark passed both latency budgets:
+
+```text
+unchanged p95:
+    2505.770 ms <= 7000 ms
+
+one-file changed:
+    5680.271 ms <= 7000 ms
+```
+
+It failed the unchanged memory budget:
+
+```text
+process-tree peak RSS:
+    2125.059 MiB > 1600 MiB
+
+stable retained capacity before changed publication:
+    2030.738 MiB
+```
+
+The main Node runtime owned approximately 2029 MiB at the instrumented changed
+peak; Potion owned approximately 108 MiB. The remaining owner is the retained
+complete-repository relationship/navigation representation.
+
+The required stop condition fired. Broad suites, package preparation, and
+symbol M0 were not started.
+
+Durable receipt:
+
+`docs/evidence/watcher-unavailable-wu2-20260726/WATCHER_UNAVAILABLE_WU2_RECEIPT.md`
+
+Current decision:
+
+```text
+WU2_OUTCOME=watcher_unavailable_memory_budget_failed
+MCP_VERSION_DECISION=blocked_no_6.5.1_release_candidate
+```
