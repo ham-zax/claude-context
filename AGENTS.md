@@ -67,6 +67,26 @@ Fix the responsible boundary, not a downstream symptom.
 
 Maintain one source of truth. Do not duplicate policy, validation, configuration, state, or business logic without demonstrated need.
 
+### Architecture ownership
+
+Every behavior and mutable state collection must have one authoritative owner. Ownership may span multiple files within one cohesive module, but authority must not be duplicated across domains.
+
+`Context` is the composition root and compatibility façade. It may construct services, wire dependencies, expose established compatibility APIs, and delegate. It must not gain new domain logic or mutable domain state.
+
+New indexing, search, generation-authority, publication, retention, lease, repair, or navigation behavior must belong to a dedicated domain owner.
+
+New domain services must depend on narrow ports or domain types, not on `Context`. Do not migrate existing dependencies unless the requested outcome requires it.
+
+Cross-domain workflows require an explicit coordinator with a named contract. Do not make `Context` the coordinator merely because it can reach the participating domains.
+
+Before adding behavior or state to an existing owner, identify:
+
+`invariant | lifecycle | authoritative writer | persistence boundary | callers | why this owner is correct`
+
+If the change would make one owner responsible for a second major domain, do not add it there. Place it in the existing correct owner, perform the smallest required extraction when it is within the authorized scope, or report a blocker when the necessary extraction would materially expand that scope.
+
+File size and complexity are warning signals, not substitutes for ownership. Obey repository-enforced budgets. When a proposed change crosses a configured threshold, make a bounded extraction decision before continuing. Do not split files solely to satisfy a number while preserving tangled ownership.
+
 Keep observations, assumptions, unknowns, hypotheses, findings, and decisions distinct.
 
 For defects, establish:
