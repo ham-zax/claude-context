@@ -1,10 +1,61 @@
 # Satori MCP capability report
 
-## Satori 6.3.0 requalification
+## Current native-only release decision (2026-07-26)
+
+The native Satori release candidate is qualified for the bounded repository
+class and static-analysis patterns recorded by the durable receipts below.
+This is the only current decision in this report:
+
+- Fresh reindex now publishes complete canonical V4 source-checkpoint,
+  relationship-graph, and mutation-receipt authority.
+- A fully proven healthy V4 repair is an exact no-op. Missing, corrupt,
+  changed, V3, or ambiguous source authority still fails closed to
+  `requires_reindex`.
+- Corrected C4 add/modify/delete freshness passed for a syntactically valid
+  `.py` probe with `scope=runtime` and a `.txt` probe with `scope=mixed`,
+  including restart and zero-change-sync readback.
+- All six qualified Python inbound relationship witnesses survived fresh
+  publication, repair, restart, zero-change sync, every controlled mutation,
+  and final readback.
+- Core passed 595 tests with one skipped and no failures. MCP passed 1,047
+  tests with no failures.
+- Native Python relationships are qualified only for the declared bounded
+  static patterns: absolute-import constructor receivers, bounded direct
+  service/callback value-origin flow, and the recorded signal-ledger flow.
+  General Python inbound completeness is not claimed; absence remains
+  non-authoritative outside the declared support model.
+- CodeQL is excluded from the release runtime and rejected as authoritative
+  Python `CALLS` evidence. Its retained role is optional offline or
+  asynchronous advisory evidence under separate future qualification.
+- The first `call_graph` in a fresh MCP process remains a documented
+  approximately 7–8 second limitation (`p50 7,204.25 ms`,
+  `p95 7,530.10 ms`). Warm calls are approximately 12–14 ms
+  (`p50 11.97 ms`, `p95 13.57 ms`). Optimization is deferred and is not a
+  native-release blocker.
+- The external-sampler experiment established bounded retained capacity over
+  six controlled publications. It does not establish a multi-day memory
+  guarantee. The qualified deployment contract requires approximately 2 GiB
+  of available runtime capacity.
+- Semantic abstention remains deferred and is not part of this release.
+
+Current evidence:
+
+- [V4 repair authority and corrected C4](../evidence/repair-authority-c4-20260726/REPAIR_AUTHORITY_C4_RECEIPT.md)
+- [Historical missing-authority execution](../evidence/current-master-freshness-20260726/CURRENT_MASTER_FRESHNESS_RECEIPT.md)
+- [Freshness first-wrong-boundary diagnosis](../evidence/freshness-boundary-20260726/FRESHNESS_BOUNDARY_RECEIPT.md)
+- [Historical post-merge stabilization run](../evidence/post-merge-stabilization-20260726/POST_MERGE_STABILIZATION_RECEIPT.md)
+- [Cold call-graph characterization](../evidence/cold-graph-memory-20260726/COLD_CALL_GRAPH_RECEIPT.md)
+- [Incremental-publication memory characterization](../evidence/cold-graph-memory-20260726/INCREMENTAL_PUBLICATION_MEMORY_RECEIPT.md)
+- [Deferred cold call-graph optimization plan](./COLD_CALL_GRAPH_DEFERRED_OPTIMIZATION.md)
+- [Native Python integration receipt](../evidence/python-native-integration-20260725/NATIVE_PYTHON_INTEGRATION_RECEIPT.md)
+- [CodeQL disposition](./CODEQL_RELATIONSHIP_PROVIDER_DISPOSITION.md)
+
+## Historical Satori 6.3.0 requalification
 
 This section records a bounded requalification completed on 2026-07-25. It
-supersedes the current decision from the original Satori 6.2.0 assessment
-below, but it does not rewrite that historical evidence.
+superseded the original Satori 6.2.0 assessment below. It is itself superseded
+for current release decisions by the 2026-07-26 decision above. Its original
+observations remain historical evidence.
 
 ### Decision
 
@@ -21,53 +72,11 @@ The original two production-completeness findings therefore could not both be
 retired by that run. The later implementation disposition below records the
 bounded repairs without rewriting this historical evidence.
 
-### Current implementation disposition (2026-07-25)
+### Superseded implementation disposition (2026-07-25)
 
-The requalification above remains the historical runtime record; it is not
-rewritten by the current shared-worktree implementation. The checkpoint
-C1/C2 execution record now reports the following frozen V4 model:
-
-- A fully proven healthy V4 publication is an exact no-op with no vector,
-  marker, checkpoint, policy, graph, or navigation authority writes.
-- A valid V4 source tuple with damaged navigation activates only a new
-  graph/navigation generation while preserving marker and source-checkpoint
-  authority.
-- V3, missing, corrupt, changed, or ambiguous source authority returns
-  `requires_reindex` rather than fabricating authority.
-- MCP repair success now validates the effective source checkpoint and, for a
-  V4 activation, its exact document digest.
-
-The checkpoint implementation landed in
-`074bed62f723e8b04ec36f3467417cba632687ae` and remains the publication
-baseline for the later language qualification.
-
-The bounded native Python relationship implementation is integrated by
-`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. It closes the six recorded
-production false negatives for:
-
-- absolute-import constructor receivers;
-- bounded direct service/callback value-origin flow; and
-- the recorded signal-ledger value-origin flow.
-
-The integration retained exact relationship and claim digests, full/delta
-equality, sidecar reload, restart readback, and all frozen wrong-target
-controls. MCP passed 1,047/1,047 tests. Core passed 592 tests with one skipped
-and the same three checkpoint-baseline failures recorded before this
-integration. Typecheck, changed-file lint, Core/MCP builds, and diff integrity
-passed.
-
-This is not general Python call-graph completeness. Reflection, arbitrary
-factories, collections, monkeypatching, unbounded aliases, and unsupported or
-ambiguous environments remain outside the static support model. Individual
-edges may be exact under that model while the inbound result set remains
-non-exhaustive.
-
-The native implementation is approved only under the absolute product budgets
-recorded in the
-[integration receipt](../evidence/python-native-integration-20260725/NATIVE_PYTHON_INTEGRATION_RECEIPT.md)
-and a runtime allowance of at least 2 GiB. It is not approved for a roughly
-1 GiB deployment. Production CodeQL/SCIP integration remains unauthorized.
-Semantic S0 is deferred, with no runtime abstention-policy change authorized.
+This intermediate disposition preceded the V4 publication-authority correction,
+corrected C4, and cold-graph/memory characterization. The current native-only
+release decision at the top of this document supersedes it.
 
 ### Requalification evidence boundary
 
@@ -104,7 +113,7 @@ complete serialized requests and responses as durable artifacts. Claims below
 are therefore bounded to the structured values and exact source reads recorded
 by the qualifying agent.
 
-### Finding decisions
+### Historical finding decisions
 
 The evidence levels below mean:
 
@@ -115,10 +124,10 @@ The evidence levels below mean:
   but no before/after intervention proves it caused the observed outcome; and
 - `unresolved`: the available client or artifact could not test the contract.
 
-| Finding | Observed evidence | Result | Evidence level | Current decision |
+| Finding | Observed evidence | Result | Evidence level | Decision at that run |
 | --- | --- | --- | --- | --- |
 | Large-repository repair proof | Repair returned `status=ok`; payload basis `same_state_membership_and_exact_count`; expected and observed 19,741; missing and extra zero; stale payload matched; no reindex hint | Pass | Intervention-proven | Retire the specific 16,384-row proof-limit defect |
-| Python inbound caller coverage | The historical runtime returned zero inbound edges despite exact production callers; the later bounded native integration returns all six recorded sites after publication and restart with frozen negatives preserved | Pass for the six qualified static patterns; general coverage remains partial | Intervention-proven by the later integration receipt | Retire the sampled six-site defect only; keep absence non-authoritative outside the declared support model |
+| Python inbound caller coverage | The runtime returned zero inbound edges despite exact production callers | Fail | Observed | Keep graph absence non-authoritative and retain deterministic source verification |
 | Empty-graph disclosure | Every empty inbound response included `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and an executable `must:` verification search | Pass | Observed | Retire the missing-disclosure defect, not the coverage defect |
 | Semantic abstention | All four negative controls returned ten nearest-neighbour groups without a zero-result, weak-relevance, or no-answer warning | Unqualified: `nearest_neighbor_without_calibrated_no_answer_contract` | Observed | Define and validate a calibrated contract before making a production no-answer claim |
 | Freshness timing and checkpoint integrity | Five corrected add/modify/delete cycles produced no observable indexed transition; recovery sync returned `requires_reindex` because the active source checkpoint was corrupt | Fail | Observed | Isolate and repair the responsible checkpoint lifecycle owner, then repeat timing qualification |
@@ -241,7 +250,7 @@ freshness/checkpoint-integrity defect. The recorded sequence does not prove
 whether reindex, repair, or another lifecycle transition introduced the
 mismatch, so it does not yet establish the responsible owner.
 
-### Current requalification verdict
+### Historical requalification verdict
 
 Implementation defects verified closed in the historical requalification:
 
@@ -265,19 +274,26 @@ Product behavior still unqualified:
 Accordingly, **“everything is resolved” is not supported by the Satori 6.3.0
 requalification**.
 
+### Superseded open-issue status (2026-07-25)
+
+The [open-findings review index](./OPEN_FINDINGS_REVIEW_INDEX.md) now owns the
+current issue ledger. In particular, corrected C4 freshness and the complete
+Core/MCP test results supersede this historical report's earlier open
+freshness and baseline-test classifications.
+
 ## Post-qualification root-cause hypotheses and design options
 
-> **Supersession notice (2026-07-25).** The pass/fail observations in this
-> report remain current. The checkpoint-identity and semantic-solution options
-> below are not implementation authorization and are superseded by the
+> **Supersession notice (2026-07-26).** The observations below remain
+> historical evidence. Their checkpoint, language-provider, and semantic
+> solution options are not implementation authorization and are superseded by
+> the current native-only release decision above, the
 > [open-findings review index](./OPEN_FINDINGS_REVIEW_INDEX.md),
 > [checkpoint integrity review](./CHECKPOINT_INTEGRITY_REPAIR_REVIEW.md), and
 > [semantic abstention review](./SEMANTIC_ABSTENTION_QUALIFICATION_REVIEW.md).
-> C0 has since established a repair-owned transition, and the frozen C1/C2
-> implementation is recorded as passing its bounded acceptance checks while
-> remaining unmerged. Native Python is the selected bounded path after
-> architecture corrections; production SCIP integration is not authorized.
-> Semantic S0 remains deferred.
+> The frozen C1/C2 repair model remains authoritative, the fresh-reindex owner
+> now publishes complete canonical V4 authority, and corrected C4 passes.
+> Bounded native Python remains qualified; CodeQL remains excluded from runtime
+> authority; semantic abstention remains deferred.
 
 This section records the bounded follow-up investigation completed on
 2026-07-25. It identifies defect-capable mechanisms and candidate design
@@ -286,22 +302,24 @@ pilot do not establish intervention-proven causes or settle the broader
 language-server, publication-identity, or abstention designs. It does not
 change the pass/fail decisions above.
 
-The current bounded decision is:
+The historical bounded decision before the corrected C4 qualification was:
 
 > C0 established a repair-owned checkpoint transition. C1/C2 use the existing
 > V4 binding with exact healthy no-op, graph-only navigation activation for a
 > valid source tuple, and explicit fail-reindex for missing, corrupt, changed,
-> or ambiguous authority. Their bounded execution record is passing but the
-> implementation remains unmerged and the Core residual failures remain open.
-> Python uses the `native_python_bounded` path after architecture corrections;
-> production SCIP integration is not authorized. Semantic S0 remains deferred.
+> or ambiguous authority. A later qualification corrected the fresh-reindex
+> publication owner and passed C4 for both valid probe classes; C3 remains
+> outside this release.
+> Python passes the six recorded sites under the bounded native static model;
+> general Python inbound completeness remains partial. Production CodeQL/SCIP
+> integration is not authorized. Semantic S0 remains deferred.
 
 | Open finding | Current evidence | Current decision | Required experiment |
 | --- | --- | --- | --- |
-| Python constructor-receiver callers | Source-supported leading mechanism: the current relationship module resolver rejects absolute Python imports | Bounded native implementation authorized after architecture corrections; exact acceptance remains open | Trace each production caller through import resolution, relationship emission, identity projection, and traversal; then intervene on the first observed mismatch |
-| Python callback/service callers | Source-supported gap: current facts do not represent the sampled callable and service value flows | Bounded native model authorized only under a frozen support model with precision gates | Prove a bounded allocation-site or value-origin-sensitive model against exact positives and precision negatives |
-| Source checkpoint corruption | Historical source inspection found a writer-validator incompatibility capable of producing the observed marker/checkpoint mismatch | C1/C2 frozen V4 model implemented; merge, residual Core-test reconciliation, and final acceptance remain open | Record the owner-preserving merge, version/fingerprint consequence, affected full tests, and documentation reconciliation |
-| Semantic no-answer behavior | Observed top-K retrieval has no calibrated relevance decision | Abstention design unresolved | Compare calibrated fused-score features, a lightweight classifier, and a reranker on held-out realistic controls |
+| Python constructor-receiver callers | Intervention-proven integration returns all three recorded production callers with frozen negatives preserved | Closed for the qualified constructor pattern; general result-set completeness remains partial | No further experiment is authorized by this finding |
+| Python callback/service callers | Intervention-proven integration returns both residual callers and the recorded ledger caller with bounded value-origin proof | Closed for the qualified service/callback patterns; unsupported dynamic flows remain partial | No further experiment is authorized by this finding |
+| Source checkpoint corruption and corrected freshness | C1/C2 prove the selected V4 no-op/graph-only/fail-reindex model; the fresh-reindex owner correction publishes complete V4 authority; corrected C4 passes `.py`/runtime and `.txt`/mixed add-modify-delete lifecycles | Closed for the frozen repair model and corrected controlled freshness witness | No further checkpoint or freshness batch is authorized by this release |
+| Semantic no-answer behavior | Observed top-K retrieval has no calibrated relevance decision | Dedicated plan exists, but S0 is deferred and no runtime policy is authorized | Freeze the S0 ground truth, request applicability, risk bounds, holdout governance, and runtime budgets before candidate evaluation |
 
 ### Python inbound relationships: local source-supported evidence
 
@@ -433,7 +451,7 @@ Consequently:
 | Candidate | Useful capability | Demonstrated limitation | Decision |
 | --- | --- | --- | --- |
 | [Pyright](https://github.com/microsoft/pyright) | Python type analysis and standard call hierarchy | Missed the exact constructor, callback, and `Any` acceptance cases in the live pilot | Possible supplementary provider after a separate bounded acceptance pilot |
-| [SCIP](https://github.com/scip-code/scip) and [scip-python](https://github.com/sourcegraph/scip-python) | Language-neutral, immutable code-intelligence interchange suitable for one bounded offline evidence spike | `scip-python` is Pyright-based; the bounded provider decision does not authorize production ingestion or an external graph authority | Use only as the recorded offline P0 evidence path; `native_python_bounded` remains selected and production SCIP integration is not authorized |
+| [SCIP](https://github.com/scip-code/scip) and [scip-python](https://github.com/sourcegraph/scip-python) | Language-neutral, immutable code-intelligence interchange suitable for one bounded offline evidence spike | `scip-python` is Pyright-based; the bounded provider decision does not authorize production ingestion or an external graph authority | Retain only as offline evidence; the bounded native implementation is integrated and production SCIP integration is not authorized |
 | [multilspy](https://github.com/microsoft/multilspy) | Reference implementation for language-server lifecycle and JSON-RPC orchestration | It is a Python client library and currently documents Jedi for Python; Satori is TypeScript and already owns a shared runtime host | Use as design reference, not as a direct runtime dependency |
 | [Stack Graphs](https://github.com/github/stack-graphs) | Declarative, incremental name resolution independent of build tools | GitHub states that the repository is no longer supported or updated | Do not adopt as a new core dependency |
 
@@ -609,10 +627,10 @@ unconditional runtime graph truth.
 
 | Finding | Evidence required to close it |
 | --- | --- |
-| Absolute-import constructor coverage | The three recorded `SignalGenerator.check_entry` production callers appear as inbound edges with exact targets and no same-name false positives |
-| Callback/service binding coverage | Exact binding-derived edges appear for the patterns admitted by the frozen support model with no precision negatives. If calls remain absent but partial coverage is disclosed, the disclosure contract passes and coverage remains open |
+| Absolute-import constructor coverage | Closed for the recorded pattern: the three `SignalGenerator.check_entry` production callers appear as inbound edges with exact targets and no frozen same-name false positives |
+| Callback/service binding coverage | Closed for the recorded patterns: exact binding-derived edges appear for both residual callers and the ledger caller with no frozen precision negatives |
 | LSP integration | No integration is currently required. A future provider comparison must add correct evidence beyond the bounded native model, preserve deterministic results, degrade safely, and remain within a frozen workspace/configuration/provider lifecycle and resource budget |
-| Checkpoint integrity | The frozen C1/C2 V4/no-op/fail-reindex model passes its bounded happy-path, source-observation, restart, zero-change, recovery, retention, and rollback witnesses; final closure still requires owner-preserving merge, residual Core-test reconciliation, affected full tests, and version/reindex recording |
+| Checkpoint integrity | Closed for the frozen C1/C2 V4/no-op/fail-reindex repair model. The merged implementation passed source-observation, restart, zero-change, recovery, retention, rollback, affected MCP, and compatibility witnesses. This does not close the separate add/modify/delete freshness-timing qualification |
 | Semantic abstention | Held-out realistic controls establish a versioned retrieval-pipeline decision policy with bounded selective risk, latency, and cost and explicit weak-relevance behavior |
 
 ### Durable external source record

@@ -4,13 +4,18 @@ Status: active decision ledger
 
 Created: 2026-07-25
 
-Current status: checkpoint C1/C2 passed under the selected
-V4/no-op/graph-only/fail-reindex model; C3/C4 remain unauthorized. Bounded
-native Python relationship coverage is integrated and qualified for the six
-recorded production sites under the declared static support model and absolute
-product budgets. General Python inbound coverage remains partial. Production
-CodeQL/SCIP integration and semantic S0 remain deferred or unauthorized as
-recorded below.
+Current status: the fresh-reindex owner publishes complete canonical V4
+authority, healthy repair is an exact no-op, and corrected C4 add/modify/delete
+freshness passes for `.py`/`runtime` and `.txt`/`mixed`. All six bounded native
+Python relationship witnesses survived the lifecycle. Core passed 595 tests
+with one skipped and no failures; MCP passed 1,047 tests with no failures.
+General Python inbound completeness is not claimed. CodeQL is excluded from
+the release runtime and rejected as authoritative Python `CALLS` evidence.
+Cold first `call_graph` remains a documented 7–8 second limitation; warm
+calls are approximately 12–14 ms. Memory is qualified as bounded retained
+capacity over six publications, not as a multi-day guarantee, under an
+approximately 2 GiB runtime allowance. Cold-graph optimization and semantic
+abstention are deferred and are not native-release blockers.
 
 ## 1. Purpose
 
@@ -34,6 +39,10 @@ Related records:
 - [Current capability report](./report.md)
 - [Python inbound relationship coverage repair plan](./SATORI_PYTHON_INBOUND_RELATIONSHIP_COVERAGE_REPAIR_PLAN.md)
 - [General incremental freshness plan](./INCREMENTAL_INDEX_FRESHNESS_PLAN.md)
+- [V4 repair authority and corrected C4](../evidence/repair-authority-c4-20260726/REPAIR_AUTHORITY_C4_RECEIPT.md)
+- [Cold call-graph characterization](../evidence/cold-graph-memory-20260726/COLD_CALL_GRAPH_RECEIPT.md)
+- [Incremental-publication memory characterization](../evidence/cold-graph-memory-20260726/INCREMENTAL_PUBLICATION_MEMORY_RECEIPT.md)
+- [Deferred cold call-graph optimization](./COLD_CALL_GRAPH_DEFERRED_OPTIMIZATION.md)
 
 This index does not reopen the closed large-index repair-proof defect or the
 closed empty-inbound-graph disclosure defect.
@@ -124,8 +133,9 @@ existing index during qualification.
 | C0 | `repair_owned_transition_proven`; use the selected V4/no-op/fail-reindex model: healthy state is an exact no-op, a valid source tuple with damaged navigation receives V4 graph/navigation activation, and missing/corrupt/changed source authority fails to explicit reindex |
 | C1 | `checkpoint_c1_pass`; healthy proven V4 is an exact no-op, while V3 and missing/corrupt/ambiguous authority fail to explicit reindex |
 | C2 | `checkpoint_c2_pass`; valid V4 graph-only activation preserves source authority, validates every successful MCP repair checkpoint, exposes later writes as the next delta, and retains and reactivates the prior readable V4 tuple |
-| C3 | Not authorized; any broader concurrency/failure-injection batch requires a separate decision after the C1/C2 receipt |
-| C4 | Not authorized; isolated product qualification requires a separate decision and must inherit the passed C1/C2 contracts |
+| Fresh-reindex authority correction | `product_defect_fixed`; `ManageIndexingHandlers.startBackgroundIndexing` now publishes the existing canonical V4 binding after full reindex |
+| C3 | Deferred and outside this release; no broader concurrency or failure-injection work is authorized |
+| C4 | `pass`; corrected `.py`/`runtime` and `.txt`/`mixed` add-modify-delete lifecycles passed after healthy repair, restart, and zero-change sync |
 
 ### Semantic abstention
 
@@ -149,25 +159,40 @@ its exact terminal outcome and stopping reason.
 | Product budget | Approved only for the frozen repository class with at least 2 GiB runtime allowance; not approved for a roughly 1 GiB deployment |
 | Production CodeQL/SCIP integration | Not authorized; the [portable CodeQL receipt](../evidence/codeql-python-20260725/CODEQL_PYTHON_RECEIPT.md) and [provider disposition](./CODEQL_RELATIONSHIP_PROVIDER_DISPOSITION.md) reject CodeQL as authoritative Python `CALLS` while retaining only optional offline/asynchronous advisory use under separate qualification |
 
+### Release characterization
+
+| Finding | Current decision |
+| --- | --- |
+| Corrected controlled freshness | Pass for `.py` with `scope=runtime` and `.txt` with `scope=mixed`; no general watcher-continuity claim is added |
+| Cold first `call_graph` | Open documented limitation: p50 `7,204.25 ms`, p95 `7,530.10 ms`; deferred optimization is not a native-release blocker |
+| Warm `call_graph` | p50 `11.97 ms`, p95 `13.57 ms` after preparation |
+| Incremental-publication memory | `memory_retained_capacity_bounded` over six controlled publications; no multi-day guarantee |
+| Runtime capacity | Approximately 2 GiB available capacity is required by the qualified deployment contract |
+| Semantic abstention | Deferred; no relevance-threshold, response-contract, or runtime-policy change is part of this release |
+| Package verification | Core 595 passed, 1 skipped, 0 failed; MCP 1,047 passed, 0 failed |
+
 ## 5. Current report status
 
-The pass/fail observations in `report.md` remain the current bounded
-qualification record. Its checkpoint-identity and semantic-solution discussion
-is not implementation authorization. The two dedicated plans supersede those
-design recommendations.
+The 2026-07-26 native-only release decision at the top of `report.md` is the
+single current capability decision. Earlier 6.3.0 and 6.2.0 sections remain
+historical evidence and do not override it.
 
 The six-site Python caller-coverage finding is closed only for the static
 patterns qualified by its separate Python plan. General Python inbound
-coverage remains partial and non-exhaustive. The general watcher-latency
-contract remains governed by the incremental freshness plan after checkpoint
-integrity is restored.
+coverage remains partial and non-exhaustive. Corrected controlled freshness
+passes, while no broader watcher-continuity or multi-day-memory guarantee is
+claimed.
 
 ## 6. Integration stewardship and merge/version ledger
 
 This ledger is the integration boundary for the authorized work. C1/C2 are
 present in base `c07eb3807639810a08f59d2ce73825bc5de8caba`. The optimized
 native Python implementation and its retained evidence were integrated by
-`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. The CodeQL experiment did not
+`cbde1a890aa81ebaffaf9deae92eab650ca61bd0`. The fresh-reindex V4 authority
+owner correction is `96332975a5f06722ccf5089d486c92c318f375b5`; its qualified
+code-and-test tip is `5ebe57f099db4b355cf7c67464e8f13db491b672`, and its
+durable qualification evidence is
+`f8b65867ab09b18af4e94edcf65d7d11894621d4`. The CodeQL experiment did not
 become runtime authority; its portable evidence is integrated from
 `cfa9491bdd4c119b96b9ede2524f0e88c4bf1a9f` through the
 [receipt](../evidence/codeql-python-20260725/CODEQL_PYTHON_RECEIPT.md) and
