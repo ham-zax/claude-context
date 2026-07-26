@@ -314,11 +314,12 @@ export class SharedRuntimeSocketHost {
                 this.scheduleIdleShutdown();
                 return;
             }
-            await new Promise<void>((resolve) => {
+            const serverClosed = new Promise<void>((resolve) => {
                 this.server.close(() => resolve());
             });
             await Promise.all([...this.sessions].map((session) => session.shutdown()));
             this.sessions.clear();
+            await serverClosed;
             await this.runtimeHost.shutdown();
             this.unsubscribeActivity();
             if (this.metadata) {

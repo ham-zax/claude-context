@@ -47,6 +47,12 @@ import {
     resolveSatoriUpgradeTarget,
     type SatoriUpgradeTarget,
 } from "./upgrade-target.js";
+import {
+    formatTerminateText,
+    terminateSatoriServers,
+    type TerminateOptions,
+    type TerminateResult,
+} from "./terminate.js";
 
 interface RunCliOptions {
     writeStdout?: (text: string) => void;
@@ -85,6 +91,7 @@ interface RunCliOptions {
     ) => Promise<ManagedRuntimeUpgradeResult>;
     globalCliUpgradeRunner?: (input: GlobalCliUpgradeInput) => number | Promise<number>;
     invokedScriptPath?: string;
+    terminateRunner?: (options: TerminateOptions) => Promise<TerminateResult>;
     connectSession?: (options: {
         command: string;
         args: string[];
@@ -255,6 +262,7 @@ function buildHelpPayload() {
             "install [--client all|codex|claude|opencode] [--runtime offline|voyage] [--vector-store lancedb|milvus] [--ollama-model <model>] [--profile default|minimal|all-text] [--dry-run] [--install-guidance-hook] (default: offline Potion on Linux x64; --ollama-model selects Ollama)",
             "version (-v, --version)",
             "upgrade (alias: update)",
+            "terminate",
             "uninstall [--client all|codex|claude|opencode] [--dry-run]",
             "doctor [--verbose] [--json]",
             "tools list",
@@ -292,6 +300,7 @@ function formatHelpText(): string {
         "  install       Install Satori for Codex, Claude Code, OpenCode, or all clients",
         "  version       Show installed CLI, MCP, and Core versions",
         "  upgrade       Update the CLI and its compatible MCP/Core runtime",
+        "  terminate     Stop all running Satori MCP servers",
         "  doctor        Check installation, runtime, and client configuration",
         "  uninstall     Remove Satori-managed client configuration",
         "  tools list    List the available MCP tools",
@@ -549,6 +558,19 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
             return 0;
         }
 
+        if (parsed.command.kind === "terminate") {
+            const result = await (options.terminateRunner ?? terminateSatoriServers)({
+                homeDir,
+                env: effectiveEnv,
+            });
+            if (parsed.globals.formatExplicit && parsed.globals.format === "json") {
+                emitJson(writers, result);
+            } else {
+                writers.writeStdout(formatTerminateText(result));
+            }
+            return result.status === "partial" ? 1 : 0;
+        }
+
         if (parsed.command.kind === "install" || parsed.command.kind === "uninstall") {
             const wantsJson = parsed.globals.formatExplicit && parsed.globals.format === "json";
             let packageSpecifier: string | undefined;
@@ -670,6 +692,20 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
                         ? effectiveEnv.SATORI_UPGRADE_FROM_CLI_VERSION
                         : currentCliVersion),
                 toCliVersion: delegationStartError?.toCliVersion ?? currentCliVersion,
+                error: {
+                    token: cliError.token,
+                    message: cliError.message,
+                },
+            });
+        }
+        if (
+            parsedCommandKind === "terminate"
+            && parsedFormatExplicit
+            && parsedFormat === "json"
+        ) {
+            emitJson(writers, {
+                action: "terminate",
+                status: "error",
                 error: {
                     token: cliError.token,
                     message: cliError.message,

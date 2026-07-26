@@ -20,6 +20,7 @@ export type ParsedCommand =
     | { kind: "version" }
     | { kind: "doctor"; json: boolean; verbose: boolean }
     | { kind: "upgrade" }
+    | { kind: "terminate" }
     | {
         kind: "install";
         client: InstallClient;
@@ -70,6 +71,7 @@ const RESERVED_SUBCOMMANDS = new Set([
     "uninstall",
     "upgrade",
     "update",
+    "terminate",
 ]);
 const PRIMITIVE_TYPES = new Set(["string", "number", "integer", "boolean"]);
 
@@ -360,6 +362,16 @@ export function parseCliArgs(argv: string[]): ParsedCliInput {
         return {
             globals,
             command: { kind: "upgrade" },
+        };
+    }
+
+    if (rest[0] === "terminate") {
+        if (rest.length !== 1) {
+            throw new CliError("E_USAGE", `Unknown arguments for terminate: ${rest.slice(1).join(" ")}`, 2);
+        }
+        return {
+            globals,
+            command: { kind: "terminate" },
         };
     }
 

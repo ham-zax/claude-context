@@ -58,6 +58,14 @@ test("parseCliArgs treats upgrade and update as the same command", () => {
     );
 });
 
+test("parseCliArgs supports terminate without accepting command-specific arguments", () => {
+    assert.deepEqual(parseCliArgs(["terminate"]).command, { kind: "terminate" });
+    assert.throws(
+        () => parseCliArgs(["terminate", "--force"]),
+        /Unknown arguments for terminate/,
+    );
+});
+
 test("parseCliArgs accepts the strict offline runtime variant", () => {
     const parsed = parseCliArgs([
         "install",

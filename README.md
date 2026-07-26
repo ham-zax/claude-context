@@ -47,6 +47,15 @@ shared provider/LanceDB state, and one Potion worker. The host uses a user-only
 Unix-domain socket, idles out after clients disconnect, and is not used for
 connected Voyage/Milvus or explicit Ollama runtimes.
 
+To stop every verified Satori MCP runtime under the active state root:
+
+```bash
+satori terminate
+```
+
+The command shuts down registered servers and their provider workers without
+removing client configuration, indexes, or installed packages.
+
 Upgrade the installed CLI, MCP runtime, and its compatible Core dependency:
 
 ```bash

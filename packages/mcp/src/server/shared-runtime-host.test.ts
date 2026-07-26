@@ -351,6 +351,48 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
     assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
 });
 
+test("socket host shutdown closes active sessions before awaiting listener closure", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-shutdown-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+
+    try {
+        await socketHost.start();
+        const bridge = await createBridge(runtimeEntry, runtimeEnv);
+        assert.deepEqual(runtimeHost.getActivity(), { sessions: 1, operations: 0 });
+
+        await Promise.race([
+            socketHost.shutdown(),
+            new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error("socket host shutdown timed out")), 1_000);
+            }),
+        ]);
+        await bridge.close().catch((error: NodeJS.ErrnoException) => {
+            assert.equal(error.code, "ECONNRESET");
+        });
+
+        assert.equal(fs.existsSync(paths.metadataPath), false);
+        assert.equal(fs.existsSync(paths.socketPath), false);
+    } finally {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("a new session cancels idle shutdown before listener closure", async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-idle-"));
     fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });

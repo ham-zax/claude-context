@@ -69,6 +69,7 @@ install [--client all|codex|claude|opencode]
 doctor [--verbose] [--json]
 version # aliases: -v, --version
 upgrade # alias: update
+terminate
 uninstall [--client all|codex|claude|opencode] [--dry-run]
 tools list
 tool call <toolName> --args-json '<json>'
@@ -98,6 +99,11 @@ Global flags must precede the command token:
 
 `satori -v`, `satori --version`, and `satori version` print the installed CLI,
 MCP runtime, and Core versions. Put `--format json` first for structured output.
+
+`satori terminate` gracefully stops every verified Satori runtime owner and
+shared host under the active state root. Provider workers close through the
+normal server lifecycle. The command does not uninstall clients or delete
+indexes. Put `--format json` first for a structured termination receipt.
 
 ## Runtime Ownership
 

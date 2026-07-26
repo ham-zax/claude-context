@@ -164,6 +164,7 @@ test("runCli defaults to human help and preserves structured help on request", a
     assert.match(io.read().stdout, /^Satori\n[\s\S]*Get started:\n {2}satori install --client all/m);
     assert.match(io.read().stdout, /satori install --client codex --install-guidance-hook/);
     assert.match(io.read().stdout, /-v, --version\s+Show installed CLI, MCP, and Core versions/);
+    assert.match(io.read().stdout, /terminate\s+Stop all running Satori MCP servers/);
     assert.doesNotMatch(io.read().stdout, /satori-cli|legacy/i);
     assert.equal(io.read().stderr, "");
 
@@ -177,8 +178,70 @@ test("runCli defaults to human help and preserves structured help on request", a
     const help = JSON.parse(jsonIo.read().stdout);
     assert.equal(help.usage, "satori <command>");
     assert.ok(help.commands.includes("version (-v, --version)"));
+    assert.ok(help.commands.includes("terminate"));
     assert.ok(help.globalFlags.includes("-v, --version"));
     assert.equal("legacyAlias" in help, false);
+});
+
+test("runCli terminate does not start an MCP session and supports text and JSON output", async () => {
+    const result = {
+        action: "terminate" as const,
+        status: "terminated" as const,
+        stateRoot: "/tmp/satori-state",
+        terminated: [{ pid: 41001, sources: ["runtime-owner" as const] }],
+        staleRecordCount: 0,
+        unverifiedRecordCount: 0,
+    };
+    const textIo = captureIo();
+    const textExitCode = await runCli(["terminate"], {
+        writeStdout: textIo.writeStdout,
+        writeStderr: textIo.writeStderr,
+        diagnosticsPath: null,
+        terminateRunner: async () => result,
+        connectSession: async () => {
+            assert.fail("terminate must not start an MCP session");
+        },
+    });
+    assert.equal(textExitCode, 0);
+    assert.match(textIo.read().stdout, /^Satori servers terminated/);
+    assert.equal(textIo.read().stderr, "");
+
+    const jsonIo = captureIo();
+    const jsonExitCode = await runCli(["--format", "json", "terminate"], {
+        writeStdout: jsonIo.writeStdout,
+        writeStderr: jsonIo.writeStderr,
+        diagnosticsPath: null,
+        terminateRunner: async () => result,
+    });
+    assert.equal(jsonExitCode, 0);
+    assert.deepEqual(JSON.parse(jsonIo.read().stdout), result);
+});
+
+test("runCli terminate preserves a structured error receipt", async () => {
+    const io = captureIo();
+    const exitCode = await runCli(["--format", "json", "terminate"], {
+        writeStdout: io.writeStdout,
+        writeStderr: io.writeStderr,
+        diagnosticsPath: null,
+        terminateRunner: async () => {
+            throw new CliError(
+                "E_TERMINATION_TIMEOUT",
+                "Timed out waiting for Satori server process 41001 to stop.",
+                1,
+            );
+        },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(JSON.parse(io.read().stdout), {
+        action: "terminate",
+        status: "error",
+        error: {
+            token: "E_TERMINATION_TIMEOUT",
+            message: "Timed out waiting for Satori server process 41001 to stop.",
+        },
+    });
+    assert.match(io.read().stderr, /^E_TERMINATION_TIMEOUT /);
 });
 
 test("runCli version shortcuts report the installed CLI, MCP, and Core set", async () => {
