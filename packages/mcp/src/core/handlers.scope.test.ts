@@ -32,7 +32,10 @@ type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
 type HandlerSyncManager = ConstructorParameters<typeof ToolHandlers>[2];
 type HandlerCallGraphManager = NonNullable<ConstructorParameters<typeof ToolHandlers>[6]>;
-type HandlerReranker = NonNullable<ConstructorParameters<typeof ToolHandlers>[7]>;
+type HandlerReranker = Pick<
+    NonNullable<ConstructorParameters<typeof ToolHandlers>[7]>,
+    'rerank'
+>;
 type SearchFixtureResult = {
     content: string;
     relativePath: string;
@@ -710,7 +713,7 @@ function createHandlers(
         capabilities,
         () => Date.parse('2026-01-01T01:00:00.000Z'),
         callGraphManager,
-        reranker || null,
+        (reranker as NonNullable<ConstructorParameters<typeof ToolHandlers>[7]> | undefined) || null,
         options?.gitignoreForceReloadEveryN,
         undefined,
         null,
@@ -729,12 +732,17 @@ function createHandlers(
             : {}),
     });
     if (options?.sourceBarrierMode !== 'native') {
-        overrides.getPreparedReadCacheObservation = () => ({
+        installVerifiedSourceBarrier(handlers);
+    }
+    return handlers;
+}
+
+function installVerifiedSourceBarrier(handlers: ToolHandlers): void {
+    (handlers as unknown as Pick<ToolHandlersTestOverrides, 'getPreparedReadCacheObservation'>)
+        .getPreparedReadCacheObservation = () => ({
             observation: 'scope-authority-observation',
             sourceObservation: 'scope-source-observation',
         });
-    }
-    return handlers;
 }
 
 test('handleSearchCode falls back from structural ownership when completion proof omits navigation evidence', async () => {
@@ -970,7 +978,6 @@ test('handleSearchCode reports warm proof reuse and forces a cold recount after 
         const observation = JSON.stringify({
             vectorAuthority: 'vector-1',
             navigationAuthority: 'navigation-1',
-            freshnessEpoch: 1,
             mutationGeneration: 1,
         });
         const internals = handlers as unknown as {
@@ -984,9 +991,11 @@ test('handleSearchCode reports warm proof reuse and forces a cold recount after 
             };
             syncManager: HandlerSyncManager & {
                 getPreparedReadObservation: () => {
-                    available: false;
-                    reason: 'watcher_manager_not_started';
-                    freshnessEpoch: number;
+                    available: true;
+                    observation: {
+                        freshnessEpoch: number;
+                        watcherState: 'ready';
+                    };
                 };
             };
             mutationLeaseCoordinator: {
@@ -1012,9 +1021,11 @@ test('handleSearchCode reports warm proof reuse and forces a cold recount after 
             navigationProof: { status: 'not_bound' },
         });
         internals.syncManager.getPreparedReadObservation = () => ({
-            available: false,
-            reason: 'watcher_manager_not_started',
-            freshnessEpoch: 1,
+            available: true,
+            observation: {
+                freshnessEpoch: 1,
+                watcherState: 'ready',
+            },
         });
         internals.mutationLeaseCoordinator = {
             observe: () => ({ mutationActive: false, generation: 1 }),
@@ -1032,6 +1043,11 @@ test('handleSearchCode reports warm proof reuse and forces a cold recount after 
             navigationStatus: 'not_bound',
             preparedObservation: observation,
         }, observation, nowMs);
+        (handlers as unknown as Pick<ToolHandlersTestOverrides, 'getPreparedReadCacheObservation'>)
+            .getPreparedReadCacheObservation = () => ({
+                observation,
+                sourceObservation: 'warm-proof-source-observation',
+            });
 
         const search = async () => {
             const response = await handlers.handleSearchCode({
@@ -1062,7 +1078,6 @@ test('handleSearchCode reports warm proof reuse and forces a cold recount after 
             },
         });
 
-        navigationAuthority = 'navigation-2';
         nowMs = 14 * 60_000;
         assert.deepEqual(await search(), {
             proofMode: 'warm',
@@ -1079,7 +1094,6 @@ test('handleSearchCode reports warm proof reuse and forces a cold recount after 
             },
         });
 
-        navigationAuthority = 'navigation-3';
         nowMs = 28 * 60_000;
         assert.deepEqual(await search(), {
             proofMode: 'warm',
@@ -1125,7 +1139,10 @@ test('manage status prepares one reusable proof and genuine authority drift stil
             language: 'typescript',
             score: 0.99,
             indexedAt: '2026-01-01T00:30:00.000Z',
-        }], undefined, { enableVectorReceipt: true });
+        }], undefined, {
+            enableVectorReceipt: true,
+            sourceBarrierMode: 'native',
+        });
         const vectorReceipt = { collectionName: 'committed-v3' } as never;
         let mutationGeneration = 1;
         let completionProofReads = 0;
@@ -1144,9 +1161,11 @@ test('manage status prepares one reusable proof and genuine authority drift stil
             syncManager: HandlerSyncManager & {
                 ensureFreshness: () => Promise<never>;
                 getPreparedReadObservation: () => {
-                    available: false;
-                    reason: 'watcher_disabled';
-                    freshnessEpoch: number;
+                    available: true;
+                    observation: {
+                        freshnessEpoch: number;
+                        watcherState: 'ready';
+                    };
                 };
             };
             mutationLeaseCoordinator: {
@@ -1177,9 +1196,11 @@ test('manage status prepares one reusable proof and genuine authority drift stil
             return semanticSearch(receipt, request);
         };
         internals.syncManager.getPreparedReadObservation = () => ({
-            available: false,
-            reason: 'watcher_disabled',
-            freshnessEpoch: 1,
+            available: true,
+            observation: {
+                freshnessEpoch: 1,
+                watcherState: 'ready',
+            },
         });
         internals.syncManager.ensureFreshness = async () => {
             freshnessCalls += 1;
@@ -1211,7 +1232,7 @@ test('manage status prepares one reusable proof and genuine authority drift stil
             debugMode: 'freshness',
         });
         const firstPayload = JSON.parse(firstSearch.content[0]?.text || '{}');
-        assert.equal(firstPayload.status, 'ok');
+        assert.equal(firstPayload.status, 'ok', JSON.stringify(firstPayload));
         assert.equal(completionProofReads, 1);
         assert.equal(freshnessCalls, 0);
         assert.deepEqual(semanticReceipt, vectorReceipt);
@@ -1447,6 +1468,16 @@ test('search continuation preserves the full grouped order without new retrieval
                     }>;
                     semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<SearchFixtureResult[]>;
                     semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                    compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                    compareSourceObservationToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                    inspectSourceFreshnessCheckpoint: () => Promise<{
+                        status: 'valid';
+                        observationToken: string;
+                        generationReceipt: {
+                            collectionName: string;
+                            marker: { runId: string; indexPolicyHash: string };
+                        };
+                    }>;
                 };
                 syncManager: HandlerSyncManager & {
                     getPreparedReadObservation: () => {
@@ -1464,6 +1495,11 @@ test('search continuation preserves the full grouped order without new retrieval
                     getActiveLease: () => null;
                 };
                 now: () => number;
+                getPreparedReadCacheObservation: () => {
+                    observation: string;
+                    sourceObservation: string | null;
+                    unavailableReason?: 'watcher_disabled';
+                };
             };
             let retrievalCalls = 0;
             let vectorAuthority = 'vector-stable';
@@ -1490,6 +1526,19 @@ test('search continuation preserves the full grouped order without new retrieval
                 vectorReceipt: { collectionName: 'committed-v3' } as never,
                 navigationProof: { status: 'not_bound' },
             });
+            internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
+            internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
+            internals.context.inspectSourceFreshnessCheckpoint = async () => ({
+                status: 'valid',
+                observationToken: 'continuation-checkpoint-observation',
+                generationReceipt: {
+                    collectionName: 'committed-v3',
+                    marker: {
+                        runId: 'continuation-marker-run',
+                        indexPolicyHash: 'continuation-policy-hash',
+                    },
+                },
+            });
             internals.syncManager.getPreparedReadObservation = () => sourceAvailable
                 ? {
                     available: true,
@@ -1500,6 +1549,17 @@ test('search continuation preserves the full grouped order without new retrieval
                     reason: 'watcher_disabled',
                     freshnessEpoch,
                 };
+            internals.getPreparedReadCacheObservation = () => ({
+                observation: JSON.stringify({
+                    vectorAuthority,
+                    navigationAuthority,
+                    mutationGeneration: 1,
+                }),
+                sourceObservation: sourceAvailable
+                    ? JSON.stringify({ freshnessEpoch, watcherState: 'ready' })
+                    : null,
+                ...(!sourceAvailable ? { unavailableReason: 'watcher_disabled' as const } : {}),
+            });
             const originalGeneratedArtifactsHint = internals.buildGeneratedArtifactsVerificationHint
                 .bind(internals);
             internals.buildGeneratedArtifactsVerificationHint = (...args) => {
@@ -1598,8 +1658,9 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.match(initialPayload.continuation.handle, /^[a-f0-9]{48}$/);
         assert.ok(Buffer.byteLength(initialResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
 
-        paged.useUnchangedDirtyFreshness();
-        const sameObservationSearch = await paged.handlers.handleSearchCode({
+        const freshnessProbe = prepareHandlers();
+        freshnessProbe.useUnchangedDirtyFreshness();
+        const sameObservationSearch = await freshnessProbe.handlers.handleSearchCode({
             path: repoPath,
             query: 'find the owner implementations again',
             scope: 'runtime',
@@ -1607,6 +1668,8 @@ test('search continuation preserves the full grouped order without new retrieval
             groupBy: 'file',
             rankingMode: 'default',
             limit: 20,
+            debugMode: 'freshness',
+            disclosureLimit: 20,
         });
         assert.equal(
             JSON.parse(sameObservationSearch.content[0]?.text || '{}').freshnessDecision.mode,
@@ -1618,6 +1681,7 @@ test('search continuation preserves the full grouped order without new retrieval
             expectedOffset: initialPayload.continuation.nextOffset,
             limit: 5,
         });
+        assert.equal(pageTwoResponse.isError, undefined, pageTwoResponse.content[0]?.text);
         const pageTwoPayload = JSON.parse(pageTwoResponse.content[0]?.text || '{}');
         const mismatchedRetry = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
@@ -2096,6 +2160,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
         const internals = handlers as unknown as {
             context: HandlerContext & {
                 compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                compareSourceObservationToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
                 inspectSourceFreshnessCheckpoint: () => Promise<{
                     status: 'valid';
                     observationToken: string;
@@ -2135,10 +2200,11 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
                 getActiveLease: () => null;
             };
         };
-        let comparisonCalls = 0;
+        let finalComparisonCalls = 0;
         let checkpointInspectionCalls = 0;
-        internals.context.compareAllSourceToFreshnessCheckpoint = async () => {
-            comparisonCalls += 1;
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
+        internals.context.compareSourceObservationToFreshnessCheckpoint = async () => {
+            finalComparisonCalls += 1;
             return { status: 'matches' };
         };
         internals.context.inspectSourceFreshnessCheckpoint = async () => {
@@ -2200,7 +2266,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results.length, 1);
         assert.equal(checkpointInspectionCalls, 2);
-        assert.equal(comparisonCalls, 1);
+        assert.equal(finalComparisonCalls, 1);
         assert.deepEqual(payload.hints.debugSearch.readiness.requestProof, {
             freshnessComparisonMode: 'full',
             exactPathCount: 0,
@@ -2225,6 +2291,7 @@ test('watcher-disabled search preserves exact changed paths for the first freshn
         const internals = handlers as unknown as {
             context: HandlerContext & {
                 compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                compareSourceObservationToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
                 inspectSourceFreshnessCheckpoint: () => Promise<{
                     status: 'valid';
                     observationToken: string;
@@ -2264,9 +2331,10 @@ test('watcher-disabled search preserves exact changed paths for the first freshn
             };
             getChangedFilesForCodebase: () => { available: true; files: Set<string> };
         };
-        let comparisonCalls = 0;
-        internals.context.compareAllSourceToFreshnessCheckpoint = async () => {
-            comparisonCalls += 1;
+        let finalComparisonCalls = 0;
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
+        internals.context.compareSourceObservationToFreshnessCheckpoint = async () => {
+            finalComparisonCalls += 1;
             return { status: 'matches' };
         };
         internals.context.inspectSourceFreshnessCheckpoint = async () => ({
@@ -2324,7 +2392,7 @@ test('watcher-disabled search preserves exact changed paths for the first freshn
 
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results.length, 1);
-        assert.equal(comparisonCalls, 1);
+        assert.equal(finalComparisonCalls, 1);
         assert.deepEqual(payload.hints.debugSearch.readiness.requestProof, {
             freshnessComparisonMode: 'exact_paths',
             exactPathCount: 1,
@@ -5845,6 +5913,7 @@ test('handleSearchCode emits FILTER_MUST_UNSATISFIED after bounded retries', asy
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, DENSE_RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -5898,6 +5967,7 @@ test('handleSearchCode does not emit FILTER_MUST_UNSATISFIED when must succeeds 
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, DENSE_RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -6871,6 +6941,7 @@ test('handleSearchCode uses real synchronizer tracked paths for exact path-scope
             CAPABILITIES_NO_RERANK,
             () => Date.parse('2026-01-01T01:00:00.000Z')
         );
+        installVerifiedSourceBarrier(handlers);
         (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({ outcome: 'valid' });
 
         const response = await handlers.handleSearchCode({
@@ -7538,6 +7609,7 @@ test('handleSearchCode marks rerank.enabled=false when reranker instance is miss
             undefined,
             null
         );
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -9757,6 +9829,7 @@ test('handleSearchCode emits fileOutlineWindow navigation fallback when sidecar 
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, DENSE_RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -9822,6 +9895,7 @@ test('handleSearchCode subdirectory query publishes the effective root once and 
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, DENSE_RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: subdirPath,
@@ -9920,6 +9994,7 @@ test('handleSearchCode builds explicit hybrid semantic search requests with topk
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -9978,6 +10053,7 @@ test('handleSearchCode keeps diagnostic candidate depth separate from visible an
             CAPABILITIES_NO_RERANK,
             () => Date.parse('2026-01-01T01:00:00.000Z'),
         );
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10178,6 +10254,7 @@ test('handleSearchCode falls back to dense retrieval when hybrid mode is disable
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, DENSE_RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10244,6 +10321,7 @@ test('handleSearchCode runs evidence-triggered expansion after the primary pass 
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10334,6 +10412,7 @@ test('handleSearchCode redacts unclassified all-pass failures from output, diagn
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         let response!: Awaited<ReturnType<ToolHandlers['handleSearchCode']>>;
         try {
@@ -10421,6 +10500,7 @@ test('handleSearchCode preserves a redacted terminal embedding cause without sta
             CAPABILITIES_NO_RERANK,
             () => Date.parse('2026-01-01T01:00:00.000Z'),
         );
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10486,6 +10566,7 @@ test('handleSearchCode returns structured backend diagnostics when all semantic 
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10501,7 +10582,7 @@ test('handleSearchCode returns structured backend diagnostics when all semantic 
         assert.equal(payload.status, 'not_ready');
         assert.equal(payload.reason, 'vector_backend_unavailable');
         assert.equal(payload.code, 'ZILLIZ_CLUSTER_STOPPED');
-        assert.equal(payload.freshnessDecision, null);
+        assert.equal(payload.freshnessDecision, undefined);
         assert.deepEqual(payload.results, []);
         assert.match(payload.hints.backend.nextSteps.join(' '), /Resume the Zilliz Cloud cluster/);
         assert.deepEqual(response.meta?.searchDiagnostics?.semanticPassFailures, [
@@ -10548,6 +10629,7 @@ test('handleSearchCode returns json envelope for collection limit errors', async
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10621,6 +10703,7 @@ test('handleSearchCode supports deterministic test-only fault injection for expa
             } as unknown as HandlerSyncManager;
 
             const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+            installVerifiedSourceBarrier(handlers);
 
             const response = await handlers.handleSearchCode({
                 path: repoPath,
@@ -10703,6 +10786,7 @@ test('handleSearchCode ignores fault injection env outside test mode', { concurr
             } as unknown as HandlerSyncManager;
 
             const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+            installVerifiedSourceBarrier(handlers);
 
             const response = await handlers.handleSearchCode({
                 path: repoPath,
@@ -10759,6 +10843,7 @@ test('handleSearchCode returns deterministic all-pass error when test fault inje
             } as unknown as HandlerSyncManager;
 
             const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+            installVerifiedSourceBarrier(handlers);
 
             const response = await handlers.handleSearchCode({
                 path: repoPath,
@@ -10852,6 +10937,7 @@ test('handleSearchCode requires_reindex payload includes compatibility diagnosti
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -10865,7 +10951,7 @@ test('handleSearchCode requires_reindex payload includes compatibility diagnosti
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
         assert.equal(payload.reason, 'requires_reindex');
-        assert.equal(payload.freshnessDecision.mode, 'skipped_requires_reindex');
+        assert.equal(payload.freshnessDecision, undefined);
         assert.equal(payload.compatibility.runtimeFingerprint.schemaVersion, 'hybrid_v3');
         assert.equal(payload.compatibility.indexedFingerprint.schemaVersion, 'dense_v3');
         assert.equal(payload.compatibility.reindexReason, 'fingerprint_mismatch');
@@ -11128,6 +11214,7 @@ test('handleSearchCode syncs missing completion marker when snapshot is verified
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES_NO_RERANK, () => Date.parse('2026-01-01T01:00:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
         (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => {
             completionProofCalls += 1;
             return completionProofCalls === 1
@@ -11149,7 +11236,7 @@ test('handleSearchCode syncs missing completion marker when snapshot is verified
         assert.equal(completionProofCalls, 2);
         assert.equal(semanticSearchCalls > 0, true);
         assert.equal(payload.status, 'ok');
-        assert.equal(payload.freshnessDecision?.mode, 'synced');
+        assert.equal(payload.freshnessDecision, undefined);
     });
 });
 

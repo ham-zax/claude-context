@@ -9,6 +9,7 @@ import {
     Embedding,
     FileSynchronizer,
     createLanguageAnalysisService,
+    readSymbolRegistrySidecar,
     resetSharedRuntimeNavigationStoreForTests,
 } from '@zokizuan/satori-core';
 import type {
@@ -59,11 +60,6 @@ const CAPABILITIES = new CapabilityResolver({
 });
 
 type JsonObject = Record<string, unknown>;
-
-type OutlineSymbol = {
-    symbolId: string;
-    symbolLabel?: string;
-};
 
 type MutableCodebaseInfo = {
     status: 'indexed' | 'sync_completed' | 'indexing' | 'requires_reindex';
@@ -325,20 +321,6 @@ function createToolContext(snapshotManager: SnapshotManager, syncManager: SyncMa
     } as unknown as ToolContext;
 }
 
-function findSymbol(outlinePayload: JsonObject, symbolName: string): OutlineSymbol {
-    const outline = outlinePayload.outline as { symbols?: unknown } | undefined;
-    const symbols = outline?.symbols;
-    assert.ok(Array.isArray(symbols), 'expected outline symbols');
-    const match = symbols.find((symbol): symbol is OutlineSymbol =>
-        typeof symbol === 'object'
-        && symbol !== null
-        && typeof (symbol as OutlineSymbol).symbolId === 'string'
-        && String((symbol as OutlineSymbol).symbolLabel || '').includes(symbolName)
-    );
-    assert.ok(match, `expected symbol label containing ${symbolName}`);
-    return match;
-}
-
 test('MCP handlers fail closed after ignore reconciliation deletes indexed paths and sync recovery fails', async () => {
     await withTempState(async ({ repoPath, stateRoot }) => {
         const ignoredRelativePath = 'src/ignored.ts';
@@ -415,14 +397,17 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
             vectorReceipt: checkpointReceipt,
             generationReceipt: checkpointReceipt,
         });
-
-        const initialOutline = parsePayload(await handlers.handleFileOutline({
-            path: repoPath,
-            file: ignoredRelativePath,
-        }));
-        assert.equal(initialOutline.status, 'ok');
-        const ignoredSymbol = findSymbol(initialOutline, 'ignoredLogin');
-        const oldSymbolInstanceId = ignoredSymbol.symbolId;
+        const registryRead = await readSymbolRegistrySidecar({
+            stateRoot,
+            normalizedRootPath: repoPath,
+        });
+        assert.equal(registryRead.status, 'ok');
+        assert.ok(registryRead.registry);
+        const ignoredSymbol = registryRead.registry.symbolsByFile
+            .get(ignoredRelativePath)
+            ?.find((symbol) => symbol.name === 'ignoredLogin');
+        assert.ok(ignoredSymbol, 'expected ignoredLogin in the published symbol registry');
+        const oldSymbolInstanceId = ignoredSymbol.symbolInstanceId;
 
         // This fixture does not model a prepared-read observation, so exact
         // opens remain unavailable even though the indexed generation is real.
@@ -468,7 +453,7 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
             assert.equal(snapshotManager.getCodebaseIndexedPaths?.(repoPath).includes(ignoredRelativePath), false);
             assert.equal(triggerSearchPayload.status, 'requires_reindex');
             assert.equal(triggerSearchPayload.reason, 'requires_reindex');
-            assert.equal(triggerSearchPayload.freshnessDecision && (triggerSearchPayload.freshnessDecision as JsonObject).mode, 'skipped_requires_reindex');
+            assert.equal(triggerSearchPayload.freshnessDecision, undefined);
             assert.equal(JSON.stringify(triggerSearchPayload).includes(oldSymbolInstanceId), false);
 
             const triggerResults = triggerSearchPayload.results;

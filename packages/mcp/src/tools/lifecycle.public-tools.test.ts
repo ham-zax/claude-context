@@ -359,6 +359,15 @@ test("public tools lifecycle: status/list → search → outline → read_file a
             CAPABILITIES,
             () => Date.parse("2026-07-09T00:00:00.000Z"),
         );
+        (handlers as unknown as {
+            getPreparedReadCacheObservation: () => {
+                observation: string;
+                sourceObservation: string;
+            };
+        }).getPreparedReadCacheObservation = () => ({
+            observation: "public-lifecycle-authority-observation",
+            sourceObservation: "public-lifecycle-source-observation",
+        });
         (handlers as unknown as { validateCompletionProof: () => Promise<{ outcome: "ok" }> })
             .validateCompletionProof = async () => ({ outcome: "ok" });
 

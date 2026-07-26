@@ -74,6 +74,18 @@ function warningCodes(payload: { warnings?: Array<string | { code?: string }> })
         .filter((code): code is string => typeof code === 'string');
 }
 
+function installVerifiedSourceBarrier(handlers: ToolHandlers): void {
+    (handlers as unknown as {
+        getPreparedReadCacheObservation: () => {
+            observation: string;
+            sourceObservation: string;
+        };
+    }).getPreparedReadCacheObservation = () => ({
+        observation: 'index-state-authority-observation',
+        sourceObservation: 'index-state-source-observation',
+    });
+}
+
 function withTempRepo<T>(fn: (repoPath: string) => Promise<T>): Promise<T> {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-mcp-index-state-stability-'));
     const repoPath = path.join(tempDir, 'repo');
@@ -428,6 +440,7 @@ test('handleSearchCode keeps status ok when completion-proof probe fails', async
             })
         } as unknown as HandlerSyncManager;
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES, () => Date.parse('2026-02-28T08:01:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -474,6 +487,7 @@ test('handleSearchCode warns when returning results from a partial limit_reached
             })
         } as unknown as HandlerSyncManager;
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES, () => Date.parse('2026-02-28T08:01:00.000Z'));
+        installVerifiedSourceBarrier(handlers);
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -858,6 +872,7 @@ test('handleSearchCode does not clear snapshot readiness when vector collection 
         } as unknown as HandlerSyncManager;
 
         const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES);
+        installVerifiedSourceBarrier(handlers);
         const response = await handlers.handleSearchCode({
             path: repoPath,
             query: 'run',

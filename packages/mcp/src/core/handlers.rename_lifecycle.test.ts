@@ -863,9 +863,10 @@ test('watcher-disabled search composes the real MCP freshness owner with Core so
             { status: 'matches' },
         );
         const comparisonResults: string[] = [];
-        const compareAllSource = context.compareAllSourceToFreshnessCheckpoint.bind(context);
-        context.compareAllSourceToFreshnessCheckpoint = async (...args) => {
-            const result = await compareAllSource(...args);
+        const compareSourceObservation =
+            context.compareSourceObservationToFreshnessCheckpoint.bind(context);
+        context.compareSourceObservationToFreshnessCheckpoint = async (...args) => {
+            const result = await compareSourceObservation(...args);
             comparisonResults.push(result.status);
             return result;
         };

@@ -78,6 +78,15 @@ function createHandlers(repoPath: string, searchResults: SearchFixtureResult[]) 
     } as unknown as ConstructorParameters<typeof ToolHandlers>[2];
 
     const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES, () => Date.parse('2026-01-01T01:00:00.000Z'));
+    (handlers as unknown as {
+        getPreparedReadCacheObservation: () => {
+            observation: string;
+            sourceObservation: string;
+        };
+    }).getPreparedReadCacheObservation = () => ({
+        observation: 'search-eval-authority-observation',
+        sourceObservation: 'search-eval-source-observation',
+    });
     return handlers;
 }
 
