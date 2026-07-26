@@ -9,11 +9,13 @@ import {
     SynchronizerCheckpointPublicationError,
 } from "@zokizuan/satori-core";
 import type {
+    CanonicalPublicationBinding,
     CustomIndexPolicyUpdate,
     PreparedIndexCollectionReceipt,
     RepairProof,
     RepairSnapshotEvidence,
     ResolvedIndexPolicy,
+    SourceFreshnessCheckpointEvidence,
 } from "@zokizuan/satori-core";
 import type { SnapshotManager } from "./snapshot.js";
 import type { SyncManager } from "./sync.js";
@@ -1462,6 +1464,9 @@ export class ManageIndexingHandlers {
         let writingReceiptPublished = false;
         let fullIndexCheckpoint: import("@zokizuan/satori-core").PreparedFileChangeSet | undefined;
         let fullIndexSynchronizer: import("@zokizuan/satori-core").FileSynchronizer | undefined;
+        let fullIndexCheckpointEvidence:
+            | Extract<SourceFreshnessCheckpointEvidence, { status: "valid" }>
+            | undefined;
         let fullIndexCheckpointCommitted = false;
         let candidateAuthorityCommitted = false;
         let publishedIndexStats: {
@@ -1685,6 +1690,13 @@ export class ManageIndexingHandlers {
                 // root-global freshness baseline.
                 await fullIndexCheckpoint.commit(assertMutationCurrent, publishMutation);
                 fullIndexCheckpointCommitted = true;
+                const checkpointEvidence = await synchronizer.inspectOwnedSnapshot();
+                if (checkpointEvidence.status !== "valid") {
+                    throw new Error(
+                        `Full index checkpoint for '${absolutePath}' could not be read after publication: ${checkpointEvidence.message}`,
+                    );
+                }
+                fullIndexCheckpointEvidence = checkpointEvidence;
             }
             console.log(`[BACKGROUND-INDEX] ✅ Indexing completed successfully! Files: ${stats.indexedFiles}, Chunks: ${stats.totalChunks}`);
             if (mutationLease) {
@@ -1800,6 +1812,36 @@ export class ManageIndexingHandlers {
                 console.warn(`[BACKGROUND-INDEX] Failed to refresh watcher for '${absolutePath}' after index proof: ${formatUnknownError(watcherError)}`);
             }
             if (stats.status === "completed" && stats.navigationCandidate) {
+                if (!fullIndexCheckpointEvidence || !candidateMarkerRunId) {
+                    throw new Error(
+                        `Completed index candidate for '${absolutePath}' has no exact source-checkpoint authority.`,
+                    );
+                }
+                const activationId = crypto.randomUUID();
+                const publicationAuthority = mutationLease ?? {
+                    ownerId: "core-internal",
+                    generation: 1,
+                    operationId: activationId,
+                };
+                const publication: CanonicalPublicationBinding = {
+                    activationId,
+                    sourceCheckpoint: {
+                        collectionName: targetCollectionName,
+                        markerRunId: candidateMarkerRunId,
+                        indexPolicyHash: candidatePolicy.policyHash,
+                        merkleRoot: fullIndexCheckpointEvidence.merkleRoot,
+                        documentDigest: fullIndexCheckpointEvidence.documentDigest,
+                    },
+                    graph: {
+                        kind: "relationship_manifest_v2",
+                        manifestHash: stats.navigationCandidate.relationshipManifestHash,
+                    },
+                    receipt: {
+                        ownerId: publicationAuthority.ownerId,
+                        generation: publicationAuthority.generation,
+                        operationId: publicationAuthority.operationId,
+                    },
+                };
                 this.host.context.publishResolvedIndexPolicy(
                     candidatePolicy,
                     {
@@ -1809,6 +1851,7 @@ export class ManageIndexingHandlers {
                             generationId: stats.navigationCandidate.generationId,
                             sealHash: stats.navigationCandidate.navigationSealHash,
                         },
+                        publication,
                     },
                     publishMutation,
                 );

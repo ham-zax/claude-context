@@ -9,6 +9,7 @@ import {
     IndexPolicyPublicationError,
     SynchronizerCheckpointPublicationError,
 } from "@zokizuan/satori-core";
+import type { CanonicalPublicationBinding } from "@zokizuan/satori-core";
 import { ManageIndexingHandlers } from "./manage-indexing-handlers.js";
 import type {
     IndexFingerprint,
@@ -36,6 +37,14 @@ const RUNTIME_FINGERPRINT: IndexFingerprint = {
 };
 
 const DEFAULT_INDEX_SOURCE = "export const value = 1;\n";
+
+type PublishedPolicyBinding = {
+    collectionName: string;
+    navigation:
+        | { status: 'not_bound' }
+        | { status: 'sealed'; generationId: string; sealHash: string };
+    publication?: CanonicalPublicationBinding;
+};
 
 function sourceHashes(sources: Readonly<Record<string, string>>): ReadonlyMap<string, string> {
     return new Map(Object.entries(sources).map(([relativePath, content]) => [
@@ -398,6 +407,7 @@ function createFailedIndexingHarness(
     let publishedPolicyCollection: string | null = null;
     let publishedPolicyHash: string | null = null;
     let publishedPolicyDocumentDigest: string | null = null;
+    let publishedPolicyBinding: PublishedPolicyBinding | null = null;
     let publishedMarker: ReturnType<typeof buildMarker> | null = null;
     let publishedMarkerCollection: string | null = null;
     let navigationPublished = false;
@@ -444,12 +454,7 @@ function createFailedIndexingHarness(
         },
         publishResolvedIndexPolicy: (
             policy: { canonicalRoot: string; policyHash: string; customExtensions: string[]; customIgnorePatterns: string[] },
-            binding: {
-                collectionName: string;
-                navigation:
-                    | { status: 'not_bound' }
-                    | { status: 'sealed'; generationId: string; sealHash: string };
-            },
+            binding: PublishedPolicyBinding,
             publishMutation?: (publish: () => void) => void,
         ) => {
             const receipt = {
@@ -462,6 +467,7 @@ function createFailedIndexingHarness(
                 policyHash: policy.policyHash,
                 collectionName: binding.collectionName,
                 navigation: { ...binding.navigation },
+                ...(binding.publication ? { publication: structuredClone(binding.publication) } : {}),
             };
             const publish = () => {
                 publishedCustomExtensions = [...policy.customExtensions];
@@ -469,6 +475,7 @@ function createFailedIndexingHarness(
                 publishedPolicyCollection = binding.collectionName;
                 publishedPolicyHash = policy.policyHash;
                 publishedPolicyDocumentDigest = receipt.documentDigest ?? null;
+                publishedPolicyBinding = structuredClone(binding);
                 publicationEvents.push('policy:publish');
             };
             if (publishMutation) {
@@ -728,6 +735,9 @@ function createFailedIndexingHarness(
         },
         get publishedMarker() {
             return publishedMarker;
+        },
+        get publishedPolicyBinding() {
+            return publishedPolicyBinding;
         },
         get reindexPolicyResolutionCalls() {
             return reindexPolicyResolutionCalls;
@@ -1199,10 +1209,27 @@ test("background reindex publishes an exact post-index source checkpoint with th
         const staleSnapshot = fs.readFileSync(snapshotPath, "utf8");
         fs.writeFileSync(sourcePath, "export const value = 2;\n", "utf8");
 
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(path.dirname(repoPath), "v4-full-index-leases"),
+            ownerId: "v4-full-index-owner",
+        });
+        const acquired = coordinator.acquire(repoPath, "reindex");
+        assert.equal(acquired.acquired, true);
+        if (!acquired.acquired) return;
         const harness = createFailedIndexingHarness(new Set(), {
+            mutationLeaseCoordinator: coordinator,
             indexCodebase: async () => completedIndexResult({ "index.ts": "export const value = 2;\n" }),
         });
-        await harness.handler.startBackgroundIndexing(repoPath, true);
+        try {
+            await harness.handler.startBackgroundIndexing(
+                repoPath,
+                true,
+                undefined,
+                acquired.lease,
+            );
+        } finally {
+            coordinator.release(acquired.lease);
+        }
 
         const candidateCollection = resolveCollectionName(repoPath);
         const candidateSnapshotPath = FileSynchronizer.getSnapshotPathForGeneration(repoPath, candidateCollection);
@@ -1222,6 +1249,32 @@ test("background reindex publishes an exact post-index source checkpoint with th
         assert.deepEqual(firstFreshnessCheck.changes.removed, []);
         assert.deepEqual(firstFreshnessCheck.changes.modified, []);
         assert.equal(harness.indexedSnapshots, 1);
+        const checkpoint = await verifier.inspectOwnedSnapshot();
+        assert.equal(checkpoint.status, "valid");
+        if (checkpoint.status !== "valid") return;
+        assert.deepEqual(harness.publishedPolicyBinding?.publication, {
+            activationId: harness.publishedPolicyBinding?.publication?.activationId,
+            sourceCheckpoint: {
+                collectionName: candidateCollection,
+                markerRunId: harness.publishedMarker?.runId,
+                indexPolicyHash: harness.publishedMarker?.indexPolicyHash,
+                merkleRoot: checkpoint.merkleRoot,
+                documentDigest: checkpoint.documentDigest,
+            },
+            graph: {
+                kind: "relationship_manifest_v2",
+                manifestHash: "relationship-manifest-hash",
+            },
+            receipt: {
+                ownerId: acquired.lease.ownerId,
+                generation: acquired.lease.generation,
+                operationId: acquired.lease.operationId,
+            },
+        });
+        assert.match(
+            harness.publishedPolicyBinding?.publication?.activationId ?? "",
+            /^[0-9a-f-]{36}$/,
+        );
     });
 });
 
