@@ -1894,7 +1894,10 @@ test('Context bounds deferred atomic publication generations without pruning act
 
         mutateActiveDuringRetention = true;
         fs.writeFileSync(sourcePath, 'export const runtime = 4;\n', 'utf8');
-        await context.reindexByChange(codebasePath);
+        await assert.rejects(
+            context.reindexByChange(codebasePath),
+            /not readable after generation retention/,
+        );
         await (context as unknown as {
             waitForPublicationRetention(canonicalRoot: string): Promise<void>;
         }).waitForPublicationRetention(fs.realpathSync(codebasePath));

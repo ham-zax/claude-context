@@ -3918,6 +3918,13 @@ export class Context {
                     `Atomic delta publication for '${input.codebasePath}' is not readable after generation retention.`,
                 );
             }
+            const retainedGenerationIdentity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
+            if (!retainedGenerationIdentity) {
+                throw new Error(
+                    `Atomic delta publication for '${input.codebasePath}' lost its retained generation identity.`,
+                );
+            }
+            this.preparedGenerationReceipts.set(retainedGenerationReceipt, retainedGenerationIdentity);
 
             return {
                 added: added.length,
