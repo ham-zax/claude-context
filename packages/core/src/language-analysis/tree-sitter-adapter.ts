@@ -626,13 +626,18 @@ function matchesPythonStructuralSymbol(
     spanNode: Node,
     qualifiedName: string,
     input: PythonStructuralSymbolInput['symbol'],
+    sourceMap: Utf8SourceMap,
 ): boolean {
     if (qualifiedName !== input.qualifiedName || nameForNode(node) !== input.name) {
         return false;
     }
     if (input.span.startByte !== undefined && input.span.endByte !== undefined) {
-        return spanNode.startIndex === input.span.startByte
-            && spanNode.endIndex === input.span.endByte;
+        const currentSpan = sourceMap.spanFromUtf16(
+            spanNode.startIndex,
+            spanNode.endIndex,
+        );
+        return currentSpan.startByte === input.span.startByte
+            && currentSpan.endByte === input.span.endByte;
     }
     return spanNode.startPosition.row + 1 === input.span.startLine
         && spanNode.endPosition.row + 1 === input.span.endLine;
@@ -641,6 +646,7 @@ function matchesPythonStructuralSymbol(
 function findPythonStructuralFunction(
     root: Node,
     input: PythonStructuralSymbolInput['symbol'],
+    sourceMap: Utf8SourceMap,
 ): Node | undefined {
     let match: Node | undefined;
     const visit = (node: Node, parents: readonly string[]): void => {
@@ -661,7 +667,13 @@ function findPythonStructuralFunction(
                 : node;
             if (
                 name
-                && matchesPythonStructuralSymbol(node, spanNode, qualifiedName, input)
+                && matchesPythonStructuralSymbol(
+                    node,
+                    spanNode,
+                    qualifiedName,
+                    input,
+                    sourceMap,
+                )
             ) {
                 match = node;
                 return;
@@ -779,7 +791,11 @@ export async function analyzePythonSymbolStructure(
         if (tree.rootNode.hasError) {
             return { status: 'unavailable', reason: 'syntax_error' };
         }
-        const functionNode = findPythonStructuralFunction(tree.rootNode, input.symbol);
+        const functionNode = findPythonStructuralFunction(
+            tree.rootNode,
+            input.symbol,
+            new Utf8SourceMap(input.content),
+        );
         if (!functionNode) {
             return { status: 'unavailable', reason: 'symbol_not_found' };
         }
@@ -788,10 +804,8 @@ export async function analyzePythonSymbolStructure(
         if (!parameters || !body) {
             return { status: 'unavailable', reason: 'analysis_failure' };
         }
-        const sourceBytes = Buffer.from(input.content, 'utf8');
-        const signature = sourceBytes
-            .subarray(functionNode.startIndex, body.startIndex)
-            .toString('utf8')
+        const signature = functionNode.text
+            .slice(0, body.startIndex - functionNode.startIndex)
             .trimEnd();
         const declaredReturnType = functionNode
             .childForFieldName('return_type')

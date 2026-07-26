@@ -1974,7 +1974,7 @@ test('Context invalidates warm navigation delta state when the bound seal observ
     }
 });
 
-test('Context retention cannot pass an active publication reader through two activations', async () => {
+test('Context retains P for an active reader while Q and R activate, then cleans P after release', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-read-lease-'));
     const codebasePath = path.join(tempRoot, 'repo');
     const sourcePath = path.join(codebasePath, 'runtime.ts');
@@ -1996,22 +1996,150 @@ test('Context retention cannot pass an active publication reader through two act
 
         const releaseRead = await context.acquirePublicationReadLease(codebasePath);
         fs.writeFileSync(sourcePath, 'export const runtime = 1;\n', 'utf8');
-        await context.reindexByChange(codebasePath);
+        const q = await context.reindexByChange(codebasePath);
+        assert.ok(q.generationReceipt);
 
-        let secondActivationCompleted = false;
         fs.writeFileSync(sourcePath, 'export const runtime = 2;\n', 'utf8');
-        const secondActivation = context.reindexByChange(codebasePath).then(() => {
-            secondActivationCompleted = true;
-        });
-        await new Promise<void>((resolve) => setImmediate(resolve));
-
-        assert.equal(secondActivationCompleted, false);
+        const r = await context.reindexByChange(codebasePath);
+        assert.ok(r.generationReceipt);
+        const activeBeforeRelease = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(activeBeforeRelease);
+        assert.equal(activeBeforeRelease.collectionName, r.collectionName);
         assert.equal(await vectorDatabase.hasCollection(initial.collectionName), true);
 
         releaseRead();
-        await secondActivation;
-        assert.equal(secondActivationCompleted, true);
+        await (context as unknown as {
+            waitForPublicationRetention(canonicalRoot: string): Promise<void>;
+        }).waitForPublicationRetention(fs.realpathSync(codebasePath));
+
+        assert.equal(await vectorDatabase.hasCollection(initial.collectionName), false);
+        assert.equal(await vectorDatabase.hasCollection(q.collectionName!), true);
+        assert.equal(await vectorDatabase.hasCollection(r.collectionName!), true);
+        const activeAfterCleanup = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(activeAfterCleanup);
+        assert.equal(activeAfterCleanup.collectionName, r.collectionName);
+        assert.match(
+            [...(vectorDatabase.collections.get(activeAfterCleanup.collectionName)?.values() ?? [])]
+                .find((document) => document.relativePath === 'runtime.ts')?.content ?? '',
+            /runtime = 2/,
+        );
     } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context retention waits for every P reader regardless of release order', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-read-lease-multiple-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'runtime.ts');
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(sourcePath, 'export const runtime = 0;\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        const initial = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(initial);
+
+        releaseFirst = await context.acquirePublicationReadLease(codebasePath);
+        releaseSecond = await context.acquirePublicationReadLease(codebasePath);
+        fs.writeFileSync(sourcePath, 'export const runtime = 1;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+        fs.writeFileSync(sourcePath, 'export const runtime = 2;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+
+        releaseSecond();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(await vectorDatabase.hasCollection(initial.collectionName), true);
+
+        releaseFirst();
+        releaseFirst();
+        await (context as unknown as {
+            waitForPublicationRetention(canonicalRoot: string): Promise<void>;
+        }).waitForPublicationRetention(fs.realpathSync(codebasePath));
+        assert.equal(await vectorDatabase.hasCollection(initial.collectionName), false);
+        assert.equal((await vectorDatabase.listCollections()).length, 2);
+    } finally {
+        releaseSecond?.();
+        releaseFirst?.();
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context retention failure preserves active authority and a later activation completes cleanup', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-read-lease-failure-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'runtime.ts');
+    let releaseRead: (() => void) | undefined;
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(sourcePath, 'export const runtime = 0;\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        const initial = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(initial);
+
+        releaseRead = await context.acquirePublicationReadLease(codebasePath);
+        fs.writeFileSync(sourcePath, 'export const runtime = 1;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+        fs.writeFileSync(sourcePath, 'export const runtime = 2;\n', 'utf8');
+        const r = await context.reindexByChange(codebasePath);
+        assert.ok(r.collectionName);
+
+        const dropCollection = vectorDatabase.dropCollection.bind(vectorDatabase);
+        let failedCleanup = false;
+        vectorDatabase.dropCollection = async (collectionName) => {
+            if (collectionName === initial.collectionName) {
+                failedCleanup = true;
+                throw new Error('injected retention cleanup failure');
+            }
+            await dropCollection(collectionName);
+        };
+
+        releaseRead();
+        await (context as unknown as {
+            waitForPublicationRetention(canonicalRoot: string): Promise<void>;
+        }).waitForPublicationRetention(fs.realpathSync(codebasePath));
+        assert.equal(failedCleanup, true);
+        assert.equal(await vectorDatabase.hasCollection(initial.collectionName), true);
+        const activeAfterFailure = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(activeAfterFailure);
+        assert.equal(activeAfterFailure.collectionName, r.collectionName);
+
+        vectorDatabase.dropCollection = dropCollection;
+        fs.writeFileSync(sourcePath, 'export const runtime = 3;\n', 'utf8');
+        const s = await context.reindexByChange(codebasePath);
+        await (context as unknown as {
+            waitForPublicationRetention(canonicalRoot: string): Promise<void>;
+        }).waitForPublicationRetention(fs.realpathSync(codebasePath));
+        assert.equal(await vectorDatabase.hasCollection(initial.collectionName), false);
+        const activeAfterRecovery = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(activeAfterRecovery);
+        assert.equal(activeAfterRecovery.collectionName, s.collectionName);
+        assert.match(
+            [...(vectorDatabase.collections.get(activeAfterRecovery.collectionName)?.values() ?? [])]
+                .find((document) => document.relativePath === 'runtime.ts')?.content ?? '',
+            /runtime = 3/,
+        );
+    } finally {
+        releaseRead?.();
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
