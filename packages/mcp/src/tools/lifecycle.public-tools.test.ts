@@ -459,7 +459,7 @@ test("public tools lifecycle: status/list → search → outline → read_file a
     });
 });
 
-test("public reindex replaces a coherent retired v2 tuple with restart-proven v3 authority", async () => {
+test("public reindex replaces a coherent retired v2 tuple with restart-proven v4 authority", async () => {
     await withTempState(async ({ repoPath, stateRoot }) => {
         const previousHome = process.env.HOME;
         process.env.HOME = path.join(path.dirname(stateRoot), "home");
@@ -628,7 +628,7 @@ test("public reindex replaces a coherent retired v2 tuple with restart-proven v3
             assert.notEqual(fs.readFileSync(pointerPath, "utf8"), legacyPointerBytes);
             const publishedPolicy = JSON.parse(fs.readFileSync(policyPath, "utf8")) as Record<string, unknown>;
             const publishedPointer = JSON.parse(fs.readFileSync(pointerPath, "utf8")) as Record<string, unknown>;
-            assert.equal(publishedPolicy.schemaVersion, "satori_index_policy_v3");
+            assert.equal(publishedPolicy.schemaVersion, "satori_index_policy_v4");
             assert.equal(publishedPointer.schemaVersion, "navigation_current_v3");
             assert.equal(vectorDatabase.collections.has(collectionName), false);
             const publishedCollectionName = publishedPolicy.collectionName;
@@ -639,6 +639,21 @@ test("public reindex replaces a coherent retired v2 tuple with restart-proven v3
                 ?.metadata as Record<string, unknown> | undefined;
             assert.equal(publishedMarker?.kind, "satori_index_completion_v3");
             assert.notDeepEqual(publishedMarker, legacyMarker);
+            const publication = publishedPolicy.publication as Record<string, unknown>;
+            const sourceCheckpoint = publication.sourceCheckpoint as Record<string, unknown>;
+            const graph = publication.graph as Record<string, unknown>;
+            const publicationReceipt = publication.receipt as Record<string, unknown>;
+            const markerNavigation = publishedMarker?.navigation as Record<string, unknown>;
+            assert.equal(sourceCheckpoint.collectionName, publishedCollectionName);
+            assert.equal(sourceCheckpoint.markerRunId, publishedMarker?.runId);
+            assert.equal(sourceCheckpoint.indexPolicyHash, publishedMarker?.indexPolicyHash);
+            assert.match(String(sourceCheckpoint.merkleRoot), /^[a-f0-9]{64}$/);
+            assert.match(String(sourceCheckpoint.documentDigest), /^[a-f0-9]{64}$/);
+            assert.equal(graph.kind, "relationship_manifest_v2");
+            assert.equal(graph.manifestHash, markerNavigation.relationshipManifestHash);
+            assert.equal(typeof publicationReceipt.ownerId, "string");
+            assert.equal(typeof publicationReceipt.generation, "number");
+            assert.equal(typeof publicationReceipt.operationId, "string");
 
             const restarted = new Context({
                 embedding: new TestEmbedding(),
