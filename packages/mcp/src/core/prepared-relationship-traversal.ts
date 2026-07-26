@@ -42,7 +42,7 @@ function createPreparedNavigationStore(input: {
     relationshipManifestIdentity: string;
     registry: SymbolRegistry;
     relationshipManifest: RelationshipManifest;
-    relationshipRecords: readonly RelationshipRecord[];
+    relationshipRecords: RelationshipRecord[];
     relationshipWarnings: readonly string[];
 }): NavigationStore {
     const registryState = () => ({
@@ -58,7 +58,7 @@ function createPreparedNavigationStore(input: {
         rootPath: input.rootPath,
         manifestHash: input.relationshipManifestIdentity,
         manifest: input.relationshipManifest,
-        records: [...input.relationshipRecords],
+        records: input.relationshipRecords,
         warnings: [...input.relationshipWarnings],
     });
     return {
@@ -151,28 +151,26 @@ function suppressionNote(
 
 async function prepareDirection(input: {
     direction: "callers" | "callees";
-    rootPath: string;
-    registryManifestIdentity: string;
     registry: SymbolRegistry;
     target: SymbolRecord;
-    navigationStore: NavigationStore;
-}): Promise<PreparedRelationshipDirectionTraversal | undefined> {
-    const neighbors = await getGraphNeighbors({
-        normalizedRootPath: input.rootPath,
-        expectedSymbolRegistryManifestHash: input.registryManifestIdentity,
-        navigationStore: input.navigationStore,
-        symbolInstanceId: input.target.symbolInstanceId,
-        depth: 1,
-        direction: input.direction,
-        allowedTypes: ["CALLS"],
-        limit: Number.MAX_SAFE_INTEGER,
-    });
-    if (neighbors.status !== "ok") return undefined;
-    const edges = neighbors.records.flatMap((record) => {
+    records: readonly RelationshipRecord[];
+    suppressedRecords: readonly RelationshipRecord[];
+}): Promise<PreparedRelationshipDirectionTraversal> {
+    const records = input.records.filter((record) => (
+        input.direction === "callers"
+            ? record.targetInstanceId === input.target.symbolInstanceId
+            : record.sourceInstanceId === input.target.symbolInstanceId
+    ));
+    const edges = records.flatMap((record) => {
         const edge = relationshipEdge(record, input.registry);
         return edge ? [edge] : [];
     });
-    const suppressionNotes = neighbors.suppressedLowConfidenceRecords
+    const suppressedRecords = input.suppressedRecords.filter((record) => (
+        input.direction === "callers"
+            ? record.targetInstanceId === input.target.symbolInstanceId
+            : record.sourceInstanceId === input.target.symbolInstanceId
+    ));
+    const suppressionNotes = suppressedRecords
         .flatMap((record) => {
             const note = suppressionNote(record, input.target, input.registry);
             return note ? [note] : [];
@@ -181,7 +179,7 @@ async function prepareDirection(input: {
     return {
         edges,
         availableCount: edges.length,
-        suppressedCount: neighbors.suppressedLowConfidenceRecords.length,
+        suppressedCount: suppressedRecords.length,
         suppressionNotes,
     };
 }
@@ -193,7 +191,7 @@ export async function prepareRelationshipTraversals(input: {
     registry: SymbolRegistry;
     target: SymbolRecord;
     relationshipManifest: RelationshipManifest;
-    relationshipRecords: readonly RelationshipRecord[];
+    relationshipRecords: RelationshipRecord[];
     relationshipWarnings?: readonly string[];
 }): Promise<PreparedRelationshipTraversals | undefined> {
     if (input.relationshipManifest.symbolRegistryManifestHash !== input.registryManifestIdentity) {
@@ -208,10 +206,32 @@ export async function prepareRelationshipTraversals(input: {
         relationshipRecords: input.relationshipRecords,
         relationshipWarnings: input.relationshipWarnings || [],
     });
+    const neighbors = await getGraphNeighbors({
+        normalizedRootPath: input.rootPath,
+        expectedSymbolRegistryManifestHash: input.registryManifestIdentity,
+        navigationStore,
+        symbolInstanceId: input.target.symbolInstanceId,
+        depth: 1,
+        direction: "both",
+        allowedTypes: ["CALLS"],
+        limit: Number.MAX_SAFE_INTEGER,
+    });
+    if (neighbors.status !== "ok") return undefined;
     const [callers, callees] = await Promise.all([
-        prepareDirection({ ...input, direction: "callers", navigationStore }),
-        prepareDirection({ ...input, direction: "callees", navigationStore }),
+        prepareDirection({
+            direction: "callers",
+            registry: input.registry,
+            target: input.target,
+            records: neighbors.records,
+            suppressedRecords: neighbors.suppressedLowConfidenceRecords,
+        }),
+        prepareDirection({
+            direction: "callees",
+            registry: input.registry,
+            target: input.target,
+            records: neighbors.records,
+            suppressedRecords: neighbors.suppressedLowConfidenceRecords,
+        }),
     ]);
-    if (!callers || !callees) return undefined;
     return { callers, callees };
 }

@@ -16,6 +16,7 @@ import {
     buildRegistryFileOutlinePayload,
     findExactRegistrySymbols,
 } from "./registry-file-outline.js";
+import { prepareRelationshipTraversals } from "./prepared-relationship-traversal.js";
 import type {
     CompletionProbeDebugHint,
     TrackedRootReadiness,
@@ -77,6 +78,9 @@ type NavigationHandlersHost = {
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         expectedSymbolRegistryManifestHash: string,
     ): ReturnType<NavigationStore["getCompatibilityState"]>;
+    isPreparedNavigationReadCurrent(
+        preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
+    ): boolean;
     stringifyToolJson(value: unknown): string;
     normalizeRelativeFilePath(relativeFilePath: string): string;
     buildInvalidFileOutlineRequestPayload(root: string, file: string, message: string, status?: string, reason?: string): unknown;
@@ -335,6 +339,59 @@ function withPythonStructuralAnalysis(
     };
 }
 
+type FileOutlineRelationshipMetadata =
+    NonNullable<NonNullable<FileOutlineResponseEnvelope["outline"]>["symbols"][number]["relationships"]>;
+
+function unavailableRelationshipMetadata(
+    coverage: "unsupported" | "unavailable",
+): FileOutlineRelationshipMetadata {
+    return {
+        directCallerCount: null,
+        directCalleeCount: null,
+        recursionState: "unknown",
+        relationshipCoverage: coverage,
+    };
+}
+
+function withRelationshipMetadata(
+    payload: FileOutlineResponseEnvelope,
+    relationships: FileOutlineRelationshipMetadata,
+): FileOutlineResponseEnvelope {
+    if (payload.status !== "ok" || payload.outline?.symbols.length !== 1) {
+        return payload;
+    }
+    return {
+        ...payload,
+        outline: {
+            symbols: [{
+                ...payload.outline.symbols[0],
+                relationships,
+            }],
+        },
+    };
+}
+
+function buildPartialRelationshipMetadata(input: {
+    targetSymbolId: string;
+    callers: readonly CallGraphEdge[];
+    callees: readonly CallGraphEdge[];
+}): FileOutlineRelationshipMetadata {
+    const callerIds = new Set(input.callers
+        .filter((edge) => edge.dstSymbolId === input.targetSymbolId)
+        .map((edge) => edge.srcSymbolId));
+    const calleeIds = new Set(input.callees
+        .filter((edge) => edge.srcSymbolId === input.targetSymbolId)
+        .map((edge) => edge.dstSymbolId));
+    return {
+        directCallerCount: callerIds.size > 0 ? callerIds.size : null,
+        directCalleeCount: calleeIds.size > 0 ? calleeIds.size : null,
+        recursionState: callerIds.has(input.targetSymbolId) || calleeIds.has(input.targetSymbolId)
+            ? "confirmed"
+            : "not_observed",
+        relationshipCoverage: "partial",
+    };
+}
+
 function collectErrorFragments(
     value: unknown,
     output: string[],
@@ -414,7 +471,9 @@ export class NavigationHandlers {
         const resolveMode = args?.resolveMode === "exact" ? "exact" : "outline";
         const symbolIdExact = typeof args?.symbolIdExact === "string" ? args.symbolIdExact.trim() : undefined;
         const symbolLabelExact = typeof args?.symbolLabelExact === "string" ? args.symbolLabelExact.trim() : undefined;
-        const detail = args?.detail === "analysis" ? "analysis" : "summary";
+        const detail = args?.detail === "analysis" || args?.detail === "relationships"
+            ? args.detail
+            : "summary";
 
         let releasePublicationReadLease: (() => void) | undefined;
         try {
@@ -450,11 +509,14 @@ export class NavigationHandlers {
                 };
             }
             const normalizedFile = this.host.normalizeRelativeFilePath(relativeFileResult.relativePath);
-            if (detail === "analysis" && (resolveMode !== "exact" || !symbolIdExact)) {
+            if (
+                (detail === "analysis" || detail === "relationships")
+                && (resolveMode !== "exact" || !symbolIdExact)
+            ) {
                 const payload = this.host.buildInvalidFileOutlineRequestPayload(
                     absoluteRoot,
                     normalizedFile,
-                    'detail="analysis" requires resolveMode="exact" and symbolIdExact.',
+                    `detail="${detail}" requires resolveMode="exact" and symbolIdExact.`,
                     "not_ready",
                     "invalid_request",
                 );
@@ -762,6 +824,75 @@ export class NavigationHandlers {
                                             : "analysis_unavailable",
                                     );
                                 }
+                            }
+                        }
+                    }
+                    if (detail === "relationships" && payload.status === "ok") {
+                        const selectedSymbol = payload.outline?.symbols[0];
+                        const target = selectedSymbol
+                            ? registryState.registry.symbolsByInstanceId.get(selectedSymbol.symbolId)
+                            : undefined;
+                        if (!selectedSymbol || !target) {
+                            projectedPayload = withRelationshipMetadata(
+                                payload,
+                                unavailableRelationshipMetadata("unavailable"),
+                            );
+                        } else if (!this.host.isCallGraphLanguageSupported(
+                            selectedSymbol.language,
+                            selectedSymbol.file,
+                        )) {
+                            projectedPayload = withRelationshipMetadata(
+                                payload,
+                                unavailableRelationshipMetadata("unsupported"),
+                            );
+                        } else if (!preparedNavigationReadWasCurrent) {
+                            projectedPayload = withRelationshipMetadata(
+                                payload,
+                                unavailableRelationshipMetadata("unavailable"),
+                            );
+                        } else {
+                            const navigationBinding = trackedRootState.generationReceipt?.navigation;
+                            const compatibility = navigationBinding
+                                ? await this.host.loadPreparedNavigationCompatibility(
+                                    trackedRootState,
+                                    registryState.manifestHash,
+                                )
+                                : undefined;
+                            const relationshipState = compatibility?.relationships;
+                            const traversals = (
+                                navigationBinding
+                                && registryState.manifestHash === navigationBinding.symbolRegistryManifestHash
+                                && relationshipState?.status === "ok"
+                                && relationshipState.manifestHash === navigationBinding.relationshipManifestHash
+                            )
+                                ? await prepareRelationshipTraversals({
+                                    rootPath: effectiveRoot,
+                                    registryManifestIdentity: registryState.manifestHash,
+                                    relationshipManifestIdentity: relationshipState.manifestHash,
+                                    registry: registryState.registry,
+                                    target,
+                                    relationshipManifest: relationshipState.manifest,
+                                    relationshipRecords: relationshipState.records,
+                                    relationshipWarnings: relationshipState.warnings || [],
+                                })
+                                : undefined;
+                            if (
+                                !traversals
+                                || !this.host.isPreparedNavigationReadCurrent(trackedRootState)
+                            ) {
+                                projectedPayload = withRelationshipMetadata(
+                                    payload,
+                                    unavailableRelationshipMetadata("unavailable"),
+                                );
+                            } else {
+                                projectedPayload = withRelationshipMetadata(
+                                    payload,
+                                    buildPartialRelationshipMetadata({
+                                        targetSymbolId: target.symbolInstanceId,
+                                        callers: traversals.callers.edges,
+                                        callees: traversals.callees.edges,
+                                    }),
+                                );
                             }
                         }
                     }

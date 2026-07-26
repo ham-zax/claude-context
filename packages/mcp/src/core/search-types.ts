@@ -764,7 +764,7 @@ export interface FileOutlineInput {
     resolveMode?: "outline" | "exact";
     symbolIdExact?: string;
     symbolLabelExact?: string;
-    detail?: "summary" | "analysis";
+    detail?: "summary" | "analysis" | "relationships";
 }
 
 export type FileOutlineStatus = "ok" | "not_found" | "requires_reindex" | "not_indexed" | "not_ready" | "unsupported" | "ambiguous";
@@ -792,6 +792,12 @@ export interface CanonicalSymbolIdentity {
 export interface FileOutlineSymbolResult extends CanonicalSymbolIdentity {
     callGraphHint: CallGraphHint;
     analysis?: import("@zokizuan/satori-core").PythonStructuralAnalysis;
+    relationships?: {
+        directCallerCount: number | null;
+        directCalleeCount: number | null;
+        recursionState: "confirmed" | "not_observed" | "unknown";
+        relationshipCoverage: "complete" | "partial" | "unsupported" | "unavailable";
+    };
 }
 
 export interface FileOutlineResponseEnvelope {

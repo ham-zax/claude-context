@@ -17,7 +17,7 @@ import {
     writeRelationshipSidecar,
     writeSymbolRegistrySidecar,
 } from '@zokizuan/satori-core';
-import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
+import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
 import { ToolHandlers } from './handlers.js';
 import { buildRegistryFileOutlinePayload } from './registry-file-outline.js';
 import { CapabilityResolver } from './capabilities.js';
@@ -235,6 +235,156 @@ async function writeTestSymbolRegistry(
         analysisByFile,
     });
     return { registry, result };
+}
+
+async function createGenerationBoundHandlers(input: {
+    repoPath: string;
+    symbols: SymbolRecord[];
+    records: RelationshipRecord[];
+    onCompatibilityRead?: () => void;
+    relationshipStateUnavailable?: boolean;
+}): Promise<{
+    handlers: ToolHandlers;
+    setNavigationAuthority(value: string): void;
+}> {
+    const filesByPath = new Map<string, { hash: string; language: string; symbolCount: number }>();
+    for (const symbol of input.symbols) {
+        const existing = filesByPath.get(symbol.file);
+        if (existing) {
+            existing.symbolCount += 1;
+        } else {
+            filesByPath.set(symbol.file, {
+                hash: symbol.fileHash,
+                language: symbol.language,
+                symbolCount: 1,
+            });
+        }
+    }
+    const manifest: SymbolRegistryManifest = {
+        schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
+        normalizedRootPath: input.repoPath,
+        rootFingerprint: 'test-root-fingerprint',
+        indexPolicyHash: 'test-policy',
+        languageRouterVersion: 'test-router-v1',
+        extractorVersion: 'test-extractor-v1',
+        relationshipVersion: 'test-relationships-v1',
+        builtAt: '2026-07-27T00:00:00.000Z',
+        files: [...filesByPath.entries()].map(([file, metadata]) => ({
+            path: file,
+            hash: metadata.hash,
+            language: metadata.language,
+            symbolCount: metadata.symbolCount,
+            definitionStatus: 'definitions_present',
+        })),
+    };
+    const registry = buildSymbolRegistry({ manifest, symbols: input.symbols });
+    const generation = await writeNavigationSidecarGeneration({
+        registry,
+        records: input.records,
+        analysisByFile: new Map(manifest.files.map((file) => [file.path, {
+            moduleBindings: [],
+            callSites: [],
+        }])),
+    });
+    const vectorReceipt = { collectionName: 'generation-relationships' } as never;
+    let navigationAuthority = 'navigation-authority-p';
+    const generationReceipt = {
+        collectionName: 'generation-relationships',
+        marker: { runId: 'run-p' },
+        policy: {
+            canonicalRoot: input.repoPath,
+            policyHash: 'policy-hash-p',
+        },
+        policyDocumentDigest: '1'.repeat(64),
+        exactPayloadCount: 1,
+        navigation: {
+            generationId: generation.generationId,
+            generationRoot: path.join(
+                resolveNavigationSidecarRoot(undefined, input.repoPath),
+                'generations',
+                generation.generationId,
+            ),
+            symbolRegistryManifestHash: generation.manifestHash,
+            relationshipManifestHash: generation.relationshipManifestHash,
+            navigationSealHash: generation.navigationSealHash,
+        },
+        observations: {
+            profileFileToken: null,
+            policyFileToken: 'policy-token-p',
+            navigationToken: 'navigation-token-p',
+        },
+    } as never;
+    const backingNavigationStore = new RuntimeNavigationStore();
+    const navigationStore = {
+        getSymbolsByFile: (...args: Parameters<HandlerNavigationStore['getSymbolsByFile']>) => (
+            backingNavigationStore.getSymbolsByFile(...args)
+        ),
+        getCompatibilityState: async (
+            ...args: Parameters<HandlerNavigationStore['getCompatibilityState']>
+        ) => {
+            const result = await backingNavigationStore.getCompatibilityState(...args);
+            input.onCompatibilityRead?.();
+            return input.relationshipStateUnavailable
+                ? {
+                    ...result,
+                    relationships: {
+                        status: 'missing' as const,
+                        rootPath: input.repoPath,
+                        reason: 'relationship_sidecar_missing',
+                    },
+                }
+                : result;
+        },
+    } as unknown as HandlerNavigationStore;
+    const context = {
+        ...baseContext(),
+        getIndexAuthorityObservations: () => ({
+            vector: 'vector-authority-p',
+            navigation: navigationAuthority,
+        }),
+        revalidatePreparedGeneration: async () => ({
+            vectorReceipt,
+            navigationProof: { status: 'valid' as const },
+            generationReceipt,
+        }),
+    } as unknown as HandlerContext;
+    const syncManager = {
+        getPreparedReadObservation: () => ({
+            available: false as const,
+            reason: 'watcher_manager_not_started' as const,
+            freshnessEpoch: 1,
+        }),
+    } as unknown as HandlerSyncManager;
+    const handlers = new ToolHandlers(
+        context,
+        baseSnapshotManager(input.repoPath) as unknown as HandlerSnapshotManager,
+        syncManager,
+        RUNTIME_FINGERPRINT,
+        CAPABILITIES,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        navigationStore,
+        null,
+        {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        } as never,
+    );
+    (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+        outcome: 'valid',
+        collectionName: 'generation-relationships',
+        navigationStatus: 'valid',
+        vectorReceipt,
+        generationReceipt,
+    });
+    return {
+        handlers,
+        setNavigationAuthority(value) {
+            navigationAuthority = value;
+        },
+    };
 }
 
 function baseSnapshotManager(repoPath: string): SnapshotStub {
@@ -1058,6 +1208,271 @@ test('handleFileOutline discards structural analysis when its source barrier cha
         assert.match(payload.message, /source changed/i);
         assert.equal(payload.hints.retry.tool, 'file_outline');
         assert.equal(payload.hints.retry.args.symbolIdExact, symbol.symbolInstanceId);
+    }));
+});
+
+test('handleFileOutline returns unique direct relationship counts and confirmed recursion from one generation', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const file = 'src/runtime.ts';
+        const fileHash = sha256Content(fs.readFileSync(path.join(repoPath, file), 'utf8'));
+        const target = createTestSymbol({
+            file,
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const callerA = createTestSymbol({
+            file,
+            label: 'function callerA()',
+            name: 'callerA',
+            qualifiedName: 'callerA',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const callerB = createTestSymbol({
+            file,
+            label: 'function callerB()',
+            name: 'callerB',
+            qualifiedName: 'callerB',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const callee = createTestSymbol({
+            file,
+            label: 'function callee()',
+            name: 'callee',
+            qualifiedName: 'callee',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const record = (
+            source: SymbolRecord,
+            destination: SymbolRecord,
+            startLine: number,
+        ): RelationshipRecord => ({
+            sourceKey: source.symbolKey,
+            sourceInstanceId: source.symbolInstanceId,
+            targetKey: destination.symbolKey,
+            targetInstanceId: destination.symbolInstanceId,
+            type: 'CALLS',
+            file,
+            span: { startLine, endLine: startLine },
+            confidence: 'high',
+        });
+        const { handlers } = await createGenerationBoundHandlers({
+            repoPath,
+            symbols: [target, callerA, callerB, callee],
+            records: [
+                record(callerA, target, 1),
+                record(callerA, target, 2),
+                record(callerB, target, 3),
+                record(target, callee, 4),
+                record(target, target, 5),
+            ],
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file,
+            resolveMode: 'exact',
+            symbolIdExact: target.symbolInstanceId,
+            detail: 'relationships',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(payload.status, 'ok');
+        assert.deepEqual(payload.outline.symbols[0].relationships, {
+            directCallerCount: 3,
+            directCalleeCount: 2,
+            recursionState: 'confirmed',
+            relationshipCoverage: 'partial',
+        });
+    }));
+});
+
+test('handleFileOutline does not report zero direct counts under partial coverage', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const file = 'src/runtime.ts';
+        const target = createTestSymbol({
+            file,
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(fs.readFileSync(path.join(repoPath, file), 'utf8')),
+        });
+        const { handlers } = await createGenerationBoundHandlers({
+            repoPath,
+            symbols: [target],
+            records: [],
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file,
+            resolveMode: 'exact',
+            symbolIdExact: target.symbolInstanceId,
+            detail: 'relationships',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.deepEqual(payload.outline.symbols[0].relationships, {
+            directCallerCount: null,
+            directCalleeCount: null,
+            recursionState: 'not_observed',
+            relationshipCoverage: 'partial',
+        });
+    }));
+});
+
+test('handleFileOutline reports unsupported relationship coverage without fabricated counts', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const file = 'src/service.go';
+        const source = 'package service\n\nfunc run() {}\n';
+        fs.writeFileSync(path.join(repoPath, file), source);
+        const target = createTestSymbol({
+            file,
+            label: 'function run',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 3,
+            endLine: 3,
+            fileHash: sha256Content(source),
+            language: 'go',
+        });
+        const { handlers } = await createGenerationBoundHandlers({
+            repoPath,
+            symbols: [target],
+            records: [],
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file,
+            resolveMode: 'exact',
+            symbolIdExact: target.symbolInstanceId,
+            detail: 'relationships',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.deepEqual(payload.outline.symbols[0].relationships, {
+            directCallerCount: null,
+            directCalleeCount: null,
+            recursionState: 'unknown',
+            relationshipCoverage: 'unsupported',
+        });
+    }));
+});
+
+test('handleFileOutline reports unavailable relationship coverage when relationship evidence is absent', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const file = 'src/runtime.ts';
+        const target = createTestSymbol({
+            file,
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(fs.readFileSync(path.join(repoPath, file), 'utf8')),
+        });
+        const { handlers } = await createGenerationBoundHandlers({
+            repoPath,
+            symbols: [target],
+            records: [],
+            relationshipStateUnavailable: true,
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file,
+            resolveMode: 'exact',
+            symbolIdExact: target.symbolInstanceId,
+            detail: 'relationships',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.deepEqual(payload.outline.symbols[0].relationships, {
+            directCallerCount: null,
+            directCalleeCount: null,
+            recursionState: 'unknown',
+            relationshipCoverage: 'unavailable',
+        });
+    }));
+});
+
+test('handleFileOutline discards relationship metadata when publication Q activates during the P read', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const file = 'src/runtime.ts';
+        const target = createTestSymbol({
+            file,
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(fs.readFileSync(path.join(repoPath, file), 'utf8')),
+        });
+        let activateQ = () => undefined;
+        const fixture = await createGenerationBoundHandlers({
+            repoPath,
+            symbols: [target],
+            records: [],
+            onCompatibilityRead: () => activateQ(),
+        });
+        activateQ = () => fixture.setNavigationAuthority('navigation-authority-q');
+
+        const response = await fixture.handlers.handleFileOutline({
+            path: repoPath,
+            file,
+            resolveMode: 'exact',
+            symbolIdExact: target.symbolInstanceId,
+            detail: 'relationships',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'source_state_unverified');
+        assert.equal(payload.outline, null);
+    }));
+});
+
+test('handleFileOutline summary remains unchanged when relationship metadata is not requested', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const file = 'src/runtime.ts';
+        const target = createTestSymbol({
+            file,
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(fs.readFileSync(path.join(repoPath, file), 'utf8')),
+        });
+        const { handlers } = await createGenerationBoundHandlers({
+            repoPath,
+            symbols: [target],
+            records: [],
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file,
+            resolveMode: 'exact',
+            symbolIdExact: target.symbolInstanceId,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(payload.status, 'ok');
+        assert.equal('relationships' in payload.outline.symbols[0], false);
+        assert.equal('analysis' in payload.outline.symbols[0], false);
     }));
 });
 
