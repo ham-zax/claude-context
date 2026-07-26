@@ -14,10 +14,25 @@ This is the only current decision in this report:
 - Corrected C4 add/modify/delete freshness passed for a syntactically valid
   `.py` probe with `scope=runtime` and a `.txt` probe with `scope=mixed`,
   including restart and zero-change-sync readback.
+- Watcher observation-only qualification passed. Filesystem events now record
+  root-keyed, process-local freshness evidence but do not start indexing after
+  a five-second timer. Search, explicit `manage_index sync`, and periodic
+  background synchronization remain the only publication triggers.
+- Pending watcher events bypass search recency through the existing freshness
+  owner. Later accepted events invalidate source-bound continuations and
+  prepared reads. `call_graph` and `file_outline` remain non-mutating and
+  disclose pending or unverified working-tree freshness.
+- `MCP_WATCH_DEBOUNCE_MS` remains accepted for compatibility but is deprecated,
+  ignored, and excluded from effective shared-runtime attachment identity.
+- The delete-triggered complete-generation failure was an existing
+  publication-retention/proof race. The repair composes with the existing
+  retention owner and canonical V4 authority without weakening validation.
+  Add, modify, delete, and restart readback passed afterward; no publication
+  authority was added.
 - All six qualified Python inbound relationship witnesses survived fresh
   publication, repair, restart, zero-change sync, every controlled mutation,
   and final readback.
-- Core passed 595 tests with one skipped and no failures. MCP passed 1,047
+- Core passed 596 tests with one skipped and no failures. MCP passed 1,051
   tests with no failures.
 - Native Python relationships are qualified only for the declared bounded
   static patterns: absolute-import constructor receivers, bounded direct
@@ -62,6 +77,11 @@ Current evidence:
 - [Deferred cold call-graph optimization plan](./COLD_CALL_GRAPH_DEFERRED_OPTIMIZATION.md)
 - [Native Python integration receipt](../evidence/python-native-integration-20260725/NATIVE_PYTHON_INTEGRATION_RECEIPT.md)
 - [CodeQL disposition](./CODEQL_RELATIONSHIP_PROVIDER_DISPOSITION.md)
+- [Watcher observation-only final qualification](../evidence/watcher-observation-only-final-20260726/WATCHER_OBSERVATION_ONLY_FINAL_RECEIPT.md)
+- [Incremental delete-publication repair](../evidence/incremental-delete-publication-20260726/INCREMENTAL_DELETE_PUBLICATION_RECEIPT.md)
+- [Watcher decoupling W0 baseline](../evidence/watcher-decoupling-w0-20260726/WATCHER_DECOUPLING_W0_RECEIPT.md)
+- [Historical blocked watcher qualification](../evidence/watcher-observation-only-20260726/WATCHER_OBSERVATION_ONLY_RECEIPT.md)
+- [Watcher observation/publication decoupling plan](./MCP_WATCHER_OBSERVATION_AND_SYNC_DECOUPLING_PLAN.md)
 
 ## Historical Satori 6.3.0 requalification
 
@@ -332,6 +352,7 @@ The historical bounded decision before the corrected C4 qualification was:
 | Python constructor-receiver callers | Intervention-proven integration returns all three recorded production callers with frozen negatives preserved | Closed for the qualified constructor pattern; general result-set completeness remains partial | No further experiment is authorized by this finding |
 | Python callback/service callers | Intervention-proven integration returns both residual callers and the recorded ledger caller with bounded value-origin proof | Closed for the qualified service/callback patterns; unsupported dynamic flows remain partial | No further experiment is authorized by this finding |
 | Source checkpoint corruption and corrected freshness | C1/C2 prove the selected V4 no-op/graph-only/fail-reindex model; the fresh-reindex owner correction publishes complete V4 authority; corrected C4 passes `.py`/runtime and `.txt`/mixed add-modify-delete lifecycles | Closed for the frozen repair model and corrected controlled freshness witness | No further checkpoint or freshness batch is authorized by this release |
+| Watcher-owned publication and delete completion | The final observation-only receipt proves no watcher-owned timer work, existing-trigger consumption, continuation invalidation, non-mutating navigation disclosure, and add/modify/delete/restart readback. The delete repair receipt isolates and repairs the retention-flight proof race without relaxing V4 validation | `watcher_observation_only_pass`; the earlier blocked receipt remains historical evidence and no second publication authority was introduced | No further watcher-decoupling work is authorized by this finding |
 | Semantic no-answer behavior | Observed top-K retrieval has no calibrated relevance decision | Dedicated plan exists, but S0 is deferred and no runtime policy is authorized | Freeze the S0 ground truth, request applicability, risk bounds, holdout governance, and runtime budgets before candidate evaluation |
 
 ### Python inbound relationships: local source-supported evidence

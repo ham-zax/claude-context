@@ -8,7 +8,19 @@ Current status: the fresh-reindex owner publishes complete canonical V4
 authority, healthy repair is an exact no-op, and corrected C4 add/modify/delete
 freshness passes for `.py`/`runtime` and `.txt`/`mixed`. All six bounded native
 Python relationship witnesses survived the lifecycle. Core passed 595 tests
-with one skipped and no failures; MCP passed 1,047 tests with no failures.
+with one skipped and no failures before watcher integration. The qualified
+watcher candidate adds one Core regression and completes with Core 596 passed,
+1 skipped, 0 failed and MCP 1,051 passed, 0 failed. Watcher observation-only
+qualification passes: events no longer trigger automatic indexing after five
+seconds; search, explicit sync, and periodic background synchronization remain
+the only publication triggers. Pending events bypass search recency through
+the existing freshness owner, later events invalidate source-bound
+continuations, and `call_graph`/`file_outline` remain non-mutating.
+`MCP_WATCH_DEBOUNCE_MS` is accepted but ignored and excluded from effective
+shared-runtime identity. The delete-triggered completion race was repaired in
+the existing retention/V4 proof owner without weakening validation or adding a
+publication authority; add/modify/delete/restart qualification passed. The
+previous blocked watcher qualification remains historical evidence.
 General Python inbound completeness is not claimed. CodeQL is excluded from
 the release runtime and rejected as authoritative Python `CALLS` evidence.
 At revision `4138b1e…`, cold first `call_graph` measured `7,204.25 ms` p50 and
@@ -49,6 +61,11 @@ Related records:
 - [Cold call-graph characterization](../evidence/cold-graph-memory-20260726/COLD_CALL_GRAPH_RECEIPT.md)
 - [Incremental-publication memory characterization](../evidence/cold-graph-memory-20260726/INCREMENTAL_PUBLICATION_MEMORY_RECEIPT.md)
 - [Deferred cold call-graph optimization](./COLD_CALL_GRAPH_DEFERRED_OPTIMIZATION.md)
+- [Watcher observation-only final qualification](../evidence/watcher-observation-only-final-20260726/WATCHER_OBSERVATION_ONLY_FINAL_RECEIPT.md)
+- [Incremental delete-publication repair](../evidence/incremental-delete-publication-20260726/INCREMENTAL_DELETE_PUBLICATION_RECEIPT.md)
+- [Watcher decoupling W0 baseline](../evidence/watcher-decoupling-w0-20260726/WATCHER_DECOUPLING_W0_RECEIPT.md)
+- [Historical blocked watcher qualification](../evidence/watcher-observation-only-20260726/WATCHER_OBSERVATION_ONLY_RECEIPT.md)
+- [Watcher observation/publication decoupling plan](./MCP_WATCHER_OBSERVATION_AND_SYNC_DECOUPLING_PLAN.md)
 
 This index does not reopen the closed large-index repair-proof defect or the
 closed empty-inbound-graph disclosure defect.
@@ -156,6 +173,16 @@ existing index during qualification.
 There is no combined checkpoint-and-semantic pass/fail state. Each plan retains
 its exact terminal outcome and stopping reason.
 
+### Watcher observation and publication
+
+| Work | Current decision |
+| --- | --- |
+| W0 | `watcher_decoupling_supported`; retained as the read-only baseline and cost record |
+| Historical observation-only qualification | `watcher_decoupling_blocked`; preserved as evidence that the existing incremental delete owner failed complete-generation validation through an allowed search trigger |
+| Incremental delete publication | `incremental_delete_publication_pass`; the retention-flight proof race is repaired through the existing canonical V4 owner, with validation unchanged |
+| Final observation-only qualification | `watcher_observation_only_pass`; watcher events are observation-only, existing freshness triggers consume pending evidence, and add/modify/delete/restart readback passes |
+| Publication ownership | Unchanged; no watcher-owned timer publication, second synchronizer, or second publication authority remains |
+
 ### Python relationship coverage and provider disposition
 
 | Work | Current decision |
@@ -176,7 +203,9 @@ its exact terminal outcome and stopping reason.
 | Runtime capacity | At least 2 GiB available capacity is required by the qualified deployment contract as an allowance, not measured steady use; earlier integration evidence observed a `1,447.21 MiB` incremental-publication peak |
 | Measurement applicability | Cold and memory measurements were not rerun after current master's full-reindex V4 authority-publication change; retain them as revision-`4138b1e…` release characterization, not strict current-master proof |
 | Semantic abstention | Deferred; no relevance-threshold, response-contract, or runtime-policy change is part of this release |
-| Package verification | Core 595 passed, 1 skipped, 0 failed; MCP 1,047 passed, 0 failed |
+| Watcher observation-only | Passed; no automatic work after the former debounce interval, existing freshness triggers consume pending events, continuations invalidate after later events, and navigation tools remain non-mutating |
+| Incremental delete publication | Passed; the existing retention flight settles and reproves the active generation before completion, preserving fail-closed canonical V4 validation |
+| Package verification | Core 596 passed, 1 skipped, 0 failed; MCP 1,051 passed, 0 failed |
 
 ## 5. Current report status
 
@@ -187,8 +216,10 @@ historical evidence and do not override it.
 The six-site Python caller-coverage finding is closed only for the static
 patterns qualified by its separate Python plan. General Python inbound
 coverage remains partial and non-exhaustive. Corrected controlled freshness
-passes, while no broader watcher-continuity or multi-day-memory guarantee is
-claimed.
+passes. Watcher observation-only qualification also passes without adding
+publication authority; the historical blocked receipt remains preserved as the
+record of the independently repaired delete-publication race. No multi-day
+memory guarantee is claimed.
 
 ## 6. Integration stewardship and merge/version ledger
 
