@@ -1,6 +1,6 @@
 # ADR: CodeQL Python relationship-provider disposition
 
-Date: 2026-07-25  
+Date: 2026-07-25
 Status: accepted for this experiment; no runtime implementation authorized
 
 ## Decision
