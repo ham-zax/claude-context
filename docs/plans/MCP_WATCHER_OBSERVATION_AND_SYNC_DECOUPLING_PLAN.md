@@ -1095,3 +1095,105 @@ batch authorization decision
 
 Return an independent decision for W0, W1, W2, W3, and W4. Do not treat approval
 of evidence gathering as approval of production behavior changes.
+
+## 14. Execution record: observation-only candidate
+
+The user subsequently authorized the complete observation/publication
+decoupling as one end-to-end outcome, with W1-W4 treated as internal
+ownership-bounded stages.
+
+The candidate implemented the required root-keyed event state, flight-owned
+coverage, observation-gap handling, pending navigation guidance, removal of
+watcher-owned publication, and compatibility treatment for
+`MCP_WATCH_DEBOUNCE_MS`.
+
+Focused and package verification passed. A real Chokidar witness also waited
+longer than the former five-second debounce and observed no automatic
+comparison or publication.
+
+Final product qualification then reached the plan's explicit stopping
+condition. After the distinct background-startup pass was allowed to settle:
+
+```text
+ten-write event burst
+-> no publication during 5.3-second quiet interval
+-> search publishes added source
+-> search publishes modified source
+-> delete event remains pending
+-> search consumes event
+-> complete-generation validation fails closed
+```
+
+The exact failure class was:
+
+```text
+Incremental publication ... is not readable as one complete generation.
+```
+
+This is equivalent to the frozen W0 validation finding, but it now occurs
+through an allowed search freshness trigger. The candidate therefore stops at:
+
+```text
+watcher_decoupling_blocked
+```
+
+No product commit was created, and nothing was merged or published. The
+durable receipt is:
+
+`../evidence/watcher-observation-only-20260726/WATCHER_OBSERVATION_ONLY_RECEIPT.md`.
+
+## 15. Final execution record
+
+The blocked result above remains historical evidence, but it did not reject the
+observation-only design. Add and modify had passed, and the delete failure was
+reproduced through the ordinary incremental owner without watcher scheduling.
+
+The first wrong boundary was the interaction between delta completion and the
+existing publication-retention queue. LanceDB sibling cleanup advanced the
+family-shared publication observation after the active generation had been
+proved. `performAtomicDeltaPublication` could therefore return before its
+active proof had been rebased, causing immediate complete-generation validation
+to reject a durable V4 generation that became readable after retention settled.
+
+The bounded repair:
+
+1. waits for the already-owned retention flight;
+2. proves the active generation after retention;
+3. fails closed if that proof cannot be obtained; and
+4. registers the retained proof as the exact prepared activation receipt.
+
+No validation, V4 identity, publication authority, schema, or fingerprint was
+relaxed or added. The detailed repair receipt is:
+
+`../evidence/incremental-delete-publication-20260726/INCREMENTAL_DELETE_PUBLICATION_RECEIPT.md`.
+
+After that repair, the preserved watcher candidate completed the real runtime
+sequence:
+
+```text
+event burst
+-> no automatic work after 5.3 seconds
+-> add consumed by search
+-> modify consumed by search
+-> delete consumed by search
+-> complete generation readable
+-> restart readable
+```
+
+Complete MCP verification passed 1,051 tests. Complete Core verification passed
+with the new direct LanceDB regression added to the prior 595-pass baseline and
+one existing skip. Typecheck, owned lint, builds, generated documentation,
+manifest checks, version freshness, and diff validation passed.
+
+The final decision is:
+
+```text
+watcher_observation_only_pass
+```
+
+The final receipt is:
+
+`../evidence/watcher-observation-only-final-20260726/WATCHER_OBSERVATION_ONLY_FINAL_RECEIPT.md`.
+
+The work remains isolated. Nothing was merged into `master` or published
+remotely.

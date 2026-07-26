@@ -75,6 +75,22 @@ export interface FreshnessDecision {
 }
 
 export type WatcherLifecycleState = 'starting' | 'ready' | 'failed' | 'stopped';
+export type WatcherObservationCoverage = WatcherLifecycleState | 'disabled';
+export type WatcherEventReason =
+    | 'source_changed'
+    | 'ignore_rules_changed'
+    | 'directory_changed';
+
+export interface WatcherObservationSnapshot {
+    observedEventEpoch: number;
+    comparedThroughEventEpoch: number;
+    latestEpochByReason: Readonly<Record<WatcherEventReason, number>>;
+    lastEventAt?: number;
+    coverage: WatcherObservationCoverage;
+    coverageGapSinceEpoch?: number;
+    lastWatcherError?: string;
+    pending: boolean;
+}
 
 export type PreparedReadObservationUnavailableReason =
     | 'watcher_disabled'
@@ -83,7 +99,8 @@ export type PreparedReadObservationUnavailableReason =
     | 'watcher_starting'
     | 'root_watcher_not_active'
     | 'watcher_failed'
-    | 'debounce_active'
+    | 'watcher_event_pending'
+    | 'watcher_observation_gap'
     | 'sync_active'
     | 'ignore_reconcile_active'
     | 'source_observation_failed'
@@ -160,7 +177,15 @@ type SourceFreshnessCheckpointValidation =
     | { checkpoint: ValidSourceFreshnessCheckpointEvidence | null }
     | { failure: FreshnessDecision };
 
-type WatchSyncReason = 'watch_event' | 'ignore_rules_changed';
+interface RootWatcherObservation {
+    observedEventEpoch: number;
+    comparedThroughEventEpoch: number;
+    latestEpochByReason: Map<WatcherEventReason, number>;
+    lastEventAt?: number;
+    coverage: WatcherObservationCoverage;
+    coverageGapSinceEpoch?: number;
+    lastWatcherError?: string;
+}
 
 interface EnsureFreshnessOptions {
     reason?: 'default' | 'ignore_change';
@@ -232,18 +257,15 @@ export class SyncManager {
     private backgroundSyncFlight: Promise<void> | null = null;
     private watcherModeStarted = false;
     private watchEnabled: boolean;
-    private watchDebounceMs: number;
     private watchedCodebases: Set<string> = new Set();
     private watchers: Map<string, FSWatcher> = new Map();
     private watcherLifecycleStates: Map<string, WatcherLifecycleState> = new Map();
     private watcherErrorCodes: Map<string, string> = new Map();
-    private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
     private watcherIgnoreMatchers: Map<string, ReturnType<typeof ignore>> = new Map();
     private ignoreRulesVersions: Map<string, number> = new Map();
-    private pendingIgnoreChangeEdits: Map<string, number> = new Map();
     private activeIgnoreReconciles: Map<string, Promise<FreshnessDecision>> = new Map();
-    private activeWatcherSyncs: Set<Promise<void>> = new Set();
     private freshnessEpochs: Map<string, number> = new Map();
+    private watcherObservations: Map<string, RootWatcherObservation> = new Map();
     private sourceCheckpointObservations: Map<string, string> = new Map();
     private sourceCheckpointStatuses: Map<string, 'valid' | 'missing' | 'corrupt'> = new Map();
     private readonly now: () => number;
@@ -257,7 +279,6 @@ export class SyncManager {
         this.context = context;
         this.snapshotManager = snapshotManager;
         this.watchEnabled = options.watchEnabled === true;
-        this.watchDebounceMs = Math.max(1, options.watchDebounceMs ?? DEFAULT_WATCH_DEBOUNCE_MS);
         this.now = options.now || (() => Date.now());
         this.onSyncCompleted = options.onSyncCompleted;
         this.mutationLeaseCoordinator = options.mutationLeaseCoordinator;
@@ -276,35 +297,181 @@ export class SyncManager {
         this.freshnessEpochs.set(codebasePath, (this.freshnessEpochs.get(codebasePath) ?? 0) + 1);
     }
 
+    private canonicalWatcherRoot(codebasePath: string): string {
+        return path.resolve(codebasePath);
+    }
+
+    private ensureWatcherObservation(
+        codebasePath: string,
+        coverage: WatcherObservationCoverage = this.watchEnabled ? 'starting' : 'disabled',
+    ): RootWatcherObservation {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const existing = this.watcherObservations.get(root);
+        if (existing) {
+            return existing;
+        }
+        const observation: RootWatcherObservation = {
+            observedEventEpoch: 0,
+            comparedThroughEventEpoch: 0,
+            latestEpochByReason: new Map(),
+            coverage,
+            ...(coverage === 'ready' ? {} : { coverageGapSinceEpoch: 0 }),
+        };
+        this.watcherObservations.set(root, observation);
+        return observation;
+    }
+
+    private setWatcherCoverage(
+        codebasePath: string,
+        coverage: WatcherObservationCoverage,
+        error?: string,
+    ): void {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const observation = this.ensureWatcherObservation(root, coverage);
+        observation.coverage = coverage;
+        if (coverage === 'starting' || coverage === 'failed' || coverage === 'stopped' || coverage === 'disabled') {
+            observation.coverageGapSinceEpoch ??= observation.observedEventEpoch;
+        }
+        if (error) {
+            observation.lastWatcherError = error;
+        } else if (coverage === 'starting' || coverage === 'ready') {
+            delete observation.lastWatcherError;
+        }
+        if (coverage === 'disabled') {
+            this.watcherLifecycleStates.delete(root);
+        } else {
+            this.watcherLifecycleStates.set(root, coverage);
+        }
+    }
+
+    public recordWatcherEvent(
+        codebasePath: string,
+        reason: WatcherEventReason,
+    ): number | null {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        if (!this.watchEnabled || !this.watcherModeStarted || !this.canScheduleWatchSync(root)) {
+            return null;
+        }
+        const observation = this.ensureWatcherObservation(root);
+        observation.observedEventEpoch += 1;
+        observation.latestEpochByReason.set(reason, observation.observedEventEpoch);
+        observation.lastEventAt = this.now();
+        this.bumpFreshnessEpoch(root);
+        return observation.observedEventEpoch;
+    }
+
+    public getWatcherObservation(codebasePath: string): WatcherObservationSnapshot {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const observation = this.watcherObservations.get(root) ?? {
+            observedEventEpoch: 0,
+            comparedThroughEventEpoch: 0,
+            latestEpochByReason: new Map<WatcherEventReason, number>(),
+            coverage: !this.watchEnabled
+                ? 'disabled' as const
+                : this.watcherErrorCodes.has(root)
+                    ? 'failed' as const
+                    : this.watcherModeStarted
+                        ? 'starting' as const
+                        : 'stopped' as const,
+            coverageGapSinceEpoch: 0,
+            ...(this.watcherErrorCodes.get(root)
+                ? { lastWatcherError: this.watcherErrorCodes.get(root) }
+                : {}),
+        };
+        const latestEpochByReason = {
+            source_changed: observation.latestEpochByReason.get('source_changed') ?? 0,
+            ignore_rules_changed: observation.latestEpochByReason.get('ignore_rules_changed') ?? 0,
+            directory_changed: observation.latestEpochByReason.get('directory_changed') ?? 0,
+        };
+        return {
+            observedEventEpoch: observation.observedEventEpoch,
+            comparedThroughEventEpoch: observation.comparedThroughEventEpoch,
+            latestEpochByReason,
+            ...(observation.lastEventAt !== undefined ? { lastEventAt: observation.lastEventAt } : {}),
+            coverage: observation.coverage,
+            ...(observation.coverageGapSinceEpoch !== undefined
+                ? { coverageGapSinceEpoch: observation.coverageGapSinceEpoch }
+                : {}),
+            ...(observation.lastWatcherError ? { lastWatcherError: observation.lastWatcherError } : {}),
+            pending: observation.observedEventEpoch > observation.comparedThroughEventEpoch
+                || observation.coverageGapSinceEpoch !== undefined,
+        };
+    }
+
+    private captureWatcherFlightEpoch(codebasePath: string): number | undefined {
+        const observation = this.watcherObservations.get(this.canonicalWatcherRoot(codebasePath));
+        if (!observation) return undefined;
+        return observation.observedEventEpoch;
+    }
+
+    private hasPendingWatcherObservation(codebasePath: string): boolean {
+        const observation = this.watcherObservations.get(this.canonicalWatcherRoot(codebasePath));
+        return observation !== undefined
+            && (observation.observedEventEpoch > observation.comparedThroughEventEpoch
+                || observation.coverageGapSinceEpoch !== undefined);
+    }
+
+    private coverWatcherObservation(codebasePath: string, flightEpoch: number | undefined): void {
+        if (flightEpoch === undefined) return;
+        const observation = this.watcherObservations.get(this.canonicalWatcherRoot(codebasePath));
+        if (!observation) return;
+        observation.comparedThroughEventEpoch = Math.max(
+            observation.comparedThroughEventEpoch,
+            flightEpoch,
+        );
+        for (const [reason, latestEpoch] of observation.latestEpochByReason.entries()) {
+            if (latestEpoch <= observation.comparedThroughEventEpoch) {
+                observation.latestEpochByReason.delete(reason);
+            }
+        }
+        if (
+            observation.coverage === 'ready'
+            && observation.coverageGapSinceEpoch !== undefined
+            && observation.coverageGapSinceEpoch <= observation.comparedThroughEventEpoch
+        ) {
+            delete observation.coverageGapSinceEpoch;
+        }
+    }
+
     public getPreparedReadObservation(codebasePath: string): PreparedReadObservationResult {
-        const freshnessEpoch = this.freshnessEpochs.get(codebasePath) ?? 0;
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const freshnessEpoch = this.freshnessEpochs.get(root) ?? 0;
         const unavailable = (
             reason: PreparedReadObservationUnavailableReason,
         ): PreparedReadObservationResult => ({
             available: false,
             reason,
             freshnessEpoch,
-            ...(this.watcherLifecycleStates.get(codebasePath)
-                ? { watcherState: this.watcherLifecycleStates.get(codebasePath) }
+            ...(this.watcherLifecycleStates.get(root)
+                ? { watcherState: this.watcherLifecycleStates.get(root) }
                 : {}),
         });
         if (!this.watchEnabled) return unavailable('watcher_disabled');
         if (!this.watcherModeStarted) return unavailable('watcher_manager_not_started');
-        if (!this.watchedCodebases.has(codebasePath)) return unavailable('root_not_registered');
-        if (this.watcherErrorCodes.has(codebasePath)) return unavailable('watcher_failed');
-        const watcherState = this.watcherLifecycleStates.get(codebasePath);
+        if (!this.watchedCodebases.has(root)) return unavailable('root_not_registered');
+        if (this.watcherErrorCodes.has(root)) return unavailable('watcher_failed');
+        const watcherState = this.watcherLifecycleStates.get(root);
         if (watcherState === 'starting') return unavailable('watcher_starting');
-        if (watcherState !== 'ready' || !this.watchers.has(codebasePath)) {
+        if (watcherState !== 'ready' || !this.watchers.has(root)) {
             return unavailable('root_watcher_not_active');
         }
-        if (this.debounceTimers.has(codebasePath)) return unavailable('debounce_active');
-        if (this.activeSyncs.has(codebasePath)) return unavailable('sync_active');
-        if (this.activeIgnoreReconciles.has(codebasePath)) return unavailable('ignore_reconcile_active');
+        const watcherObservation = this.watcherObservations.get(root);
+        if (watcherObservation?.coverageGapSinceEpoch !== undefined) {
+            return unavailable('watcher_observation_gap');
+        }
+        if (
+            watcherObservation
+            && watcherObservation.observedEventEpoch > watcherObservation.comparedThroughEventEpoch
+        ) {
+            return unavailable('watcher_event_pending');
+        }
+        if (this.activeSyncs.has(root)) return unavailable('sync_active');
+        if (this.activeIgnoreReconciles.has(root)) return unavailable('ignore_reconcile_active');
 
         const checkpointInspectionSupported = typeof this.context.inspectSourceFreshnessCheckpoint === 'function';
-        const checkpointObservation = this.sourceCheckpointObservations.get(codebasePath);
-        const currentCheckpointObservation = this.context.getRegisteredSourceFreshnessCheckpointObservation?.(codebasePath);
-        const checkpointStatus = this.sourceCheckpointStatuses.get(codebasePath);
+        const checkpointObservation = this.sourceCheckpointObservations.get(root);
+        const currentCheckpointObservation = this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
+        const checkpointStatus = this.sourceCheckpointStatuses.get(root);
         if (checkpointInspectionSupported && checkpointStatus === 'missing') {
             return unavailable('checkpoint_missing');
         }
@@ -527,6 +694,12 @@ export class SyncManager {
         thresholdMs: number = 60000,
         options: EnsureFreshnessOptions = {}
     ): Promise<FreshnessDecision> {
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
+        const flightEpoch = this.captureWatcherFlightEpoch(codebasePath);
+        const watcherObservationPending = this.hasPendingWatcherObservation(codebasePath);
+        if (watcherObservationPending) {
+            thresholdMs = 0;
+        }
         const checkedAtMs = this.now();
         const checkedAt = new Date(checkedAtMs).toISOString();
 
@@ -538,13 +711,17 @@ export class SyncManager {
                 options.preparedVectorReceipt,
             );
             if ('failure' in checkpointValidation) return checkpointValidation.failure;
-            return this.runIgnoreReconcile(
+            const decision = await this.runIgnoreReconcile(
                 codebasePath,
                 options.coalescedEdits,
                 undefined,
                 options.mutationLease,
                 checkpointValidation.checkpoint?.generationReceipt,
             );
+            if (decision.mode === 'reconciled_ignore_change') {
+                this.coverWatcherObservation(codebasePath, flightEpoch);
+            }
+            return decision;
         }
 
         // Join a live mutation before inspecting its checkpoint. The owner may be
@@ -587,13 +764,17 @@ export class SyncManager {
 
             if (typeof persistedIgnoreControlSignature === 'string') {
                 if (persistedIgnoreControlSignature !== currentIgnoreControlSignature) {
-                    return this.runIgnoreReconcile(
+                    const decision = await this.runIgnoreReconcile(
                         codebasePath,
                         1,
                         currentIgnoreControlSignature,
                         options.mutationLease,
                         checkpointValidation.checkpoint?.generationReceipt,
                     );
+                    if (decision.mode === 'reconciled_ignore_change') {
+                        this.coverWatcherObservation(codebasePath, flightEpoch);
+                    }
+                    return decision;
                 }
             } else if (
                 (this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexed'
@@ -608,20 +789,24 @@ export class SyncManager {
                     : false;
 
                 if (indexedPaths.length > 0 || hasSynchronizer) {
-                    return this.runIgnoreReconcile(
+                    const decision = await this.runIgnoreReconcile(
                         codebasePath,
                         1,
                         currentIgnoreControlSignature,
                         options.mutationLease,
                         checkpointValidation.checkpoint?.generationReceipt,
                     );
+                    if (decision.mode === 'reconciled_ignore_change') {
+                        this.coverWatcherObservation(codebasePath, flightEpoch);
+                    }
+                    return decision;
                 }
 
             }
         }
 
         const exactSourceComparisonPaths = options.exactSourceComparisonPaths;
-        if (exactSourceComparisonPaths && exactSourceComparisonPaths.length > 0) {
+        if (!watcherObservationPending && exactSourceComparisonPaths && exactSourceComparisonPaths.length > 0) {
             const compareSourcePaths = this.context.compareSourcePathsToFreshnessCheckpoint;
             if (typeof compareSourcePaths === 'function') {
                 const comparison = await compareSourcePaths.call(
@@ -695,7 +880,7 @@ export class SyncManager {
             this.sourceCheckpointObservations.delete(codebasePath);
         }
         const lastSyncedAt = this.lastSyncTimes.get(codebasePath);
-        return {
+        const decision: FreshnessDecision = {
             mode: outcome.mode,
             checkedAt,
             thresholdMs,
@@ -710,6 +895,10 @@ export class SyncManager {
             operation: outcome.operation,
             errorMessage: outcome.errorMessage,
         };
+        if (outcome.mode === 'synced' && !outcome.errorMessage) {
+            this.coverWatcherObservation(codebasePath, flightEpoch);
+        }
+        return decision;
     }
 
     private async runIgnoreReconcile(
@@ -1460,9 +1649,6 @@ export class SyncManager {
             if (this.backgroundSyncFlight) {
                 pending.add(this.backgroundSyncFlight);
             }
-            for (const flight of this.activeWatcherSyncs) {
-                pending.add(flight);
-            }
             for (const flight of this.activeSyncs.values()) {
                 pending.add(flight);
             }
@@ -1475,11 +1661,11 @@ export class SyncManager {
     }
 
     public getActiveLifecycleOperationCount(): number {
-        return (this.backgroundSyncFlight ? 1 : 0) + this.activeWatcherSyncs.size;
+        return this.backgroundSyncFlight ? 1 : 0;
     }
 
     public getWatchDebounceMs(): number {
-        return this.watchDebounceMs;
+        return DEFAULT_WATCH_DEBOUNCE_MS;
     }
 
     private canScheduleWatchSync(codebasePath: string): boolean {
@@ -1638,69 +1824,13 @@ export class SyncManager {
         return matcher.ignores(withSlash);
     }
 
-    public scheduleWatcherSync(codebasePath: string, reason: WatchSyncReason = 'watch_event'): void {
-        if (!this.watchEnabled || !this.watcherModeStarted) {
-            return;
-        }
-
-        if (!this.canScheduleWatchSync(codebasePath)) {
-            console.log(`[SYNC-WATCH] Dropping ${reason} for '${codebasePath}' due to status=${this.snapshotManager.getCodebaseStatus(codebasePath)}`);
-            return;
-        }
-
-        this.bumpFreshnessEpoch(codebasePath);
-
-        const activeTimer = this.debounceTimers.get(codebasePath);
-        if (activeTimer) {
-            clearTimeout(activeTimer);
-        }
-
-        if (reason === 'ignore_rules_changed') {
-            const current = this.pendingIgnoreChangeEdits.get(codebasePath) || 0;
-            this.pendingIgnoreChangeEdits.set(codebasePath, current + 1);
-        }
-
-        const timer = setTimeout(() => {
-            this.debounceTimers.delete(codebasePath);
-            const flight = (async () => {
-                const coalescedIgnoreEdits = this.pendingIgnoreChangeEdits.get(codebasePath) || 0;
-                this.pendingIgnoreChangeEdits.delete(codebasePath);
-                try {
-                    if (coalescedIgnoreEdits > 0) {
-                        const decision = await this.ensureFreshness(codebasePath, 0, {
-                            reason: 'ignore_change',
-                            coalescedEdits: coalescedIgnoreEdits,
-                        });
-                        if (decision.mode === 'ignore_reload_failed') {
-                            console.warn(`[SYNC-WATCH] Ignore-rule reconcile failed for '${codebasePath}': ${decision.errorMessage || 'unknown_error'} (fallbackSyncExecuted=${decision.fallbackSyncExecuted === true})`);
-                        } else {
-                            console.log(`[SYNC-WATCH] Ignore-rule reconcile completed for '${codebasePath}' (version=${decision.ignoreRulesVersion ?? 'n/a'}, deleted=${decision.deletedFiles ?? 0}, added=${decision.addedFiles ?? 0}, coalesced=${decision.coalescedEdits ?? 1})`);
-                        }
-                        return;
-                    }
-
-                    await this.ensureFreshness(codebasePath, 0);
-                } catch (error) {
-                    console.error(`[SYNC-WATCH] Debounced sync failed for '${codebasePath}':`, error);
-                }
-            })();
-            this.activeWatcherSyncs.add(flight);
-            this.onLifecycleActivityChanged?.();
-            void flight.finally(() => {
-                if (this.activeWatcherSyncs.delete(flight)) {
-                    this.onLifecycleActivityChanged?.();
-                }
-            });
-        }, this.watchDebounceMs);
-
-        this.debounceTimers.set(codebasePath, timer);
-    }
-
     private async handleWatcherError(codebasePath: string, error: unknown): Promise<void> {
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
         const message = errorMessage(error, "");
         const code = errorCode(error);
-        this.watcherLifecycleStates.set(codebasePath, 'failed');
-        this.watcherErrorCodes.set(codebasePath, code || 'WATCHER_ERROR');
+        const watcherError = code || 'WATCHER_ERROR';
+        this.setWatcherCoverage(codebasePath, 'failed', watcherError);
+        this.watcherErrorCodes.set(codebasePath, watcherError);
         if (code === 'ENOSPC' || message.includes('ENOSPC')) {
             console.error(`[SYNC-WATCH] ENOSPC detected while watching '${codebasePath}'. Disabling watcher mode and relying on periodic/manual sync.`);
             await this.stopWatcherMode();
@@ -1713,7 +1843,9 @@ export class SyncManager {
     }
 
     public async touchWatchedCodebase(codebasePath: string): Promise<void> {
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
         this.watchedCodebases.add(codebasePath);
+        this.ensureWatcherObservation(codebasePath, this.watchEnabled ? 'starting' : 'disabled');
         if (!this.watchEnabled || !this.watcherModeStarted) {
             return;
         }
@@ -1721,11 +1853,13 @@ export class SyncManager {
     }
 
     public async unwatchCodebase(codebasePath: string): Promise<void> {
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
         this.watchedCodebases.delete(codebasePath);
         await this.unregisterCodebaseWatcher(codebasePath);
         this.lastSyncTimes.delete(codebasePath);
         this.ignoreRulesVersions.delete(codebasePath);
         this.freshnessEpochs.delete(codebasePath);
+        this.watcherObservations.delete(codebasePath);
         this.sourceCheckpointObservations.delete(codebasePath);
         this.sourceCheckpointStatuses.delete(codebasePath);
         this.activeIgnoreReconciles.delete(codebasePath);
@@ -1734,6 +1868,7 @@ export class SyncManager {
     }
 
     public async registerCodebaseWatcher(codebasePath: string): Promise<void> {
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
         if (!this.watchEnabled || !this.watcherModeStarted) {
             return;
         }
@@ -1772,47 +1907,46 @@ export class SyncManager {
             return;
         }
 
-        const onPathChange = (watchPath: string) => {
+        const onPathChange = (
+            watchPath: string,
+            eventReason: Exclude<WatcherEventReason, 'ignore_rules_changed'>,
+        ) => {
             if (this.watchers.get(codebasePath) !== watcher) {
                 return;
             }
             const relativePath = this.normalizeRelativePath(codebasePath, watchPath);
-            const reason: WatchSyncReason = this.isIgnoreRuleControlFile(relativePath)
+            const observationReason: WatcherEventReason = this.isIgnoreRuleControlFile(relativePath)
                 ? 'ignore_rules_changed'
-                : 'watch_event';
-            this.scheduleWatcherSync(codebasePath, reason);
+                : eventReason;
+            if (this.recordWatcherEvent(codebasePath, observationReason) === null) {
+                return;
+            }
         };
 
         this.watcherErrorCodes.delete(codebasePath);
-        this.watcherLifecycleStates.set(codebasePath, 'starting');
+        this.setWatcherCoverage(codebasePath, 'starting');
         this.watchers.set(codebasePath, watcher);
         watcher
             .on('ready', () => {
                 if (this.watchers.get(codebasePath) === watcher) {
-                    this.watcherLifecycleStates.set(codebasePath, 'ready');
+                    this.setWatcherCoverage(codebasePath, 'ready');
                 }
             })
-            .on('add', onPathChange)
-            .on('change', onPathChange)
-            .on('unlink', onPathChange)
-            .on('addDir', onPathChange)
-            .on('unlinkDir', onPathChange)
+            .on('add', (watchPath) => onPathChange(watchPath, 'source_changed'))
+            .on('change', (watchPath) => onPathChange(watchPath, 'source_changed'))
+            .on('unlink', (watchPath) => onPathChange(watchPath, 'source_changed'))
+            .on('addDir', (watchPath) => onPathChange(watchPath, 'directory_changed'))
+            .on('unlinkDir', (watchPath) => onPathChange(watchPath, 'directory_changed'))
             .on('error', (error) => {
                 void this.handleWatcherError(codebasePath, error);
             });
 
-        console.log(`[SYNC-WATCH] Watching '${codebasePath}' (debounce=${this.watchDebounceMs}ms)`);
+        console.log(`[SYNC-WATCH] Observing '${codebasePath}' for source events.`);
     }
 
     public async unregisterCodebaseWatcher(codebasePath: string): Promise<void> {
-        const timer = this.debounceTimers.get(codebasePath);
-        if (timer) {
-            clearTimeout(timer);
-            this.debounceTimers.delete(codebasePath);
-        }
-
+        codebasePath = this.canonicalWatcherRoot(codebasePath);
         this.watcherIgnoreMatchers.delete(codebasePath);
-        this.pendingIgnoreChangeEdits.delete(codebasePath);
 
         const watcher = this.watchers.get(codebasePath);
         if (!watcher) {
@@ -1820,7 +1954,7 @@ export class SyncManager {
         }
 
         if (this.watcherLifecycleStates.get(codebasePath) !== 'failed') {
-            this.watcherLifecycleStates.set(codebasePath, 'stopped');
+            this.setWatcherCoverage(codebasePath, 'stopped');
         }
         this.watchers.delete(codebasePath);
         try {
@@ -1868,19 +2002,15 @@ export class SyncManager {
         this.watcherModeStarted = false;
 
         for (const codebasePath of this.watchers.keys()) {
-            this.watcherLifecycleStates.set(codebasePath, 'stopped');
+            this.setWatcherCoverage(codebasePath, 'stopped');
             this.bumpFreshnessEpoch(codebasePath);
         }
 
-        for (const timer of this.debounceTimers.values()) {
-            clearTimeout(timer);
-        }
-        this.debounceTimers.clear();
         this.watcherIgnoreMatchers.clear();
-        this.pendingIgnoreChangeEdits.clear();
         this.lastSyncTimes.clear();
         this.ignoreRulesVersions.clear();
         this.freshnessEpochs.clear();
+        this.watcherObservations.clear();
         this.sourceCheckpointObservations.clear();
         this.sourceCheckpointStatuses.clear();
         this.watchedCodebases.clear();

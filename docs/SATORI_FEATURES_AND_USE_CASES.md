@@ -126,6 +126,8 @@ Supported operators are `lang:`, `path:`, `-path:`, `must:`, and `exclude:`. A d
 
 When diagnostic output includes `changedCode`, its `basis="git_tracked_worktree"` means the changed-file set comes from Git-tracked worktree changes only. Untracked files are intentionally excluded from this ranking/debug signal; watcher and read-time freshness checks remain separate authority. Diagnostic modes are bounded projections: request the smallest useful mode (`summary`, `ranking`, or `freshness`) and use `full` only when those projections are insufficient.
 
+The watcher detects source changes. Satori publishes them on the next freshness-triggering operation; it does not index automatically after a five-second timer. Search, explicit `manage_index sync`, and periodic background synchronization remain the freshness triggers.
+
 Inspect:
 
 - `warnings` and each warning action;

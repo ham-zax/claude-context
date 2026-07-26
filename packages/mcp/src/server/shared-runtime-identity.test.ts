@@ -52,7 +52,7 @@ test("shared runtime identity is exact, non-secret, and bounded to eligible Linu
         ...env,
         MCP_WATCH_DEBOUNCE_MS: "6000",
     });
-    assert.notEqual(identity.hash, changed.hash);
+    assert.equal(identity.hash, changed.hash);
     assert.notEqual(
         buildSharedRuntimeIdentity(runtimeEntry, {
             ...env,

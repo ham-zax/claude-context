@@ -247,20 +247,38 @@ function createMutableSnapshot(repoPath: string, initialStatus: 'not_found' | 'i
     } as unknown as MutableSnapshot;
 }
 
-function createWatchRecorder() {
+function createWatchRecorder(options: { pendingEvent?: boolean } = {}) {
     const touched: string[] = [];
     const unwatched: string[] = [];
+    let ensureCalls = 0;
     return {
         touched,
         unwatched,
+        get ensureCalls() {
+            return ensureCalls;
+        },
         syncManager: {
-            ensureFreshness: async () => ({
-                mode: 'synced',
-                checkedAt: new Date('2026-03-16T00:00:00.000Z').toISOString(),
-                thresholdMs: 0,
-                stats: { added: 0, removed: 0, modified: 0 }
-            }),
+            ensureFreshness: async () => {
+                ensureCalls += 1;
+                return {
+                    mode: 'synced',
+                    checkedAt: new Date('2026-03-16T00:00:00.000Z').toISOString(),
+                    thresholdMs: 0,
+                    stats: { added: 0, removed: 0, modified: 0 }
+                };
+            },
             getWatchDebounceMs: () => 2000,
+            getWatcherObservation: () => ({
+                observedEventEpoch: options.pendingEvent ? 1 : 0,
+                comparedThroughEventEpoch: 0,
+                latestEpochByReason: {
+                    source_changed: options.pendingEvent ? 1 : 0,
+                    ignore_rules_changed: 0,
+                    directory_changed: 0,
+                },
+                coverage: 'ready',
+                pending: options.pendingEvent === true,
+            }),
             touchWatchedCodebase: async (codebasePath: string) => {
                 touched.push(codebasePath);
             },
@@ -443,7 +461,7 @@ test('handleSearchCode touches the watch list only for successful indexed-root s
     });
 });
 
-test('handleFileOutline and handleCallGraph touch the watch list for successful navigation responses', async () => {
+test('navigation remains non-mutating and discloses pending watcher events', async () => {
     await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
         const filePath = path.join(repoPath, 'src', 'auth.ts');
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -462,7 +480,7 @@ test('handleFileOutline and handleCallGraph touch the watch list for successful 
         });
 
         const snapshot = createMutableSnapshot(repoPath, 'indexed');
-        const watch = createWatchRecorder();
+        const watch = createWatchRecorder({ pendingEvent: true });
         const context = {} as unknown as HandlerContext;
 
         const handlers = new ToolHandlers(
@@ -480,6 +498,10 @@ test('handleFileOutline and handleCallGraph touch the watch list for successful 
         });
         const outlinePayload = parsePayload(outlineResponse);
         assert.equal(outlinePayload.status, 'ok');
+        assert.deepEqual(outlinePayload.warnings, ['SOURCE_CHANGES_PENDING']);
+        assert.deepEqual(outlinePayload.hints, {
+            sync: { tool: 'manage_index', args: { action: 'sync', path: repoPath } },
+        });
         const symbolRef = outlinePayload.outline?.symbols?.[0]?.callGraphHint?.symbolRef;
         assert.equal(isCallGraphSymbolRef(symbolRef), true);
 
@@ -492,7 +514,16 @@ test('handleFileOutline and handleCallGraph touch the watch list for successful 
         });
         const graphPayload = parsePayload(graphResponse);
         assert.equal(graphPayload.status, 'ok');
+        assert.deepEqual(graphPayload.warnings, [
+            'CALL_GRAPH_INBOUND_COVERAGE_PARTIAL',
+            'SOURCE_CHANGES_PENDING',
+        ]);
+        assert.deepEqual((graphPayload.hints as Record<string, unknown>).sync, {
+            tool: 'manage_index',
+            args: { action: 'sync', path: repoPath },
+        });
 
         assert.deepEqual(watch.touched, [repoPath, repoPath]);
+        assert.equal(watch.ensureCalls, 0);
     }));
 });

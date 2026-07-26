@@ -208,8 +208,9 @@ export interface ContextMcpConfig {
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
     // read_file behavior
     readFileMaxLines?: number;
-    // Proactive sync watcher behavior
+    // Filesystem observation behavior
     watchSyncEnabled?: boolean;
+    /** @deprecated Accepted for compatibility but ignored by observation-only watching. */
     watchDebounceMs?: number;
 }
 
@@ -663,8 +664,9 @@ export function createMcpConfig(): ContextMcpConfig {
         if (Number.isFinite(parsed) && parsed > 0) {
             watchDebounceMs = parsed;
         } else {
-            console.warn(`[WARN] Invalid MCP_WATCH_DEBOUNCE_MS value: ${watchDebounceRaw}. Using default ${DEFAULT_WATCH_DEBOUNCE_MS}.`);
+            console.warn(`[WARN] Invalid MCP_WATCH_DEBOUNCE_MS value: ${watchDebounceRaw}. The deprecated value is ignored.`);
         }
+        console.warn('[WARN] MCP_WATCH_DEBOUNCE_MS is deprecated and ignored; filesystem watching records source events but does not schedule synchronization.');
     }
 
     const config: ContextMcpConfig = {
@@ -701,7 +703,7 @@ export function createMcpConfig(): ContextMcpConfig {
         rankerModel,
         // read_file behavior
         readFileMaxLines,
-        // proactive sync watcher behavior
+        // filesystem observation behavior
         watchSyncEnabled,
         watchDebounceMs,
     };
@@ -723,7 +725,7 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     } else {
         console.log(`[MCP]   Milvus Address: ${config.milvusEndpoint || '[Not configured]'}`);
     }
-    console.log(`[MCP]   Proactive Watcher: ${config.watchSyncEnabled ? `enabled (${config.watchDebounceMs || DEFAULT_WATCH_DEBOUNCE_MS}ms debounce)` : 'disabled'}`);
+    console.log(`[MCP]   Filesystem Watcher: ${config.watchSyncEnabled ? 'enabled (observation only)' : 'disabled'}`);
 
     // Log provider-specific configuration without exposing sensitive data
     switch (config.encoderProvider) {
@@ -794,9 +796,9 @@ Environment Variables:
   Read File Configuration:
   READ_FILE_MAX_LINES     Max lines returned by read_file when no explicit range is provided (default: 1000)
 
-  Proactive Sync Configuration:
-  MCP_ENABLE_WATCHER      Enable filesystem watch mode for near-real-time sync (default: true)
-  MCP_WATCH_DEBOUNCE_MS   Quiet period after FS events before incremental sync (default: 5000; not "searchable in 5s")
+  Filesystem Observation:
+  MCP_ENABLE_WATCHER      Observe source changes for freshness-aware reads (default: true)
+  MCP_WATCH_DEBOUNCE_MS   Deprecated compatibility input; accepted but ignored
 
 Examples:
   # Install resident MCP config without package-manager startup on every client launch

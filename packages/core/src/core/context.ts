@@ -3879,7 +3879,7 @@ export class Context {
                 }
                 : undefined;
 
-            const activatedGenerationReceipt = await this.recordActivatedGenerationProof({
+            await this.recordActivatedGenerationProof({
                 canonicalRoot: input.canonicalRoot,
                 marker: publishedMarker,
                 policy: input.sealedPolicy,
@@ -3911,6 +3911,20 @@ export class Context {
                 previousNavigationGenerationId: sourceNavigation.generationId,
                 ...(activeDataObservation ? { activeDataObservation } : {}),
             });
+            await this.waitForPublicationRetention(input.canonicalRoot);
+            const retainedGenerationReceipt = await this.proveIndexedGeneration(input.canonicalRoot);
+            if (!retainedGenerationReceipt) {
+                throw new Error(
+                    `Atomic delta publication for '${input.codebasePath}' is not readable after generation retention.`,
+                );
+            }
+            const retainedGenerationIdentity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
+            if (!retainedGenerationIdentity) {
+                throw new Error(
+                    `Atomic delta publication for '${input.codebasePath}' lost its retained generation identity.`,
+                );
+            }
+            this.preparedGenerationReceipts.set(retainedGenerationReceipt, retainedGenerationIdentity);
 
             return {
                 added: added.length,
@@ -3921,9 +3935,7 @@ export class Context {
                 indexedFiles: input.preparedChanges.fileHashes.size,
                 totalChunks,
                 indexStatus: 'completed',
-                ...(activatedGenerationReceipt
-                    ? { generationReceipt: activatedGenerationReceipt }
-                    : {}),
+                generationReceipt: retainedGenerationReceipt,
             };
         } catch (error) {
             if (

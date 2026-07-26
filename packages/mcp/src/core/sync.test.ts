@@ -14,6 +14,7 @@ import {
 } from './mutation-lease.js';
 import {
     BACKGROUND_FRESHNESS_THRESHOLD_MS,
+    DEFAULT_WATCH_DEBOUNCE_MS,
     type IndexFingerprint,
     type IndexOperationReceipt,
 } from '../config.js';
@@ -31,7 +32,20 @@ type SyncManagerTestAccess = {
     watchers: Map<string, { close: () => Promise<void> | void }>;
     watchedCodebases: Set<string>;
     watcherLifecycleStates: Map<string, 'starting' | 'ready' | 'failed' | 'stopped'>;
-    debounceTimers: Map<string, NodeJS.Timeout>;
+    watcherObservations: Map<string, {
+        observedEventEpoch: number;
+        comparedThroughEventEpoch: number;
+        latestEpochByReason: Map<'source_changed' | 'ignore_rules_changed' | 'directory_changed', number>;
+        coverage: 'starting' | 'ready' | 'failed' | 'stopped' | 'disabled';
+        coverageGapSinceEpoch?: number;
+        lastEventAt?: number;
+        lastWatcherError?: string;
+    }>;
+    setWatcherCoverage(
+        codebasePath: string,
+        coverage: 'starting' | 'ready' | 'failed' | 'stopped' | 'disabled',
+        error?: string,
+    ): void;
     watcherIgnoreMatchers: Map<string, unknown>;
     shouldIgnoreWatchPath(codebasePath: string, filePath: string): boolean;
     isIgnoreRuleControlFile(relativePath: string): boolean;
@@ -370,7 +384,7 @@ test('background sync skips recent roots without lease churn and compares expire
     }
 });
 
-test('watch-triggered sync is dropped for non-searchable statuses', async () => {
+test('watcher events are rejected for non-searchable statuses', async () => {
     const codebasePath = createTempDir();
     const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexing']]);
     const context = createContext();
@@ -381,10 +395,11 @@ test('watch-triggered sync is dropped for non-searchable statuses', async () => 
     });
 
     (manager as unknown as SyncManagerTestAccess).watcherModeStarted = true;
-    manager.scheduleWatcherSync(codebasePath, 'watch_event');
-    await wait(80);
+    const epoch = manager.recordWatcherEvent(codebasePath, 'source_changed');
 
+    assert.equal(epoch, null);
     assert.equal(context.calls, 0);
+    assert.equal(manager.getWatcherObservation(codebasePath).observedEventEpoch, 0);
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
@@ -524,6 +539,164 @@ test('coalesced sync callers receive the same durable completed receipt', async 
 
     fs.rmSync(codebasePath, { recursive: true, force: true });
     fs.rmSync(stateDir, { recursive: true, force: true });
+});
+
+test('freshness flight covers only its captured watcher event epoch', async () => {
+    const codebasePath = createTempDir();
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const snapshot = createSnapshot(statusByPath);
+    let syncCalls = 0;
+    let releaseSync!: () => void;
+    let markSyncStarted!: () => void;
+    const syncGate = new Promise<void>((resolve) => {
+        releaseSync = resolve;
+    });
+    const syncStarted = new Promise<void>((resolve) => {
+        markSyncStarted = resolve;
+    });
+    const context = {
+        async reindexByChange() {
+            syncCalls += 1;
+            if (syncCalls === 1) {
+                markSyncStarted();
+                await syncGate;
+            }
+            return { added: 0, removed: 0, modified: 0 };
+        },
+    };
+    const manager = new SyncManager(
+        context as unknown as SyncContext,
+        snapshot as unknown as SyncSnapshotManager,
+        { watchEnabled: true },
+    );
+    const access = manager as unknown as SyncManagerTestAccess;
+    access.watcherModeStarted = true;
+    access.setWatcherCoverage(codebasePath, 'ready');
+
+    assert.equal(manager.recordWatcherEvent(codebasePath, 'source_changed'), 1);
+    const owner = manager.ensureFreshness(codebasePath, 60_000, { skipIgnoreControlCheck: true });
+    await syncStarted;
+
+    assert.equal(manager.recordWatcherEvent(codebasePath, 'directory_changed'), 2);
+    const joiner = manager.ensureFreshness(codebasePath, 60_000, { skipIgnoreControlCheck: true });
+    releaseSync();
+
+    const [ownerDecision, joinerDecision] = await Promise.all([owner, joiner]);
+    assert.equal(ownerDecision.mode, 'synced');
+    assert.equal(joinerDecision.mode, 'coalesced');
+    assert.equal(syncCalls, 1);
+    assert.deepEqual(manager.getWatcherObservation(codebasePath), {
+        observedEventEpoch: 2,
+        comparedThroughEventEpoch: 1,
+        latestEpochByReason: {
+            source_changed: 0,
+            ignore_rules_changed: 0,
+            directory_changed: 2,
+        },
+        lastEventAt: manager.getWatcherObservation(codebasePath).lastEventAt,
+        coverage: 'ready',
+        pending: true,
+    });
+
+    const followup = await manager.ensureFreshness(codebasePath, 60_000, { skipIgnoreControlCheck: true });
+    assert.equal(followup.mode, 'synced');
+    assert.equal(syncCalls, 2);
+    assert.equal(manager.getWatcherObservation(codebasePath).pending, false);
+
+    await manager.stopWatcherMode();
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('watcher observation is root-keyed and retains each reason independently', async () => {
+    const codebasePathA = createTempDir();
+    const codebasePathB = createTempDir();
+    const statusByPath = new Map<string, CodebaseStatus>([
+        [codebasePathA, 'indexed'],
+        [codebasePathB, 'indexed'],
+    ]);
+    const manager = new SyncManager(
+        createContext() as unknown as SyncContext,
+        createSnapshot(statusByPath) as unknown as SyncSnapshotManager,
+        { watchEnabled: true, now: () => 1234 },
+    );
+    const access = manager as unknown as SyncManagerTestAccess;
+    access.watcherModeStarted = true;
+    access.setWatcherCoverage(codebasePathA, 'ready');
+    access.setWatcherCoverage(codebasePathB, 'ready');
+
+    manager.recordWatcherEvent(codebasePathA, 'source_changed');
+    manager.recordWatcherEvent(codebasePathA, 'ignore_rules_changed');
+    manager.recordWatcherEvent(codebasePathA, 'source_changed');
+    manager.recordWatcherEvent(codebasePathB, 'directory_changed');
+
+    assert.deepEqual(manager.getWatcherObservation(codebasePathA), {
+        observedEventEpoch: 3,
+        comparedThroughEventEpoch: 0,
+        latestEpochByReason: {
+            source_changed: 3,
+            ignore_rules_changed: 2,
+            directory_changed: 0,
+        },
+        lastEventAt: 1234,
+        coverage: 'ready',
+        pending: true,
+    });
+    assert.deepEqual(manager.getWatcherObservation(codebasePathB), {
+        observedEventEpoch: 1,
+        comparedThroughEventEpoch: 0,
+        latestEpochByReason: {
+            source_changed: 0,
+            ignore_rules_changed: 0,
+            directory_changed: 1,
+        },
+        lastEventAt: 1234,
+        coverage: 'ready',
+        pending: true,
+    });
+
+    await manager.stopWatcherMode();
+    fs.rmSync(codebasePathA, { recursive: true, force: true });
+    fs.rmSync(codebasePathB, { recursive: true, force: true });
+});
+
+test('failed freshness leaves the captured watcher event pending', async (t) => {
+    const codebasePath = createTempDir();
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const manager = new SyncManager(
+        {
+            async reindexByChange() {
+                throw new Error('expected sync failure');
+            },
+        } as unknown as SyncContext,
+        createSnapshot(statusByPath) as unknown as SyncSnapshotManager,
+        { watchEnabled: true },
+    );
+    const access = manager as unknown as SyncManagerTestAccess;
+    access.watcherModeStarted = true;
+    access.setWatcherCoverage(codebasePath, 'ready');
+    t.mock.method(console, 'error', () => undefined);
+
+    manager.recordWatcherEvent(codebasePath, 'source_changed');
+    await assert.rejects(
+        manager.ensureFreshness(codebasePath, 60_000, { skipIgnoreControlCheck: true }),
+        /expected sync failure/,
+    );
+
+    assert.deepEqual(manager.getWatcherObservation(codebasePath), {
+        observedEventEpoch: 1,
+        comparedThroughEventEpoch: 0,
+        latestEpochByReason: {
+            source_changed: 1,
+            ignore_rules_changed: 0,
+            directory_changed: 0,
+        },
+        lastEventAt: manager.getWatcherObservation(codebasePath).lastEventAt,
+        coverage: 'ready',
+        pending: true,
+    });
+
+    await manager.stopWatcherMode();
+    fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
 test('independent sync runtimes join one durable owner and prove the requested source observation', async () => {
@@ -1210,7 +1383,7 @@ test('ensureFreshness treats satori.toml as an index-policy control file', async
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
-test('watch-triggered sync coalesces burst changes into one sync', async () => {
+test('watcher event bursts record bounded observation without scheduling sync', async () => {
     const codebasePath = createTempDir();
     const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
     const context = createContext();
@@ -1221,17 +1394,65 @@ test('watch-triggered sync coalesces burst changes into one sync', async () => {
     });
 
     (manager as unknown as SyncManagerTestAccess).watcherModeStarted = true;
-    manager.scheduleWatcherSync(codebasePath, 'watch_event');
-    manager.scheduleWatcherSync(codebasePath, 'watch_event');
-    manager.scheduleWatcherSync(codebasePath, 'watch_event');
+    for (let event = 0; event < 10; event += 1) {
+        manager.recordWatcherEvent(codebasePath, event % 2 === 0 ? 'source_changed' : 'directory_changed');
+    }
     await wait(120);
 
-    assert.equal(context.calls, 1);
+    assert.equal(context.calls, 0);
+    const observation = manager.getWatcherObservation(codebasePath);
+    assert.equal(typeof observation.lastEventAt, 'number');
+    assert.deepEqual({ ...observation, lastEventAt: undefined }, {
+        observedEventEpoch: 10,
+        comparedThroughEventEpoch: 0,
+        latestEpochByReason: {
+            source_changed: 9,
+            ignore_rules_changed: 0,
+            directory_changed: 10,
+        },
+        lastEventAt: undefined,
+        coverage: 'starting',
+        coverageGapSinceEpoch: 0,
+        pending: true,
+    });
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
-test('stopWatcherMode closes active watchers and clears timers', async () => {
+test('real watcher events do not schedule work after the former debounce interval', async () => {
+    const codebasePath = createTempDir();
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const context = createContext();
+    const manager = new SyncManager(
+        context as unknown as SyncContext,
+        createSnapshot(statusByPath) as unknown as SyncSnapshotManager,
+        { watchEnabled: true, watchDebounceMs: 1 },
+    );
+    const access = manager as unknown as SyncManagerTestAccess;
+
+    await manager.startWatcherMode();
+    await manager.touchWatchedCodebase(codebasePath);
+    while (access.watcherLifecycleStates.get(codebasePath) !== 'ready') {
+        await wait(5);
+    }
+
+    fs.writeFileSync(path.join(codebasePath, 'observed.ts'), 'export const observed = true;\n', 'utf8');
+    const deadline = Date.now() + 2_000;
+    while (manager.getWatcherObservation(codebasePath).observedEventEpoch === 0) {
+        assert.ok(Date.now() < deadline, 'Expected Chokidar to report the source event.');
+        await wait(10);
+    }
+
+    await wait(DEFAULT_WATCH_DEBOUNCE_MS + 100);
+    assert.equal(context.calls, 0);
+    assert.equal(manager.getWatcherObservation(codebasePath).pending, true);
+    assert.equal(manager.getActiveLifecycleOperationCount(), 0);
+
+    await manager.stopWatcherMode();
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('stopWatcherMode closes active watchers and clears observation state', async () => {
     const context = createContext();
     const snapshot = createSnapshot(new Map());
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
@@ -1247,10 +1468,11 @@ test('stopWatcherMode closes active watchers and clears timers', async () => {
         }
     };
 
-    const timer = setTimeout(() => { }, 2000);
     const access = manager as unknown as SyncManagerTestAccess;
     access.watchers.set('/tmp/repo', fakeWatcher);
-    access.debounceTimers.set('/tmp/repo', timer);
+    access.watcherModeStarted = true;
+    access.setWatcherCoverage('/tmp/repo', 'ready');
+    manager.recordWatcherEvent('/tmp/repo', 'source_changed');
     access.sourceCheckpointObservations.set('/tmp/repo', 'checkpoint-v1');
     access.sourceCheckpointStatuses.set('/tmp/repo', 'valid');
 
@@ -1258,12 +1480,12 @@ test('stopWatcherMode closes active watchers and clears timers', async () => {
 
     assert.equal(closeCalls, 1);
     assert.equal(access.watchers.size, 0);
-    assert.equal(access.debounceTimers.size, 0);
+    assert.equal(access.watcherObservations.size, 0);
     assert.equal(access.sourceCheckpointObservations.size, 0);
     assert.equal(access.sourceCheckpointStatuses.size, 0);
 });
 
-test('stopAndDrainLifecycle joins active background and watcher work without rearming timers', async () => {
+test('stopAndDrainLifecycle joins active background work without watcher-owned mutation', async () => {
     const codebasePath = createTempDir();
     const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
     const context = createContext();
@@ -1278,37 +1500,24 @@ test('stopAndDrainLifecycle joins active background and watcher work without rea
     });
     const access = manager as unknown as SyncManagerTestAccess;
     let releaseBackground!: () => void;
-    let releaseWatcher!: () => void;
     let markBackgroundStarted!: () => void;
-    let markWatcherStarted!: () => void;
     const backgroundGate = new Promise<void>((resolve) => {
         releaseBackground = resolve;
     });
-    const watcherGate = new Promise<void>((resolve) => {
-        releaseWatcher = resolve;
-    });
     const backgroundStarted = new Promise<void>((resolve) => {
         markBackgroundStarted = resolve;
-    });
-    const watcherStarted = new Promise<void>((resolve) => {
-        markWatcherStarted = resolve;
     });
     access.handleSyncIndex = async () => {
         markBackgroundStarted();
         await backgroundGate;
     };
-    access.ensureFreshness = async () => {
-        markWatcherStarted();
-        await watcherGate;
-        return { mode: 'synced' };
-    };
     access.backgroundSyncEnabled = true;
     access.watcherModeStarted = true;
 
     const background = access.runBackgroundSync();
-    manager.scheduleWatcherSync(codebasePath, 'watch_event');
-    await Promise.all([backgroundStarted, watcherStarted]);
-    assert.equal(manager.getActiveLifecycleOperationCount(), 2);
+    manager.recordWatcherEvent(codebasePath, 'source_changed');
+    await backgroundStarted;
+    assert.equal(manager.getActiveLifecycleOperationCount(), 1);
 
     let drainCompleted = false;
     const drain = manager.stopAndDrainLifecycle().then(() => {
@@ -1319,15 +1528,10 @@ test('stopAndDrainLifecycle joins active background and watcher work without rea
 
     releaseBackground();
     await background;
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(drainCompleted, false);
-    assert.equal(manager.getActiveLifecycleOperationCount(), 1);
-
-    releaseWatcher();
     await drain;
     assert.equal(drainCompleted, true);
     assert.equal(manager.getActiveLifecycleOperationCount(), 0);
-    assert.equal(activityChanges, 4);
+    assert.equal(activityChanges, 2);
     assert.equal(access.backgroundSyncEnabled, false);
     assert.equal(access.backgroundSyncTimer, null);
 
@@ -2102,7 +2306,7 @@ test('ignore-change returns ignore_reload_failed with fallback sync when manifes
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
-test('watch-triggered ignore_rules_changed event runs reconcile path', async () => {
+test('ignore_rules_changed remains pending until the existing reconcile path runs', async () => {
     const codebasePath = createTempDir();
     const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
     const snapshot = createSnapshot(statusByPath);
@@ -2143,13 +2347,25 @@ test('watch-triggered ignore_rules_changed event runs reconcile path', async () 
         watchDebounceMs: 20,
     });
 
-    (manager as unknown as SyncManagerTestAccess).watcherModeStarted = true;
-    manager.scheduleWatcherSync(codebasePath, 'ignore_rules_changed');
+    const access = manager as unknown as SyncManagerTestAccess;
+    access.watcherModeStarted = true;
+    access.setWatcherCoverage(codebasePath, 'ready');
+    manager.recordWatcherEvent(codebasePath, 'ignore_rules_changed');
     await wait(100);
 
+    assert.equal(syncCalls, 0);
+    assert.equal(manager.getWatcherObservation(codebasePath).pending, true);
+
+    const decision = await manager.ensureFreshness(codebasePath, 0, {
+        reason: 'ignore_change',
+        coalescedEdits: 1,
+    });
+
+    assert.equal(decision.mode, 'reconciled_ignore_change');
     assert.equal(syncCalls, 1);
     assert.deepEqual(deletedPaths, [['src/ignored.ts']]);
     assert.equal(snapshot.getCodebaseIgnoreRulesVersion(codebasePath), 1);
+    assert.equal(manager.getWatcherObservation(codebasePath).pending, false);
 
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
@@ -2271,6 +2487,9 @@ test('prepared read observation fails closed on watcher activity and root evicti
     while (access.watcherLifecycleStates.get(codebasePath) !== 'ready') {
         await wait(5);
     }
+    const observation = access.watcherObservations.get(codebasePath);
+    assert.ok(observation);
+    delete observation.coverageGapSinceEpoch;
     access.lastSyncTimes.set(codebasePath, 1);
     access.ignoreRulesVersions.set(codebasePath, 2);
 
@@ -2280,8 +2499,13 @@ test('prepared read observation fails closed on watcher activity and root evicti
         observation: { freshnessEpoch: 0, watcherState: 'ready' },
     });
 
-    manager.scheduleWatcherSync(codebasePath);
-    assert.equal(manager.getPreparedReadObservation(codebasePath).available, false);
+    manager.recordWatcherEvent(codebasePath, 'source_changed');
+    assert.deepEqual(manager.getPreparedReadObservation(codebasePath), {
+        available: false,
+        reason: 'watcher_event_pending',
+        freshnessEpoch: 1,
+        watcherState: 'ready',
+    });
 
     await manager.unwatchCodebase(codebasePath);
     assert.equal(access.lastSyncTimes.has(codebasePath), false);
@@ -2307,8 +2531,8 @@ test('prepared read observation distinguishes watcher startup from readiness', a
     const access = manager as unknown as SyncManagerTestAccess;
     access.watcherModeStarted = true;
     access.watchedCodebases.add(codebasePath);
-    access.watcherLifecycleStates.set(codebasePath, 'starting');
     access.watchers.set(codebasePath, { close: async () => undefined });
+    access.setWatcherCoverage(codebasePath, 'starting');
 
     assert.deepEqual(manager.getPreparedReadObservation(codebasePath), {
         available: false,
@@ -2325,8 +2549,13 @@ test('prepared read observation distinguishes watcher startup from readiness', a
         checkpointStatus: 'unverified',
     });
 
-    access.watcherLifecycleStates.set(codebasePath, 'ready');
-    assert.equal(manager.getPreparedReadObservation(codebasePath).available, true);
+    access.setWatcherCoverage(codebasePath, 'ready');
+    assert.deepEqual(manager.getPreparedReadObservation(codebasePath), {
+        available: false,
+        reason: 'watcher_observation_gap',
+        freshnessEpoch: 0,
+        watcherState: 'ready',
+    });
 
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
@@ -2348,6 +2577,9 @@ test('prepared read observation fails closed after a watcher error', async (t) =
     while (access.watcherLifecycleStates.get(codebasePath) !== 'ready') {
         await wait(5);
     }
+    const observation = access.watcherObservations.get(codebasePath);
+    assert.ok(observation);
+    delete observation.coverageGapSinceEpoch;
     assert.equal(manager.getPreparedReadObservation(codebasePath).available, true);
 
     await access.handleWatcherError(codebasePath, new Error('watcher failed'));
