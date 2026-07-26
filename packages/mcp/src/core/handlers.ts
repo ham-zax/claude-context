@@ -30,6 +30,7 @@ import {
     SyncManager,
     type FreshnessDecision,
     type PreparedReadObservationUnavailableReason,
+    type WatcherObservationSnapshot,
 } from "./sync.js";
 import {
     DEFAULT_MANAGE_RETRY_AFTER_MS,
@@ -784,6 +785,8 @@ export class ToolHandlers {
             buildRegistrySymbolCallGraphHint: this.buildRegistrySymbolCallGraphHint.bind(this),
             buildOutlineSpanWarningCodes: this.buildOutlineSpanWarningCodes.bind(this),
             touchWatchedCodebase: this.touchWatchedCodebase.bind(this),
+            getWatcherObservation: this.getWatcherObservation.bind(this),
+            buildSyncHint: this.buildSyncHint.bind(this),
             getOutlineStatusForLanguage: this.getOutlineStatusForLanguage.bind(this),
             buildInvalidCallGraphRequestPayload: this.buildInvalidCallGraphRequestPayload.bind(this),
             buildRequiresReindexCallGraphPayload: this.buildRequiresReindexCallGraphPayload.bind(this),
@@ -1076,6 +1079,23 @@ export class ToolHandlers {
         if (typeof syncManager.registerCodebaseWatcher === 'function') {
             await syncManager.registerCodebaseWatcher(codebasePath);
         }
+    }
+
+    private getWatcherObservation(codebasePath: string): WatcherObservationSnapshot {
+        const syncManager = this.syncManager as unknown as {
+            getWatcherObservation?: (path: string) => WatcherObservationSnapshot;
+        };
+        return syncManager.getWatcherObservation?.(codebasePath) ?? {
+            observedEventEpoch: 0,
+            comparedThroughEventEpoch: 0,
+            latestEpochByReason: {
+                source_changed: 0,
+                ignore_rules_changed: 0,
+                directory_changed: 0,
+            },
+            coverage: 'ready',
+            pending: false,
+        };
     }
 
     private async touchWatchedCodebaseBestEffort(codebasePath: string): Promise<void> {

@@ -29,7 +29,6 @@ export type SharedRuntimeIdentity = Readonly<{
     vectorStoreProvider: string;
     lanceDbPath: string;
     watcherEnabled: string;
-    watcherDebounceMs: string;
     readFileMaxLines: string;
     customExtensions: string;
     customIgnorePatterns: string;
@@ -154,7 +153,6 @@ export function buildSharedRuntimeIdentity(
             ? canonicalizePath(env.LANCEDB_PATH)
             : "",
         watcherEnabled: env.MCP_ENABLE_WATCHER ?? "",
-        watcherDebounceMs: env.MCP_WATCH_DEBOUNCE_MS ?? "",
         readFileMaxLines: env.READ_FILE_MAX_LINES ?? "",
         customExtensions: env.CUSTOM_EXTENSIONS ?? "",
         customIgnorePatterns: env.CUSTOM_IGNORE_PATTERNS ?? "",

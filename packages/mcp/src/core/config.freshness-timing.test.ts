@@ -10,7 +10,7 @@ import {
     WATCHER_DEBOUNCE_MS,
 } from "../config.js";
 
-test("freshness timing knobs keep distinct names and planned defaults", () => {
+test("freshness timing and deprecated watcher compatibility defaults remain stable", () => {
     assert.equal(WATCHER_DEBOUNCE_MS, 5_000);
     assert.equal(DEFAULT_WATCH_DEBOUNCE_MS, WATCHER_DEBOUNCE_MS);
     assert.equal(BACKGROUND_SYNC_INITIAL_DELAY_MS, 5_000);
@@ -20,10 +20,10 @@ test("freshness timing knobs keep distinct names and planned defaults", () => {
     assert.equal(MANUAL_SYNC_FRESHNESS_THRESHOLD_MS, 0);
 });
 
-test("watcher debounce and background initial delay stay conceptually independent knobs", () => {
-    // Defaults may share a numeric value (both 5s) without sharing meaning.
+test("deprecated watcher debounce does not define a freshness trigger", () => {
+    // The compatibility default remains parseable but no longer schedules work.
     assert.equal(WATCHER_DEBOUNCE_MS, BACKGROUND_SYNC_INITIAL_DELAY_MS);
-    // Search threshold must not silently track watcher debounce.
+    // Active freshness thresholds remain independently owned.
     assert.notEqual(SEARCH_FRESHNESS_THRESHOLD_MS, WATCHER_DEBOUNCE_MS);
     // Background interval and background freshness threshold default equal but named separately.
     assert.equal(BACKGROUND_SYNC_INTERVAL_MS, BACKGROUND_FRESHNESS_THRESHOLD_MS);

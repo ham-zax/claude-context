@@ -35,6 +35,7 @@ import type {
     FileOutlineStatus,
 } from "./search-types.js";
 import { requireAbsoluteFilesystemPath, requireRepoRelativeFilePath, trackCodebasePath } from "../utils.js";
+import { WARNING_CODES } from "./warnings.js";
 
 type ToolArgs = Record<string, unknown>;
 
@@ -98,6 +99,13 @@ type NavigationHandlersHost = {
     }): CallGraphHint;
     buildOutlineSpanWarningCodes(repair: PythonSourceBackedSpanRepair | undefined): string[];
     touchWatchedCodebase(codebasePath: string): Promise<void>;
+    getWatcherObservation(codebasePath: string): {
+        observedEventEpoch: number;
+        comparedThroughEventEpoch: number;
+        coverage: "starting" | "ready" | "disabled" | "failed" | "stopped";
+        coverageGapSinceEpoch?: number;
+    };
+    buildSyncHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     getOutlineStatusForLanguage(relativeFilePath: string): FileOutlineStatus;
     buildInvalidCallGraphRequestPayload(context: {
         path: string;
@@ -173,6 +181,34 @@ type NavigationHandlersHost = {
         hints?: Record<string, unknown>;
     } | null>;
 };
+
+function withPendingSourceGuidance<
+    T extends { warnings?: string[]; hints?: Record<string, unknown> },
+>(
+    host: Pick<NavigationHandlersHost, "getWatcherObservation" | "buildSyncHint">,
+    codebasePath: string,
+    payload: T,
+): T {
+    const observation = host.getWatcherObservation(codebasePath);
+    const hasPendingEvent = observation.observedEventEpoch > observation.comparedThroughEventEpoch;
+    const observationUnavailable = observation.coverage !== "ready"
+        || observation.coverageGapSinceEpoch !== undefined;
+    if (!hasPendingEvent && !observationUnavailable) {
+        return payload;
+    }
+    return {
+        ...payload,
+        warnings: Array.from(new Set([
+            ...(payload.warnings ?? []),
+            ...(hasPendingEvent ? [WARNING_CODES.SOURCE_CHANGES_PENDING] : []),
+            ...(observationUnavailable ? [WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED] : []),
+        ])).sort(),
+        hints: {
+            ...(payload.hints ?? {}),
+            sync: host.buildSyncHint(codebasePath),
+        },
+    };
+}
 
 function collectErrorFragments(
     value: unknown,
@@ -502,8 +538,13 @@ export class NavigationHandlers {
                         buildOutlineSpanWarningCodes: (repair) => this.host.buildOutlineSpanWarningCodes(repair),
                     });
                     await this.host.touchWatchedCodebase(effectiveRoot);
+                    const guidedPayload = withPendingSourceGuidance(
+                        this.host,
+                        effectiveRoot,
+                        payload,
+                    );
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(payload, proofDebugHint)) }],
+                        content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(guidedPayload, proofDebugHint)) }],
                     };
                 }
 
@@ -1030,8 +1071,13 @@ export class NavigationHandlers {
                 symbolRef,
                 ...relationshipBackedGraph,
             } satisfies CallGraphResponseEnvelope, proofDebugHint);
+            const guidedPayload = withPendingSourceGuidance(
+                this.host,
+                effectiveRoot,
+                payload,
+            );
             return {
-                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                content: [{ type: "text", text: this.host.stringifyToolJson(guidedPayload) }],
             };
         } catch (error: unknown) {
             const pathResult = typeof args?.path === "string"
