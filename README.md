@@ -10,7 +10,10 @@ Satori turns a repository into a freshness-aware code map. MCP-compatible agents
 
 ## Install
 
-Requirements: Node.js 22.13+ and Linux x64 (native Linux or WSL2).
+Requirements: Node.js 22.13+, Linux x64 (native Linux or WSL2), and at least
+2 GiB of available runtime capacity for the qualified native deployment
+envelope. The capacity figure is an allowance, not measured steady
+consumption.
 The npm package installs the `satori` command.
 
 ```bash
@@ -242,6 +245,12 @@ Satori keeps source-derived navigation separate from model-specific vectors. A c
 
 Incremental synchronization scans for changed files, embeds changed chunks only, updates per-file navigation and graph contributions, and activates the complete replacement generation. Missing, corrupt, stale, or incompatible authority fails closed to repair or reindex guidance.
 
+Repair is intentionally narrow. A fully proven healthy V4 publication is an
+exact no-op; navigation-only damage on an otherwise valid V4 publication uses
+the existing graph-only activation path. V3, missing, corrupt, changed, or
+ambiguous source authority requires a reindex instead of fabricating a
+compatible publication.
+
 ## Future Local Reranking
 
 The current offline product is intentionally simple: exact evidence + BM25 + Potion retrieval, followed by Satori grouping and disclosure. It does not ship a local neural reranker today.
@@ -251,6 +260,14 @@ Candidate identity and provenance are kept separate from primary publication aut
 ## Language Support
 
 Search and bounded reads work across the indexed text and language catalog. Rich symbol navigation depends on parser evidence. TypeScript, JavaScript, and Python currently have the strongest call-graph support; other supported languages may provide symbols without authoritative graph traversal. Inspect `manage_index status` instead of assuming every indexed language is graph-ready.
+
+Python inbound relationships are qualified for bounded static patterns,
+including absolute-import constructor receivers and direct service or callback
+value-origin flow. Reflection, arbitrary factories, collections,
+monkeypatching, unbounded aliases, and ambiguous environments remain outside
+that model. Individual edges may be exact under the supported model, but the
+inbound result set remains non-exhaustive and absence still requires
+deterministic verification.
 
 Structural definition coverage is intentionally language-specific:
 
@@ -275,6 +292,19 @@ Structural definition coverage is intentionally language-specific:
 - Local diagnostics exclude source, queries, paths, symbols, and repository identifiers and are never uploaded by Satori.
 - Native Windows and macOS are not supported in this release. On Windows, run Satori inside WSL2.
 - The relationship graph is conservative navigation evidence, not a full static-analysis proof.
+- At revision `4138b1e…`, fresh-process startup measured 645.95 ms p50, after
+  which the first `call_graph` measured 7,204.25 ms p50 and 7,530.10 ms p95.
+  Calls measured after two preparation calls were 11.97 ms p50 and 13.57 ms
+  p95. The cold owners were checkpoint/completion validation and relationship
+  loading/validation; adjacency construction was only about 21 ms.
+- The six-publication memory experiment at that revision peaked at 881.82 MiB
+  RSS and established `memory_retained_capacity_bounded`, not a proven plateau
+  or multi-day guarantee. The separate 2 GiB deployment allowance comes from
+  earlier integration evidence that observed a 1,447.21 MiB incremental
+  publication peak.
+- Those cold and memory measurements were not rerun after the current master's
+  full-reindex V4 authority-publication change. They are retained release
+  characterization, not strict proof of identical current-master performance.
 
 ## Packages
 

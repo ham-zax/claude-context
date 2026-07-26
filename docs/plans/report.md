@@ -27,15 +27,28 @@ This is the only current decision in this report:
 - CodeQL is excluded from the release runtime and rejected as authoritative
   Python `CALLS` evidence. Its retained role is optional offline or
   asynchronous advisory evidence under separate future qualification.
-- The first `call_graph` in a fresh MCP process remains a documented
-  approximately 7–8 second limitation (`p50 7,204.25 ms`,
-  `p95 7,530.10 ms`). Warm calls are approximately 12–14 ms
-  (`p50 11.97 ms`, `p95 13.57 ms`). Optimization is deferred and is not a
-  native-release blocker.
-- The external-sampler experiment established bounded retained capacity over
-  six controlled publications. It does not establish a multi-day memory
-  guarantee. The qualified deployment contract requires approximately 2 GiB
-  of available runtime capacity.
+- At revision `4138b1e…`, fresh-process startup measured `645.95 ms` p50. The
+  first `call_graph` after startup measured `7,204.25 ms` p50 and `7,530.10 ms`
+  p95. Calls measured after two preparation calls were `11.97 ms` p50 and
+  `13.57 ms` p95, with a `10.97–22.77 ms` range. The cold result is
+  `cold_graph_multi_owner`: checkpoint/completion validation consumed about
+  3.24 seconds and relationship loading/validation about 2.59–3.20 seconds;
+  adjacency construction was only about 21 ms. Optimization is deferred and is
+  not a native-release blocker.
+- The memory result at that revision is
+  `memory_retained_capacity_bounded`, not a proven plateau. Across six
+  publications with 120-second settling periods, retained generations
+  stabilized at three; heap, RSS, external memory, and observable caches did
+  not grow monotonically. The experiment peaked at `881.82 MiB` RSS and does
+  not establish a multi-day guarantee.
+- The qualified deployment contract separately requires at least 2 GiB
+  available runtime capacity. This is an allowance, not measured steady
+  consumption, based on earlier integration evidence that observed a
+  `1,447.21 MiB` incremental-publication peak.
+- The cold and memory characterization was not rerun after current master
+  changed full-reindex V4 authority publication. It remains the retained
+  release characterization for revision `4138b1e…`, not strict empirical proof
+  of identical current-master performance.
 - Semantic abstention remains deferred and is not part of this release.
 
 Current evidence:

@@ -49,6 +49,12 @@ For a no-install invocation, replace `satori` with `npx -y @zokizuan/satori-cli@
 
 The offline package carries a checksum-pinned 36.0 MiB Potion model/helper closure. A representative Satori publication indexed 10,830 chunks in 34.46 seconds on CPU, with 154.543 ms warm-search p95 after publication.
 
+The qualified native deployment contract requires at least 2 GiB of available
+runtime capacity. This is a deployment allowance, not measured steady
+consumption: earlier integration evidence observed a 1,447.21 MiB incremental
+publication peak. A later six-publication run established bounded retained
+capacity, not a proven plateau or multi-day guarantee.
+
 ## Commands
 
 ```text

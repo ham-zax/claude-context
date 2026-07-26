@@ -11,11 +11,17 @@ Python relationship witnesses survived the lifecycle. Core passed 595 tests
 with one skipped and no failures; MCP passed 1,047 tests with no failures.
 General Python inbound completeness is not claimed. CodeQL is excluded from
 the release runtime and rejected as authoritative Python `CALLS` evidence.
-Cold first `call_graph` remains a documented 7–8 second limitation; warm
-calls are approximately 12–14 ms. Memory is qualified as bounded retained
-capacity over six publications, not as a multi-day guarantee, under an
-approximately 2 GiB runtime allowance. Cold-graph optimization and semantic
-abstention are deferred and are not native-release blockers.
+At revision `4138b1e…`, cold first `call_graph` measured `7,204.25 ms` p50 and
+`7,530.10 ms` p95 after startup; calls measured after two preparation calls
+were `11.97 ms` p50 and `13.57 ms` p95. Memory is
+`memory_retained_capacity_bounded` over six publications, not a proven plateau
+or multi-day guarantee. The separate deployment contract requires at least
+2 GiB available runtime capacity based on an earlier `1,447.21 MiB`
+incremental-publication peak. The cold and memory characterization was not
+rerun after current master's full-reindex V4 authority-publication change, so
+it remains retained release characterization rather than strict current-master
+performance proof. Cold-graph optimization and semantic abstention are
+deferred and are not native-release blockers.
 
 ## 1. Purpose
 
@@ -164,10 +170,11 @@ its exact terminal outcome and stopping reason.
 | Finding | Current decision |
 | --- | --- |
 | Corrected controlled freshness | Pass for `.py` with `scope=runtime` and `.txt` with `scope=mixed`; no general watcher-continuity claim is added |
-| Cold first `call_graph` | Open documented limitation: p50 `7,204.25 ms`, p95 `7,530.10 ms`; deferred optimization is not a native-release blocker |
-| Warm `call_graph` | p50 `11.97 ms`, p95 `13.57 ms` after preparation |
-| Incremental-publication memory | `memory_retained_capacity_bounded` over six controlled publications; no multi-day guarantee |
-| Runtime capacity | Approximately 2 GiB available capacity is required by the qualified deployment contract |
+| Cold first `call_graph` | At revision `4138b1e…`, startup was p50 `645.95 ms`; the first graph call after startup was p50 `7,204.25 ms`, p95 `7,530.10 ms`. `cold_graph_multi_owner`: checkpoint/completion validation about 3.24 seconds and relationship loading/validation about 2.59–3.20 seconds; adjacency construction about 21 ms |
+| Warm `call_graph` | At revision `4138b1e…`, p50 `11.97 ms`, p95 `13.57 ms`, range `10.97–22.77 ms`, after two preparation calls |
+| Incremental-publication memory | At revision `4138b1e…`, `memory_retained_capacity_bounded`, not a plateau: six publications with 120-second settling, three retained generations, no monotonic heap/RSS/external-memory/cache growth, peak RSS `881.82 MiB`; no multi-day guarantee |
+| Runtime capacity | At least 2 GiB available capacity is required by the qualified deployment contract as an allowance, not measured steady use; earlier integration evidence observed a `1,447.21 MiB` incremental-publication peak |
+| Measurement applicability | Cold and memory measurements were not rerun after current master's full-reindex V4 authority-publication change; retain them as revision-`4138b1e…` release characterization, not strict current-master proof |
 | Semantic abstention | Deferred; no relevance-threshold, response-contract, or runtime-policy change is part of this release |
 | Package verification | Core 595 passed, 1 skipped, 0 failed; MCP 1,047 passed, 0 failed |
 
