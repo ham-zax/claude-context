@@ -922,9 +922,11 @@ test('handleFileOutline discards structural analysis when its source barrier cha
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_ready');
-        assert.equal(payload.reason, 'analysis_unavailable');
+        assert.equal(payload.reason, 'source_changed_during_request');
         assert.equal(payload.outline, null);
         assert.match(payload.message, /source changed/i);
+        assert.equal(payload.hints.retry.tool, 'file_outline');
+        assert.equal(payload.hints.retry.args.symbolIdExact, symbol.symbolInstanceId);
     }));
 });
 

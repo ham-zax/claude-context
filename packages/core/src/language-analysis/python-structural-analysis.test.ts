@@ -163,3 +163,178 @@ test('Python structural v1 fails closed for unsupported symbols and stale identi
         reason: 'symbol_not_found',
     });
 });
+
+test('Python structural v1 resolves decorated duplicate method names by canonical qualified identity', async () => {
+    const content = [
+        '# π keeps byte and character offsets distinct',
+        'class Alpha:',
+        '    @trace',
+        '    def run(self, value, /, *, flag=False, **options):',
+        '        return value if flag else options',
+        '',
+        'class Beta:',
+        '    def run(self):',
+        '        return None',
+        '',
+    ].join('\n');
+    const symbol = await extractedPythonSymbol(content, 'Alpha.run');
+
+    const result = await analyzePythonSymbolStructure({
+        content,
+        symbol: {
+            kind: symbol.kind,
+            name: symbol.name,
+            qualifiedName: symbol.qualifiedName,
+            span: symbol.span,
+        },
+    });
+
+    assert.equal(result.status, 'ok');
+    if (result.status !== 'ok') return;
+    assert.equal(result.analysis.metrics.parameterCount.value, 4);
+    assert.equal(
+        result.analysis.metrics.signature.value,
+        'def run(self, value, /, *, flag=False, **options):',
+    );
+    assert.equal(result.analysis.metrics.cyclomaticComplexity.value, 2);
+});
+
+test('Python structural v1 freezes isolated decision and loop counting rules', async () => {
+    const fixtures = [
+        {
+            name: 'plain_for',
+            body: ['for item in values:', '    use(item)'],
+            loopCount: 1,
+            loopDepth: 1,
+            complexity: 2,
+        },
+        {
+            name: 'nested_while_for',
+            body: ['while ready:', '    for item in values:', '        use(item)'],
+            loopCount: 2,
+            loopDepth: 2,
+            complexity: 3,
+        },
+        {
+            name: 'comprehension',
+            body: ['return [item for group in values for item in group if item]'],
+            loopCount: 2,
+            loopDepth: 2,
+            complexity: 4,
+        },
+        {
+            name: 'branches',
+            body: [
+                'if first and second or third:',
+                '    return 1',
+                'elif fourth:',
+                '    return 2',
+                'return 0',
+            ],
+            loopCount: 0,
+            loopDepth: 0,
+            complexity: 5,
+        },
+        {
+            name: 'exceptions',
+            body: [
+                'try:',
+                '    use(values)',
+                'except ValueError:',
+                '    recover()',
+                'except TypeError:',
+                '    recover()',
+            ],
+            loopCount: 0,
+            loopDepth: 0,
+            complexity: 3,
+        },
+        {
+            name: 'match_cases',
+            body: [
+                'match value:',
+                '    case 1:',
+                '        return True',
+                '    case _:',
+                '        return False',
+            ],
+            loopCount: 0,
+            loopDepth: 0,
+            complexity: 3,
+        },
+    ] as const;
+
+    for (const fixture of fixtures) {
+        const content = [
+            `def ${fixture.name}(values=None, ready=True, first=True, second=True, third=False, fourth=False, value=0):`,
+            ...fixture.body.map((line) => `    ${line}`),
+            '',
+        ].join('\n');
+        const symbol = await extractedPythonSymbol(content, fixture.name);
+        const result = await analyzePythonSymbolStructure({
+            content,
+            symbol: {
+                kind: symbol.kind,
+                name: symbol.name,
+                qualifiedName: symbol.qualifiedName,
+                span: symbol.span,
+            },
+        });
+        assert.equal(result.status, 'ok', fixture.name);
+        if (result.status !== 'ok') continue;
+        assert.equal(result.analysis.metrics.loopCount.value, fixture.loopCount, fixture.name);
+        assert.equal(result.analysis.metrics.maxLoopDepth.value, fixture.loopDepth, fixture.name);
+        assert.equal(
+            result.analysis.metrics.cyclomaticComplexity.value,
+            fixture.complexity,
+            fixture.name,
+        );
+    }
+});
+
+test('Python structural v1 excludes every nested scope and fails closed on unrelated syntax errors', async () => {
+    const content = [
+        'def owner(values):',
+        '    nested_lambda = lambda: [item for item in values]',
+        '    def nested():',
+        '        while True:',
+        '            break',
+        '    class Nested:',
+        '        def method(self):',
+        '            for item in values:',
+        '                use(item)',
+        '    return nested_lambda()',
+        '',
+    ].join('\n');
+    const symbol = await extractedPythonSymbol(content, 'owner');
+    const result = await analyzePythonSymbolStructure({
+        content,
+        symbol: {
+            kind: symbol.kind,
+            name: symbol.name,
+            qualifiedName: symbol.qualifiedName,
+            span: symbol.span,
+        },
+    });
+
+    assert.equal(result.status, 'ok');
+    if (result.status === 'ok') {
+        assert.equal(result.analysis.metrics.loopCount.value, 0);
+        assert.equal(result.analysis.metrics.maxLoopDepth.value, 0);
+        assert.equal(result.analysis.metrics.cyclomaticComplexity.value, 1);
+    }
+
+    const invalidContent = `${content}\ndef broken(:\n`;
+    assert.deepEqual(await analyzePythonSymbolStructure({
+        content: invalidContent,
+        symbol: {
+            kind: symbol.kind,
+            name: symbol.name,
+            qualifiedName: symbol.qualifiedName,
+            span: symbol.span,
+        },
+    }), {
+        status: 'unavailable',
+        reason: 'syntax_error',
+    });
+});

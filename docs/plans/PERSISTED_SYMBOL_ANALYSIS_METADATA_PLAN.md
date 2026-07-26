@@ -1,13 +1,16 @@
 # Symbol Analysis Metadata Plan
 
-**Status:** M0 decisions frozen; structural Release A implemented as an
-uncommitted qualification candidate; graph-derived Release B remains
+**Status:** on-demand is the leading M0 candidate; structural Release A has a
+focused implementation candidate; storage comparison and production
+performance qualification remain incomplete; graph-derived Release B remains
 unauthorized
 **Date:** 2026-07-26
 **Review base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
 **Base verification:** matched product `HEAD` when M0 and Release A began;
 all owner and schema claims used by the implementation were revalidated against
 this revision
+**Corrective review base:** `384a615d002db331f9e3600d47907d5c375d41ee`; the historical M0 base is retained
+rather than rewritten
 **Primary owner:** `packages/core`
 **Public projection owner:** `packages/mcp`
 **Independent companion:** `AGENT_FACING_FRESHNESS_RESPONSE_CONTRACT_PLAN.md`
@@ -642,10 +645,10 @@ BLOCKER=<none or exact blocker>
 
 ```text
 M0_BASE_REVISION=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
-M0_OUTCOME=symbol_analysis_v1_contract_ready
+M0_OUTCOME=symbol_analysis_on_demand_leading_candidate
 INITIAL_LANGUAGE=python
-PRODUCTION_FIXTURE=focused repository-local Python parser and MCP outline fixtures
-STORAGE_MODEL=on_demand
+PRODUCTION_FIXTURE=not yet qualified; focused repository-local fixtures only
+STORAGE_MODEL=on_demand_leading_candidate
 PUBLIC_ROUTE=file_outline(path,file,resolveMode="exact",symbolIdExact,detail="analysis")
 SOURCE_BINDING_MODEL=current source under the existing publication read lease
   and prepared-source observation, revalidated before response
@@ -659,7 +662,7 @@ SCHEMA_VERSION_DECISION=optional explicit response extension; no stored schema c
 PACKAGE_VERSION_DECISION=deferred to the repository release owner
 M0_EVIDENCE_COMMIT=not committed
 PRODUCT_CODE_CHANGED=yes, under later explicit Release A authorization
-BLOCKER=none
+BLOCKER=storage option comparison and representative production performance evidence incomplete
 ```
 
 The selected public projection keeps the ordinary exact outline and adds
@@ -672,6 +675,13 @@ If the prepared source observation changes during computation, the non-mutating
 `file_outline` route discards the analysis and returns `not_ready`. It does not
 start synchronization or create a second freshness owner. The caller may run the
 existing sync action and repeat the request.
+
+This execution record does not close the original M0 architecture comparison:
+Options B and C were not benchmarked, and no representative production
+repository established cold/repeated latency, memory, or large-file budgets.
+The on-demand model is retained because it is the smallest implementation and
+adds no default indexing or persistence path, not because every storage option
+was conclusively measured.
 
 ## 12. Proposed release sequence
 

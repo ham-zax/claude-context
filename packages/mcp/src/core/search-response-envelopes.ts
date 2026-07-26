@@ -7,6 +7,7 @@ import type {
     SearchFreshnessSummary,
     SearchGroupResult,
     SearchDisclosureSummary,
+    SearchDebugMode,
     SearchRankingDebugHint,
     SearchPassFailureDebugHint,
     SearchGroupedDebugV2,
@@ -29,6 +30,7 @@ type SearchResponseCommonInput = {
     scope: SearchScope;
     groupBy: SearchGroupBy;
     limit: number;
+    debugMode: SearchDebugMode;
     freshnessDecision: FreshnessDecision;
     freshnessSummary: SearchFreshnessSummary;
     warnings: string[];
@@ -182,8 +184,8 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
 }): SearchResponseEnvelope {
     const recommendedNextAction = buildTopRecommendedSearchAction(input.codebaseRoot, input.results);
     const results = input.results.map(projectGroupedResultV2);
-    const exposeFreshnessEvidence = input.debugSearch !== undefined
-        && "readiness" in input.debugSearch;
+    const exposeFreshnessEvidence = input.debugMode === "freshness"
+        || input.debugMode === "full";
     return {
         formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
         status: "ok",
@@ -209,8 +211,8 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
 export function buildRawSearchEnvelope(input: SearchResponseCommonInput & {
     results: SearchChunkResult[];
 }): SearchResponseEnvelope {
-    const exposeFreshnessEvidence = input.debugSearch !== undefined
-        && "readiness" in input.debugSearch;
+    const exposeFreshnessEvidence = input.debugMode === "freshness"
+        || input.debugMode === "full";
     return {
         formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
         status: "ok",

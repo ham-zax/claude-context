@@ -144,6 +144,7 @@ export function buildExactRegistryHitEnvelope(
         scope: input.scope,
         groupBy: input.groupBy,
         limit: input.limit,
+        debugMode: input.debugMode,
         freshnessDecision: input.freshnessDecision,
         freshnessSummary: input.freshnessSummary,
         warnings: finalizedSearchWarnings,

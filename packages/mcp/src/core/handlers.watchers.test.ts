@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -253,12 +254,14 @@ function createMutableSnapshot(repoPath: string, initialStatus: 'not_found' | 'i
 function createWatchRecorder(options: {
     pendingEvent?: boolean;
     initialCoverage?: 'ready' | 'starting';
+    coveredEventAfterObservationReads?: number;
 } = {}) {
     const touched: string[] = [];
     const unwatched: string[] = [];
     const operations: string[] = [];
     let coverage = options.initialCoverage ?? 'ready';
     let ensureCalls = 0;
+    let observationReads = 0;
     return {
         touched,
         unwatched,
@@ -278,17 +281,22 @@ function createWatchRecorder(options: {
                 };
             },
             getWatchDebounceMs: () => 2000,
-            getWatcherObservation: () => ({
-                observedEventEpoch: options.pendingEvent ? 1 : 0,
-                comparedThroughEventEpoch: 0,
-                latestEpochByReason: {
-                    source_changed: options.pendingEvent ? 1 : 0,
-                    ignore_rules_changed: 0,
-                    directory_changed: 0,
-                },
-                coverage,
-                pending: options.pendingEvent === true,
-            }),
+            getWatcherObservation: () => {
+                observationReads += 1;
+                const coveredEventObserved = options.coveredEventAfterObservationReads !== undefined
+                    && observationReads > options.coveredEventAfterObservationReads;
+                return {
+                    observedEventEpoch: options.pendingEvent || coveredEventObserved ? 1 : 0,
+                    comparedThroughEventEpoch: coveredEventObserved ? 1 : 0,
+                    latestEpochByReason: {
+                        source_changed: options.pendingEvent || coveredEventObserved ? 1 : 0,
+                        ignore_rules_changed: 0,
+                        directory_changed: 0,
+                    },
+                    coverage,
+                    pending: options.pendingEvent === true,
+                };
+            },
             touchWatchedCodebase: async (codebasePath: string) => {
                 touched.push(codebasePath);
                 operations.push('touch');
@@ -679,6 +687,7 @@ test('navigation remains non-mutating and blocks while watcher events are pendin
         const graphPayload = parsePayload(graphResponse);
         assert.equal(graphPayload.status, 'not_ready');
         assert.equal(graphPayload.reason, 'source_state_unverified');
+        assert.equal(graphPayload.supported, true);
         assert.deepEqual(graphPayload.nodes, []);
         assert.deepEqual(graphPayload.edges, []);
         assert.deepEqual((graphPayload.hints as Record<string, unknown>).sync, {
@@ -687,6 +696,50 @@ test('navigation remains non-mutating and blocks while watcher events are pendin
         });
 
         assert.deepEqual(watch.touched, [repoPath, repoPath]);
+        assert.equal(watch.ensureCalls, 0);
+    }));
+});
+
+test('navigation discards an outline when a watcher event is consumed during construction', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        const source = 'export function auth() { return true; }\n';
+        fs.writeFileSync(path.join(repoPath, 'src', 'auth.ts'), source);
+        const authSymbol = createFunctionSymbol({
+            file: 'src/auth.ts',
+            name: 'auth',
+            startLine: 1,
+            endLine: 1,
+            fileHash: crypto.createHash('sha256').update(source).digest('hex'),
+        });
+        await writeNavigationSidecars({
+            stateRoot,
+            repoPath,
+            symbols: [authSymbol],
+        });
+
+        const snapshot = createMutableSnapshot(repoPath, 'indexed');
+        const watch = createWatchRecorder({ coveredEventAfterObservationReads: 2 });
+        const handlers = new ToolHandlers(
+            {} as unknown as HandlerContext,
+            snapshot,
+            watch.syncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+            outcome: 'valid',
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/auth.ts',
+        });
+        const payload = parsePayload(response);
+
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'source_state_unverified');
+        assert.equal(payload.outline, null);
         assert.equal(watch.ensureCalls, 0);
     }));
 });

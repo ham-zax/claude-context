@@ -4,17 +4,24 @@
 
 ```text
 F0_BASE_REVISION=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
-F0_OUTCOME=freshness_projection_minor_compatible
-PUBLIC_SCHEMA_DECISION=versioned ordinary-response projection
-PACKAGE_VERSION_DECISION=MCP 6.5.0; no additional package bump required
+CORRECTIVE_REVIEW_BASE_REVISION=384a615d002db331f9e3600d47907d5c375d41ee
+F0_OUTCOME=freshness_projection_versioned_candidate
+IMPLEMENTATION_OUTCOME=agent_facing_freshness_candidate_focused_pass
+PUBLIC_SCHEMA_DECISION=format-3 candidate; consumer compatibility remains unqualified
+PACKAGE_VERSION_DECISION=release decision pending consumer compatibility evidence
 RESPONSE_FORMAT_VERSION_DECISION=search response format 3
 FIELD_OMISSION_SEMANTICS=absent
 PRODUCT_CODE_CHANGED=no during F0
 BLOCKER=none
 ```
 
-The implementation was authorized after the F0 source/schema audit. Product
-changes remain uncommitted at the time of this receipt.
+The implementation was authorized after the F0 source/schema audit. This
+receipt records a focused candidate, not final package or broad-suite
+qualification.
+
+The original F0 inventory remains bound to its recorded base. The correctness
+review and repairs in this amended receipt were performed against `384a615d002db331f9e3600d47907d5c375d41ee`;
+the older base was not rewritten as though the audit happened later.
 
 ## Current owners and compatibility
 
@@ -43,21 +50,25 @@ Normal search success requires:
 
 1. a compatible prepared publication authority observation;
 2. a publication read lease for the retrieval attempt;
-3. a non-null prepared source observation;
-4. watcher coverage `ready`, with the root registered and active;
-5. no pending watcher event or observation gap;
-6. no active synchronization or ignore reconciliation;
-7. a valid source checkpoint whose registered observation matches the
-   comparison-owned observation;
-8. the same authority and source observations at final projection.
+3. either:
+   - a non-null prepared source observation under continuous ready watcher
+     coverage; or
+   - a successful read-only full comparison against the effective source
+     checkpoint when watcher observation is unavailable;
+4. no pending watcher event or proof-changing reconciliation;
+5. a valid source checkpoint bound to the effective V4 publication;
+6. the same authority/source barrier at final projection.
 
 `coverageGapSinceEpoch` makes the source observation unavailable until the
 existing freshness owner completes a comparison through the gap. This is the
 observation-continuity proof; watcher epoch equality alone is not accepted.
 
-No separate watcher-unavailable proof was established. Search may establish a
-new proof through the existing freshness owner. `call_graph` and `file_outline`
-remain non-mutating and block when the proof is unavailable.
+Watcher-disabled, failed, starting, and interrupted search uses the existing
+Core comparison owner to compare the complete source against the effective
+checkpoint twice, without publishing or adding durable authority. Navigation
+remains non-mutating: it validates prepared V4 readiness under a publication
+read lease and requires one unchanged ready watcher-event barrier across
+construction. It blocks when that proof is unavailable.
 
 ## Retrieval-publication binding
 
@@ -83,8 +94,10 @@ continuation state, or receipts are shared between attempts.
 | Navigation source event/gap/unavailable watcher | `not_ready` | `source_state_unverified` | sync | no graph/outline |
 | Backend/provider failure | existing status/reason | existing reason | existing recovery | none |
 
-Ordinary blockers omit internal freshness decisions. Existing status and
-recovery vocabulary is retained where it already expresses the condition.
+Ordinary blockers omit internal freshness decisions. Explicit
+`debugMode="freshness"` and `"full"` retain approved evidence for successful
+and blocked search responses. Existing status and recovery vocabulary is
+retained where it already expresses the condition.
 
 ## Projection and performance decisions
 
@@ -122,12 +135,12 @@ prepared-read owners already provided the smaller implementation boundary.
 
 ## Verification
 
-Focused checks:
+Focused checks include:
 
-- freshness/source-observation subset of `handlers.scope.test.ts`: 19 passed;
-- checkpoint-unavailable projection regression: 1 passed;
-- affected search, watcher, graph, golden, setup, and compact-contract tests:
-  90 passed;
+- watcher-disabled and unavailable-source search barrier tests;
+- watcher lifecycle, retry, second-drift, and navigation-event barrier tests;
+- complete `handlers.file_outline.test.ts`;
+- compact response-contract tests;
 - MCP typecheck: passed;
 - MCP lint: passed;
 - MCP build: passed;
@@ -135,5 +148,6 @@ Focused checks:
 - manifest check: passed;
 - `git diff --check`: passed.
 
-Full Core and MCP suites were not run by explicit request; no claim depends on
-them.
+Full Core and MCP suites and external consumer compatibility were not run by
+explicit request. This receipt therefore does not claim final product or
+minor-version compatibility qualification.

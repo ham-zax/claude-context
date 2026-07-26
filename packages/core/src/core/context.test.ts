@@ -5699,6 +5699,10 @@ test('Context compares explicit source paths only against the proven active chec
             ),
             { status: 'matches' },
         );
+        assert.deepEqual(
+            await context.compareAllSourceToFreshnessCheckpoint(codebasePath, receipt),
+            { status: 'matches' },
+        );
 
         fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
         assert.deepEqual(
@@ -5708,8 +5712,18 @@ test('Context compares explicit source paths only against the proven active chec
             ),
             { status: 'differs' },
         );
+        assert.deepEqual(
+            await context.compareAllSourceToFreshnessCheckpoint(codebasePath),
+            { status: 'differs' },
+        );
 
         fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        fs.writeFileSync(path.join(codebasePath, 'added.ts'), 'export const added = true;\n', 'utf8');
+        assert.deepEqual(
+            await context.compareAllSourceToFreshnessCheckpoint(codebasePath),
+            { status: 'differs' },
+        );
+        fs.rmSync(path.join(codebasePath, 'added.ts'));
         const restarted = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
@@ -5727,6 +5741,10 @@ test('Context compares explicit source paths only against the proven active chec
                 codebasePath,
                 ['runtime.ts'],
             ),
+            { status: 'matches' },
+        );
+        assert.deepEqual(
+            await restarted.compareAllSourceToFreshnessCheckpoint(codebasePath),
             { status: 'matches' },
         );
     } finally {

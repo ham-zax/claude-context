@@ -1,11 +1,13 @@
 # Agent-Facing Freshness Response Contract Plan
 
-**Status:** F0 completed; end-to-end implementation candidate qualified by
-focused affected checks; not committed or merged
+**Status:** F0 inventory and a focused implementation candidate completed;
+external consumer and release compatibility remain unqualified
 **Date:** 2026-07-26
 **Review base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
 **Base verification:** product HEAD matched this revision when F0 began; product
 edits remained uncommitted during qualification
+**Corrective review base:** `384a615d002db331f9e3600d47907d5c375d41ee`; the historical F0 base is retained
+rather than rewritten
 **Primary owner:** `packages/mcp`
 **Existing comparison/publication owner:** `packages/core`
 **Related plan:** `MCP_WATCHER_OBSERVATION_AND_SYNC_DECOUPLING_PLAN.md`
@@ -728,9 +730,10 @@ authority
 
 ## 14. Execution record — 2026-07-26
 
-F0 returned `freshness_projection_minor_compatible` for MCP `6.5.0` when the
-ordinary search envelope advances from response format 2 to format 3. Normal
-responses omit freshness properties entirely. Explicit
+F0 produced a versioned format-3 candidate. It did not establish that every
+external consumer accepts omitted fields or the new navigation blocker
+behavior, so minor-version compatibility is not claimed. Normal responses omit
+freshness properties entirely. Explicit
 `debugMode="freshness"` and `debugMode="full"` retain bounded freshness
 evidence. Internal search inputs continue to require the complete freshness
 decision.
@@ -745,10 +748,12 @@ compatible prepared publication authority
 + valid matching source-checkpoint observation
 ```
 
-No alternate non-mutating proof was found for watcher-unavailable navigation,
-so `call_graph` and `file_outline` block with one sync action in that state.
-Search continues to enter the existing freshness owner before applying the
-proof.
+When watcher observation is unavailable, search uses the existing Core owner
+for a read-only full comparison against the effective source checkpoint and
+revalidates it before projection. `call_graph` and `file_outline` remain
+non-mutating: prepared V4 readiness and the publication read lease prove
+authority, while one unchanged ready watcher-event barrier prevents a source
+event consumed during construction from admitting an older payload.
 
 The implementation candidate:
 
@@ -770,8 +775,10 @@ Durable F0 decisions and focused verification are recorded in:
 
 `docs/evidence/agent-facing-freshness-f0-20260726/AGENT_FACING_FRESHNESS_F0_RECEIPT.md`
 
-Current product outcome:
+Current focused candidate outcome:
 
 ```text
-agent_facing_freshness_contract_pass
+agent_facing_freshness_candidate_focused_pass
 ```
+
+Final package compatibility and broad qualification remain open.

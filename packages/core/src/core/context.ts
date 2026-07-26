@@ -1504,6 +1504,57 @@ export class Context {
     }
 
     /**
+     * Compare the complete searchable source tree with the checkpoint owned by
+     * the proven active publication. This is a read-only request barrier.
+     */
+    async compareAllSourceToFreshnessCheckpoint(
+        codebasePath: string,
+        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+    ): Promise<SourceFreshnessPathComparison> {
+        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
+        const checkpoint = await this.inspectSourceFreshnessCheckpoint(
+            canonicalRoot,
+            undefined,
+            requestBoundReceipt,
+        );
+        if (checkpoint.status !== 'valid' || !checkpoint.generationReceipt) {
+            return { status: 'unavailable' };
+        }
+
+        const receipt = checkpoint.generationReceipt;
+        const synchronizer = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
+        if (
+            !synchronizer
+            || !synchronizer.ownsCheckpointIdentity(receipt.collectionName)
+            || !synchronizer.ownsCheckpointAuthority({
+                collectionName: receipt.collectionName,
+                markerRunId: receipt.marker.runId,
+                indexPolicyHash: receipt.marker.indexPolicyHash,
+            })
+            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
+        ) {
+            return { status: 'unavailable' };
+        }
+
+        const comparison = await synchronizer.compareAllSourceToOwnedCheckpoint();
+        if (comparison.status !== 'matches') {
+            return comparison;
+        }
+
+        const stillCurrent = await this.acceptPreparedSourceGenerationReceipt(
+            canonicalRoot,
+            receipt,
+        );
+        if (
+            !stillCurrent
+            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
+        ) {
+            return { status: 'unavailable' };
+        }
+        return comparison;
+    }
+
+    /**
      * Delete indexed chunks for a list of relative paths in a codebase.
      * Returns the number of file paths processed for deletion.
      */

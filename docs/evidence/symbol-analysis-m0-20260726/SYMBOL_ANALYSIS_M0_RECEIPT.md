@@ -2,12 +2,13 @@
 
 **Date:** 2026-07-26
 **Base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
-**Outcome:** `symbol_analysis_v1_contract_ready`
-**Product state:** uncommitted qualification candidate
+**Corrective review base:** `384a615d002db331f9e3600d47907d5c375d41ee`
+**Outcome:** `symbol_analysis_on_demand_leading_candidate`
+**Product state:** focused Release A candidate
 
 ## Decision
 
-Structural analysis v1 is a Python-only, on-demand extension of the existing
+The leading implemented architecture is a Python-only, on-demand extension of the existing
 exact `file_outline` route:
 
 ```text
@@ -23,6 +24,9 @@ file_outline(
 It analyzes one canonical function or method against the verified current
 source. It adds no sidecar, stored schema, index contribution, publication
 authority, migration, or default search/outline work.
+
+The original M0 inventory remains bound to its recorded base. The focused
+correctness and reproducibility review was performed against `384a615d002db331f9e3600d47907d5c375d41ee`.
 
 ## Metric model
 
@@ -66,10 +70,10 @@ new dependency or foreign storage abstraction.
 
 ```text
 Core Python structural analysis:
-  3 passed, 0 failed
+  6 passed, 0 failed
 
 MCP file_outline handler and tool:
-  45 passed, 0 failed
+  35 passed, 0 failed
 
 Core typecheck:
   passed
@@ -87,10 +91,11 @@ Generated MCP manifest check:
   passed
 ```
 
-The focused witnesses cover deterministic metrics, nested-scope exclusion,
-zero values versus absent return syntax, unsupported symbols, stale identity,
-canonical exact request validation, successful MCP projection, and source
-observation drift.
+The focused witnesses cover deterministic metrics, isolated Python decision
+constructs, decorated methods, parameter forms, nested-scope exclusion, UTF-8
+byte spans, duplicate short names, unrelated syntax errors, zero values versus
+absent return syntax, unsupported symbols, stale identity, canonical exact
+request validation, successful MCP projection, and source observation drift.
 
 ## Limits
 
@@ -101,3 +106,10 @@ observation drift.
   `python_structural_v1`; it is not a language-independent universal score.
 - No persistence or cross-request analysis cache.
 - Broad Core/MCP suites were not run for this bounded candidate.
+- Options B and C were not implemented or benchmarked.
+- No representative production-repository latency, memory, or large-file
+  qualification was performed.
+
+Therefore this receipt establishes on-demand analysis as the smallest leading
+candidate and a focused implementation result. It does not claim that M0's
+storage comparison or final Release A qualification is complete.

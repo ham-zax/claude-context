@@ -199,21 +199,49 @@ function sourceObservationUnavailable(
     return hasPendingEvent || observationUnavailable;
 }
 
+type NavigationSourceBarrier = ReturnType<NavigationHandlersHost["getWatcherObservation"]>;
+
+function navigationSourceBarrierMatches(
+    left: NavigationSourceBarrier,
+    right: NavigationSourceBarrier,
+): boolean {
+    return left.coverage === "ready"
+        && right.coverage === "ready"
+        && left.coverageGapSinceEpoch === undefined
+        && right.coverageGapSinceEpoch === undefined
+        && left.observedEventEpoch === left.comparedThroughEventEpoch
+        && right.observedEventEpoch === right.comparedThroughEventEpoch
+        && left.observedEventEpoch === right.observedEventEpoch
+        && left.comparedThroughEventEpoch === right.comparedThroughEventEpoch;
+}
+
 function buildSourceStateUnverifiedFileOutlinePayload(
     host: Pick<NavigationHandlersHost, "buildSyncHint">,
     codebasePath: string,
     file: string,
+    reason: "source_state_unverified" | "source_changed_during_request"
+        = "source_state_unverified",
+    retryArgs?: FileOutlineInput,
 ): FileOutlineResponseEnvelope {
     return {
         status: "not_ready",
-        reason: "source_state_unverified",
+        reason,
         path: codebasePath,
         file,
         outline: null,
         hasMore: false,
-        message: "Satori could not verify this outline against the current source.",
+        message: reason === "source_changed_during_request"
+            ? "Source changed while Satori was preparing this outline."
+            : "Satori could not verify this outline against the current source.",
         hints: {
-            sync: host.buildSyncHint(codebasePath),
+            ...(reason === "source_changed_during_request" && retryArgs
+                ? {
+                    retry: {
+                        tool: "file_outline",
+                        args: retryArgs,
+                    },
+                }
+                : { sync: host.buildSyncHint(codebasePath) }),
         },
     };
 }
@@ -230,7 +258,7 @@ function buildSourceStateUnverifiedCallGraphPayload(
 ): CallGraphResponseEnvelope {
     return {
         status: "not_ready",
-        supported: false,
+        supported: true,
         reason: "source_state_unverified",
         path: codebasePath,
         codebaseRoot: codebasePath,
@@ -518,6 +546,18 @@ export class NavigationHandlers {
             const matchedRoot = trackedRootState.root;
             const effectiveRoot = matchedRoot.path;
             releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
+            const navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+            if (sourceObservationUnavailable(this.host, effectiveRoot)) {
+                await this.host.touchWatchedCodebase(effectiveRoot);
+                const payload = buildSourceStateUnverifiedFileOutlinePayload(
+                    this.host,
+                    effectiveRoot,
+                    normalizedFile,
+                );
+                return {
+                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                };
+            }
             const analysisBarrier = detail === "analysis"
                 ? this.host.getPreparedReadCacheObservation(effectiveRoot)
                 : undefined;
@@ -681,10 +721,16 @@ export class NavigationHandlers {
                                 });
                                 const finalBarrier = this.host.getPreparedReadCacheObservation(effectiveRoot);
                                 if (!sourceBarrierMatches(analysisBarrier, finalBarrier)) {
-                                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                                    projectedPayload = buildSourceStateUnverifiedFileOutlinePayload(
+                                        this.host,
                                         effectiveRoot,
                                         normalizedFile,
-                                        "Source changed while Satori was computing structural analysis.",
+                                        "source_changed_during_request",
+                                        {
+                                            ...args,
+                                            path: effectiveRoot,
+                                            file: normalizedFile,
+                                        },
                                     );
                                 } else if (analysisResult.status === "ok") {
                                     projectedPayload = withPythonStructuralAnalysis(
@@ -706,7 +752,11 @@ export class NavigationHandlers {
                             }
                         }
                     }
-                    const guidedPayload = sourceObservationUnavailable(this.host, effectiveRoot)
+                    const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+                    const guidedPayload = !navigationSourceBarrierMatches(
+                        navigationSourceBarrier,
+                        finalNavigationSourceBarrier,
+                    )
                         ? buildSourceStateUnverifiedFileOutlinePayload(
                             this.host,
                             effectiveRoot,
@@ -1004,6 +1054,7 @@ export class NavigationHandlers {
             const searchableRoot = trackedRootState.root;
             const effectiveRoot = searchableRoot.path;
             releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
+            const navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
             const proofDebugHint = trackedRootState.proofDebugHint;
 
             if (this.host.isPartialIndexNavigationUnavailable(searchableRoot.info)) {
@@ -1241,7 +1292,11 @@ export class NavigationHandlers {
                 symbolRef,
                 ...relationshipBackedGraph,
             } satisfies CallGraphResponseEnvelope, proofDebugHint);
-            const guidedPayload = sourceObservationUnavailable(this.host, effectiveRoot)
+            const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+            const guidedPayload = !navigationSourceBarrierMatches(
+                navigationSourceBarrier,
+                finalNavigationSourceBarrier,
+            )
                 ? buildSourceStateUnverifiedCallGraphPayload(
                     this.host,
                     effectiveRoot,

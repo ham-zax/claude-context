@@ -347,6 +347,27 @@ type SearchToolTextResponse = ToolTextResponse & {
     meta?: Record<string, unknown>;
 };
 
+type RequestSourceBarrier =
+    | Readonly<{
+        mode: 'watcher';
+        observation: string;
+        sourceObservation: string;
+    }>
+    | Readonly<{
+        mode: 'full_comparison';
+        authorityObservation: string;
+    }>;
+
+const WATCHER_UNAVAILABLE_SOURCE_REASONS = new Set([
+    'watcher_disabled',
+    'watcher_manager_not_started',
+    'root_not_registered',
+    'watcher_failed',
+    'watcher_starting',
+    'root_watcher_not_active',
+    'watcher_observation_gap',
+]);
+
 type IndexCodebaseArgs = {
     path: string;
     force?: boolean;
@@ -3609,6 +3630,9 @@ export class ToolHandlers {
                         if (watcherObservation.coverage !== 'ready') {
                             await this.touchWatchedCodebaseBestEffort(effectiveRoot);
                         }
+                        const effectiveWatcherObservation = this.getWatcherObservation(effectiveRoot);
+                        const fullSourceComparisonRequired = effectiveWatcherObservation.coverage !== 'ready'
+                            || effectiveWatcherObservation.coverageGapSinceEpoch !== undefined;
                         const changedFilesState = this.getChangedFilesForCodebase(effectiveRoot);
                         observedChangedFilesForSearch = changedFilesState;
                         const exactSourceComparisonRequired = changedFilesState.available
@@ -3637,12 +3661,14 @@ export class ToolHandlers {
 
                         return this.syncManager.ensureFreshness(
                             effectiveRoot,
-                            exactSourceComparisonRequired ? 0 : SEARCH_FRESHNESS_THRESHOLD_MS,
+                            exactSourceComparisonRequired || fullSourceComparisonRequired
+                                ? 0
+                                : SEARCH_FRESHNESS_THRESHOLD_MS,
                             {
                                 ...(preparedRead?.vectorReceipt
                                     ? { preparedVectorReceipt: preparedRead.vectorReceipt }
                                     : {}),
-                                ...(exactSourceComparisonRequired
+                                ...(exactSourceComparisonRequired && !fullSourceComparisonRequired
                                     ? {
                                         exactSourceComparisonPaths: Array.from(
                                             changedFilesState.files,
@@ -3721,11 +3747,34 @@ export class ToolHandlers {
             } = frontDoor;
             releasePublicationReadLease = await this.acquirePublicationReadLease(effectiveRoot);
             const finalSourceObservation = this.getPreparedReadCacheObservation(effectiveRoot);
+            let requestSourceBarrier: RequestSourceBarrier | undefined;
             if (
-                finalSourceObservation.observation === null
-                || finalSourceObservation.sourceObservation === null
-                || finalSourceObservation.unavailableReason !== undefined
+                finalSourceObservation.observation !== null
+                && finalSourceObservation.sourceObservation !== null
+                && finalSourceObservation.unavailableReason === undefined
             ) {
+                requestSourceBarrier = {
+                    mode: 'watcher',
+                    observation: finalSourceObservation.observation,
+                    sourceObservation: finalSourceObservation.sourceObservation,
+                };
+            } else if (
+                finalSourceObservation.observation !== null
+                && finalSourceObservation.unavailableReason !== undefined
+                && WATCHER_UNAVAILABLE_SOURCE_REASONS.has(finalSourceObservation.unavailableReason)
+            ) {
+                const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
+                    effectiveRoot,
+                    vectorReceipt,
+                );
+                if (comparison.status === 'matches') {
+                    requestSourceBarrier = {
+                        mode: 'full_comparison',
+                        authorityObservation: finalSourceObservation.observation,
+                    };
+                }
+            }
+            if (!requestSourceBarrier) {
                 const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
                     effectiveRoot,
                     {
@@ -3737,12 +3786,37 @@ export class ToolHandlers {
                         limit: input.limit,
                     },
                     "Satori could not verify the active publication against the current source.",
+                    "source_state_unverified",
+                    {
+                        debugMode,
+                        freshnessDecision,
+                        readiness: readinessDebug,
+                    },
                 );
                 return {
                     content: [{ type: "text", text: this.stringifyToolJson(payload) }],
                     meta: { searchDiagnostics },
                 };
             }
+            const sourceBarrierChanged = async (): Promise<boolean> => {
+                if (requestSourceBarrier.mode === 'watcher') {
+                    const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
+                    return currentBarrier.observation !== requestSourceBarrier.observation
+                        || currentBarrier.sourceObservation !== requestSourceBarrier.sourceObservation
+                        || currentBarrier.unavailableReason !== undefined;
+                }
+                if (
+                    this.getPreparedAuthorityObservation(effectiveRoot)
+                    !== requestSourceBarrier.authorityObservation
+                ) {
+                    return true;
+                }
+                const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
+                    effectiveRoot,
+                    vectorReceipt,
+                );
+                return comparison.status !== 'matches';
+            };
             if (debugMode === 'full' && finalSourceObservation.unavailableReason) {
                 readinessDebug.observationUnavailableReason = finalSourceObservation.unavailableReason;
             }
@@ -3935,10 +4009,7 @@ export class ToolHandlers {
             let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
 
             if (exactFastPath.kind === 'handled') {
-                const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
-                const barrierChanged = currentBarrier.observation !== finalSourceObservation.observation
-                    || currentBarrier.sourceObservation !== finalSourceObservation.sourceObservation
-                    || currentBarrier.unavailableReason !== undefined;
+                const barrierChanged = await sourceBarrierChanged();
                 if (barrierChanged) {
                     releasePublicationReadLease?.();
                     releasePublicationReadLease = undefined;
@@ -3957,6 +4028,11 @@ export class ToolHandlers {
                         },
                         "Source changed again while Satori was preparing this response.",
                         "source_changed_during_request",
+                        {
+                            debugMode,
+                            freshnessDecision,
+                            readiness: readinessDebug,
+                        },
                     );
                     return {
                         content: [{ type: "text", text: this.stringifyToolJson(payload) }],
@@ -4168,10 +4244,7 @@ export class ToolHandlers {
                 now: this.now,
             });
             let envelope = finalized.envelope;
-            const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
-            const barrierChanged = currentBarrier.observation !== finalSourceObservation.observation
-                || currentBarrier.sourceObservation !== finalSourceObservation.sourceObservation
-                || currentBarrier.unavailableReason !== undefined;
+            const barrierChanged = await sourceBarrierChanged();
             if (barrierChanged) {
                 releasePublicationReadLease?.();
                 releasePublicationReadLease = undefined;
@@ -4190,6 +4263,11 @@ export class ToolHandlers {
                     },
                     "Source changed again while Satori was preparing this response.",
                     "source_changed_during_request",
+                    {
+                        debugMode,
+                        freshnessDecision,
+                        readiness: readinessDebug,
+                    },
                 );
                 return {
                     content: [{ type: "text", text: this.stringifyToolJson(payload) }],

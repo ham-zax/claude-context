@@ -16,6 +16,8 @@ import type {
     FileOutlineStatus,
     FingerprintCompatibilityDiagnostics,
     NonOkReason,
+    SearchDebugMode,
+    SearchReadinessDebugHint,
     SearchRecommendedNextAction,
     SearchResponseEnvelope,
 } from "./search-types.js";
@@ -32,6 +34,12 @@ type SearchContext = {
     resultMode: SearchResultMode;
     limit: number;
 };
+
+type FreshnessBlockProjection = Readonly<{
+    debugMode: SearchDebugMode;
+    freshnessDecision: FreshnessDecision;
+    readiness: SearchReadinessDebugHint;
+}>;
 
 type CallGraphContext = {
     path: string;
@@ -426,7 +434,10 @@ export class ToolResponseBuilders {
         detail: string,
         reason: Extract<NonOkReason, "source_changed_during_request" | "source_state_unverified">
             = "source_state_unverified",
+        projection?: FreshnessBlockProjection,
     ): SearchResponseEnvelope {
+        const exposeFreshnessEvidence = projection?.debugMode === "freshness"
+            || projection?.debugMode === "full";
         return {
             formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
             status: "not_ready",
@@ -439,6 +450,9 @@ export class ToolResponseBuilders {
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
             message: detail,
+            ...(exposeFreshnessEvidence
+                ? { freshnessDecision: projection.freshnessDecision }
+                : {}),
             recommendedNextAction: reason === "source_changed_during_request"
                 ? {
                     tool: "search_codebase",
@@ -457,9 +471,14 @@ export class ToolResponseBuilders {
                     codebasePath,
                     "Verify the active publication against the current source before retrying search.",
                 ),
-            hints: reason === "source_state_unverified"
-                ? { sync: this.host.buildSyncHint(codebasePath) }
-                : undefined,
+            hints: {
+                ...(reason === "source_state_unverified"
+                    ? { sync: this.host.buildSyncHint(codebasePath) }
+                    : {}),
+                ...(exposeFreshnessEvidence
+                    ? { debugSearch: { readiness: projection.readiness } }
+                    : {}),
+            },
             results: [],
         } as SearchResponseEnvelope;
     }

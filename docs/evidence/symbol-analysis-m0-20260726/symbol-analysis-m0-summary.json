@@ -2,10 +2,11 @@
   "schemaVersion": "symbol-analysis-m0-summary-v1",
   "date": "2026-07-26",
   "baseRevision": "2a69144be52e0b4f9ea9894dd5695666c7f7dce9",
-  "outcome": "symbol_analysis_v1_contract_ready",
-  "productState": "uncommitted_qualification_candidate",
+  "correctiveReviewBaseRevision": "384a615d002db331f9e3600d47907d5c375d41ee",
+  "outcome": "symbol_analysis_on_demand_leading_candidate",
+  "productState": "release_a_candidate_focused_pass",
   "language": "python",
-  "storageModel": "on_demand",
+  "storageModel": "on_demand_leading_candidate",
   "publicRoute": {
     "tool": "file_outline",
     "resolveMode": "exact",
@@ -32,11 +33,11 @@
   "upstreamCodeCopied": false,
   "verification": {
     "coreFocused": {
-      "passed": 3,
+      "passed": 6,
       "failed": 0
     },
     "mcpFocused": {
-      "passed": 45,
+      "passed": 35,
       "failed": 0
     },
     "coreTypecheck": "passed",
@@ -46,5 +47,7 @@
     "manifestCheck": "passed",
     "broadSuitesRun": false
   },
-  "blocker": null
+  "storageComparisonComplete": false,
+  "productionPerformanceQualified": false,
+  "blocker": "M0 storage comparison and production performance evidence remain incomplete"
 }

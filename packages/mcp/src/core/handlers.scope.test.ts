@@ -2072,9 +2072,107 @@ test('source observation failure blocks without returning vector results', async
         assert.equal(payload.status, 'not_ready');
         assert.equal(payload.reason, 'source_state_unverified');
         assert.deepEqual(payload.results, []);
-        assert.equal(payload.freshnessDecision, undefined);
+        assert.equal(payload.freshnessDecision.mode, 'skipped_recent');
+        assert.equal(payload.hints.debugSearch.readiness.proofMode, 'cold');
         assert.equal(payload.hints.sync.tool, 'manage_index');
         assert.equal(payload.hints.sync.args.action, 'sync');
+    });
+});
+
+test('watcher-disabled search uses the existing full checkpoint comparison as its request barrier', async () => {
+    await withTempRepo(async (repoPath) => {
+        const handlers = createHandlers(repoPath, [{
+            content: 'export function owner() { return true; }',
+            relativePath: 'src/owner.ts',
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }], undefined, { sourceBarrierMode: 'native', enableVectorReceipt: true });
+        const internals = handlers as unknown as {
+            context: HandlerContext & {
+                compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                getIndexAuthorityObservations: () => { vector: string; navigation: string };
+            };
+            syncManager: HandlerSyncManager & {
+                ensureFreshness: (
+                    codebasePath: string,
+                    thresholdMs: number,
+                    options?: { exactSourceComparisonPaths?: readonly string[] },
+                ) => Promise<{
+                    mode: 'synced';
+                    checkedAt: string;
+                    thresholdMs: number;
+                }>;
+                getPreparedReadObservation: () => {
+                    available: false;
+                    reason: 'watcher_disabled';
+                    freshnessEpoch: number;
+                };
+                getWatcherObservation: () => {
+                    observedEventEpoch: number;
+                    comparedThroughEventEpoch: number;
+                    latestEpochByReason: Record<string, number>;
+                    coverage: 'disabled';
+                    coverageGapSinceEpoch: number;
+                    pending: true;
+                };
+            };
+            mutationLeaseCoordinator: {
+                observe: () => { mutationActive: boolean; generation: number };
+                getActiveLease: () => null;
+            };
+        };
+        let comparisonCalls = 0;
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => {
+            comparisonCalls += 1;
+            return { status: 'matches' };
+        };
+        internals.context.getIndexAuthorityObservations = () => ({
+            vector: 'vector-stable',
+            navigation: 'navigation-stable',
+        });
+        internals.syncManager.getWatcherObservation = () => ({
+            observedEventEpoch: 0,
+            comparedThroughEventEpoch: 0,
+            latestEpochByReason: {},
+            coverage: 'disabled',
+            coverageGapSinceEpoch: 0,
+            pending: true,
+        });
+        internals.syncManager.getPreparedReadObservation = () => ({
+            available: false,
+            reason: 'watcher_disabled',
+            freshnessEpoch: 0,
+        });
+        internals.syncManager.ensureFreshness = async (_root, thresholdMs, options) => {
+            assert.equal(thresholdMs, 0);
+            assert.equal(options?.exactSourceComparisonPaths, undefined);
+            return {
+                mode: 'synced',
+                checkedAt: '2026-01-01T01:00:00.000Z',
+                thresholdMs,
+            };
+        };
+        internals.mutationLeaseCoordinator = {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        };
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'where is owner behavior handled',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 1);
+        assert.equal(comparisonCalls, 2);
     });
 });
 
