@@ -3850,7 +3850,6 @@ export class Context {
         let checkpointStaged = false;
         let activated = false;
         try {
-            await this.waitForPublicationRetention(input.canonicalRoot);
             input.options.assertMutationCurrent?.();
             await measurePublicationPhase(
                 'publication_fork',
@@ -4062,7 +4061,7 @@ export class Context {
                         }
                         : undefined;
 
-                    await this.recordActivatedGenerationProof({
+                    const generationReceipt = await this.recordActivatedGenerationProof({
                         canonicalRoot: input.canonicalRoot,
                         marker: publishedMarker,
                         policy: input.sealedPolicy,
@@ -4075,11 +4074,16 @@ export class Context {
                             navigationSealHash: preparedNavigation.navigationSealHash,
                         },
                     });
-                    return { activeDataObservation };
+                    if (!generationReceipt) {
+                        throw new Error(
+                            `Atomic delta publication for '${input.codebasePath}' could not bind its activated generation proof.`,
+                        );
+                    }
+                    return { activeDataObservation, generationReceipt };
                 },
             );
 
-            const retainedGenerationReceipt = await measurePublicationPhase(
+            const generationReceipt = await measurePublicationPhase(
                 'publication_retention_proof',
                 async () => {
                     const nextSynchronizer = new FileSynchronizer(
@@ -4102,22 +4106,35 @@ export class Context {
                             ? { activeDataObservation: activationResult.activeDataObservation }
                             : {}),
                     });
+                    if (
+                        (this.publicationReadGates.get(input.canonicalRoot)?.activeReaders ?? 0) > 0
+                    ) {
+                        return activationResult.generationReceipt;
+                    }
                     await this.waitForPublicationRetention(input.canonicalRoot);
-                    return this.proveIndexedGeneration(input.canonicalRoot);
+                    const retainedGenerationReceipt = await this.proveIndexedGeneration(
+                        input.canonicalRoot,
+                    );
+                    if (!retainedGenerationReceipt) {
+                        throw new Error(
+                            `Atomic delta publication for '${input.codebasePath}' is not readable after generation retention.`,
+                        );
+                    }
+                    const retainedGenerationIdentity = await this.resolveGenerationProofIdentity(
+                        input.canonicalRoot,
+                    );
+                    if (!retainedGenerationIdentity) {
+                        throw new Error(
+                            `Atomic delta publication for '${input.codebasePath}' lost its retained generation identity.`,
+                        );
+                    }
+                    this.preparedGenerationReceipts.set(
+                        retainedGenerationReceipt,
+                        retainedGenerationIdentity,
+                    );
+                    return retainedGenerationReceipt;
                 },
             );
-            if (!retainedGenerationReceipt) {
-                throw new Error(
-                    `Atomic delta publication for '${input.codebasePath}' is not readable after generation retention.`,
-                );
-            }
-            const retainedGenerationIdentity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
-            if (!retainedGenerationIdentity) {
-                throw new Error(
-                    `Atomic delta publication for '${input.codebasePath}' lost its retained generation identity.`,
-                );
-            }
-            this.preparedGenerationReceipts.set(retainedGenerationReceipt, retainedGenerationIdentity);
 
             return {
                 added: added.length,
@@ -4128,7 +4145,7 @@ export class Context {
                 indexedFiles: input.preparedChanges.fileHashes.size,
                 totalChunks,
                 indexStatus: 'completed',
-                generationReceipt: retainedGenerationReceipt,
+                generationReceipt,
             };
         } catch (error) {
             if (
