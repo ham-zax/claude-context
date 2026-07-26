@@ -51,6 +51,7 @@ import {
     INDEX_COMPLETION_MARKER_DOC_ID,
     INDEX_COMPLETION_MARKER_FILE_EXTENSION as COMPLETION_MARKER_EXTENSION,
 } from '../vectordb';
+import { LanceDbVectorDatabase } from '../vectordb/lancedb-vectordb';
 import { FileSynchronizer } from '../sync/synchronizer';
 
 const previousSatoriStateRoot = process.env.SATORI_STATE_ROOT;
@@ -1467,6 +1468,133 @@ test('Context.reindexByChange activates one immutable vector, navigation, graph,
         assert.equal(restartedReceipt.navigation.generationId, current.navigation.generationId);
         assert.ok(await restarted.revalidateProvenGeneration(codebasePath, restartedReceipt));
     } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context.reindexByChange publishes one complete generation after deleting a source file', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-atomic-delete-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const retainedSourcePath = path.join(codebasePath, 'retained.ts');
+    const deletedSourcePath = path.join(codebasePath, 'deleted.ts');
+    const vectorDatabase = new LanceDbVectorDatabase({
+        databasePath: path.join(tempRoot, 'lancedb'),
+    });
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(retainedSourcePath, 'export const retained = 1;\n', 'utf8');
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        const previous = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(previous);
+
+        fs.writeFileSync(deletedSourcePath, 'export const added = 1;\n', 'utf8');
+        const added = await context.reindexByChange(codebasePath);
+        assert.ok(added.generationReceipt);
+        assert.ok(await context.proveIndexedGeneration(codebasePath));
+
+        fs.writeFileSync(deletedSourcePath, 'export const modified = 2;\n', 'utf8');
+        const modified = await context.reindexByChange(codebasePath);
+        assert.ok(modified.generationReceipt);
+        const immediateModifiedProof = await context.proveIndexedGeneration(codebasePath);
+        await (context as unknown as {
+            waitForPublicationRetention(canonicalRoot: string): Promise<void>;
+        }).waitForPublicationRetention(fs.realpathSync(codebasePath));
+        assert.ok(
+            await context.proveIndexedGeneration(codebasePath),
+            'the activated generation must be readable after deferred retention settles',
+        );
+        assert.ok(
+            immediateModifiedProof,
+            'the activated generation must remain readable while deferred retention runs',
+        );
+
+        fs.unlinkSync(deletedSourcePath);
+        const result = await context.reindexByChange(codebasePath, undefined, {
+            publicationAuthority: { ownerId: 'sync-owner', generation: 8, operationId: 'sync-delete' },
+        });
+        const current = await context.proveIndexedGeneration(codebasePath);
+
+        assert.ok(result.generationReceipt);
+        assert.ok(current);
+        assert.ok(await context.revalidateProvenGeneration(codebasePath, current));
+        assert.notEqual(current.collectionName, previous.collectionName);
+        assert.equal(result.collectionName, current.collectionName);
+        assert.equal(
+            (await vectorDatabase.queryDocuments(current.collectionName, {
+                fields: ['relativePath'],
+                filter: {
+                    kind: 'comparison',
+                    field: 'relativePath',
+                    operator: 'eq',
+                    value: 'deleted.ts',
+                },
+            })).length,
+            0,
+        );
+        const checkpoint = await context.inspectSourceFreshnessCheckpoint(
+            codebasePath,
+            current.collectionName,
+            current,
+        );
+        assert.equal(checkpoint.status, 'valid');
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        const registry = await readSymbolRegistrySidecar({
+            stateRoot,
+            normalizedRootPath: canonicalRoot,
+            generationId: current.navigation.generationId,
+        });
+        assert.equal(registry.status, 'ok');
+        if (registry.status === 'ok') {
+            assert.equal(registry.registry.symbolsByFile.has('deleted.ts'), false);
+            assert.deepEqual(
+                registry.registry.manifest.files.map((file) => file.path),
+                ['retained.ts'],
+            );
+        }
+        const relationships = await readRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: canonicalRoot,
+            generationId: current.navigation.generationId,
+            expectedSymbolRegistryManifestHash: current.navigation.symbolRegistryManifestHash,
+        });
+        assert.equal(relationships.status, 'ok');
+        if (relationships.status === 'ok') {
+            assert.equal(relationships.analysisByFile.has('deleted.ts'), false);
+            assert.deepEqual(
+                relationships.manifest.files.map((file) => file.path),
+                ['retained.ts'],
+            );
+            assert.equal(
+                relationships.records.some((record) => (
+                    record.file === 'deleted.ts'
+                    || record.targetPath === 'deleted.ts'
+                )),
+                false,
+            );
+        }
+
+        const restarted = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
+        });
+        const restartedReceipt = await restarted.proveIndexedGeneration(codebasePath);
+        assert.ok(restartedReceipt);
+        assert.equal(restartedReceipt.collectionName, current.collectionName);
+        assert.equal(restartedReceipt.navigation.generationId, current.navigation.generationId);
+    } finally {
+        await vectorDatabase.close();
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
