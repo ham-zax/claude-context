@@ -1,11 +1,16 @@
 # Symbol Analysis Metadata Plan
 
-**Status:** amended after technical review; M0 is the next evidence batch;
-M1 and later product work are unauthorized
+**Status:** M0 formally selects on-demand analysis and its production budgets
+passed; structural Release A qualification is blocked by an independent Core
+publication-read-lease test that does not complete; persisted analysis and
+graph-derived Release B remain unauthorized
 **Date:** 2026-07-26
-**Review base revision:** `5634f5e13c278c917c4667c17e465298b6ffdd2a`
-**Base verification:** matched local `master` and `origin/master` when this
-amendment was prepared
+**Review base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
+**Base verification:** matched product `HEAD` when M0 and Release A began;
+all owner and schema claims used by the implementation were revalidated against
+this revision
+**Corrective review base:** `384a615d002db331f9e3600d47907d5c375d41ee`; the historical M0 base is retained
+rather than rewritten
 **Primary owner:** `packages/core`
 **Public projection owner:** `packages/mcp`
 **Independent companion:** `AGENT_FACING_FRESHNESS_RESPONSE_CONTRACT_PLAN.md`
@@ -610,7 +615,9 @@ symbol_analysis_requires_architecture_decision
 symbol_analysis_evidence_insufficient
 ```
 
-M1 and later work remain unauthorized until M0 is reviewed.
+The explicit implementation authorization received after this plan review
+authorized structural Release A against the frozen M0 decisions below. It did
+not authorize graph-derived Release B.
 
 Seal:
 
@@ -632,6 +639,212 @@ PACKAGE_VERSION_DECISION=<decision>
 M0_EVIDENCE_COMMIT=<hash when commit authorization is included>
 PRODUCT_CODE_CHANGED=no
 BLOCKER=<none or exact blocker>
+```
+
+### 11.1 Executed M0 decision
+
+```text
+M0_BASE_REVISION=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
+M0_OUTCOME=symbol_analysis_evidence_insufficient
+ARCHITECTURE_CANDIDATE=on_demand
+INITIAL_LANGUAGE=python
+PRODUCTION_FIXTURE=not yet qualified; focused repository-local fixtures only
+STORAGE_MODEL=on_demand_candidate
+PUBLIC_ROUTE=file_outline(path,file,resolveMode="exact",symbolIdExact,detail="analysis")
+SOURCE_BINDING_MODEL=current source under the existing publication read lease
+  and prepared-source observation, revalidated before response
+METRIC_VERSION=python_structural_v1
+UPSTREAM_REUSE_DECISION=reference inspected; no upstream code copied because
+  Satori's existing Tree-sitter owner provided the smaller implementation
+OLD_INDEX_BEHAVIOR=normal indexes remain readable; no analysis sidecar is required
+DEFAULT_PATH_BUDGET=no eager analysis, persistence, indexing, or default response change
+ANALYSIS_REQUEST_BUDGET=one exact symbol and one on-demand Python parse per request
+SCHEMA_VERSION_DECISION=optional explicit response extension; no stored schema change
+PACKAGE_VERSION_DECISION=deferred to the repository release owner
+M0_EVIDENCE_COMMIT=not committed
+PRODUCT_CODE_CHANGED=yes, under later explicit Release A authorization
+BLOCKER=storage option comparison and representative production performance evidence incomplete
+```
+
+The selected public projection keeps the ordinary exact outline and adds
+`analysis` only to its one canonical Python function or method. Unsupported
+languages and symbol kinds return a precise unavailable response. An internal
+computation failure fails the whole explicit analysis request; it is not
+normalized into partial metric data.
+
+If the prepared source observation changes during computation, the non-mutating
+`file_outline` route discards the analysis and returns `not_ready`. It does not
+start synchronization or create a second freshness owner. The caller may run the
+existing sync action and repeat the request.
+
+This execution record does not close the original M0 architecture comparison:
+Options B and C were not benchmarked, and no representative production
+repository established cold/repeated latency, memory, or large-file budgets.
+The on-demand model is retained because it is the smallest implementation and
+adds no default indexing or persistence path, not because every storage option
+was conclusively measured.
+
+### 11.2 Formal Release A storage decision and frozen budgets
+
+This decision was authorized independently after watcher-unavailable latency
+qualification. It does not change or qualify the separate freshness release,
+whose RSS blocker remains open.
+
+```text
+M0_FINALIZATION_BASE=e9745207b517e812cc7e5754ba536a9e32fdc182
+M0_STORAGE_DECISION=on_demand
+INITIAL_LANGUAGE=python
+PRODUCTION_FIXTURE=tradingview_ratio@8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7
+PUBLIC_ROUTE=file_outline(path,file,resolveMode="exact",symbolIdExact,detail="analysis")
+SOURCE_BINDING_MODEL=current source under the existing publication read lease
+  and prepared-source observation, revalidated before response
+METRIC_VERSION=python_structural_v1
+PERSISTED_ANALYSIS=not_authorized
+GRAPH_DERIVED_RELEASE_B=not_authorized
+```
+
+On-demand analysis is selected because Release A has one explicit, bounded
+request and no demonstrated cross-request reuse requirement. It adds no
+analysis artifact, publication work, migration, retention policy, startup
+load, or default indexing work. Options B and C necessarily add at least one of
+those default-path costs and are not justified merely to make an optional
+single-symbol response faster.
+
+This is a product decision based on required behavior and avoided default-path
+cost, not a claim that complete implementations of Options B and C were
+benchmarked. Reconsider persistence only when repository-local evidence proves
+at least one of:
+
+- repeated analysis requests make on-demand latency exceed the frozen budget;
+- parse-time or transient-memory cost exceeds the frozen budget on a supported
+  repository class;
+- an approved offline workflow requires reusable analysis without source
+  parsing;
+- a later authorized feature needs generation-bound analysis reuse and can
+  own its migration, retention, and rollback costs.
+
+Budgets are frozen before the production benchmark:
+
+```text
+selected-symbol cold request:
+    <= 4000 ms
+
+selected-symbol repeated request:
+    p95 <= 250 ms after two preparation calls
+
+analysis overhead over paired summary:
+    p95 <= 150 ms
+
+large tracked Python file:
+    <= 1000 ms after preparation
+
+process-tree peak RSS increase over paired summary:
+    <= 64 MiB
+
+retained process-tree RSS increase after repeated analysis:
+    <= 32 MiB
+
+serialized successful response:
+    <= 8192 bytes
+
+unused default path:
+    omitted detail and detail="summary" return normalized byte-identical
+      payloads; only the existing callGraphHint.validatedAt observation time
+      may differ between separate calls
+    no analysis field
+    no analysis artifact
+    no analysis-owned source comparison, synchronization, or publication
+    paired warm-summary p95 regression <= 5% and <= 25 ms
+```
+
+The latency limits include the existing public `file_outline` route. The
+paired-overhead limit distinguishes structural-analysis cost from already
+qualified navigation loading. RSS limits are deltas from the same isolated
+runtime and publication, not a new deployment-capacity decision.
+
+### 11.3 Release A production measurement and qualification stop
+
+The pinned production benchmark passed every frozen budget:
+
+```text
+target:
+    tradingview_ratio@8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7
+    1013 tracked Python files
+
+selected symbol:
+    src/cli/main.py::cli_entry_point
+
+cold request:
+    49.810 ms
+
+repeated request:
+    p50 46.540 ms
+    p95 51.333 ms
+
+paired analysis overhead:
+    p95 1.235 ms
+
+large supported production file:
+    src/cli/commands/discover.py
+    123835 bytes
+    144.766 ms
+
+process-tree peak RSS increase over paired summary:
+    0.219 MiB
+
+retained process-tree RSS increase:
+    7.059 MiB
+
+maximum response:
+    1611 bytes
+
+unused default path:
+    normalized payload equal
+    zero latency regression
+    no analysis field
+    no persisted analysis artifact
+    no publication or operation change
+```
+
+The 525434-byte generated operations script was not used as a latency sample
+because its existing canonical symbol span returned
+`OUTLINE_SYMBOL_SPAN_UNVERIFIED`; the public route failed closed before
+analysis. The benchmark instead used a large supported production module.
+
+M0 therefore closes with:
+
+```text
+M0_OUTCOME=symbol_analysis_v1_contract_ready
+STORAGE_MODEL=on_demand
+ARCHITECTURE_DECISION=sealed_for_release_a
+PERSISTENCE_RECONSIDERATION=only_under_the_triggers_in_section_11_2
+```
+
+Complete affected qualification then exposed an independent current-master
+regression:
+
+```text
+Core full suite:
+    stalled in Context retention cannot pass an active publication reader
+      through two activations
+    interrupted after 416.736 seconds
+    48 passed before the stall
+
+Focused reproduction:
+    same test timed out after 60 seconds
+    second activation remained unresolved after the read lease was released
+
+MCP full suite:
+    not run after the explicit stop condition fired
+```
+
+This plan does not authorize changing that freshness/publication owner.
+Structural Release A remains unmodified and records:
+
+```text
+RELEASE_A_OUTCOME=symbol_analysis_release_a_qualification_blocked
+BLOCKER=current Core read-lease retention test does not complete
+PACKAGE_VERSION_DECISION=hold Core 3.4.0 and MCP 6.5.0 release candidacy
 ```
 
 ## 12. Proposed release sequence
