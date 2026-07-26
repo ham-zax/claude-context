@@ -557,6 +557,296 @@ const CONSTRUCTOR_NODE_TYPES = new Set([
     'new_expression',
 ]);
 
+export const PYTHON_STRUCTURAL_ANALYSIS_VERSION = 'python_structural_v1' as const;
+
+export type PythonStructuralMetric<T> = Readonly<{
+    derivationKind: 'exact_syntax' | 'structural_metric';
+    availability: 'available';
+    value: T;
+}>;
+
+export type PythonStructuralAnalysis = Readonly<{
+    analysisVersion: typeof PYTHON_STRUCTURAL_ANALYSIS_VERSION;
+    language: 'python';
+    backend: 'tree_sitter_wasm';
+    sourceBinding: 'current_source';
+    metrics: Readonly<{
+        parameterCount: PythonStructuralMetric<number>;
+        loopCount: PythonStructuralMetric<number>;
+        maxLoopDepth: PythonStructuralMetric<number>;
+        cyclomaticComplexity: PythonStructuralMetric<number>;
+        signature: PythonStructuralMetric<string>;
+        declaredReturnType: PythonStructuralMetric<string | null>;
+    }>;
+}>;
+
+export type PythonStructuralAnalysisResult =
+    | Readonly<{ status: 'ok'; analysis: PythonStructuralAnalysis }>
+    | Readonly<{
+        status: 'unavailable';
+        reason:
+            | 'unsupported_symbol_kind'
+            | 'parser_unavailable'
+            | 'syntax_error'
+            | 'symbol_not_found'
+            | 'analysis_failure';
+    }>;
+
+export type PythonStructuralSymbolInput = Readonly<{
+    content: string;
+    symbol: Readonly<{
+        kind: string;
+        name: string;
+        qualifiedName: string;
+        span: Readonly<{
+            startLine: number;
+            endLine: number;
+            startByte?: number;
+            endByte?: number;
+        }>;
+    }>;
+}>;
+
+const PYTHON_COMPREHENSION_NODE_TYPES = new Set([
+    'list_comprehension',
+    'set_comprehension',
+    'dictionary_comprehension',
+    'generator_expression',
+]);
+
+const PYTHON_NESTED_SCOPE_NODE_TYPES = new Set([
+    'function_definition',
+    'class_definition',
+    'lambda',
+    'decorated_definition',
+]);
+
+function matchesPythonStructuralSymbol(
+    node: Node,
+    spanNode: Node,
+    qualifiedName: string,
+    input: PythonStructuralSymbolInput['symbol'],
+): boolean {
+    if (qualifiedName !== input.qualifiedName || nameForNode(node) !== input.name) {
+        return false;
+    }
+    if (input.span.startByte !== undefined && input.span.endByte !== undefined) {
+        return spanNode.startIndex === input.span.startByte
+            && spanNode.endIndex === input.span.endByte;
+    }
+    return spanNode.startPosition.row + 1 === input.span.startLine
+        && spanNode.endPosition.row + 1 === input.span.endLine;
+}
+
+function findPythonStructuralFunction(
+    root: Node,
+    input: PythonStructuralSymbolInput['symbol'],
+): Node | undefined {
+    let match: Node | undefined;
+    const visit = (node: Node, parents: readonly string[]): void => {
+        if (match) return;
+        if (node.type === 'class_definition') {
+            const name = nameForNode(node);
+            const nextParents = name ? [...parents, name] : parents;
+            for (const child of node.namedChildren) {
+                visit(child, nextParents);
+            }
+            return;
+        }
+        if (node.type === 'function_definition') {
+            const name = nameForNode(node);
+            const qualifiedName = name ? [...parents, name].join('.') : '';
+            const spanNode = node.parent?.type === 'decorated_definition'
+                ? node.parent
+                : node;
+            if (
+                name
+                && matchesPythonStructuralSymbol(node, spanNode, qualifiedName, input)
+            ) {
+                match = node;
+                return;
+            }
+            const nextParents = name ? [...parents, name] : parents;
+            for (const child of node.namedChildren) {
+                visit(child, nextParents);
+            }
+            return;
+        }
+        for (const child of node.namedChildren) {
+            visit(child, parents);
+        }
+    };
+    visit(root, []);
+    return match;
+}
+
+function comprehensionLoopOrdinal(node: Node): number {
+    const parent = node.parent;
+    if (!parent || !PYTHON_COMPREHENSION_NODE_TYPES.has(parent.type)) {
+        return 1;
+    }
+    let ordinal = 0;
+    for (const sibling of parent.namedChildren) {
+        if (sibling.type === 'for_in_clause') {
+            ordinal += 1;
+        }
+        if (sibling.id === node.id) {
+            return Math.max(1, ordinal);
+        }
+    }
+    return 1;
+}
+
+function measurePythonStructure(body: Node): {
+    loopCount: number;
+    maxLoopDepth: number;
+    cyclomaticComplexity: number;
+} {
+    let loopCount = 0;
+    let maxLoopDepth = 0;
+    let decisionCount = 0;
+    const visit = (node: Node, loopDepth: number): void => {
+        if (node !== body && PYTHON_NESTED_SCOPE_NODE_TYPES.has(node.type)) {
+            return;
+        }
+
+        let childLoopDepth = loopDepth;
+        if (node.type === 'for_statement' || node.type === 'while_statement') {
+            loopCount += 1;
+            decisionCount += 1;
+            childLoopDepth = loopDepth + 1;
+            maxLoopDepth = Math.max(maxLoopDepth, childLoopDepth);
+        } else if (node.type === 'for_in_clause') {
+            loopCount += 1;
+            decisionCount += 1;
+            childLoopDepth = loopDepth + comprehensionLoopOrdinal(node);
+            maxLoopDepth = Math.max(maxLoopDepth, childLoopDepth);
+        } else if (
+            node.type === 'if_statement'
+            || node.type === 'elif_clause'
+            || node.type === 'except_clause'
+            || node.type === 'case_clause'
+            || node.type === 'conditional_expression'
+            || node.type === 'if_clause'
+            || node.type === 'boolean_operator'
+        ) {
+            decisionCount += 1;
+        }
+
+        for (const child of node.namedChildren) {
+            visit(child, childLoopDepth);
+        }
+    };
+    visit(body, 0);
+    return {
+        loopCount,
+        maxLoopDepth,
+        cyclomaticComplexity: 1 + decisionCount,
+    };
+}
+
+function countPythonParameters(parameters: Node): number {
+    return parameters.namedChildren.filter((parameter) => (
+        parameter.type !== 'positional_separator'
+        && parameter.type !== 'keyword_separator'
+    )).length;
+}
+
+export async function analyzePythonSymbolStructure(
+    input: PythonStructuralSymbolInput,
+    assetRoot?: string,
+): Promise<PythonStructuralAnalysisResult> {
+    if (input.symbol.kind !== 'function' && input.symbol.kind !== 'method') {
+        return { status: 'unavailable', reason: 'unsupported_symbol_kind' };
+    }
+
+    let language: Language;
+    try {
+        language = await loadLanguage('python', assetRoot);
+    } catch {
+        return { status: 'unavailable', reason: 'parser_unavailable' };
+    }
+
+    let parser: Parser | undefined;
+    let tree: ReturnType<Parser['parse']> | null = null;
+    try {
+        parser = new Parser();
+        parser.setLanguage(language);
+        tree = parser.parse(input.content);
+        if (!tree) {
+            return { status: 'unavailable', reason: 'analysis_failure' };
+        }
+        if (tree.rootNode.hasError) {
+            return { status: 'unavailable', reason: 'syntax_error' };
+        }
+        const functionNode = findPythonStructuralFunction(tree.rootNode, input.symbol);
+        if (!functionNode) {
+            return { status: 'unavailable', reason: 'symbol_not_found' };
+        }
+        const parameters = functionNode.childForFieldName('parameters');
+        const body = functionNode.childForFieldName('body');
+        if (!parameters || !body) {
+            return { status: 'unavailable', reason: 'analysis_failure' };
+        }
+        const sourceBytes = Buffer.from(input.content, 'utf8');
+        const signature = sourceBytes
+            .subarray(functionNode.startIndex, body.startIndex)
+            .toString('utf8')
+            .trimEnd();
+        const declaredReturnType = functionNode
+            .childForFieldName('return_type')
+            ?.text
+            .trim() || null;
+        const structure = measurePythonStructure(body);
+        return {
+            status: 'ok',
+            analysis: {
+                analysisVersion: PYTHON_STRUCTURAL_ANALYSIS_VERSION,
+                language: 'python',
+                backend: 'tree_sitter_wasm',
+                sourceBinding: 'current_source',
+                metrics: {
+                    parameterCount: {
+                        derivationKind: 'exact_syntax',
+                        availability: 'available',
+                        value: countPythonParameters(parameters),
+                    },
+                    loopCount: {
+                        derivationKind: 'structural_metric',
+                        availability: 'available',
+                        value: structure.loopCount,
+                    },
+                    maxLoopDepth: {
+                        derivationKind: 'structural_metric',
+                        availability: 'available',
+                        value: structure.maxLoopDepth,
+                    },
+                    cyclomaticComplexity: {
+                        derivationKind: 'structural_metric',
+                        availability: 'available',
+                        value: structure.cyclomaticComplexity,
+                    },
+                    signature: {
+                        derivationKind: 'exact_syntax',
+                        availability: 'available',
+                        value: signature,
+                    },
+                    declaredReturnType: {
+                        derivationKind: 'exact_syntax',
+                        availability: 'available',
+                        value: declaredReturnType,
+                    },
+                },
+            },
+        };
+    } catch {
+        return { status: 'unavailable', reason: 'analysis_failure' };
+    } finally {
+        tree?.delete();
+        parser?.delete();
+    }
+}
+
 function callableName(node: Node): string | undefined {
     const callable = node.childForFieldName('function')
         ?? node.childForFieldName('name')
