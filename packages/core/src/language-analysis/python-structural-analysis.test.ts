@@ -199,6 +199,37 @@ test('Python structural v1 resolves decorated duplicate method names by canonica
     assert.equal(result.analysis.metrics.cyclomaticComplexity.value, 2);
 });
 
+test('Python structural v1 keeps Unicode byte spans and signature text coherent', async () => {
+    const content = [
+        '# λ before the selected symbol',
+        'def café(π: list[str], *, naïve=True) -> dict[str, str]:',
+        '    return {"π": str(naïve)}',
+        '',
+    ].join('\n');
+    const symbol = await extractedPythonSymbol(content, 'café');
+    const result = await analyzePythonSymbolStructure({
+        content,
+        symbol: {
+            kind: symbol.kind,
+            name: symbol.name,
+            qualifiedName: symbol.qualifiedName,
+            span: symbol.span,
+        },
+    });
+
+    assert.equal(result.status, 'ok');
+    if (result.status !== 'ok') return;
+    assert.equal(result.analysis.metrics.parameterCount.value, 2);
+    assert.equal(
+        result.analysis.metrics.signature.value,
+        'def café(π: list[str], *, naïve=True) -> dict[str, str]:',
+    );
+    assert.equal(
+        result.analysis.metrics.declaredReturnType.value,
+        'dict[str, str]',
+    );
+});
+
 test('Python structural v1 freezes isolated decision and loop counting rules', async () => {
     const fixtures = [
         {

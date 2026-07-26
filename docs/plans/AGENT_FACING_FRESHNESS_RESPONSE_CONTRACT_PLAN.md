@@ -750,10 +750,14 @@ compatible prepared publication authority
 
 When watcher observation is unavailable, search uses the existing Core owner
 for a read-only full comparison against the effective source checkpoint and
-revalidates it before projection. `call_graph` and `file_outline` remain
-non-mutating: prepared V4 readiness and the publication read lease prove
-authority, while one unchanged ready watcher-event barrier prevents a source
-event consumed during construction from admitting an older payload.
+revalidates it before projection. This costs two explicit full-source
+comparisons per attempt and at most four across the one permitted retry;
+representative production cost remains unqualified. `call_graph` and
+`file_outline` remain non-mutating: while holding the publication read lease,
+they prove the prepared navigation identity still matches current authority
+before and after construction. One unchanged ready watcher-event barrier also
+prevents a source event consumed during construction from admitting an older
+payload.
 
 The implementation candidate:
 
@@ -766,10 +770,11 @@ The implementation candidate:
   pending or unavailable;
 - preserves continuation authority independently of the public fields.
 
-The clean path adds two bounded prepared-read observation captures per
-successful search attempt, no source-tree scan, no new freshness flight, and no
-publication owner. One retry is permitted only after demonstrated post-proof
-source drift.
+The watcher-ready clean path adds two bounded prepared-read observation
+captures per successful search attempt, no source-tree scan, no new freshness
+flight, and no publication owner. The watcher-unavailable fallback is
+intentionally more expensive as recorded above. One retry is permitted only
+after demonstrated post-proof source drift.
 
 Durable F0 decisions and focused verification are recorded in:
 
@@ -778,7 +783,9 @@ Durable F0 decisions and focused verification are recorded in:
 Current focused candidate outcome:
 
 ```text
-agent_facing_freshness_candidate_focused_pass
+F0_OUTCOME=freshness_contract_evidence_insufficient
+CANDIDATE_OUTCOME=agent_facing_freshness_candidate_focused_pass
 ```
 
-Final package compatibility and broad qualification remain open.
+Final package compatibility and watcher-unavailable production performance
+qualification remain open.

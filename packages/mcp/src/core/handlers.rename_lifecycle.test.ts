@@ -27,10 +27,10 @@ import type {
 import { readFileTool } from '../tools/read_file.js';
 import type { ToolContext } from '../tools/types.js';
 import { CapabilityResolver } from './capabilities.js';
-import { IndexFingerprint } from '../config.js';
+import { parseIndexFingerprint, type IndexFingerprint } from '../config.js';
 import { ToolHandlers } from './handlers.js';
-import type { SnapshotManager } from './snapshot.js';
-import type { SyncManager } from './sync.js';
+import { SnapshotManager } from './snapshot.js';
+import { SyncManager } from './sync.js';
 import { MutationLeaseCoordinator } from './mutation-lease.js';
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
@@ -234,6 +234,22 @@ class InMemoryVectorDatabase implements VectorDatabase {
     }
 }
 
+class PublicationAwareInMemoryVectorDatabase extends InMemoryVectorDatabase {
+    async getPublicationObservation(collectionName: string): Promise<string | null> {
+        const collection = this.collections.get(collectionName);
+        if (!collection) return null;
+        return JSON.stringify(
+            [...collection.entries()]
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(([id, document]) => [id, document]),
+        );
+    }
+
+    async getCollectionDataObservation(collectionName: string): Promise<string | null> {
+        return this.getPublicationObservation(collectionName);
+    }
+}
+
 async function withTempState<T>(fn: (input: { repoPath: string; stateRoot: string }) => Promise<T>): Promise<T> {
     const previousStateRoot = process.env.SATORI_STATE_ROOT;
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-mcp-rename-lifecycle-'));
@@ -358,13 +374,16 @@ test('cached exact search cannot survive direct collection deletion', async () =
             symbolRegistryStateRoot: stateRoot,
         });
         await context.indexCodebase(repoPath);
+        await publishCurrentAuthorityCheckpoint(context, repoPath);
         const receipt = await context.resolveProvenGeneration(repoPath);
         assert.ok(receipt);
         const syncManager = {
             getPreparedReadObservation: () => ({
-                available: false as const,
-                reason: 'watcher_manager_not_started' as const,
-                freshnessEpoch: 1,
+                available: true as const,
+                observation: {
+                    freshnessEpoch: 1,
+                    watcherState: 'ready' as const,
+                },
             }),
             ensureFreshness: async () => ({
                 mode: 'skipped_recent',
@@ -433,14 +452,17 @@ test('cached exact search downgrades navigation after direct symbol shard deleti
             symbolRegistryStateRoot: stateRoot,
         });
         await context.indexCodebase(repoPath);
+        await publishCurrentAuthorityCheckpoint(context, repoPath);
         const receipt = await context.resolveProvenGeneration(repoPath);
         assert.ok(receipt?.navigation);
         vectorDatabase.payloadCountQueryCount = 0;
         const syncManager = {
             getPreparedReadObservation: () => ({
-                available: false as const,
-                reason: 'watcher_manager_not_started' as const,
-                freshnessEpoch: 1,
+                available: true as const,
+                observation: {
+                    freshnessEpoch: 1,
+                    watcherState: 'ready' as const,
+                },
             }),
             ensureFreshness: async () => ({
                 mode: 'skipped_recent',
@@ -614,9 +636,11 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
         let syncTriggered = false;
         const syncManager = {
             getPreparedReadObservation: () => ({
-                available: false,
-                reason: 'watcher_manager_not_started',
-                freshnessEpoch: 1,
+                available: true as const,
+                observation: {
+                    freshnessEpoch: 1,
+                    watcherState: 'ready' as const,
+                },
             }),
             ensureFreshness: async () => {
                 syncTriggered = true;
@@ -798,6 +822,135 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
     });
 });
 
+test('watcher-disabled search composes the real MCP freshness owner with Core source proof', async () => {
+    await withTempState(async ({ repoPath, stateRoot }) => {
+        const relativePath = 'src/fallback.ts';
+        const sourcePath = path.join(repoPath, relativePath);
+        fs.writeFileSync(
+            sourcePath,
+            'export function fallbackBefore() { return true; }\n',
+            'utf8',
+        );
+        fs.writeFileSync(
+            path.join(repoPath, 'src', 'keep.ts'),
+            'export function keepIndexed() { return true; }\n',
+            'utf8',
+        );
+
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new PublicationAwareInMemoryVectorDatabase(),
+            languageAnalyzer: createLanguageAnalysisService(),
+            symbolRegistryStateRoot: stateRoot,
+        });
+        await context.indexCodebase(repoPath);
+        await publishCurrentAuthorityCheckpoint(context, repoPath);
+        const initialReceipt = await context.resolveProvenGeneration(repoPath);
+        const initialVectorReceipt = await context.proveVectorGeneration(repoPath);
+        assert.ok(initialReceipt);
+        assert.ok(initialVectorReceipt);
+        const runtimeFingerprint = parseIndexFingerprint(initialReceipt.marker.fingerprint);
+        assert.ok(runtimeFingerprint);
+        const checkpointEvidence = await context.inspectSourceFreshnessCheckpoint(
+            repoPath,
+            undefined,
+            initialVectorReceipt,
+        );
+        assert.equal(checkpointEvidence.status, 'valid', JSON.stringify(checkpointEvidence));
+        assert.ok(checkpointEvidence.generationReceipt, JSON.stringify(checkpointEvidence));
+        assert.deepEqual(
+            await context.compareAllSourceToFreshnessCheckpoint(repoPath, initialVectorReceipt),
+            { status: 'matches' },
+        );
+        const comparisonResults: string[] = [];
+        const compareAllSource = context.compareAllSourceToFreshnessCheckpoint.bind(context);
+        context.compareAllSourceToFreshnessCheckpoint = async (...args) => {
+            const result = await compareAllSource(...args);
+            comparisonResults.push(result.status);
+            return result;
+        };
+
+        const snapshot = new SnapshotManager(runtimeFingerprint);
+        snapshot.addIndexedCodebase(repoPath, 2);
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(stateRoot, 'leases'),
+            ownerId: 'watcher-disabled-real-freshness-test',
+        });
+        const syncManager = new SyncManager(context, snapshot, {
+            watchEnabled: false,
+            mutationLeaseCoordinator: coordinator,
+        });
+        await syncManager.recordCurrentIgnoreControlSignature(repoPath);
+        const handlers = new ToolHandlers(
+            context,
+            snapshot,
+            syncManager,
+            runtimeFingerprint,
+            CAPABILITIES,
+            undefined,
+            undefined,
+            null,
+            undefined,
+            undefined,
+            null,
+            coordinator,
+        );
+        const testHandlers = handlers as unknown as {
+            validateCompletionProof: () => Promise<Record<string, unknown>>;
+        };
+        testHandlers.validateCompletionProof = async () => {
+            const receipt = await context.proveIndexedGeneration(repoPath);
+            assert.ok(receipt);
+            return {
+                outcome: 'valid',
+                marker: receipt.marker,
+                collectionName: receipt.collectionName,
+                vectorReceipt: receipt,
+                generationReceipt: receipt,
+                navigationStatus: 'valid',
+            };
+        };
+
+        const search = async (query: string): Promise<JsonObject> => parsePayload(
+            await handlers.handleSearchCode({
+                path: repoPath,
+                query,
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 10,
+            }),
+        );
+
+        const before = await search('fallbackBefore');
+        assert.equal(
+            before.status,
+            'ok',
+            JSON.stringify({ before, comparisonResults }),
+        );
+        assert.ok(JSON.stringify(before.results).includes('fallbackBefore'));
+
+        fs.writeFileSync(
+            sourcePath,
+            'export function fallbackAfter() { return true; }\n',
+            'utf8',
+        );
+        const after = await search('fallbackAfter');
+        assert.equal(after.status, 'ok', JSON.stringify(after));
+        assert.ok(JSON.stringify(after.results).includes('fallbackAfter'));
+        assert.equal(JSON.stringify(after.results).includes('fallbackBefore'), false);
+
+        fs.unlinkSync(sourcePath);
+        const deleted = await search('fallbackAfter');
+        assert.equal(deleted.status, 'ok', JSON.stringify(deleted));
+        assert.equal(JSON.stringify(deleted.results).includes('fallbackAfter'), false);
+        assert.equal(
+            (await context.inspectSourceFreshnessCheckpoint(repoPath)).status,
+            'valid',
+        );
+        assert.deepEqual(comparisonResults, Array(6).fill('matches'));
+    });
+});
+
 test('MCP direct navigation fails closed for dirty files until search freshness syncs', async () => {
     await withTempState(async ({ repoPath, stateRoot }) => {
         const relativePath = 'src/runtime.ts';
@@ -819,9 +972,11 @@ test('MCP direct navigation fails closed for dirty files until search freshness 
         let ensureFreshnessCalls = 0;
         const syncManager = {
             getPreparedReadObservation: () => ({
-                available: false,
-                reason: 'watcher_manager_not_started',
-                freshnessEpoch: 1,
+                available: true as const,
+                observation: {
+                    freshnessEpoch: 1,
+                    watcherState: 'ready' as const,
+                },
             }),
             ensureFreshness: async () => {
                 ensureFreshnessCalls += 1;

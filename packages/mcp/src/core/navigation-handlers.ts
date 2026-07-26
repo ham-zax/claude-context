@@ -66,6 +66,9 @@ type NavigationHandlersHost = {
         sourceObservation: string | null;
         unavailableReason?: string;
     };
+    isPreparedNavigationReadCurrent(
+        preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
+    ): boolean;
     loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         file: string,
@@ -304,6 +307,14 @@ function sourceBarrierMatches(
         && right.observation === left.observation
         && right.sourceObservation === left.sourceObservation
         && right.unavailableReason === undefined;
+}
+
+function preparedNavigationBarrierMatches(
+    preparedReadWasCurrent: boolean,
+    preparedReadIsCurrent: boolean,
+): boolean {
+    return preparedReadWasCurrent
+        && preparedReadIsCurrent;
 }
 
 function withPythonStructuralAnalysis(
@@ -547,6 +558,8 @@ export class NavigationHandlers {
             const effectiveRoot = matchedRoot.path;
             releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
             const navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+            const preparedNavigationReadWasCurrent =
+                this.host.isPreparedNavigationReadCurrent(trackedRootState);
             if (sourceObservationUnavailable(this.host, effectiveRoot)) {
                 await this.host.touchWatchedCodebase(effectiveRoot);
                 const payload = buildSourceStateUnverifiedFileOutlinePayload(
@@ -753,10 +766,13 @@ export class NavigationHandlers {
                         }
                     }
                     const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-                    const guidedPayload = !navigationSourceBarrierMatches(
-                        navigationSourceBarrier,
-                        finalNavigationSourceBarrier,
-                    )
+                    const guidedPayload = !preparedNavigationBarrierMatches(
+                        preparedNavigationReadWasCurrent,
+                        this.host.isPreparedNavigationReadCurrent(trackedRootState),
+                    ) || !navigationSourceBarrierMatches(
+                            navigationSourceBarrier,
+                            finalNavigationSourceBarrier,
+                        )
                         ? buildSourceStateUnverifiedFileOutlinePayload(
                             this.host,
                             effectiveRoot,
@@ -1055,6 +1071,8 @@ export class NavigationHandlers {
             const effectiveRoot = searchableRoot.path;
             releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
             const navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+            const preparedNavigationReadWasCurrent =
+                this.host.isPreparedNavigationReadCurrent(trackedRootState);
             const proofDebugHint = trackedRootState.proofDebugHint;
 
             if (this.host.isPartialIndexNavigationUnavailable(searchableRoot.info)) {
@@ -1293,10 +1311,13 @@ export class NavigationHandlers {
                 ...relationshipBackedGraph,
             } satisfies CallGraphResponseEnvelope, proofDebugHint);
             const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-            const guidedPayload = !navigationSourceBarrierMatches(
-                navigationSourceBarrier,
-                finalNavigationSourceBarrier,
-            )
+            const guidedPayload = !preparedNavigationBarrierMatches(
+                preparedNavigationReadWasCurrent,
+                this.host.isPreparedNavigationReadCurrent(trackedRootState),
+            ) || !navigationSourceBarrierMatches(
+                    navigationSourceBarrier,
+                    finalNavigationSourceBarrier,
+                )
                 ? buildSourceStateUnverifiedCallGraphPayload(
                     this.host,
                     effectiveRoot,

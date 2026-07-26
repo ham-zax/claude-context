@@ -3,7 +3,8 @@
   "date": "2026-07-26",
   "baseRevision": "2a69144be52e0b4f9ea9894dd5695666c7f7dce9",
   "correctiveReviewBaseRevision": "384a615d002db331f9e3600d47907d5c375d41ee",
-  "outcome": "symbol_analysis_on_demand_leading_candidate",
+  "outcome": "symbol_analysis_evidence_insufficient",
+  "architectureCandidate": "on_demand",
   "productState": "release_a_candidate_focused_pass",
   "language": "python",
   "storageModel": "on_demand_leading_candidate",
@@ -33,7 +34,7 @@
   "upstreamCodeCopied": false,
   "verification": {
     "coreFocused": {
-      "passed": 6,
+      "passed": 7,
       "failed": 0
     },
     "mcpFocused": {
@@ -49,5 +50,7 @@
   },
   "storageComparisonComplete": false,
   "productionPerformanceQualified": false,
-  "blocker": "M0 storage comparison and production performance evidence remain incomplete"
+  "installedTreeSitterIndexModel": "web-tree-sitter-0.26.10 JavaScript UTF-16 code-unit indices converted to canonical UTF-8 byte spans",
+  "implementationBlocker": null,
+  "finalQualificationBlocker": "M0 storage comparison and production performance evidence remain incomplete"
 }

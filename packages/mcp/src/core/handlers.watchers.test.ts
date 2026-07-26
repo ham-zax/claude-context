@@ -39,9 +39,12 @@ type ToolHandlersTestOverrides = {
     evaluateReindexPreflight: (codebasePath: string) => unknown;
     clearAllCollectionsForForceReindex: (codebasePath: string) => Promise<unknown[]>;
     validateCompletionProof: (codebasePath: string) => Promise<unknown>;
+    getPreparedAuthorityObservation: (codebasePath: string) => string | null;
+    isPreparedNavigationReadCurrent: () => boolean;
     getPreparedReadCacheObservation: (codebasePath: string) => {
-        observation: string;
-        sourceObservation: string;
+        observation: string | null;
+        sourceObservation: string | null;
+        unavailableReason?: string;
     };
 };
 
@@ -741,5 +744,79 @@ test('navigation discards an outline when a watcher event is consumed during con
         assert.equal(payload.reason, 'source_state_unverified');
         assert.equal(payload.outline, null);
         assert.equal(watch.ensureCalls, 0);
+    }));
+});
+
+test('navigation never mixes a prepared publication with a later active publication', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        const source = 'export function auth() { return true; }\n';
+        fs.writeFileSync(path.join(repoPath, 'src', 'auth.ts'), source);
+        const authSymbol = createFunctionSymbol({
+            file: 'src/auth.ts',
+            name: 'auth',
+            startLine: 1,
+            endLine: 1,
+            fileHash: crypto.createHash('sha256').update(source).digest('hex'),
+        });
+        await writeNavigationSidecars({
+            stateRoot,
+            repoPath,
+            symbols: [authSymbol],
+        });
+
+        const createHandlersWithAuthorityChange = (activateOnValidationRead: number) => {
+            const watch = createWatchRecorder();
+            const handlers = new ToolHandlers(
+                {} as unknown as HandlerContext,
+                createMutableSnapshot(repoPath, 'indexed'),
+                watch.syncManager,
+                RUNTIME_FINGERPRINT,
+                CAPABILITIES,
+            );
+            const overrides = handlers as unknown as ToolHandlersTestOverrides;
+            let authority = 'publication-p';
+            let validationReads = 0;
+            overrides.validateCompletionProof = async () => ({ outcome: 'valid' });
+            overrides.getPreparedAuthorityObservation = () => authority;
+            overrides.isPreparedNavigationReadCurrent = () => {
+                validationReads += 1;
+                if (validationReads >= activateOnValidationRead) {
+                    authority = 'publication-q';
+                }
+                return authority === 'publication-p';
+            };
+            return { handlers, watch };
+        };
+
+        const outlineCandidate = createHandlersWithAuthorityChange(2);
+        const outlineResponse = await outlineCandidate.handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/auth.ts',
+        });
+        const outlinePayload = parsePayload(outlineResponse);
+        assert.equal(outlinePayload.status, 'not_ready');
+        assert.equal(outlinePayload.reason, 'source_state_unverified');
+        assert.equal(outlinePayload.outline, null);
+        assert.equal(outlineCandidate.watch.ensureCalls, 0);
+
+        const graphCandidate = createHandlersWithAuthorityChange(1);
+        const graphResponse = await graphCandidate.handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: authSymbol.file,
+                symbolId: authSymbol.symbolInstanceId,
+            },
+            direction: 'both',
+            depth: 1,
+            limit: 5,
+        });
+        const graphPayload = parsePayload(graphResponse);
+        assert.equal(graphPayload.status, 'not_ready');
+        assert.equal(graphPayload.reason, 'source_state_unverified');
+        assert.equal(graphPayload.supported, true);
+        assert.deepEqual(graphPayload.nodes, []);
+        assert.deepEqual(graphPayload.edges, []);
+        assert.equal(graphCandidate.watch.ensureCalls, 0);
     }));
 });

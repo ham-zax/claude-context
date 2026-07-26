@@ -5,14 +5,16 @@
 ```text
 F0_BASE_REVISION=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
 CORRECTIVE_REVIEW_BASE_REVISION=384a615d002db331f9e3600d47907d5c375d41ee
-F0_OUTCOME=freshness_projection_versioned_candidate
-IMPLEMENTATION_OUTCOME=agent_facing_freshness_candidate_focused_pass
+LATEST_CORRECTIVE_REVIEW_BASE_REVISION=f4ef5c7a71419967b066ed786e3cf9156a4b82d6
+F0_OUTCOME=freshness_contract_evidence_insufficient
+CANDIDATE_OUTCOME=agent_facing_freshness_candidate_focused_pass
 PUBLIC_SCHEMA_DECISION=format-3 candidate; consumer compatibility remains unqualified
 PACKAGE_VERSION_DECISION=release decision pending consumer compatibility evidence
 RESPONSE_FORMAT_VERSION_DECISION=search response format 3
 FIELD_OMISSION_SEMANTICS=absent
 PRODUCT_CODE_CHANGED=no during F0
-BLOCKER=none
+IMPLEMENTATION_BLOCKER=none
+FINAL_QUALIFICATION_BLOCKER=external consumer compatibility and watcher-unavailable production performance remain unqualified
 ```
 
 The implementation was authorized after the F0 source/schema audit. This
@@ -65,10 +67,11 @@ observation-continuity proof; watcher epoch equality alone is not accepted.
 
 Watcher-disabled, failed, starting, and interrupted search uses the existing
 Core comparison owner to compare the complete source against the effective
-checkpoint twice, without publishing or adding durable authority. Navigation
-remains non-mutating: it validates prepared V4 readiness under a publication
-read lease and requires one unchanged ready watcher-event barrier across
-construction. It blocks when that proof is unavailable.
+checkpoint twice per attempt, without publishing or adding durable authority.
+Navigation remains non-mutating: under one publication read lease it validates
+the prepared navigation identity against current authority before and after
+construction and requires one unchanged ready watcher-event barrier. It blocks
+and discards its payload if either proof changes or is unavailable.
 
 ## Retrieval-publication binding
 
@@ -112,7 +115,7 @@ Explicit `debugMode="freshness"` and `debugMode="full"` retain approved
 freshness evidence. Status and maintenance tools retain their existing
 diagnostics.
 
-The clean-path budget is structural:
+The watcher-ready clean-path budget is structural:
 
 - two bounded prepared-read observation captures per successful search attempt;
 - zero new source-tree scans;
@@ -120,9 +123,19 @@ The clean-path budget is structural:
 - zero new durable state;
 - at most one complete retry, only after post-proof source drift.
 
+The watcher-unavailable fallback has a different cost:
+
+- two explicit full-source comparisons per attempt;
+- at most two attempts;
+- therefore at most four explicit full-source comparisons for one request;
+- the preceding existing `ensureFreshness` call may also compare or publish.
+
 Focused fixture searches, including retry and second-drift paths, completed
-within the existing affected test envelope. No production repository latency
-claim is made by this receipt.
+within the existing affected test envelope. A real MCP-to-Core watcher-disabled
+fixture passed unchanged, modify, delete, and checkpoint readback with exactly
+two matching explicit comparisons per search attempt. No representative
+production-repository latency, file-read, RSS, or permanently-disabled-watcher
+budget is claimed by this receipt.
 
 ## Cancellation and reuse
 
@@ -139,6 +152,8 @@ Focused checks include:
 
 - watcher-disabled and unavailable-source search barrier tests;
 - watcher lifecycle, retry, second-drift, and navigation-event barrier tests;
+- prepared-publication P/Q changes for both outline and graph projection;
+- real watcher-disabled MCP-to-Core unchanged/modify/delete lifecycle;
 - complete `handlers.file_outline.test.ts`;
 - compact response-contract tests;
 - MCP typecheck: passed;

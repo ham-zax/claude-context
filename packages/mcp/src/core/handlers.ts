@@ -798,6 +798,9 @@ export class ToolHandlers {
             getPreparedReadCacheObservation: (codebasePath) => (
                 this.getPreparedReadCacheObservation(codebasePath)
             ),
+            isPreparedNavigationReadCurrent: (preparedRead) => (
+                this.isPreparedNavigationReadCurrent(preparedRead)
+            ),
             loadPreparedNavigationSymbolsByFile: this.loadPreparedNavigationSymbolsByFile.bind(this),
             loadPreparedNavigationCompatibility: this.loadPreparedNavigationCompatibility.bind(this),
             stringifyToolJson: this.stringifyToolJson.bind(this),
@@ -1248,6 +1251,16 @@ export class ToolHandlers {
         } catch {
             return null;
         }
+    }
+
+    private isPreparedNavigationReadCurrent(
+        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
+    ): boolean {
+        if (!preparedRead.generationReceipt || !preparedRead.preparedObservation) {
+            // Lightweight injected navigation stores do not own Core authority.
+            return true;
+        }
+        return this.getPreparedNavigationIdentity(preparedRead) !== null;
     }
 
     private getPreparedNavigationCacheEntry(

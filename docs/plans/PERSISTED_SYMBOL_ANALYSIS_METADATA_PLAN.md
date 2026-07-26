@@ -645,10 +645,11 @@ BLOCKER=<none or exact blocker>
 
 ```text
 M0_BASE_REVISION=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
-M0_OUTCOME=symbol_analysis_on_demand_leading_candidate
+M0_OUTCOME=symbol_analysis_evidence_insufficient
+ARCHITECTURE_CANDIDATE=on_demand
 INITIAL_LANGUAGE=python
 PRODUCTION_FIXTURE=not yet qualified; focused repository-local fixtures only
-STORAGE_MODEL=on_demand_leading_candidate
+STORAGE_MODEL=on_demand_candidate
 PUBLIC_ROUTE=file_outline(path,file,resolveMode="exact",symbolIdExact,detail="analysis")
 SOURCE_BINDING_MODEL=current source under the existing publication read lease
   and prepared-source observation, revalidated before response

@@ -30,6 +30,7 @@ type HandlerCallGraphManager = NonNullable<ConstructorParameters<typeof ToolHand
 type HandlerNavigationStore = NonNullable<ConstructorParameters<typeof ToolHandlers>[9]>;
 type ToolHandlersTestOverrides = {
     validateCompletionProof: (codebasePath: string) => Promise<unknown>;
+    getPreparedAuthorityObservation: (codebasePath: string) => string | null;
     getPreparedReadCacheObservation: (codebasePath: string) => {
         observation: string | null;
         sourceObservation: string | null;
@@ -852,7 +853,9 @@ test('handleFileOutline returns Python structural analysis only for an exact can
             RUNTIME_FINGERPRINT,
             CAPABILITIES,
         );
-        (handlers as unknown as ToolHandlersTestOverrides).getPreparedReadCacheObservation = () => ({
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.getPreparedAuthorityObservation = () => 'analysis-authority';
+        overrides.getPreparedReadCacheObservation = () => ({
             observation: 'analysis-authority',
             sourceObservation: 'analysis-source',
         });
@@ -907,7 +910,9 @@ test('handleFileOutline discards structural analysis when its source barrier cha
             CAPABILITIES,
         );
         let barrierReads = 0;
-        (handlers as unknown as ToolHandlersTestOverrides).getPreparedReadCacheObservation = () => ({
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.getPreparedAuthorityObservation = () => 'analysis-authority';
+        overrides.getPreparedReadCacheObservation = () => ({
             observation: 'analysis-authority',
             sourceObservation: barrierReads++ === 0 ? 'source-before' : 'source-after',
         });

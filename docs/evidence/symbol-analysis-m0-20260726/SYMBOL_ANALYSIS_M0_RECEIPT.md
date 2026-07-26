@@ -3,7 +3,8 @@
 **Date:** 2026-07-26
 **Base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
 **Corrective review base:** `384a615d002db331f9e3600d47907d5c375d41ee`
-**Outcome:** `symbol_analysis_on_demand_leading_candidate`
+**Outcome:** `symbol_analysis_evidence_insufficient`
+**Architecture candidate:** `on_demand`
 **Product state:** focused Release A candidate
 
 ## Decision
@@ -66,11 +67,20 @@ reference. No upstream source was copied. Satori's existing Tree-sitter parser
 and canonical outline identity path supplied a smaller implementation without a
 new dependency or foreign storage abstraction.
 
+The installed `web-tree-sitter` version is `0.26.10`. Its JavaScript parser
+callback passes JavaScript strings through `stringToUTF16` with `string.length`,
+and its text extraction uses JavaScript string indices. Satori therefore treats
+the installed binding's node indices as UTF-16 code-unit indices and converts
+them through `Utf8SourceMap` when matching canonical byte spans. Generic native
+Tree-sitter byte-offset documentation is not the contract of this installed
+binding. A signature containing Unicode in the callable name, parameter names,
+defaults, and annotations is covered directly.
+
 ## Focused verification
 
 ```text
 Core Python structural analysis:
-  6 passed, 0 failed
+  7 passed, 0 failed
 
 MCP file_outline handler and tool:
   35 passed, 0 failed
