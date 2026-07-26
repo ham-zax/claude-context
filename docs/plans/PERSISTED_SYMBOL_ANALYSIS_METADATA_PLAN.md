@@ -1,11 +1,13 @@
 # Symbol Analysis Metadata Plan
 
-**Status:** amended after technical review; M0 is the next evidence batch;
-M1 and later product work are unauthorized
+**Status:** M0 decisions frozen; structural Release A implemented as an
+uncommitted qualification candidate; graph-derived Release B remains
+unauthorized
 **Date:** 2026-07-26
-**Review base revision:** `5634f5e13c278c917c4667c17e465298b6ffdd2a`
-**Base verification:** matched local `master` and `origin/master` when this
-amendment was prepared
+**Review base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
+**Base verification:** matched product `HEAD` when M0 and Release A began;
+all owner and schema claims used by the implementation were revalidated against
+this revision
 **Primary owner:** `packages/core`
 **Public projection owner:** `packages/mcp`
 **Independent companion:** `AGENT_FACING_FRESHNESS_RESPONSE_CONTRACT_PLAN.md`
@@ -610,7 +612,9 @@ symbol_analysis_requires_architecture_decision
 symbol_analysis_evidence_insufficient
 ```
 
-M1 and later work remain unauthorized until M0 is reviewed.
+The explicit implementation authorization received after this plan review
+authorized structural Release A against the frozen M0 decisions below. It did
+not authorize graph-derived Release B.
 
 Seal:
 
@@ -633,6 +637,41 @@ M0_EVIDENCE_COMMIT=<hash when commit authorization is included>
 PRODUCT_CODE_CHANGED=no
 BLOCKER=<none or exact blocker>
 ```
+
+### 11.1 Executed M0 decision
+
+```text
+M0_BASE_REVISION=2a69144be52e0b4f9ea9894dd5695666c7f7dce9
+M0_OUTCOME=symbol_analysis_v1_contract_ready
+INITIAL_LANGUAGE=python
+PRODUCTION_FIXTURE=focused repository-local Python parser and MCP outline fixtures
+STORAGE_MODEL=on_demand
+PUBLIC_ROUTE=file_outline(path,file,resolveMode="exact",symbolIdExact,detail="analysis")
+SOURCE_BINDING_MODEL=current source under the existing publication read lease
+  and prepared-source observation, revalidated before response
+METRIC_VERSION=python_structural_v1
+UPSTREAM_REUSE_DECISION=reference inspected; no upstream code copied because
+  Satori's existing Tree-sitter owner provided the smaller implementation
+OLD_INDEX_BEHAVIOR=normal indexes remain readable; no analysis sidecar is required
+DEFAULT_PATH_BUDGET=no eager analysis, persistence, indexing, or default response change
+ANALYSIS_REQUEST_BUDGET=one exact symbol and one on-demand Python parse per request
+SCHEMA_VERSION_DECISION=optional explicit response extension; no stored schema change
+PACKAGE_VERSION_DECISION=deferred to the repository release owner
+M0_EVIDENCE_COMMIT=not committed
+PRODUCT_CODE_CHANGED=yes, under later explicit Release A authorization
+BLOCKER=none
+```
+
+The selected public projection keeps the ordinary exact outline and adds
+`analysis` only to its one canonical Python function or method. Unsupported
+languages and symbol kinds return a precise unavailable response. An internal
+computation failure fails the whole explicit analysis request; it is not
+normalized into partial metric data.
+
+If the prepared source observation changes during computation, the non-mutating
+`file_outline` route discards the analysis and returns `not_ready`. It does not
+start synchronization or create a second freshness owner. The caller may run the
+existing sync action and repeat the request.
 
 ## 12. Proposed release sequence
 

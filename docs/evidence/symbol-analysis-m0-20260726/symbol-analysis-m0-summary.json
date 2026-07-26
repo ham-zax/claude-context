@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "symbol-analysis-m0-summary-v1",
+  "date": "2026-07-26",
+  "baseRevision": "2a69144be52e0b4f9ea9894dd5695666c7f7dce9",
+  "outcome": "symbol_analysis_v1_contract_ready",
+  "productState": "uncommitted_qualification_candidate",
+  "language": "python",
+  "storageModel": "on_demand",
+  "publicRoute": {
+    "tool": "file_outline",
+    "resolveMode": "exact",
+    "requiresSymbolIdExact": true,
+    "detail": "analysis",
+    "cardinality": "one_canonical_symbol"
+  },
+  "metricVersion": "python_structural_v1",
+  "metrics": [
+    "parameterCount",
+    "loopCount",
+    "maxLoopDepth",
+    "cyclomaticComplexity",
+    "signature",
+    "declaredReturnType"
+  ],
+  "persistence": {
+    "sidecar": false,
+    "storedSchemaChange": false,
+    "indexContribution": false,
+    "migration": false
+  },
+  "sourceBinding": "existing_publication_read_lease_and_prepared_source_observation_revalidated_before_response",
+  "upstreamCodeCopied": false,
+  "verification": {
+    "coreFocused": {
+      "passed": 3,
+      "failed": 0
+    },
+    "mcpFocused": {
+      "passed": 45,
+      "failed": 0
+    },
+    "coreTypecheck": "passed",
+    "mcpTypecheck": "passed",
+    "affectedLint": "passed",
+    "docsCheck": "passed",
+    "manifestCheck": "passed",
+    "broadSuitesRun": false
+  },
+  "blocker": null
+}

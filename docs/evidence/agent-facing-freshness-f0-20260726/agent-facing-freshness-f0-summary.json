@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "agent_facing_freshness_f0_v1",
+  "baseRevision": "2a69144be52e0b4f9ea9894dd5695666c7f7dce9",
+  "f0Outcome": "freshness_projection_minor_compatible",
+  "productOutcome": "agent_facing_freshness_contract_pass",
+  "mcpVersion": "6.5.0",
+  "searchResponseFormatVersion": 3,
+  "fieldOmissionSemantics": "absent",
+  "normalSuccessFreshnessEvidence": "explicit_debug_only",
+  "acceptedSourceProof": "prepared_publication_authority_plus_continuous_watcher_checkpoint_observation",
+  "watcherUnavailableNavigationPolicy": "block_with_sync_action",
+  "retryLimit": 1,
+  "newSourceTreeScans": 0,
+  "newSynchronizationOwners": 0,
+  "newPublicationOwners": 0,
+  "focusedScopeTests": {
+    "passed": 19,
+    "failed": 0
+  },
+  "checkpointProjectionTests": {
+    "passed": 1,
+    "failed": 0
+  },
+  "affectedContractTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "lint": "passed",
+  "build": "passed",
+  "docsCheck": "passed",
+  "manifestCheck": "passed",
+  "fullSuitesRun": false,
+  "blocker": null
+}

@@ -1,11 +1,11 @@
 # Agent-Facing Freshness Response Contract Plan
 
-**Status:** amended after technical review; F0 is the next evidence batch;
-no product implementation is authorized
+**Status:** F0 completed; end-to-end implementation candidate qualified by
+focused affected checks; not committed or merged
 **Date:** 2026-07-26
-**Review base revision:** `5634f5e13c278c917c4667c17e465298b6ffdd2a`
-**Base verification:** matched local `master` and `origin/master` when this
-amendment was prepared
+**Review base revision:** `2a69144be52e0b4f9ea9894dd5695666c7f7dce9`
+**Base verification:** product HEAD matched this revision when F0 began; product
+edits remained uncommitted during qualification
 **Primary owner:** `packages/mcp`
 **Existing comparison/publication owner:** `packages/core`
 **Related plan:** `MCP_WATCHER_OBSERVATION_AND_SYNC_DECOUPLING_PLAN.md`
@@ -724,4 +724,54 @@ debug/status
 
 authority
     remains with existing freshness and V4 publication owners
+```
+
+## 14. Execution record — 2026-07-26
+
+F0 returned `freshness_projection_minor_compatible` for MCP `6.5.0` when the
+ordinary search envelope advances from response format 2 to format 3. Normal
+responses omit freshness properties entirely. Explicit
+`debugMode="freshness"` and `debugMode="full"` retain bounded freshness
+evidence. Internal search inputs continue to require the complete freshness
+decision.
+
+The closed normal-read proof is the existing MCP prepared-read observation:
+
+```text
+compatible prepared publication authority
++ active publication read lease
++ watcher ready and registered
++ no pending event, coverage gap, active sync, or ignore reconciliation
++ valid matching source-checkpoint observation
+```
+
+No alternate non-mutating proof was found for watcher-unavailable navigation,
+so `call_graph` and `file_outline` block with one sync action in that state.
+Search continues to enter the existing freshness owner before applying the
+proof.
+
+The implementation candidate:
+
+- returns quiet format-3 search successes;
+- blocks unverified source responses without stale payloads;
+- retries search exactly once when the final source observation changes;
+- keeps each attempt under one publication read lease and discards the first
+  attempt before retry;
+- keeps navigation non-mutating and blocks when its source observation is
+  pending or unavailable;
+- preserves continuation authority independently of the public fields.
+
+The clean path adds two bounded prepared-read observation captures per
+successful search attempt, no source-tree scan, no new freshness flight, and no
+publication owner. One retry is permitted only after demonstrated post-proof
+source drift.
+
+Durable F0 decisions and focused verification are recorded in:
+
+`docs/evidence/agent-facing-freshness-f0-20260726/AGENT_FACING_FRESHNESS_F0_RECEIPT.md`
+
+Current product outcome:
+
+```text
+agent_facing_freshness_contract_pass
 ```

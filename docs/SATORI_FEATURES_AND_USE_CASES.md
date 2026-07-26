@@ -148,7 +148,14 @@ Once a candidate file is known, use `file_outline` to resolve the exact symbol a
 }
 ```
 
-For grouped `formatVersion: 2` results, build reads from the envelope `codebaseRoot` plus `target.file`. When `target.symbolId` is present, call `read_file` with required `mode` and the one canonical exact open: `open_symbol.contractVersion=2`, exactly one of `symbolId`/`symbolLabel`, and exactly one of `context`/`continuation`. Success is one bounded structured `symbol_context` JSON package in both plain and annotated modes; accepted exact failures use bounded structured errors. When no symbol identity is present, use an unversioned direct span (`open_symbol.startLine/endLine` or top-level line range). Do not rebuild spans from prose, and do not treat exact open as a full unversioned symbol-span dump.
+For an exact Python function or method, request `detail: "analysis"` with
+`resolveMode: "exact"` and its canonical `symbolIdExact`. Satori computes the
+analysis on demand against the verified current source and returns parameter
+count, loop count, maximum loop depth, versioned cyclomatic complexity, the
+source signature, and the declared return type. It does not persist analysis or
+change ordinary outline and search responses.
+
+For grouped `formatVersion: 3` results, build reads from the envelope `codebaseRoot` plus `target.file`. Normal successful responses omit internal freshness evidence; freshness and readiness details are available only through explicit debug modes. When `target.symbolId` is present, call `read_file` with required `mode` and the one canonical exact open: `open_symbol.contractVersion=2`, exactly one of `symbolId`/`symbolLabel`, and exactly one of `context`/`continuation`. Success is one bounded structured `symbol_context` JSON package in both plain and annotated modes; accepted exact failures use bounded structured errors. When no symbol identity is present, use an unversioned direct span (`open_symbol.startLine/endLine` or top-level line range). Do not rebuild spans from prose, and do not treat exact open as a full unversioned symbol-span dump.
 
 ### Inspect Relationships
 
