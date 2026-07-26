@@ -53,6 +53,44 @@ test("runtime policy incompatibility blocks navigation despite its fingerprint m
     assert.match(result.state === "requires_reindex" ? result.message ?? "" : "", /runtime policy inputs/i);
 });
 
+test("fingerprint-mismatch navigation retains the sealed marker binding explicitly", async () => {
+    const host = createHost({ fingerprintMismatch: true });
+    host.validateCompletionProof = async () => ({
+        outcome: "fingerprint_mismatch",
+        marker: {
+            navigation: {
+                status: "sealed",
+                generationId: "generation-p",
+                symbolRegistryManifestHash: "registry-p",
+                relationshipManifestHash: "relationships-p",
+                sealHash: "seal-p",
+            },
+        } as never,
+    });
+
+    const result = await new TrackedRootReadiness(host).prepareTrackedRootForRead(
+        "/repo/src/index.ts",
+        "navigation",
+        undefined,
+        { observePreparedRead: () => "stable-authority-observation" },
+    );
+
+    assert.equal(result.state, "ready");
+    if (result.state === "ready") {
+        assert.equal(
+            result.navigationAuthorityMode,
+            "source_backed_fingerprint_compatibility",
+        );
+        assert.deepEqual(result.sourceBackedNavigationBinding, {
+            generationId: "generation-p",
+            symbolRegistryManifestHash: "registry-p",
+            relationshipManifestHash: "relationships-p",
+            navigationSealHash: "seal-p",
+        });
+        assert.equal(result.preparedObservation, "stable-authority-observation");
+    }
+});
+
 test("retired persisted authority routes directly to requires_reindex", async () => {
     const host = createHost();
     host.validateCompletionProof = async () => ({

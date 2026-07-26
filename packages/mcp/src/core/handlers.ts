@@ -21,6 +21,8 @@ import {
     recordSourceIo,
     recordSourceProcessing,
     sourceIoOwnerForCurrentOperation,
+    readNavigationGenerationSeal,
+    computeNavigationGenerationSealHash,
 } from "@zokizuan/satori-core";
 import type { RelationshipRecord, SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "./capabilities.js";
@@ -232,7 +234,23 @@ type SearchPhaseTimingKey =
     | 'rerank'
     | 'registryLoad'
     | 'grouping'
-    | 'navigationValidation';
+    | 'navigationValidation'
+    | 'freshnessCheckpointProof'
+    | 'freshnessExactPathComparison'
+    | 'incrementalPublication'
+    | 'publicationSourceNavigationLoad'
+    | 'publicationFork'
+    | 'publicationPayloadDelta'
+    | 'publicationNavigationCheckpoint'
+    | 'publicationNavigationDelta'
+    | 'publicationRelationshipLoad'
+    | 'publicationRelationshipDelta'
+    | 'publicationSidecarStage'
+    | 'publicationCheckpointStage'
+    | 'publicationPayloadCount'
+    | 'publicationActivation'
+    | 'publicationRetentionProof'
+    | 'finalSourceValidation';
 
 export type FrozenSearchResultSet = {
     canonicalRoot: string;
@@ -357,6 +375,15 @@ type RequestSourceBarrier =
         mode: 'full_comparison';
         authorityObservation: string;
     }>;
+
+type CompletedFreshnessRequestProof = Readonly<{
+    checkpointObservation: string;
+    collectionName: string;
+    markerRunId: string;
+    indexPolicyHash: string;
+    comparisonMode: 'full' | 'exact_paths';
+    exactPathCount: number;
+}>;
 
 const WATCHER_UNAVAILABLE_SOURCE_REASONS = new Set([
     'watcher_disabled',
@@ -497,6 +524,53 @@ function parsePreparedReadObservation(value: string): PreparedReadObservationSna
             : null;
     } catch {
         return null;
+    }
+}
+
+function sourceBackedBindingMatchesPreparedObservation(
+    binding: NonNullable<
+        Extract<
+            TrackedRootReadinessState,
+            { state: "ready" }
+        >["sourceBackedNavigationBinding"]
+    >,
+    preparedObservation: string,
+): boolean {
+    const observation = parsePreparedReadObservation(preparedObservation);
+    if (!observation) return false;
+    try {
+        const navigationAuthority = JSON.parse(observation.navigationAuthority) as {
+            binding?: {
+                status?: unknown;
+                generationId?: unknown;
+                sealHash?: unknown;
+            };
+            observation?: {
+                status?: unknown;
+                token?: unknown;
+            };
+        };
+        const authorityBinding = navigationAuthority.binding;
+        const authorityObservation = navigationAuthority.observation;
+        if (
+            authorityBinding?.status !== "sealed"
+            || authorityBinding.generationId !== binding.generationId
+            || authorityBinding.sealHash !== binding.navigationSealHash
+            || authorityObservation?.status !== "valid"
+            || typeof authorityObservation.token !== "string"
+        ) {
+            return false;
+        }
+        const token = JSON.parse(authorityObservation.token) as {
+            symbolRegistryManifestHash?: unknown;
+            relationshipManifestHash?: unknown;
+            navigationSealHash?: unknown;
+        };
+        return token.symbolRegistryManifestHash === binding.symbolRegistryManifestHash
+            && token.relationshipManifestHash === binding.relationshipManifestHash
+            && token.navigationSealHash === binding.navigationSealHash;
+    } catch {
+        return false;
     }
 }
 
@@ -642,6 +716,7 @@ export class ToolHandlers {
     private readonly callGraphManager: CallGraphSidecarManager;
     private readonly reranker: VoyageAIReranker | null;
     private readonly navigationStore: NavigationStore;
+    private readonly canonicalNavigationAuthorityAvailable: boolean;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
     private readonly rootGitignoreMatcherCache = new Map<string, GitignoreMatcherCacheEntry>();
     private readonly preparedReadCache = new PreparedReadCache<Extract<TrackedRootReadinessState, { state: 'ready' }>>();
@@ -687,6 +762,14 @@ export class ToolHandlers {
         this.searchContinuationCoordinator.registerOwner(this);
         this.gitignoreForceReloadEveryN = Math.max(1, Math.trunc(gitignoreForceReloadEveryN));
         this.navigationStore = navigationStore;
+        this.canonicalNavigationAuthorityAvailable = Boolean(
+            mutationLeaseCoordinator
+            && typeof (
+                context as unknown as {
+                    getIndexAuthorityObservations?: unknown;
+                }
+            ).getIndexAuthorityObservations === "function"
+        );
         const searchQuerySupportHost: ConstructorParameters<typeof SearchQuerySupport>[0] = {
             normalizeSearchPath: this.normalizeSearchPath.bind(this),
             hasPathSegment: this.hasPathSegment.bind(this),
@@ -988,6 +1071,22 @@ export class ToolHandlers {
             registryLoad: 0,
             grouping: 0,
             navigationValidation: 0,
+            freshnessCheckpointProof: 0,
+            freshnessExactPathComparison: 0,
+            incrementalPublication: 0,
+            publicationSourceNavigationLoad: 0,
+            publicationFork: 0,
+            publicationPayloadDelta: 0,
+            publicationNavigationCheckpoint: 0,
+            publicationNavigationDelta: 0,
+            publicationRelationshipLoad: 0,
+            publicationRelationshipDelta: 0,
+            publicationSidecarStage: 0,
+            publicationCheckpointStage: 0,
+            publicationPayloadCount: 0,
+            publicationActivation: 0,
+            publicationRetentionProof: 0,
+            finalSourceValidation: 0,
         };
     }
 
@@ -1256,9 +1355,28 @@ export class ToolHandlers {
     private isPreparedNavigationReadCurrent(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
     ): boolean {
-        if (!preparedRead.generationReceipt || !preparedRead.preparedObservation) {
-            // Lightweight injected navigation stores do not own Core authority.
+        if (!this.canonicalNavigationAuthorityAvailable) {
+            // Lightweight injected hosts explicitly do not expose Core's publication
+            // authority. Their navigation contract is owned by the injected store.
             return true;
+        }
+        if (
+            preparedRead.navigationAuthorityMode === "source_backed_fingerprint_compatibility"
+        ) {
+            return Boolean(
+                preparedRead.sourceBackedNavigationBinding
+                && preparedRead.sourceBackedNavigationBindingValidated
+                && preparedRead.preparedObservation
+                && sourceBackedBindingMatchesPreparedObservation(
+                    preparedRead.sourceBackedNavigationBinding,
+                    preparedRead.preparedObservation,
+                )
+                && this.getPreparedAuthorityObservation(preparedRead.root.path)
+                    === preparedRead.preparedObservation
+            );
+        }
+        if (!preparedRead.generationReceipt || !preparedRead.preparedObservation) {
+            return false;
         }
         return this.getPreparedNavigationIdentity(preparedRead) !== null;
     }
@@ -1317,10 +1435,25 @@ export class ToolHandlers {
         if (operations) operations.registryLoads += 1;
         const result = await this.navigationStore.getManifest({
             normalizedRootPath: root,
-            ...(preparedRead.generationReceipt
-                ? { generationId: preparedRead.generationReceipt.navigation.generationId }
+            ...(preparedRead.generationReceipt || preparedRead.sourceBackedNavigationBinding
+                ? {
+                    generationId: preparedRead.generationReceipt?.navigation.generationId
+                        ?? preparedRead.sourceBackedNavigationBinding?.generationId,
+                }
                 : {}),
         });
+        if (
+            result.status === "ok"
+            && preparedRead.sourceBackedNavigationBinding
+            && result.manifestHash
+                !== preparedRead.sourceBackedNavigationBinding.symbolRegistryManifestHash
+        ) {
+            return {
+                status: "incompatible",
+                rootPath: result.rootPath,
+                reason: "symbol registry manifest does not match the completion marker binding",
+            };
+        }
         if (
             result.status === 'ok'
             && identityBefore
@@ -1349,11 +1482,26 @@ export class ToolHandlers {
 
         const result = await this.navigationStore.getSymbolsByFile({
             normalizedRootPath: root,
-            ...(preparedRead.generationReceipt
-                ? { generationId: preparedRead.generationReceipt.navigation.generationId }
+            ...(preparedRead.generationReceipt || preparedRead.sourceBackedNavigationBinding
+                ? {
+                    generationId: preparedRead.generationReceipt?.navigation.generationId
+                        ?? preparedRead.sourceBackedNavigationBinding?.generationId,
+                }
                 : {}),
             file,
         });
+        if (
+            result.status === "ok"
+            && preparedRead.sourceBackedNavigationBinding
+            && result.manifestHash
+                !== preparedRead.sourceBackedNavigationBinding.symbolRegistryManifestHash
+        ) {
+            return {
+                status: "incompatible",
+                rootPath: result.rootPath,
+                reason: "symbol registry manifest does not match the completion marker binding",
+            };
+        }
         if (
             result.status === 'ok'
             && identityBefore
@@ -1390,11 +1538,43 @@ export class ToolHandlers {
         if (operations) operations.navigationValidationRuns += 1;
         const result = await this.navigationStore.getCompatibilityState({
             normalizedRootPath: root,
-            ...(preparedRead.generationReceipt
-                ? { generationId: preparedRead.generationReceipt.navigation.generationId }
+            ...(preparedRead.generationReceipt || preparedRead.sourceBackedNavigationBinding
+                ? {
+                    generationId: preparedRead.generationReceipt?.navigation.generationId
+                        ?? preparedRead.sourceBackedNavigationBinding?.generationId,
+                }
                 : {}),
             expectedSymbolRegistryManifestHash,
         });
+        if (preparedRead.sourceBackedNavigationBinding) {
+            const binding = preparedRead.sourceBackedNavigationBinding;
+            if (
+                result.registry.status === "ok"
+                && result.registry.manifestHash !== binding.symbolRegistryManifestHash
+            ) {
+                return {
+                    ...result,
+                    registry: {
+                        status: "incompatible",
+                        rootPath: result.registry.rootPath,
+                        reason: "symbol registry manifest does not match the completion marker binding",
+                    },
+                };
+            }
+            if (
+                result.relationships.status === "ok"
+                && result.relationships.manifestHash !== binding.relationshipManifestHash
+            ) {
+                return {
+                    ...result,
+                    relationships: {
+                        status: "incompatible",
+                        rootPath: result.relationships.rootPath,
+                        reason: "relationship manifest does not match the completion marker binding",
+                    },
+                };
+            }
+        }
         if (
             result.registry?.status === 'ok'
             && result.relationships.status === 'ok'
@@ -1647,6 +1827,30 @@ export class ToolHandlers {
             'navigation',
         );
         if (state.state === 'ready') {
+            if (
+                this.canonicalNavigationAuthorityAvailable
+                && state.navigationAuthorityMode
+                    === "source_backed_fingerprint_compatibility"
+                && state.sourceBackedNavigationBinding
+            ) {
+                const binding = state.sourceBackedNavigationBinding;
+                const sealRead = await readNavigationGenerationSeal(
+                    undefined,
+                    state.root.path,
+                    binding.generationId,
+                );
+                if (
+                    sealRead.status === "ok"
+                    && sealRead.seal.symbolRegistryManifestHash
+                        === binding.symbolRegistryManifestHash
+                    && sealRead.seal.relationshipManifestHash
+                        === binding.relationshipManifestHash
+                    && computeNavigationGenerationSealHash(sealRead.seal)
+                        === binding.navigationSealHash
+                ) {
+                    state.sourceBackedNavigationBindingValidated = true;
+                }
+            }
             this.seedPreparedRead(state, false);
         }
         return state;
@@ -3555,6 +3759,7 @@ export class ToolHandlers {
         let preservePreparedProofAge = false;
         let releasePublicationReadLease: (() => void) | undefined;
         let observedChangedFilesForSearch: { available: boolean; files: Set<string> } | undefined;
+        let completedFreshnessRequestProof: CompletedFreshnessRequestProof | undefined;
 
         const readinessPhaseToSearchPhase = {
             snapshot_reload: 'snapshotReload',
@@ -3650,6 +3855,10 @@ export class ToolHandlers {
                         observedChangedFilesForSearch = changedFilesState;
                         const exactSourceComparisonRequired = changedFilesState.available
                             && changedFilesState.files.size > 0;
+                        const exactSourceComparisonPaths = sourceDriftRetryCount === 0
+                            && exactSourceComparisonRequired
+                            ? Array.from(changedFilesState.files).sort()
+                            : undefined;
                         const statusPreparedSourceObservation = preparedRead?.statusPrepared === true
                             ? this.getPreparedReadCacheObservation(effectiveRoot)
                             : null;
@@ -3672,7 +3881,7 @@ export class ToolHandlers {
                             });
                         }
 
-                        return this.syncManager.ensureFreshness(
+                        const decision = await this.syncManager.ensureFreshness(
                             effectiveRoot,
                             exactSourceComparisonRequired || fullSourceComparisonRequired
                                 ? 0
@@ -3681,15 +3890,89 @@ export class ToolHandlers {
                                 ...(preparedRead?.vectorReceipt
                                     ? { preparedVectorReceipt: preparedRead.vectorReceipt }
                                     : {}),
-                                ...(exactSourceComparisonRequired && !fullSourceComparisonRequired
+                                ...(exactSourceComparisonPaths
+                                    ? { exactSourceComparisonPaths }
+                                    : {}),
+                                ...(debugMode === 'freshness' || debugMode === 'full'
                                     ? {
-                                        exactSourceComparisonPaths: Array.from(
-                                            changedFilesState.files,
-                                        ).sort(),
+                                        onPhaseTiming: (
+                                            phase:
+                                                | 'checkpoint_proof'
+                                                | 'exact_path_comparison'
+                                                | 'incremental_publication'
+                                                | 'publication_source_navigation_load'
+                                                | 'publication_fork'
+                                                | 'publication_payload_delta'
+                                                | 'publication_navigation_checkpoint'
+                                                | 'publication_navigation_delta'
+                                                | 'publication_relationship_load'
+                                                | 'publication_relationship_delta'
+                                                | 'publication_sidecar_stage'
+                                                | 'publication_checkpoint_stage'
+                                                | 'publication_payload_count'
+                                                | 'publication_activation'
+                                                | 'publication_retention_proof',
+                                            durationMs: number,
+                                        ) => {
+                                            const timingKey = {
+                                                checkpoint_proof: 'freshnessCheckpointProof',
+                                                exact_path_comparison: 'freshnessExactPathComparison',
+                                                incremental_publication: 'incrementalPublication',
+                                                publication_source_navigation_load:
+                                                    'publicationSourceNavigationLoad',
+                                                publication_fork: 'publicationFork',
+                                                publication_payload_delta: 'publicationPayloadDelta',
+                                                publication_navigation_checkpoint:
+                                                    'publicationNavigationCheckpoint',
+                                                publication_navigation_delta:
+                                                    'publicationNavigationDelta',
+                                                publication_relationship_load:
+                                                    'publicationRelationshipLoad',
+                                                publication_relationship_delta:
+                                                    'publicationRelationshipDelta',
+                                                publication_sidecar_stage:
+                                                    'publicationSidecarStage',
+                                                publication_checkpoint_stage:
+                                                    'publicationCheckpointStage',
+                                                publication_payload_count:
+                                                    'publicationPayloadCount',
+                                                publication_activation: 'publicationActivation',
+                                                publication_retention_proof:
+                                                    'publicationRetentionProof',
+                                            }[phase] as SearchPhaseTimingKey;
+                                            phaseTimings[timingKey] += durationMs;
+                                        },
                                     }
                                     : {}),
                             },
                         );
+                        if (
+                            fullSourceComparisonRequired
+                            && !decision.errorMessage
+                            && (
+                                decision.mode === 'synced'
+                                || decision.mode === 'skipped_source_unchanged'
+                                || decision.mode === 'reconciled_ignore_change'
+                            )
+                        ) {
+                            const checkpoint = await this.context.inspectSourceFreshnessCheckpoint(
+                                effectiveRoot,
+                            );
+                            if (checkpoint.status === 'valid' && checkpoint.generationReceipt) {
+                                completedFreshnessRequestProof = {
+                                    checkpointObservation: checkpoint.observationToken,
+                                    collectionName: checkpoint.generationReceipt.collectionName,
+                                    markerRunId: checkpoint.generationReceipt.marker.runId,
+                                    indexPolicyHash:
+                                        checkpoint.generationReceipt.marker.indexPolicyHash,
+                                    comparisonMode: exactSourceComparisonPaths
+                                        ? 'exact_paths'
+                                        : 'full',
+                                    exactPathCount: exactSourceComparisonPaths?.length ?? 0,
+                                };
+                            }
+                        }
+                        return decision;
                     },
                 ),
                 noteFreshnessMode: (mode) => {
@@ -3776,15 +4059,58 @@ export class ToolHandlers {
                 && finalSourceObservation.unavailableReason !== undefined
                 && WATCHER_UNAVAILABLE_SOURCE_REASONS.has(finalSourceObservation.unavailableReason)
             ) {
-                const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
-                    effectiveRoot,
-                    vectorReceipt,
-                );
-                if (comparison.status === 'matches') {
+                let freshnessProofBound = false;
+                if (completedFreshnessRequestProof) {
+                    const checkpoint = await this.measureSearchPhase(
+                        phaseTimings,
+                        'freshnessCheckpointProof',
+                        () => this.context.inspectSourceFreshnessCheckpoint(
+                            effectiveRoot,
+                            undefined,
+                            vectorReceipt,
+                        ),
+                    );
+                    freshnessProofBound = checkpoint.status === 'valid'
+                        && checkpoint.observationToken
+                            === completedFreshnessRequestProof.checkpointObservation
+                        && checkpoint.generationReceipt?.collectionName
+                            === completedFreshnessRequestProof.collectionName
+                        && checkpoint.generationReceipt.marker.runId
+                            === completedFreshnessRequestProof.markerRunId
+                        && checkpoint.generationReceipt.marker.indexPolicyHash
+                            === completedFreshnessRequestProof.indexPolicyHash;
+                }
+                if (freshnessProofBound) {
                     requestSourceBarrier = {
                         mode: 'full_comparison',
                         authorityObservation: finalSourceObservation.observation,
                     };
+                    readinessDebug.requestProof = {
+                        freshnessComparisonMode:
+                            completedFreshnessRequestProof!.comparisonMode,
+                        exactPathCount: completedFreshnessRequestProof!.exactPathCount,
+                        checkpointBindings: 1,
+                        preRetrievalFullComparisons: 0,
+                        finalFullComparisons: 0,
+                    };
+                } else {
+                    const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
+                        effectiveRoot,
+                        vectorReceipt,
+                    );
+                    if (comparison.status === 'matches') {
+                        requestSourceBarrier = {
+                            mode: 'full_comparison',
+                            authorityObservation: finalSourceObservation.observation,
+                        };
+                        readinessDebug.requestProof = {
+                            freshnessComparisonMode: 'full',
+                            exactPathCount: 0,
+                            checkpointBindings: 0,
+                            preRetrievalFullComparisons: 1,
+                            finalFullComparisons: 0,
+                        };
+                    }
                 }
             }
             if (!requestSourceBarrier) {
@@ -3824,10 +4150,17 @@ export class ToolHandlers {
                 ) {
                     return true;
                 }
-                const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
-                    effectiveRoot,
-                    vectorReceipt,
+                const comparison = await this.measureSearchPhase(
+                    phaseTimings,
+                    'finalSourceValidation',
+                    () => this.context.compareAllSourceToFreshnessCheckpoint(
+                        effectiveRoot,
+                        vectorReceipt,
+                    ),
                 );
+                if (readinessDebug.requestProof) {
+                    readinessDebug.requestProof.finalFullComparisons += 1;
+                }
                 return comparison.status !== 'matches';
             };
             if (debugMode === 'full' && finalSourceObservation.unavailableReason) {
@@ -3937,6 +4270,7 @@ export class ToolHandlers {
             const preparedReadState: Extract<TrackedRootReadinessState, { state: 'ready' }> = {
                 state: 'ready',
                 root: searchableRoot,
+                navigationAuthorityMode: 'canonical_v4',
                 proofDebugHint,
                 vectorReceipt,
                 generationReceipt,

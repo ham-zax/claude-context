@@ -348,6 +348,13 @@ export interface SearchReadinessDebugHint {
     auditClassification?: "proof_expiry_audit";
     observationUnavailableReason?: PreparedReadObservationUnavailableReason;
     watcher?: PreparedReadWatcherDiagnostics;
+    requestProof?: {
+        freshnessComparisonMode: "full" | "exact_paths";
+        exactPathCount: number;
+        checkpointBindings: number;
+        preRetrievalFullComparisons: number;
+        finalFullComparisons: number;
+    };
     operations: {
         preparedCacheLookups: number;
         preparedCacheHits: number;
@@ -463,6 +470,22 @@ export interface SearchDebugHint {
         registryLoad: number;
         grouping: number;
         navigationValidation: number;
+        freshnessCheckpointProof: number;
+        freshnessExactPathComparison: number;
+        incrementalPublication: number;
+        publicationSourceNavigationLoad: number;
+        publicationFork: number;
+        publicationPayloadDelta: number;
+        publicationNavigationCheckpoint: number;
+        publicationNavigationDelta: number;
+        publicationRelationshipLoad: number;
+        publicationRelationshipDelta: number;
+        publicationSidecarStage: number;
+        publicationCheckpointStage: number;
+        publicationPayloadCount: number;
+        publicationActivation: number;
+        publicationRetentionProof: number;
+        finalSourceValidation: number;
     };
     readiness: SearchReadinessDebugHint;
     passesUsed: string[];

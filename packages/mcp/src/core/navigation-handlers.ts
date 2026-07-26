@@ -1276,7 +1276,11 @@ export class NavigationHandlers {
             const relationshipBackedGraph = await this.host.buildRelationshipBackedCallGraph({
                 codebaseRoot: effectiveRoot,
                 ...(trackedRootState.generationReceipt
-                    ? { generationId: trackedRootState.generationReceipt.navigation.generationId }
+                    || trackedRootState.sourceBackedNavigationBinding
+                    ? {
+                        generationId: trackedRootState.generationReceipt?.navigation.generationId
+                            ?? trackedRootState.sourceBackedNavigationBinding?.generationId,
+                    }
                     : {}),
                 registry: registryState.registry,
                 registryManifestHash: registryState.manifestHash,

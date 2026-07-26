@@ -759,37 +759,229 @@ test('navigation never mixes a prepared publication with a later active publicat
             endLine: 1,
             fileHash: crypto.createHash('sha256').update(source).digest('hex'),
         });
-        await writeNavigationSidecars({
+        const registry = await writeNavigationSidecars({
             stateRoot,
             repoPath,
             symbols: [authSymbol],
         });
 
-        const createHandlersWithAuthorityChange = (activateOnValidationRead: number) => {
+        const createHandlersWithAuthorityChange = () => {
             const watch = createWatchRecorder();
+            let authority = 'publication-p';
+            const authorityObservation = () => {
+                const suffix = authority === 'publication-p' ? 'p' : 'q';
+                return JSON.stringify({
+                    vectorAuthority: `vector-${authority}`,
+                    navigationAuthority: JSON.stringify({
+                        binding: {
+                            status: 'sealed',
+                            generationId: `generation-${suffix}`,
+                            sealHash: `seal-${suffix}`,
+                        },
+                        observation: {
+                            status: 'valid',
+                            token: JSON.stringify({
+                                symbolRegistryManifestHash: `registry-${suffix}`,
+                                relationshipManifestHash: `relationships-${suffix}`,
+                                navigationSealHash: `seal-${suffix}`,
+                            }),
+                        },
+                    }),
+                    mutationGeneration: authority === 'publication-p' ? 1 : 2,
+                });
+            };
+            const generationReceipt = {
+                collectionName: 'collection-p',
+                marker: { runId: 'run-p' },
+                policy: {
+                    canonicalRoot: repoPath,
+                    policyHash: 'policy-p',
+                },
+                policyDocumentDigest: '1'.repeat(64),
+                exactPayloadCount: 1,
+                navigation: {
+                    generationId: 'generation-p',
+                    symbolRegistryManifestHash: 'registry-p',
+                    relationshipManifestHash: 'relationships-p',
+                    navigationSealHash: 'seal-p',
+                },
+                observations: {
+                    profileFileToken: null,
+                    policyFileToken: 'policy-token-p',
+                    navigationToken: 'navigation-token-p',
+                },
+            } as never;
+            const context = {
+                getIndexAuthorityObservations: () => ({
+                    vector: `vector-${authority}`,
+                    navigation: `navigation-${authority}`,
+                }),
+            } as unknown as HandlerContext;
+            const mutationLeaseCoordinator = {
+                observe: () => ({
+                    mutationActive: false,
+                    generation: authority === 'publication-p' ? 1 : 2,
+                }),
+                getActiveLease: () => null,
+            };
             const handlers = new ToolHandlers(
-                {} as unknown as HandlerContext,
+                context,
                 createMutableSnapshot(repoPath, 'indexed'),
                 watch.syncManager,
                 RUNTIME_FINGERPRINT,
                 CAPABILITIES,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                null,
+                mutationLeaseCoordinator as never,
             );
             const overrides = handlers as unknown as ToolHandlersTestOverrides;
-            let authority = 'publication-p';
-            let validationReads = 0;
-            overrides.validateCompletionProof = async () => ({ outcome: 'valid' });
-            overrides.getPreparedAuthorityObservation = () => authority;
-            overrides.isPreparedNavigationReadCurrent = () => {
-                validationReads += 1;
-                if (validationReads >= activateOnValidationRead) {
-                    authority = 'publication-q';
-                }
-                return authority === 'publication-p';
+            overrides.getPreparedAuthorityObservation = authorityObservation;
+            const preparedRead = {
+                state: 'ready' as const,
+                root: {
+                    path: repoPath,
+                    info: { status: 'indexed' as const },
+                },
+                navigationAuthorityMode: 'canonical_v4' as const,
+                generationReceipt,
+                navigationStatus: 'valid' as const,
+                preparedObservation: authorityObservation(),
             };
-            return { handlers, watch };
+            const navigationHost = (
+                handlers as unknown as {
+                    navigationHandlers: {
+                        host: Record<string, unknown>;
+                    };
+                }
+            ).navigationHandlers.host as {
+                prepareNavigationRead: () => Promise<typeof preparedRead>;
+                loadPreparedNavigationSymbolsByFile: () => Promise<unknown>;
+                loadPreparedNavigationCompatibility: () => Promise<unknown>;
+                loadRegistryValidatedCallGraphSidecar: () => Promise<unknown>;
+                buildRelationshipBackedCallGraph: () => Promise<unknown>;
+            };
+            navigationHost.prepareNavigationRead = async () => preparedRead;
+            navigationHost.loadPreparedNavigationSymbolsByFile = async () => {
+                const result = {
+                    status: 'ok',
+                    rootPath: repoPath,
+                    manifestHash: 'registry-p',
+                    registryManifestHash: 'registry-p',
+                    registry,
+                    symbols: [authSymbol],
+                    warnings: [],
+                };
+                authority = 'publication-q';
+                return result;
+            };
+            navigationHost.loadPreparedNavigationCompatibility = async () => ({
+                rootPath: repoPath,
+                registry: {
+                    status: 'ok',
+                    rootPath: repoPath,
+                    manifestHash: 'registry-p',
+                    registryManifestHash: 'registry-p',
+                    registry,
+                    warnings: [],
+                },
+                relationships: {
+                    status: 'ok',
+                    rootPath: repoPath,
+                    manifestHash: 'relationships-p',
+                    manifest: {
+                        builtAt: '2026-06-17T00:00:00.000Z',
+                    },
+                    records: [],
+                    warnings: [],
+                },
+            });
+            navigationHost.loadRegistryValidatedCallGraphSidecar = async () => ({
+                relationshipReady: true,
+                relationshipBuiltAt: '2026-06-17T00:00:00.000Z',
+            });
+            navigationHost.buildRelationshipBackedCallGraph = async () => ({
+                supported: true,
+                direction: 'both',
+                depth: 1,
+                limit: 5,
+                nodes: [{
+                    symbolId: authSymbol.symbolInstanceId,
+                    symbolLabel: authSymbol.label,
+                    file: authSymbol.file,
+                    language: authSymbol.language,
+                    span: authSymbol.span,
+                }],
+                edges: [],
+                notes: [],
+                notesTruncated: false,
+                totalNoteCount: 0,
+                returnedNoteCount: 0,
+                sidecar: {
+                    builtAt: '2026-06-17T00:00:00.000Z',
+                    nodeCount: 1,
+                    edgeCount: 0,
+                },
+            });
+            return { handlers, watch, preparedRead, setAuthority: (value: string) => {
+                authority = value;
+            } };
         };
 
-        const outlineCandidate = createHandlersWithAuthorityChange(2);
+        const outlineCandidate = createHandlersWithAuthorityChange();
+        const outlineAuthority = outlineCandidate.handlers as unknown as {
+            isPreparedNavigationReadCurrent: (preparedRead: unknown) => boolean;
+        };
+        assert.equal(
+            outlineAuthority.isPreparedNavigationReadCurrent(outlineCandidate.preparedRead),
+            true,
+        );
+        const missingCanonicalProof = {
+            ...outlineCandidate.preparedRead,
+            generationReceipt: undefined,
+            preparedObservation: undefined,
+        };
+        assert.equal(
+            outlineAuthority.isPreparedNavigationReadCurrent(missingCanonicalProof),
+            false,
+        );
+        const sourceBackedProof = {
+            ...outlineCandidate.preparedRead,
+            navigationAuthorityMode:
+                'source_backed_fingerprint_compatibility' as const,
+            generationReceipt: undefined,
+            sourceBackedNavigationBinding: {
+                generationId: 'generation-p',
+                symbolRegistryManifestHash: 'registry-p',
+                relationshipManifestHash: 'relationships-p',
+                navigationSealHash: 'seal-p',
+            },
+            sourceBackedNavigationBindingValidated: true as const,
+        };
+        assert.equal(
+            outlineAuthority.isPreparedNavigationReadCurrent({
+                ...sourceBackedProof,
+                sourceBackedNavigationBindingValidated: undefined,
+            }),
+            false,
+        );
+        assert.equal(
+            outlineAuthority.isPreparedNavigationReadCurrent(sourceBackedProof),
+            true,
+        );
+        outlineCandidate.setAuthority('publication-q');
+        assert.equal(
+            outlineAuthority.isPreparedNavigationReadCurrent(outlineCandidate.preparedRead),
+            false,
+        );
+        assert.equal(
+            outlineAuthority.isPreparedNavigationReadCurrent(sourceBackedProof),
+            false,
+        );
+        outlineCandidate.setAuthority('publication-p');
         const outlineResponse = await outlineCandidate.handlers.handleFileOutline({
             path: repoPath,
             file: 'src/auth.ts',
@@ -800,7 +992,7 @@ test('navigation never mixes a prepared publication with a later active publicat
         assert.equal(outlinePayload.outline, null);
         assert.equal(outlineCandidate.watch.ensureCalls, 0);
 
-        const graphCandidate = createHandlersWithAuthorityChange(1);
+        const graphCandidate = createHandlersWithAuthorityChange();
         const graphResponse = await graphCandidate.handlers.handleCallGraph({
             path: repoPath,
             symbolRef: {

@@ -947,7 +947,7 @@ test('watcher-disabled search composes the real MCP freshness owner with Core so
             (await context.inspectSourceFreshnessCheckpoint(repoPath)).status,
             'valid',
         );
-        assert.deepEqual(comparisonResults, Array(6).fill('matches'));
+        assert.deepEqual(comparisonResults, Array(3).fill('matches'));
     });
 });
 

@@ -194,11 +194,30 @@ interface EnsureFreshnessOptions {
     mutationLease?: RootMutationLease;
     preparedVectorReceipt?: ProvenVectorGenerationReceipt;
     exactSourceComparisonPaths?: readonly string[];
+    onPhaseTiming?: (
+        phase:
+            | 'checkpoint_proof'
+            | 'exact_path_comparison'
+            | 'incremental_publication'
+            | 'publication_source_navigation_load'
+            | 'publication_fork'
+            | 'publication_payload_delta'
+            | 'publication_navigation_checkpoint'
+            | 'publication_navigation_delta'
+            | 'publication_relationship_load'
+            | 'publication_relationship_delta'
+            | 'publication_sidecar_stage'
+            | 'publication_checkpoint_stage'
+            | 'publication_payload_count'
+            | 'publication_activation'
+            | 'publication_retention_proof',
+        durationMs: number,
+    ) => void;
 }
 
 type CrossProcessSyncJoinRequest = Pick<
     EnsureFreshnessOptions,
-    'exactSourceComparisonPaths'
+    'exactSourceComparisonPaths' | 'onPhaseTiming'
 >;
 
 interface IgnoreReloadResult {
@@ -749,11 +768,16 @@ export class SyncManager {
         // Source-freshness ownership is a precondition for every incremental path,
         // including ignore reconciliation. The identity comes from Core authority,
         // never from the lifecycle snapshot.
+        const checkpointValidationStartedAt = Date.now();
         const checkpointValidation = await this.validateSourceFreshnessCheckpoint(
             codebasePath,
             checkedAt,
             thresholdMs,
             options.preparedVectorReceipt,
+        );
+        options.onPhaseTiming?.(
+            'checkpoint_proof',
+            Math.max(0, Date.now() - checkpointValidationStartedAt),
         );
         if ('failure' in checkpointValidation) return checkpointValidation.failure;
 
@@ -809,11 +833,16 @@ export class SyncManager {
         if (!watcherObservationPending && exactSourceComparisonPaths && exactSourceComparisonPaths.length > 0) {
             const compareSourcePaths = this.context.compareSourcePathsToFreshnessCheckpoint;
             if (typeof compareSourcePaths === 'function') {
+                const exactComparisonStartedAt = Date.now();
                 const comparison = await compareSourcePaths.call(
                     this.context,
                     codebasePath,
                     exactSourceComparisonPaths,
                     options.preparedVectorReceipt,
+                );
+                options.onPhaseTiming?.(
+                    'exact_path_comparison',
+                    Math.max(0, Date.now() - exactComparisonStartedAt),
                 );
                 if (comparison.status === 'matches') {
                     return {
@@ -851,6 +880,7 @@ export class SyncManager {
                     currentIgnoreControlSignature,
                     {
                         exactSourceComparisonPaths: options.exactSourceComparisonPaths,
+                        onPhaseTiming: options.onPhaseTiming,
                     },
                     checkpointValidation.checkpoint?.generationReceipt,
                 );
@@ -866,9 +896,14 @@ export class SyncManager {
 
         this.activeSyncs.set(codebasePath, syncPromise);
         const outcome = await syncPromise;
+        const committedCheckpointStartedAt = Date.now();
         const committedCheckpoint = await this.inspectSourceFreshnessCheckpoint(
             codebasePath,
             outcome.stats?.generationReceipt,
+        );
+        options.onPhaseTiming?.(
+            'checkpoint_proof',
+            Math.max(0, Date.now() - committedCheckpointStartedAt),
         );
         if (committedCheckpoint?.status === 'valid') {
             this.sourceCheckpointStatuses.set(codebasePath, 'valid');
@@ -1225,9 +1260,14 @@ export class SyncManager {
                     this.mutationLeaseCoordinator.publishWhileCurrent(lease, publish);
                 }
                 : undefined;
+            const fencedCheckpointStartedAt = Date.now();
             const fencedCheckpoint = await this.inspectSourceFreshnessCheckpoint(
                 codebasePath,
                 preparedVectorReceipt,
+            );
+            joinRequest.onPhaseTiming?.(
+                'checkpoint_proof',
+                Math.max(0, Date.now() - fencedCheckpointStartedAt),
             );
             if (fencedCheckpoint && fencedCheckpoint.status !== 'valid') {
                 throw new Error(
@@ -1268,6 +1308,9 @@ export class SyncManager {
                     assertMutationCurrent: assertCurrent,
                     publishMutation: publishCurrent,
                 } : {}),
+                ...(joinRequest.onPhaseTiming
+                    ? { onPhaseTiming: joinRequest.onPhaseTiming }
+                    : {}),
             };
             if (lease) {
                 this.mutationLeaseCoordinator?.assertCurrent(lease);
@@ -1276,7 +1319,12 @@ export class SyncManager {
             if (writingOperation) {
                 lastDurableOperation = writingOperation;
             }
+            const publicationStartedAt = Date.now();
             const stats: SyncStats = await this.context.reindexByChange(codebasePath, undefined, syncOptions);
+            joinRequest.onPhaseTiming?.(
+                'incremental_publication',
+                Math.max(0, Date.now() - publicationStartedAt),
+            );
             if (lease) {
                 this.mutationLeaseCoordinator?.assertCurrent(lease);
             }

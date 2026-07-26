@@ -791,6 +791,22 @@ type ReindexByChangeOptions = {
     publishMutation?: (publish: () => void) => void;
     publicationAuthority?: DurableAuthorityMutationOwner;
     sourceGenerationReceipt?: ProvenGenerationReceipt;
+    onPhaseTiming?: (
+        phase:
+            | 'publication_source_navigation_load'
+            | 'publication_fork'
+            | 'publication_payload_delta'
+            | 'publication_navigation_checkpoint'
+            | 'publication_navigation_delta'
+            | 'publication_relationship_load'
+            | 'publication_relationship_delta'
+            | 'publication_sidecar_stage'
+            | 'publication_checkpoint_stage'
+            | 'publication_payload_count'
+            | 'publication_activation'
+            | 'publication_retention_proof',
+        durationMs: number,
+    ) => void;
 };
 
 type MutationGuardOptions = {
@@ -3697,6 +3713,32 @@ export class Context {
         options: ReindexByChangeOptions;
         progressCallback?: (progress: { phase: string; current: number; total: number; percentage: number }) => void;
     }): Promise<ReindexByChangeResult> {
+        const measurePublicationPhase = async <T>(
+            phase:
+                | 'publication_source_navigation_load'
+                | 'publication_fork'
+                | 'publication_payload_delta'
+                | 'publication_navigation_checkpoint'
+                | 'publication_navigation_delta'
+                | 'publication_relationship_load'
+                | 'publication_relationship_delta'
+                | 'publication_sidecar_stage'
+                | 'publication_checkpoint_stage'
+                | 'publication_payload_count'
+                | 'publication_activation'
+                | 'publication_retention_proof',
+            run: () => Promise<T>,
+        ): Promise<T> => {
+            const startedAt = performance.now();
+            try {
+                return await run();
+            } finally {
+                input.options.onPhaseTiming?.(
+                    phase,
+                    Math.max(0, performance.now() - startedAt),
+                );
+            }
+        };
         const { added, removed, modified } = input.preparedChanges.changes;
         const changedFiles = Array.from(new Set([...added, ...removed, ...modified]));
         const totalChanges = changedFiles.length;
@@ -3717,28 +3759,33 @@ export class Context {
         if (reusableNavigationState) {
             existingRegistry = reusableNavigationState.registry;
         } else {
-            const expectedSealHash = sourceNavigation.sealHash;
-            const sealRead = await readNavigationGenerationSeal(
-                this.symbolRegistryStateRoot,
-                input.canonicalRoot,
-                sourceNavigation.generationId,
+            existingRegistry = await measurePublicationPhase(
+                'publication_source_navigation_load',
+                async () => {
+                    const expectedSealHash = sourceNavigation.sealHash;
+                    const sealRead = await readNavigationGenerationSeal(
+                        this.symbolRegistryStateRoot,
+                        input.canonicalRoot,
+                        sourceNavigation.generationId,
+                    );
+                    const registryRead = await readSymbolRegistrySidecar({
+                        stateRoot: this.symbolRegistryStateRoot,
+                        normalizedRootPath: input.canonicalRoot,
+                        generationId: sourceNavigation.generationId,
+                    });
+                    if (sealRead.status !== 'ok'
+                        || sealRead.seal.symbolRegistryManifestHash
+                            !== sourceNavigation.symbolRegistryManifestHash
+                        || sealRead.seal.relationshipManifestHash
+                            !== sourceNavigation.relationshipManifestHash
+                        || computeNavigationGenerationSealHash(sealRead.seal) !== expectedSealHash
+                        || registryRead.status !== 'ok'
+                        || registryRead.manifestHash !== sourceNavigation.symbolRegistryManifestHash) {
+                        throw new Error('Atomic delta publication cannot prove its source navigation metadata; reindex is required.');
+                    }
+                    return registryRead.registry;
+                },
             );
-            const registryRead = await readSymbolRegistrySidecar({
-                stateRoot: this.symbolRegistryStateRoot,
-                normalizedRootPath: input.canonicalRoot,
-                generationId: sourceNavigation.generationId,
-            });
-            if (sealRead.status !== 'ok'
-                || sealRead.seal.symbolRegistryManifestHash
-                    !== sourceNavigation.symbolRegistryManifestHash
-                || sealRead.seal.relationshipManifestHash
-                    !== sourceNavigation.relationshipManifestHash
-                || computeNavigationGenerationSealHash(sealRead.seal) !== expectedSealHash
-                || registryRead.status !== 'ok'
-                || registryRead.manifestHash !== sourceNavigation.symbolRegistryManifestHash) {
-                throw new Error('Atomic delta publication cannot prove its source navigation metadata; reindex is required.');
-            }
-            existingRegistry = registryRead.registry;
         }
 
         const activationId = crypto.randomUUID();
@@ -3750,48 +3797,61 @@ export class Context {
         try {
             await this.waitForPublicationRetention(input.canonicalRoot);
             input.options.assertMutationCurrent?.();
-            await this.vectorDatabase.forkCollection(input.sourceCollectionName, candidateCollectionName);
-
-            let replacedPayloadCount = 0;
-            for (const relativePath of changedFiles) {
-                const pathCount = await this.countIndexedPayloadExactly(
+            await measurePublicationPhase(
+                'publication_fork',
+                () => this.vectorDatabase.forkCollection!(
+                    input.sourceCollectionName,
                     candidateCollectionName,
-                    { kind: 'comparison', field: 'relativePath', operator: 'eq', value: relativePath },
-                    input.previousMarker.totalChunks,
-                );
-                if (pathCount === null) {
-                    throw new Error(`Atomic delta publication could not count existing payload for '${relativePath}'.`);
-                }
-                replacedPayloadCount += pathCount;
-                await this.deleteFileChunks(candidateCollectionName, relativePath, input.options.assertMutationCurrent);
-            }
+                ),
+            );
 
-            let processedChanges = 0;
-            const filesToIndex = [...added, ...modified].map((file) => path.join(input.codebasePath, file));
-            const indexedDelta = filesToIndex.length > 0
-                ? await this.processFileList(
-                    filesToIndex,
-                    input.codebasePath,
-                    (filePath) => {
-                        processedChanges += 1;
-                        input.progressCallback?.({
-                            phase: `Indexed ${filePath}`,
-                            current: processedChanges,
-                            total: totalChanges,
-                            percentage: Math.round((processedChanges / totalChanges) * 100),
-                        });
-                    },
-                    candidateCollectionName,
-                    input.options.assertMutationCurrent,
-                )
-                : {
-                    processedFiles: 0,
-                    totalChunks: 0,
-                    status: 'completed' as const,
-                    symbolRecords: [] as SymbolRecord[],
-                    symbolManifestFiles: [] as SymbolRegistryManifestFile[],
-                    analysisByFile: new Map<string, RelationshipAnalysisEvidence>(),
-                };
+            const payloadDelta = await measurePublicationPhase(
+                'publication_payload_delta',
+                async () => {
+                    let replacedPayloadCount = 0;
+                    for (const relativePath of changedFiles) {
+                        const pathCount = await this.countIndexedPayloadExactly(
+                            candidateCollectionName,
+                            { kind: 'comparison', field: 'relativePath', operator: 'eq', value: relativePath },
+                            input.previousMarker.totalChunks,
+                        );
+                        if (pathCount === null) {
+                            throw new Error(`Atomic delta publication could not count existing payload for '${relativePath}'.`);
+                        }
+                        replacedPayloadCount += pathCount;
+                        await this.deleteFileChunks(candidateCollectionName, relativePath, input.options.assertMutationCurrent);
+                    }
+
+                    let processedChanges = 0;
+                    const filesToIndex = [...added, ...modified].map((file) => path.join(input.codebasePath, file));
+                    const indexedDelta = filesToIndex.length > 0
+                        ? await this.processFileList(
+                            filesToIndex,
+                            input.codebasePath,
+                            (filePath) => {
+                                processedChanges += 1;
+                                input.progressCallback?.({
+                                    phase: `Indexed ${filePath}`,
+                                    current: processedChanges,
+                                    total: totalChanges,
+                                    percentage: Math.round((processedChanges / totalChanges) * 100),
+                                });
+                            },
+                            candidateCollectionName,
+                            input.options.assertMutationCurrent,
+                        )
+                        : {
+                            processedFiles: 0,
+                            totalChunks: 0,
+                            status: 'completed' as const,
+                            symbolRecords: [] as SymbolRecord[],
+                            symbolManifestFiles: [] as SymbolRegistryManifestFile[],
+                            analysisByFile: new Map<string, RelationshipAnalysisEvidence>(),
+                        };
+                    return { indexedDelta, replacedPayloadCount };
+                },
+            );
+            const { indexedDelta, replacedPayloadCount } = payloadDelta;
             if (indexedDelta.status !== 'completed') {
                 throw new Error('Atomic delta publication stopped before every changed file was indexed.');
             }
@@ -3805,18 +3865,22 @@ export class Context {
                 markerRunId,
                 indexPolicyHash: input.sealedPolicy.policyHash,
             };
-            const navigationPromise = this.rebuildNavigationArtifactsForSyncDelta(
-                input.codebasePath,
-                existingRegistry,
-                changedFiles,
-                indexedDelta.symbolRecords,
-                indexedDelta.symbolManifestFiles,
-                input.options.assertMutationCurrent,
-                indexedDelta.analysisByFile,
-                undefined,
-                sourceNavigation.generationId,
-                true,
-                reusableNavigationState,
+            const navigationPromise = measurePublicationPhase(
+                'publication_navigation_delta',
+                () => this.rebuildNavigationArtifactsForSyncDelta(
+                    input.codebasePath,
+                    existingRegistry,
+                    changedFiles,
+                    indexedDelta.symbolRecords,
+                    indexedDelta.symbolManifestFiles,
+                    input.options.assertMutationCurrent,
+                    indexedDelta.analysisByFile,
+                    undefined,
+                    sourceNavigation.generationId,
+                    true,
+                    reusableNavigationState,
+                    input.options.onPhaseTiming,
+                ),
             ).then((result) => {
                 const candidate = result.candidate;
                 if (!candidate) {
@@ -3825,17 +3889,23 @@ export class Context {
                 navigationCandidate = candidate;
                 return result;
             });
-            const checkpointPromise = input.preparedChanges.stageCheckpoint(
-                checkpointAuthority,
-                input.options.assertMutationCurrent,
+            const checkpointPromise = measurePublicationPhase(
+                'publication_checkpoint_stage',
+                () => input.preparedChanges.stageCheckpoint(
+                    checkpointAuthority,
+                    input.options.assertMutationCurrent,
+                ),
             ).then((checkpoint) => {
                 checkpointStaged = true;
                 return checkpoint;
             });
-            const payloadCountPromise = this.countIndexedPayloadExactly(
-                candidateCollectionName,
-                undefined,
-                totalChunks,
+            const payloadCountPromise = measurePublicationPhase(
+                'publication_payload_count',
+                () => this.countIndexedPayloadExactly(
+                    candidateCollectionName,
+                    undefined,
+                    totalChunks,
+                ),
             );
             let candidateResults: Awaited<ReturnType<typeof Promise.all<[
                 typeof navigationPromise,
@@ -3843,11 +3913,14 @@ export class Context {
                 typeof payloadCountPromise,
             ]>>>;
             try {
-                candidateResults = await Promise.all([
-                    navigationPromise,
-                    checkpointPromise,
-                    payloadCountPromise,
-                ]);
+                candidateResults = await measurePublicationPhase(
+                    'publication_navigation_checkpoint',
+                    () => Promise.all([
+                        navigationPromise,
+                        checkpointPromise,
+                        payloadCountPromise,
+                    ]),
+                );
             } catch (error) {
                 await Promise.allSettled([navigationPromise, checkpointPromise, payloadCountPromise]);
                 throw error;
@@ -3857,113 +3930,127 @@ export class Context {
             if (!preparedNavigation || !preparedNavigationResult.state) {
                 throw new Error('Atomic delta publication did not prepare reusable navigation state.');
             }
-            await this.verifyPreparedSyncPublication(
-                input.codebasePath,
-                candidateCollectionName,
-                input.preparedChanges.fileHashes,
-                totalChunks,
-                preparedNavigation,
-                observedTotalChunks,
-            );
-            const publishedMarker = await this.writeCompletedIndexMarker(
-                input.codebasePath,
-                input.preparedChanges.fileHashes.size,
-                totalChunks,
-                candidateCollectionName,
-                'completed',
-                input.options.assertMutationCurrent,
-                preparedNavigation,
-                input.sealedPolicy.policyHash,
-                markerRunId,
-            );
-            const activeDataObservation = this.vectorDatabase.getCollectionDataObservation
-                ? await this.vectorDatabase.getCollectionDataObservation(candidateCollectionName)
-                : undefined;
+            const preparedNavigationState = preparedNavigationResult.state;
+            const activationResult = await measurePublicationPhase(
+                'publication_activation',
+                async () => {
+                    await this.verifyPreparedSyncPublication(
+                        input.codebasePath,
+                        candidateCollectionName,
+                        input.preparedChanges.fileHashes,
+                        totalChunks,
+                        preparedNavigation,
+                        observedTotalChunks,
+                    );
+                    const publishedMarker = await this.writeCompletedIndexMarker(
+                        input.codebasePath,
+                        input.preparedChanges.fileHashes.size,
+                        totalChunks,
+                        candidateCollectionName,
+                        'completed',
+                        input.options.assertMutationCurrent,
+                        preparedNavigation,
+                        input.sealedPolicy.policyHash,
+                        markerRunId,
+                    );
+                    const activeDataObservation = this.vectorDatabase.getCollectionDataObservation
+                        ? await this.vectorDatabase.getCollectionDataObservation(candidateCollectionName)
+                        : undefined;
 
-            const authority = input.options.publicationAuthority ?? {
-                ownerId: 'core-internal',
-                generation: 1,
-                operationId: activationId,
-            };
-            const publication: CanonicalPublicationBinding = {
-                activationId,
-                sourceCheckpoint: {
-                    ...checkpointAuthority,
-                    merkleRoot: checkpoint.merkleRoot,
-                    documentDigest: checkpoint.documentDigest,
-                },
-                graph: {
-                    kind: 'relationship_manifest_v2',
-                    manifestHash: preparedNavigation.relationshipManifestHash,
-                },
-                receipt: {
-                    ownerId: authority.ownerId,
-                    generation: authority.generation,
-                    operationId: authority.operationId,
-                },
-            };
-            await input.preparedChanges.assertSourceObservationCurrent();
-            input.options.assertMutationCurrent?.();
-            this.publishResolvedIndexPolicy(
-                input.sealedPolicy,
-                {
-                    collectionName: candidateCollectionName,
-                    navigation: {
-                        status: 'sealed',
-                        generationId: preparedNavigation.generationId,
-                        sealHash: preparedNavigation.navigationSealHash,
-                    },
-                    publication,
-                },
-                input.options.publishMutation,
-            );
-            activated = true;
-            const navigationObservationToken = this.resolveNavigationObservationToken(
-                input.canonicalRoot,
-                preparedNavigation.generationId,
-                false,
-            );
-            this.navigationDeltaState = navigationObservationToken
-                ? {
-                    ...preparedNavigationResult.state,
-                    navigationObservationToken,
-                }
-                : undefined;
+                    const authority = input.options.publicationAuthority ?? {
+                        ownerId: 'core-internal',
+                        generation: 1,
+                        operationId: activationId,
+                    };
+                    const publication: CanonicalPublicationBinding = {
+                        activationId,
+                        sourceCheckpoint: {
+                            ...checkpointAuthority,
+                            merkleRoot: checkpoint.merkleRoot,
+                            documentDigest: checkpoint.documentDigest,
+                        },
+                        graph: {
+                            kind: 'relationship_manifest_v2',
+                            manifestHash: preparedNavigation.relationshipManifestHash,
+                        },
+                        receipt: {
+                            ownerId: authority.ownerId,
+                            generation: authority.generation,
+                            operationId: authority.operationId,
+                        },
+                    };
+                    await input.preparedChanges.assertSourceObservationCurrent();
+                    input.options.assertMutationCurrent?.();
+                    this.publishResolvedIndexPolicy(
+                        input.sealedPolicy,
+                        {
+                            collectionName: candidateCollectionName,
+                            navigation: {
+                                status: 'sealed',
+                                generationId: preparedNavigation.generationId,
+                                sealHash: preparedNavigation.navigationSealHash,
+                            },
+                            publication,
+                        },
+                        input.options.publishMutation,
+                    );
+                    activated = true;
+                    const navigationObservationToken = this.resolveNavigationObservationToken(
+                        input.canonicalRoot,
+                        preparedNavigation.generationId,
+                        false,
+                    );
+                    this.navigationDeltaState = navigationObservationToken
+                        ? {
+                            ...preparedNavigationState,
+                            navigationObservationToken,
+                        }
+                        : undefined;
 
-            await this.recordActivatedGenerationProof({
-                canonicalRoot: input.canonicalRoot,
-                marker: publishedMarker,
-                policy: input.sealedPolicy,
-                exactPayloadCount: totalChunks,
-                navigation: {
-                    generationId: preparedNavigation.generationId,
-                    generationRoot: preparedNavigation.rootPath,
-                    symbolRegistryManifestHash: preparedNavigation.manifestHash,
-                    relationshipManifestHash: preparedNavigation.relationshipManifestHash,
-                    navigationSealHash: preparedNavigation.navigationSealHash,
+                    await this.recordActivatedGenerationProof({
+                        canonicalRoot: input.canonicalRoot,
+                        marker: publishedMarker,
+                        policy: input.sealedPolicy,
+                        exactPayloadCount: totalChunks,
+                        navigation: {
+                            generationId: preparedNavigation.generationId,
+                            generationRoot: preparedNavigation.rootPath,
+                            symbolRegistryManifestHash: preparedNavigation.manifestHash,
+                            relationshipManifestHash: preparedNavigation.relationshipManifestHash,
+                            navigationSealHash: preparedNavigation.navigationSealHash,
+                        },
+                    });
+                    return { activeDataObservation };
                 },
-            });
-
-            const nextSynchronizer = new FileSynchronizer(
-                input.codebasePath,
-                this.getActiveIgnorePatterns(input.codebasePath),
-                this.getIndexedExtensionsForCodebase(input.codebasePath),
-                { checkpointIdentity: candidateCollectionName, checkpointAuthority },
             );
-            await nextSynchronizer.initialize(undefined, undefined, { requireExistingCheckpoint: true });
-            this.synchronizers.set(input.synchronizerKey, nextSynchronizer);
-            this.synchronizerMutationTargets.delete(input.synchronizerKey);
-            this.schedulePublicationRetention({
-                canonicalRoot: input.canonicalRoot,
-                activationId,
-                activeCollectionName: candidateCollectionName,
-                previousCollectionName: input.sourceCollectionName,
-                activeNavigationGenerationId: preparedNavigation.generationId,
-                previousNavigationGenerationId: sourceNavigation.generationId,
-                ...(activeDataObservation ? { activeDataObservation } : {}),
-            });
-            await this.waitForPublicationRetention(input.canonicalRoot);
-            const retainedGenerationReceipt = await this.proveIndexedGeneration(input.canonicalRoot);
+
+            const retainedGenerationReceipt = await measurePublicationPhase(
+                'publication_retention_proof',
+                async () => {
+                    const nextSynchronizer = new FileSynchronizer(
+                        input.codebasePath,
+                        this.getActiveIgnorePatterns(input.codebasePath),
+                        this.getIndexedExtensionsForCodebase(input.codebasePath),
+                        { checkpointIdentity: candidateCollectionName, checkpointAuthority },
+                    );
+                    await nextSynchronizer.initialize(undefined, undefined, { requireExistingCheckpoint: true });
+                    this.synchronizers.set(input.synchronizerKey, nextSynchronizer);
+                    this.synchronizerMutationTargets.delete(input.synchronizerKey);
+                    this.schedulePublicationRetention({
+                        canonicalRoot: input.canonicalRoot,
+                        activationId,
+                        activeCollectionName: candidateCollectionName,
+                        previousCollectionName: input.sourceCollectionName,
+                        activeNavigationGenerationId: preparedNavigation.generationId,
+                        previousNavigationGenerationId: sourceNavigation.generationId,
+                        ...(activationResult.activeDataObservation
+                            ? { activeDataObservation: activationResult.activeDataObservation }
+                            : {}),
+                    });
+                    await this.waitForPublicationRetention(input.canonicalRoot);
+                    return this.proveIndexedGeneration(input.canonicalRoot);
+                },
+            );
             if (!retainedGenerationReceipt) {
                 throw new Error(
                     `Atomic delta publication for '${input.codebasePath}' is not readable after generation retention.`,
@@ -7947,7 +8034,22 @@ export class Context {
         existingGenerationId?: string,
         deferPublication = false,
         existingRelationshipState?: CachedNavigationDeltaState,
+        onPhaseTiming?: ReindexByChangeOptions['onPhaseTiming'],
     ): Promise<NavigationDeltaBuildResult> {
+        const measurePhase = async <T>(
+            phase:
+                | 'publication_relationship_load'
+                | 'publication_relationship_delta'
+                | 'publication_sidecar_stage',
+            run: () => Promise<T> | T,
+        ): Promise<T> => {
+            const startedAt = performance.now();
+            try {
+                return await run();
+            } finally {
+                onPhaseTiming?.(phase, Math.max(0, performance.now() - startedAt));
+            }
+        };
         const replacedPaths = new Set<string>([
             ...changedRelativePaths.map((filePath) => filePath.replace(/\\/g, '/').replace(/^\/+/, '')),
             ...rebuiltManifestFiles.map((file) => file.path),
@@ -7960,12 +8062,15 @@ export class Context {
                 records: existingRelationshipState.records,
                 analysisByFile: existingRelationshipState.analysisByFile,
             }
-            : await readRelationshipSidecar({
-                stateRoot: this.symbolRegistryStateRoot,
-                normalizedRootPath: this.canonicalizeCodebasePath(codebasePath),
-                expectedSymbolRegistryManifestHash: computeSymbolRegistryManifestHash(existingRegistry.manifest),
-                ...(existingGenerationId ? { generationId: existingGenerationId } : {}),
-            });
+            : await measurePhase(
+                'publication_relationship_load',
+                () => readRelationshipSidecar({
+                    stateRoot: this.symbolRegistryStateRoot,
+                    normalizedRootPath: this.canonicalizeCodebasePath(codebasePath),
+                    expectedSymbolRegistryManifestHash: computeSymbolRegistryManifestHash(existingRegistry.manifest),
+                    ...(existingGenerationId ? { generationId: existingGenerationId } : {}),
+                }),
+            );
         if (existingRelationships.status === 'ok') {
             for (const file of existingRegistry.manifest.files) {
                 const evidence = existingRelationships.analysisByFile.get(file.path);
@@ -8015,26 +8120,32 @@ export class Context {
                 },
                 symbols: mergedSymbolRecords,
             });
-            const relationshipDelta = buildRelationshipDelta({
-                previousRegistry: existingRegistry,
-                registry,
-                existingRecords: existingRelationships.records,
-                analysisByFile: retainedAnalysisByFile,
-                changedFiles: replacedPaths,
-                previousAnalysisByFile,
-            });
+            const relationshipDelta = await measurePhase(
+                'publication_relationship_delta',
+                () => buildRelationshipDelta({
+                    previousRegistry: existingRegistry,
+                    registry,
+                    existingRecords: existingRelationships.records,
+                    analysisByFile: retainedAnalysisByFile,
+                    changedFiles: replacedPaths,
+                    previousAnalysisByFile,
+                }),
+            );
             assertMutationCurrent?.();
-            const candidate = await stageNavigationSidecarGeneration({
-                stateRoot: this.symbolRegistryStateRoot,
-                registry,
-                records: relationshipDelta.records,
-                analysisByFile: retainedAnalysisByFile,
-                deltaReuse: {
-                    baseGenerationId: existingGenerationId,
-                    symbolFilesToRewrite: [...replacedPaths],
-                    relationshipFilesToRewrite: relationshipDelta.affectedFiles,
-                },
-            });
+            const candidate = await measurePhase(
+                'publication_sidecar_stage',
+                () => stageNavigationSidecarGeneration({
+                    stateRoot: this.symbolRegistryStateRoot,
+                    registry,
+                    records: relationshipDelta.records,
+                    analysisByFile: retainedAnalysisByFile,
+                    deltaReuse: {
+                        baseGenerationId: existingGenerationId,
+                        symbolFilesToRewrite: [...replacedPaths],
+                        relationshipFilesToRewrite: relationshipDelta.affectedFiles,
+                    },
+                }),
+            );
             console.log(
                 `[Context] 🧭 Staged navigation delta '${candidate.generationId}' affecting `
                 + `${relationshipDelta.affectedFiles.length} relationship owner(s); `

@@ -789,3 +789,97 @@ CANDIDATE_OUTCOME=agent_facing_freshness_candidate_focused_pass
 
 Final package compatibility and watcher-unavailable production performance
 qualification remain open.
+
+## 15. Final qualification attempt — 2026-07-26
+
+The supported compatibility boundary passed:
+
+```text
+format-3 MCP JSON-text transport
++ repository-owned MCP wrapper
++ repository-owned CLI diagnostics
+-> compatible
+```
+
+This does not claim compatibility for unknown private parsers hard-coded to
+the format-2 object shape.
+
+Watcher-disabled production performance did not pass the frozen product
+budget on the pinned 1,013-Python-file repository:
+
+```text
+unchanged search p95:
+    6718.435 ms <= 7000 ms
+
+one-file changed search:
+    17156.686 ms > 7000 ms
+
+process-tree peak RSS:
+    1215.504 MiB <= 1600 MiB
+```
+
+The required performance stop condition fired before broad suites or the
+separate symbol-analysis finalization began.
+
+Durable receipt:
+
+`docs/evidence/final-candidate-qualification-20260726/FRESHNESS_FINAL_QUALIFICATION_RECEIPT.md`
+
+Current terminal decision:
+
+```text
+FRESHNESS_FINAL_OUTCOME=agent_facing_freshness_contract_blocked
+BLOCKER=watcher-disabled one-file search exceeded the accepted product budget
+```
+
+## 16. WU1 request-proof optimization — 2026-07-26
+
+WU1 removed the demonstrated duplicate pre-retrieval full comparison. The
+completed existing freshness flight is now accepted as the initial
+request-local proof only when its checkpoint tuple binds to the exact
+publication used for retrieval. Git-known changed paths remain available to
+the existing freshness owner on the first attempt. One final full comparison
+remains mandatory.
+
+Focused tests prove:
+
+```text
+pre-retrieval full comparisons = 0
+final full comparisons = 1
+exact changed paths preserved on first attempt
+```
+
+Code inspection confirms that the second attempt does not receive the
+exact-path shortcut and therefore remains on the existing forced-full path.
+
+The same production target improved but still failed:
+
+```text
+unchanged p95:
+    4299.206 ms <= 7000 ms
+
+one-file changed:
+    14425.845 ms > 7000 ms
+
+process-tree peak RSS:
+    1870.340 MiB > 1600 MiB
+```
+
+The first WU1 production run triggered the same required stop condition.
+Budgets were not changed, broad suites were not started, and symbol M0 remains
+paused.
+
+Durable receipt:
+
+`docs/evidence/watcher-unavailable-wu1-20260726/WATCHER_UNAVAILABLE_WU1_RECEIPT.md`
+
+Current decision:
+
+```text
+WU1_OUTCOME=watcher_unavailable_budget_failed
+FRESHNESS_FINAL_OUTCOME=agent_facing_freshness_contract_blocked
+SELECTED_NEXT_DECISION=A
+```
+
+Decision A retains watcher-unavailable automatic freshness as a product goal
+but requires a separately approved performance architecture change.

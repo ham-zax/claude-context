@@ -72,6 +72,14 @@ export type TrackedRootReadinessState =
     | {
         state: "ready";
         root: TrackedRootEntry;
+        navigationAuthorityMode: "canonical_v4" | "source_backed_fingerprint_compatibility";
+        sourceBackedNavigationBinding?: {
+            generationId: string;
+            symbolRegistryManifestHash: string;
+            relationshipManifestHash: string;
+            navigationSealHash: string;
+        };
+        sourceBackedNavigationBindingValidated?: true;
         proofDebugHint?: CompletionProbeDebugHint;
         vectorReceipt?: ProvenVectorGenerationReceipt;
         generationReceipt?: ProvenGenerationReceipt;
@@ -437,6 +445,10 @@ export class TrackedRootReadiness {
 
         const effectiveRoot = searchableRoot.path;
         const preparedObservationBefore = options.observePreparedRead?.(effectiveRoot);
+        let navigationAuthorityMode: Extract<
+            TrackedRootReadinessState,
+            { state: "ready" }
+        >["navigationAuthorityMode"] = "canonical_v4";
         const gateResult = this.measurePhase(
             "fingerprint_gate",
             () => this.host.enforceFingerprintGate(effectiveRoot),
@@ -445,6 +457,7 @@ export class TrackedRootReadiness {
         if (gateResult.blockedResponse) {
             if (accessMode === "navigation" && gateResult.reason === "fingerprint_mismatch") {
                 // Navigation sidecars are source-backed and can still be safe under a runtime-model mismatch.
+                navigationAuthorityMode = "source_backed_fingerprint_compatibility";
             } else {
                 return {
                     state: "requires_reindex",
@@ -469,6 +482,7 @@ export class TrackedRootReadiness {
         if (completionProof.outcome === "fingerprint_mismatch") {
             if (accessMode === "navigation") {
                 // Completion proof mismatch blocks semantic/vector search, not source-backed navigation.
+                navigationAuthorityMode = "source_backed_fingerprint_compatibility";
             } else {
                 return {
                     state: "requires_reindex",
@@ -527,6 +541,20 @@ export class TrackedRootReadiness {
         return {
             state: "ready",
             root: searchableRoot,
+            navigationAuthorityMode,
+            ...(navigationAuthorityMode === "source_backed_fingerprint_compatibility"
+                && completionProof.marker?.navigation.status === "sealed"
+                ? {
+                    sourceBackedNavigationBinding: {
+                        generationId: completionProof.marker.navigation.generationId,
+                        symbolRegistryManifestHash:
+                            completionProof.marker.navigation.symbolRegistryManifestHash,
+                        relationshipManifestHash:
+                            completionProof.marker.navigation.relationshipManifestHash,
+                        navigationSealHash: completionProof.marker.navigation.sealHash,
+                    },
+                }
+                : {}),
             proofDebugHint,
             ...(completionProof.vectorReceipt ? { vectorReceipt: completionProof.vectorReceipt } : {}),
             ...(completionProof.generationReceipt ? { generationReceipt: completionProof.generationReceipt } : {}),

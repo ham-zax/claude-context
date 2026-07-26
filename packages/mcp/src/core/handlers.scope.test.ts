@@ -2093,6 +2093,14 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
         const internals = handlers as unknown as {
             context: HandlerContext & {
                 compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                inspectSourceFreshnessCheckpoint: () => Promise<{
+                    status: 'valid';
+                    observationToken: string;
+                    generationReceipt: {
+                        collectionName: string;
+                        marker: { runId: string; indexPolicyHash: string };
+                    };
+                }>;
                 getIndexAuthorityObservations: () => { vector: string; navigation: string };
             };
             syncManager: HandlerSyncManager & {
@@ -2125,9 +2133,24 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
             };
         };
         let comparisonCalls = 0;
+        let checkpointInspectionCalls = 0;
         internals.context.compareAllSourceToFreshnessCheckpoint = async () => {
             comparisonCalls += 1;
             return { status: 'matches' };
+        };
+        internals.context.inspectSourceFreshnessCheckpoint = async () => {
+            checkpointInspectionCalls += 1;
+            return {
+                status: 'valid',
+                observationToken: 'checkpoint-observation',
+                generationReceipt: {
+                    collectionName: 'committed-v3',
+                    marker: {
+                        runId: 'marker-run',
+                        indexPolicyHash: 'policy-hash',
+                    },
+                },
+            };
         };
         internals.context.getIndexAuthorityObservations = () => ({
             vector: 'vector-stable',
@@ -2167,12 +2190,145 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
             resultMode: 'grouped',
             groupBy: 'symbol',
             limit: 5,
+            debugMode: 'full',
         });
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results.length, 1);
-        assert.equal(comparisonCalls, 2);
+        assert.equal(checkpointInspectionCalls, 2);
+        assert.equal(comparisonCalls, 1);
+        assert.deepEqual(payload.hints.debugSearch.readiness.requestProof, {
+            freshnessComparisonMode: 'full',
+            exactPathCount: 0,
+            checkpointBindings: 1,
+            preRetrievalFullComparisons: 0,
+            finalFullComparisons: 1,
+        });
+    });
+});
+
+test('watcher-disabled search preserves exact changed paths for the first freshness attempt', async () => {
+    await withTempRepo(async (repoPath) => {
+        const handlers = createHandlers(repoPath, [{
+            content: 'export function owner() { return true; }',
+            relativePath: 'src/owner.ts',
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }], undefined, { sourceBarrierMode: 'native', enableVectorReceipt: true });
+        const internals = handlers as unknown as {
+            context: HandlerContext & {
+                compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                inspectSourceFreshnessCheckpoint: () => Promise<{
+                    status: 'valid';
+                    observationToken: string;
+                    generationReceipt: {
+                        collectionName: string;
+                        marker: { runId: string; indexPolicyHash: string };
+                    };
+                }>;
+                getIndexAuthorityObservations: () => { vector: string; navigation: string };
+            };
+            syncManager: HandlerSyncManager & {
+                ensureFreshness: (
+                    codebasePath: string,
+                    thresholdMs: number,
+                    options?: { exactSourceComparisonPaths?: readonly string[] },
+                ) => Promise<{
+                    mode: 'synced';
+                    checkedAt: string;
+                    thresholdMs: number;
+                }>;
+                getPreparedReadObservation: () => {
+                    available: false;
+                    reason: 'watcher_disabled';
+                    freshnessEpoch: number;
+                };
+                getWatcherObservation: () => {
+                    observedEventEpoch: number;
+                    comparedThroughEventEpoch: number;
+                    latestEpochByReason: Record<string, number>;
+                    coverage: 'disabled';
+                    pending: boolean;
+                };
+            };
+            mutationLeaseCoordinator: {
+                observe: () => { mutationActive: boolean; generation: number };
+                getActiveLease: () => null;
+            };
+            getChangedFilesForCodebase: () => { available: true; files: Set<string> };
+        };
+        let comparisonCalls = 0;
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => {
+            comparisonCalls += 1;
+            return { status: 'matches' };
+        };
+        internals.context.inspectSourceFreshnessCheckpoint = async () => ({
+            status: 'valid',
+            observationToken: 'checkpoint-observation',
+            generationReceipt: {
+                collectionName: 'committed-v3',
+                marker: { runId: 'marker-run', indexPolicyHash: 'policy-hash' },
+            },
+        });
+        internals.context.getIndexAuthorityObservations = () => ({
+            vector: 'vector-stable',
+            navigation: 'navigation-stable',
+        });
+        internals.getChangedFilesForCodebase = () => ({
+            available: true,
+            files: new Set(['src/owner.ts']),
+        });
+        internals.syncManager.getWatcherObservation = () => ({
+            observedEventEpoch: 0,
+            comparedThroughEventEpoch: 0,
+            latestEpochByReason: {},
+            coverage: 'disabled',
+            pending: false,
+        });
+        internals.syncManager.getPreparedReadObservation = () => ({
+            available: false,
+            reason: 'watcher_disabled',
+            freshnessEpoch: 0,
+        });
+        internals.syncManager.ensureFreshness = async (_root, thresholdMs, options) => {
+            assert.equal(thresholdMs, 0);
+            assert.deepEqual(options?.exactSourceComparisonPaths, ['src/owner.ts']);
+            return {
+                mode: 'synced',
+                checkedAt: '2026-01-01T01:00:00.000Z',
+                thresholdMs,
+            };
+        };
+        internals.mutationLeaseCoordinator = {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        };
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'where is owner behavior handled',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 1);
+        assert.equal(comparisonCalls, 1);
+        assert.deepEqual(payload.hints.debugSearch.readiness.requestProof, {
+            freshnessComparisonMode: 'exact_paths',
+            exactPathCount: 1,
+            checkpointBindings: 1,
+            preRetrievalFullComparisons: 0,
+            finalFullComparisons: 1,
+        });
     });
 });
 

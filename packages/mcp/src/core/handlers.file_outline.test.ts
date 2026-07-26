@@ -353,6 +353,132 @@ test('handleFileOutline allows source-backed navigation under runtime fingerprin
     });
 });
 
+test('handleFileOutline proves the sealed source-backed generation before serving a fingerprint mismatch', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const fileHash = sha256Content(
+            fs.readFileSync(path.join(repoPath, 'src', 'runtime.ts'), 'utf8'),
+        );
+        const symbol = createTestSymbol({
+            file: 'src/runtime.ts',
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'src.runtime.run',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const { result: generation } = await writeTestSymbolRegistry(
+            repoPath,
+            [symbol],
+            { generation: true },
+        );
+        const navigationAuthority = JSON.stringify({
+            binding: {
+                status: 'sealed',
+                generationId: generation.generationId,
+                sealHash: generation.navigationSealHash,
+            },
+            observation: {
+                status: 'valid',
+                token: JSON.stringify({
+                    symbolRegistryManifestHash: generation.manifestHash,
+                    relationshipManifestHash: generation.relationshipManifestHash,
+                    navigationSealHash: generation.navigationSealHash,
+                }),
+            },
+        });
+        const context = {
+            ...baseContext(),
+            getIndexAuthorityObservations: () => ({
+                vector: 'vector-authority-p',
+                navigation: navigationAuthority,
+            }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            ...baseSnapshotManager(repoPath),
+            getAllCodebases: () => [{
+                path: repoPath,
+                info: {
+                    status: 'indexed',
+                    indexedFiles: 1,
+                    totalChunks: 1,
+                    indexStatus: 'completed',
+                    lastUpdated: '2026-01-01T00:00:00.000Z',
+                },
+            }],
+            ensureFingerprintCompatibilityOnAccess: () => ({
+                allowed: false,
+                changed: false,
+                reason: 'fingerprint_mismatch',
+                message: 'Index fingerprint mismatch.',
+            }),
+        } as unknown as HandlerSnapshotManager;
+        const mutationLeaseCoordinator = {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        };
+        const createHandlers = (markerSealHash: string) => {
+            const handlers = new ToolHandlers(
+                context,
+                snapshotManager,
+                {} as unknown as HandlerSyncManager,
+                RUNTIME_FINGERPRINT,
+                CAPABILITIES,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                null,
+                mutationLeaseCoordinator as never,
+            );
+            (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof =
+                async () => ({
+                    outcome: 'fingerprint_mismatch',
+                    marker: {
+                        navigation: {
+                            status: 'sealed',
+                            generationId: generation.generationId,
+                            symbolRegistryManifestHash: generation.manifestHash,
+                            relationshipManifestHash:
+                                generation.relationshipManifestHash,
+                            sealHash: markerSealHash,
+                        },
+                    },
+                });
+            return handlers;
+        };
+
+        const passingResponse = await createHandlers(
+            generation.navigationSealHash,
+        ).handleFileOutline({
+            path: repoPath,
+            file: 'src/runtime.ts',
+        });
+        const passingPayload = JSON.parse(
+            passingResponse.content[0]?.text || '{}',
+        );
+        assert.equal(passingPayload.status, 'ok');
+        assert.equal(
+            passingPayload.outline.symbols[0]?.symbolId,
+            symbol.symbolInstanceId,
+        );
+
+        const blockedResponse = await createHandlers(
+            'f'.repeat(64),
+        ).handleFileOutline({
+            path: repoPath,
+            file: 'src/runtime.ts',
+        });
+        const blockedPayload = JSON.parse(
+            blockedResponse.content[0]?.text || '{}',
+        );
+        assert.equal(blockedPayload.status, 'not_ready');
+        assert.equal(blockedPayload.reason, 'source_state_unverified');
+        assert.equal(blockedPayload.outline, null);
+    }));
+});
+
 test('handleFileOutline returns requires_reindex, not unsupported, for Go/Rust when the symbol registry is missing', async () => {
     await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
         fs.writeFileSync(path.join(repoPath, 'src', 'service.go'), [
