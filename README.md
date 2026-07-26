@@ -23,6 +23,14 @@ satori doctor
 ```
 
 Run `satori` without arguments at any time for human-readable help.
+Use `satori -v` to print the installed CLI, MCP runtime, and Core versions.
+
+Codex receives global Satori guidance by default. To also install the optional
+Codex session-start reminder:
+
+```bash
+satori install --client codex --install-guidance-hook
+```
 
 Restart your coding agent and tell it:
 

@@ -67,6 +67,7 @@ install [--client all|codex|claude|opencode]
         [--install-guidance-hook]
 
 doctor [--verbose] [--json]
+version # aliases: -v, --version
 upgrade # alias: update
 uninstall [--client all|codex|claude|opencode] [--dry-run]
 tools list
@@ -94,6 +95,9 @@ Global flags must precede the command token:
 `doctor` prints a concise human summary by default. Use `doctor --verbose` for paths, individual successful checks, package sources, and local diagnostics. Use `doctor --json` or the compatible global form `--format json doctor` for the complete machine-readable result.
 
 `install`, `upgrade`, and `uninstall` also print concise human summaries by default. Put `--format json` before the command for a structured receipt without interactive progress text, or use `--debug` to expose MCP startup details during install verification.
+
+`satori -v`, `satori --version`, and `satori version` print the installed CLI,
+MCP runtime, and Core versions. Put `--format json` first for structured output.
 
 ## Runtime Ownership
 

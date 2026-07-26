@@ -29,8 +29,8 @@ import {
 } from "./install-postflight.js";
 import { verifyManagedPackageInstallability } from "./package-installability.js";
 import { resolveServerEntryPath } from "./resolve-server-entry.js";
-import { runDoctor } from "./doctor.js";
-import type { DoctorResult } from "./doctor.js";
+import { resolveInstalledPackageVersions, runDoctor } from "./doctor.js";
+import type { DoctorPackageVersion, DoctorResult } from "./doctor.js";
 import { emitDoctorText } from "./doctor-format.js";
 import { emitInstallText } from "./install-format.js";
 import { buildLocalDiagnosticEvent, recordLocalDiagnosticEvent } from "./local-diagnostics.js";
@@ -67,6 +67,7 @@ interface RunCliOptions {
         dependencies?: InstallPreflightDependencies,
     ) => Promise<InstallPreflightResult>;
     doctorRunner?: (options: { env: NodeJS.ProcessEnv }) => DoctorResult | Promise<DoctorResult>;
+    versionResolver?: () => DoctorPackageVersion[];
     nowMs?: () => number;
     /** Test/embed override; null disables best-effort local recording. */
     diagnosticsPath?: string | null;
@@ -201,6 +202,36 @@ function readPackageVersion(): string {
     return "unknown";
 }
 
+function installedPackageVersion(
+    packages: DoctorPackageVersion[],
+    packageName: string,
+): string | null {
+    return packages.find((entry) => entry.name === packageName)?.version ?? null;
+}
+
+function buildVersionPayload(packages: DoctorPackageVersion[]) {
+    const cliVersion = readPackageVersion();
+    return {
+        name: "@zokizuan/satori-cli",
+        cli: "satori",
+        version: cliVersion,
+        cliVersion,
+        mcpVersion: installedPackageVersion(packages, "@zokizuan/satori-mcp"),
+        coreVersion: installedPackageVersion(packages, "@zokizuan/satori-core"),
+    };
+}
+
+function formatVersionText(result: ReturnType<typeof buildVersionPayload>): string {
+    return [
+        "Satori",
+        "",
+        `CLI: ${result.cliVersion}`,
+        `MCP runtime: ${result.mcpVersion ?? "unknown"}`,
+        `Core: ${result.coreVersion ?? "unknown"}`,
+        "",
+    ].join("\n");
+}
+
 function resolveDefaultServerArgs(): string[] {
     const serverEntry = resolveServerEntryPath();
     if (serverEntry.endsWith(".ts")) {
@@ -222,6 +253,7 @@ function buildHelpPayload() {
         usage: "satori <command>",
         commands: [
             "install [--client all|codex|claude|opencode] [--runtime offline|voyage] [--vector-store lancedb|milvus] [--ollama-model <model>] [--profile default|minimal|all-text] [--dry-run] [--install-guidance-hook] (default: offline Potion on Linux x64; --ollama-model selects Ollama)",
+            "version (-v, --version)",
             "upgrade (alias: update)",
             "uninstall [--client all|codex|claude|opencode] [--dry-run]",
             "doctor [--verbose] [--json]",
@@ -234,7 +266,8 @@ function buildHelpPayload() {
             "--startup-timeout-ms <n>",
             "--call-timeout-ms <n>",
             "--format json|text",
-            "--debug"
+            "--debug",
+            "-v, --version"
         ]
     };
 }
@@ -252,8 +285,12 @@ function formatHelpText(): string {
         "  satori install --client all",
         "  satori doctor",
         "",
+        "Optional Codex startup reminder:",
+        "  satori install --client codex --install-guidance-hook",
+        "",
         "Commands:",
         "  install       Install Satori for Codex, Claude Code, OpenCode, or all clients",
+        "  version       Show installed CLI, MCP, and Core versions",
         "  upgrade       Update the CLI and its compatible MCP/Core runtime",
         "  doctor        Check installation, runtime, and client configuration",
         "  uninstall     Remove Satori-managed client configuration",
@@ -261,6 +298,7 @@ function formatHelpText(): string {
         "  tool call     Call an MCP tool from the terminal",
         "",
         "Options:",
+        "  -v, --version     Show installed CLI, MCP, and Core versions",
         "  --format json     Print structured output",
         "  --debug           Show MCP startup details",
         "",
@@ -408,15 +446,13 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
         }
 
         if (parsed.command.kind === "version") {
-            const result = {
-                name: "@zokizuan/satori-cli",
-                cli: "satori",
-                version: readPackageVersion(),
-            };
+            const result = buildVersionPayload(
+                options.versionResolver?.() ?? resolveInstalledPackageVersions(),
+            );
             if (parsed.globals.formatExplicit && parsed.globals.format === "json") {
                 emitJson(writers, result);
             } else {
-                writers.writeStdout(`Satori ${result.version}\n`);
+                writers.writeStdout(formatVersionText(result));
             }
             return 0;
         }

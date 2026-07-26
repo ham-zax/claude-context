@@ -15,6 +15,8 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const CLI_PACKAGE_VERSION = (
     JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as { version: string }
 ).version;
+const [CLI_MAJOR, CLI_MINOR] = CLI_PACKAGE_VERSION.split(".").map((part) => Number.parseInt(part, 10));
+const FUTURE_CLI_VERSION = `${CLI_MAJOR}.${CLI_MINOR + 1}.0`;
 const SOURCE_SERVER_ENTRY = path.resolve(PACKAGE_ROOT, "..", "mcp", "src", "index.ts");
 const RUN_LIVE_SERVER_SMOKE = process.env.SATORI_RUN_LIVE_SERVER_SMOKE === "1";
 const BLOCK_LANCEDB_NATIVE_FIXTURE = path.resolve(
@@ -154,6 +156,8 @@ test("runCli defaults to human help and preserves structured help on request", a
 
     assert.equal(exitCode, 0);
     assert.match(io.read().stdout, /^Satori\n[\s\S]*Get started:\n {2}satori install --client all/m);
+    assert.match(io.read().stdout, /satori install --client codex --install-guidance-hook/);
+    assert.match(io.read().stdout, /-v, --version\s+Show installed CLI, MCP, and Core versions/);
     assert.doesNotMatch(io.read().stdout, /satori-cli|legacy/i);
     assert.equal(io.read().stderr, "");
 
@@ -166,7 +170,49 @@ test("runCli defaults to human help and preserves structured help on request", a
     assert.equal(jsonExitCode, 0);
     const help = JSON.parse(jsonIo.read().stdout);
     assert.equal(help.usage, "satori <command>");
+    assert.ok(help.commands.includes("version (-v, --version)"));
+    assert.ok(help.globalFlags.includes("-v, --version"));
     assert.equal("legacyAlias" in help, false);
+});
+
+test("runCli version shortcuts report the installed CLI, MCP, and Core set", async () => {
+    const versions = [
+        { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-mcp", version: "6.4.0", source: "test" },
+        { name: "@zokizuan/satori-core", version: "3.3.0", source: "test" },
+    ];
+    const textIo = captureIo();
+    const textExitCode = await runCli(["-v"], {
+        writeStdout: textIo.writeStdout,
+        writeStderr: textIo.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+    });
+
+    assert.equal(textExitCode, 0);
+    assert.equal(
+        textIo.read().stdout,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nMCP runtime: 6.4.0\nCore: 3.3.0\n`,
+    );
+    assert.equal(textIo.read().stderr, "");
+
+    const jsonIo = captureIo();
+    const jsonExitCode = await runCli(["--format", "json", "--version"], {
+        writeStdout: jsonIo.writeStdout,
+        writeStderr: jsonIo.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+    });
+
+    assert.equal(jsonExitCode, 0);
+    assert.deepEqual(JSON.parse(jsonIo.read().stdout), {
+        name: "@zokizuan/satori-cli",
+        cli: "satori",
+        version: CLI_PACKAGE_VERSION,
+        cliVersion: CLI_PACKAGE_VERSION,
+        mcpVersion: "6.4.0",
+        coreVersion: "3.3.0",
+    });
 });
 
 test("runCli tools list succeeds and emits JSON to stdout", async () => {
@@ -445,8 +491,8 @@ test("runCli reports the installed CLI version when delegated upgrade cannot sta
         diagnosticsPath: null,
         env: { HOME: "/home/test" },
         upgradeTargetResolver: () => ({
-            cliPackageSpecifier: "@zokizuan/satori-cli@1.4.0",
-            cliVersion: "1.4.0",
+            cliPackageSpecifier: `@zokizuan/satori-cli@${FUTURE_CLI_VERSION}`,
+            cliVersion: FUTURE_CLI_VERSION,
             mcpPackageSpecifier: "@zokizuan/satori-mcp@6.3.0",
             mcpVersion: "6.3.0",
             coreVersion: "3.2.0",
@@ -454,8 +500,8 @@ test("runCli reports the installed CLI version when delegated upgrade cannot sta
         globalCliUpgradeRunner: () => {
             throw new CliUpgradeDelegationStartError(
                 CLI_PACKAGE_VERSION,
-                "1.4.0",
-                "Global CLI updated to 1.4.0, but the upgraded command could not start: EAGAIN",
+                FUTURE_CLI_VERSION,
+                `Global CLI updated to ${FUTURE_CLI_VERSION}, but the upgraded command could not start: EAGAIN`,
             );
         },
     });
@@ -469,10 +515,11 @@ test("runCli reports the installed CLI version when delegated upgrade cannot sta
     assert.equal(receipt.runtimeUpgrade, "failed");
     assert.equal(receipt.launcherChanged, false);
     assert.equal(receipt.fromCliVersion, CLI_PACKAGE_VERSION);
-    assert.equal(receipt.toCliVersion, "1.4.0");
+    assert.equal(receipt.toCliVersion, FUTURE_CLI_VERSION);
     assert.equal(receipt.error.token, "E_UPGRADE");
-    assert.match(receipt.error.message, /CLI updated to 1\.4\.0.*could not start.*EAGAIN/s);
-    assert.match(output.stderr, /E_UPGRADE Global CLI updated to 1\.4\.0.*could not start.*EAGAIN/s);
+    const futureVersionPattern = FUTURE_CLI_VERSION.replace(/\./g, "\\.");
+    assert.match(receipt.error.message, new RegExp(`CLI updated to ${futureVersionPattern}.*could not start.*EAGAIN`, "s"));
+    assert.match(output.stderr, new RegExp(`E_UPGRADE Global CLI updated to ${futureVersionPattern}.*could not start.*EAGAIN`, "s"));
 });
 
 test("runCli update alias preserves the structured upgrade receipt", async () => {
