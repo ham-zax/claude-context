@@ -49,6 +49,18 @@ test('buildSearchQueryPlan classifies explicit routes without changing legacy re
     }
 });
 
+test('buildSearchQueryPlan retains technical compound terms before bounded natural-language terms', () => {
+    const parsed = parseSearchOperators(
+        'Where is the final local candidate score composed from fusion, lexical, path, changed-file, agent-fit, and owner evidence?',
+    );
+    const plan = buildSearchQueryPlan(parsed.semanticQuery, true, parsed);
+
+    assert.deepEqual(
+        plan.lexicalTerms.map((term) => term.value),
+        ['changed-file', 'changed', 'file', 'agent-fit', 'agent', 'fit', 'final', 'local'],
+    );
+});
+
 test('buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent', () => {
     const cases = [
         {

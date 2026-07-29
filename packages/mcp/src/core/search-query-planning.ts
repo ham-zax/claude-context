@@ -534,7 +534,10 @@ export function buildSearchQueryPlan(
     const quotedLiteralPhrases = extractQuotedLiteralPhrases(semanticQuery);
     const quotedLiteralSeeking = quotedLiteralPhrases.length > 0;
     const lexicalSourceTokens = identifierTokens.length > 0 && naturalLanguageTokens.length > 0
-        ? tokens
+        ? [
+            ...identifierTokens,
+            ...tokens.filter((token) => !isIdentifierLikeToken(token)),
+        ]
         : (identifierTokens.length > 0 ? identifierTokens : tokens);
     const lexicalTerms = tokenizeLexicalTerms(lexicalSourceTokens)
         .filter((term) => !SEARCH_QUERY_STOPWORDS.has(term.value))
