@@ -7,6 +7,8 @@ conditional
 
 **Date:** 2026-07-19
 
+**Last updated:** 2026-07-29
+
 **Entry condition:** each track has its own authority. Lean L4 directly compared
 the two existing publications and recorded
 `direct_relevance_useful_with_observed_java_and_configuration_gaps`. The user
@@ -249,6 +251,345 @@ focused Milvus non-regression evidence for the changed boundary. A LateOn-only
 adapter that leaves those shared paths unchanged does not require Milvus
 requalification.
 
+### C-preflight — natural-language owner and noise localization
+
+The 2026-07-29 `tradingview_ratio` probe supplies a concrete preflight for
+Track C. It is discovery evidence from one repository, not a release benchmark,
+and it does not authorize a ranking or model implementation by itself.
+
+The oracle sources are independent of search output:
+
+```toml
+# tradingview_ratio/pyproject.toml
+qap = "cli.main:cli_entry_point"
+```
+
+The manifest establishes installed-command invocation ownership. The
+implementation independently shows that `cli_entry_point` converts the Typer
+application to a Click command, attaches lazy loading, invokes that command,
+and owns process-exit handling. The separate `main` function is the Typer root
+callback and renders the no-subcommand interface after invocation; it is
+relevant supporting evidence but not an acceptable replacement for the
+function that creates and launches the Click command.
+
+Freeze each query with its own oracle rather than transferring manifest
+authority to every CLI-related formulation:
+
+| Query class | Exact required owner | Acceptable delegated owners | Negative owners | Oracle rationale |
+| --- | --- | --- | --- | --- |
+| Installed `qap` command target or entry | `src/cli/main.py::cli_entry_point` | None as a replacement; `main` may be supporting context. | Development scripts, tests, and unrelated command callbacks. | Exact `pyproject.toml` declaration plus resolved symbol. |
+| Command-line application startup owner | `src/cli/main.py::cli_entry_point` | None as a replacement. | Runtime-path helpers and unrelated script `main` functions. | `cli_entry_point` constructs and invokes the Click command and owns exit handling. |
+| Function that creates and launches the user-facing CLI | `src/cli/main.py::cli_entry_point` | None as a replacement; `main` may be supporting context for the root UI. | Command callbacks and development launchers. | `cli_entry_point` calls `typer.main.get_command(app)`, attaches lazy loading, and invokes `click_app`. |
+
+If the implementation changes, recompute these oracle assignments from the
+frozen source revision instead of treating the manifest as proof of
+construction, rendering, or delegated runtime behavior.
+
+The probe used the synced symbol-rich Python index with the qualified Potion
+revision, `hybrid_v3`, runtime scope, symbol grouping, default ranking, a
+15-result disclosure, and full candidate-survival diagnostics. No reranker
+capability was present. The `must:` index/resolution control used the same
+publication.
+
+| Query | First-stage evidence | Final disclosure |
+| --- | --- | --- |
+| `Where does the command-line application start, and which function owns startup?` | The expected owner chunk was dense rank 12. | The owner was absent from the top 15; a runtime-path helper ranked first and unrelated script `main` functions dominated. |
+| `Find the function that creates and launches the user-facing command line interface.` | The expected owner survived the candidate pool. | The expected owner ranked first. |
+| `How does running the qap terminal command enter the application?` | Two expected-owner chunks were dense ranks 7 and 8. | The grouped owner fell to rank 10 behind an unrelated development script and core execution results. |
+| `must:cli_entry_point` plus `cli_entry_point` | Index/resolution and eligibility control; `must:` changes eligibility and pinning. | The expected owner ranked first. |
+
+This establishes inconsistent exposure and shows that the expected owner is
+representable by at least one first-stage arm. It does **not** yet establish the
+first wrong post-retrieval boundary. Dense rank followed by absence from the
+disclosed results is insufficient to distinguish arm-budget truncation, union
+deduplication, scope filtering, eligibility, scoring, grouping, diversity, or
+final disclosure.
+
+Runtime scope removed documentation noise, but it intentionally retained
+executable scripts. The observed final order is consistent with deterministic
+policy influence:
+
+* `src/cli/main.py` was classified as an adapter and received a `0.70` path
+  multiplier;
+* core candidates received `1.35`;
+* scripts received `1.15`; and
+* the weaker natural-language formulations did not produce an entrypoint-owner
+  signal capable of counteracting those generic path preferences.
+
+Do not repair this by globally raising every adapter or lowering every script.
+That would replace one coarse path bias with another and would damage legitimate
+adapter- or script-seeking queries.
+
+#### C-preflight-Q — evidence qualification, read-only
+
+This phase qualifies the evidence and responsible owner. It does not change
+runtime ranking, add persisted facts, or create test fixtures. Fixture
+definitions may be frozen here; implementing them belongs to the separately
+authorized deterministic correction.
+
+1. Freeze the four observed queries above, their query-specific oracle,
+   publication and source fingerprints, query plan, arm budgets, and complete
+   result lists. Add plain `cli_entry_point` as the exact-ranking control; keep
+   the `must:` query only as the index/resolution and eligibility control.
+2. Freeze contrastive query definitions covering:
+
+   * CLI startup tests;
+   * development or mock launch scripts;
+   * CLI construction or builder ownership;
+   * startup-configuration parsing;
+   * helpers used after startup;
+   * core request execution;
+   * shutdown handling;
+   * command declaration;
+   * behavior after argument parsing;
+   * a repository with no declared entrypoint; and
+   * a multi-entrypoint package whose command names select different exact
+     owners.
+3. Record one explicit expected-owner trace for every query:
+
+   ```text
+   dense arm rank
+   -> sparse arm rank
+   -> exact/configuration arm rank
+   -> frozen union membership
+   -> deduplication result
+   -> scope-filter result
+   -> eligibility result
+   -> path-policy contribution
+   -> intent-policy contribution
+   -> every other score component
+   -> grouped-symbol result
+   -> diversity result
+   -> disclosed rank or exact exclusion reason
+   ```
+
+   A post-retrieval diagnosis requires the owner to enter the frozen union and
+   remain eligible. The trace must then identify the first wrong boundary in
+   scoring, grouping, diversity, or disclosure.
+4. Identify the authoritative parser and resolver capable of interpreting the
+   package declaration and resolving its exact symbol. Do not assume that an
+   established indexed-project manifest parser exists. Qualify whether the
+   resulting relation can be represented with:
+
+   ```text
+   command
+   + declaration source and span
+   + resolved module or file
+   + resolved exact symbol
+   + source identity
+   + publication identity
+   + resolution confidence and basis
+   ```
+
+   `EntrypointOwner` is a candidate domain name, not a preselected persisted
+   schema. Before persistence is chosen, identify its invariant, lifecycle,
+   authoritative writer, invalidation boundary, publication binding, callers,
+   and correct domain owner. Compare publication-bound persisted metadata, an
+   existing compatible contribution or sidecar, and bounded on-demand
+   derivation. Record why the selected placement preserves source and
+   publication identity without creating a second authority. The ranking
+   policy must consume resolved evidence; it must not parse project manifests
+   at query time.
+5. Specify and freeze the prospective extension to the existing query-plan
+   evidence model rather than adding one universal `entrypoint_intent`
+   Boolean. Distinguish at least:
+
+   ```text
+   installed-command ownership
+   application-startup ownership
+   command declaration
+   development execution
+   test startup
+   post-startup runtime behavior
+   ```
+
+   Startup language plus an exact manifest-to-symbol relation is strong bounded
+   evidence. A generic function named `main` is weak evidence. Development- or
+   test-seeking intent can positively support scripts or tests instead.
+6. Before implementation, freeze the proposed policy component, including:
+
+   * additive or multiplicative composition;
+   * maximum contribution;
+   * position relative to existing path and agent-fit multipliers and
+     exact/configuration pins;
+   * grouping and diversity behavior;
+   * deterministic tie-breaking;
+   * behavior with multiple declared entrypoints;
+   * command-name matching and queries that describe a different entrypoint;
+     and
+   * the complete local and contrastive acceptance matrix.
+
+Terminal outcomes:
+
+```text
+entrypoint_owner_policy_candidate
+entrypoint_owner_fact_unavailable
+entrypoint_owner_missing_from_union
+entrypoint_owner_failure_not_reproduced
+entrypoint_owner_evidence_insufficient
+```
+
+#### C-preflight-D — deterministic correction, separate authorization
+
+Start this batch only when qualification returns
+`entrypoint_owner_policy_candidate` and implementation is separately
+authorized.
+
+1. Produce the normalized declaration-to-symbol relation through the qualified
+   configuration parser and symbol resolver. Persist it only when the qualified
+   lifecycle and publication contract require persistence.
+2. Add the frozen bounded query-intent evidence through the existing
+   query-planning owner.
+3. Apply the frozen score component only to exact matching owners already
+   present and eligible in the candidate union. A manifest target must not
+   always win, and one command's evidence must not promote every entrypoint in a
+   multi-entrypoint package equally.
+4. Preserve candidate-arm retrieval, scope filtering, exact/path/configuration
+   pins, grouping, diversity, continuation, and disclosure contracts.
+5. Rerun the frozen probes and focused ranking tests. The local correction
+   passes only when:
+
+   * the expected `qap` owner is top three for all three natural-language
+     probes;
+   * plain `cli_entry_point` ranks the expected owner first;
+   * the `must:` control still resolves the owner, satisfies its predicate, and
+     keeps the owner eligible;
+   * every contrastive query retains its intended owner class;
+   * multi-entrypoint queries select the intended command owner;
+   * at the frozen candidate-union and post-filter eligibility boundaries,
+     candidate identities and eligibility decisions remain identity-equal to
+     the baseline; only query-plan diagnostics, scoring components, downstream
+     ordering, diversity selection, and disclosure may change; and
+   * complete result-list diffs disclose every unrelated promotion.
+
+This is a bounded defect gate, not a general release gate. Do not introduce an
+arbitrary top-one count as a product requirement without separately freezing
+that requirement.
+
+#### C-preflight broader qualification and routing
+
+General support requires a larger frozen matrix covering a three-entrypoint
+fixture, a no-entrypoint fixture, generic `main` functions, correct adapters,
+correct scripts, correct core functions, CLI builders, and queries with and
+without literal command names. Use multiple repositories only when the intended
+support claim extends beyond what repository-owned synthetic fixtures and
+existing ranking tests can establish.
+
+Report owner recall in the frozen union, MRR, top-one, top-three, top-ten,
+counterexample-class accuracy, unrelated promotions, and complete result-list
+diffs.
+
+Route the result mechanically:
+
+```text
+owner remains in the complete eligible union
+and loses during scoring, grouping, diversity, or disclosure
+-> Track C; repair the first responsible stage
+
+owner is absent from dense but present through sparse, exact, or configuration
+-> not yet a first-stage recall failure
+
+owner is absent from all first-stage arms across the frozen owner matrix
+-> Track F representation or retrieval investigation
+
+owner is present before scope filtering but correctly excluded by requested scope
+-> query or scope contract, not Track C or Track F
+
+owner remains eligible after the deterministic correction
+but residual semantic ordering still fails the frozen matrix
+-> admit existing LateOn C0/C1
+```
+
+A global freshness requalification based on the historical observation that
+synchronized added or modified files were unsearchable is not a Track C
+prerequisite. The
+[authoritative freshness receipt](../evidence/freshness-boundary-20260726/FRESHNESS_BOUNDARY_RECEIPT.md)
+classified that observation as a scope-filter mismatch, and the corrected
+[repair-authority qualification](../evidence/repair-authority-c4-20260726/REPAIR_AUTHORITY_C4_RECEIPT.md)
+passed. Every evaluation must still bind its diagnostics to one readable
+publication, valid source checkpoint, and exact source and publication
+fingerprints. If those identities disagree, invalidate that evaluation run
+rather than attributing the result to ranking.
+
+### C-preflight donor review — ColGREP and NextPlaid
+
+The inspected upstream revision is
+`lightonai/next-plaid@4ff801eef11004e20a6ffb62591b6aaeb6859aec`.
+Its repository and Cargo manifests are Apache-2.0, not MIT. Apache-2.0 permits
+reuse subject to its license and notice obligations. Any verbatim reuse must be
+recorded as derived code with the required attribution and modification
+notices. Prefer adapting the bounded mechanism to Satori's existing owners when
+the behavior is simple enough to implement independently.
+
+At that revision, ColGREP reduces noise through a layered deterministic
+pipeline around LateOn:
+
+| Stage | ColGREP mechanism | Satori disposition |
+| --- | --- | --- |
+| Index admission | Respect `.gitignore`; exclude hidden files, dependencies, build outputs, caches, coverage, and other common non-source paths; allow persistent ignore and force-include overrides; reject oversized or escaping files. | Compare lists and semantics with Satori's existing ignore owner. Port only demonstrated missing patterns; do not create a second ignore policy. |
+| Source projection | Tree-sitter code units include name, signature, docstring, parameters, calls, callers, variables, imports, normalized shortened path, and source; the embedding text is capped at 8 KiB. | Compare fields against Satori's existing source projection. A missing owner-bearing field is a projection experiment, not a ranking heuristic. |
+| Candidate recall | LateOn multi-vector retrieval is fused with identifier-aware FTS5/BM25 using relative-score fusion. Natural-language FTS uses OR semantics after identifier tokenization. | Satori already has dense, sparse, and exact arms. Compare relative-score fusion with current RRF only after diagnostics attribute a miss to fusion; do not replace fusion as part of the entrypoint fix. |
+| Candidate budget | Fetch at least `max(top_k * 20, 200)` candidates before deterministic adjustments and per-file collapse. | Preserve Satori's bounded retrieval and reranker budgets. Over-fetch is relevant only if the expected owner is outside the current eligible union. |
+| Path penalty | Multiply tests, test directories, compatibility/legacy code, and examples by `0.30`; declaration stubs by `0.70`; re-export barrels by `0.50`. Skip test/spec/benchmark penalties when the query asks for them. | Reuse the intent-conditioned principle, not the literal constants or patterns. Satori already has path classes, and the CLI probe demonstrates the danger of an over-broad class penalty. |
+| Deterministic boosts | Add bounded boosts for query-to-definition name matches, query-to-file-stem matches with stopword filtering, and multi-unit file coherence. | Definition and stem evidence may be useful for identifier-adjacent queries. File coherence can favor large noisy files; require a focused ablation before adoption. None of these identifies a manifest-declared entrypoint by itself. |
+| Filters | Apply include, exclude, exclude-directory, code-only, subdirectory, regex, and SQLite metadata filters before or around semantic scoring. | Keep Satori's existing operators and runtime/docs scopes as authority. Fill only a demonstrated contract gap. |
+| Disclosure | Sort deterministically, collapse to one result per file, merge spans, and use stable file/line tie-breaks. | Satori already owns symbol/file grouping and diversity. Do not replace symbol disclosure with ColGREP's file-only collapse. |
+
+The inspected ColGREP search pipeline does **not** use LateOn as a separate
+learned reranker. LateOn is its primary multi-vector semantic retriever, and
+ColGREP still relies on the deterministic controls above. This is useful
+architecture evidence: the model does not eliminate the need for explicit
+noise policy.
+
+The immutable revision and source links below are sufficient for discovery and
+design observations. If Satori retains an exact upstream constant, structure,
+or code fragment, its decision receipt must additionally record the source path
+and line range, file digest, observation or excerpt, capture date, license, and
+whether the implementation is verbatim, substantially derived, or independently
+implemented. Keep repository source, model weights, and independently
+reimplemented ideas distinct. Do not call substantially copied structure
+independent implementation.
+
+Candidate upstream sources:
+
+* license and repository:
+  https://github.com/lightonai/next-plaid/tree/4ff801eef11004e20a6ffb62591b6aaeb6859aec
+* structured projection:
+  https://github.com/lightonai/next-plaid/blob/4ff801eef11004e20a6ffb62591b6aaeb6859aec/colgrep/src/embed.rs
+* hybrid retrieval and disclosure:
+  https://github.com/lightonai/next-plaid/blob/4ff801eef11004e20a6ffb62591b6aaeb6859aec/colgrep/src/index/mod.rs
+* deterministic noise policy:
+  https://github.com/lightonai/next-plaid/blob/4ff801eef11004e20a6ffb62591b6aaeb6859aec/colgrep/src/ranking.rs
+
+### C-preflight model disposition
+
+The current engineering judgment is to make LateOn Code edge the first neural
+experiment, but not the first repair for the `cli_entry_point` failure.
+
+| Candidate | Appropriate role | Cost and boundary | Disposition |
+| --- | --- | --- | --- |
+| `lightonai/LateOn-Code-edge` | Second-stage MaxSim scorer over a frozen Potion candidate union. | 17M multi-vector model; query-time document encoding adds latency and retained token vectors add memory or storage if cached. It can run without changing the primary publication in C1. | First neural candidate only after the deterministic preflight repair leaves residual semantic-ordering errors. |
+| `nomic-ai/CodeRankEmbed` | Alternative first-stage code embedding. | 137M bi-encoder, 8,192-token context, required query instruction, MIT model-card license, and a fresh Satori publication. Its model card recommends a separate `CodeRankLLM` reranker, and its published usage relies on `trust_remote_code=True`. | Track F only when expected owners are absent before reranking; not a repair for the demonstrated post-retrieval demotion. Pin and audit the implementation or use a reviewed local export; never execute mutable remote model code in the Satori runtime. |
+| CodeSage | Alternative first-stage code representation. | The official family starts at 130M and also has 356M and 1.3B variants; adopting it changes the embedding contract and requires a fresh publication. Its official loading example also uses `trust_remote_code=True`. | Track F only under the same recall trigger; do not start a three-model tournament. Pin and audit the implementation or use a reviewed local export; never execute mutable remote model code in the Satori runtime. |
+
+The LateOn choice is provisional engineering judgment, not a benchmark win for
+Satori. Its advantages are the small edge checkpoint, token-level matching,
+official reranking usage, ONNX availability, and a Rust/ONNX reference. Its
+risks are candidate-encoding latency, MaxSim complexity, training-data overlap,
+and multi-vector storage. C1 therefore remains query-time and all-or-nothing;
+do not build a second persisted code index merely because ColGREP does.
+
+Additional model authorities:
+
+* LateOn Code edge:
+  https://huggingface.co/lightonai/LateOn-Code-edge
+* CodeRankEmbed:
+  https://huggingface.co/nomic-ai/CodeRankEmbed
+* CodeSage:
+  https://github.com/amazon-science/CodeSage
+* CodeSage model-family description:
+  https://code-representation-learning.github.io/
+
 ### C0 — LateOn artifact and runtime conformance
 
 Public artifacts exist for `lightonai/LateOn-Code-edge` and
@@ -283,7 +624,9 @@ them with an exact revision and file hashes.
 Freeze:
 
 * repository revision and every required file hash;
+* ONNX artifact variant and execution provider;
 * tokenizer and special-token behavior;
+* exact query prefix or template;
 * query/document distinction;
 * query and document limits;
 * output shape and runtime dtype;
@@ -291,6 +634,7 @@ Freeze:
 * normalization;
 * exact MaxSim reduction;
 * ONNX Runtime version and target;
+* batch size, thread count, warmup policy, and timeout;
 * model load, model-related RSS, and warm latency; and
 * reference query vectors, document vectors, masks, and scores from the pinned
   official PyLate path.
@@ -362,6 +706,12 @@ Rules:
   frozen result set.
 * Load failure, timeout, malformed output, out-of-memory failure, or explicit
   disablement returns the byte-equivalent baseline result.
+
+C1 intentionally holds the source projection constant so the model is the only
+changed variable. Do not choose among alternative projections after seeing
+ranking results. If diagnostics later identify projection as the responsible
+boundary, open a separately preregistered projection experiment with the model
+and candidate union held constant.
 
 Measure cold and warm operation separately:
 
@@ -533,8 +883,11 @@ publication and recovery evidence.
 
 ## Track F — alternative local embeddings
 
-**Trigger:** Potion fails because critical expected owners are absent before
-reranking, or it materially exceeds the resource envelope.
+**Trigger:** critical expected owners are absent from all first-stage arms in
+the complete eligible frozen union across the owner-query matrix, or Potion
+materially exceeds the resource envelope. Absence from dense retrieval alone
+does not satisfy this trigger when sparse, exact, or configuration retrieval
+recovers the owner.
 
 First produce a bounded failure analysis identifying whether the cause is:
 
@@ -578,10 +931,12 @@ separately authorized A0.1 platform candidate
     -> do not extend the default decision automatically
 
 Potion candidate recall passes but post-retrieval exposure loses answers
-    -> capture the current production candidate union once for C1
-    -> localize grouping, disclosure, fusion, ranking, or semantic ordering
-    -> correct the deterministic owner when it is responsible
+    -> run read-only C-preflight-Q
+    -> trace the expected owner through every candidate stage
+    -> separately authorize and test C-preflight-D
+    -> complete the broader frozen owner and counterexample matrix
     -> C0 LateOn conformance only when semantic ordering remains responsible
+    -> capture the current production candidate union once for LateOn C1
     -> C1 B / B-L16 / B-L32 on the revealed diagnostic tasks
     -> stop if there is no material answer gain
     -> C2 cache or C3 sidecar only when its own trigger passes
