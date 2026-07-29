@@ -475,12 +475,10 @@ admission or ordering.
 | `B-P0` | Path score contribution neutralized; scope and explicit path operators remain unchanged |
 | `B-A0` | Optional authoritative score components disabled for diagnosis; mandatory exact, `must:`, path, and configuration contracts remain enabled |
 
-`B-P1` is formally excluded from this sealed experiment. No evidence-independent
-intent set, path-category mapping, cap, composition point, or tie contract was
-qualified before tuning output, so freezing one would introduce a guessed
-policy. Adding an intent-conditioned path contender later requires a new sealed
-experiment and fresh held-out authority; it cannot be selected from this
-experiment's tuning output.
+The sealed deterministic experiment contains exactly the two contenders above.
+No intent-conditioned path mapping or cap was qualified before tuning output,
+so adding another path contender would require a new sealed experiment and
+fresh held-out authority.
 
 `B-A0` measures the incremental effect of already-qualified optional authority
 signals. It does not authorize removing exact or configuration truth from the
