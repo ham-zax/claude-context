@@ -237,7 +237,8 @@ function classifyUnrelatedMembershipChange(diff, baselineTask, contenderTask, ex
 
 function assertReplayBinding(replay, capture, policyId, label) {
     validateSelfDigest(replay, label);
-    if (replay.policyId !== policyId || replay.policy?.policyId !== policyId) {
+    if (replay.policy?.policyId !== policyId
+        || (replay.policyId !== undefined && replay.policyId !== policyId)) {
         throw new Error(`${label} does not bind policy '${policyId}'.`);
     }
     if (replay.sourceCaptureSha256 !== capture.sha256 || replay.baselineReproduced !== true) {
