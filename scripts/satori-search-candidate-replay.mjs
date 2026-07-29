@@ -1959,7 +1959,21 @@ export function replayNeuralCandidateCapture(captureValue, neuralValue, options 
             neuralStatus: neuralTask.status,
             selectedCandidateIds: [...neuralTask.selectedCandidateIds],
             ranking,
-            mcpAttempts: baselineTask.mcpAttempts,
+            mcpAttempts: [{
+                attemptId: internalAttempts.at(-1).attemptId,
+                candidates: adjusted.candidates.map((candidate, index) => ({
+                    candidateId: candidate.candidate.candidateId,
+                    ownerId: candidate.candidate.ownerId,
+                    relativePath: candidate.candidate.relativePath,
+                    symbolLabel: candidate.symbolLabel,
+                    symbolId: candidate.symbolId,
+                    rank: index + 1,
+                    fusionScore: candidate.fusionScore,
+                    lexicalScore: candidate.lexicalScore,
+                    finalScore: candidate.finalScore,
+                })),
+                removed: adjusted.removed,
+            }],
             groupingDisclosure,
             invariants: {
                 candidateMembershipIdentityEqual: true,

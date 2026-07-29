@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
     averageTaskMetrics,
     bootstrapInterval,
@@ -13,7 +14,7 @@ import {
     ownerRank,
 } from "./satori-search-ranking-r2.mjs";
 import {
-    replayBaselineCandidateCapture,
+    replayCandidateCapture,
     replayNeuralCandidateCapture,
 } from "./satori-search-candidate-replay.mjs";
 import { canonicalJson } from "./satori-useful-context.mjs";
@@ -24,6 +25,17 @@ const REPOSITORIES = Object.freeze([
     { id: "shopify-theme-r0", scorePrefix: "shopify" },
 ]);
 const CONTENDERS = Object.freeze(["D-L16", "D-L32"]);
+const TOOL_REPOSITORY_ROOT = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+);
+const EVALUATOR_ARTIFACTS = Object.freeze([
+    ["r3_evaluator", fileURLToPath(import.meta.url)],
+    ["ranking_metrics", fileURLToPath(new URL("./satori-search-ranking-r2.mjs", import.meta.url))],
+    ["neural_replay", fileURLToPath(new URL("./satori-search-candidate-replay.mjs", import.meta.url))],
+    ["canonical_json", fileURLToPath(new URL("./satori-useful-context.mjs", import.meta.url))],
+    ["dependency_lockfile", fileURLToPath(new URL("../pnpm-lock.yaml", import.meta.url))],
+]);
 
 function parseArguments(argv) {
     const values = new Map();
@@ -81,6 +93,37 @@ function writeSignedJson(filePath, value) {
     return signed;
 }
 
+function evaluatorToolingIdentity() {
+    const status = execFileSync(
+        "git",
+        ["-C", TOOL_REPOSITORY_ROOT, "status", "--porcelain=v1"],
+        { encoding: "utf8" },
+    );
+    if (status.length !== 0) {
+        throw new Error("R3 evaluation requires a clean, committed tooling worktree.");
+    }
+    return {
+        gitRevision: execFileSync(
+            "git",
+            ["-C", TOOL_REPOSITORY_ROOT, "rev-parse", "HEAD"],
+            { encoding: "utf8" },
+        ).trim(),
+        gitTree: execFileSync(
+            "git",
+            ["-C", TOOL_REPOSITORY_ROOT, "rev-parse", "HEAD^{tree}"],
+            { encoding: "utf8" },
+        ).trim(),
+        artifacts: EVALUATOR_ARTIFACTS.map(([role, filePath]) => ({
+            role,
+            fileName: path.basename(filePath),
+            bytes: fs.statSync(filePath).size,
+            sha256: crypto.createHash("sha256")
+                .update(fs.readFileSync(filePath))
+                .digest("hex"),
+        })),
+    };
+}
+
 function taskMap(replay) {
     return new Map(requireArray(replay.tasks, "Replay tasks").map((task) => [
         task.taskId,
@@ -95,7 +138,10 @@ function qualityTasks(replay, positiveScore) {
         .map((scoreTask) => {
             const task = tasks.get(scoreTask.taskId);
             if (!task) throw new Error(`Replay lacks quality task '${scoreTask.taskId}'.`);
-            const expected = requireRecord(task.expected, `Task '${task.taskId}' expected`);
+            const expected = requireRecord(
+                scoreTask.expected,
+                `Task '${task.taskId}' expected`,
+            );
             const rank = ownerRank(task, {
                 file: expected.ownerFile,
                 symbol: expected.ownerSymbol,
@@ -105,10 +151,14 @@ function qualityTasks(replay, positiveScore) {
         });
 }
 
-function negativeTasks(replay) {
+function negativeTasks(replay, capture) {
+    const expectedByTaskId = new Map(capture.captures.map((task) => [
+        task.taskId,
+        task.expected,
+    ]));
     return replay.tasks.map((task) => {
         const owners = requireArray(
-            task.expected?.hardNegativeOwners,
+            expectedByTaskId.get(task.taskId)?.hardNegativeOwners,
             `Task '${task.taskId}' hard-negative owners`,
         );
         const ranks = owners.map((owner) => ownerRank(task, owner));
@@ -312,6 +362,37 @@ function evaluateContender({
     };
 }
 
+export function buildR3Decision(contenders, minimumDepthMrrDelta) {
+    const ordered = [...contenders].sort((left, right) => (
+        right.qualityMetrics.reciprocalRank.contender
+        - left.qualityMetrics.reciprocalRank.contender
+        || left.contenderId.localeCompare(right.contenderId)
+    ));
+    const winner = ordered[0];
+    const d16 = contenders.find(({ contenderId }) => contenderId === "D-L16");
+    const d32 = contenders.find(({ contenderId }) => contenderId === "D-L32");
+    if (!winner || !d16 || !d32) {
+        throw new Error("R3 decision requires D-L16 and D-L32.");
+    }
+    const d32OverD16Mrr = roundMetric(
+        d32.qualityMetrics.reciprocalRank.contender
+        - d16.qualityMetrics.reciprocalRank.contender
+    );
+    return {
+        qualityDiagnosticWinner: winner.contenderId,
+        qualityDiagnosticWinnerPassedEveryQualityGate: winner.passesEveryQualityGate,
+        d32OverD16MacroReciprocalRank: d32OverD16Mrr,
+        d32OverD16DepthThresholdMet: d32OverD16Mrr >= minimumDepthMrrDelta,
+        qualityConclusion: winner.passesEveryQualityGate
+            ? "quality_gates_passed"
+            : "directional_quality_improvement_not_fully_qualified",
+        productPolicy: "B",
+        productFinalist: null,
+        productReason: "all_lateon_contenders_failed_frozen_resource_gates",
+        heldOutOpened: false,
+    };
+}
+
 export function evaluateR3({
     manifest,
     r1Dir,
@@ -331,6 +412,10 @@ export function evaluateR3({
     const contract = JSON.parse(
         fs.readFileSync(path.join(process.cwd(), "evals/search-ranking/lateon/c0-contract.json"), "utf8"),
     );
+    const baselinePolicy = JSON.parse(fs.readFileSync(
+        path.join(process.cwd(), "evals/search-ranking/policies/r2-b.json"),
+        "utf8",
+    ));
     fs.mkdirSync(replayDir, { recursive: true });
     const repositoryResults = {};
     const scoreArtifacts = {};
@@ -348,18 +433,18 @@ export function evaluateR3({
             path.join(repositoryR1, "positive-score.json"),
             `${repository.id} positive score`,
         );
-        const baselinePositive = replayBaselineCandidateCapture(positiveCapture, {
+        const baselinePositive = replayCandidateCapture(positiveCapture, baselinePolicy, {
             requireNeuralDisabled: true,
             requireGroupingReady: true,
         });
-        const baselineNegative = replayBaselineCandidateCapture(negativeCapture, {
+        const baselineNegative = replayCandidateCapture(negativeCapture, baselinePolicy, {
             requireNeuralDisabled: true,
             requireGroupingReady: true,
         });
         repositoryResults[repository.id] = {
             B: {
                 quality: qualityTasks(baselinePositive, positiveScore),
-                negative: negativeTasks(baselineNegative),
+                negative: negativeTasks(baselineNegative, negativeCapture),
                 exact: baselinePositive.tasks
                     .filter((task) => task.route.kind === "exact_registry")
                     .map((task) => task.rankedResults),
@@ -395,7 +480,7 @@ export function evaluateR3({
             );
             repositoryResults[repository.id][contenderId] = {
                 quality: qualityTasks(positiveReplay, positiveScore),
-                negative: negativeTasks(negativeReplay),
+                negative: negativeTasks(negativeReplay, negativeCapture),
                 exact: positiveReplay.tasks
                     .filter((task) => task.route.kind === "exact_registry")
                     .map((task) => task.rankedResults),
@@ -422,11 +507,7 @@ export function evaluateR3({
         statisticalContract: manifest.statisticalContract,
         resources: buildResourceSummary(scoreArtifacts, contenderId, contract),
     }));
-    const diagnosticWinner = [...contenders].sort((left, right) => (
-        right.qualityMetrics.reciprocalRank.contender
-        - left.qualityMetrics.reciprocalRank.contender
-        || left.contenderId.localeCompare(right.contenderId)
-    ))[0];
+    const tooling = evaluatorToolingIdentity();
     const result = {
         version: 1,
         kind: "satori_search_ranking_r3_diagnostic",
@@ -449,17 +530,14 @@ export function evaluateR3({
                 0,
             ),
         },
+        tooling,
         summaries,
         contenders,
-        decision: {
-            qualityDiagnosticWinner: diagnosticWinner.contenderId,
-            qualityDiagnosticWinnerPassedEveryQualityGate:
-                diagnosticWinner.passesEveryQualityGate,
-            productPolicy: "B",
-            productFinalist: null,
-            productReason: "all_lateon_contenders_failed_frozen_resource_gates",
-            heldOutOpened: false,
-        },
+        decision: buildR3Decision(
+            contenders,
+            manifest.statisticalContract.minimumEffects
+                .lateOn32Over16MacroReciprocalRank,
+        ),
     };
     return { ...result, sha256: sha256Canonical(result) };
 }
