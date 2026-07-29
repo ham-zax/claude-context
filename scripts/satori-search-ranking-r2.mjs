@@ -579,6 +579,11 @@ export function evaluateR2({ manifest, r1Dir, replayDir }) {
         (total, repositoryId) => total + negativeByPolicy.B[repositoryId].length,
         0,
     );
+    const excludedHardMissTaskCount = repositoryIds.reduce((
+        total,
+        repositoryId,
+    ) => total + repositoryArtifacts[repositoryId].positiveScore.tasks
+        .filter((task) => task.hardMiss === true).length, 0);
     const expectedTaskCounts = expectedR2TaskCounts(manifest);
     if (
         qualityTaskCount !== expectedTaskCounts.quality
@@ -748,7 +753,7 @@ export function evaluateR2({ manifest, r1Dir, replayDir }) {
             qualityTaskCount,
             negativeTaskCount,
             exactIdentifierTaskCount: exactControls.length,
-            excludedHardMissTaskCount: 5,
+            excludedHardMissTaskCount,
         },
         baseline: summaries.B,
         contenders: contenderResults,
