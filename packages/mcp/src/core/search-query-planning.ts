@@ -283,7 +283,13 @@ function tokenizeLexicalTerms(tokens: string[]): SearchLexicalTerm[] {
         }
 
         addTerm(trimmed, "whole");
+    }
 
+    for (const token of tokens) {
+        const trimmed = token.trim();
+        if (trimmed.length === 0) {
+            continue;
+        }
         const expanded = trimmed
             .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
             .replace(/[/\\._:-]+/g, " ")

@@ -57,7 +57,7 @@ test('buildSearchQueryPlan retains technical compound terms before bounded natur
 
     assert.deepEqual(
         plan.lexicalTerms.map((term) => term.value),
-        ['changed-file', 'changed', 'file', 'agent-fit', 'agent', 'fit', 'final', 'local'],
+        ['changed-file', 'agent-fit', 'final', 'local', 'candidate', 'score', 'composed', 'fusion'],
     );
 });
 
