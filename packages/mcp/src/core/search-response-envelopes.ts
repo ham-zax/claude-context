@@ -90,6 +90,12 @@ function projectGroupedDebugV2(debug: SearchGroupedDebugV2): SearchGroupedDebugV
         ...(debug.agentFitReason !== undefined
             ? { agentFitReason: debug.agentFitReason }
             : {}),
+        ...(debug.entrypointOwnerScoreBoost !== undefined
+            ? { entrypointOwnerScoreBoost: debug.entrypointOwnerScoreBoost }
+            : {}),
+        ...(debug.entrypointOwnerScoreReason !== undefined
+            ? { entrypointOwnerScoreReason: debug.entrypointOwnerScoreReason }
+            : {}),
         ...(debug.matchesMust !== undefined
             ? { matchesMust: debug.matchesMust }
             : {}),

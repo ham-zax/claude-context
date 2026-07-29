@@ -44,6 +44,103 @@ test('buildSearchQueryPlan classifies explicit routes without changing legacy re
     }
 });
 
+test('buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent', () => {
+    const cases = [
+        {
+            query: 'Where does the command-line application start, and which function owns startup?',
+            kinds: ['application_startup_ownership'],
+        },
+        {
+            query: 'Find the function that creates and launches the user-facing command line interface.',
+            kinds: ['application_startup_ownership'],
+        },
+        {
+            query: 'How does running the qap terminal command enter the application?',
+            kinds: ['installed_command_ownership'],
+        },
+        {
+            query: 'Which function is the installed command target?',
+            kinds: ['installed_command_ownership'],
+        },
+        {
+            query: 'Where is the qap binary declared?',
+            kinds: ['command_declaration'],
+        },
+        {
+            query: 'Where are CLI startup tests?',
+            kinds: ['test_startup'],
+            testSeeking: true,
+        },
+        {
+            query: 'Where is the development startup test?',
+            kinds: ['test_startup'],
+            testSeeking: true,
+        },
+        {
+            query: 'Where is the mock CLI startup test?',
+            kinds: ['test_startup'],
+            testSeeking: true,
+        },
+        {
+            query: 'Where is the mock CLI startup?',
+            kinds: ['test_startup'],
+            testSeeking: true,
+        },
+        {
+            query: 'Where does the fixture application start?',
+            kinds: ['test_startup'],
+            testSeeking: true,
+        },
+        {
+            query: 'Find the stub command entrypoint.',
+            kinds: ['test_startup'],
+            testSeeking: true,
+        },
+        {
+            query: 'Which development script launches the mock application?',
+            kinds: ['development_execution'],
+            testSeeking: false,
+        },
+        {
+            query: 'Where is the startup configuration parsed?',
+            kinds: [],
+        },
+        {
+            query: 'How is the application running?',
+            kinds: [],
+        },
+        {
+            query: 'Where is the running application worker?',
+            kinds: [],
+        },
+        {
+            query: 'Where is the target application configuration?',
+            kinds: [],
+        },
+        {
+            query: 'Find the helper used after the command has already started.',
+            kinds: ['post_startup_runtime'],
+        },
+        {
+            query: 'Where is application shutdown handled?',
+            kinds: ['post_startup_runtime'],
+        },
+        {
+            query: 'cli_entry_point',
+            kinds: [],
+        },
+    ] as const;
+
+    for (const row of cases) {
+        const parsed = parseSearchOperators(row.query);
+        const plan = buildSearchQueryPlan(parsed.semanticQuery, true, parsed);
+        assert.deepEqual(plan.entrypointIntent.kinds, row.kinds, row.query);
+        if ('testSeeking' in row) {
+            assert.equal(plan.testSeeking, row.testSeeking, row.query);
+        }
+    }
+});
+
 test('parseSearchOperators derives clean retrieval text for operator-only requests', () => {
     const cases = [
         {

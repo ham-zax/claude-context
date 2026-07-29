@@ -67,6 +67,7 @@ export type SearchQueryPlan = {
     testSeeking: boolean;
     implementationSeeking: boolean;
     writerSeeking: boolean;
+    entrypointIntent: EntrypointQueryIntent;
     lexicalTerms: SearchLexicalTerm[];
     retrievalMode: "dense" | "lexical" | "hybrid";
     scorePolicyKind: "dense_similarity_min" | "topk_only";
@@ -74,6 +75,19 @@ export type SearchQueryPlan = {
     exactMatchPinningEnabled: boolean;
     rerankAllowed: boolean;
 };
+
+export type EntrypointQueryIntentKind =
+    | "installed_command_ownership"
+    | "application_startup_ownership"
+    | "command_declaration"
+    | "development_execution"
+    | "test_startup"
+    | "post_startup_runtime";
+
+export type EntrypointQueryIntent = Readonly<{
+    kinds: readonly EntrypointQueryIntentKind[];
+    reasons: readonly string[];
+}>;
 
 export type SearchLexicalEvidence = {
     score: number;

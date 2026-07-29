@@ -1,4 +1,9 @@
 import { STALENESS_THRESHOLDS_MS, type PathCategory, type SearchScope } from "./search-constants.js";
+import type {
+    EntrypointOwnerEvidence,
+    EntrypointOwnerEvidenceResolution,
+} from "./entrypoint-owner-evidence.js";
+import type { EntrypointQueryIntent } from "./search-lexical-scoring.js";
 import type { StalenessBucket } from "./search-types.js";
 
 const SEARCH_AGENT_FIT_NEUTRAL = 1.0;
@@ -14,6 +19,7 @@ const SEARCH_AGENT_FIT_WRITER_NON_OWNER_DEMOTION = 0.55;
 const SEARCH_AGENT_FIT_TYPE_DEMOTION = 0.72;
 const SEARCH_AGENT_FIT_SCHEMA_DEMOTION = 0.80;
 const SEARCH_AGENT_FIT_ANONYMOUS_DEMOTION = 0.70;
+export const SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST = 0.35;
 
 type SearchLexicalTermLike = {
     value: string;
@@ -21,9 +27,11 @@ type SearchLexicalTermLike = {
 };
 
 type SearchQueryPlanLike = {
+    semanticQuery: string;
     testSeeking: boolean;
     implementationSeeking: boolean;
     writerSeeking: boolean;
+    entrypointIntent: EntrypointQueryIntent;
     lexicalTerms: SearchLexicalTermLike[];
 };
 
@@ -32,6 +40,8 @@ type SearchResultLike = {
     content?: string | null;
     symbolLabel?: string | null;
     symbolId?: string | null;
+    ownerSymbolKey?: string | null;
+    ownerSymbolInstanceId?: string | null;
     startLine?: number;
 };
 
@@ -48,6 +58,19 @@ type SearchCandidateLike = {
 
 type SearchOwnerSourceLike = "owner_metadata" | "registry_repair" | "fallback";
 type TokenBoundaryMatcher = (field: string, term: string) => boolean;
+
+const ENTRYPOINT_OWNER_INTENT_KINDS = new Set([
+    "installed_command_ownership",
+    "application_startup_ownership",
+]);
+const EXPLICIT_COMMAND_REFERENCE_STOPWORDS = new Set([
+    "a",
+    "an",
+    "installed",
+    "the",
+    "this",
+    "terminal",
+]);
 
 function compareNullableNumbersAsc(a?: number | null, b?: number | null): number {
     const left = a === undefined || a === null ? Number.POSITIVE_INFINITY : a;
@@ -301,6 +324,89 @@ export function shouldApplyChangedFilesBoost(category: PathCategory, plan: Searc
     return isImplementationPathCategory(category);
 }
 
+function explicitCommandReferences(query: string): string[] {
+    const normalized = query.toLowerCase();
+    const references = [
+        ...normalized.matchAll(/\brunning\s+(?:the\s+)?([a-z0-9][a-z0-9._-]*)\b/g),
+        ...normalized.matchAll(/\b([a-z0-9][a-z0-9._-]*)\s+(?:terminal\s+)?command\b(?![- ]line)/g),
+    ]
+        .map((match) => match[1])
+        .filter((value): value is string => (
+            typeof value === "string"
+            && !EXPLICIT_COMMAND_REFERENCE_STOPWORDS.has(value)
+        ));
+    return Array.from(new Set(references));
+}
+
+function resolveMatchingEntrypointOwner(
+    plan: SearchQueryPlanLike,
+    result: SearchResultLike,
+    evidence: EntrypointOwnerEvidenceResolution | undefined,
+): EntrypointOwnerEvidence | undefined {
+    if (!plan.entrypointIntent.kinds.some((kind) => ENTRYPOINT_OWNER_INTENT_KINDS.has(kind))) {
+        return undefined;
+    }
+    const owners = evidence?.owners ?? [];
+    const queryTokens = new Set(
+        plan.semanticQuery.toLowerCase().match(/[a-z0-9][a-z0-9._-]*/g) ?? [],
+    );
+    const directlyMentionedOwners = owners.filter((owner) => queryTokens.has(owner.command.toLowerCase()));
+    const explicitReferences = explicitCommandReferences(plan.semanticQuery);
+    const eligibleOwners = directlyMentionedOwners.length > 0
+        ? directlyMentionedOwners
+        : explicitReferences.length > 0
+            ? []
+            : evidence?.resolutionComplete === true
+                && evidence.declaredOwnerCount === 1
+                && evidence.resolvedOwnerCount === 1
+                ? owners
+                : [];
+    return eligibleOwners.find((owner) => (
+        owner.target.symbolKey === result.ownerSymbolKey
+        && owner.target.symbolInstanceId === result.ownerSymbolInstanceId
+    ));
+}
+
+export function resolveEntrypointOwnerScoreComponent(input: {
+    plan: SearchQueryPlanLike;
+    result: SearchResultLike;
+    entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
+}): { scoreBoost: number; reason: string } {
+    const owner = resolveMatchingEntrypointOwner(
+        input.plan,
+        input.result,
+        input.entrypointOwnerEvidence,
+    );
+    return owner
+        ? {
+            scoreBoost: SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+            reason: "manifest_entrypoint_owner",
+        }
+        : {
+            scoreBoost: 0,
+            reason: "not_applicable",
+        };
+}
+
+export function computeSearchCandidateFinalScore(input: {
+    fusionScore: number;
+    lexicalScore: number;
+    pathMultiplier: number;
+    changedFilesMultiplier: number;
+    agentFitMultiplier: number;
+    entrypointOwnerScoreBoost: number;
+}): number {
+    return (
+        (input.fusionScore + input.lexicalScore)
+        * input.pathMultiplier
+        * input.changedFilesMultiplier
+        * input.agentFitMultiplier
+    ) + Math.min(
+        SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+        Math.max(0, input.entrypointOwnerScoreBoost),
+    );
+}
+
 export function resolveAgentFitMultiplier(input: {
     plan: SearchQueryPlanLike;
     result: SearchResultLike;
@@ -308,7 +414,13 @@ export function resolveAgentFitMultiplier(input: {
     scope: SearchScope;
     hasTokenBoundaryMatch: TokenBoundaryMatcher;
 }): { multiplier: number; reason: string } {
-    const { plan, result, category, scope, hasTokenBoundaryMatch } = input;
+    const {
+        plan,
+        result,
+        category,
+        scope,
+        hasTokenBoundaryMatch,
+    } = input;
     if (scope === "docs") {
         return { multiplier: SEARCH_AGENT_FIT_NEUTRAL, reason: "docs_scope_neutral" };
     }

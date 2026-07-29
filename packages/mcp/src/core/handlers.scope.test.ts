@@ -21,6 +21,7 @@ import {
     buildSymbolRecordsForFile,
     buildSymbolRegistry,
     resolveNavigationSidecarRoot,
+    writeNavigationSidecarGeneration,
     writeRelationshipSidecar,
     writeSymbolRegistrySidecar,
     COLLECTION_LIMIT_MESSAGE,
@@ -156,6 +157,7 @@ type ToolHandlersTestOverrides = {
         outcome: string;
         reason?: string;
         navigationStatus?: string;
+        vectorReceipt?: unknown;
         generationReceipt?: unknown;
     }>;
     probeLocalSearchCollectionState: (codebasePath: string) => Promise<{ state: string; collectionName?: string }>;
@@ -341,6 +343,9 @@ async function writeSearchSymbolRegistryForFiles(input: {
     relationships?: (
         symbols: SymbolRecord[],
     ) => Parameters<typeof writeRelationshipSidecar>[0]['records'];
+    captureGeneration?: (
+        generation: Awaited<ReturnType<typeof writeNavigationSidecarGeneration>>,
+    ) => void;
 }) {
     const allSymbols: SymbolRecord[] = [];
     const manifestFiles: SymbolRegistryManifest['files'] = [];
@@ -388,21 +393,16 @@ async function writeSearchSymbolRegistryForFiles(input: {
         files: manifestFiles,
     };
 
-    const result = await writeSymbolRegistrySidecar({
-        registry: buildSymbolRegistry({ manifest, symbols: allSymbols }),
-    });
-    await writeRelationshipSidecar({
-        normalizedRootPath: input.repoPath,
-        symbolRegistryManifestHash: result.manifestHash,
-        relationshipVersion: manifest.relationshipVersion,
-        builtAt: manifest.builtAt,
-        files: manifest.files,
+    const registry = buildSymbolRegistry({ manifest, symbols: allSymbols });
+    const result = await writeNavigationSidecarGeneration({
+        registry,
         records: input.relationships?.(allSymbols) ?? [],
         analysisByFile: new Map(manifest.files.map((file) => [file.path, {
             moduleBindings: [],
             callSites: [],
         }])),
     });
+    input.captureGeneration?.(result);
 
     return allSymbols;
 }
@@ -588,6 +588,7 @@ function createHandlers(
         enableVectorReceipt?: boolean;
         searchContinuationCoordinator?: SearchContinuationCoordinator;
         sourceBarrierMode?: 'verified' | 'native';
+        sourcePathComparisonStatus?: 'matches' | 'differs' | 'unavailable';
     }
 ) {
     const tracedSearchResults = searchResults.map((result, index) => ({
@@ -596,6 +597,9 @@ function createHandlers(
     }));
     const context = {
         getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+        compareSourcePathsToFreshnessCheckpoint: async () => ({
+            status: options?.sourcePathComparisonStatus ?? 'matches',
+        }),
         semanticSearch: async () => searchResults,
         semanticSearchInProvenGeneration: async (_receipt: unknown, request: { topK: number }) => (
             options?.respectSemanticTopK ? searchResults.slice(0, request.topK) : searchResults
@@ -7899,6 +7903,373 @@ test('handleSearchCode keeps a provider adapter eligible as the canonical implem
         assert.equal(payload.results[0].target.file, 'packages/core/src/vectordb/adapters/milvus-rest.ts');
         assert.equal(payload.results[0].debug?.pathCategory, 'adapter');
         assert.equal(payload.results[0].debug?.agentFitReason, 'implementation_symbol');
+    });
+});
+
+test('handleSearchCode ranks a manifest-declared CLI owner without changing candidate eligibility', async () => {
+    await withTempRepo(async (repoPath) => {
+        fs.mkdirSync(path.join(repoPath, 'src/cli'), { recursive: true });
+        fs.writeFileSync(
+            path.join(repoPath, 'pyproject.toml'),
+            [
+                '[project]',
+                'name = "qap-fixture"',
+                '',
+                '[project.scripts]',
+                'qap = "cli.main:cli_entry_point"',
+            ].join('\n'),
+            'utf8',
+        );
+        fs.writeFileSync(
+            path.join(repoPath, 'src/cli/main.py'),
+            [
+                'def cli_entry_point():',
+                '    click_app = typer.main.get_command(app)',
+                '    return click_app(standalone_mode=False)',
+            ].join('\n'),
+            'utf8',
+        );
+        let navigationGeneration:
+            | Awaited<ReturnType<typeof writeNavigationSidecarGeneration>>
+            | undefined;
+        const symbols = await writeSearchSymbolRegistryForFiles({
+            repoPath,
+            files: [{
+                relativePath: 'src/cli/main.py',
+                content: fs.readFileSync(path.join(repoPath, 'src/cli/main.py'), 'utf8'),
+                language: 'python',
+                chunks: [{
+                    content: 'def cli_entry_point(): click_app = typer.main.get_command(app); return click_app()',
+                    startLine: 1,
+                    endLine: 3,
+                    symbolLabel: 'function cli_entry_point',
+                }],
+            }],
+            captureGeneration: (generation) => {
+                navigationGeneration = generation;
+            },
+        });
+        const canonicalOwner = symbols.find((symbol) => symbol.qualifiedName === 'cli_entry_point');
+        assert.ok(canonicalOwner);
+        assert.ok(navigationGeneration);
+
+        const searchResults: SearchFixtureResult[] = [
+            {
+                content: 'def get_runtime_app_data_dir(): return resolve_executable_dir() / "data"',
+                relativePath: 'src/python/core/runtime_paths.py',
+                startLine: 20,
+                endLine: 22,
+                language: 'python',
+                score: 0.86,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_runtime_path',
+                symbolLabel: 'function get_runtime_app_data_dir',
+            },
+            {
+                content: 'def main(): parser = argparse.ArgumentParser("development launcher")',
+                relativePath: 'scripts/dev/qap_ralph.py',
+                startLine: 932,
+                endLine: 960,
+                language: 'python',
+                score: 0.79,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_dev_main',
+                symbolLabel: 'function main',
+            },
+            {
+                content: 'def main(): parser = argparse.ArgumentParser("batch runner")',
+                relativePath: 'scripts/ops/run_batch.py',
+                startLine: 100,
+                endLine: 130,
+                language: 'python',
+                score: 0.77,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_batch_main',
+                symbolLabel: 'function main',
+            },
+            {
+                content: 'def cli_entry_point(): click_app = typer.main.get_command(app); return click_app()',
+                relativePath: 'src/cli/main.py',
+                startLine: 1,
+                endLine: 3,
+                language: 'python',
+                score: 0.32,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_cli_entry_point',
+                symbolLabel: 'function cli_entry_point',
+                ownerSymbolKey: canonicalOwner.symbolKey,
+                ownerSymbolInstanceId: canonicalOwner.symbolInstanceId,
+            },
+        ];
+        const handlers = createHandlers(
+            repoPath,
+            searchResults,
+            undefined,
+            { enableVectorReceipt: true },
+        );
+        const policyHash = 'd'.repeat(64);
+        const marker = {
+            runId: 'entrypoint-owner-run',
+            indexPolicyHash: policyHash,
+        };
+        const policy = { policyHash };
+        const vectorReceipt = {
+            collectionName: 'committed-v3',
+            marker,
+            policy,
+            policyDocumentDigest: 'e'.repeat(64),
+            exactPayloadCount: 4,
+            observations: {
+                profileFileToken: null,
+                policyFileToken: 'policy-token',
+            },
+        };
+        const completionProof = {
+            outcome: 'valid',
+            navigationStatus: 'valid',
+            vectorReceipt,
+            generationReceipt: {
+                ...vectorReceipt,
+                navigation: {
+                    generationId: navigationGeneration.generationId,
+                    generationRoot: navigationGeneration.generationRoot,
+                    symbolRegistryManifestHash: navigationGeneration.manifestHash,
+                    relationshipManifestHash: navigationGeneration.relationshipManifestHash,
+                    navigationSealHash: navigationGeneration.navigationSealHash,
+                },
+                observations: {
+                    ...vectorReceipt.observations,
+                    navigationToken: 'navigation-token',
+                },
+            },
+        };
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof =
+            async () => completionProof;
+
+        const ownerQueries = [
+            'Where does the command-line application start, and which function owns startup?',
+            'Find the function that creates and launches the user-facing command line interface.',
+            'How does running the qap terminal command enter the application?',
+        ];
+        for (const query of ownerQueries) {
+            const response = await handlers.handleSearchCode({
+                path: repoPath,
+                query,
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 4,
+                debugMode: 'full',
+            });
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            const ownerRank = payload.results.findIndex(
+                (result: { target?: { file?: string } }) => result.target?.file === 'src/cli/main.py',
+            );
+            assert.equal(ownerRank >= 0 && ownerRank < 3, true, query);
+            assert.equal(
+                payload.hints?.debugSearch?.entrypointOwnerEvidence?.status,
+                'resolved',
+                query,
+            );
+            assert.equal(
+                payload.hints?.debugSearch?.entrypointOwnerEvidence?.declaredOwnerCount,
+                1,
+                query,
+            );
+            assert.equal(
+                payload.hints?.debugSearch?.entrypointOwnerEvidence?.resolvedOwnerCount,
+                1,
+                query,
+            );
+            assert.equal(
+                payload.hints?.debugSearch?.entrypointOwnerEvidence?.resolutionComplete,
+                true,
+                query,
+            );
+            assert.equal(
+                payload.results[ownerRank].debug?.entrypointOwnerScoreReason,
+                'manifest_entrypoint_owner',
+                query,
+            );
+        }
+
+        for (const query of [
+            'cli_entry_point',
+            'must:cli_entry_point cli_entry_point',
+        ]) {
+            const response = await handlers.handleSearchCode({
+                path: repoPath,
+                query,
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 4,
+                debugMode: 'full',
+            });
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            assert.equal(payload.results[0].target.file, 'src/cli/main.py', query);
+            assert.equal(
+                payload.results[0].target.symbolId,
+                canonicalOwner.symbolInstanceId,
+                query,
+            );
+        }
+
+        const tracedResponse = await handlers.handleSearchCode({
+            path: repoPath,
+            query: ownerQueries[0],
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 4,
+            debugMode: 'full',
+        });
+        const tracedPayload = JSON.parse(tracedResponse.content[0]?.text || '{}');
+        const stages = tracedPayload.hints?.debugSearch?.candidateSurvival?.stages ?? [];
+        const candidateIds = (stageName: string) => stages
+            .find((stage: { stage?: string }) => stage.stage === stageName)
+            ?.candidates.map((candidate: { candidateId: string }) => candidate.candidateId)
+            .sort();
+        assert.deepEqual(candidateIds('mcp_filtered'), candidateIds('mcp_fusion'));
+        const baselineHandlers = createHandlers(repoPath, searchResults);
+        const baselineResponse = await baselineHandlers.handleSearchCode({
+            path: repoPath,
+            query: ownerQueries[0],
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 4,
+            debugMode: 'full',
+        });
+        const baselinePayload = JSON.parse(baselineResponse.content[0]?.text || '{}');
+        const baselineStages = baselinePayload.hints?.debugSearch?.candidateSurvival?.stages ?? [];
+        const candidateIdentities = (
+            candidateStages: Array<{
+                stage?: string;
+                candidates?: Array<{
+                    relativePath: string;
+                    startLine: number | null;
+                    endLine: number | null;
+                    language: string;
+                }>;
+            }>,
+            stageName: string,
+        ) => candidateStages
+            .find((stage) => stage.stage === stageName)
+            ?.candidates?.map((candidate) => JSON.stringify([
+                candidate.relativePath,
+                candidate.startLine,
+                candidate.endLine,
+                candidate.language,
+            ]))
+            .sort();
+        assert.deepEqual(
+            candidateIdentities(stages, 'mcp_filtered'),
+            candidateIdentities(baselineStages, 'mcp_filtered'),
+        );
+        const eligibilityRemovalReasons = new Set([
+            'dirty_source_suppressed',
+            'scope_filter',
+            'language_filter',
+            'path_include_filter',
+            'path_exclude_filter',
+            'must_filter',
+            'exclude_filter',
+        ]);
+        const eligibilityRemovals = (
+            removals: Array<{
+                candidateId: string;
+                afterStage: string;
+                reason: string;
+                passId?: string;
+            }>,
+        ) => removals
+            .filter((removal) => eligibilityRemovalReasons.has(removal.reason))
+            .map((removal) => JSON.stringify([
+                removal.candidateId,
+                removal.afterStage,
+                removal.reason,
+                removal.passId ?? null,
+            ]))
+            .sort();
+        assert.deepEqual(
+            eligibilityRemovals(
+                tracedPayload.hints?.debugSearch?.candidateSurvival?.removals ?? [],
+            ),
+            eligibilityRemovals(
+                baselinePayload.hints?.debugSearch?.candidateSurvival?.removals ?? [],
+            ),
+        );
+        const disclosedResultIdentities = (
+            results: Array<{
+                target?: {
+                    file?: string;
+                    symbolId?: string;
+                    span?: { startLine?: number; endLine?: number };
+                };
+            }>,
+        ) => results.map((result) => JSON.stringify([
+            result.target?.file ?? null,
+            result.target?.symbolId ?? null,
+            result.target?.span?.startLine ?? null,
+            result.target?.span?.endLine ?? null,
+        ])).sort();
+        assert.deepEqual(
+            disclosedResultIdentities(tracedPayload.results ?? []),
+            disclosedResultIdentities(baselinePayload.results ?? []),
+        );
+        const incompatibleHandlers = createHandlers(
+            repoPath,
+            searchResults,
+            undefined,
+            {
+                enableVectorReceipt: true,
+                sourcePathComparisonStatus: 'differs',
+            },
+        );
+        (incompatibleHandlers as unknown as ToolHandlersTestOverrides).validateCompletionProof =
+            async () => completionProof;
+        const incompatibleResponse = await incompatibleHandlers.handleSearchCode({
+            path: repoPath,
+            query: ownerQueries[0],
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 4,
+            debugMode: 'full',
+        });
+        const incompatiblePayload = JSON.parse(incompatibleResponse.content[0]?.text || '{}');
+        assert.equal(
+            incompatiblePayload.hints?.debugSearch?.entrypointOwnerEvidence?.status,
+            'publication_incompatible',
+        );
+        assert.equal(
+            incompatiblePayload.results.some(
+                (result: { debug?: { entrypointOwnerScoreBoost?: number } }) => (
+                    (result.debug?.entrypointOwnerScoreBoost ?? 0) > 0
+                ),
+            ),
+            false,
+        );
+
+        const developmentResponse = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'Which development script launches the mock application?',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 4,
+            debugMode: 'full',
+        });
+        const developmentPayload = JSON.parse(developmentResponse.content[0]?.text || '{}');
+        assert.equal(developmentPayload.results[0].target.file, 'scripts/dev/qap_ralph.py');
+        const entrypointResult = developmentPayload.results.find(
+            (result: { target?: { file?: string } }) => result.target?.file === 'src/cli/main.py',
+        );
+        assert.notEqual(
+            entrypointResult?.debug?.entrypointOwnerScoreReason,
+            'manifest_entrypoint_owner',
+        );
     });
 });
 

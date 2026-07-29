@@ -1,6 +1,8 @@
 import { SEARCH_OPERATOR_PREFIX_MAX_CHARS } from "./search-constants.js";
 import type {
     SearchIntentConfidence,
+    EntrypointQueryIntent,
+    EntrypointQueryIntentKind,
     SearchLexicalTerm,
     SearchLexicalTermKind,
     SearchQueryIntent,
@@ -21,6 +23,61 @@ const SEARCH_STRUCTURAL_CUE_WORDS = new Set([
     "call", "calls", "caller", "callers", "callee", "callees",
     "own", "owns", "owner", "owners", "owning", "reference", "references",
 ]);
+
+function classifyEntrypointQueryIntent(
+    normalizedQuery: string,
+    testSeeking: boolean,
+    explicitTestSeeking: boolean,
+): EntrypointQueryIntent {
+    const startupCue = /\b(start|starts|started|starting|startup|launch|launches|launched|launching|enter|enters|entered|entering|entry|entrypoint|bootstrap|bootstraps|bootstrapped|bootstrapping|invoke|invokes|invoked|invoking)\b/.test(normalizedQuery);
+    const commandSubject = /\b(command[- ]line(?: interface| application)?|cli|terminal command|installed command|binary|executable|application)\b/.test(normalizedQuery);
+    const declarationCue = /\b(declar(?:e|es|ed|ation)|manifest|project scripts?|package scripts?|configured as|registered as)\b/.test(normalizedQuery);
+    const targetCue = /\btarget\b/.test(normalizedQuery);
+    const developmentCue = /\b(dev|development|local)\b/.test(normalizedQuery)
+        || /\bdevelopment script\b/.test(normalizedQuery);
+    const postStartupCue = /\b(after (?:the )?(?:command|application|cli) (?:has )?(?:already )?started|after argument parsing|shutdown|shut down|post-startup|runtime helper|execute(?:s|d|ing)? (?:a )?request)\b/.test(normalizedQuery);
+    const installedCommandCue = /\b(installed command|terminal command|binary|executable)\b/.test(normalizedQuery);
+    const kinds: EntrypointQueryIntentKind[] = [];
+    const reasons: string[] = [];
+
+    if (postStartupCue) {
+        return {
+            kinds: ["post_startup_runtime"],
+            reasons: ["post_startup_runtime_cue"],
+        };
+    }
+    if (explicitTestSeeking && startupCue) {
+        return {
+            kinds: ["test_startup"],
+            reasons: ["test_startup_cue"],
+        };
+    }
+    if (developmentCue && startupCue) {
+        return {
+            kinds: ["development_execution"],
+            reasons: ["development_execution_cue"],
+        };
+    }
+    if (testSeeking && startupCue) {
+        return {
+            kinds: ["test_startup"],
+            reasons: ["test_startup_cue"],
+        };
+    }
+    if (declarationCue && commandSubject) {
+        kinds.push("command_declaration");
+        reasons.push("command_declaration_cue");
+    }
+    if ((startupCue || targetCue) && commandSubject && installedCommandCue) {
+        kinds.push("installed_command_ownership");
+        reasons.push("installed_command_ownership_cue");
+    } else if (startupCue && commandSubject && !declarationCue) {
+        kinds.push("application_startup_ownership");
+        reasons.push("application_startup_ownership_cue");
+    }
+
+    return { kinds, reasons };
+}
 
 export type ParsedSearchOperators = {
     semanticQuery: string;
@@ -483,9 +540,19 @@ export function buildSearchQueryPlan(
     const explicitReferenceSeeking = /\b(used|uses|usage|reference|references|referenced|callers?|called|imports?|imported|instantiat(?:e|ed|ion))\b/.test(normalizedQuery)
         || /\bwho\s+uses\b/.test(normalizedQuery);
     const referenceSeeking = explicitReferenceSeeking;
-    const testSeeking = /\b(test|tests|tested|testing|spec|specs|coverage|assert|asserts|assertion|assertions|fixture|fixtures|mock|mocks|mocked|stub|stubs)\b/.test(normalizedQuery)
+    const rawTestSeeking = /\b(test|tests|tested|testing|spec|specs|coverage|assert|asserts|assertion|assertions|fixture|fixtures|mock|mocks|mocked|stub|stubs)\b/.test(normalizedQuery)
         || /\.test\b/.test(normalizedQuery)
         || /\.spec\b/.test(normalizedQuery);
+    const explicitTestSeeking = /\b(test|tests|tested|testing|spec|specs|coverage|assert|asserts|assertion|assertions)\b/.test(normalizedQuery)
+        || /\.test\b/.test(normalizedQuery)
+        || /\.spec\b/.test(normalizedQuery);
+    const entrypointIntent = classifyEntrypointQueryIntent(
+        normalizedQuery,
+        rawTestSeeking,
+        explicitTestSeeking,
+    );
+    const testSeeking = rawTestSeeking
+        && !entrypointIntent.kinds.includes("development_execution");
     const writerSeeking = /\b(writes?|writing|written|updates?|updated|updating|creates?|created|creating|generates?|generated|generating|emits?|emitted|emitting|persists?|persisted|persisting|configures?|configured|configuring|installs?|installed|installing)\b/.test(normalizedQuery);
     const implementationCue = /\b(implement|implements|implemented|implementation|owner|owning|built|build|builds|builder|construct|constructed|create|creates|created|install|installs|installed|emit|emits|emitted|producer|produces|normalize|normalizes|normalized|cap|caps|capped|script|scripts|check|checks|checked|wire|wired|assemble|assembles|assembled|decide|decides|decided|deciding|freshness|reconcile|reconciles|reconciled|reconciliation|control)\b/.test(normalizedQuery);
     const ownerWhereSeeking = identifierTokens.length > 0
@@ -531,6 +598,7 @@ export function buildSearchQueryPlan(
     if (writerSeeking) {
         reasons.push("writer_seeking_query");
     }
+    reasons.push(...entrypointIntent.reasons);
     const route = classifySearchRoute({
         semanticQuery,
         intent,
@@ -561,6 +629,7 @@ export function buildSearchQueryPlan(
         testSeeking,
         implementationSeeking,
         writerSeeking,
+        entrypointIntent,
         lexicalTerms,
         retrievalMode: hybridEnabled
             ? (sparseOnlyRoute ? "lexical" : "hybrid")

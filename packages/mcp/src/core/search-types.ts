@@ -11,6 +11,7 @@ import type {
 import { SearchGroupBy, SearchNoiseCategory, SearchRankingMode, SearchResultMode, SearchScope } from "./search-constants.js";
 import { FingerprintSource, IndexFingerprint } from "../config.js";
 import type { SearchRouteContract } from "./search-lexical-scoring.js";
+import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
 import type { RerankBudgetReason } from "./search-rerank-policy.js";
 import type { SemanticPassFailureDiagnostic } from "./backend-diagnostics.js";
 
@@ -108,6 +109,8 @@ export interface SearchChunkResult {
         changedFilesMultiplier?: number;
         agentFitMultiplier?: number;
         agentFitReason?: string;
+        entrypointOwnerScoreBoost?: number;
+        entrypointOwnerScoreReason?: string;
         matchesMust?: boolean;
         exactLexicalMatch: boolean;
         backendScore?: number;
@@ -157,6 +160,8 @@ export interface SearchGroupedDebugV2 {
     changedFilesMultiplier?: number;
     agentFitMultiplier?: number;
     agentFitReason?: string;
+    entrypointOwnerScoreBoost?: number;
+    entrypointOwnerScoreReason?: string;
     matchesMust?: boolean;
     exactLexicalMatch: boolean;
     symbolAggregation?: {
@@ -242,6 +247,7 @@ export interface SearchCandidateSurvivalOccurrence {
         pathMultiplier: number;
         changedFilesMultiplier: number;
         agentFitMultiplier: number;
+        entrypointOwnerScoreBoost: number;
         exactLexicalMatch: boolean;
         passesMatchedMust: boolean;
         rerankFamilyId: string;
@@ -397,7 +403,12 @@ export interface SearchDebugHint {
         reasons: string[];
         lexicalTerms: string[];
         semanticQuery: string;
+        entrypointIntent?: {
+            kinds: string[];
+            reasons: string[];
+        };
     };
+    entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
     retrieval: {
         mode: "dense" | "lexical" | "hybrid";
         scorePolicyKind: "dense_similarity_min" | "topk_only";

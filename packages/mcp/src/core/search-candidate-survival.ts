@@ -31,6 +31,7 @@ type TraceableCandidate = {
     pathMultiplier?: number;
     changedFilesMultiplier?: number;
     agentFitMultiplier?: number;
+    entrypointOwnerScoreBoost?: number;
     exactLexicalMatch?: boolean;
     passesMatchedMust?: boolean;
     rerankFamilyId?: string;
@@ -85,6 +86,7 @@ function buildCandidateOccurrence(input: {
         && Number.isFinite(input.candidate.pathMultiplier)
         && Number.isFinite(input.candidate.changedFilesMultiplier)
         && Number.isFinite(input.candidate.agentFitMultiplier)
+        && Number.isFinite(input.candidate.entrypointOwnerScoreBoost)
         && typeof input.candidate.exactLexicalMatch === "boolean"
         && typeof input.candidate.passesMatchedMust === "boolean"
         && typeof input.candidate.rerankFamilyId === "string"
@@ -94,6 +96,7 @@ function buildCandidateOccurrence(input: {
             pathMultiplier: input.candidate.pathMultiplier as number,
             changedFilesMultiplier: input.candidate.changedFilesMultiplier as number,
             agentFitMultiplier: input.candidate.agentFitMultiplier as number,
+            entrypointOwnerScoreBoost: input.candidate.entrypointOwnerScoreBoost as number,
             exactLexicalMatch: input.candidate.exactLexicalMatch,
             passesMatchedMust: input.candidate.passesMatchedMust,
             rerankFamilyId: input.candidate.rerankFamilyId,

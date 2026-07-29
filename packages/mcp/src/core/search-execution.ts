@@ -22,6 +22,7 @@ import type {
     SearchOperatorSummary,
     SearchProviderWorkDebugHint,
 } from "./search-types.js";
+import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
 import {
     appendCoreCandidateTrace,
     appendSearchCandidatePass,
@@ -37,7 +38,9 @@ import {
 } from "./search-response-helpers.js";
 import {
     classifyPathCategory,
+    computeSearchCandidateFinalScore,
     resolveAgentFitMultiplier as resolveSearchAgentFitMultiplier,
+    resolveEntrypointOwnerScoreComponent,
     shouldApplyChangedFilesBoost,
     shouldIncludeCategoryInScope,
     sortSearchCandidates as sortSearchCandidatesHelper,
@@ -127,6 +130,8 @@ export type SearchCandidate = {
     changedFilesMultiplier: number;
     agentFitMultiplier: number;
     agentFitReason: string;
+    entrypointOwnerScoreBoost: number;
+    entrypointOwnerScoreReason: string;
     passesMatchedMust: boolean;
     exactLexicalMatch: boolean;
     exactMatchPinned: boolean;
@@ -316,6 +321,7 @@ export type SearchExecutionOutcome =
         rerankerByteBudgetOmittedCandidates: number;
         semanticExpansion: SearchExpansionDecision & { attempted: boolean };
         providerWork: SearchProviderWorkDiagnostics;
+        entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
         candidateSurvival?: SearchCandidateSurvivalDebug;
         semanticPassFailures: SemanticPassFailureDiagnostic[];
     }
@@ -366,6 +372,7 @@ export type SearchExecutionInput = {
     freshnessMode: FreshnessDecision["mode"];
     observedChangedFilesState: ChangedFilesState;
     retrievalPolicy: ResolvedSearchPolicy;
+    entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
 };
 
 type RerankPhaseResult = {
@@ -510,10 +517,7 @@ async function rerankSearchCandidates(
                 if (!rank) continue;
                 const rerankRrf = 1 / (SEARCH_RERANK_RRF_K + rank);
                 rerankSlice[idx].fusionScore += SEARCH_RERANK_WEIGHT * rerankRrf;
-                rerankSlice[idx].finalScore = (rerankSlice[idx].fusionScore + rerankSlice[idx].lexicalScore)
-                    * rerankSlice[idx].pathMultiplier
-                    * rerankSlice[idx].changedFilesMultiplier
-                    * rerankSlice[idx].agentFitMultiplier;
+                rerankSlice[idx].finalScore = computeSearchCandidateFinalScore(rerankSlice[idx]);
                 rerankSlice[idx].rerankAdjusted = true;
                 rerankerUpdatedCandidates++;
             }
@@ -830,6 +834,8 @@ export async function runSearchExecution(
                 changedFilesMultiplier: 1.0,
                 agentFitMultiplier: 1,
                 agentFitReason: "neutral",
+                entrypointOwnerScoreBoost: 0,
+                entrypointOwnerScoreReason: "not_applicable",
                 passesMatchedMust: false,
                 exactLexicalMatch: false,
                 exactMatchPinned: false,
@@ -1057,6 +1063,11 @@ export async function runSearchExecution(
                 scope: input.scope,
                 hasTokenBoundaryMatch: (field, term) => host.searchQuerySupport.hasTokenBoundaryMatch(field, term),
             });
+            const entrypointOwnerScore = resolveEntrypointOwnerScoreComponent({
+                plan: input.queryPlan,
+                result: candidate.result,
+                entrypointOwnerEvidence: input.entrypointOwnerEvidence,
+            });
             let changedFilesMultiplier = 1.0;
             if (changedFilesBoostEnabled
                 && changedFilesState.files.has(relativePath)
@@ -1070,14 +1081,13 @@ export async function runSearchExecution(
             candidate.changedFilesMultiplier = changedFilesMultiplier;
             candidate.agentFitMultiplier = agentFit.multiplier;
             candidate.agentFitReason = agentFit.reason;
+            candidate.entrypointOwnerScoreBoost = entrypointOwnerScore.scoreBoost;
+            candidate.entrypointOwnerScoreReason = entrypointOwnerScore.reason;
             candidate.passesMatchedMust = matchesMust;
             const lexicalEvidence = host.searchQuerySupport.scoreCandidateLexicalEvidence(input.queryPlan, candidate.result);
             candidate.lexicalScore = lexicalEvidence.score;
             candidate.exactLexicalMatch = lexicalEvidence.exactLexicalMatch;
-            candidate.finalScore = (candidate.fusionScore + candidate.lexicalScore)
-                * pathMultiplier
-                * changedFilesMultiplier
-                * agentFit.multiplier;
+            candidate.finalScore = computeSearchCandidateFinalScore(candidate);
             return true;
         };
         const recordFilterRemoval = (
@@ -1336,6 +1346,9 @@ export async function runSearchExecution(
         rerankerBudgetReason,
         rerankerByteBudgetOmittedCandidates,
         semanticExpansion,
+        ...(input.entrypointOwnerEvidence
+            ? { entrypointOwnerEvidence: input.entrypointOwnerEvidence }
+            : {}),
         providerWork: {
             routeKind: searchDiagnostics.routeKind,
             retrievalMode: searchDiagnostics.retrievalMode,

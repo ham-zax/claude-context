@@ -450,6 +450,14 @@ export async function runExactRegistryFastPath(
                 reasons: [...input.queryPlan.reasons],
                 lexicalTerms: input.queryPlan.lexicalTerms.map((term) => term.value),
                 semanticQuery: input.semanticQuery,
+                ...(input.queryPlan.entrypointIntent.kinds.length > 0
+                    ? {
+                        entrypointIntent: {
+                            kinds: [...input.queryPlan.entrypointIntent.kinds],
+                            reasons: [...input.queryPlan.entrypointIntent.reasons],
+                        },
+                    }
+                    : {}),
             },
             retrieval: {
                 mode: input.queryPlan.retrievalMode,

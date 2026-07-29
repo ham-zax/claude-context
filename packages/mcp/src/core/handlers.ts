@@ -187,6 +187,11 @@ import {
 } from "./search-execution.js";
 import { resolveSearchPolicy } from './search-policy.js';
 import { SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE } from './search-candidate-survival.js';
+import {
+    prepareEntrypointOwnerEvidence,
+    type EntrypointOwnerEvidenceResolution,
+    type PreparedEntrypointOwnerEvidence,
+} from "./entrypoint-owner-evidence.js";
 import { runExactRegistryFastPath } from "./search-exact-fast-path.js";
 import { finalizeSearchResults } from "./search-result-finalization.js";
 import {
@@ -3762,6 +3767,7 @@ export class ToolHandlers {
         };
         let preservePreparedProofAge = false;
         let releasePublicationReadLease: (() => void) | undefined;
+        let preparedEntrypointOwnerEvidence: PreparedEntrypointOwnerEvidence | undefined;
         let observedChangedFilesForSearch: { available: boolean; files: Set<string> } | undefined;
         let completedFreshnessRequestProof: CompletedFreshnessRequestProof | undefined;
 
@@ -4211,6 +4217,10 @@ export class ToolHandlers {
 
             const semanticQuery = parsedOperators.semanticQuery;
             const queryPlan = this.searchQuerySupport.buildSearchQueryPlan(semanticQuery, parsedOperators);
+            const entrypointOwnerSeeking = queryPlan.entrypointIntent.kinds.some((kind) => (
+                kind === "installed_command_ownership"
+                || kind === "application_startup_ownership"
+            ));
             searchDiagnostics.routeKind = queryPlan.route.kind;
             searchDiagnostics.retrievalMode = queryPlan.retrievalMode;
             const retrievalPolicy = resolveSearchPolicy({
@@ -4429,6 +4439,85 @@ export class ToolHandlers {
                 };
             }
 
+            let entrypointOwnerEvidence: EntrypointOwnerEvidenceResolution | undefined;
+            const completeEntrypointPublicationBinding = Boolean(
+                generationReceipt
+                && typeof generationReceipt.collectionName === "string"
+                && typeof generationReceipt.marker?.runId === "string"
+                && typeof generationReceipt.policyDocumentDigest === "string"
+                && typeof generationReceipt.policy?.policyHash === "string"
+                && typeof generationReceipt.navigation?.generationId === "string"
+                && typeof generationReceipt.navigation?.symbolRegistryManifestHash === "string",
+            );
+            if (
+                entrypointOwnerSeeking
+                && completeEntrypointPublicationBinding
+                && generationReceipt
+                && navigationStatus === "valid"
+            ) {
+                if (
+                    !searchSymbolRegistry
+                    || searchSymbolRegistryManifestHash
+                        !== generationReceipt.navigation.symbolRegistryManifestHash
+                ) {
+                    const registryState = await this.loadPreparedNavigationManifest(
+                        preparedReadState,
+                        readinessDebug.operations,
+                    );
+                    if (
+                        registryState.status === "ok"
+                        && registryState.manifestHash
+                            === generationReceipt.navigation.symbolRegistryManifestHash
+                    ) {
+                        searchSymbolRegistry = registryState.registry;
+                        searchSymbolRegistryManifestHash = registryState.manifestHash;
+                    }
+                }
+                if (
+                    searchSymbolRegistry
+                    && searchSymbolRegistryManifestHash
+                        === generationReceipt.navigation.symbolRegistryManifestHash
+                ) {
+                    const preparedEvidence = await prepareEntrypointOwnerEvidence({
+                        codebaseRoot: effectiveRoot,
+                        registry: searchSymbolRegistry,
+                        publication: {
+                            collectionName: generationReceipt.collectionName,
+                            markerRunId: generationReceipt.marker.runId,
+                            policyDocumentDigest: generationReceipt.policyDocumentDigest,
+                            policyHash: generationReceipt.policy.policyHash,
+                            navigationGenerationId: generationReceipt.navigation.generationId,
+                            symbolRegistryManifestHash:
+                                generationReceipt.navigation.symbolRegistryManifestHash,
+                        },
+                    });
+                    if ("resolution" in preparedEvidence) {
+                        preparedEntrypointOwnerEvidence = preparedEvidence;
+                        const manifestComparison = await this.context
+                            .compareSourcePathsToFreshnessCheckpoint(
+                                effectiveRoot,
+                                ["pyproject.toml"],
+                                generationReceipt,
+                            );
+                        if (manifestComparison.status === "matches") {
+                            entrypointOwnerEvidence = preparedEvidence.resolution;
+                        } else {
+                            entrypointOwnerEvidence = {
+                                ...preparedEvidence.resolution,
+                                status: "publication_incompatible",
+                                owners: [],
+                                resolvedOwnerCount: 0,
+                                resolutionComplete: false,
+                            };
+                            await preparedEvidence.release();
+                            preparedEntrypointOwnerEvidence = undefined;
+                        }
+                    } else {
+                        entrypointOwnerEvidence = preparedEvidence;
+                    }
+                }
+            }
+
             const execution = await runSearchExecution({
                 effectiveRoot,
                 scope: input.scope,
@@ -4443,6 +4532,7 @@ export class ToolHandlers {
                 freshnessMode: freshnessDecision.mode,
                 observedChangedFilesState: initialObservedChangedFilesState,
                 retrievalPolicy,
+                entrypointOwnerEvidence,
             }, {
                 searchQuerySupport: this.searchQuerySupport,
                 semanticSearch: (request) => {
@@ -4598,8 +4688,31 @@ export class ToolHandlers {
                 now: this.now,
             });
             let envelope = finalized.envelope;
-            const barrierChanged = await sourceBarrierChanged();
+            let barrierChanged = false;
+            if (preparedEntrypointOwnerEvidence) {
+                const finalizedEntrypointEvidence = await preparedEntrypointOwnerEvidence.finalize({
+                    validatePreparedAuthority: async () => {
+                        barrierChanged = await sourceBarrierChanged();
+                        if (!barrierChanged) {
+                            const manifestComparison = await this.context
+                                .compareSourcePathsToFreshnessCheckpoint(
+                                    effectiveRoot,
+                                    ["pyproject.toml"],
+                                    generationReceipt,
+                                );
+                            barrierChanged = manifestComparison.status !== "matches";
+                        }
+                    },
+                });
+                if (finalizedEntrypointEvidence.status !== "available") {
+                    barrierChanged = true;
+                }
+            } else {
+                barrierChanged = await sourceBarrierChanged();
+            }
             if (barrierChanged) {
+                await preparedEntrypointOwnerEvidence?.release();
+                preparedEntrypointOwnerEvidence = undefined;
                 releasePublicationReadLease?.();
                 releasePublicationReadLease = undefined;
                 if (sourceDriftRetryCount === 0) {
@@ -4753,6 +4866,7 @@ export class ToolHandlers {
                 isError: true
             };
         } finally {
+            await preparedEntrypointOwnerEvidence?.release();
             releasePublicationReadLease?.();
         }
     }

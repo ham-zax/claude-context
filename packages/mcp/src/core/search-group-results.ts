@@ -69,6 +69,8 @@ type SearchCandidateLike = {
     changedFilesMultiplier: number;
     agentFitMultiplier: number;
     agentFitReason: string;
+    entrypointOwnerScoreBoost: number;
+    entrypointOwnerScoreReason: string;
     passesMatchedMust: boolean;
     exactLexicalMatch: boolean;
     exactMatchPinned: boolean;
@@ -323,6 +325,8 @@ export function buildExactRegistryGroupResult(input: {
                 changedFilesMultiplier: 1,
                 agentFitMultiplier: 1,
                 agentFitReason: "exact_registry",
+                entrypointOwnerScoreBoost: 0,
+                entrypointOwnerScoreReason: "not_applicable",
                 matchesMust: true,
                 exactLexicalMatch: true,
                 ...(input.debugMode === "full" ? {
@@ -479,6 +483,8 @@ export function buildGroupedSymbolSearchResult(input: {
                 changedFilesMultiplier: input.representative.changedFilesMultiplier,
                 agentFitMultiplier: input.representative.agentFitMultiplier,
                 agentFitReason: input.representative.agentFitReason,
+                entrypointOwnerScoreBoost: input.representative.entrypointOwnerScoreBoost,
+                entrypointOwnerScoreReason: input.representative.entrypointOwnerScoreReason,
                 matchesMust: input.representative.passesMatchedMust,
                 exactLexicalMatch: input.representative.exactLexicalMatch,
                 symbolAggregation: {
@@ -746,6 +752,8 @@ export function buildRawSearchResults(input: {
                 changedFilesMultiplier: candidate.changedFilesMultiplier,
                 agentFitMultiplier: candidate.agentFitMultiplier,
                 agentFitReason: candidate.agentFitReason,
+                entrypointOwnerScoreBoost: candidate.entrypointOwnerScoreBoost,
+                entrypointOwnerScoreReason: candidate.entrypointOwnerScoreReason,
                 matchesMust: candidate.passesMatchedMust,
                 exactLexicalMatch: candidate.exactLexicalMatch,
                 backendScore: candidate.backendScore,

@@ -209,6 +209,7 @@ export async function finalizeSearchResults(
         providerWork,
         candidateSurvival,
         semanticPassFailures,
+        entrypointOwnerEvidence,
     } = input.execution;
     let freshnessSummary = input.freshnessSummary;
 
@@ -235,7 +236,16 @@ export async function finalizeSearchResults(
                 reasons: [...input.queryPlan.reasons],
                 lexicalTerms: input.queryPlan.lexicalTerms.map((term) => term.value),
                 semanticQuery: input.queryPlan.semanticQuery,
+                ...(input.queryPlan.entrypointIntent.kinds.length > 0
+                    ? {
+                        entrypointIntent: {
+                            kinds: [...input.queryPlan.entrypointIntent.kinds],
+                            reasons: [...input.queryPlan.entrypointIntent.reasons],
+                        },
+                    }
+                    : {}),
             },
+            ...(entrypointOwnerEvidence ? { entrypointOwnerEvidence } : {}),
             retrieval: {
                 mode: input.queryPlan.retrievalMode,
                 scorePolicyKind: input.queryPlan.scorePolicyKind,
