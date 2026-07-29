@@ -18,6 +18,8 @@ import {
 import { isDeclarationSearchGroup } from "./search-group-ordering.js";
 
 export const SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE = SEARCH_MAX_DIAGNOSTIC_CANDIDATES;
+export const SEARCH_CANDIDATE_SURVIVAL_MAX_REMOVAL_ENTRIES =
+    SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE * 2;
 
 type CandidateIdentityInput = {
     candidateId?: unknown;
@@ -171,6 +173,7 @@ export function createSearchCandidateSurvivalTrace(): SearchCandidateSurvivalDeb
             entrypointOwnerMaxContribution: SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
         },
         maxEntriesPerStage: SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
+        maxRemovalEntries: SEARCH_CANDIDATE_SURVIVAL_MAX_REMOVAL_ENTRIES,
         corePasses: [],
         queryEmbeddings: [],
         lexicalRequests: [],
@@ -322,7 +325,7 @@ export function appendSearchCandidateRemoval(
     ))) {
         return;
     }
-    if (trace.removals.length >= trace.maxEntriesPerStage) {
+    if (trace.removals.length >= trace.maxRemovalEntries) {
         trace.omittedRemovals += 1;
         return;
     }

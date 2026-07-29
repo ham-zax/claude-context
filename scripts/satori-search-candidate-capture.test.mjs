@@ -934,6 +934,30 @@ test("version 2 baseline replay preserves authoritative owner scoring", () => {
     );
 });
 
+test("version 2 capture retains removal diagnostics beyond the stage-entry bound", () => {
+    const suite = taskSuite();
+    const traceFactory = () => {
+        const trace = replayReadyCandidateTraceV2();
+        trace.maxRemovalEntries = 320;
+        trace.removals = Array.from({ length: 161 }, (_, index) => ({
+            candidateId: `removed-${index}`,
+            afterStage: "disclosed",
+            reason: "visible_limit",
+        }));
+        return trace;
+    };
+    const capture = buildSearchCandidateCapture(
+        suite,
+        replayReadyObservationSet(suite, traceFactory),
+        { requireReplayReady: true },
+    );
+
+    assert.equal(capture.captures[0].candidateTrace.maxEntriesPerStage, 160);
+    assert.equal(capture.captures[0].candidateTrace.maxRemovalEntries, 320);
+    assert.equal(capture.captures[0].candidateTrace.removals.length, 161);
+    assert.equal(capture.captures[0].readiness.removalReasonsComplete, true);
+});
+
 test("exact-registry hits reproduce as policy-invariant routes without fusion work", () => {
     const suite = taskSuite();
     suite.tasks[0].queryClass = "exact_identifier";

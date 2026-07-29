@@ -304,6 +304,7 @@ export interface SearchCandidateSurvivalDebug {
         entrypointOwnerMaxContribution: number;
     };
     maxEntriesPerStage: number;
+    maxRemovalEntries: number;
     corePasses: Array<{
         passId: string;
         productCandidateLimit: number;

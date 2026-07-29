@@ -60,14 +60,14 @@ test("candidate-survival stages are bounded and never retain source content", ()
     assert.equal(trace.stages[0]?.omittedOccurrences, 10);
     assert.equal(JSON.stringify(trace).includes("secret-source"), false);
 
-    for (let index = 0; index < 170; index++) {
+    for (let index = 0; index < 330; index++) {
         appendSearchCandidateRemoval(trace, {
             candidateId: `stored-${index}`,
             afterStage: "disclosed",
             reason: "visible_limit",
         });
     }
-    assert.equal(trace.removals.length, 160);
+    assert.equal(trace.removals.length, 320);
     assert.equal(trace.omittedRemovals, 10);
 });
 

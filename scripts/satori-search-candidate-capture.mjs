@@ -152,6 +152,12 @@ function normalizeCandidateTrace(value, label) {
     if (maxEntriesPerStage < 1) {
         throw new Error(`${label}.maxEntriesPerStage must be positive.`);
     }
+    const maxRemovalEntries = trace.maxRemovalEntries === undefined
+        ? maxEntriesPerStage
+        : requireSafeCount(trace.maxRemovalEntries, `${label}.maxRemovalEntries`);
+    if (maxRemovalEntries < maxEntriesPerStage) {
+        throw new Error(`${label}.maxRemovalEntries must be at least maxEntriesPerStage.`);
+    }
     if (!Array.isArray(trace.queryEmbeddings)) {
         throw new Error(`${label}.queryEmbeddings must be an array.`);
     }
@@ -370,8 +376,8 @@ function normalizeCandidateTrace(value, label) {
         return jsonClone(stage);
     });
     if (!Array.isArray(trace.removals)) throw new Error(`${label}.removals must be an array.`);
-    if (trace.removals.length > maxEntriesPerStage) {
-        throw new Error(`${label}.removals exceeds maxEntriesPerStage.`);
+    if (trace.removals.length > maxRemovalEntries) {
+        throw new Error(`${label}.removals exceeds maxRemovalEntries.`);
     }
     for (let index = 0; index < trace.removals.length; index += 1) {
         const removal = requireRecord(trace.removals[index], `${label}.removals[${index}]`);
@@ -387,6 +393,7 @@ function normalizeCandidateTrace(value, label) {
         schemaVersion: trace.schemaVersion,
         ...(scorePolicy ? { scorePolicy } : {}),
         maxEntriesPerStage,
+        ...(trace.maxRemovalEntries === undefined ? {} : { maxRemovalEntries }),
         corePasses,
         queryEmbeddings,
         lexicalRequests,
