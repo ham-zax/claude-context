@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { canonicalJson } from "./satori-useful-context.mjs";
 
 const SPLITS = new Set(["tuning", "held_out"]);
+const SEARCH_SCOPES = new Set(["runtime", "mixed", "docs"]);
+const SEARCH_RESULT_MODES = new Set(["grouped", "raw"]);
+const SEARCH_GROUPS = new Set(["symbol", "file"]);
+const FROZEN_POTION_SEARCH_LIMIT = 15;
 const QUERY_CLASSES = new Set([
     "ownership_implementation",
     "natural_language_behavior",
@@ -216,6 +220,19 @@ function normalizeTask(value, index, repositoriesById) {
         throw new Error(`${label}.querySha256 does not match the exact query text.`);
     }
     const search = requireRecord(task.search, `${label}.search`);
+    const limit = requirePositiveInteger(search.limit, `${label}.search.limit`);
+    const disclosureLimit = requirePositiveInteger(
+        search.disclosureLimit,
+        `${label}.search.disclosureLimit`,
+    );
+    if (limit > FROZEN_POTION_SEARCH_LIMIT) {
+        throw new Error(
+            `${label}.search.limit exceeds the frozen Potion runtime maximum.`,
+        );
+    }
+    if (disclosureLimit > limit) {
+        throw new Error(`${label}.search.disclosureLimit must not exceed limit.`);
+    }
     return {
         id: requireString(task.id, `${label}.id`),
         split,
@@ -224,14 +241,23 @@ function normalizeTask(value, index, repositoriesById) {
         query,
         querySha256,
         search: {
-            scope: requireString(search.scope, `${label}.search.scope`),
-            resultMode: requireString(search.resultMode, `${label}.search.resultMode`),
-            groupBy: requireString(search.groupBy, `${label}.search.groupBy`),
-            limit: requirePositiveInteger(search.limit, `${label}.search.limit`),
-            disclosureLimit: requirePositiveInteger(
-                search.disclosureLimit,
-                `${label}.search.disclosureLimit`,
+            scope: requireEnum(
+                search.scope,
+                SEARCH_SCOPES,
+                `${label}.search.scope`,
             ),
+            resultMode: requireEnum(
+                search.resultMode,
+                SEARCH_RESULT_MODES,
+                `${label}.search.resultMode`,
+            ),
+            groupBy: requireEnum(
+                search.groupBy,
+                SEARCH_GROUPS,
+                `${label}.search.groupBy`,
+            ),
+            limit,
+            disclosureLimit,
         },
         criticality: requireEnum(task.criticality, CRITICALITIES, `${label}.criticality`),
         oracle: normalizeOracle(task.oracle, `${label}.oracle`, repository),

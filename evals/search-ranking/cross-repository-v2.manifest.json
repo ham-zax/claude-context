@@ -196,10 +196,10 @@
       "query": "Which function prepares publication-bound installed-command owner evidence?",
       "querySha256": "23f5a6022c367033acd96c4b68c99c19f89f835ac2b397afd9cb616a5536aa30",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -230,10 +230,10 @@
       "query": "Where is the final local candidate score composed from fusion, lexical, path, changed-file, agent-fit, and owner evidence?",
       "querySha256": "5e9175f7248661a3c4ac33adf1d7bd8e8a48cc355fa7ccede1e71a5bf38e831c",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -264,10 +264,10 @@
       "query": "Which function groups scored chunks into visible symbol or file results?",
       "querySha256": "5301fd7109bac5366a7f02aada57c11d759d2bca50bb6df71238042a8bc56f52",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -298,10 +298,10 @@
       "query": "Which function builds the search query plan and route from operators and intent?",
       "querySha256": "85e5456c252cef9958205c97dac5777fd6c6d8b9844d14cbd1fc6f38ce8bc5f2",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -332,10 +332,10 @@
       "query": "Where is grouped search disclosure bounded by caller, initial, and UTF-8 response budgets?",
       "querySha256": "09ea2ec6541fc06cd2e117248d237e43d5fc966d6c40a1dcfb434f91d089570b",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -366,10 +366,10 @@
       "query": "Which coordinator turns ranked search candidates into the final raw or grouped response?",
       "querySha256": "1d68e76025fc0f6dcc3db10540db0ec947c1b201c08ccdaa9a3d5230ad76fe2e",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -400,10 +400,10 @@
       "query": "Which regression test distinguishes installed-command ownership from mock, fixture, development, and runtime-helper startup queries?",
       "querySha256": "d751ef2bac65ca9480467e927ed4e6f916b79fff16f408663fd06c03fed33128",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -434,10 +434,10 @@
       "query": "Which document defines the cross-repository ranking ablation phases and decision boundaries?",
       "querySha256": "f6dfb3fb929391e1ca62a74842e88815027891f52da627357e28aa8a60cb2a1b",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -468,10 +468,10 @@
       "query": "Which Satori function charges a customer credit card?",
       "querySha256": "d70b67449500551a09a881c20357863170640b7f3de1976a90955733ad41a875",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -503,10 +503,10 @@
       "query": "Which browser component renders a product image gallery?",
       "querySha256": "24c407aacde0a6a9036ed32523f728cac86fe65c1387b7a6c4a996b3e62a0af4",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -538,10 +538,10 @@
       "query": "How does running the qap terminal command enter the application?",
       "querySha256": "d15d7be1d14390cff203d637a11959112ac0e96e0476b09f01d363d664f4f471",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "critical",
@@ -572,10 +572,10 @@
       "query": "Which function runs a complete backtest for a configured pair?",
       "querySha256": "373e300e955612484523c40e5f5acaecc447ed2af954431cd26e6c3d01a555eb",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -606,10 +606,10 @@
       "query": "Which function defines the root Typer command and its global options?",
       "querySha256": "25798c9d643590abc82f4d70a741f2246195f160503d6f46c8509c13547f42f5",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -640,10 +640,10 @@
       "query": "Where are lazy CLI subcommand and alias maps assembled from command specifications?",
       "querySha256": "0b50e8aae5089bcc6aa7c58e9a2da04fcd407839c01cf971bb2a608cb1e25e02",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -674,10 +674,10 @@
       "query": "Which function loads the engine intent policy used by the backtest runner?",
       "querySha256": "1a6405fdb391a2f61e56e4fe48c2353a80f69477cdb370af8589677400fefa86",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -708,10 +708,10 @@
       "query": "check_cointegration",
       "querySha256": "d3b70b67092e2af32a38d36b0e96c29876c46982d57600c6eccbcbf5ff38fc5d",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "critical",
@@ -742,10 +742,10 @@
       "query": "Which React component declares the browser route table?",
       "querySha256": "581b05be51faa37f400e5b35fcf8d3fdd7f9ca4c3356d8f1c64f2f1c7bddf288",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -777,10 +777,10 @@
       "query": "Which Shopify component updates the cart drawer after an item is added?",
       "querySha256": "e79437093aee3b36e9d32d300a721aa072821a36cac0bdd750678afa779232dc",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -812,10 +812,10 @@
       "query": "Which component updates cart item quantities and removes cart lines?",
       "querySha256": "44d96b843bb89b480c2cf81dbde62ac27c70573aabd6f98d680880a933eef13f",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -846,10 +846,10 @@
       "query": "Which component fetches and renders predictive search results?",
       "querySha256": "84a91e06be77fb94a9fd0f309c01f2e49fe0535623a81f4fefcfc038a4c9199b",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -880,10 +880,10 @@
       "query": "Which component applies collection facet filters and updates the product grid?",
       "querySha256": "c0b479c9d9c524a23fee49521295d88d92015c59d581d992d5be2e1f762be5e3",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -914,10 +914,10 @@
       "query": "Which function traps keyboard focus inside an open modal or drawer?",
       "querySha256": "e874e2216c13a15b092c08310f7698c80d7128baa2a8f82cf5edd2f8d01c61d3",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -948,10 +948,10 @@
       "query": "Which function broadcasts a named theme event to all subscribers?",
       "querySha256": "fe5aef47837cdd4b15805648741e6920e02459c2bfa8de5771fa29f31199511d",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -982,10 +982,10 @@
       "query": "Which component lazily fetches product recommendations when visible?",
       "querySha256": "1585e8c9e34c6d5ba8f5f606712184d930684e60281712b14e350275952c69a2",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1016,10 +1016,10 @@
       "query": "Which Python function executes a statistical backtest?",
       "querySha256": "0728bb563852910cee92e44f2ade27e56f26944ed3dd001a56c5ce9cc5365061",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1051,10 +1051,10 @@
       "query": "Where is an OAuth access token refreshed on the server?",
       "querySha256": "f831bb7ce4172a978a53ab8e5d93d391102338620b43b2dfc2998c288c476ba7",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1086,10 +1086,10 @@
       "query": "Which function records the primary CTA and opens the configured Chrome store URL?",
       "querySha256": "1f703c9a59cc127bc0d8f9b2f5ddf1c0fde6b45a894c598e4e45101671dd2ba7",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1120,10 +1120,10 @@
       "query": "Which component declares the landing-page route table and page-view transition wrapper?",
       "querySha256": "1a5d6b9edebb89c902a6af1876e19971431b8d743e5715c9883e0f95e14f7478",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1154,10 +1154,10 @@
       "query": "Which function creates a canonical production URL from a pathname?",
       "querySha256": "f4b49d5c431dd89172b4c4ee41117481d2d0aa9dfb9bf996d1ffac7287c00da1",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1188,10 +1188,10 @@
       "query": "Which hook derives canonical, social, and robots metadata for the current page?",
       "querySha256": "9ba3da7bada61dd4acabac4457343e84453c9dc4b3742c4ed1a5be80d5670fab",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1222,10 +1222,10 @@
       "query": "Which function sends a named analytics event with an optional payload?",
       "querySha256": "c13fab57e1619e787b068f051f9a852d15af8992a82d5f4c61a1d1d47dfb7f40",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1256,10 +1256,10 @@
       "query": "Which component chooses the hero CTA variant and tracks primary and demo actions?",
       "querySha256": "ab17600af917c280f19616d15283054bd039d3a320333b52fb12a20e19ad22a1",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1290,10 +1290,10 @@
       "query": "Which function applies database schema migrations?",
       "querySha256": "bf7e1bb5d8bc5589bf83a21f7ba10c388c4251f9afd902f21251ecb0a2d46423",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1325,10 +1325,10 @@
       "query": "Which Python console-script function installs the application command?",
       "querySha256": "ef7b53a1f817143930d116381776182d53dd46bb9247672487825753d05499e9",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1360,10 +1360,10 @@
       "query": "Which function builds and executes the ripgrep subprocess command?",
       "querySha256": "5676f2a3bab60a0815ce06cd81f67c1b900409d86fa15b9a2e9f31ebfb6b23d5",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1394,10 +1394,10 @@
       "query": "Which function loads a system prompt template and renders built-in arguments?",
       "querySha256": "0708836a7474653f3d906886c6bfbb7b43d5e03aedb5904f72c3d4265569405b",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1428,10 +1428,10 @@
       "query": "Which function extracts the final answer section from an agent response?",
       "querySha256": "0cba15ec6ae7ee979b594c36c3b9aa2fb2cbddf63bb6c0952b880e26939a802d",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1462,10 +1462,10 @@
       "query": "Which public function scores predicted citation files against edited files?",
       "querySha256": "7331114d2be15981723e399af9fcaf737679e7d97e98b4fd99640747dc45c1dd",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1496,10 +1496,10 @@
       "query": "Which function scores whether predicted citation line ranges overlap edits?",
       "querySha256": "c8df5f997f0165b9a536b45c8610c762739d32283ed41ae88f47aaf564302621",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1530,10 +1530,10 @@
       "query": "Which function installs and configures FastContext inside a benchmark container?",
       "querySha256": "bcf4383de02f1407b06695660d8e25e5f624a2287d0c584a5638a488cea8b82b",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1564,10 +1564,10 @@
       "query": "Which React component defines the browser route table?",
       "querySha256": "8b753817422ec4a901ccf912cdc7ef9fd05989ea027346c2904a3a3f821476a7",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1599,10 +1599,10 @@
       "query": "Which function commits a customer payment SQL transaction?",
       "querySha256": "893b0a9485391493692eb2faaa663a46c3fba1c54e87d4b29a78efcbac607796",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1634,10 +1634,10 @@
       "query": "Which route handler serves dashboard data for the requested day range?",
       "querySha256": "2326fad923ff01c6b045e433221916d66d10264b8a7f51bbe5c6c36ab7056fcb",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1668,10 +1668,10 @@
       "query": "Which function assembles the weekly recovery review response?",
       "querySha256": "c4bf8ac78268c10b2bf7e8b77569bea16a3c1aa2a34d8c8af17bb074dd48f1b5",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1702,10 +1702,10 @@
       "query": "Which function normalizes a date to the start of its UTC day?",
       "querySha256": "68b66090debfa56e03525bdcb647c9f14d38ef4bc27a9c97c53af6f15427c0fa",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1736,10 +1736,10 @@
       "query": "Which function closes the active protocol and creates its replacement transactionally?",
       "querySha256": "b6607fa72d0a01043fa1cbff524b28afcc6677fa802a979e06f238a3f8cf3fb1",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1770,10 +1770,10 @@
       "query": "Which function determines whether protocol edits are locked?",
       "querySha256": "f0ce7c508f0894390a9678fc331ecb5612568f5d7466e6a980e4ac0b8fc5287f",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1804,10 +1804,10 @@
       "query": "Which component owns the daily check-in fields and submission request?",
       "querySha256": "a4355b5a0dcff3fed8ac4288c176e641dd26e5f3c82330fb20322e97dce0e4ad",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "important",
@@ -1838,10 +1838,10 @@
       "query": "Which function parses and type-checks a Rust source file?",
       "querySha256": "85fa815f682b2b210ef6a4d717a6750afcc4560974c8528b7dcc32b13bb00eb0",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1873,10 +1873,10 @@
       "query": "Which installed terminal command starts this application?",
       "querySha256": "244458beab50f0e64fab818a0eddb24a44843e6763c5cae97c35932fb51ad656",
       "search": {
-        "scope": "all",
+        "scope": "mixed",
         "resultMode": "grouped",
         "groupBy": "symbol",
-        "limit": 20,
+        "limit": 15,
         "disclosureLimit": 10
       },
       "criticality": "diagnostic",
@@ -1901,5 +1901,5 @@
       }
     }
   ],
-  "sha256": "5428cedc074ed2c3d2b24a680be6be7b93d1f1a3c7cd18c92d02f967b3ac70f7"
+  "sha256": "dd93051e0d56c2070078d050e7145708cecca5f4f7ea56b0dadeae8b78ab3eaa"
 }

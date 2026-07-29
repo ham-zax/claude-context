@@ -237,8 +237,8 @@ The initial R0 manifest is sealed at:
 
 ```text
 evals/search-ranking/cross-repository-v2.manifest.json
-canonical seal SHA-256: 5428cedc074ed2c3d2b24a680be6be7b93d1f1a3c7cd18c92d02f967b3ac70f7
-artifact bytes SHA-256: 466c85d537a59938ccd81dd2a44dcf60fad9502668d0b83da3963d21f25da68f
+canonical seal SHA-256: dd93051e0d56c2070078d050e7145708cecca5f4f7ea56b0dadeae8b78ab3eaa
+artifact bytes SHA-256: 9226a0c155461054ffd0872641217ac796f890b9fd5156bd8f166a366996a2b4
 ```
 
 It contains three independent repository families per split, 26 tuning tasks,

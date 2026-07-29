@@ -11,10 +11,10 @@ import {
 
 const REVIEWER = "local_source_oracle_review_2026_07_30";
 const SEARCH = Object.freeze({
-    scope: "all",
+    scope: "mixed",
     resultMode: "grouped",
     groupBy: "symbol",
-    limit: 20,
+    limit: 15,
     disclosureLimit: 10,
 });
 const STATISTICAL_CONTRACT = Object.freeze({

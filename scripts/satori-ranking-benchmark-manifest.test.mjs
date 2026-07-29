@@ -48,10 +48,10 @@ function task(overrides = {}) {
         query,
         querySha256: queryDigest(query),
         search: {
-            scope: "all",
+            scope: "mixed",
             resultMode: "grouped",
             groupBy: "symbol",
-            limit: 20,
+            limit: 15,
             disclosureLimit: 10,
         },
         criticality: "important",
@@ -97,7 +97,7 @@ function manifest(overrides = {}) {
             clusterBootstrapResamples: 10000,
             bootstrapSeed: "sealed_manifest_sha256",
             multiplicityAdjustedConfidence: {
-                deterministic: 0.9833,
+                deterministic: 0.975,
                 neural: 0.975,
             },
             minimumEffects: {
@@ -278,6 +278,37 @@ test("manifest rejects query leakage and a digest that does not bind exact text"
             tasks: [task({ querySha256: DIGEST_B })],
         })),
         /does not match the exact query text/,
+    );
+});
+
+test("manifest rejects search arguments outside the public Satori contract", () => {
+    assert.throws(
+        () => seal(manifest({
+            tasks: [task({
+                search: {
+                    scope: "all",
+                    resultMode: "grouped",
+                    groupBy: "symbol",
+                    limit: 15,
+                    disclosureLimit: 10,
+                },
+            })],
+        })),
+        /search.scope is unsupported/,
+    );
+    assert.throws(
+        () => seal(manifest({
+            tasks: [task({
+                search: {
+                    scope: "mixed",
+                    resultMode: "grouped",
+                    groupBy: "symbol",
+                    limit: 20,
+                    disclosureLimit: 10,
+                },
+            })],
+        })),
+        /exceeds the frozen Potion runtime maximum/,
     );
 });
 
