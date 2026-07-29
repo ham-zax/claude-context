@@ -57,3 +57,24 @@ test("baseline Core replay uses fallback lexical when precise lexical is empty",
     );
     assert.ok(replayed.every(({ score }) => score === 1 / 101));
 });
+
+test("baseline Core replay assigns arm ranks after repeated owners are removed", () => {
+    const firstOwnerChunk = candidate("owner-a-1", "raw_dense", "src/owner-a.ts", 3);
+    const secondOwnerChunk = candidate("owner-a-2", "raw_dense", "src/owner-a.ts", 2);
+    secondOwnerChunk.ownerId = firstOwnerChunk.ownerId;
+    const distinctOwner = candidate("owner-b", "raw_dense", "src/owner-b.ts", 1);
+
+    const replayed = replayCoreFusion(
+        stage("raw_dense", [firstOwnerChunk, secondOwnerChunk, distinctOwner]),
+        stage("raw_lexical", []),
+        undefined,
+        3,
+        "owner-level arm regression",
+    );
+
+    assert.deepEqual(
+        replayed.map(({ candidate: entry }) => entry.candidateId),
+        ["owner-a-1", "owner-b"],
+    );
+    assert.equal(replayed[1]?.score, 1 / 102);
+});

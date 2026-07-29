@@ -270,6 +270,7 @@ export function orderCapturedCoreArm(stage, depth, label = "Captured Core arm") 
             right.score - left.score || compareCandidateIdentity(left, right)
         ));
     const seen = new Map();
+    const seenOwnerIds = new Set();
     const ranked = [];
     for (const candidate of candidates) {
         const prior = seen.get(candidate.candidateId);
@@ -278,6 +279,11 @@ export function orderCapturedCoreArm(stage, depth, label = "Captured Core arm") 
             continue;
         }
         seen.set(candidate.candidateId, candidate);
+        const ownerId = requireString(candidate.ownerId, `${label} ownerId`);
+        if (seenOwnerIds.has(ownerId)) {
+            continue;
+        }
+        seenOwnerIds.add(ownerId);
         ranked.push(candidate);
     }
     return ranked;
