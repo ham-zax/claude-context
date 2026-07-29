@@ -462,6 +462,33 @@ authorized.
      ordering, diversity selection, and disclosure may change; and
    * complete result-list diffs disclose every unrelated promotion.
 
+The authorized bounded Python correction uses on-demand derivation in the
+entrypoint-evidence owner rather than adding a second persisted relation.
+Derivation runs only for owner-seeking queries, reads at most 256 KiB from
+`pyproject.toml`, accepts at most 64 declarations, binds the retained source
+descriptor to the active publication and freshness checkpoint, and supplies
+normalized evidence to ranking. This placement was selected because no
+qualified indexed-project configuration relation currently owns PEP 621
+scripts; persistence would introduce a new lifecycle and authority without
+evidence that the bounded read is a bottleneck.
+
+Until indexing owns a proven Python package-root map, exact module resolution
+is restricted to one unambiguous match under the repository root or `src/`.
+Other layouts fail closed. The evidence retains declared and resolved owner
+counts plus a completeness flag. Generic startup intent requires exactly one
+declaration and complete resolution; an explicitly named command may use its
+own exact resolved owner without treating the package as globally unambiguous.
+
+The frozen score component is additive after existing path, changed-file, and
+agent-fit multipliers, is independently disclosed, and is capped at `0.35`.
+Reranking recomputes the same capped component. The 2026-07-29
+`tradingview_ratio` baseline for the first startup query disclosed top-result
+scores from `0.681545` to `0.860915`, with lexical components from `0.444` to
+`0.498`; the expected owner entered dense retrieval at rank 12. The `0.35` cap
+passes the frozen top-three correction fixture while a representative
+two-arm-plus-reranker candidate with stronger lexical evidence still outranks
+the owner. Exact pins remain separately authoritative.
+
 This is a bounded defect gate, not a general release gate. Do not introduce an
 arbitrary top-one count as a product requirement without separately freezing
 that requirement.
