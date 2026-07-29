@@ -142,6 +142,7 @@ import {
     EMBEDDING_PROJECTION_VERSION,
     LEXICAL_PROJECTION_VERSION,
 } from './search-projections';
+import { buildIndexedChunkId } from './indexed-chunk-identity';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     fuseVectorCandidatesWithRrf,
@@ -8700,17 +8701,7 @@ export class Context {
      * @returns Hash-based unique ID
      */
     private generateId(relativePath: string, chunk: CodeChunk, fileChunkIndex: number): string {
-        const combinedString = JSON.stringify([
-            relativePath,
-            fileChunkIndex,
-            chunk.metadata.startByte ?? null,
-            chunk.metadata.endByte ?? null,
-            chunk.metadata.startLine,
-            chunk.metadata.endLine,
-            chunk.content,
-        ]);
-        const hash = crypto.createHash('sha256').update(combinedString, 'utf-8').digest('hex');
-        return `chunk_${hash.substring(0, 16)}`;
+        return buildIndexedChunkId(relativePath, chunk, fileChunkIndex);
     }
 
     /**
