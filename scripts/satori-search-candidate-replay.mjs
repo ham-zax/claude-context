@@ -220,6 +220,10 @@ function compareCandidateIdentity(left, right) {
     return left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0;
 }
 
+function compareContractStrings(left, right) {
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function assertSameCandidatePayload(left, right, label) {
     const identity = (candidate) => ({
         candidateId: candidate.candidateId,
@@ -307,6 +311,62 @@ function replayCoreFusion(denseStage, lexicalStage, limit, label) {
 
 function normalizeReplayPolicy(value) {
     const policy = requireRecord(value, "Replay policy");
+    if (policy.version === 2) {
+        requireExactKeys(
+            policy,
+            ["version", "kind", "policyId", "candidateSet", "scoring"],
+            "Replay policy",
+        );
+        if (policy.kind !== "satori_search_candidate_policy") {
+            throw new Error("Replay policy version or kind is unsupported.");
+        }
+        const policyId = requireString(policy.policyId, "Replay policy policyId");
+        if (!["B", "B-P0", "B-A0"].includes(policyId)) {
+            throw new Error("Frozen-component replay policyId must be B, B-P0, or B-A0.");
+        }
+        if (policy.candidateSet !== "frozen_baseline") {
+            throw new Error("Frozen-component replay requires candidateSet=frozen_baseline.");
+        }
+        const scoring = requireRecord(policy.scoring, "Replay policy scoring");
+        requireExactKeys(
+            scoring,
+            ["pathMultiplier", "entrypointOwnerScore"],
+            "Replay policy scoring",
+        );
+        if (!["captured", "neutral"].includes(scoring.pathMultiplier)) {
+            throw new Error("Replay policy scoring.pathMultiplier is unsupported.");
+        }
+        if (!["captured", "disabled"].includes(scoring.entrypointOwnerScore)) {
+            throw new Error("Replay policy scoring.entrypointOwnerScore is unsupported.");
+        }
+        const expectedComponents = {
+            B: {
+                pathMultiplier: "captured",
+                entrypointOwnerScore: "captured",
+            },
+            "B-P0": {
+                pathMultiplier: "neutral",
+                entrypointOwnerScore: "captured",
+            },
+            "B-A0": {
+                pathMultiplier: "captured",
+                entrypointOwnerScore: "disabled",
+            },
+        };
+        if (canonicalJson(scoring) !== canonicalJson(expectedComponents[policyId])) {
+            throw new Error(`Replay policy '${policyId}' changes an unauthorized component.`);
+        }
+        return {
+            version: 2,
+            kind: "satori_search_candidate_policy",
+            policyId,
+            candidateSet: "frozen_baseline",
+            scoring: {
+                pathMultiplier: scoring.pathMultiplier,
+                entrypointOwnerScore: scoring.entrypointOwnerScore,
+            },
+        };
+    }
     requireExactKeys(policy, ["version", "kind", "policyId", "core", "mcp"], "Replay policy");
     if (policy.version !== 1 || policy.kind !== "satori_search_candidate_policy") {
         throw new Error("Replay policy version or kind is unsupported.");
@@ -533,6 +593,31 @@ function assertCandidateIdsMatchStage(candidates, expectedStage, label) {
     }
 }
 
+function assertCandidateMembershipMatchesStage(candidates, expectedStage, label) {
+    const expected = requireCompleteStage(expectedStage, label).candidates;
+    const actualIds = candidates
+        .map((candidate) => candidate.candidate.candidateId)
+        .sort(compareContractStrings);
+    const expectedIds = expected
+        .map((candidate) => candidate.candidateId)
+        .sort(compareContractStrings);
+    if (canonicalJson(actualIds) !== canonicalJson(expectedIds)) {
+        throw new Error(`${label} replay candidate membership does not match the recorded stage.`);
+    }
+}
+
+function assertRemovalIdentityMatchesBaseline(actual, expected, label) {
+    const normalize = (entries) => entries
+        .map(({ candidateId, reason }) => ({ candidateId, reason }))
+        .sort((left, right) => (
+            compareContractStrings(left.candidateId, right.candidateId)
+            || compareContractStrings(left.reason, right.reason)
+        ));
+    if (canonicalJson(normalize(actual)) !== canonicalJson(normalize(expected))) {
+        throw new Error(`${label} replay eligibility removals do not match baseline.`);
+    }
+}
+
 function stageByNameAndPass(stages, stageName, passId) {
     return stages.find((stage) => stage.stage === stageName && stage.passId === passId);
 }
@@ -660,7 +745,10 @@ function diagnosticRemovalByCandidate(capture, attemptId) {
     return removals;
 }
 
-function replayPostFusionLocalScoring(capture, attempt) {
+function replayPostFusionLocalScoring(capture, attempt, scoringPolicy = {
+    pathMultiplier: "captured",
+    entrypointOwnerScore: "captured",
+}) {
     const signals = replaySignalByCandidate(capture, attempt.attemptId);
     const removals = diagnosticRemovalByCandidate(capture, attempt.attemptId);
     const scored = [];
@@ -685,10 +773,13 @@ function replayPostFusionLocalScoring(capture, attempt) {
             replay.lexicalScore,
             `Task '${capture.taskId}' candidate '${candidateId}' lexicalScore`,
         );
-        const pathMultiplier = requirePositiveFinite(
+        const capturedPathMultiplier = requirePositiveFinite(
             replay.pathMultiplier,
             `Task '${capture.taskId}' candidate '${candidateId}' pathMultiplier`,
         );
+        const pathMultiplier = scoringPolicy.pathMultiplier === "neutral"
+            ? 1
+            : capturedPathMultiplier;
         const changedFilesMultiplier = requirePositiveFinite(
             replay.changedFilesMultiplier,
             `Task '${capture.taskId}' candidate '${candidateId}' changedFilesMultiplier`,
@@ -697,7 +788,8 @@ function replayPostFusionLocalScoring(capture, attempt) {
             replay.agentFitMultiplier,
             `Task '${capture.taskId}' candidate '${candidateId}' agentFitMultiplier`,
         );
-        const entrypointOwnerScoreBoost = capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2
+        const capturedEntrypointOwnerScoreBoost =
+            capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2
             ? requireNonNegativeFinite(
                 replay.entrypointOwnerScoreBoost,
                 `Task '${capture.taskId}' candidate '${candidateId}' entrypointOwnerScoreBoost`,
@@ -705,7 +797,7 @@ function replayPostFusionLocalScoring(capture, attempt) {
             : 0;
         if (
             capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2
-            && entrypointOwnerScoreBoost
+            && capturedEntrypointOwnerScoreBoost
                 > capture.candidateTrace.scorePolicy.entrypointOwnerMaxContribution
         ) {
             throw new Error(
@@ -726,15 +818,19 @@ function replayPostFusionLocalScoring(capture, attempt) {
             }
             if (
                 (entrypointOwnerScoreReason === "not_applicable"
-                    && entrypointOwnerScoreBoost !== 0)
+                    && capturedEntrypointOwnerScoreBoost !== 0)
                 || (entrypointOwnerScoreReason === "manifest_entrypoint_owner"
-                    && entrypointOwnerScoreBoost <= 0)
+                    && capturedEntrypointOwnerScoreBoost <= 0)
             ) {
                 throw new Error(
                     `Task '${capture.taskId}' candidate '${candidateId}' has inconsistent entrypoint owner scoring evidence.`,
                 );
             }
         }
+        const entrypointOwnerScoreBoost =
+            scoringPolicy.entrypointOwnerScore === "disabled"
+                ? 0
+                : capturedEntrypointOwnerScoreBoost;
         if (typeof replay.exactLexicalMatch !== "boolean"
             || typeof replay.passesMatchedMust !== "boolean") {
             throw new Error(`Task '${capture.taskId}' candidate '${candidateId}' has invalid replay flags.`);
@@ -754,9 +850,11 @@ function replayPostFusionLocalScoring(capture, attempt) {
             },
             fusionScore,
             lexicalScore,
+            capturedPathMultiplier,
             pathMultiplier,
             changedFilesMultiplier,
             agentFitMultiplier,
+            capturedEntrypointOwnerScoreBoost,
             entrypointOwnerScoreBoost,
             entrypointOwnerScoreReason,
             exactLexicalMatch: replay.exactLexicalMatch,
@@ -1679,9 +1777,12 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
         throw new Error("Candidate capture has no tasks for the requested selection.");
     }
     const tasks = selectedCaptures.map((taskCapture) => {
+        const baselineTask = baselineByTaskId.get(taskCapture.taskId);
+        if (!baselineTask) {
+            throw new Error(`Task '${taskCapture.taskId}' has no reproduced baseline.`);
+        }
         if (taskCapture.readiness?.route === "exact_registry") {
-            const baselineTask = baselineByTaskId.get(taskCapture.taskId);
-            if (!baselineTask || baselineTask.route?.kind !== "exact_registry") {
+            if (baselineTask.route?.kind !== "exact_registry") {
                 throw new Error(`Task '${taskCapture.taskId}' has no reproduced exact-registry baseline.`);
             }
             return {
@@ -1706,32 +1807,90 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
                     budgetReason: "exact_registry_not_applicable",
                     inputUtf8Bytes: 0,
                 },
+                ...(policy.version === 2 ? {
+                    invariants: {
+                        candidateMembershipIdentityEqual: true,
+                        eligibilityIdentityEqual: true,
+                        exactIdentifierIdentityEqual: true,
+                    },
+                } : {}),
             };
         }
-        const diagnosticLimit = taskCapture.queryPlan?.diagnosticCandidateLimit;
-        if (!Number.isSafeInteger(diagnosticLimit) || diagnosticLimit < policy.core.candidateDepth) {
-            throw new Error(
-                `Task '${taskCapture.taskId}' diagnostic capture does not cover depth ${policy.core.candidateDepth}.`,
-            );
+        const frozenComponentPolicy = policy.version === 2;
+        let corePasses;
+        let internalMcpAttempts;
+        if (frozenComponentPolicy) {
+            corePasses = baselineTask.corePasses;
+            internalMcpAttempts = taskCapture.candidateTrace.stages
+                .filter((stage) => stage.stage === "mcp_fusion")
+                .map((stage) => replayMcpAttempt(taskCapture, stage));
+        } else {
+            const diagnosticLimit = taskCapture.queryPlan?.diagnosticCandidateLimit;
+            if (!Number.isSafeInteger(diagnosticLimit) || diagnosticLimit < policy.core.candidateDepth) {
+                throw new Error(
+                    `Task '${taskCapture.taskId}' diagnostic capture does not cover depth ${policy.core.candidateDepth}.`,
+                );
+            }
+            const outputStages = taskCapture.candidateTrace.stages.filter((stage) => (
+                stage.stage === "core_fusion" || stage.stage === "core_result"
+            ));
+            corePasses = outputStages.map((stage) => replayPolicyCorePass(
+                taskCapture,
+                stage,
+                policy,
+            ));
+            internalMcpAttempts = taskCapture.candidateTrace.stages
+                .filter((stage) => stage.stage === "mcp_fusion")
+                .map((stage) => replayPolicyMcpAttempt(taskCapture, stage, corePasses, policy));
         }
-        const outputStages = taskCapture.candidateTrace.stages.filter((stage) => (
-            stage.stage === "core_fusion" || stage.stage === "core_result"
-        ));
-        const corePasses = outputStages.map((stage) => replayPolicyCorePass(
-            taskCapture,
-            stage,
-            policy,
-        ));
-        const internalMcpAttempts = taskCapture.candidateTrace.stages
-            .filter((stage) => stage.stage === "mcp_fusion")
-            .map((stage) => replayPolicyMcpAttempt(taskCapture, stage, corePasses, policy));
         const localAttempts = internalMcpAttempts.map((attempt) => ({
             attemptId: attempt.attemptId,
-            ...replayPostFusionLocalScoring(taskCapture, attempt),
+            ...replayPostFusionLocalScoring(
+                taskCapture,
+                attempt,
+                frozenComponentPolicy ? policy.scoring : undefined,
+            ),
         }));
+        if (frozenComponentPolicy) {
+            const baselineLocalAttempts = internalMcpAttempts.map((attempt) => ({
+                attemptId: attempt.attemptId,
+                ...replayPostFusionLocalScoring(taskCapture, attempt),
+            }));
+            localAttempts.forEach((local, index) => {
+                const recordedStage = stageByNameAndPass(
+                    taskCapture.candidateTrace.stages,
+                    "mcp_filtered",
+                    local.attemptId,
+                );
+                if (!recordedStage) {
+                    throw new Error(
+                        `Task '${taskCapture.taskId}' MCP attempt '${local.attemptId}' has no filtered stage.`,
+                    );
+                }
+                assertCandidateMembershipMatchesStage(
+                    local.candidates,
+                    recordedStage,
+                    `Task '${taskCapture.taskId}' frozen candidate set '${local.attemptId}'`,
+                );
+                assertRemovalIdentityMatchesBaseline(
+                    local.removed,
+                    baselineLocalAttempts[index].removed,
+                    `Task '${taskCapture.taskId}' frozen eligibility '${local.attemptId}'`,
+                );
+                if (policy.policyId === "B") {
+                    assertLocalScoringMatches(
+                        local.candidates,
+                        recordedStage,
+                        `Task '${taskCapture.taskId}' explicit B scoring '${local.attemptId}'`,
+                    );
+                }
+            });
+        }
         const rerankerAdmission = replayRerankerAdmission(taskCapture, localAttempts.at(-1));
         const groupingDisclosure = groupingDisclosureAvailability(taskCapture) === null
-            ? replayFrozenGroupingAndDisclosure(taskCapture, localAttempts.at(-1))
+            ? replayFrozenGroupingAndDisclosure(taskCapture, localAttempts.at(-1), {
+                assertBaseline: frozenComponentPolicy && policy.policyId === "B",
+            })
             : null;
         return {
             taskId: taskCapture.taskId,
@@ -1741,20 +1900,22 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
             expected: taskCapture.expected,
             route: { kind: "fusion", fusionReplay: "contender" },
             policyAffected: true,
-            corePasses: corePasses.map((pass) => ({
-                passId: pass.passId,
-                mode: pass.mode,
-                fallbackActivated: pass.fallbackActivated,
-                sourceCounts: pass.sourceCounts,
-                candidates: pass.candidates.map((entry) => ({
-                    candidateId: entry.candidate.candidateId,
-                    ownerId: entry.candidate.ownerId,
-                    relativePath: entry.candidate.relativePath,
-                    rank: entry.rank,
-                    score: entry.score,
-                    sources: entry.sources,
+            corePasses: frozenComponentPolicy
+                ? corePasses
+                : corePasses.map((pass) => ({
+                    passId: pass.passId,
+                    mode: pass.mode,
+                    fallbackActivated: pass.fallbackActivated,
+                    sourceCounts: pass.sourceCounts,
+                    candidates: pass.candidates.map((entry) => ({
+                        candidateId: entry.candidate.candidateId,
+                        ownerId: entry.candidate.ownerId,
+                        relativePath: entry.candidate.relativePath,
+                        rank: entry.rank,
+                        score: entry.score,
+                        sources: entry.sources,
+                    })),
                 })),
-            })),
             mcpAttempts: internalMcpAttempts.map((attempt, index) => ({
                 attemptId: attempt.attemptId,
                 passCount: attempt.passCount,
@@ -1767,6 +1928,10 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
                     rank: rankIndex + 1,
                     fusionScore: candidate.fusionScore,
                     lexicalScore: candidate.lexicalScore,
+                    capturedPathMultiplier: candidate.capturedPathMultiplier,
+                    pathMultiplier: candidate.pathMultiplier,
+                    capturedEntrypointOwnerScoreBoost:
+                        candidate.capturedEntrypointOwnerScoreBoost,
                     entrypointOwnerScoreBoost: candidate.entrypointOwnerScoreBoost,
                     entrypointOwnerScoreReason: candidate.entrypointOwnerScoreReason,
                     finalScore: candidate.finalScore,
@@ -1774,6 +1939,12 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
                 })),
                 removed: localAttempts[index].removed,
             })),
+            ...(frozenComponentPolicy ? {
+                invariants: {
+                    candidateMembershipIdentityEqual: true,
+                    eligibilityIdentityEqual: true,
+                },
+            } : {}),
             rerankerAdmission: {
                 enabled: rerankerAdmission.enabled,
                 skippedByExactPin: rerankerAdmission.skippedByExactPin,
@@ -1810,7 +1981,7 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
         policySha256: sha256Canonical(policy),
         ...selection,
         replayRuntime,
-        providerValidationRequired: true,
+        providerValidationRequired: policy.version !== 2,
         replayCoverage: {
             coreFusion: true,
             mcpFusion: true,
@@ -1824,10 +1995,12 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
             exactRegistryPolicyInvariantTaskCount: tasks.filter((task) => !task.policyAffected).length,
         },
         groupingIncompleteTasks,
-        liveValidationReasons: [
-            "new_candidates_have_no_frozen_reranker_scores",
-            "grouped_response_byte_budget_requires_live_validation",
-        ],
+        liveValidationReasons: policy.version === 2
+            ? ["grouped_response_byte_budget_requires_live_validation"]
+            : [
+                "new_candidates_have_no_frozen_reranker_scores",
+                "grouped_response_byte_budget_requires_live_validation",
+            ],
         tasks,
     };
     return { ...replay, sha256: sha256Canonical(replay) };

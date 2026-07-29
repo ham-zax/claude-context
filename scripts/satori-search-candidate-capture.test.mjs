@@ -366,6 +366,30 @@ function contenderPolicy() {
     };
 }
 
+function frozenComponentPolicy(policyId) {
+    const components = {
+        B: {
+            pathMultiplier: "captured",
+            entrypointOwnerScore: "captured",
+        },
+        "B-P0": {
+            pathMultiplier: "neutral",
+            entrypointOwnerScore: "captured",
+        },
+        "B-A0": {
+            pathMultiplier: "captured",
+            entrypointOwnerScore: "disabled",
+        },
+    };
+    return {
+        version: 2,
+        kind: "satori_search_candidate_policy",
+        policyId,
+        candidateSet: "frozen_baseline",
+        scoring: components[policyId],
+    };
+}
+
 function debugSearch(trace = candidateTrace()) {
     return {
         route: { kind: "semantic" },
@@ -1012,11 +1036,24 @@ test("exact-registry hits reproduce as policy-invariant routes without fusion wo
 
     const baseline = replayBaselineCandidateCapture(capture);
     const contender = replayCandidateCapture(capture, contenderPolicy());
+    const frozenComponent = replayCandidateCapture(
+        capture,
+        frozenComponentPolicy("B-P0"),
+    );
     assert.equal(baseline.tasks[0].route.kind, "exact_registry");
     assert.equal(baseline.tasks[0].policyAffected, false);
     assert.deepEqual(baseline.tasks[0].corePasses, []);
     assert.deepEqual(contender.tasks[0].rankedResults, baseline.tasks[0].rankedResults);
     assert.equal(contender.tasks[0].policyAffected, false);
+    assert.deepEqual(
+        frozenComponent.tasks[0].rankedResults,
+        baseline.tasks[0].rankedResults,
+    );
+    assert.deepEqual(frozenComponent.tasks[0].invariants, {
+        candidateMembershipIdentityEqual: true,
+        eligibilityIdentityEqual: true,
+        exactIdentifierIdentityEqual: true,
+    });
 });
 
 test("baseline replay uses the captured product depth for each Core pass", () => {
@@ -1166,6 +1203,80 @@ test("version 2 baseline and contender replay production grouping and disclosure
     assert.notEqual(
         contender.tasks[0].groupingDisclosure.groupedResults[0].score,
         baseline.tasks[0].groupingDisclosure.groupedResults[0].score,
+    );
+});
+
+test("R2 component policies preserve frozen candidates and vary only the authorized score component", () => {
+    const suite = taskSuite();
+    suite.version = 2;
+    suite.tasks[0].split = "tuning";
+    Object.assign(suite.tasks[0].workload.invocations[0].args, {
+        limit: 10,
+        disclosureLimit: 5,
+        debugCandidateLimit: 160,
+    });
+    const capture = buildSearchCandidateCapture(
+        suite,
+        groupingReadyObservationSet(suite),
+        {
+            requireReplayReady: true,
+            requireGroupingReady: true,
+            requireNeuralDisabled: true,
+        },
+    );
+    const replayOptions = {
+        split: "tuning",
+        requireGroupingReady: true,
+        requireNeuralDisabled: true,
+    };
+
+    const explicitBaseline = replayCandidateCapture(
+        capture,
+        frozenComponentPolicy("B"),
+        replayOptions,
+    );
+    const neutralPath = replayCandidateCapture(
+        capture,
+        frozenComponentPolicy("B-P0"),
+        replayOptions,
+    );
+    const disabledAuthority = replayCandidateCapture(
+        capture,
+        frozenComponentPolicy("B-A0"),
+        replayOptions,
+    );
+    const baselineCandidate = explicitBaseline.tasks[0].mcpAttempts[0].candidates[0];
+    const neutralPathCandidate = neutralPath.tasks[0].mcpAttempts[0].candidates[0];
+    const disabledAuthorityCandidate =
+        disabledAuthority.tasks[0].mcpAttempts[0].candidates[0];
+
+    assert.equal(explicitBaseline.baselineReproduced, true);
+    assert.equal(explicitBaseline.providerValidationRequired, false);
+    assert.deepEqual(explicitBaseline.tasks[0].invariants, {
+        candidateMembershipIdentityEqual: true,
+        eligibilityIdentityEqual: true,
+    });
+    assert.deepEqual(
+        explicitBaseline.tasks[0].groupingDisclosure,
+        replayBaselineCandidateCapture(capture, replayOptions).tasks[0].groupingDisclosure,
+    );
+    assert.equal(neutralPathCandidate.capturedPathMultiplier, 1);
+    assert.equal(neutralPathCandidate.pathMultiplier, 1);
+    assert.equal(
+        disabledAuthorityCandidate.capturedEntrypointOwnerScoreBoost,
+        SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    );
+    assert.equal(disabledAuthorityCandidate.entrypointOwnerScoreBoost, 0);
+    assert.equal(
+        baselineCandidate.finalScore - disabledAuthorityCandidate.finalScore,
+        SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    );
+
+    const malformed = frozenComponentPolicy("B-P0");
+    malformed.scoring.entrypointOwnerScore = "disabled";
+    assert.throws(
+        () => replayCandidateCapture(capture, malformed, replayOptions),
+        /changes an unauthorized component/,
     );
 });
 

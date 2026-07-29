@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "kind": "satori_search_candidate_policy",
+  "policyId": "B-P0",
+  "candidateSet": "frozen_baseline",
+  "scoring": {
+    "pathMultiplier": "neutral",
+    "entrypointOwnerScore": "captured"
+  }
+}
