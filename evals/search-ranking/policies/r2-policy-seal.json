@@ -1,9 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "kind": "satori_search_ranking_r2_policy_seal",
-  "sha256": "c39834ce36998c41f0e39cef9edd8164435c6635484ddfa277e08d776d1a1989",
+  "sha256": "00c4248e1405a705ee2ee4c9f143884ddbfc1b5cf8f2f5d1a51a56eedf70d7f7",
   "createdAt": "2026-07-30T03:36:00+08:00",
   "createdBeforeContenderReplay": true,
+  "evaluatorAmendedBeforeResultsOpened": true,
   "manifest": {
     "seal": "dd93051e0d56c2070078d050e7145708cecca5f4f7ea56b0dadeae8b78ab3eaa",
     "artifactSha256": "9226a0c155461054ffd0872641217ac796f890b9fd5156bd8f166a366996a2b4"
@@ -13,10 +14,11 @@
     "sha256": "c5bab8e806f159e7eb52340ecb9c44732aa746a603886ea27fa09c43a84d6d92"
   },
   "execution": {
-    "gitRevision": "8b3553bae9b01fb48451f1ebafd299069b8fbb4f",
-    "gitTree": "ad9980259fe9ccf2980bb985cc8db60dfe95d647",
+    "gitRevision": "5f9a504177a5f38646d4b68f33107d2e969526a1",
+    "gitTree": "4a00969c6fb3fa75a29c36be79d9804b4f04a1bf",
     "replayScriptSha256": "393389f865854b7928e26eb0d364d56400027ece2674c75b4501f91ab57fc9c2",
-    "evaluatorScriptSha256": "0ded931a8bbffa81a48c3b4e080f777390d4160f4282767df32167a0dd30c026",
+    "evaluatorScriptSha256": "53aca3b26a6aab5fe5656db284d05831581df11fecd6f8926cd349e51aab3fbb",
+    "evaluatorAmendment": "Accept the canonical nested replay policy identity; no rank, score, list, or contender metric was opened before this amendment.",
     "nodeVersion": "v24.13.0",
     "nodeSha256": "53fb205ae78805130177e24bcb459a69a1518c8d98f8965f31d85aae7ea840fc",
     "tsxVersion": "4.22.4",
