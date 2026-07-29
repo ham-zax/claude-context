@@ -79,20 +79,20 @@ function canonicalSymbolName(symbolLabel) {
     );
 }
 
-function candidateMatchesOwner(candidate, owner) {
+export function candidateMatchesOwner(candidate, owner) {
     if (candidate.relativePath !== owner.file) return false;
     return owner.match === "file"
         || canonicalSymbolName(candidate.symbolLabel) === owner.symbol;
 }
 
-function finalCandidates(task) {
+export function finalCandidates(task) {
     const attempts = requireArray(task.mcpAttempts, `Task '${task.taskId}' MCP attempts`);
     const finalAttempt = attempts.at(-1);
     if (!finalAttempt) throw new Error(`Task '${task.taskId}' has no final MCP attempt.`);
     return requireArray(finalAttempt.candidates, `Task '${task.taskId}' final candidates`);
 }
 
-function disclosedResults(task) {
+export function disclosedResults(task) {
     const grouping = requireRecord(
         task.groupingDisclosure,
         `Task '${task.taskId}' grouping disclosure`,
@@ -103,7 +103,7 @@ function disclosedResults(task) {
     );
 }
 
-function ownerRank(task, owner) {
+export function ownerRank(task, owner) {
     const ownerCandidateIds = new Set(
         finalCandidates(task)
             .filter((candidate) => candidateMatchesOwner(candidate, owner))
@@ -117,7 +117,7 @@ function ownerRank(task, owner) {
     return match?.rank ?? null;
 }
 
-function metricForRank(rank) {
+export function metricForRank(rank) {
     return {
         ownerAt1: rank === 1 ? 1 : 0,
         ownerAt3: rank !== null && rank <= 3 ? 1 : 0,
@@ -134,7 +134,7 @@ function roundMetric(value) {
     return Number(value.toFixed(12));
 }
 
-function averageTaskMetrics(tasks) {
+export function averageTaskMetrics(tasks) {
     const metricNames = ["ownerAt1", "ownerAt3", "ownerAt10", "reciprocalRank"];
     return Object.fromEntries(metricNames.map((metric) => [
         metric,
@@ -142,7 +142,7 @@ function averageTaskMetrics(tasks) {
     ]));
 }
 
-function buildBootstrapSamples(repositoryCount, resamples, seed) {
+export function buildBootstrapSamples(repositoryCount, resamples, seed) {
     return Array.from({ length: resamples }, (_, sample) => {
         const digest = crypto.createHash("sha256")
             .update(`${seed}:${sample}`, "utf8")

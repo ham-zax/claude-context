@@ -1959,6 +1959,7 @@ export function replayNeuralCandidateCapture(captureValue, neuralValue, options 
             neuralStatus: neuralTask.status,
             selectedCandidateIds: [...neuralTask.selectedCandidateIds],
             ranking,
+            mcpAttempts: baselineTask.mcpAttempts,
             groupingDisclosure,
             invariants: {
                 candidateMembershipIdentityEqual: true,
