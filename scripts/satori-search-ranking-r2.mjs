@@ -68,8 +68,9 @@ function canonicalSymbolName(symbolLabel) {
 }
 
 function candidateMatchesOwner(candidate, owner) {
-    return candidate.relativePath === owner.file
-        && canonicalSymbolName(candidate.symbolLabel) === owner.symbol;
+    if (candidate.relativePath !== owner.file) return false;
+    return owner.match === "file"
+        || canonicalSymbolName(candidate.symbolLabel) === owner.symbol;
 }
 
 function finalCandidates(task) {
@@ -347,6 +348,7 @@ function buildQualityResult(repositoryId, artifacts, policyId) {
             const rank = ownerRank(task, {
                 file: requireString(expected.ownerFile, "Expected ownerFile"),
                 symbol: requireString(expected.ownerSymbol, "Expected ownerSymbol"),
+                match: expected.ownerMatch === "file" ? "file" : "symbol",
             });
             return { taskId: task.taskId, rank, metrics: metricForRank(rank), task };
         });
@@ -618,6 +620,7 @@ export function evaluateR2({ manifest, r1Dir, replayDir }) {
                 const unrelated = classifyUnrelatedMembershipChange(diff, baselineTask, contenderTask, {
                     file: expected.ownerFile,
                     symbol: expected.ownerSymbol,
+                    match: expected.ownerMatch === "file" ? "file" : "symbol",
                 });
                 if (unrelated) {
                     safety.unrelatedMembershipChanges.push({

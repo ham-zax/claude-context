@@ -176,6 +176,33 @@ test("validateTaskSuite version 2 requires explicit tuning or held-out authority
     );
 });
 
+test("validateTaskSuite defaults owner matching to symbols and validates explicit file matching", () => {
+    const normalized = validateTaskSuite(minimalSuite([
+        baseTask({ id: "symbol-owner" }),
+        baseTask({
+            id: "file-owner",
+            expected: {
+                ownerFile: "docs/plan.md",
+                ownerSymbol: "Plan title",
+                ownerMatch: "file",
+            },
+        }),
+    ]));
+
+    assert.equal(normalized.tasks[0].expected.ownerMatch, "symbol");
+    assert.equal(normalized.tasks[1].expected.ownerMatch, "file");
+    assert.throws(
+        () => validateTaskSuite(minimalSuite([baseTask({
+            expected: {
+                ownerFile: "docs/plan.md",
+                ownerSymbol: "Plan title",
+                ownerMatch: "chunk",
+            },
+        })])),
+        /ownerMatch is unsupported/,
+    );
+});
+
 test("version-1 observations preserve explicit absence of source evidence", () => {
     const normalized = validateObservationSet(
         minimalObservations(pairedObservations([baseObservation()]).observations),
@@ -515,6 +542,21 @@ test("gradeObservation detects owner in top three and ignores later ranks", () =
         ],
     }));
     assert.equal(fourth.ownerFoundTop3, false);
+});
+
+test("gradeObservation accepts a grouped file result for an explicit file-level oracle", () => {
+    const task = baseTask({
+        expected: {
+            ownerFile: "docs/plan.md",
+            ownerSymbol: "Plan title",
+            ownerMatch: "file",
+        },
+    });
+    const observation = baseObservation({
+        results: [{ kind: "file", file: "docs/plan.md" }],
+    });
+
+    assert.equal(gradeObservation(task, observation).ownerFoundTop3, true);
 });
 
 test("gradeObservation exact_open requires ok status, identity, and exact expected span", () => {

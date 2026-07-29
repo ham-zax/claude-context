@@ -25,6 +25,7 @@ const QUERY_CLASSES = new Set([
     "negative",
 ]);
 const ORACLE_KINDS = new Set(["owner", "negative"]);
+const OWNER_MATCH_KINDS = new Set(["symbol", "file"]);
 const CRITICALITIES = new Set(["critical", "important", "diagnostic"]);
 const NEURAL_OVERLAP_STATUSES = new Set([
     "deferred_r3_closed",
@@ -168,6 +169,9 @@ function normalizeOracle(value, label, repository) {
     const requiredOwner = kind === "owner"
         ? normalizeOwner(oracle.requiredOwner, `${label}.requiredOwner`)
         : undefined;
+    const ownerMatch = kind === "owner" && oracle.ownerMatch !== undefined
+        ? requireEnum(oracle.ownerMatch, OWNER_MATCH_KINDS, `${label}.ownerMatch`)
+        : undefined;
     if (kind === "negative" && oracle.requiredOwner !== undefined) {
         throw new Error(`${label}.requiredOwner is not valid for a negative task.`);
     }
@@ -195,6 +199,7 @@ function normalizeOracle(value, label, repository) {
     return {
         kind,
         ...(requiredOwner ? { requiredOwner } : {}),
+        ...(ownerMatch ? { ownerMatch } : {}),
         acceptableAlternativeOwners,
         hardNegativeOwners,
         rationale: requireString(oracle.rationale, `${label}.rationale`),
@@ -641,6 +646,7 @@ export function buildRankingCandidateTaskSuites(manifestValue) {
                     expected: {
                         ownerFile: task.oracle.requiredOwner.file,
                         ownerSymbol: task.oracle.requiredOwner.symbol,
+                        ownerMatch: task.oracle.ownerMatch ?? "symbol",
                     },
                     workload: buildCandidateWorkload(task),
                 };

@@ -126,6 +126,36 @@ test("candidate scoring uses frozen file and symbol authority", () => {
     assert.match(comparison.sha256, /^[0-9a-f]{64}$/);
 });
 
+test("candidate scoring accepts any grouped candidate from an explicitly file-matched owner", () => {
+    const expected = {
+        ownerFile: "docs/plan.md",
+        ownerSymbol: "Plan title",
+        ownerMatch: "file",
+    };
+    const capture = {
+        captures: [
+            baselineTask(
+                "tuning-plan",
+                "owner_discovery",
+                expected,
+                [{
+                    candidateId: "plan-section",
+                    relativePath: expected.ownerFile,
+                    symbolLabel: "Different grouped section",
+                    rank: 1,
+                }],
+                [],
+            ),
+        ],
+    };
+
+    const score = scoreBaselineCapture(capture, "tuning");
+
+    assert.equal(score.summary.hardMissCount, 0);
+    assert.equal(score.tasks[0].localRank, 1);
+    assert.equal(score.tasks[0].expected.ownerMatch, "file");
+});
+
 test("candidate scoring uses explicit task-suite v2 splits instead of ID prefixes", () => {
     const capture = {
         taskSuiteVersion: 2,

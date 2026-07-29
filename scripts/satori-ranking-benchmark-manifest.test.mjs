@@ -421,3 +421,23 @@ test("candidate-suite compilation preserves explicit splits and keeps negatives 
     )));
     assert.doesNotThrow(() => validateTaskSuite(promptReady.negativeExposureSuite));
 });
+
+test("candidate-suite compilation preserves explicit file-level owner matching", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(
+            REPO_ROOT,
+            "evals/search-ranking/cross-repository-v2.manifest.json",
+        ),
+        "utf8",
+    ));
+    const { sha256: _oldSeal, ...unsealed } = committed;
+    unsealed.tasks[0].oracle.ownerMatch = "file";
+    const sealed = seal(unsealed);
+
+    const suite = buildRankingCandidateTaskSuites(sealed)
+        .find(({ repository }) => repository.id === unsealed.tasks[0].repositoryId);
+
+    assert.ok(suite);
+    assert.equal(suite.candidateTaskSuite.tasks[0].expected.ownerMatch, "file");
+    assert.doesNotThrow(() => validateTaskSuite(suite.candidateTaskSuite));
+});

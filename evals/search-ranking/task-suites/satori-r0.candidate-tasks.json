@@ -261,7 +261,8 @@
       "language": "typescript",
       "expected": {
         "ownerFile": "packages/mcp/src/core/search-query-support.test.ts",
-        "ownerSymbol": "buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent"
+        "ownerSymbol": "buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent",
+        "ownerMatch": "file"
       },
       "workload": {
         "setup": [
@@ -303,7 +304,8 @@
       "language": "typescript",
       "expected": {
         "ownerFile": "docs/plans/SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md",
-        "ownerSymbol": "Satori Cross-Repository Ranking Ablation Plan"
+        "ownerSymbol": "Satori Cross-Repository Ranking Ablation Plan",
+        "ownerMatch": "file"
       },
       "workload": {
         "setup": [

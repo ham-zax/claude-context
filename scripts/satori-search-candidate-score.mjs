@@ -178,8 +178,9 @@ function canonicalSymbolName(symbolLabel) {
 }
 
 function candidateMatchesExpectedOwner(candidate, expected) {
-    return candidate.relativePath === expected.ownerFile
-        && canonicalSymbolName(candidate.symbolLabel) === expected.ownerSymbol;
+    if (candidate.relativePath !== expected.ownerFile) return false;
+    return expected.ownerMatch === "file"
+        || canonicalSymbolName(candidate.symbolLabel) === expected.ownerSymbol;
 }
 
 function scoreTask(view) {
@@ -201,6 +202,7 @@ function scoreTask(view) {
         expected: {
             ownerFile: requireString(expected.ownerFile, "Expected ownerFile"),
             ownerSymbol: requireString(expected.ownerSymbol, "Expected ownerSymbol"),
+            ownerMatch: expected.ownerMatch === "file" ? "file" : "symbol",
         },
         policyApplicable: view.policyApplicable,
         localRank,

@@ -409,6 +409,7 @@
       "criticality": "important",
       "oracle": {
         "kind": "owner",
+        "ownerMatch": "file",
         "requiredOwner": {
           "file": "packages/mcp/src/core/search-query-support.test.ts",
           "symbol": "buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent"
@@ -443,6 +444,7 @@
       "criticality": "important",
       "oracle": {
         "kind": "owner",
+        "ownerMatch": "file",
         "requiredOwner": {
           "file": "docs/plans/SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md",
           "symbol": "Satori Cross-Repository Ranking Ablation Plan"
@@ -1901,5 +1903,5 @@
       }
     }
   ],
-  "sha256": "dd93051e0d56c2070078d050e7145708cecca5f4f7ea56b0dadeae8b78ab3eaa"
+  "sha256": "ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445"
 }

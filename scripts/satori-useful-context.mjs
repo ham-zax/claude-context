@@ -24,6 +24,7 @@ const COMPARISON_CLASSES = new Set([
 const PHASES = new Set(["cold", "warm"]);
 const PHASE_ORDER = ["cold", "warm"];
 const TASK_SPLITS = new Set(["tuning", "held_out"]);
+const OWNER_MATCH_KINDS = new Set(["symbol", "file"]);
 const STATUSES = new Set(["ok", "zero_result", "fallback", "error"]);
 const BASELINE_KEYS = ["maxLatencyMs", "maxPayloadBytes", "maxContextBytes"];
 const READINESS_PROOF_MODES = new Set(["cold", "warm"]);
@@ -290,7 +291,17 @@ export function validateTaskSuite(value) {
                     rawExpected.ownerSymbol,
                     `tasks[${index}].expected.ownerSymbol`,
                 ),
+                ownerMatch: rawExpected.ownerMatch === undefined
+                    ? "symbol"
+                    : requireNonEmptyString(
+                        rawExpected.ownerMatch,
+                        `tasks[${index}].expected.ownerMatch`,
+                    ),
             };
+        if (task.queryClass !== "negative_exposure"
+            && !OWNER_MATCH_KINDS.has(expected.ownerMatch)) {
+            throw new Error(`tasks[${index}].expected.ownerMatch is unsupported.`);
+        }
         if (task.queryClass !== "negative_exposure"
             && rawExpected.callerSymbols !== undefined) {
             expected.callerSymbols = requireUniqueSymbolRefs(
@@ -586,9 +597,9 @@ export function nearestRankPercentile(values, percentile) {
 }
 
 function sameOwner(expected, actual) {
-    return actual?.kind !== "file"
-        && actual?.file === expected.ownerFile
-        && actual?.symbol === expected.ownerSymbol;
+    if (actual?.file !== expected.ownerFile) return false;
+    return expected.ownerMatch === "file"
+        || (actual?.kind !== "file" && actual?.symbol === expected.ownerSymbol);
 }
 
 function extractRecoveredCallers(task, response) {
