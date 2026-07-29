@@ -2,7 +2,7 @@ import type { CodeChunk } from '../language-analysis';
 import { validateRepositoryRelativePath } from '../paths/repository-path';
 import type { SearchProjections } from '../vectordb/types';
 
-export const EMBEDDING_PROJECTION_VERSION = 'embedding_projection_v1' as const;
+export const EMBEDDING_PROJECTION_VERSION = 'embedding_projection_v2' as const;
 export const LEXICAL_PROJECTION_VERSION = 'lexical_projection_v1' as const;
 
 export interface SearchProjectionInput {
@@ -59,9 +59,18 @@ export function buildSearchProjections(input: SearchProjectionInput): SearchProj
         ...(metadata.breadcrumbs?.length ? { breadcrumbs: metadata.breadcrumbs } : {}),
     });
     const contentSection = `content:${chunk.content.length}\n${chunk.content}`;
+    const semanticIdentity = [
+        `path:${JSON.stringify(relativePath)}`,
+        ...(metadata.language ? [`language:${JSON.stringify(metadata.language)}`] : []),
+        ...(metadata.symbolKind ? [`symbol-kind:${JSON.stringify(metadata.symbolKind)}`] : []),
+        ...(metadata.symbolLabel ? [`symbol:${JSON.stringify(metadata.symbolLabel)}`] : []),
+        ...(metadata.breadcrumbs?.length
+            ? [`breadcrumbs:${JSON.stringify(metadata.breadcrumbs)}`]
+            : []),
+    ].join('\n');
 
     return {
-        embeddingText: `metadata:${projectionMetadata}\n${contentSection}`,
+        embeddingText: `search-identity:\n${semanticIdentity}\n${contentSection}`,
         lexicalText: `${contentSection}\nmetadata:${projectionMetadata}\nidentifier-components:${JSON.stringify(additiveLexicalTerms)}`,
         embeddingVersion: EMBEDDING_PROJECTION_VERSION,
         lexicalVersion: LEXICAL_PROJECTION_VERSION,

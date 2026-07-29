@@ -233,6 +233,7 @@ function buildSemanticSearchCandidateTrace(input: {
     dense?: readonly VectorCandidate[];
     lexical?: readonly VectorCandidate[];
     lexicalFallback?: readonly VectorCandidate[];
+    lexicalFallbackParticipated?: boolean;
     result: readonly VectorCandidate[];
     hybrid: boolean;
     maxEntries: number;
@@ -264,6 +265,9 @@ function buildSemanticSearchCandidateTrace(input: {
     const removedIds = [...new Set([
         ...(input.dense ?? []).map((candidate) => candidate.document.id),
         ...(input.lexical ?? []).map((candidate) => candidate.document.id),
+        ...(input.lexicalFallbackParticipated
+            ? (input.lexicalFallback ?? []).map((candidate) => candidate.document.id)
+            : []),
     ])]
         .filter((candidateId) => !resultIds.has(candidateId))
         .sort(compareContractStrings);
@@ -1468,10 +1472,57 @@ export class Context {
         return synchronizer?.getOwnedSnapshotObservationToken() ?? null;
     }
 
+    private async resolveCheckpointComparisonSynchronizer(
+        canonicalRoot: string,
+        receipt: ProvenGenerationReceipt,
+        observationToken: string,
+    ): Promise<FileSynchronizer | null> {
+        const checkpointAuthority = {
+            collectionName: receipt.collectionName,
+            markerRunId: receipt.marker.runId,
+            indexPolicyHash: receipt.marker.indexPolicyHash,
+        };
+        const registered = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
+        if (
+            registered
+            && registered.ownsCheckpointIdentity(receipt.collectionName)
+            && registered.ownsCheckpointAuthority(checkpointAuthority)
+            && registered.getOwnedSnapshotObservationToken() === observationToken
+        ) {
+            return registered;
+        }
+
+        const inspector = new FileSynchronizer(
+            canonicalRoot,
+            [],
+            [],
+            {
+                checkpointIdentity: receipt.collectionName,
+                checkpointAuthority,
+            },
+        );
+        try {
+            await inspector.initialize(
+                undefined,
+                undefined,
+                { requireExistingCheckpoint: true },
+            );
+        } catch {
+            return null;
+        }
+        if (inspector.getOwnedSnapshotObservationToken() !== observationToken) {
+            return null;
+        }
+        const collectionName = this.resolveCollectionName(canonicalRoot);
+        this.synchronizers.set(collectionName, inspector);
+        this.synchronizerMutationTargets.delete(collectionName);
+        return inspector;
+    }
+
     /**
      * Compare explicit dirty paths with the source checkpoint owned by the
-     * proven active publication. No synchronizer or publication state is
-     * advanced by this read-only check.
+     * proven active publication. The checkpoint may be loaded into runtime
+     * memory, but no source checkpoint or publication state is advanced.
      */
     async compareSourcePathsToFreshnessCheckpoint(
         codebasePath: string,
@@ -1489,17 +1540,12 @@ export class Context {
         }
 
         const receipt = checkpoint.generationReceipt;
-        const synchronizer = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
-        if (
-            !synchronizer
-            || !synchronizer.ownsCheckpointIdentity(receipt.collectionName)
-            || !synchronizer.ownsCheckpointAuthority({
-                collectionName: receipt.collectionName,
-                markerRunId: receipt.marker.runId,
-                indexPolicyHash: receipt.marker.indexPolicyHash,
-            })
-            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
-        ) {
+        const synchronizer = await this.resolveCheckpointComparisonSynchronizer(
+            canonicalRoot,
+            receipt,
+            checkpoint.observationToken,
+        );
+        if (!synchronizer) {
             return { status: 'unavailable' };
         }
 
@@ -1540,17 +1586,12 @@ export class Context {
         }
 
         const receipt = checkpoint.generationReceipt;
-        const synchronizer = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
-        if (
-            !synchronizer
-            || !synchronizer.ownsCheckpointIdentity(receipt.collectionName)
-            || !synchronizer.ownsCheckpointAuthority({
-                collectionName: receipt.collectionName,
-                markerRunId: receipt.marker.runId,
-                indexPolicyHash: receipt.marker.indexPolicyHash,
-            })
-            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
-        ) {
+        const synchronizer = await this.resolveCheckpointComparisonSynchronizer(
+            canonicalRoot,
+            receipt,
+            checkpoint.observationToken,
+        );
+        if (!synchronizer) {
             return { status: 'unavailable' };
         }
 
@@ -1593,17 +1634,12 @@ export class Context {
         }
 
         const receipt = checkpoint.generationReceipt;
-        const synchronizer = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
-        if (
-            !synchronizer
-            || !synchronizer.ownsCheckpointIdentity(receipt.collectionName)
-            || !synchronizer.ownsCheckpointAuthority({
-                collectionName: receipt.collectionName,
-                markerRunId: receipt.marker.runId,
-                indexPolicyHash: receipt.marker.indexPolicyHash,
-            })
-            || synchronizer.getOwnedSnapshotObservationToken() !== checkpoint.observationToken
-        ) {
+        const synchronizer = await this.resolveCheckpointComparisonSynchronizer(
+            canonicalRoot,
+            receipt,
+            checkpoint.observationToken,
+        );
+        if (!synchronizer) {
             return { status: 'unavailable' };
         }
 
@@ -5042,9 +5078,12 @@ export class Context {
                     : Promise.resolve(undefined),
             ]);
             await assertCandidateReadAuthorityUnchanged('Index generation changed during hybrid retrieval.');
+            const lexicalFusionCandidates = lexicalCandidates.length > 0
+                ? lexicalCandidates
+                : lexicalFallback ?? [];
             const searchResults = fuseVectorCandidatesWithRrf({
                 dense: denseCandidates.slice(0, resolvedRequest.topK),
-                lexical: lexicalCandidates.slice(0, resolvedRequest.topK),
+                lexical: lexicalFusionCandidates.slice(0, resolvedRequest.topK),
                 k: VECTOR_CANDIDATE_RRF_K_V1,
                 limit: resolvedRequest.topK,
             });
@@ -5063,6 +5102,8 @@ export class Context {
                 dense: denseCandidates,
                 lexical: lexicalCandidates,
                 ...(lexicalFallback ? { lexicalFallback } : {}),
+                lexicalFallbackParticipated:
+                    lexicalCandidates.length === 0 && lexicalFallback !== undefined,
                 result: searchResults,
                 hybrid: true,
                 maxEntries: candidateTraceMaxEntries,

@@ -475,7 +475,9 @@ function classifySearchRoute(input: {
     if (input.quotedLiteralSeeking) {
         return buildRouteContract("literal", "quoted_literal");
     }
-    if (/\b(config|configuration|configured|setting|settings|constant|constants|environment|env|flag|flags)\b/.test(normalizedQuery)) {
+    const strongConfigurationCue = /\b(config|configuration|setting|settings|constant|constants|environment|env|flag|flags)\b/.test(normalizedQuery);
+    const configuredPredicate = /\b(?:where|how)\s+(?:is|are|was|were)\s+[^\n]*\bconfigured\b/.test(normalizedQuery);
+    if (strongConfigurationCue || configuredPredicate) {
         return buildRouteContract("configuration", "configuration_cue");
     }
     if (input.referenceSeeking || /\b(calls?|callers?|callees?|references?|imports?|uses?)\b/.test(normalizedQuery)) {

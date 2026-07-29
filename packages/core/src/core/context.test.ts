@@ -5858,22 +5858,28 @@ test('Context compares explicit source paths only against the proven active chec
             symbolRegistryStateRoot: stateRoot,
             indexPolicyStateRoot: policyRoot,
         });
-        await restarted.recreateSynchronizerForCodebase(
-            codebasePath,
-            undefined,
-            undefined,
-            { requireAuthorityCheckpoint: true },
-        );
+        assert.equal(restarted.hasSynchronizerForCodebase(codebasePath), false);
+        const restartedReceipt = await restarted.proveIndexedGeneration(codebasePath);
+        assert.ok(restartedReceipt);
         assert.deepEqual(
             await restarted.compareSourcePathsToFreshnessCheckpoint(
                 codebasePath,
                 ['runtime.ts'],
+                restartedReceipt!,
             ),
             { status: 'matches' },
         );
         assert.deepEqual(
             await restarted.compareAllSourceToFreshnessCheckpoint(codebasePath),
             { status: 'matches' },
+        );
+        fs.writeFileSync(sourcePath, 'export const value = 3;\n', 'utf8');
+        assert.deepEqual(
+            await restarted.compareSourcePathsToFreshnessCheckpoint(
+                codebasePath,
+                ['runtime.ts'],
+            ),
+            { status: 'differs' },
         );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -6411,6 +6417,70 @@ test('Context rejects malformed filters before embedding or retrieval', async ()
         assert.equal(embedding.embedCalls, embedCallsBefore);
         assert.equal(vectorDatabase.searchCalls, denseCallsBefore);
         assert.equal(vectorDatabase.sparseSearchCalls, lexicalCallsBefore);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context hybrid search admits fallback lexical candidates when precise lexical retrieval is empty', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-hybrid-fallback-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'decoy.ts'), 'export const decoy = true;\n', 'utf8');
+        fs.writeFileSync(
+            path.join(codebasePath, 'owner.ts'),
+            'export function buildSearchQueryPlan() { return "owner"; }\n',
+            'utf8',
+        );
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+        });
+        await context.indexCodebase(codebasePath);
+        const vectorReceipt = await context.proveVectorGeneration(codebasePath);
+        assert.ok(vectorReceipt);
+        const documents = [...(vectorDatabase.collections.get(vectorReceipt!.collectionName)?.values() ?? [])]
+            .filter((document) => document.fileExtension !== '.satori_meta');
+        const decoy = documents.find((document) => document.relativePath === 'decoy.ts');
+        const owner = documents.find((document) => document.relativePath === 'owner.ts');
+        assert.ok(decoy);
+        assert.ok(owner);
+
+        vectorDatabase.retrieveDense = async () => [{ document: decoy!, score: 1 }];
+        vectorDatabase.retrieveLexical = async (_collectionName, request) => (
+            request.matchMode === 'any_terms'
+                ? [{ document: owner!, score: 1 }]
+                : []
+        );
+
+        const execution = await context.semanticSearchWithCandidateTraceInProvenGeneration(
+            vectorReceipt!,
+            {
+                codebasePath,
+                query: 'Which function builds the search query plan and route?',
+                topK: 2,
+                retrievalMode: 'hybrid',
+                scorePolicy: { kind: 'topk_only' },
+            },
+            8,
+            {
+                captureLexicalFallback: true,
+                diagnosticCandidateLimit: 8,
+                lexicalFallbackTerms: ['buildSearchQueryPlan', 'search', 'query', 'plan'],
+            },
+        );
+
+        assert.equal(execution.diagnosticCandidateArms?.preciseLexical?.length, 0);
+        assert.equal(execution.diagnosticCandidateArms?.fallbackLexical?.length, 1);
+        assert.ok(execution.results.some((result) => result.relativePath === 'owner.ts'));
+        assert.ok(execution.candidateTrace.stages
+            .find((stage) => stage.stage === 'core_fusion')
+            ?.candidates.some((candidate) => candidate.relativePath === 'owner.ts'));
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

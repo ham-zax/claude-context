@@ -7,7 +7,7 @@ import {
     LEXICAL_PROJECTION_VERSION,
 } from './search-projections';
 
-test('buildSearchProjections produces byte-stable v1 text from canonical chunk inputs', () => {
+test('buildSearchProjections produces byte-stable text from canonical chunk inputs', () => {
     const chunk: CodeChunk = {
         content: 'export function parseHTTPResponse(raw_value: string): ResultType {\n  return decode(raw_value);\n}',
         metadata: {
@@ -39,7 +39,12 @@ test('buildSearchProjections produces byte-stable v1 text from canonical chunk i
     assert.equal(first.lexicalVersion, LEXICAL_PROJECTION_VERSION);
     const metadata = '{"path":"src/http/parser_utils.ts","language":"typescript","symbolKind":"function","symbolLabel":"Parser.parseHTTPResponse","breadcrumbs":["Parser","parseHTTPResponse"]}';
     assert.equal(first.embeddingText, [
-        `metadata:${metadata}`,
+        'search-identity:',
+        'path:"src/http/parser_utils.ts"',
+        'language:"typescript"',
+        'symbol-kind:"function"',
+        'symbol:"Parser.parseHTTPResponse"',
+        'breadcrumbs:["Parser","parseHTTPResponse"]',
         `content:${chunk.content.length}`,
         chunk.content,
     ].join('\n'));
@@ -110,5 +115,5 @@ test('buildSearchProjections serializes newline-bearing metadata without collisi
 
     assert.notEqual(pathWithHeaderText.embeddingText, separateLanguage.embeddingText);
     assert.notEqual(pathWithHeaderText.lexicalText, separateLanguage.lexicalText);
-    assert.match(pathWithHeaderText.embeddingText, /"path":"a\\nlanguage: typescript"/);
+    assert.match(pathWithHeaderText.embeddingText, /path:"a\\nlanguage: typescript"/);
 });

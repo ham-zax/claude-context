@@ -28,6 +28,11 @@ test('buildSearchQueryPlan classifies explicit routes without changing legacy re
         { query: 'path:src/search/ranking.ts rankCandidates', route: 'exact_path', retrievalMode: 'lexical' },
         { query: '"SOURCE_CHECKPOINT_MISSING"', route: 'literal', retrievalMode: 'lexical' },
         { query: 'where is RERANK_TOP_K configured', route: 'configuration', retrievalMode: 'lexical' },
+        {
+            query: 'Which function runs a complete backtest for a configured pair?',
+            route: 'mixed',
+            retrievalMode: 'hybrid',
+        },
         { query: 'owner of rankCandidates', route: 'ownership', retrievalMode: 'hybrid' },
         { query: 'who calls writeSourceCheckpoint', route: 'references', retrievalMode: 'hybrid' },
         { query: 'trace public search architecture', route: 'structural', retrievalMode: 'hybrid' },
