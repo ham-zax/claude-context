@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "kind": "satori_search_ranking_r2_policy_seal",
+  "sha256": "c39834ce36998c41f0e39cef9edd8164435c6635484ddfa277e08d776d1a1989",
+  "createdAt": "2026-07-30T03:36:00+08:00",
+  "createdBeforeContenderReplay": true,
+  "manifest": {
+    "seal": "dd93051e0d56c2070078d050e7145708cecca5f4f7ea56b0dadeae8b78ab3eaa",
+    "artifactSha256": "9226a0c155461054ffd0872641217ac796f890b9fd5156bd8f166a366996a2b4"
+  },
+  "r1Archive": {
+    "relativePath": "docs/evidence/r1-baseline-qualification-20260730/r1-baseline-artifacts.tar.gz",
+    "sha256": "c5bab8e806f159e7eb52340ecb9c44732aa746a603886ea27fa09c43a84d6d92"
+  },
+  "execution": {
+    "gitRevision": "8b3553bae9b01fb48451f1ebafd299069b8fbb4f",
+    "gitTree": "ad9980259fe9ccf2980bb985cc8db60dfe95d647",
+    "replayScriptSha256": "393389f865854b7928e26eb0d364d56400027ece2674c75b4501f91ab57fc9c2",
+    "evaluatorScriptSha256": "0ded931a8bbffa81a48c3b4e080f777390d4160f4282767df32167a0dd30c026",
+    "nodeVersion": "v24.13.0",
+    "nodeSha256": "53fb205ae78805130177e24bcb459a69a1518c8d98f8965f31d85aae7ea840fc",
+    "tsxVersion": "4.22.4",
+    "tsxManifestSha256": "b0d63b124b9b85b53d09cff256fa7832cb6a774f8b90ae1353e63df5275824b2",
+    "tsxLoaderSha256": "7dcee7691241fdd4a59a52879597d22d603d770a764282724eaca7cab03b389f",
+    "lockfileSha256": "ae791d83663e216686eb35f20e2e9f446791bf695b0ae2e339ec85159c43334e"
+  },
+  "policies": [
+    {
+      "policyId": "B",
+      "relativePath": "evals/search-ranking/policies/r2-b.json",
+      "artifactSha256": "f7b2c8c282dca017078aec91eafcc5d764da7d3d46f396ede2ac21039e139ce8",
+      "canonicalSha256": "63d1ad583110fc0e46ffd8740f194ef9a122ddaae69f32a8a54b6f766bb1238a"
+    },
+    {
+      "policyId": "B-P0",
+      "relativePath": "evals/search-ranking/policies/r2-b-p0.json",
+      "artifactSha256": "e4b87d2c63201a3c5dab095ed3b564cc6f3ff6fb9c0f18be58dd40773be50938",
+      "canonicalSha256": "671e757855e8327e9cb3287a5febd00d080ebf976960ab445e464ad517e18e0e"
+    },
+    {
+      "policyId": "B-A0",
+      "relativePath": "evals/search-ranking/policies/r2-b-a0.json",
+      "artifactSha256": "260ad642ddb231a75026a11fa8bedec487cdbb06f3ac49615b86a84397791b7a",
+      "canonicalSha256": "44140b9c043bd95b4ddbbbd850c85c3b1d50fc567b9dd317280fe38fbecdd9fa"
+    }
+  ]
+}
