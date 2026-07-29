@@ -11,6 +11,10 @@ import {
     sortSearchCandidates,
 } from "../packages/mcp/src/core/search-ranking-policy.ts";
 import {
+    SEARCH_RERANK_RRF_K,
+    SEARCH_RERANK_WEIGHT,
+} from "../packages/mcp/src/core/search-constants.ts";
+import {
     computeSearchGroupScore,
     rankAndDiversifySearchGroups,
 } from "../packages/mcp/src/core/search-group-results.ts";
@@ -1776,6 +1780,200 @@ export function replayBaselineCandidateCapture(value, options = {}) {
             ).length,
             groupingDisclosureIncompleteTasks,
         },
+        tasks,
+    };
+    return { ...replay, sha256: sha256Canonical(replay) };
+}
+
+export function applyFrozenNeuralOrder(localScoring, neuralRanking, {
+    exactMatchPinningEnabled,
+} = {}) {
+    const candidates = localScoring.candidates.map((candidate) => ({
+        ...candidate,
+        candidate: { ...candidate.candidate },
+        result: { ...candidate.result },
+    }));
+    const candidatesById = new Map(candidates.map((candidate) => [
+        candidate.candidate.candidateId,
+        candidate,
+    ]));
+    const rankedIds = new Set();
+    for (let index = 0; index < neuralRanking.length; index += 1) {
+        const entry = requireRecord(neuralRanking[index], `Neural rank ${index + 1}`);
+        const candidateId = requireString(entry.candidateId, `Neural rank ${index + 1} candidateId`);
+        requireNonNegativeFinite(entry.score, `Neural rank ${index + 1} score`);
+        if (rankedIds.has(candidateId)) {
+            throw new Error(`Neural ranking contains duplicate candidate '${candidateId}'.`);
+        }
+        rankedIds.add(candidateId);
+        const candidate = candidatesById.get(candidateId);
+        if (!candidate) {
+            throw new Error(`Neural ranking candidate '${candidateId}' is outside the eligible union.`);
+        }
+        const rank = index + 1;
+        candidate.fusionScore += SEARCH_RERANK_WEIGHT / (SEARCH_RERANK_RRF_K + rank);
+        candidate.finalScore = computeSearchCandidateFinalScore(candidate);
+        candidate.rerankAdjusted = true;
+    }
+    sortSearchCandidates(
+        candidates,
+        exactMatchPinningEnabled === true,
+        localScoring.mustMatchesFirst,
+    );
+    return {
+        candidates,
+        removed: localScoring.removed.map((removal) => ({ ...removal })),
+        mustMatchesFirst: localScoring.mustMatchesFirst,
+    };
+}
+
+function validateNeuralScoreArtifact(value) {
+    const artifact = requireRecord(value, "Neural score artifact");
+    if (artifact.schemaVersion !== "satori_search_ranking_r3_scores_v1") {
+        throw new Error("Neural score artifact schema is unsupported.");
+    }
+    const suppliedDigest = requireSha256(artifact.sha256, "Neural score artifact sha256");
+    const { sha256: _ignored, ...unsignedArtifact } = artifact;
+    if (sha256Canonical(unsignedArtifact) !== suppliedDigest) {
+        throw new Error("Neural score artifact digest does not match its contents.");
+    }
+    if (!["D-L16", "D-L32"].includes(artifact.contenderId)) {
+        throw new Error("Neural score artifact contender is unsupported.");
+    }
+    return artifact;
+}
+
+export function replayNeuralCandidateCapture(captureValue, neuralValue, options = {}) {
+    const capture = requireRecord(captureValue, "Candidate capture");
+    const neural = validateNeuralScoreArtifact(neuralValue);
+    const baseline = replayBaselineCandidateCapture(capture, {
+        requireNeuralDisabled: true,
+        requireGroupingReady: true,
+    });
+    const captureAuthority = neural.captures.find(
+        (entry) => entry.captureSha256 === capture.sha256,
+    );
+    if (!captureAuthority) {
+        throw new Error("Neural score artifact does not bind this candidate capture.");
+    }
+    if (
+        neural.authority.gitRevision !== capture.authority.gitRevision
+        || canonicalJson(neural.authority.armPublication)
+            !== canonicalJson(capture.authority.armPublication)
+    ) {
+        throw new Error("Neural score artifact publication authority is incompatible.");
+    }
+    const diagnosticQualityOnly = options.diagnosticQualityOnly === true;
+    const neuralByTaskId = new Map(neural.tasks.map((task) => [task.taskId, task]));
+    const baselineByTaskId = new Map(baseline.tasks.map((task) => [task.taskId, task]));
+    const tasks = capture.captures.map((taskCapture) => {
+        const baselineTask = baselineByTaskId.get(taskCapture.taskId);
+        const neuralTask = neuralByTaskId.get(taskCapture.taskId);
+        if (!baselineTask || !neuralTask) {
+            throw new Error(`Task '${taskCapture.taskId}' is missing baseline or neural authority.`);
+        }
+        if (taskCapture.readiness?.route === "exact_registry") {
+            if (neuralTask.route !== "exact_registry" || neuralTask.policyAffected !== false) {
+                throw new Error(`Task '${taskCapture.taskId}' exact route was changed by neural scoring.`);
+            }
+            return {
+                taskId: taskCapture.taskId,
+                split: taskCapture.split,
+                queryClass: taskCapture.queryClass,
+                language: taskCapture.language,
+                expected: taskCapture.expected,
+                route: { kind: "exact_registry", fusionReplay: "not_applicable" },
+                policyAffected: false,
+                rankedResults: baselineTask.rankedResults,
+                invariants: {
+                    candidateMembershipIdentityEqual: true,
+                    eligibilityIdentityEqual: true,
+                    exactIdentifierIdentityEqual: true,
+                },
+            };
+        }
+        const ranking = neuralTask.status === "scored"
+            ? neuralTask.ranking
+            : diagnosticQualityOnly
+                ? neuralTask.diagnosticRanking
+                : [];
+        if (neuralTask.status !== "scored" && !diagnosticQualityOnly) {
+            throw new Error(
+                `Task '${taskCapture.taskId}' neural output is unavailable under the product deadline.`,
+            );
+        }
+        if (canonicalJson(ranking.map(({ candidateId }) => candidateId).sort())
+            !== canonicalJson([...neuralTask.selectedCandidateIds].sort())) {
+            throw new Error(`Task '${taskCapture.taskId}' neural candidate membership mismatch.`);
+        }
+        const internalAttempts = taskCapture.candidateTrace.stages
+            .filter((stage) => stage.stage === "mcp_fusion")
+            .map((stage) => replayMcpAttempt(taskCapture, stage));
+        if (internalAttempts.length === 0) {
+            throw new Error(`Task '${taskCapture.taskId}' has no replayable MCP attempt.`);
+        }
+        const baselineLocal = replayPostFusionLocalScoring(
+            taskCapture,
+            internalAttempts.at(-1),
+        );
+        const recordedStage = stageByNameAndPass(
+            taskCapture.candidateTrace.stages,
+            "mcp_filtered",
+            internalAttempts.at(-1).attemptId,
+        );
+        assertLocalScoringMatches(
+            baselineLocal.candidates,
+            recordedStage,
+            `Task '${taskCapture.taskId}' neural baseline scoring`,
+        );
+        const adjusted = applyFrozenNeuralOrder(baselineLocal, ranking, {
+            exactMatchPinningEnabled:
+                taskCapture.passConfiguration.rerank.exactMatchPinningEnabled === true,
+        });
+        assertCandidateMembershipMatchesStage(
+            adjusted.candidates,
+            recordedStage,
+            `Task '${taskCapture.taskId}' neural candidate membership`,
+        );
+        assertRemovalIdentityMatchesBaseline(
+            adjusted.removed,
+            baselineLocal.removed,
+            `Task '${taskCapture.taskId}' neural eligibility`,
+        );
+        const groupingDisclosure = replayFrozenGroupingAndDisclosure(
+            taskCapture,
+            adjusted,
+            { assertBaseline: false },
+        );
+        return {
+            taskId: taskCapture.taskId,
+            split: taskCapture.split,
+            queryClass: taskCapture.queryClass,
+            language: taskCapture.language,
+            expected: taskCapture.expected,
+            route: {
+                kind: "fusion",
+                fusionReplay: diagnosticQualityOnly ? "diagnostic_neural" : "neural",
+            },
+            policyAffected: ranking.length > 0,
+            neuralStatus: neuralTask.status,
+            selectedCandidateIds: [...neuralTask.selectedCandidateIds],
+            ranking,
+            groupingDisclosure,
+            invariants: {
+                candidateMembershipIdentityEqual: true,
+                eligibilityIdentityEqual: true,
+            },
+        };
+    });
+    const replay = {
+        version: 1,
+        kind: "satori_search_candidate_neural_replay",
+        contenderId: neural.contenderId,
+        diagnosticQualityOnly,
+        sourceCaptureSha256: capture.sha256,
+        sourceNeuralScoreSha256: neural.sha256,
+        baselineReplaySha256: baseline.sha256,
         tasks,
     };
     return { ...replay, sha256: sha256Canonical(replay) };

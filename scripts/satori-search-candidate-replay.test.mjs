@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { replayCoreFusion } from "./satori-search-candidate-replay.mjs";
+import {
+    applyFrozenNeuralOrder,
+    replayCoreFusion,
+} from "./satori-search-candidate-replay.mjs";
 
 function candidate(candidateId, stage, relativePath, score) {
     return {
@@ -77,4 +80,62 @@ test("baseline Core replay assigns arm ranks after repeated owners are removed",
         ["owner-a-1", "owner-b"],
     );
     assert.equal(replayed[1]?.score, 1 / 102);
+});
+
+test("neural replay applies production RRF scoring without changing eligibility", () => {
+    const localCandidate = (candidateId, fusionScore) => ({
+        candidate: {
+            candidateId,
+            relativePath: `src/${candidateId}.ts`,
+        },
+        result: {
+            relativePath: `src/${candidateId}.ts`,
+            startLine: 1,
+            endLine: 2,
+        },
+        fusionScore,
+        lexicalScore: 0,
+        pathMultiplier: 1,
+        changedFilesMultiplier: 1,
+        agentFitMultiplier: 1,
+        entrypointOwnerScoreBoost: 0,
+        finalScore: fusionScore,
+        exactLexicalMatch: false,
+        passesMatchedMust: false,
+        exactMatchPinned: false,
+        rerankAdjusted: false,
+    });
+    const localScoring = {
+        candidates: [
+            localCandidate("semantic-runner-up", 0.015),
+            localCandidate("neural-owner", 0.01),
+        ],
+        removed: [{ candidateId: "filtered", reason: "scope_filter" }],
+        mustMatchesFirst: false,
+    };
+
+    const adjusted = applyFrozenNeuralOrder(localScoring, [
+        { candidateId: "neural-owner", score: 10 },
+        { candidateId: "semantic-runner-up", score: 9 },
+    ], { exactMatchPinningEnabled: false });
+
+    assert.deepEqual(
+        adjusted.candidates.map(({ candidate: entry }) => entry.candidateId),
+        ["neural-owner", "semantic-runner-up"],
+    );
+    assert.deepEqual(adjusted.removed, localScoring.removed);
+    assert.equal(adjusted.candidates.every(({ rerankAdjusted }) => rerankAdjusted), true);
+    assert.deepEqual(
+        localScoring.candidates.map(({ fusionScore }) => fusionScore),
+        [0.015, 0.01],
+        "neural replay must not mutate the reproduced baseline",
+    );
+});
+
+test("neural replay rejects candidates outside the eligible union", () => {
+    assert.throws(() => applyFrozenNeuralOrder({
+        candidates: [],
+        removed: [],
+        mustMatchesFirst: false,
+    }, [{ candidateId: "missing", score: 1 }]), /outside the eligible union/);
 });
