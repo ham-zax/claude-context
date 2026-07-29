@@ -12,5 +12,6 @@ export declare function buildLauncherScript(options: {
     command: string;
     args: readonly string[];
     managedEnv?: Readonly<Record<string, string>>;
+    managedRuntimeRoot?: string;
     shutdownGraceMs?: number;
 }): string;

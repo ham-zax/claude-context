@@ -1,11 +1,15 @@
+/// <reference types="node" />
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { resolveLanceDbNativePackage } from "../src/managed-runtime-closure.js";
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 500 * 1024 * 1024;
 
 interface PackageManifest {
     name?: unknown;
@@ -129,10 +133,18 @@ function installAndVerifyPackedReleaseClosure(
     cliEntry: string;
     packedMcpRoot: string;
 } {
+    const sourceCli = readManifest(path.join(sourceRoots.cli, "package.json"));
+    const sourceMcp = readManifest(path.join(sourceRoots.mcp, "package.json"));
+    const sourceCore = readManifest(path.join(sourceRoots.core, "package.json"));
+    const lanceDbNativePackage = resolveLanceDbNativePackage({
+        vectorStore: "LanceDB",
+    });
     execFileSync("npm", [
         "install",
         "--prefix",
         installRoot,
+        "--omit=dev",
+        "--omit=optional",
         "--ignore-scripts",
         "--no-package-lock",
         "--no-audit",
@@ -142,6 +154,7 @@ function installAndVerifyPackedReleaseClosure(
         tarballs.core,
         tarballs.mcp,
         tarballs.cli,
+        lanceDbNativePackage,
     ], {
         cwd: installRoot,
         encoding: "utf8",
@@ -149,9 +162,6 @@ function installAndVerifyPackedReleaseClosure(
         stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const sourceCli = readManifest(path.join(sourceRoots.cli, "package.json"));
-    const sourceMcp = readManifest(path.join(sourceRoots.mcp, "package.json"));
-    const sourceCore = readManifest(path.join(sourceRoots.core, "package.json"));
     const cliVersion = requireStableVersion(sourceCli.version, "Source CLI version");
     const mcpVersion = requireStableVersion(sourceMcp.version, "Source MCP version");
     const coreVersion = requireStableVersion(sourceCore.version, "Source Core version");
@@ -218,6 +228,29 @@ function installAndVerifyPackedReleaseClosure(
         cliEntry,
         packedMcpRoot: mcpRoot,
     };
+}
+
+function directorySize(filePath: string): number {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        return stat.size;
+    }
+    return fs.readdirSync(filePath)
+        .map((entry) => directorySize(path.join(filePath, entry)))
+        .reduce((total, size) => total + size, 0);
+}
+
+function assertManagedRuntimeSizeBudget(installRoot: string): void {
+    if (process.platform !== "linux" || process.arch !== "x64") {
+        return;
+    }
+    const installedBytes = directorySize(installRoot);
+    if (installedBytes > MAX_LINUX_X64_MANAGED_RUNTIME_BYTES) {
+        throw new Error(
+            `Packed Linux x64 managed runtime is ${installedBytes} bytes; `
+            + `budget is ${MAX_LINUX_X64_MANAGED_RUNTIME_BYTES} bytes.`,
+        );
+    }
 }
 
 function runCliSmoke(
@@ -310,6 +343,7 @@ function main(): void {
             smokeExecDir,
             baseEnv,
         );
+        assertManagedRuntimeSizeBudget(smokeExecDir);
         assertPackedCliHelp(runCliSmoke(["--format", "json", "--help"], packed.cliEntry, smokeExecDir, baseEnv));
         const doctorEnv = packedPotionSmokeEnv(baseEnv, packed.packedMcpRoot, smokeHomeDir);
         runCliSmoke(["doctor"], packed.cliEntry, smokeExecDir, doctorEnv);

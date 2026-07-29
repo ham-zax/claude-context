@@ -31,6 +31,16 @@ import {
     parseStableVersion,
     type SatoriUpgradeTarget,
 } from "./upgrade-target.js";
+import {
+    acquireManagedRuntimeMutationLock,
+    pruneManagedRuntimeStore,
+} from "./managed-runtime-store.js";
+import {
+    managedRuntimeClosureMatches,
+    resolveLanceDbNativePackage,
+    type ManagedRuntimeClosure,
+    writeManagedRuntimeClosureManifest,
+} from "./managed-runtime-closure.js";
 
 const MANAGED_BLOCK_START = "# >>> satori-cli managed satori start >>>";
 const MANAGED_BLOCK_END = "# <<< satori-cli managed satori end <<<";
@@ -153,6 +163,7 @@ export interface InstallCommandOptions {
     potionAssetsRoot?: string;
     platform?: NodeJS.Platform;
     architecture?: string;
+    libc?: "gnu" | "musl";
     onUpgradeProgress?: (phase: ManagedRuntimeUpgradePhase) => void;
     preflightRunner?: (
         input: InstallPreflightInput,
@@ -574,10 +585,20 @@ function prepareLauncherInstall(
 ): FileMutation {
     const launcherPath = resolveLauncherPath(homeDir);
     const current = readTextIfExists(launcherPath);
+    const runtimePackageRoot = runtimeCommand.args.length === 1
+        ? readContainingPackageIdentity(
+            runtimeCommand.args[0],
+            "@zokizuan/satori-mcp",
+        )?.packageRoot
+        : undefined;
+    const managedRuntimeRoot = runtimePackageRoot
+        ? resolveContainingManagedRuntimeRoot(homeDir, runtimePackageRoot) ?? undefined
+        : undefined;
     const next = buildLauncherScript({
         command: runtimeCommand.command,
         args: runtimeCommand.args,
         managedEnv,
+        ...(managedRuntimeRoot ? { managedRuntimeRoot } : {}),
     });
     return {
         changed: current !== next,
@@ -608,7 +629,8 @@ function installManagedRuntimeCandidate(
     homeDir: string,
     packageSpecifier: string,
     execImpl: ExecFileSyncLike,
-    expectedCoreVersion?: string,
+    expectedCoreVersion: string | undefined,
+    closure: ManagedRuntimeClosure,
 ): ManagedRuntimeCandidate {
     const stableRuntimeRoot = resolveRuntimeRoot(homeDir, packageSpecifier);
     const existing = resolveInstalledRuntimeCommand(
@@ -617,7 +639,7 @@ function installManagedRuntimeCandidate(
         true,
         expectedCoreVersion,
     );
-    if (existing) {
+    if (existing && managedRuntimeClosureMatches(stableRuntimeRoot, closure)) {
         return {
             ...existing,
             runtimeRoot: stableRuntimeRoot,
@@ -631,18 +653,25 @@ function installManagedRuntimeCandidate(
         ? fs.mkdtempSync(`${stableRuntimeRoot}.generation-`)
         : stableRuntimeRoot;
     ensureDir(runtimeRoot);
+    const installTargets = [
+        packageSpecifier,
+        ...(closure.vectorStore === "LanceDB"
+            ? [resolveLanceDbNativePackage(closure)]
+            : []),
+    ];
     try {
         execImpl("npm", [
             "install",
             "--prefix",
             runtimeRoot,
             "--omit=dev",
+            "--omit=optional",
             "--no-package-lock",
             "--ignore-scripts",
             "--no-audit",
             "--no-fund",
             "--",
-            packageSpecifier,
+            ...installTargets,
         ], {
             encoding: "utf8",
             stdio: ["ignore", "pipe", "pipe"],
@@ -668,6 +697,16 @@ function installManagedRuntimeCandidate(
         throw new CliError(
             "E_USAGE",
             `Installed Satori MCP runtime is missing a usable entry under ${packageRoot}.`,
+            2,
+        );
+    }
+    try {
+        writeManagedRuntimeClosureManifest(runtimeRoot, closure);
+    } catch (error) {
+        fs.rmSync(runtimeRoot, { recursive: true, force: true });
+        throw new CliError(
+            "E_USAGE",
+            `Installed Satori MCP runtime closure could not be recorded at ${runtimeRoot}: ${error instanceof Error ? error.message : String(error)}`,
             2,
         );
     }
@@ -1852,12 +1891,19 @@ export function applyInstallPlan(
             1,
         );
     }
-    const runtimeEnvironment = preflight?.runtimeEnvironment ?? Object.freeze({});
+    const runtimeEnvironment: Readonly<Record<string, string>> =
+        preflight?.runtimeEnvironment ?? Object.freeze({});
+    let installedManagedRuntimeCandidate: ManagedRuntimeCandidate | undefined;
     let launcherMutation = command.kind === "install"
         ? prepareLauncherInstall(homeDir, plan.plannedRuntimeCommand, runtimeEnvironment)
         : { changed: false, apply: () => {} };
 
-    if (!command.dryRun) {
+    const releaseRuntimeMutationLock =
+        !command.dryRun && command.kind === "install" && !options.runtimeCommand
+            ? acquireManagedRuntimeMutationLock({ homeDir })
+            : undefined;
+    try {
+        if (!command.dryRun) {
         const plannedSteps: Array<{ description: string; changed: boolean; apply: () => void }> = [];
         if (command.kind === "install" && !options.runtimeCommand) {
             plannedSteps.push({
@@ -1868,7 +1914,17 @@ export function applyInstallPlan(
                         homeDir,
                         packageSpecifier,
                         options.execFileSyncImpl ?? execFileSync,
+                        undefined,
+                        {
+                            vectorStore: runtimeEnvironment.VECTOR_STORE_PROVIDER === "Milvus"
+                                ? "Milvus"
+                                : "LanceDB",
+                            platform: options.platform,
+                            architecture: options.architecture,
+                            libc: options.libc,
+                        },
                     );
+                    installedManagedRuntimeCandidate = installedRuntime;
                     profileMutation.assertUnchanged?.();
                     for (const mutation of prepared) {
                         mutation.configMutation.assertUnchanged?.();
@@ -1940,6 +1996,15 @@ export function applyInstallPlan(
                 );
             }
         }
+        }
+        if (installedManagedRuntimeCandidate) {
+            pruneManagedRuntimeAfterActivation(
+                homeDir,
+                installedManagedRuntimeCandidate.runtimeRoot,
+            );
+        }
+    } finally {
+        releaseRuntimeMutationLock?.();
     }
 
     return {
@@ -2013,6 +2078,16 @@ function resolveContainingManagedRuntimeRoot(homeDir: string, packageRoot: strin
     }
     const runtimeRoot = path.join(storageRoot, generationName);
     return isPathWithin(runtimeRoot, packageRoot) ? runtimeRoot : null;
+}
+
+function pruneManagedRuntimeAfterActivation(homeDir: string, currentRuntimeRoot: string): void {
+    const result = pruneManagedRuntimeStore({
+        homeDir,
+        currentRuntimeRoot,
+    });
+    for (const warning of result.warnings) {
+        console.warn(`[RUNTIME-CLEANUP] ${warning}`);
+    }
 }
 
 function upgradeRuntimeSelection(
@@ -2163,21 +2238,38 @@ export async function executeManagedRuntimeUpgrade(
             2,
         );
     }
-    if (mcpComparison === 0 && fromCoreVersion === target.coreVersion) {
-        return {
-            action: "upgrade",
-            status: "up_to_date",
-            fromMcpVersion,
-            toMcpVersion: target.mcpVersion,
-            fromCoreVersion,
-            toCoreVersion: target.coreVersion,
-            packageSpecifier: target.mcpPackageSpecifier,
-            configuredClients,
-            restartRequired: false,
-        };
+    const selection = upgradeRuntimeSelection(homeDir, descriptor.managedEnv, env);
+    const runtimeClosure: ManagedRuntimeClosure = {
+        vectorStore: selection.vectorStore,
+        platform: options.platform,
+        architecture: options.architecture,
+        libc: options.libc,
+    };
+    if (
+        mcpComparison === 0
+        && fromCoreVersion === target.coreVersion
+        && managedRuntimeClosureMatches(currentRuntimeRoot, runtimeClosure)
+    ) {
+        const releaseRuntimeMutationLock = acquireManagedRuntimeMutationLock({ homeDir });
+        try {
+            assertFileContentUnchanged(launcherPath, launcherContent);
+            pruneManagedRuntimeAfterActivation(homeDir, currentRuntimeRoot);
+            return {
+                action: "upgrade",
+                status: "up_to_date",
+                fromMcpVersion,
+                toMcpVersion: target.mcpVersion,
+                fromCoreVersion,
+                toCoreVersion: target.coreVersion,
+                packageSpecifier: target.mcpPackageSpecifier,
+                configuredClients,
+                restartRequired: false,
+            };
+        } finally {
+            releaseRuntimeMutationLock();
+        }
     }
 
-    const selection = upgradeRuntimeSelection(homeDir, descriptor.managedEnv, env);
     if (selection.runtime === "offline" && !selection.ollamaModel) {
         assertSupportedPotionPlatform({
             platform: options.platform,
@@ -2185,14 +2277,17 @@ export async function executeManagedRuntimeUpgrade(
         });
     }
 
-    let candidate: ManagedRuntimeCandidate | undefined;
+    const releaseRuntimeMutationLock = acquireManagedRuntimeMutationLock({ homeDir });
     try {
+        let candidate: ManagedRuntimeCandidate | undefined;
+        try {
         options.onUpgradeProgress?.("installing");
         candidate = installManagedRuntimeCandidate(
             homeDir,
             target.mcpPackageSpecifier,
             options.execFileSyncImpl ?? execFileSync,
             target.coreVersion,
+            runtimeClosure,
         );
         options.onUpgradeProgress?.("verifying");
         const potionAssetsRoot = options.potionAssetsRoot
@@ -2229,28 +2324,34 @@ export async function executeManagedRuntimeUpgrade(
         );
         launcherMutation.assertUnchanged?.();
         launcherMutation.apply();
-    } catch (error) {
-        if (candidate?.newlyInstalled) {
-            fs.rmSync(candidate.runtimeRoot, { recursive: true, force: true });
+        } catch (error) {
+            if (candidate?.newlyInstalled) {
+                fs.rmSync(candidate.runtimeRoot, { recursive: true, force: true });
+            }
+            if (error instanceof CliError) {
+                throw error;
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            throw new CliError("E_INSTALL_PREFLIGHT", `Satori runtime upgrade failed: ${message}`, 1);
         }
-        if (error instanceof CliError) {
-            throw error;
+        if (candidate) {
+            pruneManagedRuntimeAfterActivation(homeDir, candidate.runtimeRoot);
         }
-        const message = error instanceof Error ? error.message : String(error);
-        throw new CliError("E_INSTALL_PREFLIGHT", `Satori runtime upgrade failed: ${message}`, 1);
-    }
 
-    return {
-        action: "upgrade",
-        status: "upgraded",
-        fromMcpVersion,
-        toMcpVersion: target.mcpVersion,
-        fromCoreVersion,
-        toCoreVersion: target.coreVersion,
-        packageSpecifier: target.mcpPackageSpecifier,
-        configuredClients,
-        restartRequired: true,
-    };
+        return {
+            action: "upgrade",
+            status: "upgraded",
+            fromMcpVersion,
+            toMcpVersion: target.mcpVersion,
+            fromCoreVersion,
+            toCoreVersion: target.coreVersion,
+            packageSpecifier: target.mcpPackageSpecifier,
+            configuredClients,
+            restartRequired: true,
+        };
+    } finally {
+        releaseRuntimeMutationLock();
+    }
 }
 
 export async function executeInstallCommand(
@@ -2262,11 +2363,15 @@ export async function executeInstallCommand(
     let preflight: InstallPreflightResult | undefined;
     let installedRuntimeCommand = options.runtimeCommand;
     let managedRuntimeCandidate: ManagedRuntimeCandidate | undefined;
+    let releaseRuntimeMutationLock: (() => void) | undefined;
     let plan: InstallPlan;
     try {
         if (command.kind === "install") {
             if (command.runtime === "offline" && command.vectorStore !== undefined && command.vectorStore !== "LanceDB") {
                 throw new CliError("E_USAGE", "Offline install requires --vector-store lancedb.", 2);
+            }
+            if (!command.dryRun) {
+                releaseRuntimeMutationLock = acquireManagedRuntimeMutationLock({ homeDir });
             }
             const managedRuntimeEnvironment = readManagedRuntimeEnvironment(homeDir);
             const vectorStore = command.runtime === "voyage"
@@ -2302,6 +2407,13 @@ export async function executeInstallCommand(
                         homeDir,
                         packageSpecifier,
                         options.execFileSyncImpl ?? execFileSync,
+                        undefined,
+                        {
+                            vectorStore,
+                            platform: options.platform,
+                            architecture: options.architecture,
+                            libc: options.libc,
+                        },
                     );
                     installedRuntimeCommand = managedRuntimeCandidate.command;
                     potionAssetsRoot = resolvePotionAssetsRoot(managedRuntimeCandidate.packageRoot);
@@ -2380,7 +2492,17 @@ export async function executeInstallCommand(
         if (managedRuntimeCandidate?.newlyInstalled) {
             fs.rmSync(managedRuntimeCandidate.runtimeRoot, { recursive: true, force: true });
         }
+        releaseRuntimeMutationLock?.();
+        releaseRuntimeMutationLock = undefined;
         throw error;
     }
-    return applyInstallPlan(plan, preflight);
+    try {
+        const result = applyInstallPlan(plan, preflight);
+        if (managedRuntimeCandidate) {
+            pruneManagedRuntimeAfterActivation(homeDir, managedRuntimeCandidate.runtimeRoot);
+        }
+        return result;
+    } finally {
+        releaseRuntimeMutationLock?.();
+    }
 }

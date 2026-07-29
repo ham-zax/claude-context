@@ -238,6 +238,7 @@ function installRuntimePackageStub(
         const packageIndex = args.indexOf(expectedSpecifier);
         assert.notEqual(packageIndex, -1);
         assert.equal(args[packageIndex - 1], "--");
+        assert.notEqual(args.indexOf("--omit=optional"), -1);
         const packageRoot = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-mcp");
         const entryPath = path.join(packageRoot, relativeEntry);
         fs.mkdirSync(path.dirname(entryPath), { recursive: true });
@@ -271,6 +272,10 @@ function brokenRuntimePackageStub(
 ) {
     const install = installRuntimePackageStub("dist/broken-runtime.mjs", expectedSpecifier);
     return (command: string, args: string[]) => {
+        assert.equal(
+            args.some((argument) => argument.startsWith("@lancedb/lancedb-")),
+            false,
+        );
         const result = install(command, args);
         const prefix = args[args.indexOf("--prefix") + 1];
         installedPrefixes.push(prefix);
@@ -576,7 +581,7 @@ test("runtime reuse requires the exact requested package identity", async () => 
         assert.equal(installedPrefixes.length, 1);
         assert.notEqual(installedPrefixes[0], stableRoot);
         assert.match(readFile(launcherPath(homeDir)), /new-runtime\.mjs/);
-        assert.equal(fs.existsSync(path.join(stalePackageRoot, "dist", "stale-runtime.mjs")), true);
+        assert.equal(fs.existsSync(stableRoot), false);
     });
 });
 
@@ -633,6 +638,12 @@ test("successful runtime upgrade switches the launcher only after candidate pref
         const installVersion = (entry: string, specifier: string) => {
             const install = installRuntimePackageStub(entry, specifier);
             return ((command: string, args: string[]) => {
+                assert.equal(
+                    args.some((argument) => (
+                        argument === "@lancedb/lancedb-linux-x64-gnu@0.31.0"
+                    )),
+                    true,
+                );
                 installedPrefixes.push(args[args.indexOf("--prefix") + 1]);
                 return install(command, args);
             }) as never;
@@ -672,7 +683,7 @@ test("successful runtime upgrade switches the launcher only after candidate pref
         assert.notEqual(installedPrefixes[0], installedPrefixes[1]);
         assert.equal(preflightEntries.length, 1);
         assert.match(readFile(launcherPath(homeDir)), /new-runtime\.mjs/);
-        assert.equal(fs.existsSync(oldRuntimeRoot), true);
+        assert.equal(fs.existsSync(oldRuntimeRoot), false);
     });
 });
 
@@ -905,6 +916,74 @@ test("managed runtime upgrade is a no-op when both MCP and Core are current", as
         assert.equal(result.status, "up_to_date");
         assert.equal(result.restartRequired, false);
         assert.equal(readFile(launcherPath(homeDir)), originalLauncher);
+    });
+});
+
+test("managed runtime upgrade replaces a current legacy closure without the slim manifest", async () => {
+    await withTempHome(async (homeDir) => {
+        const currentSpecifier = "@zokizuan/satori-mcp@6.2.0";
+        await executeInstallCommand({
+            kind: "install",
+            client: "codex",
+            runtime: "voyage",
+            dryRun: false,
+        }, {
+            homeDir,
+            packageSpecifier: currentSpecifier,
+            execFileSyncImpl: installRuntimePackageStub(
+                "dist/legacy-runtime.mjs",
+                currentSpecifier,
+                "6.2.0",
+                "3.1.0",
+            ) as never,
+        });
+        const legacyRoot = path.join(
+            homeDir,
+            ".satori",
+            "mcp-runtime",
+            "@zokizuan-satori-mcp@6.2.0",
+        );
+        fs.rmSync(path.join(legacyRoot, ".satori-runtime-closure.json"));
+        const installedPrefixes: string[] = [];
+        const install = installRuntimePackageStub(
+            "dist/slim-runtime.mjs",
+            currentSpecifier,
+            "6.2.0",
+            "3.1.0",
+        );
+
+        const result = await executeManagedRuntimeUpgrade({
+            cliPackageSpecifier: "@zokizuan/satori-cli@1.3.0",
+            cliVersion: "1.3.0",
+            mcpPackageSpecifier: currentSpecifier,
+            mcpVersion: "6.2.0",
+            coreVersion: "3.1.0",
+        }, {
+            homeDir,
+            execFileSyncImpl: ((command: string, args: string[]) => {
+                installedPrefixes.push(args[args.indexOf("--prefix") + 1]);
+                return install(command, args);
+            }) as never,
+            preflightRunner: async () => ({
+                runtimeEnvironment: Object.freeze({
+                    SATORI_RUNTIME_PROFILE: "connected",
+                    VECTOR_STORE_PROVIDER: "LanceDB",
+                }),
+            }),
+            preflightDependencies: {
+                probeCandidateRuntime: async () => {},
+            },
+        });
+
+        assert.equal(result.status, "upgraded");
+        assert.equal(result.restartRequired, true);
+        assert.equal(installedPrefixes.length, 1);
+        assert.notEqual(installedPrefixes[0], legacyRoot);
+        assert.equal(fs.existsSync(legacyRoot), false);
+        assert.equal(
+            fs.existsSync(path.join(installedPrefixes[0], ".satori-runtime-closure.json")),
+            true,
+        );
     });
 });
 
