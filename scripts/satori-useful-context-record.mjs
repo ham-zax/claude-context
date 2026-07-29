@@ -1069,7 +1069,7 @@ export async function recordSuite(taskSuite, options) {
     let armIndexProof;
     let serverInfo;
     for (const task of expanded.tasks) {
-        const session = new JsonRpcStdioSession({ ...options, cwd: repoRoot });
+        let session = new JsonRpcStdioSession({ ...options, cwd: repoRoot });
         try {
             await session.start();
             if (serverInfo && JSON.stringify(serverInfo) !== JSON.stringify(session.serverInfo)) {
@@ -1082,6 +1082,16 @@ export async function recordSuite(taskSuite, options) {
                 repoRoot,
                 options.preparationMode,
             );
+            if (options.preparationMode === "status-only") {
+                await session.close();
+                session = new JsonRpcStdioSession({ ...options, cwd: repoRoot });
+                await session.start();
+                if (JSON.stringify(serverInfo) !== JSON.stringify(session.serverInfo)) {
+                    throw new Error(
+                        `MCP serverInfo changed between status proof and measurement for task '${task.id}'.`,
+                    );
+                }
+            }
             if (armIndexProof) {
                 assertSamePublishedGeneration(armIndexProof, prepared.indexProof, task.id);
             } else {
@@ -1121,6 +1131,7 @@ export async function recordSuite(taskSuite, options) {
             taskRuns.push({
                 taskId: task.id,
                 ...prepared,
+                measurementRuntimeRestarted: options.preparationMode === "status-only",
                 finalIndexProof: finalProof,
             });
         } finally {

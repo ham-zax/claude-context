@@ -98,6 +98,7 @@ function writeFakeMcp(file, options = {}) {
     const authorityResultFile = options.authorityResultFile || null;
     const authorityCandidateFile = options.authorityCandidateFile || null;
     const rejectSync = options.rejectSync === true;
+    const statusPrimesSearch = options.statusPrimesSearch === true;
     fs.writeFileSync(file, `
 import fs from "node:fs";
 import readline from "node:readline";
@@ -109,7 +110,9 @@ const driftAfterSearch = ${JSON.stringify(driftAfterSearch)};
 const authorityResultFile = ${JSON.stringify(authorityResultFile)};
 const authorityCandidateFile = ${JSON.stringify(authorityCandidateFile)};
 const rejectSync = ${JSON.stringify(rejectSync)};
+const statusPrimesSearch = ${JSON.stringify(statusPrimesSearch)};
 let measuredSearchRan = false;
+let statusPrepared = false;
 const operation = () => ({
   id: measuredSearchRan && driftAfterSearch ? "op-drifted" : "op-prepared",
   action: "sync",
@@ -143,9 +146,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     payload = action === "sync"
       ? { status: ${JSON.stringify(status)}, action, path: message.params.arguments.path, operation: operation(), syncStats: { added: 0, removed: 0, modified: 0 } }
       : { status: ${JSON.stringify(status)}, action: "status", path: message.params.arguments.path, operation: operation(), publication: { collectionName: "generation-7", markerRunId: "marker-run-7", indexPolicyHash: "${"a".repeat(64)}", policyDocumentDigest: "${"b".repeat(64)}" } };
+    if (action === "status" && statusPrimesSearch) statusPrepared = true;
   } else if (name === "search_codebase") {
     if (dirtyFile) fs.appendFileSync(dirtyFile, "changed during recording\\n");
-    const proofMode = measuredSearchRan ? "warm" : "cold";
+    const proofMode = measuredSearchRan || statusPrepared ? "warm" : "cold";
     payload = {
       status: "ok",
       runtimeId: process.pid,
@@ -323,7 +327,7 @@ test("status-only preparation proves one publication without requesting synchron
         initializeRepo(repoRoot);
         writeJson(tasksFile, taskSuite(repoRoot));
         fs.mkdirSync(path.dirname(fakeMcp), { recursive: true });
-        writeFakeMcp(fakeMcp, { rejectSync: true });
+        writeFakeMcp(fakeMcp, { rejectSync: true, statusPrimesSearch: true });
         commitRuntimeFixture(runtimeRoot);
 
         const run = spawnSync(process.execPath, [
@@ -345,6 +349,7 @@ test("status-only preparation proves one publication without requesting synchron
         assert.ok(output.metadata.taskRuns.every((entry) => (
             entry.preparationMode === "status-only"
             && entry.syncStats === undefined
+            && entry.measurementRuntimeRestarted === true
             && JSON.stringify(entry.finalIndexProof) === JSON.stringify(entry.indexProof)
         )));
     } finally {

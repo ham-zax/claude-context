@@ -89,8 +89,11 @@ search must report `skipped_recent`, and its exact operation/publication proof
 must be unchanged after the samples. The default recorder preparation performs
 a proven zero-change sync. A frozen-publication experiment may instead use
 `--preparation-mode status-only` with `satori-published-index-runtime.mjs`; that
-wrapper disables freshness work for the exact measured runtime, and the capture
-rejects status-only records that contain synchronization evidence.
+wrapper disables freshness work for the exact measured runtime. The recorder
+proves status in an unmeasured process, then restarts the same frozen runtime so
+the first measured search must establish a real cold proof instead of inheriting
+the status call's prepared-read cache. The capture rejects status-only records
+that contain synchronization evidence.
 Replay output records the replay script, canonical-JSON helper, Node identity,
 measured-runtime digest, and exact policy-source bytes so later results can be
 attributed to one executable replay artifact.
