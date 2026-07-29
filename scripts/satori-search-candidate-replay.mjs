@@ -903,7 +903,18 @@ function compareGroupedReplay(actual, expected, label) {
             candidateIds: recorded.candidateIds,
         };
         if (canonicalJson(replayedIdentity) !== canonicalJson(recordedIdentity)) {
-            throw new Error(`${label} order mismatch at rank ${index + 1}.`);
+            throw new Error(
+                `${label} order mismatch at rank ${index + 1} `
+                + `(replayed=${canonicalJson({
+                    ...replayedIdentity,
+                    file: replayed.target?.file,
+                    score: replayed.score,
+                })} recorded=${canonicalJson({
+                    ...recordedIdentity,
+                    file: recorded.relativePath,
+                    score: recorded.score,
+                })}).`,
+            );
         }
         if (Math.abs(replayed.score - recorded.score) > SCORE_TOLERANCE) {
             throw new Error(`${label} score mismatch at rank ${index + 1}.`);
@@ -1045,7 +1056,7 @@ function replayFrozenGroupingAndDisclosure(
     });
     if (assertBaseline) {
         compareGroupedReplay(
-            ranked.rankedResults,
+            ranked.disclosureOrder,
             groupedAuthority,
             `Task '${capture.taskId}' grouped replay`,
         );
