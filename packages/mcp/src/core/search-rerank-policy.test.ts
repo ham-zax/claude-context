@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PathCategory } from "./search-constants.js";
 import {
+    buildRerankCandidatePool,
     selectRerankCandidates,
     selectRerankInputWithinUtf8Budget,
     type RerankCandidateLike,
@@ -116,6 +117,26 @@ test("rerank selection gives distinct owners priority and retains bounded supple
     assert.equal(selected.supplementalCandidateCount, 3);
     assert.equal(selected.candidatePoolCount, 5);
     assert.equal(selected.budgetReason, "family_ambiguity");
+});
+
+test("rerank candidate pool exposes the production family order without applying a request budget", () => {
+    const pool = buildRerankCandidatePool([
+        candidate({ id: "owner-a-primary", ownerInstanceId: "owner-a", score: 10 }),
+        candidate({ id: "owner-a-duplicate", ownerInstanceId: "owner-a", score: 9 }),
+        candidate({ id: "owner-b-primary", ownerInstanceId: "owner-b", score: 8 }),
+        candidate({ id: "owner-a-exact", ownerInstanceId: "owner-a", exact: true, score: 7 }),
+        candidate({ id: "owner-b-duplicate", ownerInstanceId: "owner-b", score: 6 }),
+    ]);
+
+    assert.deepEqual(pool.candidates.map(({ id }) => id), [
+        "owner-a-primary",
+        "owner-b-primary",
+        "owner-a-duplicate",
+        "owner-b-duplicate",
+        "owner-a-exact",
+    ]);
+    assert.equal(pool.familyCount, 2);
+    assert.equal(pool.supplementalCandidateCount, 3);
 });
 
 test("rerank selection preserves a later query-relevant chunk from a split owner", () => {

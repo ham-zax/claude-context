@@ -31,6 +31,12 @@ export type RerankInputByteSelection<T> = Readonly<{
     omittedCandidateCount: number;
 }>;
 
+export type RerankCandidatePool<T> = Readonly<{
+    candidates: readonly T[];
+    familyCount: number;
+    supplementalCandidateCount: number;
+}>;
+
 function normalizedString(value: unknown): string | null {
     if (typeof value !== "string") return null;
     const normalized = value.trim();
@@ -57,15 +63,14 @@ export function resolveRerankFamilyKey(candidate: RerankCandidateLike): string {
     return `chunk:${exactChunkIdentity(candidate)}`;
 }
 
-export function selectRerankCandidates<T extends RerankCandidateLike>(input: {
-    candidates: readonly T[];
-    requestedLimit: number;
-}): RerankCandidateSelection<T> {
+export function buildRerankCandidatePool<T extends RerankCandidateLike>(
+    candidates: readonly T[],
+): RerankCandidatePool<T> {
     const representatives: T[] = [];
     const representedFamilies = new Set<string>();
     const supplementalByFamily = new Map<string, T[]>();
 
-    for (const candidate of input.candidates) {
+    for (const candidate of candidates) {
         const familyKey = resolveRerankFamilyKey(candidate);
         if (!representedFamilies.has(familyKey)) {
             representatives.push(candidate);
@@ -89,8 +94,21 @@ export function selectRerankCandidates<T extends RerankCandidateLike>(input: {
         }
     }
     const candidatePool = [...representatives, ...supplementalCandidates];
+    return {
+        candidates: candidatePool,
+        familyCount: representatives.length,
+        supplementalCandidateCount: supplementalCandidates.length,
+    };
+}
+
+export function selectRerankCandidates<T extends RerankCandidateLike>(input: {
+    candidates: readonly T[];
+    requestedLimit: number;
+}): RerankCandidateSelection<T> {
+    const pool = buildRerankCandidatePool(input.candidates);
+    const candidatePool = [...pool.candidates];
     const requestedLimit = Math.max(1, Math.floor(input.requestedLimit));
-    const ambiguous = representatives.length > requestedLimit;
+    const ambiguous = pool.familyCount > requestedLimit;
     const adaptiveBudget = ambiguous
         ? Math.max(
             SEARCH_RERANK_MIN_AMBIGUOUS_CANDIDATES,
@@ -104,8 +122,8 @@ export function selectRerankCandidates<T extends RerankCandidateLike>(input: {
 
     return {
         selected: candidatePool.slice(0, budget),
-        familyCount: representatives.length,
-        supplementalCandidateCount: supplementalCandidates.length,
+        familyCount: pool.familyCount,
+        supplementalCandidateCount: pool.supplementalCandidateCount,
         candidatePoolCount: candidatePool.length,
         budget,
         budgetReason,
