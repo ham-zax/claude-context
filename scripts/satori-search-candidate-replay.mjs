@@ -484,7 +484,7 @@ function assertRankedStageMatches(actual, expectedStage, label) {
             throw new Error(
                 `${label} replay order mismatch at rank ${index + 1} `
                 + `(${replayed.candidate.candidateId} score=${replayed.finalScore} `
-                + `path=${replayed.relativePath}:${replayed.startLine} != `
+                + `path=${replayed.candidate.relativePath}:${replayed.candidate.startLine} != `
                 + `${recorded.candidateId} score=${recorded.score} `
                 + `path=${recorded.relativePath}:${recorded.startLine}).`,
             );
@@ -511,7 +511,7 @@ function assertLocalScoringMatches(actual, expectedStage, label) {
             throw new Error(
                 `${label} replay order mismatch at rank ${index + 1} `
                 + `(${replayed.candidate.candidateId} score=${replayed.finalScore} `
-                + `path=${replayed.relativePath}:${replayed.startLine} != `
+                + `path=${replayed.candidate.relativePath}:${replayed.candidate.startLine} != `
                 + `${recorded.candidateId} score=${recorded.score} `
                 + `path=${recorded.relativePath}:${recorded.startLine}).`,
             );
@@ -616,39 +616,6 @@ function capturedMcpRrfK(capture) {
         ).rrfK,
         `Task '${capture.taskId}' MCP fusion rrfK`,
     );
-}
-
-function compareNullableStrings(left, right) {
-    if (left === right) return 0;
-    if (left === null || left === undefined) return 1;
-    if (right === null || right === undefined) return -1;
-    return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function compareNullableNumbers(left, right) {
-    if (left === right) return 0;
-    if (left === null || left === undefined) return 1;
-    if (right === null || right === undefined) return -1;
-    return left - right;
-}
-
-function compareLocallyScoredCandidates(left, right, options) {
-    if (options.mustMatchesFirst && left.passesMatchedMust !== right.passesMatchedMust) {
-        return left.passesMatchedMust ? -1 : 1;
-    }
-    if (options.exactMatchFirst && left.exactLexicalMatch !== right.exactLexicalMatch) {
-        return left.exactLexicalMatch ? -1 : 1;
-    }
-    if (right.finalScore !== left.finalScore) return right.finalScore - left.finalScore;
-    const leftCandidate = left.candidate ?? left;
-    const rightCandidate = right.candidate ?? right;
-    const fileOrder = compareNullableStrings(leftCandidate.relativePath, rightCandidate.relativePath);
-    if (fileOrder !== 0) return fileOrder;
-    const lineOrder = compareNullableNumbers(leftCandidate.startLine, rightCandidate.startLine);
-    if (lineOrder !== 0) return lineOrder;
-    const labelOrder = compareNullableStrings(left.symbolLabel, right.symbolLabel);
-    if (labelOrder !== 0) return labelOrder;
-    return compareNullableStrings(left.symbolId, right.symbolId);
 }
 
 function replaySignalByCandidate(capture, attemptId) {
@@ -778,6 +745,13 @@ function replayPostFusionLocalScoring(capture, attempt) {
         );
         scored.push({
             ...entry,
+            result: {
+                relativePath: signal.candidate.relativePath,
+                startLine: signal.candidate.startLine,
+                endLine: signal.candidate.endLine,
+                symbolLabel: replay.symbolLabel ?? null,
+                symbolId: replay.symbolId ?? null,
+            },
             fusionScore,
             lexicalScore,
             pathMultiplier,
@@ -797,6 +771,10 @@ function replayPostFusionLocalScoring(capture, attempt) {
             ),
             symbolLabel: replay.symbolLabel ?? null,
             symbolId: replay.symbolId ?? null,
+            exactMatchPinned: false,
+            rerankAdjusted: false,
+            retrievalPasses: [],
+            backendScoreKindsSeen: [],
             finalScore: computeSearchCandidateFinalScore({
                 fusionScore,
                 lexicalScore,
@@ -813,10 +791,11 @@ function replayPostFusionLocalScoring(capture, attempt) {
     );
     const mustMatchesFirst = Array.isArray(capture.queryPlan.operatorSummary?.must)
         && capture.queryPlan.operatorSummary.must.length > 0;
-    scored.sort((left, right) => compareLocallyScoredCandidates(left, right, {
-        exactMatchFirst: rerank.exactMatchPinningEnabled === true,
+    sortSearchCandidates(
+        scored,
+        rerank.exactMatchPinningEnabled === true,
         mustMatchesFirst,
-    }));
+    );
     return { candidates: scored, removed, mustMatchesFirst };
 }
 
