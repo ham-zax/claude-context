@@ -59,6 +59,18 @@ function compareContractStrings(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
 
+export function expectedR2TaskCounts(manifest) {
+    const tuningTasks = requireArray(manifest.tasks, "Manifest tasks")
+        .filter((task) => task.split === "tuning");
+    return {
+        quality: tuningTasks.filter((task) => (
+            task.queryClass !== "negative" && task.queryClass !== "exact_identifier"
+        )).length,
+        negative: tuningTasks.filter((task) => task.queryClass === "negative").length,
+        exact: tuningTasks.filter((task) => task.queryClass === "exact_identifier").length,
+    };
+}
+
 function canonicalSymbolName(symbolLabel) {
     if (typeof symbolLabel !== "string") return null;
     return symbolLabel.replace(
@@ -567,9 +579,15 @@ export function evaluateR2({ manifest, r1Dir, replayDir }) {
         (total, repositoryId) => total + negativeByPolicy.B[repositoryId].length,
         0,
     );
-    if (qualityTaskCount !== 14 || negativeTaskCount !== 6) {
+    const expectedTaskCounts = expectedR2TaskCounts(manifest);
+    if (
+        qualityTaskCount !== expectedTaskCounts.quality
+        || negativeTaskCount !== expectedTaskCounts.negative
+    ) {
         throw new Error(
-            `R2 task authority mismatch (quality=${qualityTaskCount}, negative=${negativeTaskCount}).`,
+            "R2 task authority mismatch "
+            + `(quality=${qualityTaskCount}/${expectedTaskCounts.quality}, `
+            + `negative=${negativeTaskCount}/${expectedTaskCounts.negative}).`,
         );
     }
     const exactControls = [];
@@ -582,8 +600,11 @@ export function evaluateR2({ manifest, r1Dir, replayDir }) {
             exactControls.push({ repositoryId, taskId });
         }
     }
-    if (exactControls.length !== 1) {
-        throw new Error(`R2 requires exactly one exact-identifier control, found ${exactControls.length}.`);
+    if (exactControls.length !== expectedTaskCounts.exact) {
+        throw new Error(
+            "R2 exact-identifier authority mismatch "
+            + `(actual=${exactControls.length}, expected=${expectedTaskCounts.exact}).`,
+        );
     }
     const bootstrapSamples = buildBootstrapSamples(
         repositoryIds.length,

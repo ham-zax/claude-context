@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     bootstrapInterval,
     diffDisclosedLists,
+    expectedR2TaskCounts,
 } from "./satori-search-ranking-r2.mjs";
 
 function replayTask(groups) {
@@ -34,6 +35,22 @@ test("R2 bootstrap interval uses the frozen paired repository samples", () => {
     assert.deepEqual(interval, {
         lower: -0.1,
         upper: 0.1,
+    });
+});
+
+test("R2 derives quality and safety task counts from the sealed tuning manifest", () => {
+    assert.deepEqual(expectedR2TaskCounts({
+        tasks: [
+            { split: "tuning", queryClass: "ownership_implementation" },
+            { split: "tuning", queryClass: "natural_language_behavior" },
+            { split: "tuning", queryClass: "negative" },
+            { split: "tuning", queryClass: "exact_identifier" },
+            { split: "held_out", queryClass: "negative" },
+        ],
+    }), {
+        quality: 2,
+        negative: 1,
+        exact: 1,
     });
 });
 
