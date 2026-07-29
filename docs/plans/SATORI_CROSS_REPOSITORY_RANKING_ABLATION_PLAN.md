@@ -1,16 +1,23 @@
 # Satori Cross-Repository Ranking Ablation Plan
 
-**Status:** R0/R1 tooling and sealed benchmark construction complete; tuning
-baseline capture pending authorized isolated-index setup; no ablation
-authorized
+**Status:** complete. R2 retained baseline `B`; the corrected retrieval
+baseline passed; LateOn C0 FP32 conformance passed; R3 found directional quality
+improvement but no contender passed both the frozen quality and resource gates.
+R4 finalist qualification and R5 held-out adjudication were not admitted.
 
 **Date:** 2026-07-29
+**Completed:** 2026-07-30
 
-**Current authorization:** R0/R1 tooling, sealed benchmark construction, and
-baseline replay qualification. R2 remains conditional on exact baseline
-reproduction. This document does not authorize runtime ranking changes, model
-integration, dependency addition, index mutation, release qualification, or
-production activation.
+**Terminal decision:** retain product policy `B`. No LateOn finalist, runtime
+ranking change, dependency addition, release qualification, or production
+activation is authorized. Held-out evidence remains sealed.
+
+Final evidence:
+
+```text
+docs/evidence/lateon-r3-diagnostic-20260730/LATEON_R3_DIAGNOSTIC_RECEIPT.md
+docs/evidence/lateon-r3-diagnostic-20260730/lateon-r3-diagnostic-artifacts.tar.gz
+```
 
 ## 1. Purpose
 
