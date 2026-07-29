@@ -557,6 +557,75 @@ function replayReadyObservationSet(suite, traceFactory = replayReadyCandidateTra
     return observations;
 }
 
+function groupingReadyObservationSet(suite) {
+    const observations = replayReadyObservationSet(suite, replayReadyCandidateTraceV2);
+    for (const observation of observations.observations) {
+        const debug = observation.response.hints.debugSearch;
+        const trace = debug.candidateSurvival;
+        trace.stages = trace.stages.filter((stage) => (
+            stage.stage !== "reranker_input" && stage.stage !== "disclosed"
+        ));
+        const primary = trace.stages
+            .find((stage) => stage.stage === "mcp_filtered")
+            .candidates[0];
+        const groupedScore = primary.score + Math.log1p(1) * 0.01;
+        const groupedOccurrence = {
+            ...primary,
+            evidenceOccurrenceId: JSON.stringify([primary.candidateId, "grouped", 1, 1]),
+            rank: 1,
+            score: groupedScore,
+        };
+        delete groupedOccurrence.passId;
+        trace.stages.push({
+            stage: "grouped",
+            totalOccurrences: 1,
+            uniqueCandidates: 1,
+            omittedOccurrences: 0,
+            candidates: [groupedOccurrence],
+        });
+        trace.stages.push({
+            stage: "disclosed",
+            totalOccurrences: 1,
+            uniqueCandidates: 1,
+            omittedOccurrences: 0,
+            candidates: [{
+                ...groupedOccurrence,
+                evidenceOccurrenceId: JSON.stringify([
+                    primary.candidateId,
+                    "disclosed",
+                    1,
+                    1,
+                ]),
+            }],
+        });
+        debug.providerWork.rerankerCalls = 0;
+        debug.providerWork.rerankerCandidates = 0;
+        debug.providerWork.rerankerInputBytes = 0;
+        debug.rankingProvenance.rerankApplied = false;
+        debug.rerank = {
+            ...debug.rerank,
+            enabledByPolicy: false,
+            capabilityPresent: false,
+            rerankerPresent: false,
+            enabled: false,
+            attempted: false,
+            applied: false,
+            candidatesIn: 0,
+            candidatesReranked: 0,
+            familyCount: 0,
+            supplementalCandidates: 0,
+            candidatePoolCount: 0,
+            candidateBudget: 0,
+        };
+        delete debug.rerank.budgetReason;
+        observation.responseBytes = Buffer.byteLength(
+            JSON.stringify(observation.response),
+            "utf8",
+        );
+    }
+    return observations;
+}
+
 test("candidate capture binds stable query, runtime, publication, and trace authority", () => {
     const suite = taskSuite();
     const capture = buildSearchCandidateCapture(suite, observationSet(suite));
@@ -675,6 +744,10 @@ test("baseline replay recomputes both Core and MCP fusion from one capture", () 
             "replay_executable",
             "canonical_json_helper",
             "production_scoring_owner",
+            "production_grouping_owner",
+            "production_group_ordering_owner",
+            "production_diversity_owner",
+            "production_disclosure_owner",
             "typescript_loader",
             "typescript_loader_manifest",
             "dependency_lockfile",
@@ -922,6 +995,8 @@ test("contender replay proves baseline first and carries a conditional OR candid
         rerankerAdmission: true,
         rerankerProviderOutput: false,
         groupingAndDisclosure: false,
+        groupingMembership: "frozen_production_capture",
+        responseByteBudget: false,
         fusionTaskCount: 1,
         exactRegistryPolicyInvariantTaskCount: 0,
     });
@@ -955,6 +1030,132 @@ test("contender replay proves baseline first and carries a conditional OR candid
     assert.throws(
         () => replayCandidateCapture(capture, malformed),
         /must contain exactly/,
+    );
+});
+
+test("version 2 baseline and contender replay production grouping and disclosure order", () => {
+    const suite = taskSuite();
+    suite.version = 2;
+    suite.tasks[0].split = "tuning";
+    Object.assign(suite.tasks[0].workload.invocations[0].args, {
+        limit: 10,
+        disclosureLimit: 5,
+        debugCandidateLimit: 160,
+    });
+    const capture = buildSearchCandidateCapture(
+        suite,
+        groupingReadyObservationSet(suite),
+        {
+            requireReplayReady: true,
+            requireGroupingReady: true,
+            requireNeuralDisabled: true,
+        },
+    );
+
+    const baseline = replayBaselineCandidateCapture(
+        capture,
+        { requireGroupingReady: true, requireNeuralDisabled: true },
+    );
+    const groupingPolicy = contenderPolicy();
+    groupingPolicy.policyId = "grouping-neutral-v1";
+    groupingPolicy.core.minimums.fallbackLexical = 0;
+    groupingPolicy.core.fallback.preciseUniqueCountBelow = 1;
+    groupingPolicy.mcp.rrfK = 100;
+    const contender = replayCandidateCapture(
+        capture,
+        groupingPolicy,
+        {
+            split: "tuning",
+            requireGroupingReady: true,
+            requireNeuralDisabled: true,
+        },
+    );
+
+    assert.equal(baseline.routeCoverage.groupingDisclosureExact, true);
+    assert.equal(capture.replayReadiness.groupingDisclosureReady, true);
+    assert.equal(capture.replayReadiness.neuralDisabled, true);
+    assert.equal(baseline.routeCoverage.groupingDisclosureTaskCount, 1);
+    assert.deepEqual(
+        baseline.tasks[0].groupingDisclosure.groupedResults,
+        baseline.tasks[0].groupingDisclosure.disclosedResults,
+    );
+    assert.equal(contender.replayCoverage.groupingAndDisclosure, true);
+    assert.equal(contender.replayCoverage.groupingMembership, "frozen_production_capture");
+    assert.equal(contender.replayCoverage.responseByteBudget, false);
+    assert.deepEqual(contender.groupingIncompleteTasks, []);
+    assert.deepEqual(
+        contender.tasks[0].groupingDisclosure.groupedResults,
+        contender.tasks[0].groupingDisclosure.disclosedResults,
+    );
+    assert.notEqual(
+        contender.tasks[0].groupingDisclosure.groupedResults[0].score,
+        baseline.tasks[0].groupingDisclosure.groupedResults[0].score,
+    );
+});
+
+test("version 2 negative-exposure tasks retain replayable candidate traces", () => {
+    const suite = taskSuite();
+    suite.version = 2;
+    Object.assign(suite.tasks[0], {
+        split: "tuning",
+        queryClass: "negative_exposure",
+        expected: {
+            hardNegativeOwners: [{
+                file: "src/sync.ts",
+                symbol: "reconcileIgnoreRules",
+            }],
+        },
+    });
+    Object.assign(suite.tasks[0].workload.invocations[0].args, {
+        limit: 10,
+        disclosureLimit: 5,
+        debugCandidateLimit: 160,
+    });
+
+    const capture = buildSearchCandidateCapture(
+        suite,
+        groupingReadyObservationSet(suite),
+        {
+            requireReplayReady: true,
+            requireGroupingReady: true,
+            requireNeuralDisabled: true,
+        },
+    );
+    const replay = replayBaselineCandidateCapture(
+        capture,
+        {
+            requireGroupingReady: true,
+            requireNeuralDisabled: true,
+        },
+    );
+
+    assert.deepEqual(capture.captures[0].expected, {
+        hardNegativeOwners: [{
+            file: "src/sync.ts",
+            symbol: "reconcileIgnoreRules",
+        }],
+    });
+    assert.equal(capture.captures[0].queryClass, "negative_exposure");
+    assert.equal(capture.replayReadiness.groupingDisclosureReady, true);
+    assert.equal(capture.replayReadiness.neuralDisabled, true);
+    assert.equal(replay.routeCoverage.groupingDisclosureExact, true);
+    assert.equal(replay.tasks[0].groupingDisclosure.disclosedResults.length, 1);
+});
+
+test("R2 capture qualification rejects neural capability or provider work", () => {
+    const suite = taskSuite();
+    suite.tasks[0].workload.invocations[0].args.debugCandidateLimit = 160;
+
+    assert.throws(
+        () => buildSearchCandidateCapture(
+            suite,
+            replayReadyObservationSet(suite),
+            {
+                requireReplayReady: true,
+                requireNeuralDisabled: true,
+            },
+        ),
+        /neural reranking authority or work/,
     );
 });
 

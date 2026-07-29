@@ -1,0 +1,258 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-shopify-theme-r0",
+  "tasks": [
+    {
+      "id": "shopify-cart-items",
+      "split": "tuning",
+      "queryClass": "owner_discovery",
+      "language": "javascript",
+      "expected": {
+        "ownerFile": "assets/cart.js",
+        "ownerSymbol": "CartItems"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component updates cart item quantities and removes cart lines?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "shopify-predictive-search",
+      "split": "tuning",
+      "queryClass": "owner_discovery",
+      "language": "javascript",
+      "expected": {
+        "ownerFile": "assets/predictive-search.js",
+        "ownerSymbol": "PredictiveSearch"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component fetches and renders predictive search results?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "shopify-facets",
+      "split": "tuning",
+      "queryClass": "owner_discovery",
+      "language": "javascript",
+      "expected": {
+        "ownerFile": "assets/facets.js",
+        "ownerSymbol": "FacetFiltersForm"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component applies collection facet filters and updates the product grid?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "shopify-focus-trap",
+      "split": "tuning",
+      "queryClass": "owner_discovery",
+      "language": "javascript",
+      "expected": {
+        "ownerFile": "assets/global.js",
+        "ownerSymbol": "trapFocus"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function traps keyboard focus inside an open modal or drawer?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "shopify-publish-event",
+      "split": "tuning",
+      "queryClass": "owner_discovery",
+      "language": "javascript",
+      "expected": {
+        "ownerFile": "assets/pubsub.js",
+        "ownerSymbol": "publish"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function broadcasts a named theme event to all subscribers?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "shopify-recommendations",
+      "split": "tuning",
+      "queryClass": "owner_discovery",
+      "language": "javascript",
+      "expected": {
+        "ownerFile": "assets/global.js",
+        "ownerSymbol": "ProductRecommendations"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component lazily fetches product recommendations when visible?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}

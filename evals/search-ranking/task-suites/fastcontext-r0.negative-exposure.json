@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-negative-fastcontext-r0",
+  "tasks": [
+    {
+      "id": "fastcontext-negative-react-route",
+      "split": "held_out",
+      "queryClass": "negative_exposure",
+      "language": "python",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "src/fastcontext/agent/tool/grep.py",
+            "symbol": "run_rg"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which React component defines the browser route table?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-negative-sql-transaction",
+      "split": "held_out",
+      "queryClass": "negative_exposure",
+      "language": "python",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "benchmark/evaluation/utils.py",
+            "symbol": "calculate_score_file"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function commits a customer payment SQL transaction?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}

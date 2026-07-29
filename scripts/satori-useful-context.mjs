@@ -11,6 +11,7 @@ const QUERY_CLASSES = [
     "caller_recovery",
     "dirty_owner",
     "stale_recovery",
+    "negative_exposure",
 ];
 const COMPARISON_CLASSES = new Set([
     "exact",
@@ -273,17 +274,31 @@ export function validateTaskSuite(value) {
         }
 
         const rawExpected = requireRecord(task.expected, `tasks[${index}].expected`);
-        const expected = {
-            ownerFile: requireNonEmptyString(rawExpected.ownerFile, `tasks[${index}].expected.ownerFile`),
-            ownerSymbol: requireNonEmptyString(rawExpected.ownerSymbol, `tasks[${index}].expected.ownerSymbol`),
-        };
-        if (rawExpected.callerSymbols !== undefined) {
+        const expected = task.queryClass === "negative_exposure"
+            ? {
+                hardNegativeOwners: requireUniqueSymbolRefs(
+                    rawExpected.hardNegativeOwners,
+                    `tasks[${index}].expected.hardNegativeOwners`,
+                ),
+            }
+            : {
+                ownerFile: requireNonEmptyString(
+                    rawExpected.ownerFile,
+                    `tasks[${index}].expected.ownerFile`,
+                ),
+                ownerSymbol: requireNonEmptyString(
+                    rawExpected.ownerSymbol,
+                    `tasks[${index}].expected.ownerSymbol`,
+                ),
+            };
+        if (task.queryClass !== "negative_exposure"
+            && rawExpected.callerSymbols !== undefined) {
             expected.callerSymbols = requireUniqueSymbolRefs(
                 rawExpected.callerSymbols,
                 `tasks[${index}].expected.callerSymbols`
             );
         }
-        if (rawExpected.span !== undefined) {
+        if (task.queryClass !== "negative_exposure" && rawExpected.span !== undefined) {
             expected.span = requireSpan(rawExpected.span, `tasks[${index}].expected.span`);
         }
         if (task.queryClass === "exact_open" && expected.span === undefined) {

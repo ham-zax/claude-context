@@ -1,0 +1,258 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-recovery-dashboard-r0",
+  "tasks": [
+    {
+      "id": "recovery-dashboard-api",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/app/api/dashboard/route.ts",
+        "ownerSymbol": "GET"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which route handler serves dashboard data for the requested day range?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "recovery-weekly-review",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/lib/reviewData.ts",
+        "ownerSymbol": "getWeeklyReviewData"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function assembles the weekly recovery review response?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "recovery-day-normalization",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/lib/validation.ts",
+        "ownerSymbol": "startOfDayUtc"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function normalizes a date to the start of its UTC day?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "recovery-protocol-update",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/lib/protocol.ts",
+        "ownerSymbol": "updateActiveProtocol"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function closes the active protocol and creates its replacement transactionally?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "recovery-protocol-lock",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/lib/lock.ts",
+        "ownerSymbol": "isProtocolLocked"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function determines whether protocol edits are locked?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "recovery-checkin-form",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/components/CheckInForm.tsx",
+        "ownerSymbol": "CheckInForm"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component owns the daily check-in fields and submission request?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}

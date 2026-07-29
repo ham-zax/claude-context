@@ -1,0 +1,258 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-promptready-r0",
+  "tasks": [
+    {
+      "id": "promptready-primary-action",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/App.tsx",
+        "ownerSymbol": "handlePrimaryAction"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function records the primary CTA and opens the configured Chrome store URL?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "promptready-route-table",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/router/LandingFlowRouter.tsx",
+        "ownerSymbol": "AnimatedRoutes"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component declares the landing-page route table and page-view transition wrapper?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "promptready-canonical-url",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/utils/canonicalUrl.ts",
+        "ownerSymbol": "getCanonicalUrl"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function creates a canonical production URL from a pathname?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "promptready-seo-hook",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/hooks/useSEO.ts",
+        "ownerSymbol": "useSEO"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which hook derives canonical, social, and robots metadata for the current page?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "promptready-analytics",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/hooks/useAnalytics.ts",
+        "ownerSymbol": "trackEvent"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function sends a named analytics event with an optional payload?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "promptready-hero-actions",
+      "split": "held_out",
+      "queryClass": "owner_discovery",
+      "language": "typescript",
+      "expected": {
+        "ownerFile": "src/components/Hero/HeroActions.tsx",
+        "ownerSymbol": "HeroActions"
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which component chooses the hero CTA variant and tracks primary and demo actions?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}

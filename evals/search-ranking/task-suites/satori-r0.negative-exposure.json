@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-negative-satori-r0",
+  "tasks": [
+    {
+      "id": "satori-negative-payments",
+      "split": "tuning",
+      "queryClass": "negative_exposure",
+      "language": "typescript",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "packages/mcp/src/core/search-ranking-policy.ts",
+            "symbol": "computeSearchCandidateFinalScore"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which Satori function charges a customer credit card?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "satori-negative-product-gallery",
+      "split": "tuning",
+      "queryClass": "negative_exposure",
+      "language": "typescript",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "packages/mcp/src/core/search-group-results.ts",
+            "symbol": "buildVisibleGroupedSearchResults"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which browser component renders a product image gallery?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}

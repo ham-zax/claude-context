@@ -120,6 +120,61 @@ type GroupAccumulator = {
     validatedOwnerChunkCount: number;
 };
 
+export function computeSearchGroupScore(
+    representativeScore: number,
+    chunkCount: number,
+): number {
+    return representativeScore + computeSearchGroupSupportBoost(chunkCount);
+}
+
+function computeSearchGroupSupportBoost(chunkCount: number): number {
+    return Math.min(Math.log1p(chunkCount) * 0.01, 0.03);
+}
+
+export function rankAndDiversifySearchGroups<
+    T extends SearchGroupResult & { __exactLexicalMatch: boolean },
+>(input: {
+    groupedResults: T[];
+    collapseDuplicateDeclarations: boolean;
+    exactMatchPinningEnabled: boolean;
+    limit: number;
+    groupBy: SearchGroupBy;
+}): {
+    visibleResults: T[];
+    rankedResults: T[];
+    disclosureOrder: T[];
+    diversityOmissions: Array<{
+        group: T;
+        reason: "file_diversity_cap" | "symbol_diversity_cap" | "visible_limit";
+    }>;
+    diversitySummary: SearchDiversitySummary;
+    exactMatchPinningApplied: boolean;
+} {
+    const rankedResults = input.collapseDuplicateDeclarations
+        ? collapseDuplicateDeclarationGroups(input.groupedResults)
+        : input.groupedResults;
+    const exactMatchPinningApplied = sortGroupedSearchResults(
+        rankedResults,
+        input.exactMatchPinningEnabled,
+    );
+    const diversityApplied = applyGroupDiversity(
+        rankedResults,
+        input.limit,
+        input.groupBy,
+    );
+    const completeDiversityApplied = input.limit >= rankedResults.length
+        ? diversityApplied
+        : applyGroupDiversity(rankedResults, rankedResults.length, input.groupBy);
+    return {
+        visibleResults: diversityApplied.selected,
+        rankedResults,
+        disclosureOrder: completeDiversityApplied.selected,
+        diversityOmissions: diversityApplied.omitted,
+        diversitySummary: diversityApplied.summary,
+        exactMatchPinningApplied,
+    };
+}
+
 type RawSearchCandidateLike = SearchCandidateLike & {
     result: SearchResultLike;
     baseScore: number;
@@ -374,7 +429,7 @@ export function buildGroupedSymbolSearchResult(input: {
     ownershipValidated?: boolean;
     candidateIds: string[];
 }): SearchGroupResult | undefined {
-    const supportBoost = Math.min(Math.log1p(input.chunkCount) * 0.01, 0.03);
+    const supportBoost = computeSearchGroupSupportBoost(input.chunkCount);
     const symbolScore = input.representative.finalScore + supportBoost;
     if (!Number.isFinite(symbolScore)) {
         return undefined;
@@ -692,28 +747,28 @@ export function buildVisibleGroupedSearchResults(input: {
         }
     }
 
-    const rankedGroupedResults = (input.queryPlan.referenceSeeking || input.queryPlan.intent === "identifier")
-        ? collapseDuplicateDeclarationGroups(groupedResults)
-        : groupedResults;
-
-    if (sortGroupedSearchResults(rankedGroupedResults, input.queryPlan.exactMatchPinningEnabled)) {
+    const rankedGroups = rankAndDiversifySearchGroups({
+        groupedResults,
+        collapseDuplicateDeclarations: input.queryPlan.referenceSeeking
+            || input.queryPlan.intent === "identifier",
+        exactMatchPinningEnabled: input.queryPlan.exactMatchPinningEnabled,
+        limit: input.limit,
+        groupBy: input.groupBy,
+    });
+    if (rankedGroups.exactMatchPinningApplied) {
         exactMatchPinningApplied = true;
     }
 
-    const diversityApplied = applyGroupDiversity(rankedGroupedResults, input.limit, input.groupBy);
-    const completeDiversityApplied = input.limit >= rankedGroupedResults.length
-        ? diversityApplied
-        : applyGroupDiversity(rankedGroupedResults, rankedGroupedResults.length, input.groupBy);
     return {
-        visibleResults: diversityApplied.selected,
-        rankedResults: rankedGroupedResults,
+        visibleResults: rankedGroups.visibleResults,
+        rankedResults: rankedGroups.rankedResults,
         // Freeze one complete diversity pass so continuation can page through a
         // stable order without re-running caps independently for every page.
-        disclosureOrder: completeDiversityApplied.selected,
-        diversityOmissions: diversityApplied.omitted,
+        disclosureOrder: rankedGroups.disclosureOrder,
+        diversityOmissions: rankedGroups.diversityOmissions,
         invalidCandidateIds: Array.from(new Set(invalidCandidateIds)).sort(),
         warnings: Array.from(spanWarningCodes).sort(),
-        diversitySummary: diversityApplied.summary,
+        diversitySummary: rankedGroups.diversitySummary,
         exactMatchPinningApplied,
         registryRepairGroupCount,
     };

@@ -814,6 +814,7 @@ function exactRegistryReplayReadiness(capture) {
         routeReplayStatus: reasons.length === 0 ? "ready" : "incomplete",
         fusionReplayStatus: "not_applicable",
         survivalReplayStatus: "not_applicable",
+        groupingDisclosureReplayStatus: "not_applicable",
         fusionNotApplicableReason: "exact_registry_hit",
         routeReasons: reasons,
         removalReasonsComplete: capture.candidateTrace.omittedRemovals === 0,
@@ -822,6 +823,7 @@ function exactRegistryReplayReadiness(capture) {
             : [],
         agentReplayReady: false,
         requiredDepth: null,
+        groupingDisclosureReasons: [],
         agentReasons: ["agent_replay_not_implemented"],
     };
 }
@@ -925,6 +927,36 @@ function replayReadiness(capture) {
     const uniqueSorted = (values) => [...new Set(values)].sort();
     const normalizedFusionReasons = uniqueSorted(fusionReasons);
     const normalizedSurvivalReasons = uniqueSorted(survivalReasons);
+    const groupingDisclosureReasons = [...normalizedSurvivalReasons];
+    const invocationArgs = capture.queryPlan.invocationArgs;
+    if (invocationArgs.resultMode !== "grouped") {
+        groupingDisclosureReasons.push("result_mode_not_grouped");
+    }
+    if (!["symbol", "file"].includes(invocationArgs.groupBy)) {
+        groupingDisclosureReasons.push("group_by_not_recorded");
+    }
+    if (!Number.isSafeInteger(invocationArgs.limit) || invocationArgs.limit < 1) {
+        groupingDisclosureReasons.push("caller_limit_not_recorded");
+    }
+    if (!Number.isSafeInteger(invocationArgs.disclosureLimit)
+        || invocationArgs.disclosureLimit < 1) {
+        groupingDisclosureReasons.push("disclosure_limit_not_recorded");
+    }
+    const groupedStage = capture.candidateTrace.stages.find(
+        (stage) => stage.stage === "grouped",
+    );
+    const disclosedStage = capture.candidateTrace.stages.find(
+        (stage) => stage.stage === "disclosed",
+    );
+    if (!groupedStage || !disclosedStage) {
+        groupingDisclosureReasons.push("grouped_or_disclosed_stage_missing");
+    } else if (groupedStage.omittedOccurrences > 0 || disclosedStage.omittedOccurrences > 0) {
+        groupingDisclosureReasons.push("grouped_or_disclosed_stage_truncated");
+    }
+    if (capture.passConfiguration.rerank?.applied === true) {
+        groupingDisclosureReasons.push("neural_reranker_order_not_replayable");
+    }
+    const normalizedGroupingDisclosureReasons = uniqueSorted(groupingDisclosureReasons);
     const agentReasons = uniqueSorted([
         ...normalizedSurvivalReasons,
         "agent_replay_not_implemented",
@@ -935,6 +967,8 @@ function replayReadiness(capture) {
         routeReplayStatus: normalizedSurvivalReasons.length === 0 ? "ready" : "incomplete",
         fusionReplayStatus: normalizedFusionReasons.length === 0 ? "ready" : "incomplete",
         survivalReplayStatus: normalizedSurvivalReasons.length === 0 ? "ready" : "incomplete",
+        groupingDisclosureReplayStatus:
+            normalizedGroupingDisclosureReasons.length === 0 ? "ready" : "incomplete",
         fusionReplayReady: normalizedFusionReasons.length === 0,
         survivalTraceComplete: normalizedSurvivalReasons.length === 0,
         removalReasonsComplete: removalReasonReasons.length === 0,
@@ -943,8 +977,31 @@ function replayReadiness(capture) {
         requiredDepth: REQUIRED_REPLAY_DEPTH,
         fusionReasons: normalizedFusionReasons,
         survivalReasons: normalizedSurvivalReasons,
+        groupingDisclosureReasons: normalizedGroupingDisclosureReasons,
         agentReasons,
     };
+}
+
+function neuralDisabledReasons(capture) {
+    if (capture.readiness?.route === "exact_registry") return [];
+    const rerank = capture.passConfiguration.rerank;
+    const providerWork = capture.passConfiguration.providerWork;
+    const reasons = [];
+    if (!isRecord(rerank)
+        || rerank.rerankerPresent !== false
+        || rerank.capabilityPresent !== false
+        || rerank.enabled !== false
+        || rerank.attempted !== false
+        || rerank.applied !== false) {
+        reasons.push("neural_reranker_not_disabled");
+    }
+    if (!isRecord(providerWork)
+        || providerWork.rerankerCalls !== 0
+        || providerWork.rerankerCandidates !== 0
+        || providerWork.rerankerInputBytes !== 0) {
+        reasons.push("neural_provider_work_not_zero");
+    }
+    return reasons;
 }
 
 export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue, options = {}) {
@@ -1025,9 +1082,31 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
     const removalReasonIncompleteTasks = captures
         .filter((capture) => !capture.readiness.removalReasonsComplete)
         .map((capture) => capture.taskId);
+    const groupingDisclosureIncompleteTasks = captures
+        .filter((capture) => (
+            capture.readiness.groupingDisclosureReplayStatus === "incomplete"
+        ))
+        .map((capture) => capture.taskId);
+    const neuralDisabledIncompleteTasks = captures
+        .filter((capture) => neuralDisabledReasons(capture).length > 0)
+        .map((capture) => capture.taskId);
     if (options.requireReplayReady === true && routeIncompleteTasks.length > 0) {
         throw new Error(
             `Candidate captures are not replay-ready under their route-specific contracts: ${routeIncompleteTasks.join(", ")}.`,
+        );
+    }
+    if (options.requireGroupingReady === true
+        && groupingDisclosureIncompleteTasks.length > 0) {
+        throw new Error(
+            "Candidate captures are not grouping/disclosure replay-ready: "
+            + groupingDisclosureIncompleteTasks.join(", "),
+        );
+    }
+    if (options.requireNeuralDisabled === true
+        && neuralDisabledIncompleteTasks.length > 0) {
+        throw new Error(
+            "Candidate captures contain neural reranking authority or work: "
+            + neuralDisabledIncompleteTasks.join(", "),
         );
     }
     const traceSchemas = [...new Set(
@@ -1055,6 +1134,8 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
             routeReplayReady: routeIncompleteTasks.length === 0,
             agentReady: agentIncompleteTasks.length === 0,
             removalReasonsComplete: removalReasonIncompleteTasks.length === 0,
+            groupingDisclosureReady: groupingDisclosureIncompleteTasks.length === 0,
+            neuralDisabled: neuralDisabledIncompleteTasks.length === 0,
             fusionIncompleteTasks,
             survivalIncompleteTasks,
             routeIncompleteTasks,
@@ -1062,6 +1143,8 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
             policyInvariantTaskIds,
             agentIncompleteTasks,
             removalReasonIncompleteTasks,
+            groupingDisclosureIncompleteTasks,
+            neuralDisabledIncompleteTasks,
         },
         captures,
     };
@@ -1075,6 +1158,8 @@ function parseArgs(argv) {
         outFile: null,
         policyId: "baseline",
         requireReplayReady: false,
+        requireGroupingReady: false,
+        requireNeuralDisabled: false,
     };
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
@@ -1088,6 +1173,8 @@ function parseArgs(argv) {
         else if (arg === "--out") options.outFile = path.resolve(next());
         else if (arg === "--policy") options.policyId = next();
         else if (arg === "--require-replay-ready") options.requireReplayReady = true;
+        else if (arg === "--require-grouping-ready") options.requireGroupingReady = true;
+        else if (arg === "--require-neural-disabled") options.requireNeuralDisabled = true;
         else if (arg === "--help") options.help = true;
         else throw new Error(`Unknown argument: ${arg}`);
     }
@@ -1104,6 +1191,8 @@ function usage() {
         "  --out <capture.json>",
         "  --policy <id>                 Policy selector recorded in the capture (default: baseline)",
         "  --require-replay-ready        Reject traces that lack top-160/lexical-fallback authority",
+        "  --require-grouping-ready      Reject traces that cannot reproduce grouped/disclosed order",
+        "  --require-neural-disabled     Reject traces with a reranker capability or provider work",
     ].join("\n");
 }
 

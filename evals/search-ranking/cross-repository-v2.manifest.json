@@ -1,0 +1,1905 @@
+{
+  "version": 2,
+  "kind": "satori_cross_repository_ranking_manifest",
+  "repositories": [
+    {
+      "id": "satori-r0",
+      "family": "satori",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/satori.git",
+      "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+      "gitTree": "9f3eafdc82834a097c196032813fb830805f613f",
+      "sourceTreeSha256": "cf9a1431a03d335361e8bad71b4f76f7dec4d33b9988af08f1f0853227bcafb4",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "tradingview-r0",
+      "family": "tradingview_ratio",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/tradingview_ratio.git",
+      "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+      "gitTree": "2969002a2aa46948d6557ac5f5c70e19355c80a7",
+      "sourceTreeSha256": "ee70d61453220d57988cf5267011e55290565c99db5843a8b980993c7ec21c5f",
+      "primaryLanguage": "python"
+    },
+    {
+      "id": "shopify-theme-r0",
+      "family": "noor_and_knot_shopify",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/noor-and-knot-shopify.git",
+      "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+      "gitTree": "95fb149c531370eba964d6c0f1a61f9f83629d50",
+      "sourceTreeSha256": "675ce8b037f9fc4f4f6fb70a83b2df9d3c98b3af8002ef72064b14fc3097302a",
+      "primaryLanguage": "javascript"
+    },
+    {
+      "id": "promptready-r0",
+      "family": "promptready",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/PromptReady.git",
+      "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+      "gitTree": "0111598a1c3ac9228fedc62c9e0a88a5047a98a5",
+      "sourceTreeSha256": "03caf89e635f51940c4a9076afdac14052dfa31280abe36c8cdcc3e901199862",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "fastcontext-r0",
+      "family": "fastcontext",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/microsoft/fastcontext.git",
+      "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+      "gitTree": "c81d38f19b2e9b87575c621eb55db9921c43f63a",
+      "sourceTreeSha256": "b4d1da142850adccfaed9aa0a57223ab30883c7f99ea8f806d0b887ed5c0ad58",
+      "primaryLanguage": "python"
+    },
+    {
+      "id": "recovery-dashboard-r0",
+      "family": "recovery_dashboard",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/recovery_dashboard.git",
+      "revision": "14dfdaf380aa705205497402c17a382fae650677",
+      "gitTree": "f74693f44808d28e031e1ac2eaa0f98052982113",
+      "sourceTreeSha256": "a826a37de52d2174dcf2187f82aca34fba01c6175aed27002edcc84d826b8420",
+      "primaryLanguage": "typescript"
+    }
+  ],
+  "leakage": {
+    "tuningOnlyRepositoryFamilies": [
+      "satori",
+      "tradingview_ratio",
+      "noor_and_knot_shopify",
+      "entrypoint_owner_implementation_fixtures"
+    ],
+    "tuningOnlyRevisions": [
+      "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+      "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+      "34a00887a5904c091c5c049843e383c96ff41f6f"
+    ],
+    "tuningOnlyTaskIds": [
+      "satori-entrypoint-evidence",
+      "satori-final-score",
+      "satori-group-results",
+      "satori-query-plan",
+      "satori-disclosure",
+      "satori-finalization",
+      "satori-entrypoint-intent-test",
+      "satori-ranking-plan-document",
+      "satori-negative-payments",
+      "satori-negative-product-gallery",
+      "tradingview-qap-owner",
+      "tradingview-backtest",
+      "tradingview-root-cli",
+      "tradingview-lazy-map",
+      "tradingview-engine-intent",
+      "tradingview-cointegration-exact",
+      "tradingview-negative-react-routes",
+      "tradingview-negative-cart-drawer",
+      "shopify-cart-items",
+      "shopify-predictive-search",
+      "shopify-facets",
+      "shopify-focus-trap",
+      "shopify-publish-event",
+      "shopify-recommendations",
+      "shopify-negative-backtest",
+      "shopify-negative-token-refresh",
+      "owner-launches-cli",
+      "owner-running-qap",
+      "owner-installed-target",
+      "owner-plain-exact-control",
+      "owner-must-control"
+    ],
+    "tuningOnlyQuerySha256": [
+      "23f5a6022c367033acd96c4b68c99c19f89f835ac2b397afd9cb616a5536aa30",
+      "5e9175f7248661a3c4ac33adf1d7bd8e8a48cc355fa7ccede1e71a5bf38e831c",
+      "5301fd7109bac5366a7f02aada57c11d759d2bca50bb6df71238042a8bc56f52",
+      "85e5456c252cef9958205c97dac5777fd6c6d8b9844d14cbd1fc6f38ce8bc5f2",
+      "09ea2ec6541fc06cd2e117248d237e43d5fc966d6c40a1dcfb434f91d089570b",
+      "1d68e76025fc0f6dcc3db10540db0ec947c1b201c08ccdaa9a3d5230ad76fe2e",
+      "d751ef2bac65ca9480467e927ed4e6f916b79fff16f408663fd06c03fed33128",
+      "f6dfb3fb929391e1ca62a74842e88815027891f52da627357e28aa8a60cb2a1b",
+      "d70b67449500551a09a881c20357863170640b7f3de1976a90955733ad41a875",
+      "24c407aacde0a6a9036ed32523f728cac86fe65c1387b7a6c4a996b3e62a0af4",
+      "d15d7be1d14390cff203d637a11959112ac0e96e0476b09f01d363d664f4f471",
+      "373e300e955612484523c40e5f5acaecc447ed2af954431cd26e6c3d01a555eb",
+      "25798c9d643590abc82f4d70a741f2246195f160503d6f46c8509c13547f42f5",
+      "0b50e8aae5089bcc6aa7c58e9a2da04fcd407839c01cf971bb2a608cb1e25e02",
+      "1a6405fdb391a2f61e56e4fe48c2353a80f69477cdb370af8589677400fefa86",
+      "d3b70b67092e2af32a38d36b0e96c29876c46982d57600c6eccbcbf5ff38fc5d",
+      "581b05be51faa37f400e5b35fcf8d3fdd7f9ca4c3356d8f1c64f2f1c7bddf288",
+      "e79437093aee3b36e9d32d300a721aa072821a36cac0bdd750678afa779232dc",
+      "44d96b843bb89b480c2cf81dbde62ac27c70573aabd6f98d680880a933eef13f",
+      "84a91e06be77fb94a9fd0f309c01f2e49fe0535623a81f4fefcfc038a4c9199b",
+      "c0b479c9d9c524a23fee49521295d88d92015c59d581d992d5be2e1f762be5e3",
+      "e874e2216c13a15b092c08310f7698c80d7128baa2a8f82cf5edd2f8d01c61d3",
+      "fe5aef47837cdd4b15805648741e6920e02459c2bfa8de5771fa29f31199511d",
+      "1585e8c9e34c6d5ba8f5f606712184d930684e60281712b14e350275952c69a2",
+      "0728bb563852910cee92e44f2ade27e56f26944ed3dd001a56c5ce9cc5365061",
+      "f831bb7ce4172a978a53ab8e5d93d391102338620b43b2dfc2998c288c476ba7",
+      "aa7b4659dd5321925f9de2d3da746377bf076dd67b9dda5ede56884f679aa817",
+      "a17a6a30bde8d8f15f51d154eef6c5f2a1ec847cd67599924136c291ff268775",
+      "ec0c2158b2af3491ecdedf8d544bbd8c917602dd353e927134e3392838df984c",
+      "e38d411c4456f03d029115fe86eef5017bb8c0761812f303bb101203ea846011"
+    ]
+  },
+  "statisticalContract": {
+    "version": 1,
+    "independentRepositoryFamiliesPerSplit": 3,
+    "positiveTasksPerRepository": 6,
+    "negativeTasksPerRepository": 2,
+    "decisionStratumMinimumTasks": 4,
+    "decisionStratumMinimumRepositoryFamilies": 2,
+    "pairedEstimator": "repository_macro_mean_of_paired_task_deltas",
+    "uncertainty": "deterministic_repository_cluster_percentile_bootstrap",
+    "clusterBootstrapResamples": 10000,
+    "bootstrapSeed": "sealed_manifest_sha256",
+    "multiplicityAdjustedConfidence": {
+      "deterministic": 0.975,
+      "neural": 0.975
+    },
+    "minimumEffects": {
+      "ownerAt3": 0.05,
+      "macroReciprocalRank": 0.03,
+      "lateOn32Over16MacroReciprocalRank": 0.01,
+      "simplicityTie": 0.01
+    },
+    "nonInferiorityMargins": {
+      "ownerAt1": -0.02,
+      "ownerAt10": -0.01,
+      "requiredRoleCoverage": -0.01,
+      "hardNegativeExposureAt3": 0.02,
+      "unacceptableOwnerExposureAt3": 0.02
+    },
+    "deterministicPerformance": {
+      "p95Multiplier": 1.1,
+      "p95AdditionalMs": 10,
+      "peakRssMultiplier": 1.05
+    },
+    "zeroFailureControls": [
+      "exact_identifier",
+      "must",
+      "configuration_pin",
+      "candidate_membership",
+      "eligibility"
+    ],
+    "contenderSelection": "largest_repository_macro_mrr_then_simpler_within_0.01"
+  },
+  "neuralTrainingOverlapReview": {
+    "status": "deferred_r3_closed",
+    "rationale": "R3 is closed; C0 must pin a neural contender and complete repository-overlap review before any neural benchmark execution."
+  },
+  "tasks": [
+    {
+      "id": "satori-entrypoint-evidence",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function prepares publication-bound installed-command owner evidence?",
+      "querySha256": "23f5a6022c367033acd96c4b68c99c19f89f835ac2b397afd9cb616a5536aa30",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/entrypoint-owner-evidence.ts",
+          "symbol": "prepareEntrypointOwnerEvidence"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The function parses the prepared manifest, resolves canonical symbols, and returns the bounded evidence relation.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/entrypoint-owner-evidence.ts",
+          "symbol": "prepareEntrypointOwnerEvidence",
+          "sourceBlobSha256": "0a1ec77e74a3ab3b386e310f96eddeb41142001a01073fd8a7a97a2cddd4e67b"
+        }
+      }
+    },
+    {
+      "id": "satori-final-score",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Where is the final local candidate score composed from fusion, lexical, path, changed-file, agent-fit, and owner evidence?",
+      "querySha256": "5e9175f7248661a3c4ac33adf1d7bd8e8a48cc355fa7ccede1e71a5bf38e831c",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/search-ranking-policy.ts",
+          "symbol": "computeSearchCandidateFinalScore"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This is the production score-composition owner used by runtime and replay.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-ranking-policy.ts",
+          "symbol": "computeSearchCandidateFinalScore",
+          "sourceBlobSha256": "2110a82fc84253975f3a0f54f0b12872ae72b44826c4194ead4556a0b8ba3b28"
+        }
+      }
+    },
+    {
+      "id": "satori-group-results",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "path_role",
+      "query": "Which function groups scored chunks into visible symbol or file results?",
+      "querySha256": "5301fd7109bac5366a7f02aada57c11d759d2bca50bb6df71238042a8bc56f52",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/search-group-results.ts",
+          "symbol": "buildVisibleGroupedSearchResults"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns chunk grouping, representative selection, target construction, ordering, and diversity invocation.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-group-results.ts",
+          "symbol": "buildVisibleGroupedSearchResults",
+          "sourceBlobSha256": "16848877c0af6d2d39a24fa22c729134a447cf761c8ff9fb0ef368fdda980f84"
+        }
+      }
+    },
+    {
+      "id": "satori-query-plan",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function builds the search query plan and route from operators and intent?",
+      "querySha256": "85e5456c252cef9958205c97dac5777fd6c6d8b9844d14cbd1fc6f38ce8bc5f2",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/search-query-planning.ts",
+          "symbol": "buildSearchQueryPlan"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function returns the normalized production query plan.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-query-planning.ts",
+          "symbol": "buildSearchQueryPlan",
+          "sourceBlobSha256": "d7c3bd219c5996e86ef04150cd5f1076569445bc267a08aebe1126578f823717"
+        }
+      }
+    },
+    {
+      "id": "satori-disclosure",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "configuration",
+      "query": "Where is grouped search disclosure bounded by caller, initial, and UTF-8 response budgets?",
+      "querySha256": "09ea2ec6541fc06cd2e117248d237e43d5fc966d6c40a1dcfb434f91d089570b",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/search-disclosure.ts",
+          "symbol": "projectGroupedDisclosure"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns grouped disclosure projection and truncation reasons.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-disclosure.ts",
+          "symbol": "projectGroupedDisclosure",
+          "sourceBlobSha256": "db89917ab435167eba1309822ed36cde293897ae08cfd4e4727efef6409cc48e"
+        }
+      }
+    },
+    {
+      "id": "satori-finalization",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which coordinator turns ranked search candidates into the final raw or grouped response?",
+      "querySha256": "1d68e76025fc0f6dcc3db10540db0ec947c1b201c08ccdaa9a3d5230ad76fe2e",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/search-result-finalization.ts",
+          "symbol": "finalizeSearchResults"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This coordinator owns final route-specific result construction and diagnostic projection.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-result-finalization.ts",
+          "symbol": "finalizeSearchResults",
+          "sourceBlobSha256": "69ab7554ecba831f823b991873e1fe5233aee030419ba620ba5a415cfc18c59a"
+        }
+      }
+    },
+    {
+      "id": "satori-entrypoint-intent-test",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "tests_fixtures",
+      "query": "Which regression test distinguishes installed-command ownership from mock, fixture, development, and runtime-helper startup queries?",
+      "querySha256": "d751ef2bac65ca9480467e927ed4e6f916b79fff16f408663fd06c03fed33128",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "packages/mcp/src/core/search-query-support.test.ts",
+          "symbol": "buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The named test contains the mixed-cue positive and negative classifier matrix.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-query-support.test.ts",
+          "symbol": "buildSearchQueryPlan distinguishes entrypoint ownership from adjacent CLI intent",
+          "sourceBlobSha256": "ca53bbc848ebfcd0c0583188592c29e9f08f0c13af04bcf1d3031fdab0b6aa48"
+        }
+      }
+    },
+    {
+      "id": "satori-ranking-plan-document",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "documentation",
+      "query": "Which document defines the cross-repository ranking ablation phases and decision boundaries?",
+      "querySha256": "f6dfb3fb929391e1ca62a74842e88815027891f52da627357e28aa8a60cb2a1b",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "docs/plans/SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md",
+          "symbol": "Satori Cross-Repository Ranking Ablation Plan"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The pinned plan is the authority for R0-R5 scope, controls, and routing.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "docs/plans/SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md",
+          "symbol": "Satori Cross-Repository Ranking Ablation Plan",
+          "sourceBlobSha256": "748be9918ea1b04e7e9337386499f93ab222ee71a3324a0f9b5c5a41eecb6ffd"
+        }
+      }
+    },
+    {
+      "id": "satori-negative-payments",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "negative",
+      "query": "Which Satori function charges a customer credit card?",
+      "querySha256": "d70b67449500551a09a881c20357863170640b7f3de1976a90955733ad41a875",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "packages/mcp/src/core/search-ranking-policy.ts",
+            "symbol": "computeSearchCandidateFinalScore"
+          }
+        ],
+        "rationale": "Satori has no payment domain; the scoring function is a reviewed semantically unrelated hard negative.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-ranking-policy.ts",
+          "symbol": "computeSearchCandidateFinalScore",
+          "sourceBlobSha256": "2110a82fc84253975f3a0f54f0b12872ae72b44826c4194ead4556a0b8ba3b28"
+        }
+      }
+    },
+    {
+      "id": "satori-negative-product-gallery",
+      "split": "tuning",
+      "repositoryId": "satori-r0",
+      "queryClass": "negative",
+      "query": "Which browser component renders a product image gallery?",
+      "querySha256": "24c407aacde0a6a9036ed32523f728cac86fe65c1387b7a6c4a996b3e62a0af4",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "packages/mcp/src/core/search-group-results.ts",
+            "symbol": "buildVisibleGroupedSearchResults"
+          }
+        ],
+        "rationale": "Search result grouping is not a browser product-gallery implementation.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+          "file": "packages/mcp/src/core/search-group-results.ts",
+          "symbol": "buildVisibleGroupedSearchResults",
+          "sourceBlobSha256": "16848877c0af6d2d39a24fa22c729134a447cf761c8ff9fb0ef368fdda980f84"
+        }
+      }
+    },
+    {
+      "id": "tradingview-qap-owner",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "entrypoint",
+      "query": "How does running the qap terminal command enter the application?",
+      "querySha256": "d15d7be1d14390cff203d637a11959112ac0e96e0476b09f01d363d664f4f471",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "critical",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/cli/main.py",
+          "symbol": "cli_entry_point"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The pinned PEP 621 declaration targets this function, which constructs and invokes the Click command.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/cli/main.py",
+          "symbol": "cli_entry_point",
+          "sourceBlobSha256": "f8460655bd60dd8311585e6071c47508af388f3b15f69f1eec882b7c4a01b71f"
+        }
+      }
+    },
+    {
+      "id": "tradingview-backtest",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function runs a complete backtest for a configured pair?",
+      "querySha256": "373e300e955612484523c40e5f5acaecc447ed2af954431cd26e6c3d01a555eb",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/python/core/backtest/runner.py",
+          "symbol": "run_backtest"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function is the source owner of the backtest workflow.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/python/core/backtest/runner.py",
+          "symbol": "run_backtest",
+          "sourceBlobSha256": "03cebdd482718966b7b3d0ab7df9853628e42dfeede1c35daa582d9660f20eb4"
+        }
+      }
+    },
+    {
+      "id": "tradingview-root-cli",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function defines the root Typer command and its global options?",
+      "querySha256": "25798c9d643590abc82f4d70a741f2246195f160503d6f46c8509c13547f42f5",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/cli/main.py",
+          "symbol": "main"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The decorated root command owns the application-level CLI options.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/cli/main.py",
+          "symbol": "main",
+          "sourceBlobSha256": "f8460655bd60dd8311585e6071c47508af388f3b15f69f1eec882b7c4a01b71f"
+        }
+      }
+    },
+    {
+      "id": "tradingview-lazy-map",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "configuration",
+      "query": "Where are lazy CLI subcommand and alias maps assembled from command specifications?",
+      "querySha256": "0b50e8aae5089bcc6aa7c58e9a2da04fcd407839c01cf971bb2a608cb1e25e02",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/cli/main.py",
+          "symbol": "_build_lazy_maps"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This helper derives the three lazy-loading maps from the frozen command specifications.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/cli/main.py",
+          "symbol": "_build_lazy_maps",
+          "sourceBlobSha256": "f8460655bd60dd8311585e6071c47508af388f3b15f69f1eec882b7c4a01b71f"
+        }
+      }
+    },
+    {
+      "id": "tradingview-engine-intent",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "configuration",
+      "query": "Which function loads the engine intent policy used by the backtest runner?",
+      "querySha256": "1a6405fdb391a2f61e56e4fe48c2353a80f69477cdb370af8589677400fefa86",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/python/core/backtest/runner.py",
+          "symbol": "_load_engine_intent_policy"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the runner's policy-file loading boundary.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/python/core/backtest/runner.py",
+          "symbol": "_load_engine_intent_policy",
+          "sourceBlobSha256": "03cebdd482718966b7b3d0ab7df9853628e42dfeede1c35daa582d9660f20eb4"
+        }
+      }
+    },
+    {
+      "id": "tradingview-cointegration-exact",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "exact_identifier",
+      "query": "check_cointegration",
+      "querySha256": "d3b70b67092e2af32a38d36b0e96c29876c46982d57600c6eccbcbf5ff38fc5d",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "critical",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/python/core/backtest/runner.py",
+          "symbol": "check_cointegration"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The exact identifier resolves to this pinned function.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/python/core/backtest/runner.py",
+          "symbol": "check_cointegration",
+          "sourceBlobSha256": "03cebdd482718966b7b3d0ab7df9853628e42dfeede1c35daa582d9660f20eb4"
+        }
+      }
+    },
+    {
+      "id": "tradingview-negative-react-routes",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "negative",
+      "query": "Which React component declares the browser route table?",
+      "querySha256": "581b05be51faa37f400e5b35fcf8d3fdd7f9ca4c3356d8f1c64f2f1c7bddf288",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/cli/main.py",
+            "symbol": "main"
+          }
+        ],
+        "rationale": "This Python CLI command is a reviewed hard negative for a nonexistent React route owner.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/cli/main.py",
+          "symbol": "main",
+          "sourceBlobSha256": "f8460655bd60dd8311585e6071c47508af388f3b15f69f1eec882b7c4a01b71f"
+        }
+      }
+    },
+    {
+      "id": "tradingview-negative-cart-drawer",
+      "split": "tuning",
+      "repositoryId": "tradingview-r0",
+      "queryClass": "negative",
+      "query": "Which Shopify component updates the cart drawer after an item is added?",
+      "querySha256": "e79437093aee3b36e9d32d300a721aa072821a36cac0bdd750678afa779232dc",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/cli/main.py",
+            "symbol": "cli_entry_point"
+          }
+        ],
+        "rationale": "The installed Python command owner is unrelated to Shopify cart rendering.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+          "file": "src/cli/main.py",
+          "symbol": "cli_entry_point",
+          "sourceBlobSha256": "f8460655bd60dd8311585e6071c47508af388f3b15f69f1eec882b7c4a01b71f"
+        }
+      }
+    },
+    {
+      "id": "shopify-cart-items",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which component updates cart item quantities and removes cart lines?",
+      "querySha256": "44d96b843bb89b480c2cf81dbde62ac27c70573aabd6f98d680880a933eef13f",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "assets/cart.js",
+          "symbol": "CartItems"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The custom element owns cart-line updates and section refresh behavior.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/cart.js",
+          "symbol": "CartItems",
+          "sourceBlobSha256": "ea41cbce2a652cee7a88e354ef0648096562a9e4c62a8d7c1eb522fb845dccd5"
+        }
+      }
+    },
+    {
+      "id": "shopify-predictive-search",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which component fetches and renders predictive search results?",
+      "querySha256": "84a91e06be77fb94a9fd0f309c01f2e49fe0535623a81f4fefcfc038a4c9199b",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "assets/predictive-search.js",
+          "symbol": "PredictiveSearch"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This custom element owns predictive-search requests, caching, and rendering.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/predictive-search.js",
+          "symbol": "PredictiveSearch",
+          "sourceBlobSha256": "4b80b634228a94953dc1625f6798588ad4a9de59255351de9afcc3cb41065050"
+        }
+      }
+    },
+    {
+      "id": "shopify-facets",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which component applies collection facet filters and updates the product grid?",
+      "querySha256": "c0b479c9d9c524a23fee49521295d88d92015c59d581d992d5be2e1f762be5e3",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "assets/facets.js",
+          "symbol": "FacetFiltersForm"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This custom element coordinates filter history and section rendering.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/facets.js",
+          "symbol": "FacetFiltersForm",
+          "sourceBlobSha256": "316777cf06e307c9c056a6166c4ad0924dd47b49a4e502328a269fd43722a4c6"
+        }
+      }
+    },
+    {
+      "id": "shopify-focus-trap",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function traps keyboard focus inside an open modal or drawer?",
+      "querySha256": "e874e2216c13a15b092c08310f7698c80d7128baa2a8f82cf5edd2f8d01c61d3",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "assets/global.js",
+          "symbol": "trapFocus"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The function installs the focus-in, focus-out, and keydown handlers.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/global.js",
+          "symbol": "trapFocus",
+          "sourceBlobSha256": "f943ec1c2b1a5ca74955f949a9445c8420832c253ce498f2c57618c9ede4e91e"
+        }
+      }
+    },
+    {
+      "id": "shopify-publish-event",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "callers_references",
+      "query": "Which function broadcasts a named theme event to all subscribers?",
+      "querySha256": "fe5aef47837cdd4b15805648741e6920e02459c2bfa8de5771fa29f31199511d",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "assets/pubsub.js",
+          "symbol": "publish"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The function invokes every callback registered for the event name.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/pubsub.js",
+          "symbol": "publish",
+          "sourceBlobSha256": "b2a481f5dea48e04d6d2e9c562f338a2d0ef3b96bea2a4396203ac20b97d24a3"
+        }
+      }
+    },
+    {
+      "id": "shopify-recommendations",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which component lazily fetches product recommendations when visible?",
+      "querySha256": "1585e8c9e34c6d5ba8f5f606712184d930684e60281712b14e350275952c69a2",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "assets/global.js",
+          "symbol": "ProductRecommendations"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The custom element observes visibility and loads recommendation markup.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/global.js",
+          "symbol": "ProductRecommendations",
+          "sourceBlobSha256": "f943ec1c2b1a5ca74955f949a9445c8420832c253ce498f2c57618c9ede4e91e"
+        }
+      }
+    },
+    {
+      "id": "shopify-negative-backtest",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "negative",
+      "query": "Which Python function executes a statistical backtest?",
+      "querySha256": "0728bb563852910cee92e44f2ade27e56f26944ed3dd001a56c5ce9cc5365061",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "assets/cart.js",
+            "symbol": "CartItems"
+          }
+        ],
+        "rationale": "The JavaScript cart element is a reviewed hard negative for an absent Python backtest.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/cart.js",
+          "symbol": "CartItems",
+          "sourceBlobSha256": "ea41cbce2a652cee7a88e354ef0648096562a9e4c62a8d7c1eb522fb845dccd5"
+        }
+      }
+    },
+    {
+      "id": "shopify-negative-token-refresh",
+      "split": "tuning",
+      "repositoryId": "shopify-theme-r0",
+      "queryClass": "negative",
+      "query": "Where is an OAuth access token refreshed on the server?",
+      "querySha256": "f831bb7ce4172a978a53ab8e5d93d391102338620b43b2dfc2998c288c476ba7",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "assets/predictive-search.js",
+            "symbol": "PredictiveSearch"
+          }
+        ],
+        "rationale": "Client-side predictive search is unrelated to server token refresh.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "34a00887a5904c091c5c049843e383c96ff41f6f",
+          "file": "assets/predictive-search.js",
+          "symbol": "PredictiveSearch",
+          "sourceBlobSha256": "4b80b634228a94953dc1625f6798588ad4a9de59255351de9afcc3cb41065050"
+        }
+      }
+    },
+    {
+      "id": "promptready-primary-action",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function records the primary CTA and opens the configured Chrome store URL?",
+      "querySha256": "1f703c9a59cc127bc0d8f9b2f5ddf1c0fde6b45a894c598e4e45101671dd2ba7",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/App.tsx",
+          "symbol": "handlePrimaryAction"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The nested handler records analytics and opens the environment-owned destination.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/App.tsx",
+          "symbol": "handlePrimaryAction",
+          "sourceBlobSha256": "656df6aa32fa382c69626a715fe148d91210f582c479597e3358815ffd14e81b"
+        }
+      }
+    },
+    {
+      "id": "promptready-route-table",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "configuration",
+      "query": "Which component declares the landing-page route table and page-view transition wrapper?",
+      "querySha256": "1a5d6b9edebb89c902a6af1876e19971431b8d743e5715c9883e0f95e14f7478",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/router/LandingFlowRouter.tsx",
+          "symbol": "AnimatedRoutes"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This component owns route declarations and transition/page-view behavior.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/router/LandingFlowRouter.tsx",
+          "symbol": "AnimatedRoutes",
+          "sourceBlobSha256": "3c6c50f3310f37dbb513aa7c0736354706d9fcbfd0153edf86cdb60ad8a6f4b8"
+        }
+      }
+    },
+    {
+      "id": "promptready-canonical-url",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function creates a canonical production URL from a pathname?",
+      "querySha256": "f4b49d5c431dd89172b4c4ee41117481d2d0aa9dfb9bf996d1ffac7287c00da1",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/canonicalUrl.ts",
+          "symbol": "getCanonicalUrl"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This utility normalizes the path against the production domain.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/utils/canonicalUrl.ts",
+          "symbol": "getCanonicalUrl",
+          "sourceBlobSha256": "2b828782444cbbd403dc78c58d72856af0cb1101e17ac8d65dc94e3e24dc5fe4"
+        }
+      }
+    },
+    {
+      "id": "promptready-seo-hook",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which hook derives canonical, social, and robots metadata for the current page?",
+      "querySha256": "9ba3da7bada61dd4acabac4457343e84453c9dc4b3742c4ed1a5be80d5670fab",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/hooks/useSEO.ts",
+          "symbol": "useSEO"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The hook composes SEO values from route and deployment context.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/hooks/useSEO.ts",
+          "symbol": "useSEO",
+          "sourceBlobSha256": "5f806d1e98634ff9c43521f6d4dc77432c3a9928e3e85429a4fe1a5810fd4afd"
+        }
+      }
+    },
+    {
+      "id": "promptready-analytics",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "callers_references",
+      "query": "Which function sends a named analytics event with an optional payload?",
+      "querySha256": "c13fab57e1619e787b068f051f9a852d15af8992a82d5f4c61a1d1d47dfb7f40",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/hooks/useAnalytics.ts",
+          "symbol": "trackEvent"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This is the shared analytics event boundary used by feature-specific helpers.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/hooks/useAnalytics.ts",
+          "symbol": "trackEvent",
+          "sourceBlobSha256": "5315659e064d5c0e8f2a728ca917e809563ca920fdd434baaebcf23ae5c13e2d"
+        }
+      }
+    },
+    {
+      "id": "promptready-hero-actions",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which component chooses the hero CTA variant and tracks primary and demo actions?",
+      "querySha256": "ab17600af917c280f19616d15283054bd039d3a320333b52fb12a20e19ad22a1",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/components/Hero/HeroActions.tsx",
+          "symbol": "HeroActions"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This component owns CTA feature-flag text and interaction callbacks.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/components/Hero/HeroActions.tsx",
+          "symbol": "HeroActions",
+          "sourceBlobSha256": "a30e828c6f293f9ca7cae9e0477fad0da118910e16cbfd2b1712b1acc261227c"
+        }
+      }
+    },
+    {
+      "id": "promptready-negative-migration",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "negative",
+      "query": "Which function applies database schema migrations?",
+      "querySha256": "bf7e1bb5d8bc5589bf83a21f7ba10c388c4251f9afd902f21251ecb0a2d46423",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/router/LandingFlowRouter.tsx",
+            "symbol": "AnimatedRoutes"
+          }
+        ],
+        "rationale": "The browser route component is a reviewed hard negative for an absent database migration owner.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/router/LandingFlowRouter.tsx",
+          "symbol": "AnimatedRoutes",
+          "sourceBlobSha256": "3c6c50f3310f37dbb513aa7c0736354706d9fcbfd0153edf86cdb60ad8a6f4b8"
+        }
+      }
+    },
+    {
+      "id": "promptready-negative-cli-install",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "negative",
+      "query": "Which Python console-script function installs the application command?",
+      "querySha256": "ef7b53a1f817143930d116381776182d53dd46bb9247672487825753d05499e9",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/App.tsx",
+            "symbol": "handlePrimaryAction"
+          }
+        ],
+        "rationale": "The browser CTA handler is unrelated to Python packaging and console scripts.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/App.tsx",
+          "symbol": "handlePrimaryAction",
+          "sourceBlobSha256": "656df6aa32fa382c69626a715fe148d91210f582c479597e3358815ffd14e81b"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-ripgrep",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "development_script",
+      "query": "Which function builds and executes the ripgrep subprocess command?",
+      "querySha256": "5676f2a3bab60a0815ce06cd81f67c1b900409d86fa15b9a2e9f31ebfb6b23d5",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/fastcontext/agent/tool/grep.py",
+          "symbol": "run_rg"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns rg argument construction, execution, and output/error handling.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/tool/grep.py",
+          "symbol": "run_rg",
+          "sourceBlobSha256": "ccd9150daf1f7cecaf109fddafb83e6c0d69da5182aa3edacb8deae34dfbc9e2"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-system-prompt",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "configuration",
+      "query": "Which function loads a system prompt template and renders built-in arguments?",
+      "querySha256": "0708836a7474653f3d906886c6bfbb7b43d5e03aedb5904f72c3d4265569405b",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "_load_system_prompt"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This helper owns prompt-file loading and template rendering.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "_load_system_prompt",
+          "sourceBlobSha256": "ff438b4d17c2e239e7da5a8796524bcf7024afcdb61ad25d4a7beb9e74406584"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-final-answer",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function extracts the final answer section from an agent response?",
+      "querySha256": "0cba15ec6ae7ee979b594c36c3b9aa2fb2cbddf63bb6c0952b880e26939a802d",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "get_final_answer"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns final-answer extraction.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "get_final_answer",
+          "sourceBlobSha256": "ff438b4d17c2e239e7da5a8796524bcf7024afcdb61ad25d4a7beb9e74406584"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-file-score",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which public function scores predicted citation files against edited files?",
+      "querySha256": "7331114d2be15981723e399af9fcaf737679e7d97e98b4fd99640747dc45c1dd",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_file"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This evaluator computes file-level citation precision, recall, and exploration score.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_file",
+          "sourceBlobSha256": "2db70364fb4c02d8ce662dff419df8e146925a14ff600541c0b7902f5e49e8e5"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-line-score",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function scores whether predicted citation line ranges overlap edits?",
+      "querySha256": "c8df5f997f0165b9a536b45c8610c762739d32283ed41ae88f47aaf564302621",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_line"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This evaluator owns line-range overlap scoring.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_line",
+          "sourceBlobSha256": "2db70364fb4c02d8ce662dff419df8e146925a14ff600541c0b7902f5e49e8e5"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-container-setup",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "development_script",
+      "query": "Which function installs and configures FastContext inside a benchmark container?",
+      "querySha256": "bcf4383de02f1407b06695660d8e25e5f624a2287d0c584a5638a488cea8b82b",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "benchmark/evaluation/bench_mini_swe_agent.py",
+          "symbol": "setup_fastcontext_in_container"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns container-side benchmark setup.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/bench_mini_swe_agent.py",
+          "symbol": "setup_fastcontext_in_container",
+          "sourceBlobSha256": "ce53d7c8eb49d9ad8dc883cdc679df0e96740561ae233e2b60cd1ae976af7ce7"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-negative-react-route",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "negative",
+      "query": "Which React component defines the browser route table?",
+      "querySha256": "8b753817422ec4a901ccf912cdc7ef9fd05989ea027346c2904a3a3f821476a7",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/fastcontext/agent/tool/grep.py",
+            "symbol": "run_rg"
+          }
+        ],
+        "rationale": "The Python rg executor is a reviewed hard negative for an absent React router.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/tool/grep.py",
+          "symbol": "run_rg",
+          "sourceBlobSha256": "ccd9150daf1f7cecaf109fddafb83e6c0d69da5182aa3edacb8deae34dfbc9e2"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-negative-sql-transaction",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "negative",
+      "query": "Which function commits a customer payment SQL transaction?",
+      "querySha256": "893b0a9485391493692eb2faaa663a46c3fba1c54e87d4b29a78efcbac607796",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "benchmark/evaluation/utils.py",
+            "symbol": "calculate_score_file"
+          }
+        ],
+        "rationale": "The citation evaluator is unrelated to payments or SQL transaction ownership.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_file",
+          "sourceBlobSha256": "2db70364fb4c02d8ce662dff419df8e146925a14ff600541c0b7902f5e49e8e5"
+        }
+      }
+    },
+    {
+      "id": "recovery-dashboard-api",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which route handler serves dashboard data for the requested day range?",
+      "querySha256": "2326fad923ff01c6b045e433221916d66d10264b8a7f51bbe5c6c36ab7056fcb",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/app/api/dashboard/route.ts",
+          "symbol": "GET"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This Next.js route validates the range and delegates dashboard data retrieval.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/app/api/dashboard/route.ts",
+          "symbol": "GET",
+          "sourceBlobSha256": "2e268f526f3bd8814c0d31c6a42aa08fba4504991a475ce54de6051d9a7da2d5"
+        }
+      }
+    },
+    {
+      "id": "recovery-weekly-review",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function assembles the weekly recovery review response?",
+      "querySha256": "c4bf8ac78268c10b2bf7e8b77569bea16a3c1aa2a34d8c8af17bb074dd48f1b5",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/reviewData.ts",
+          "symbol": "getWeeklyReviewData"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the weekly review query and response assembly.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/reviewData.ts",
+          "symbol": "getWeeklyReviewData",
+          "sourceBlobSha256": "097d558287809ec6e5f17cede10573b3a7a916d687d4112d226299a0e9618d52"
+        }
+      }
+    },
+    {
+      "id": "recovery-day-normalization",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function normalizes a date to the start of its UTC day?",
+      "querySha256": "68b66090debfa56e03525bdcb647c9f14d38ef4bc27a9c97c53af6f15427c0fa",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/validation.ts",
+          "symbol": "startOfDayUtc"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This utility constructs the UTC midnight boundary.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/validation.ts",
+          "symbol": "startOfDayUtc",
+          "sourceBlobSha256": "221c2c1080cdfa5f6751c88906eae1e91669ba171f14f8ac37823ba6412e67cf"
+        }
+      }
+    },
+    {
+      "id": "recovery-protocol-update",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function closes the active protocol and creates its replacement transactionally?",
+      "querySha256": "b6607fa72d0a01043fa1cbff524b28afcc6677fa802a979e06f238a3f8cf3fb1",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/protocol.ts",
+          "symbol": "updateActiveProtocol"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the protocol transition transaction and audit relation.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/protocol.ts",
+          "symbol": "updateActiveProtocol",
+          "sourceBlobSha256": "5fdc386019ab9e1b7e35e937cf6c9cf04510672c32f8a0ecd8aab3dd132120c2"
+        }
+      }
+    },
+    {
+      "id": "recovery-protocol-lock",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function determines whether protocol edits are locked?",
+      "querySha256": "f0ce7c508f0894390a9678fc331ecb5612568f5d7466e6a980e4ac0b8fc5287f",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/lock.ts",
+          "symbol": "isProtocolLocked"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function queries the lock condition used by protocol update callers.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/lock.ts",
+          "symbol": "isProtocolLocked",
+          "sourceBlobSha256": "408921d1a04cf5de6ab3aabbcea1f8105e0d416a03ec88b200792a0995ab1f0e"
+        }
+      }
+    },
+    {
+      "id": "recovery-checkin-form",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which component owns the daily check-in fields and submission request?",
+      "querySha256": "a4355b5a0dcff3fed8ac4288c176e641dd26e5f3c82330fb20322e97dce0e4ad",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/components/CheckInForm.tsx",
+          "symbol": "CheckInForm"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This component owns form state, validation conversion, and API submission.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/components/CheckInForm.tsx",
+          "symbol": "CheckInForm",
+          "sourceBlobSha256": "bb74a22812e28a9c3b79ebe6661b4f1964bcc0886f1657124e0f25c6d4055799"
+        }
+      }
+    },
+    {
+      "id": "recovery-negative-compiler",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "negative",
+      "query": "Which function parses and type-checks a Rust source file?",
+      "querySha256": "85fa815f682b2b210ef6a4d717a6750afcc4560974c8528b7dcc32b13bb00eb0",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/lib/validation.ts",
+            "symbol": "startOfDayUtc"
+          }
+        ],
+        "rationale": "The date utility is a reviewed hard negative for an absent compiler frontend.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/validation.ts",
+          "symbol": "startOfDayUtc",
+          "sourceBlobSha256": "221c2c1080cdfa5f6751c88906eae1e91669ba171f14f8ac37823ba6412e67cf"
+        }
+      }
+    },
+    {
+      "id": "recovery-negative-cli-entry",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "negative",
+      "query": "Which installed terminal command starts this application?",
+      "querySha256": "244458beab50f0e64fab818a0eddb24a44843e6763c5cae97c35932fb51ad656",
+      "search": {
+        "scope": "all",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 20,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/app/api/dashboard/route.ts",
+            "symbol": "GET"
+          }
+        ],
+        "rationale": "The HTTP route is not an installed terminal-command owner.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/app/api/dashboard/route.ts",
+          "symbol": "GET",
+          "sourceBlobSha256": "2e268f526f3bd8814c0d31c6a42aa08fba4504991a475ce54de6051d9a7da2d5"
+        }
+      }
+    }
+  ],
+  "sha256": "5428cedc074ed2c3d2b24a680be6be7b93d1f1a3c7cd18c92d02f967b3ac70f7"
+}

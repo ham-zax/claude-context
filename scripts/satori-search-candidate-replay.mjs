@@ -8,7 +8,13 @@ import {
     computeSearchCandidateFinalScore,
     SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    sortSearchCandidates,
 } from "../packages/mcp/src/core/search-ranking-policy.ts";
+import {
+    computeSearchGroupScore,
+    rankAndDiversifySearchGroups,
+} from "../packages/mcp/src/core/search-group-results.ts";
+import { projectGroupedDisclosure } from "../packages/mcp/src/core/search-disclosure.ts";
 import { canonicalJson } from "./satori-useful-context.mjs";
 
 const CORE_RRF_K = 100;
@@ -25,6 +31,18 @@ const CANONICAL_JSON_HELPER_PATH = fileURLToPath(
 );
 const PRODUCTION_SCORING_OWNER_PATH = fileURLToPath(
     new URL("../packages/mcp/src/core/search-ranking-policy.ts", import.meta.url),
+);
+const PRODUCTION_GROUPING_OWNER_PATH = fileURLToPath(
+    new URL("../packages/mcp/src/core/search-group-results.ts", import.meta.url),
+);
+const PRODUCTION_GROUP_ORDERING_OWNER_PATH = fileURLToPath(
+    new URL("../packages/mcp/src/core/search-group-ordering.ts", import.meta.url),
+);
+const PRODUCTION_DIVERSITY_OWNER_PATH = fileURLToPath(
+    new URL("../packages/mcp/src/core/search-grouping.ts", import.meta.url),
+);
+const PRODUCTION_DISCLOSURE_OWNER_PATH = fileURLToPath(
+    new URL("../packages/mcp/src/core/search-disclosure.ts", import.meta.url),
 );
 const TSX_LOADER_PATH = fileURLToPath(import.meta.resolve("tsx"));
 const REPOSITORY_LOCKFILE_PATH = fileURLToPath(new URL("../pnpm-lock.yaml", import.meta.url));
@@ -60,6 +78,16 @@ const REPLAY_EXECUTABLE_ARTIFACTS = Object.freeze([
     Object.freeze(sha256FileArtifact(REPLAY_SCRIPT_PATH, "replay_executable")),
     Object.freeze(sha256FileArtifact(CANONICAL_JSON_HELPER_PATH, "canonical_json_helper")),
     Object.freeze(sha256FileArtifact(PRODUCTION_SCORING_OWNER_PATH, "production_scoring_owner")),
+    Object.freeze(sha256FileArtifact(PRODUCTION_GROUPING_OWNER_PATH, "production_grouping_owner")),
+    Object.freeze(sha256FileArtifact(
+        PRODUCTION_GROUP_ORDERING_OWNER_PATH,
+        "production_group_ordering_owner",
+    )),
+    Object.freeze(sha256FileArtifact(PRODUCTION_DIVERSITY_OWNER_PATH, "production_diversity_owner")),
+    Object.freeze(sha256FileArtifact(
+        PRODUCTION_DISCLOSURE_OWNER_PATH,
+        "production_disclosure_owner",
+    )),
     Object.freeze(sha256FileArtifact(TSX_LOADER_PATH, "typescript_loader")),
     Object.freeze(sha256FileArtifact(TSX_PACKAGE.manifestPath, "typescript_loader_manifest")),
     Object.freeze(sha256FileArtifact(REPOSITORY_LOCKFILE_PATH, "dependency_lockfile")),
@@ -792,6 +820,296 @@ function replayPostFusionLocalScoring(capture, attempt) {
     return { candidates: scored, removed, mustMatchesFirst };
 }
 
+function groupedStageAuthority(stage, label) {
+    const complete = requireCompleteStage(stage, label);
+    const byRank = new Map();
+    for (const rawOccurrence of complete.candidates) {
+        const occurrence = requireRecord(rawOccurrence, `${label} occurrence`);
+        const rank = requirePositiveInteger(occurrence.rank, `${label} rank`);
+        const existing = byRank.get(rank);
+        if (existing) {
+            for (const field of [
+                "ownerId",
+                "relativePath",
+                "startLine",
+                "endLine",
+                "language",
+                "score",
+            ]) {
+                if (existing[field] !== occurrence[field]) {
+                    throw new Error(`${label} rank ${rank} has inconsistent '${field}'.`);
+                }
+            }
+            existing.candidateIds.push(requireString(
+                occurrence.candidateId,
+                `${label} candidateId`,
+            ));
+            continue;
+        }
+        byRank.set(rank, {
+            rank,
+            ownerId: requireString(occurrence.ownerId, `${label} ownerId`),
+            relativePath: requireString(
+                occurrence.relativePath,
+                `${label} relativePath`,
+            ),
+            startLine: requirePositiveInteger(
+                occurrence.startLine,
+                `${label} startLine`,
+            ),
+            endLine: requirePositiveInteger(occurrence.endLine, `${label} endLine`),
+            language: requireString(occurrence.language, `${label} language`),
+            score: requireNonNegativeFinite(occurrence.score, `${label} score`),
+            candidateIds: [requireString(occurrence.candidateId, `${label} candidateId`)],
+        });
+    }
+    const groups = [...byRank.values()].sort((left, right) => left.rank - right.rank);
+    groups.forEach((group, index) => {
+        if (group.rank !== index + 1) {
+            throw new Error(`${label} group ranks must be contiguous.`);
+        }
+        if (new Set(group.candidateIds).size !== group.candidateIds.length) {
+            throw new Error(`${label} rank ${group.rank} contains duplicate candidates.`);
+        }
+    });
+    return groups;
+}
+
+function parseOwnerId(ownerId, label) {
+    let parsed;
+    try {
+        parsed = JSON.parse(ownerId);
+    } catch {
+        throw new Error(`${label} ownerId must be canonical JSON.`);
+    }
+    if (!Array.isArray(parsed) || !["symbol", "file"].includes(parsed[0])) {
+        throw new Error(`${label} ownerId is unsupported.`);
+    }
+    if (parsed[0] === "symbol" && parsed.length === 3) {
+        return {
+            kind: "symbol",
+            file: requireString(parsed[1], `${label} owner file`),
+            symbolId: requireString(parsed[2], `${label} owner symbol`),
+        };
+    }
+    if (parsed[0] === "file" && parsed.length === 2) {
+        return {
+            kind: "file",
+            file: requireString(parsed[1], `${label} owner file`),
+        };
+    }
+    throw new Error(`${label} ownerId has an invalid shape.`);
+}
+
+function symbolKindFromLabel(value) {
+    if (typeof value !== "string") return undefined;
+    const match = /^(?:async\s+)?(class|type|interface|enum|struct|function|method|const|variable|property)\b/i
+        .exec(value.trim());
+    return match?.[1]?.toLowerCase();
+}
+
+function compareGroupedReplay(actual, expected, label) {
+    if (actual.length !== expected.length) {
+        throw new Error(`${label} group count mismatch (${actual.length} != ${expected.length}).`);
+    }
+    for (let index = 0; index < actual.length; index += 1) {
+        const replayed = actual[index];
+        const recorded = expected[index];
+        const replayedIdentity = {
+            ownerId: replayed.__frozenOwnerId,
+            candidateIds: replayed.__candidateIds,
+        };
+        const recordedIdentity = {
+            ownerId: recorded.ownerId,
+            candidateIds: recorded.candidateIds,
+        };
+        if (canonicalJson(replayedIdentity) !== canonicalJson(recordedIdentity)) {
+            throw new Error(`${label} order mismatch at rank ${index + 1}.`);
+        }
+        if (Math.abs(replayed.score - recorded.score) > SCORE_TOLERANCE) {
+            throw new Error(`${label} score mismatch at rank ${index + 1}.`);
+        }
+    }
+}
+
+function groupingDisclosureAvailability(capture) {
+    const args = capture.queryPlan?.invocationArgs;
+    if (args?.resultMode !== "grouped") return "result_mode_not_grouped";
+    if (!["symbol", "file"].includes(args.groupBy)) return "group_by_not_recorded";
+    if (!Number.isSafeInteger(args.limit) || args.limit < 1) return "caller_limit_not_recorded";
+    if (!Number.isSafeInteger(args.disclosureLimit) || args.disclosureLimit < 1) {
+        return "disclosure_limit_not_recorded";
+    }
+    const grouped = capture.candidateTrace.stages.find((stage) => stage.stage === "grouped");
+    const disclosed = capture.candidateTrace.stages.find((stage) => stage.stage === "disclosed");
+    if (!grouped || !disclosed) return "grouped_or_disclosed_stage_missing";
+    if (grouped.omittedOccurrences !== 0 || disclosed.omittedOccurrences !== 0) {
+        return "grouped_or_disclosed_stage_truncated";
+    }
+    if (capture.passConfiguration.rerank?.applied === true) {
+        return "neural_reranker_order_not_replayable";
+    }
+    return null;
+}
+
+function replayFrozenGroupingAndDisclosure(
+    capture,
+    localScoring,
+    { assertBaseline = false } = {},
+) {
+    const unavailableReason = groupingDisclosureAvailability(capture);
+    if (unavailableReason) {
+        throw new Error(
+            `Task '${capture.taskId}' grouping/disclosure replay is unavailable: ${unavailableReason}.`,
+        );
+    }
+    const groupedAuthority = groupedStageAuthority(
+        capture.candidateTrace.stages.find((stage) => stage.stage === "grouped"),
+        `Task '${capture.taskId}' grouped authority`,
+    );
+    const disclosedAuthority = groupedStageAuthority(
+        capture.candidateTrace.stages.find((stage) => stage.stage === "disclosed"),
+        `Task '${capture.taskId}' disclosed authority`,
+    );
+    const localById = new Map(localScoring.candidates.map((candidate) => [
+        candidate.candidate.candidateId,
+        candidate,
+    ]));
+    const groupedCandidateIds = new Set(groupedAuthority.flatMap(({ candidateIds }) => (
+        candidateIds
+    )));
+    const invalidGroupCandidateIds = new Set(
+        capture.candidateTrace.removals
+            .filter((removal) => (
+                removal.afterStage === "grouped"
+                && removal.reason === "invalid_group_target"
+            ))
+            .map((removal) => removal.candidateId),
+    );
+    for (const candidateId of localById.keys()) {
+        if (!groupedCandidateIds.has(candidateId) && !invalidGroupCandidateIds.has(candidateId)) {
+            throw new Error(
+                `Task '${capture.taskId}' candidate '${candidateId}' has no frozen group authority.`,
+            );
+        }
+    }
+    const groupedResults = groupedAuthority.map((group) => {
+        const chunks = group.candidateIds.map((candidateId) => {
+            const candidate = localById.get(candidateId);
+            if (!candidate) {
+                throw new Error(
+                    `Task '${capture.taskId}' frozen group candidate '${candidateId}' is absent.`,
+                );
+            }
+            return {
+                ...candidate,
+                result: {
+                    relativePath: candidate.candidate.relativePath,
+                    startLine: candidate.candidate.startLine,
+                    endLine: candidate.candidate.endLine,
+                },
+                exactMatchPinned: false,
+                rerankAdjusted: false,
+            };
+        });
+        sortSearchCandidates(
+            chunks,
+            capture.passConfiguration.rerank.exactMatchPinningEnabled === true,
+            localScoring.mustMatchesFirst,
+        );
+        const representative = chunks[0];
+        const owner = parseOwnerId(
+            group.ownerId,
+            `Task '${capture.taskId}' grouped rank ${group.rank}`,
+        );
+        const displayLabel = representative.symbolLabel
+            ?? (owner.kind === "symbol" ? owner.symbolId : `file ${owner.file}`);
+        const symbolKind = symbolKindFromLabel(displayLabel);
+        return {
+            target: {
+                file: group.relativePath,
+                span: {
+                    startLine: group.startLine,
+                    endLine: group.endLine,
+                },
+                ...(owner.kind === "symbol" ? { symbolId: owner.symbolId } : {}),
+            },
+            displayLabel,
+            language: group.language,
+            ...(symbolKind ? { symbolKind } : {}),
+            score: computeSearchGroupScore(representative.finalScore, chunks.length),
+            quality: {
+                owner: "medium",
+                semantic: "medium",
+            },
+            preview: "",
+            navigation: { supported: false, reason: "not_available" },
+            __groupId: group.ownerId,
+            __candidateIds: [...group.candidateIds],
+            ...(owner.kind === "symbol"
+                ? { __symbolInstanceId: owner.symbolId }
+                : {}),
+            __exactLexicalMatch: representative.exactLexicalMatch,
+            __frozenOwnerId: group.ownerId,
+        };
+    });
+    const args = capture.queryPlan.invocationArgs;
+    const ranked = rankAndDiversifySearchGroups({
+        groupedResults,
+        // The frozen grouped stage is already downstream of declaration
+        // collapse. R2 changes scores, not group membership or ownership.
+        collapseDuplicateDeclarations: false,
+        exactMatchPinningEnabled:
+            capture.passConfiguration.rerank.exactMatchPinningEnabled === true,
+        limit: args.limit,
+        groupBy: args.groupBy,
+    });
+    if (assertBaseline) {
+        compareGroupedReplay(
+            ranked.rankedResults,
+            groupedAuthority,
+            `Task '${capture.taskId}' grouped replay`,
+        );
+    }
+    const disclosure = projectGroupedDisclosure({
+        orderedResults: ranked.disclosureOrder,
+        callerLimit: args.limit,
+        disclosureLimit: args.disclosureLimit,
+        // Captures intentionally contain no source previews. Byte-budget
+        // behavior remains a live metric; R1 replays the production count and
+        // ordering policy only when no byte truncation occurred.
+        maxResponseBytes: Number.MAX_SAFE_INTEGER,
+        includeSummary: args.disclosureLimit < args.limit
+            || ranked.disclosureOrder.length > args.limit,
+        buildEnvelope: (results, summary) => ({
+            status: "ok",
+            results: [...results],
+            ...(summary ? { disclosure: summary } : {}),
+        }),
+    });
+    if (assertBaseline) {
+        compareGroupedReplay(
+            disclosure.results,
+            disclosedAuthority,
+            `Task '${capture.taskId}' disclosed replay`,
+        );
+    }
+    const toIdentity = (group, index) => ({
+        rank: index + 1,
+        ownerId: group.__frozenOwnerId,
+        candidateIds: [...group.__candidateIds],
+        score: group.score,
+    });
+    return {
+        groupedResults: ranked.rankedResults.map(toIdentity),
+        disclosureOrder: ranked.disclosureOrder.map(toIdentity),
+        disclosedResults: disclosure.results.map(toIdentity),
+        diversitySummary: ranked.diversitySummary,
+        exactMatchPinningApplied: ranked.exactMatchPinningApplied,
+        responseByteBudgetReplayed: false,
+    };
+}
+
 function shouldSkipRerankForExactPin(candidates, rerank, mustMatchesFirst) {
     if (candidates.length === 0 || candidates[0].exactLexicalMatch !== true) return false;
     if (rerank.exactMatchPinningEnabled === true) return true;
@@ -1040,14 +1358,24 @@ function replayTaskCapture(capture) {
             || record.readiness.fusionNotApplicableReason !== "exact_registry_hit") {
             throw new Error(`Task '${record.taskId}' has incomplete exact-registry route authority.`);
         }
-        const expected = requireRecord(record.expected, `Task '${record.taskId}' expected owner`);
         const rankedResults = requireArray(
             record.rankedResults,
             `Task '${record.taskId}' exact-registry ranked results`,
         );
-        const first = requireRecord(rankedResults[0], `Task '${record.taskId}' exact-registry first result`);
-        if (first.file !== expected.ownerFile || first.symbol !== expected.ownerSymbol) {
-            throw new Error(`Task '${record.taskId}' exact-registry target does not match frozen owner authority.`);
+        if (record.queryClass !== "negative_exposure") {
+            const expected = requireRecord(
+                record.expected,
+                `Task '${record.taskId}' expected owner`,
+            );
+            const first = requireRecord(
+                rankedResults[0],
+                `Task '${record.taskId}' exact-registry first result`,
+            );
+            if (first.file !== expected.ownerFile || first.symbol !== expected.ownerSymbol) {
+                throw new Error(
+                    `Task '${record.taskId}' exact-registry target does not match frozen owner authority.`,
+                );
+            }
         }
         return {
             taskId: record.taskId,
@@ -1083,6 +1411,7 @@ function replayTaskCapture(capture) {
     ));
     let localScoring;
     let rerankerAdmission;
+    let groupingDisclosure;
     if (signalsComplete) {
         const localAttempts = internalMcpAttempts.map((attempt) => {
             const local = replayPostFusionLocalScoring(record, attempt);
@@ -1137,6 +1466,13 @@ function replayTaskCapture(capture) {
             candidateCount: attempt.candidates.length,
             removedCount: attempt.removed.length,
         }));
+        if (groupingDisclosureAvailability(record) === null) {
+            groupingDisclosure = replayFrozenGroupingAndDisclosure(
+                record,
+                finalLocal,
+                { assertBaseline: true },
+            );
+        }
     }
     const mcpAttempts = internalMcpAttempts.map((attempt) => ({
         attemptId: attempt.attemptId,
@@ -1164,6 +1500,7 @@ function replayTaskCapture(capture) {
                 inputUtf8Bytes: rerankerAdmission.inputUtf8Bytes,
             },
         } : {}),
+        ...(groupingDisclosure ? { groupingDisclosure } : {}),
     };
 }
 
@@ -1243,6 +1580,10 @@ export function replayBaselineCandidateCapture(value, options = {}) {
         throw new Error("Baseline replay requires policyId=baseline.");
     }
     if (!Array.isArray(capture.captures)) throw new Error("Candidate capture tasks must be an array.");
+    if (options.requireNeuralDisabled === true
+        && capture.replayReadiness?.neuralDisabled !== true) {
+        throw new Error("Baseline replay requires a neural-disabled candidate capture.");
+    }
     const expectedTraceSchema = capture.version === 2 ? TRACE_SCHEMA_V2 : TRACE_SCHEMA_V1;
     if (capture.captures.some((taskCapture) => (
         taskCapture.candidateTrace?.schemaVersion !== expectedTraceSchema
@@ -1254,6 +1595,22 @@ export function replayBaselineCandidateCapture(value, options = {}) {
     selectReplayTasks(capture, {});
     capture.captures.forEach(assertProductionScorePolicyCompatibility);
     const tasks = capture.captures.map(replayTaskCapture);
+    const groupingDisclosureIncompleteTasks = capture.captures
+        .filter((taskCapture) => taskCapture.readiness?.route === "fusion")
+        .map((taskCapture) => ({
+            taskId: taskCapture.taskId,
+            reason: groupingDisclosureAvailability(taskCapture),
+        }))
+        .filter(({ reason }) => reason !== null);
+    if (options.requireGroupingReady === true
+        && groupingDisclosureIncompleteTasks.length > 0) {
+        throw new Error(
+            "Baseline grouping/disclosure replay is incomplete: "
+            + groupingDisclosureIncompleteTasks
+                .map(({ taskId, reason }) => `${taskId} (${reason})`)
+                .join(", "),
+        );
+    }
     const replayRuntime = buildReplayRuntimeManifest(capture, "baseline", options);
     const replay = {
         version: capture.version,
@@ -1265,6 +1622,11 @@ export function replayBaselineCandidateCapture(value, options = {}) {
         routeCoverage: {
             fusionTaskCount: tasks.filter((task) => task.route.kind === "fusion").length,
             exactRegistryTaskCount: tasks.filter((task) => task.route.kind === "exact_registry").length,
+            groupingDisclosureExact: groupingDisclosureIncompleteTasks.length === 0,
+            groupingDisclosureTaskCount: tasks.filter(
+                (task) => task.groupingDisclosure,
+            ).length,
+            groupingDisclosureIncompleteTasks,
         },
         tasks,
     };
@@ -1272,7 +1634,7 @@ export function replayBaselineCandidateCapture(value, options = {}) {
 }
 
 export function replayCandidateCapture(value, policyValue = "baseline", options = {}) {
-    const baseline = replayBaselineCandidateCapture(value);
+    const baseline = replayBaselineCandidateCapture(value, options);
     if (policyValue === "baseline") return baseline;
     const capture = requireRecord(value, "Candidate capture");
     if (capture.replayReadiness?.survivalReady !== true) {
@@ -1342,6 +1704,9 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
             ...replayPostFusionLocalScoring(taskCapture, attempt),
         }));
         const rerankerAdmission = replayRerankerAdmission(taskCapture, localAttempts.at(-1));
+        const groupingDisclosure = groupingDisclosureAvailability(taskCapture) === null
+            ? replayFrozenGroupingAndDisclosure(taskCapture, localAttempts.at(-1))
+            : null;
         return {
             taskId: taskCapture.taskId,
             ...(taskCapture.split ? { split: taskCapture.split } : {}),
@@ -1396,8 +1761,18 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
                 budgetReason: rerankerAdmission.budgetReason,
                 inputUtf8Bytes: rerankerAdmission.inputUtf8Bytes,
             },
+            ...(groupingDisclosure ? { groupingDisclosure } : {}),
         };
     });
+    const groupingIncompleteTasks = selectedCaptures
+        .filter((taskCapture) => (
+            taskCapture.readiness?.route === "fusion"
+            && groupingDisclosureAvailability(taskCapture) !== null
+        ))
+        .map((taskCapture) => ({
+            taskId: taskCapture.taskId,
+            reason: groupingDisclosureAvailability(taskCapture),
+        }));
     const replay = {
         version: capture.version,
         kind: "satori_search_candidate_policy_replay",
@@ -1416,12 +1791,16 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
             postFusionLocalScoring: true,
             rerankerAdmission: true,
             rerankerProviderOutput: false,
-            groupingAndDisclosure: false,
+            groupingAndDisclosure: groupingIncompleteTasks.length === 0,
+            groupingMembership: "frozen_production_capture",
+            responseByteBudget: false,
             fusionTaskCount: tasks.filter((task) => task.policyAffected).length,
             exactRegistryPolicyInvariantTaskCount: tasks.filter((task) => !task.policyAffected).length,
         },
+        groupingIncompleteTasks,
         liveValidationReasons: [
             "new_candidates_have_no_frozen_reranker_scores",
+            "grouped_response_byte_budget_requires_live_validation",
         ],
         tasks,
     };
@@ -1429,7 +1808,7 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
 }
 
 function usage() {
-    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--out <replay.json>]";
+    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -1438,11 +1817,15 @@ export function main(argv = process.argv.slice(2)) {
     let split;
     let taskPrefix;
     let outFile;
+    let requireGroupingReady = false;
+    let requireNeuralDisabled = false;
     for (let index = 0; index < argv.length; index += 1) {
         if (argv[index] === "--capture") captureFile = path.resolve(argv[++index]);
         else if (argv[index] === "--policy-file") policyFile = path.resolve(argv[++index]);
         else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--task-prefix") taskPrefix = argv[++index];
+        else if (argv[index] === "--require-grouping-ready") requireGroupingReady = true;
+        else if (argv[index] === "--require-neural-disabled") requireNeuralDisabled = true;
         else if (argv[index] === "--out") outFile = path.resolve(argv[++index]);
         else if (argv[index] === "--help") {
             process.stdout.write(`${usage()}\n`);
@@ -1458,6 +1841,8 @@ export function main(argv = process.argv.slice(2)) {
     const replay = replayCandidateCapture(capture, policy, {
         ...(split !== undefined ? { split } : {}),
         ...(taskPrefix !== undefined ? { taskPrefix } : {}),
+        requireGroupingReady,
+        requireNeuralDisabled,
         ...(policySourceBytes ? { policySourceBytes } : {}),
         ...(policyFile ? { policySourceFileName: policyFile } : {}),
     });

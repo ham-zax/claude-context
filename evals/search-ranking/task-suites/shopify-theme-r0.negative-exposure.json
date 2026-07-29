@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-negative-shopify-theme-r0",
+  "tasks": [
+    {
+      "id": "shopify-negative-backtest",
+      "split": "tuning",
+      "queryClass": "negative_exposure",
+      "language": "javascript",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "assets/cart.js",
+            "symbol": "CartItems"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which Python function executes a statistical backtest?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "shopify-negative-token-refresh",
+      "split": "tuning",
+      "queryClass": "negative_exposure",
+      "language": "javascript",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "assets/predictive-search.js",
+            "symbol": "PredictiveSearch"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Where is an OAuth access token refreshed on the server?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}

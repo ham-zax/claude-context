@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "name": "cross-repository-ranking-negative-promptready-r0",
+  "tasks": [
+    {
+      "id": "promptready-negative-migration",
+      "split": "held_out",
+      "queryClass": "negative_exposure",
+      "language": "typescript",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "src/router/LandingFlowRouter.tsx",
+            "symbol": "AnimatedRoutes"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which function applies database schema migrations?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    },
+    {
+      "id": "promptready-negative-cli-install",
+      "split": "held_out",
+      "queryClass": "negative_exposure",
+      "language": "typescript",
+      "expected": {
+        "hardNegativeOwners": [
+          {
+            "file": "src/App.tsx",
+            "symbol": "handlePrimaryAction"
+          }
+        ]
+      },
+      "workload": {
+        "setup": [
+          {
+            "tool": "manage_index",
+            "args": {
+              "action": "status",
+              "path": "$REPO_ROOT"
+            }
+          }
+        ],
+        "invocations": [
+          {
+            "tool": "search_codebase",
+            "args": {
+              "path": "$REPO_ROOT",
+              "query": "Which Python console-script function installs the application command?",
+              "scope": "all",
+              "resultMode": "grouped",
+              "groupBy": "symbol",
+              "limit": 20,
+              "disclosureLimit": 10,
+              "rankingMode": "default",
+              "debugMode": "full",
+              "debugCandidateLimit": 160
+            }
+          }
+        ],
+        "phaseProtocol": {
+          "cold": "start an isolated runtime with neural reranking disabled, prepare one zero-change publication proof, then run once",
+          "warm": "repeat in the same isolated runtime without synchronization or provider-order changes"
+        }
+      }
+    }
+  ]
+}
