@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveLateOnScoreOutcome } from "./satori-search-ranking-r3-score.mjs";
+import {
+    resolveLateOnScoreOutcome,
+    verifyCapturePair,
+} from "./satori-search-ranking-r3-score.mjs";
 
 test("LateOn score outcome discards every neural score after the frozen deadline", () => {
     const outcome = resolveLateOnScoreOutcome({
@@ -43,4 +46,32 @@ test("LateOn score outcome uses deterministic candidate identity ties within the
             { candidateId: "zeta", score: 5 },
         ],
     });
+});
+
+test("capture pairing permits independently qualified runtimes on one publication", () => {
+    const armPublication = {
+        canonicalRoot: "/repo",
+        generation: 1,
+        publication: { collectionName: "frozen" },
+    };
+    assert.doesNotThrow(() => verifyCapturePair(
+        {
+            capture: {
+                authority: {
+                    gitRevision: "revision",
+                    runtimeSha256: "positive-runtime",
+                    armPublication,
+                },
+            },
+        },
+        {
+            capture: {
+                authority: {
+                    gitRevision: "revision",
+                    runtimeSha256: "negative-runtime",
+                    armPublication,
+                },
+            },
+        },
+    ));
 });

@@ -93,7 +93,7 @@ function loadCapture(filePath) {
     };
 }
 
-function verifyCapturePair(positive, negative) {
+export function verifyCapturePair(positive, negative) {
     const fields = [
         ["gitRevision", positive.capture.authority.gitRevision, negative.capture.authority.gitRevision],
         [
@@ -101,7 +101,6 @@ function verifyCapturePair(positive, negative) {
             canonicalJson(positive.capture.authority.armPublication),
             canonicalJson(negative.capture.authority.armPublication),
         ],
-        ["runtimeSha256", positive.capture.authority.runtimeSha256, negative.capture.authority.runtimeSha256],
     ];
     for (const [label, left, right] of fields) {
         if (left !== right) throw new Error(`Capture pair ${label} mismatch.`);
