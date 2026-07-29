@@ -146,6 +146,7 @@ import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     fuseVectorCandidatesWithRrf,
     orderVectorCandidateArm,
+    vectorCandidateOwnerId,
     VECTOR_CANDIDATE_RRF_K_V1,
 } from './vector-candidate-fusion';
 
@@ -189,10 +190,7 @@ const INDEX_POLICY_MALFORMED_LOCK_STALE_MS = 30_000;
 const MAX_SEMANTIC_SEARCH_TRACE_ENTRIES_PER_STAGE = 160;
 
 function semanticSearchTraceOwnerId(candidate: VectorCandidate): string {
-    const ownerSymbolInstanceId = candidate.document.metadata.ownerSymbolInstanceId;
-    return typeof ownerSymbolInstanceId === 'string' && ownerSymbolInstanceId.length > 0
-        ? JSON.stringify(['symbol', candidate.document.relativePath, ownerSymbolInstanceId])
-        : JSON.stringify(['file', candidate.document.relativePath]);
+    return vectorCandidateOwnerId(candidate);
 }
 
 function buildSemanticSearchTraceStage(

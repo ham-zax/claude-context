@@ -50,6 +50,13 @@ export function orderVectorCandidateArm(arm: readonly VectorCandidate[]): Vector
     ));
 }
 
+export function vectorCandidateOwnerId(candidate: VectorCandidate): string {
+    const ownerSymbolInstanceId = candidate.document.metadata.ownerSymbolInstanceId;
+    return typeof ownerSymbolInstanceId === 'string' && ownerSymbolInstanceId.length > 0
+        ? JSON.stringify(['symbol', candidate.document.relativePath, ownerSymbolInstanceId])
+        : JSON.stringify(['file', candidate.document.relativePath]);
+}
+
 export function fuseVectorCandidatesWithRrf(input: {
     readonly dense: readonly VectorCandidate[];
     readonly lexical: readonly VectorCandidate[];
@@ -66,6 +73,7 @@ export function fuseVectorCandidatesWithRrf(input: {
     const candidatesById = new Map<string, RankedCandidate>();
     const addRankedArm = (arm: readonly VectorCandidate[]): void => {
         const seenDocumentsById = new Map<string, VectorCandidate['document']>();
+        const seenOwnerIds = new Set<string>();
         let rank = 0;
         for (const candidate of orderVectorCandidateArm(arm)) {
             const priorArmDocument = seenDocumentsById.get(candidate.document.id);
@@ -74,6 +82,11 @@ export function fuseVectorCandidatesWithRrf(input: {
                 continue;
             }
             seenDocumentsById.set(candidate.document.id, candidate.document);
+            const ownerId = vectorCandidateOwnerId(candidate);
+            if (seenOwnerIds.has(ownerId)) {
+                continue;
+            }
+            seenOwnerIds.add(ownerId);
             rank++;
             const score = 1 / (input.k + rank);
             const existing = candidatesById.get(candidate.document.id);

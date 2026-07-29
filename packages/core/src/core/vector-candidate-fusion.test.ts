@@ -66,6 +66,26 @@ test('Core RRF fusion assigns ranks after duplicate IDs are removed', () => {
     assert.equal(results.find((result) => result.document.id === 'b')?.score, 1 / 102);
 });
 
+test('Core RRF fusion assigns arm ranks after repeated owner chunks are removed', () => {
+    const repeatedOwner = {
+        relativePath: 'src/owner-a.ts',
+        metadata: { ownerSymbolInstanceId: 'owner-a' },
+    };
+    const results = fuseVectorCandidatesWithRrf({
+        dense: [
+            candidate('a-1', 3, repeatedOwner),
+            candidate('a-2', 2, repeatedOwner),
+            candidate('b', 1, { metadata: { ownerSymbolInstanceId: 'owner-b' } }),
+        ],
+        lexical: [],
+        k: VECTOR_CANDIDATE_RRF_K_V1,
+        limit: 2,
+    });
+
+    assert.deepEqual(results.map((result) => result.document.id), ['a-1', 'b']);
+    assert.equal(results.find((result) => result.document.id === 'b')?.score, 1 / 102);
+});
+
 test('Core RRF fusion uses only code-unit ID order for equal fused scores', () => {
     const denseIds = Array.from({ length: 8 }, (_, index) => `dense-${index + 1}`);
     denseIds[4] = 'z-best-rank';
