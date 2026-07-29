@@ -283,7 +283,13 @@ export function orderCapturedCoreArm(stage, depth, label = "Captured Core arm") 
     return ranked;
 }
 
-function replayCoreFusion(denseStage, lexicalStage, limit, label) {
+export function replayCoreFusion(
+    denseStage,
+    preciseLexicalStage,
+    fallbackLexicalStage,
+    limit,
+    label,
+) {
     const byId = new Map();
     const addArm = (stage, armLabel) => {
         if (!stage) return;
@@ -300,7 +306,13 @@ function replayCoreFusion(denseStage, lexicalStage, limit, label) {
         });
     };
     addArm(denseStage, "dense");
-    addArm(lexicalStage, "lexical");
+    const preciseLexical = preciseLexicalStage
+        ? requireCompleteStage(preciseLexicalStage, `${label} precise lexical`).candidates
+        : [];
+    addArm(
+        preciseLexical.length > 0 ? preciseLexicalStage : fallbackLexicalStage,
+        preciseLexical.length > 0 ? "precise lexical" : "fallback lexical",
+    );
     return [...byId.values()]
         .sort((left, right) => right.score - left.score || compareCandidateIdentity(
             left.candidate,
@@ -543,7 +555,7 @@ function assertRankedStageMatches(actual, expectedStage, label) {
         if (replayed.candidate.candidateId !== recorded.candidateId) {
             throw new Error(
                 `${label} replay order mismatch at rank ${index + 1} `
-                + `(${replayed.candidate.candidateId} score=${replayed.finalScore} `
+                + `(${replayed.candidate.candidateId} score=${replayed.score} `
                 + `path=${replayed.candidate.relativePath}:${replayed.candidate.startLine} != `
                 + `${recorded.candidateId} score=${recorded.score} `
                 + `path=${recorded.relativePath}:${recorded.startLine}).`,
@@ -649,14 +661,20 @@ function replayCorePasses(capture) {
     return outputStages.map((outputStage) => {
         const passId = requireString(outputStage.passId, "Core output passId");
         const dense = stageByNameAndPass(stages, "raw_dense", passId);
-        const lexical = stageByNameAndPass(stages, "raw_lexical", passId);
+        const preciseLexical = stageByNameAndPass(stages, "raw_lexical", passId);
+        const fallbackLexical = stageByNameAndPass(
+            stages,
+            "raw_lexical_fallback",
+            passId,
+        );
         if (outputStage.stage === "core_fusion") {
-            if (!dense || !lexical) {
+            if (!dense || !preciseLexical) {
                 throw new Error(`Core hybrid pass '${passId}' is missing a raw retrieval arm.`);
             }
             const replayed = replayCoreFusion(
                 dense,
-                lexical,
+                preciseLexical,
+                fallbackLexical,
                 productCandidateLimitForPass(capture, passId),
                 `Task '${capture.taskId}' Core pass '${passId}'`,
             );
@@ -667,7 +685,7 @@ function replayCorePasses(capture) {
             );
             return { passId, mode: "hybrid", candidateCount: replayed.length };
         }
-        const rawStage = dense ?? lexical;
+        const rawStage = dense ?? preciseLexical;
         if (!rawStage) throw new Error(`Core pass '${passId}' is missing its raw retrieval stage.`);
         const replayed = compactRankedArm(
             rawStage,
