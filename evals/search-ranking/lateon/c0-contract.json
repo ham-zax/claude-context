@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "satori_lateon_c0_contract_v1",
+  "checkpoint": {
+    "repository": "lightonai/LateOn-Code-edge",
+    "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
+    "license": "Apache-2.0",
+    "trainingDataOverlapDecision": "fine_tuned_checkpoint_admitted_no_known_frozen_repository_or_task_overlap"
+  },
+  "artifacts": {
+    "model": {
+      "path": "model.onnx",
+      "sha256": "ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef",
+      "bytes": 67970609,
+      "variant": "fp32"
+    },
+    "tokenizer": {
+      "path": "tokenizer.json",
+      "sha256": "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+    },
+    "tokenizerConfig": {
+      "path": "tokenizer_config.json",
+      "sha256": "1621afee1f3dbc2c42901841ca46016c83102a8e070d32b90f80f80b214172a4"
+    },
+    "onnxConfig": {
+      "path": "onnx_config.json",
+      "sha256": "fa4fef89820dcdc33c5504c62c1d5efc19603cfbfebf02368a70d51a4dbe6651"
+    },
+    "specialTokens": {
+      "path": "special_tokens_map.json",
+      "sha256": "6edfb9d64c0d7e5cbaa53516e90280fe1f42ba5ea7923d005a5f9b6e082142cf"
+    }
+  },
+  "rejectedArtifacts": [
+    {
+      "path": "model_int8.onnx",
+      "sha256": "eac35bdaa862e2762e6455337f7a3e704b05dbc4259f00929fcc8e10207f11c7",
+      "reason": "published export does not reproduce the pinned PyLate vectors or MaxSim scores"
+    }
+  ],
+  "inference": {
+    "executionProvider": "cpu",
+    "inputNames": [
+      "input_ids",
+      "attention_mask"
+    ],
+    "outputName": "output",
+    "outputDtype": "float32",
+    "embeddingDimensions": 48,
+    "queryPrefix": "[Q] ",
+    "documentPrefix": "[D] ",
+    "queryPrefixId": 50368,
+    "documentPrefixId": 50369,
+    "queryTokenLimit": 256,
+    "documentTokenLimit": 2048,
+    "lowercase": true,
+    "normalizeTokenVectors": "l2",
+    "documentSkipTokenIds": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      92,
+      93,
+      94,
+      95
+    ],
+    "maxSim": "sum_over_query_tokens_of_max_document_token_dot_product",
+    "batchSize": 1,
+    "intraOpThreads": 1,
+    "interOpThreads": 1,
+    "warmupRuns": 2,
+    "timeoutMilliseconds": 2000
+  },
+  "runtime": {
+    "node": "24.13.0",
+    "onnxruntimeNode": "1.19.2",
+    "transformersJs": "3.0.2",
+    "referencePython": "3.12",
+    "referencePyLate": "1.3.4",
+    "referenceTransformers": "4.56.2",
+    "referenceTorch": "2.8.0+cpu"
+  },
+  "tolerances": {
+    "tokenIdentity": "exact",
+    "retainedTokenCount": "exact",
+    "maximumVectorAbsoluteError": 0.00001,
+    "maximumScoreAbsoluteError": 0.0001,
+    "maximumRepeatScoreAbsoluteError": 0
+  },
+  "resourceBudgets": {
+    "requiredArtifactBytes": 72000000,
+    "maximumProcessPeakRssBytes": 536870912,
+    "maximumRetainedRssBytes": 402653184,
+    "maximumModelLoadMilliseconds": 2500,
+    "maximumColdD16Milliseconds": 2500,
+    "maximumWarmD16P95Milliseconds": 750,
+    "maximumWarmD32P95Milliseconds": 1500
+  },
+  "r3Projection": {
+    "version": "embedding_projection_v3",
+    "source": "production semanticText reconstructed from the pinned source revision",
+    "digestRequired": true
+  }
+}
