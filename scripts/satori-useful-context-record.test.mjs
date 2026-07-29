@@ -364,6 +364,48 @@ test("status-only preparation proves one publication without requesting synchron
     }
 });
 
+test("status-only preparation accepts a completed reindex publication", () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "satori-useful-context-status-reindex-"));
+    try {
+        const repoRoot = path.join(temp, "repo");
+        const tasksFile = path.join(temp, "tasks.json");
+        const outputFile = path.join(temp, "observations.json");
+        const runtimeRoot = path.join(temp, "runtime");
+        const fakeMcp = path.join(runtimeRoot, "packages/mcp/dist/index.js");
+        initializeRepo(repoRoot);
+        writeJson(tasksFile, taskSuite(repoRoot));
+        fs.mkdirSync(path.dirname(fakeMcp), { recursive: true });
+        writeFakeMcp(fakeMcp, {
+            rejectSync: true,
+            statusPrimesSearch: true,
+            operationAction: "reindex",
+        });
+        commitRuntimeFixture(runtimeRoot);
+
+        const run = spawnSync(process.execPath, [
+            SCRIPT_PATH,
+            "--tasks", tasksFile,
+            "--repo", repoRoot,
+            "--out", outputFile,
+            "--command", process.execPath,
+            "--command-arg", fakeMcp,
+            "--preparation-mode", "status-only",
+            "--startup-timeout-ms", "2000",
+            "--call-timeout-ms", "2000",
+            "--close-timeout-ms", "500",
+        ], { encoding: "utf8" });
+        assert.equal(run.status, 0, run.stderr);
+
+        const output = JSON.parse(fs.readFileSync(outputFile, "utf8"));
+        assert.ok(output.metadata.taskRuns.every((entry) => (
+            entry.indexProof.action === "reindex"
+            && JSON.stringify(entry.finalIndexProof) === JSON.stringify(entry.indexProof)
+        )));
+    } finally {
+        fs.rmSync(temp, { recursive: true, force: true });
+    }
+});
+
 test("recorder rejects an indexed evaluation-authority artifact without post-filtering", () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "satori-useful-context-contamination-"));
     try {

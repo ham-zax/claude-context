@@ -890,7 +890,7 @@ async function prepareMeasurementState(session, task, repoRoot, preparationMode)
         return {
             preparationMode,
             indexProof: {
-                ...extractCompletedOperationProof(readiness, repoRoot, ["create", "sync"]),
+                ...extractCompletedOperationProof(readiness, repoRoot, ["create", "reindex", "sync"]),
                 publication: extractPublicationProof(readiness, repoRoot),
             },
         };
@@ -1130,7 +1130,9 @@ export async function recordSuite(taskSuite, options) {
                 ...extractCompletedOperationProof(
                     finalStatus,
                     repoRoot,
-                    options.preparationMode === "status-only" ? ["create", "sync"] : "sync",
+                    options.preparationMode === "status-only"
+                        ? ["create", "reindex", "sync"]
+                        : "sync",
                 ),
                 publication: extractPublicationProof(finalStatus, repoRoot),
             };
