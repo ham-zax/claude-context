@@ -6,6 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+    SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+} from "../packages/mcp/src/core/search-ranking-policy.ts";
 import { buildSearchCandidateCapture } from "./satori-search-candidate-capture.mjs";
 import {
     orderCapturedCoreArm,
@@ -17,6 +21,20 @@ import { canonicalJson } from "./satori-useful-context.mjs";
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
 const DIGEST_C = "c".repeat(64);
+const CAPTURE_PUBLICATION = Object.freeze({
+    collectionName: "generation-7",
+    markerRunId: "marker-run-7",
+    indexPolicyHash: DIGEST_A,
+    policyDocumentDigest: DIGEST_B,
+});
+const ENTRYPOINT_PUBLICATION_BINDING = Object.freeze({
+    collectionName: CAPTURE_PUBLICATION.collectionName,
+    markerRunId: CAPTURE_PUBLICATION.markerRunId,
+    policyDocumentDigest: CAPTURE_PUBLICATION.policyDocumentDigest,
+    policyHash: CAPTURE_PUBLICATION.indexPolicyHash,
+    navigationGenerationId: "navigation-generation-7",
+    symbolRegistryManifestHash: "symbol-manifest-7",
+});
 const SCRIPT_PATH = fileURLToPath(new URL("./satori-search-candidate-capture.mjs", import.meta.url));
 const REPLAY_SCRIPT_PATH = fileURLToPath(new URL("./satori-search-candidate-replay.mjs", import.meta.url));
 
@@ -247,6 +265,80 @@ function replayReadyCandidateTrace() {
     return trace;
 }
 
+function replayReadyCandidateTraceV2() {
+    const trace = replayReadyCandidateTrace();
+    trace.schemaVersion = "search_candidate_survival_v2";
+    trace.scorePolicy = {
+        finalScorePolicyId: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+        entrypointOwnerMaxContribution: SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    };
+    const replaySignals = trace.stages.find((stage) => stage.stage === "mcp_replay_signals");
+    replaySignals.candidates = replaySignals.candidates.map((candidate) => {
+        const isEntrypointOwner = candidate.candidateId === "candidate-1";
+        const entrypointOwnerScoreBoost = isEntrypointOwner
+            ? SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST
+            : 0;
+        return {
+            ...candidate,
+            score: candidate.score + entrypointOwnerScoreBoost,
+            replay: {
+                ...candidate.replay,
+                entrypointOwnerScoreBoost,
+                entrypointOwnerScoreReason: isEntrypointOwner
+                    ? "manifest_entrypoint_owner"
+                    : "not_applicable",
+            },
+        };
+    });
+    for (const stageName of ["mcp_filtered", "reranker_input"]) {
+        const stage = trace.stages.find((candidateStage) => candidateStage.stage === stageName);
+        stage.candidates = stage.candidates.map((candidate) => ({
+            ...candidate,
+            score: candidate.score + SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+        }));
+    }
+    return trace;
+}
+
+function entrypointOwnerEvidence() {
+    const publicationIdentity = crypto.createHash("sha256").update(JSON.stringify([
+        ENTRYPOINT_PUBLICATION_BINDING.collectionName,
+        ENTRYPOINT_PUBLICATION_BINDING.markerRunId,
+        ENTRYPOINT_PUBLICATION_BINDING.policyDocumentDigest,
+        ENTRYPOINT_PUBLICATION_BINDING.policyHash,
+        ENTRYPOINT_PUBLICATION_BINDING.navigationGenerationId,
+        ENTRYPOINT_PUBLICATION_BINDING.symbolRegistryManifestHash,
+    ]), "utf8").digest("hex");
+    return {
+        status: "resolved",
+        owners: [{
+            command: "ignore",
+            declaration: {
+                relativePath: "pyproject.toml",
+                startLine: 5,
+                endLine: 5,
+            },
+            target: {
+                module: "sync",
+                relativePath: "src/sync.ts",
+                symbol: "reconcileIgnoreRules",
+                symbolKey: "symkey-ignore",
+                symbolInstanceId: "reconcileIgnoreRules",
+            },
+            sourceIdentity: DIGEST_C,
+            publicationIdentity,
+            resolutionConfidence: "exact",
+            resolutionBasis: "pep621_project_script_supported_root_canonical_symbol",
+        }],
+        declaredOwnerCount: 1,
+        resolvedOwnerCount: 1,
+        resolutionComplete: true,
+        manifestSourceIdentity: DIGEST_C,
+        publicationBinding: { ...ENTRYPOINT_PUBLICATION_BINDING },
+        publicationIdentity,
+    };
+}
+
 function contenderPolicy() {
     return {
         version: 1,
@@ -385,21 +477,16 @@ function debugSearch(trace = candidateTrace()) {
 
 function observationSet(suite = taskSuite()) {
     const runtimeFingerprint = { vectorStoreProvider: "LanceDB", embeddingProvider: "VoyageAI" };
-    const publication = {
-        collectionName: "generation-7",
-        markerRunId: "marker-run-7",
-        indexPolicyHash: DIGEST_A,
-        policyDocumentDigest: DIGEST_B,
-    };
+    const publication = structuredClone(CAPTURE_PUBLICATION);
     const generationReceipt = { canonicalRoot: "/repo", runtimeFingerprint, publication };
-    const makeObservation = (phase, sample) => {
+    const makeObservation = (taskId, phase, sample) => {
         const response = {
             status: "ok",
             hints: { debugSearch: debugSearch() },
             results: [{ target: { file: "src/sync.ts" }, displayLabel: "reconcileIgnoreRules" }],
         };
         return {
-            taskId: "ignore-owner",
+            taskId,
             phase,
             sample,
             generationReceipt: structuredClone(generationReceipt),
@@ -440,22 +527,29 @@ function observationSet(suite = taskSuite()) {
                 runtimeFingerprint,
                 publication: structuredClone(publication),
             },
-            taskRuns: [{
-                taskId: "ignore-owner",
+            taskRuns: suite.tasks.map((task) => ({
+                taskId: task.id,
                 syncStats: { added: 0, removed: 0, modified: 0 },
                 indexProof: structuredClone(indexProof),
                 finalIndexProof: structuredClone(indexProof),
-            }],
+            })),
         },
-        observations: [makeObservation("cold", 0), makeObservation("warm", 1)],
+        observations: suite.tasks.flatMap((task) => [
+            makeObservation(task.id, "cold", 0),
+            makeObservation(task.id, "warm", 1),
+        ]),
     };
 }
 
-function replayReadyObservationSet(suite) {
+function replayReadyObservationSet(suite, traceFactory = replayReadyCandidateTrace) {
     const observations = observationSet(suite);
     for (const observation of observations.observations) {
+        const trace = traceFactory();
         observation.response.hints.debugSearch = {
-            ...debugSearch(replayReadyCandidateTrace()),
+            ...debugSearch(trace),
+            ...(trace.schemaVersion === "search_candidate_survival_v2"
+                ? { entrypointOwnerEvidence: entrypointOwnerEvidence() }
+                : {}),
             diagnosticCandidateLimit: 160,
         };
         observation.responseBytes = Buffer.byteLength(JSON.stringify(observation.response), "utf8");
@@ -552,6 +646,12 @@ test("baseline replay recomputes both Core and MCP fusion from one capture", () 
     const capture = buildSearchCandidateCapture(suite, observationSet(suite));
     const replay = replayBaselineCandidateCapture(capture);
 
+    assert.equal(capture.version, 1);
+    assert.equal(
+        capture.captures[0].candidateTrace.schemaVersion,
+        "search_candidate_survival_v1",
+    );
+    assert.equal(replay.version, 1);
     assert.equal(replay.policyId, "baseline");
     assert.deepEqual(replay.tasks, [{
         taskId: "ignore-owner",
@@ -571,14 +671,142 @@ test("baseline replay recomputes both Core and MCP fusion from one capture", () 
     assert.equal(replay.replayRuntime.measuredRuntimeSha256, DIGEST_C);
     assert.deepEqual(
         replay.replayRuntime.artifacts.map((artifact) => artifact.role),
-        ["replay_executable", "canonical_json_helper"],
+        [
+            "replay_executable",
+            "canonical_json_helper",
+            "production_scoring_owner",
+            "typescript_loader",
+            "typescript_loader_manifest",
+            "dependency_lockfile",
+        ],
     );
     assert.ok(replay.replayRuntime.artifacts.every((artifact) => (
         Number.isSafeInteger(artifact.bytes) && artifact.bytes > 0 && /^[0-9a-f]{64}$/.test(artifact.sha256)
     )));
     assert.equal(replay.replayRuntime.policySource.kind, "canonical_inline");
+    assert.equal(replay.replayRuntime.typescriptLoader.name, "tsx");
+    assert.match(replay.replayRuntime.typescriptLoader.version, /^\d+\.\d+\.\d+/);
     assert.match(replay.replayRuntime.sha256, /^[0-9a-f]{64}$/);
     assert.match(replay.sha256, /^[0-9a-f]{64}$/);
+});
+
+test("version 2 baseline replay preserves authoritative owner scoring", () => {
+    const suite = taskSuite();
+    suite.tasks[0].workload.invocations[0].args.debugCandidateLimit = 160;
+    const capture = buildSearchCandidateCapture(
+        suite,
+        replayReadyObservationSet(suite, replayReadyCandidateTraceV2),
+        { requireReplayReady: true },
+    );
+
+    const baseline = replayBaselineCandidateCapture(capture);
+    const contender = replayCandidateCapture(capture, contenderPolicy());
+    const primary = contender.tasks[0].mcpAttempts[0].candidates.find(
+        (candidate) => candidate.candidateId === "candidate-1",
+    );
+
+    assert.equal(capture.version, 2);
+    assert.equal(
+        capture.captures[0].candidateTrace.schemaVersion,
+        "search_candidate_survival_v2",
+    );
+    assert.equal(baseline.version, 2);
+    assert.equal(contender.version, 2);
+    assert.equal(contender.baselineReproduced, true);
+    assert.deepEqual(capture.captures[0].candidateTrace.scorePolicy, {
+        finalScorePolicyId: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+        entrypointOwnerMaxContribution: SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    });
+    assert.equal(capture.captures[0].entrypointOwnerEvidence.status, "resolved");
+    assert.deepEqual(
+        capture.captures[0].entrypointOwnerEvidence.publicationBinding,
+        ENTRYPOINT_PUBLICATION_BINDING,
+    );
+    assert.match(
+        capture.captures[0].entrypointOwnerEvidenceDigest,
+        /^[0-9a-f]{64}$/,
+    );
+    assert.equal(
+        primary.entrypointOwnerScoreBoost,
+        SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    );
+    assert.equal(primary.entrypointOwnerScoreReason, "manifest_entrypoint_owner");
+    assert.equal(
+        primary.finalScore,
+        primary.fusionScore
+            + primary.lexicalScore
+            + SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+    );
+
+    const inconsistentObservations = replayReadyObservationSet(
+        suite,
+        replayReadyCandidateTraceV2,
+    );
+    for (const observation of inconsistentObservations.observations) {
+        const signals = observation.response.hints.debugSearch.candidateSurvival.stages.find(
+            (stage) => stage.stage === "mcp_replay_signals",
+        );
+        signals.candidates[0].replay.entrypointOwnerScoreReason = "not_applicable";
+        observation.responseBytes = Buffer.byteLength(
+            JSON.stringify(observation.response),
+            "utf8",
+        );
+    }
+    assert.throws(
+        () => buildSearchCandidateCapture(suite, inconsistentObservations),
+        /owner score and reason are inconsistent/,
+    );
+
+    const overCapObservations = replayReadyObservationSet(
+        suite,
+        replayReadyCandidateTraceV2,
+    );
+    for (const observation of overCapObservations.observations) {
+        const signals = observation.response.hints.debugSearch.candidateSurvival.stages.find(
+            (stage) => stage.stage === "mcp_replay_signals",
+        );
+        signals.candidates[0].replay.entrypointOwnerScoreBoost =
+            SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST + 1;
+        observation.responseBytes = Buffer.byteLength(
+            JSON.stringify(observation.response),
+            "utf8",
+        );
+    }
+    assert.throws(
+        () => buildSearchCandidateCapture(suite, overCapObservations),
+        /exceeds the captured policy cap/,
+    );
+
+    const incompatibleEvidence = replayReadyObservationSet(
+        suite,
+        replayReadyCandidateTraceV2,
+    );
+    for (const observation of incompatibleEvidence.observations) {
+        observation.response.hints.debugSearch
+            .entrypointOwnerEvidence.publicationBinding.collectionName = "other-generation";
+        observation.responseBytes = Buffer.byteLength(
+            JSON.stringify(observation.response),
+            "utf8",
+        );
+    }
+    assert.throws(
+        () => buildSearchCandidateCapture(suite, incompatibleEvidence),
+        /does not match the captured vector publication/,
+    );
+
+    const incompatibleReplayPolicy = structuredClone(capture);
+    incompatibleReplayPolicy.captures[0]
+        .candidateTrace.scorePolicy.entrypointOwnerMaxContribution += 0.01;
+    incompatibleReplayPolicy.captures[0].candidateTraceDigest = sha256Canonical(
+        incompatibleReplayPolicy.captures[0].candidateTrace,
+    );
+    const { sha256: _incompatibleDigest, ...unsignedIncompatibleReplayPolicy } =
+        incompatibleReplayPolicy;
+    incompatibleReplayPolicy.sha256 = sha256Canonical(unsignedIncompatibleReplayPolicy);
+    assert.throws(
+        () => replayBaselineCandidateCapture(incompatibleReplayPolicy),
+        /cap is incompatible/,
+    );
 });
 
 test("exact-registry hits reproduce as policy-invariant routes without fusion work", () => {
@@ -683,6 +911,8 @@ test("contender replay proves baseline first and carries a conditional OR candid
     );
     const replay = replayCandidateCapture(capture, contenderPolicy());
 
+    assert.equal(capture.version, 1);
+    assert.equal(replay.version, 1);
     assert.equal(replay.baselineReproduced, true);
     assert.equal(replay.providerValidationRequired, true);
     assert.deepEqual(replay.replayCoverage, {
@@ -747,6 +977,47 @@ test("contender tuning replay does not process validation captures", () => {
     const replay = replayCandidateCapture(capture, contenderPolicy(), { taskPrefix: "tuning" });
     assert.equal(replay.taskPrefix, "tuning");
     assert.deepEqual(replay.tasks.map((task) => task.taskId), ["tuning-ignore-owner"]);
+});
+
+test("task-suite v2 replay selects explicit splits independently of task IDs", () => {
+    const template = taskSuite().tasks[0];
+    const suite = {
+        version: 2,
+        tasks: [
+            { ...structuredClone(template), id: "arbitrary-a", split: "tuning" },
+            { ...structuredClone(template), id: "arbitrary-b", split: "held_out" },
+        ],
+    };
+    for (const task of suite.tasks) {
+        task.workload.invocations[0].args.debugCandidateLimit = 160;
+    }
+    const capture = buildSearchCandidateCapture(
+        suite,
+        replayReadyObservationSet(suite, replayReadyCandidateTraceV2),
+        { requireReplayReady: true },
+    );
+
+    const replay = replayCandidateCapture(capture, contenderPolicy(), {
+        split: "held_out",
+    });
+
+    assert.equal(capture.taskSuiteVersion, 2);
+    assert.equal(capture.version, 2);
+    assert.deepEqual(
+        capture.captures.map(({ taskId, split }) => ({ taskId, split })),
+        [
+            { taskId: "arbitrary-a", split: "tuning" },
+            { taskId: "arbitrary-b", split: "held_out" },
+        ],
+    );
+    assert.equal(replay.split, "held_out");
+    assert.deepEqual(replay.tasks.map((task) => task.taskId), ["arbitrary-b"]);
+    assert.throws(
+        () => replayCandidateCapture(capture, contenderPolicy(), {
+            taskPrefix: "tuning",
+        }),
+        /do not accept legacy taskPrefix/,
+    );
 });
 
 test("contender replay excludes a fallback candidate with a recorded diagnostic removal", () => {
@@ -828,6 +1099,7 @@ test("replay CLI binds the exact policy-file bytes and executable manifest", () 
         fs.writeFileSync(policyFile, policyBytes);
 
         const run = spawnSync(process.execPath, [
+            "--import", "tsx",
             REPLAY_SCRIPT_PATH,
             "--capture", captureFile,
             "--policy-file", policyFile,
@@ -845,6 +1117,15 @@ test("replay CLI binds the exact policy-file bytes and executable manifest", () 
     } finally {
         fs.rmSync(temp, { recursive: true, force: true });
     }
+});
+
+test("replay executable routes direct invocation through the pinned TypeScript loader", () => {
+    const executed = spawnSync(REPLAY_SCRIPT_PATH, ["--help"], {
+        encoding: "utf8",
+    });
+
+    assert.equal(executed.status, 0, executed.stderr);
+    assert.match(executed.stdout, /--import tsx/);
 });
 
 test("baseline replay rejects fusion score drift and tampered capture bytes", () => {

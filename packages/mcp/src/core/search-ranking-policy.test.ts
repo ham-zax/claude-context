@@ -56,6 +56,14 @@ function evidence(
         resolutionComplete: input.resolutionComplete
             ?? declaredOwnerCount === owners.length,
         manifestSourceIdentity: "a".repeat(64),
+        publicationBinding: {
+            collectionName: "collection",
+            markerRunId: "marker",
+            policyDocumentDigest: "c".repeat(64),
+            policyHash: "d".repeat(64),
+            navigationGenerationId: "navigation",
+            symbolRegistryManifestHash: "manifest",
+        },
         publicationIdentity: "b".repeat(64),
     };
 }

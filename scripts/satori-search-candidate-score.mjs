@@ -38,8 +38,14 @@ function sha256Canonical(value) {
     return crypto.createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
 }
 
-function taskIsInSplit(taskId, splitPrefix) {
-    return splitPrefix === "all" || taskId.startsWith(`${splitPrefix}-`);
+function taskIsSelected(task, selection, taskSuiteVersion) {
+    if (taskSuiteVersion === 2) {
+        if (!["tuning", "held_out"].includes(task.split)) {
+            throw new Error(`Task '${task.taskId}' has no valid explicit split.`);
+        }
+        return selection === "all" || task.split === selection;
+    }
+    return selection === "all" || task.taskId.startsWith(`${selection}-`);
 }
 
 function replaySignalsByCandidate(taskCapture) {
@@ -80,6 +86,7 @@ function baselineTaskView(taskCapture) {
     if (taskCapture.readiness?.route === "exact_registry") {
         return {
             taskId: taskCapture.taskId,
+            ...(taskCapture.split ? { split: taskCapture.split } : {}),
             queryClass: taskCapture.queryClass,
             expected: taskCapture.expected,
             policyApplicable: false,
@@ -109,6 +116,7 @@ function baselineTaskView(taskCapture) {
     );
     return {
         taskId: taskCapture.taskId,
+        ...(taskCapture.split ? { split: taskCapture.split } : {}),
         queryClass: taskCapture.queryClass,
         expected: taskCapture.expected,
         policyApplicable: true,
@@ -128,6 +136,7 @@ function contenderTaskView(task) {
     if (task.route?.kind === "exact_registry") {
         return {
             taskId: task.taskId,
+            ...(task.split ? { split: task.split } : {}),
             queryClass: task.queryClass,
             expected: task.expected,
             policyApplicable: false,
@@ -141,6 +150,7 @@ function contenderTaskView(task) {
     const reranker = requireRecord(task.rerankerAdmission, `Task '${task.taskId}' reranker admission`);
     return {
         taskId: task.taskId,
+        ...(task.split ? { split: task.split } : {}),
         queryClass: task.queryClass,
         expected: task.expected,
         policyApplicable: true,
@@ -204,12 +214,25 @@ function scoreTask(view) {
     };
 }
 
-function summarizeTasks(tasks, splitPrefix, policyId) {
+function summarizeTasks(tasks, selection, policyId, taskSuiteVersion) {
+    if (taskSuiteVersion !== 1 && taskSuiteVersion !== 2) {
+        throw new Error("Candidate score taskSuiteVersion is unsupported.");
+    }
+    const allowedSelections = taskSuiteVersion === 2
+        ? ["tuning", "held_out", "all"]
+        : ["tuning", "validation", "all"];
+    if (!allowedSelections.includes(selection)) {
+        throw new Error(
+            taskSuiteVersion === 2
+                ? "Explicit split must be tuning, held_out, or all."
+                : "Legacy split prefix must be tuning, validation, or all.",
+        );
+    }
     const selected = tasks
-        .filter((task) => taskIsInSplit(task.taskId, splitPrefix))
+        .filter((task) => taskIsSelected(task, selection, taskSuiteVersion))
         .map(scoreTask);
     if (selected.length === 0) {
-        throw new Error(`No tasks match split prefix '${splitPrefix}'.`);
+        throw new Error(`No tasks match selection '${selection}'.`);
     }
     const summary = {
         taskCount: selected.length,
@@ -238,35 +261,50 @@ function summarizeTasks(tasks, splitPrefix, policyId) {
     const scored = {
         version: 1,
         kind: "satori_search_candidate_score",
+        taskSuiteVersion,
         policyId,
-        splitPrefix,
+        ...(taskSuiteVersion === 2 ? { split: selection } : { splitPrefix: selection }),
         summary,
         tasks: selected,
     };
     return { ...scored, sha256: sha256Canonical(scored) };
 }
 
-export function scoreBaselineCapture(captureValue, splitPrefix = "all") {
+export function scoreBaselineCapture(captureValue, selection = "all") {
     const capture = requireRecord(captureValue, "Candidate capture");
     const captures = requireArray(capture.captures, "Candidate capture tasks");
-    return summarizeTasks(captures.map(baselineTaskView), splitPrefix, "baseline");
+    const taskSuiteVersion = capture.taskSuiteVersion ?? 1;
+    return summarizeTasks(
+        captures.map(baselineTaskView),
+        selection,
+        "baseline",
+        taskSuiteVersion,
+    );
 }
 
-export function scoreContenderReplay(replayValue, splitPrefix = "all") {
+export function scoreContenderReplay(replayValue, selection = "all") {
     const replay = requireRecord(replayValue, "Candidate replay");
     if (replay.baselineReproduced !== true) {
         throw new Error("Contender score requires baselineReproduced=true.");
     }
     return summarizeTasks(
         requireArray(replay.tasks, "Candidate replay tasks").map(contenderTaskView),
-        splitPrefix,
+        selection,
         requireString(replay.policy?.policyId, "Candidate replay policyId"),
+        replay.taskSuiteVersion ?? 1,
     );
 }
 
 export function compareCandidateScores(baseline, contender) {
-    if (baseline.splitPrefix !== contender.splitPrefix) {
-        throw new Error("Candidate scores must use the same split prefix.");
+    const baselineSelection = baseline.taskSuiteVersion === 2
+        ? baseline.split
+        : baseline.splitPrefix;
+    const contenderSelection = contender.taskSuiteVersion === 2
+        ? contender.split
+        : contender.splitPrefix;
+    if (baseline.taskSuiteVersion !== contender.taskSuiteVersion
+        || baselineSelection !== contenderSelection) {
+        throw new Error("Candidate scores must use the same task-suite split authority.");
     }
     const baselineById = new Map(baseline.tasks.map((task) => [task.taskId, task]));
     const contenderById = new Map(contender.tasks.map((task) => [task.taskId, task]));
@@ -290,7 +328,10 @@ export function compareCandidateScores(baseline, contender) {
     const comparison = {
         version: 1,
         kind: "satori_search_candidate_score_comparison",
-        splitPrefix: baseline.splitPrefix,
+        taskSuiteVersion: baseline.taskSuiteVersion,
+        ...(baseline.taskSuiteVersion === 2
+            ? { split: baselineSelection }
+            : { splitPrefix: baselineSelection }),
         baselinePolicyId: baseline.policyId,
         contenderPolicyId: contender.policyId,
         ownerSurvivalGain: contender.summary.policyApplicableOwnerSurvivalCount
@@ -311,17 +352,19 @@ export function compareCandidateScores(baseline, contender) {
 }
 
 function usage() {
-    return "Usage: node scripts/satori-search-candidate-score.mjs --capture <capture.json> [--replay <replay.json>] [--split-prefix <tuning|validation|all>] [--out <score.json>]";
+    return "Usage: node scripts/satori-search-candidate-score.mjs --capture <capture.json> [--replay <replay.json>] [--split <tuning|held_out|all> | --split-prefix <tuning|validation|all>] [--out <score.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
     let captureFile;
     let replayFile;
-    let splitPrefix = "all";
+    let split;
+    let splitPrefix;
     let outFile;
     for (let index = 0; index < argv.length; index += 1) {
         if (argv[index] === "--capture") captureFile = path.resolve(argv[++index]);
         else if (argv[index] === "--replay") replayFile = path.resolve(argv[++index]);
+        else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--split-prefix") splitPrefix = argv[++index];
         else if (argv[index] === "--out") outFile = path.resolve(argv[++index]);
         else if (argv[index] === "--help") {
@@ -330,8 +373,8 @@ export function main(argv = process.argv.slice(2)) {
         } else throw new Error(`Unknown argument: ${argv[index]}`);
     }
     if (!captureFile) throw new Error("--capture is required.");
-    if (!["tuning", "validation", "all"].includes(splitPrefix)) {
-        throw new Error("--split-prefix must be tuning, validation, or all.");
+    if (split !== undefined && splitPrefix !== undefined) {
+        throw new Error("--split and --split-prefix are mutually exclusive.");
     }
     const capture = JSON.parse(fs.readFileSync(captureFile, "utf8"));
     const replay = replayFile
@@ -340,10 +383,11 @@ export function main(argv = process.argv.slice(2)) {
     if (replay && replay.sourceCaptureSha256 !== capture.sha256) {
         throw new Error("Candidate replay is not bound to the supplied capture.");
     }
-    const baseline = scoreBaselineCapture(capture, splitPrefix);
+    const selection = split ?? splitPrefix ?? "all";
+    const baseline = scoreBaselineCapture(capture, selection);
     let output = baseline;
     if (replay) {
-        const contender = scoreContenderReplay(replay, splitPrefix);
+        const contender = scoreContenderReplay(replay, selection);
         output = {
             version: 1,
             kind: "satori_search_candidate_scored_comparison",

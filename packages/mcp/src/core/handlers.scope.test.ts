@@ -907,7 +907,7 @@ function assertClosedDebugProjection(
     assert.ok(hints.debugSearch.readiness);
     assert.ok(hints.debugSearch.queryIntent);
     if (expectCandidateSurvival) {
-        assert.equal(hints.debugSearch.candidateSurvival?.schemaVersion, 'search_candidate_survival_v1');
+        assert.equal(hints.debugSearch.candidateSurvival?.schemaVersion, 'search_candidate_survival_v2');
         const queryEmbeddings = hints.debugSearch.candidateSurvival?.queryEmbeddings ?? [];
         assert.ok(Array.isArray(queryEmbeddings));
         if (hints.debugSearch.candidateSurvival?.stages.some(
@@ -8086,6 +8086,18 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
                 true,
                 query,
             );
+            assert.deepEqual(
+                payload.hints?.debugSearch?.entrypointOwnerEvidence?.publicationBinding,
+                {
+                    collectionName: vectorReceipt.collectionName,
+                    markerRunId: marker.runId,
+                    policyDocumentDigest: vectorReceipt.policyDocumentDigest,
+                    policyHash,
+                    navigationGenerationId: navigationGeneration.generationId,
+                    symbolRegistryManifestHash: navigationGeneration.manifestHash,
+                },
+                query,
+            );
             assert.equal(
                 payload.results[ownerRank].debug?.entrypointOwnerScoreReason,
                 'manifest_entrypoint_owner',
@@ -8200,23 +8212,52 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
                 baselinePayload.hints?.debugSearch?.candidateSurvival?.removals ?? [],
             ),
         );
-        const disclosedResultIdentities = (
-            results: Array<{
-                target?: {
-                    file?: string;
-                    symbolId?: string;
-                    span?: { startLine?: number; endLine?: number };
-                };
-            }>,
-        ) => results.map((result) => JSON.stringify([
+        type DisclosedResult = {
+            target?: {
+                file?: string;
+                symbolId?: string;
+                span?: { startLine?: number; endLine?: number };
+            };
+        };
+        const disclosedResultIdentity = (result: DisclosedResult) => JSON.stringify([
             result.target?.file ?? null,
             result.target?.symbolId ?? null,
             result.target?.span?.startLine ?? null,
             result.target?.span?.endLine ?? null,
-        ])).sort();
+        ]);
+        const orderedDisclosedResultIdentities = (results: DisclosedResult[]) =>
+            results.map(disclosedResultIdentity);
+        const disclosedResultMembership = (results: DisclosedResult[]) =>
+            orderedDisclosedResultIdentities(results).sort();
         assert.deepEqual(
-            disclosedResultIdentities(tracedPayload.results ?? []),
-            disclosedResultIdentities(baselinePayload.results ?? []),
+            disclosedResultMembership(tracedPayload.results ?? []),
+            disclosedResultMembership(baselinePayload.results ?? []),
+        );
+        const tracedOrder = orderedDisclosedResultIdentities(tracedPayload.results ?? []);
+        const baselineOrder = orderedDisclosedResultIdentities(baselinePayload.results ?? []);
+        const tracedOwner = (tracedPayload.results as DisclosedResult[]).find(
+            (result) => result.target?.symbolId === canonicalOwner.symbolInstanceId,
+        );
+        assert.ok(tracedOwner);
+        const ownerIdentity = disclosedResultIdentity(tracedOwner);
+        const ownerBaselineRank = baselineOrder.indexOf(ownerIdentity);
+        const ownerTracedRank = tracedOrder.indexOf(ownerIdentity);
+        const rankTransitions = baselineOrder.map((identity, before) => ({
+            identity,
+            before: before + 1,
+            after: tracedOrder.indexOf(identity) + 1,
+        }));
+        assert.equal(ownerBaselineRank >= 0, true);
+        assert.equal(ownerTracedRank >= 0, true);
+        assert.equal(
+            ownerTracedRank < ownerBaselineRank,
+            true,
+            JSON.stringify(rankTransitions),
+        );
+        assert.deepEqual(
+            tracedOrder.filter((identity) => identity !== ownerIdentity),
+            baselineOrder.filter((identity) => identity !== ownerIdentity),
+            JSON.stringify(rankTransitions),
         );
         const incompatibleHandlers = createHandlers(
             repoPath,

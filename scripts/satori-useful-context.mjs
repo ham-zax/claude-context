@@ -22,6 +22,7 @@ const COMPARISON_CLASSES = new Set([
 ]);
 const PHASES = new Set(["cold", "warm"]);
 const PHASE_ORDER = ["cold", "warm"];
+const TASK_SPLITS = new Set(["tuning", "held_out"]);
 const STATUSES = new Set(["ok", "zero_result", "fallback", "error"]);
 const BASELINE_KEYS = ["maxLatencyMs", "maxPayloadBytes", "maxContextBytes"];
 const READINESS_PROOF_MODES = new Set(["cold", "warm"]);
@@ -252,8 +253,8 @@ function requireWorkload(value, label) {
 
 export function validateTaskSuite(value) {
     const suite = requireRecord(value, "Task suite");
-    if (suite.version !== 1) {
-        throw new Error("Task suite version must be 1.");
+    if (suite.version !== 1 && suite.version !== 2) {
+        throw new Error("Task suite version must be 1 or 2.");
     }
     if (!Array.isArray(suite.tasks) || suite.tasks.length === 0) {
         throw new Error("Task suite tasks must be a non-empty array.");
@@ -301,9 +302,19 @@ export function validateTaskSuite(value) {
                 throw new Error(`tasks[${index}].comparisonClass is unsupported.`);
             }
         }
+        let split;
+        if (suite.version === 2) {
+            split = requireNonEmptyString(task.split, `tasks[${index}].split`);
+            if (!TASK_SPLITS.has(split)) {
+                throw new Error(`tasks[${index}].split is unsupported.`);
+            }
+        } else if (task.split !== undefined) {
+            throw new Error(`tasks[${index}].split requires task suite version 2.`);
+        }
 
         const normalized = {
             id,
+            ...(split ? { split } : {}),
             queryClass: task.queryClass,
             ...(comparisonClass !== undefined ? { comparisonClass } : {}),
             language: requireNonEmptyString(task.language, `tasks[${index}].language`),
@@ -331,7 +342,7 @@ export function validateTaskSuite(value) {
         return normalized;
     });
 
-    const normalized = { version: 1, tasks };
+    const normalized = { version: suite.version, tasks };
     if (suite.name !== undefined) {
         normalized.name = requireNonEmptyString(suite.name, "Task suite name");
     }

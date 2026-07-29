@@ -11,6 +11,10 @@ import type {
     SearchGroupResult,
 } from "./search-types.js";
 import { SEARCH_MAX_DIAGNOSTIC_CANDIDATES } from "./search-constants.js";
+import {
+    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+    SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+} from "./search-ranking-policy.js";
 
 export const SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE = SEARCH_MAX_DIAGNOSTIC_CANDIDATES;
 
@@ -32,6 +36,7 @@ type TraceableCandidate = {
     changedFilesMultiplier?: number;
     agentFitMultiplier?: number;
     entrypointOwnerScoreBoost?: number;
+    entrypointOwnerScoreReason?: string;
     exactLexicalMatch?: boolean;
     passesMatchedMust?: boolean;
     rerankFamilyId?: string;
@@ -87,6 +92,7 @@ function buildCandidateOccurrence(input: {
         && Number.isFinite(input.candidate.changedFilesMultiplier)
         && Number.isFinite(input.candidate.agentFitMultiplier)
         && Number.isFinite(input.candidate.entrypointOwnerScoreBoost)
+        && typeof input.candidate.entrypointOwnerScoreReason === "string"
         && typeof input.candidate.exactLexicalMatch === "boolean"
         && typeof input.candidate.passesMatchedMust === "boolean"
         && typeof input.candidate.rerankFamilyId === "string"
@@ -97,6 +103,7 @@ function buildCandidateOccurrence(input: {
             changedFilesMultiplier: input.candidate.changedFilesMultiplier as number,
             agentFitMultiplier: input.candidate.agentFitMultiplier as number,
             entrypointOwnerScoreBoost: input.candidate.entrypointOwnerScoreBoost as number,
+            entrypointOwnerScoreReason: input.candidate.entrypointOwnerScoreReason,
             exactLexicalMatch: input.candidate.exactLexicalMatch,
             passesMatchedMust: input.candidate.passesMatchedMust,
             rerankFamilyId: input.candidate.rerankFamilyId,
@@ -157,7 +164,11 @@ function appendStage(
 
 export function createSearchCandidateSurvivalTrace(): SearchCandidateSurvivalDebug {
     return {
-        schemaVersion: "search_candidate_survival_v1",
+        schemaVersion: "search_candidate_survival_v2",
+        scorePolicy: {
+            finalScorePolicyId: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+            entrypointOwnerMaxContribution: SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+        },
         maxEntriesPerStage: SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
         corePasses: [],
         queryEmbeddings: [],

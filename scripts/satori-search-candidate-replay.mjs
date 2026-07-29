@@ -1,17 +1,50 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --import tsx
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import {
+    computeSearchCandidateFinalScore,
+    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+    SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+} from "../packages/mcp/src/core/search-ranking-policy.ts";
 import { canonicalJson } from "./satori-useful-context.mjs";
 
 const CORE_RRF_K = 100;
 const SCORE_TOLERANCE = 1e-12;
+const TRACE_SCHEMA_V1 = "search_candidate_survival_v1";
+const TRACE_SCHEMA_V2 = "search_candidate_survival_v2";
+const ENTRYPOINT_OWNER_SCORE_REASONS = new Set([
+    "manifest_entrypoint_owner",
+    "not_applicable",
+]);
 const REPLAY_SCRIPT_PATH = fileURLToPath(import.meta.url);
 const CANONICAL_JSON_HELPER_PATH = fileURLToPath(
     new URL("./satori-useful-context.mjs", import.meta.url),
 );
+const PRODUCTION_SCORING_OWNER_PATH = fileURLToPath(
+    new URL("../packages/mcp/src/core/search-ranking-policy.ts", import.meta.url),
+);
+const TSX_LOADER_PATH = fileURLToPath(import.meta.resolve("tsx"));
+const REPOSITORY_LOCKFILE_PATH = fileURLToPath(new URL("../pnpm-lock.yaml", import.meta.url));
+
+function resolvePackageManifest(startPath, expectedName) {
+    let current = path.dirname(startPath);
+    while (current !== path.dirname(current)) {
+        const manifestPath = path.join(current, "package.json");
+        if (fs.existsSync(manifestPath)) {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+            if (manifest.name === expectedName) {
+                return { manifestPath, manifest };
+            }
+        }
+        current = path.dirname(current);
+    }
+    throw new Error(`Unable to resolve package manifest for '${expectedName}'.`);
+}
+
+const TSX_PACKAGE = resolvePackageManifest(TSX_LOADER_PATH, "tsx");
 
 function sha256FileArtifact(file, role) {
     const bytes = fs.readFileSync(file);
@@ -26,6 +59,10 @@ function sha256FileArtifact(file, role) {
 const REPLAY_EXECUTABLE_ARTIFACTS = Object.freeze([
     Object.freeze(sha256FileArtifact(REPLAY_SCRIPT_PATH, "replay_executable")),
     Object.freeze(sha256FileArtifact(CANONICAL_JSON_HELPER_PATH, "canonical_json_helper")),
+    Object.freeze(sha256FileArtifact(PRODUCTION_SCORING_OWNER_PATH, "production_scoring_owner")),
+    Object.freeze(sha256FileArtifact(TSX_LOADER_PATH, "typescript_loader")),
+    Object.freeze(sha256FileArtifact(TSX_PACKAGE.manifestPath, "typescript_loader_manifest")),
+    Object.freeze(sha256FileArtifact(REPOSITORY_LOCKFILE_PATH, "dependency_lockfile")),
 ]);
 
 function isRecord(value) {
@@ -130,6 +167,11 @@ function buildReplayRuntimeManifest(capture, policyValue, options = {}) {
             version: process.version,
             platform: process.platform,
             arch: process.arch,
+        },
+        typescriptLoader: {
+            name: "tsx",
+            version: requireString(TSX_PACKAGE.manifest.version, "tsx package version"),
+            resolvedArtifact: path.basename(TSX_LOADER_PATH),
         },
         artifacts: REPLAY_EXECUTABLE_ARTIFACTS.map((artifact) => ({ ...artifact })),
         policySource,
@@ -660,6 +702,44 @@ function replayPostFusionLocalScoring(capture, attempt) {
             replay.agentFitMultiplier,
             `Task '${capture.taskId}' candidate '${candidateId}' agentFitMultiplier`,
         );
+        const entrypointOwnerScoreBoost = capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2
+            ? requireNonNegativeFinite(
+                replay.entrypointOwnerScoreBoost,
+                `Task '${capture.taskId}' candidate '${candidateId}' entrypointOwnerScoreBoost`,
+            )
+            : 0;
+        if (
+            capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2
+            && entrypointOwnerScoreBoost
+                > capture.candidateTrace.scorePolicy.entrypointOwnerMaxContribution
+        ) {
+            throw new Error(
+                `Task '${capture.taskId}' candidate '${candidateId}' entrypointOwnerScoreBoost exceeds the captured policy cap.`,
+            );
+        }
+        const entrypointOwnerScoreReason = capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2
+            ? requireString(
+                replay.entrypointOwnerScoreReason,
+                `Task '${capture.taskId}' candidate '${candidateId}' entrypointOwnerScoreReason`,
+            )
+            : "legacy_not_recorded";
+        if (capture.candidateTrace.schemaVersion === TRACE_SCHEMA_V2) {
+            if (!ENTRYPOINT_OWNER_SCORE_REASONS.has(entrypointOwnerScoreReason)) {
+                throw new Error(
+                    `Task '${capture.taskId}' candidate '${candidateId}' has an unsupported entrypointOwnerScoreReason.`,
+                );
+            }
+            if (
+                (entrypointOwnerScoreReason === "not_applicable"
+                    && entrypointOwnerScoreBoost !== 0)
+                || (entrypointOwnerScoreReason === "manifest_entrypoint_owner"
+                    && entrypointOwnerScoreBoost <= 0)
+            ) {
+                throw new Error(
+                    `Task '${capture.taskId}' candidate '${candidateId}' has inconsistent entrypoint owner scoring evidence.`,
+                );
+            }
+        }
         if (typeof replay.exactLexicalMatch !== "boolean"
             || typeof replay.passesMatchedMust !== "boolean") {
             throw new Error(`Task '${capture.taskId}' candidate '${candidateId}' has invalid replay flags.`);
@@ -675,6 +755,8 @@ function replayPostFusionLocalScoring(capture, attempt) {
             pathMultiplier,
             changedFilesMultiplier,
             agentFitMultiplier,
+            entrypointOwnerScoreBoost,
+            entrypointOwnerScoreReason,
             exactLexicalMatch: replay.exactLexicalMatch,
             passesMatchedMust: replay.passesMatchedMust,
             rerankFamilyId: requireString(
@@ -687,10 +769,14 @@ function replayPostFusionLocalScoring(capture, attempt) {
             ),
             symbolLabel: replay.symbolLabel ?? null,
             symbolId: replay.symbolId ?? null,
-            finalScore: (fusionScore + lexicalScore)
-                * pathMultiplier
-                * changedFilesMultiplier
-                * agentFitMultiplier,
+            finalScore: computeSearchCandidateFinalScore({
+                fusionScore,
+                lexicalScore,
+                pathMultiplier,
+                changedFilesMultiplier,
+                agentFitMultiplier,
+                entrypointOwnerScoreBoost,
+            }),
         });
     }
     const rerank = requireRecord(
@@ -930,12 +1016,19 @@ function replayPolicyMcpAttempt(capture, attemptStage, corePasses, policy) {
 function replayTaskCapture(capture) {
     const record = requireRecord(capture, "Task capture");
     const trace = requireRecord(record.candidateTrace, `Task '${record.taskId}' candidateTrace`);
-    for (const [field, value] of [
+    const digestedFields = [
         ["queryPlanDigest", record.queryPlan],
         ["passConfigurationDigest", record.passConfiguration],
         ["candidateTraceDigest", trace],
         ["rankedResultIdentityDigest", record.rankedResults],
-    ]) {
+    ];
+    if (trace.schemaVersion === TRACE_SCHEMA_V2) {
+        digestedFields.push([
+            "entrypointOwnerEvidenceDigest",
+            record.entrypointOwnerEvidence,
+        ]);
+    }
+    for (const [field, value] of digestedFields) {
         if (sha256Canonical(value) !== record[field]) {
             throw new Error(`Task '${record.taskId}' ${field} does not match its contents.`);
         }
@@ -958,6 +1051,7 @@ function replayTaskCapture(capture) {
         }
         return {
             taskId: record.taskId,
+            ...(record.split ? { split: record.split } : {}),
             route: {
                 kind: "exact_registry",
                 fusionReplay: "not_applicable",
@@ -1051,6 +1145,7 @@ function replayTaskCapture(capture) {
     }));
     return {
         taskId: record.taskId,
+        ...(record.split ? { split: record.split } : {}),
         route: { kind: "fusion", fusionReplay: "exact" },
         policyAffected: true,
         corePasses,
@@ -1072,9 +1167,70 @@ function replayTaskCapture(capture) {
     };
 }
 
+function assertProductionScorePolicyCompatibility(taskCapture) {
+    if (taskCapture.candidateTrace?.schemaVersion !== TRACE_SCHEMA_V2) return;
+    const scorePolicy = requireRecord(
+        taskCapture.candidateTrace.scorePolicy,
+        `Task '${taskCapture.taskId}' scorePolicy`,
+    );
+    if (scorePolicy.finalScorePolicyId !== SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID) {
+        throw new Error(
+            `Task '${taskCapture.taskId}' final-score policy is incompatible with this replay runtime.`,
+        );
+    }
+    if (scorePolicy.entrypointOwnerMaxContribution
+        !== SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST) {
+        throw new Error(
+            `Task '${taskCapture.taskId}' entrypoint-owner cap is incompatible with this replay runtime.`,
+        );
+    }
+}
+
+function selectReplayTasks(capture, options) {
+    const taskSuiteVersion = capture.taskSuiteVersion ?? 1;
+    if (taskSuiteVersion === 2) {
+        if (options.taskPrefix !== undefined) {
+            throw new Error("Explicit-split captures do not accept legacy taskPrefix selection.");
+        }
+        const split = options.split ?? "all";
+        if (!["tuning", "held_out", "all"].includes(split)) {
+            throw new Error("Replay split must be tuning, held_out, or all.");
+        }
+        if (capture.captures.some((taskCapture) => (
+            !["tuning", "held_out"].includes(taskCapture.split)
+        ))) {
+            throw new Error("Task-suite v2 captures require an explicit split on every task.");
+        }
+        return {
+            selectedCaptures: capture.captures.filter((taskCapture) => (
+                split === "all" || taskCapture.split === split
+            )),
+            selection: { split },
+            taskSuiteVersion,
+        };
+    }
+    if (taskSuiteVersion !== 1) {
+        throw new Error("Candidate capture taskSuiteVersion is unsupported.");
+    }
+    if (options.split !== undefined) {
+        throw new Error("Legacy task-suite captures require taskPrefix selection.");
+    }
+    const taskPrefix = options.taskPrefix ?? "all";
+    if (!["tuning", "validation", "all"].includes(taskPrefix)) {
+        throw new Error("Replay taskPrefix must be tuning, validation, or all.");
+    }
+    return {
+        selectedCaptures: capture.captures.filter((taskCapture) => (
+            taskPrefix === "all" || taskCapture.taskId.startsWith(`${taskPrefix}-`)
+        )),
+        selection: { taskPrefix },
+        taskSuiteVersion,
+    };
+}
+
 export function replayBaselineCandidateCapture(value, options = {}) {
     const capture = requireRecord(value, "Candidate capture");
-    if (capture.version !== 1 || capture.kind !== "satori_search_candidate_capture") {
+    if (![1, 2].includes(capture.version) || capture.kind !== "satori_search_candidate_capture") {
         throw new Error("Candidate capture version or kind is unsupported.");
     }
     const suppliedDigest = requireString(capture.sha256, "Candidate capture sha256");
@@ -1087,11 +1243,22 @@ export function replayBaselineCandidateCapture(value, options = {}) {
         throw new Error("Baseline replay requires policyId=baseline.");
     }
     if (!Array.isArray(capture.captures)) throw new Error("Candidate capture tasks must be an array.");
+    const expectedTraceSchema = capture.version === 2 ? TRACE_SCHEMA_V2 : TRACE_SCHEMA_V1;
+    if (capture.captures.some((taskCapture) => (
+        taskCapture.candidateTrace?.schemaVersion !== expectedTraceSchema
+    ))) {
+        throw new Error(
+            `Candidate capture version ${capture.version} requires ${expectedTraceSchema}.`,
+        );
+    }
+    selectReplayTasks(capture, {});
+    capture.captures.forEach(assertProductionScorePolicyCompatibility);
     const tasks = capture.captures.map(replayTaskCapture);
     const replayRuntime = buildReplayRuntimeManifest(capture, "baseline", options);
     const replay = {
-        version: 1,
+        version: capture.version,
         kind: "satori_search_candidate_baseline_replay",
+        taskSuiteVersion: capture.taskSuiteVersion ?? 1,
         sourceCaptureSha256: suppliedDigest,
         policyId: "baseline",
         replayRuntime,
@@ -1114,17 +1281,14 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
         );
     }
     const policy = normalizeReplayPolicy(policyValue);
-    const taskPrefix = options.taskPrefix ?? "all";
-    if (!["tuning", "validation", "all"].includes(taskPrefix)) {
-        throw new Error("Replay taskPrefix must be tuning, validation, or all.");
-    }
+    const { selectedCaptures, selection, taskSuiteVersion } = selectReplayTasks(
+        capture,
+        options,
+    );
     const replayRuntime = buildReplayRuntimeManifest(capture, policy, options);
     const baselineByTaskId = new Map(baseline.tasks.map((task) => [task.taskId, task]));
-    const selectedCaptures = capture.captures.filter((taskCapture) => (
-        taskPrefix === "all" || taskCapture.taskId.startsWith(`${taskPrefix}-`)
-    ));
     if (selectedCaptures.length === 0) {
-        throw new Error(`Candidate capture has no tasks for prefix '${taskPrefix}'.`);
+        throw new Error("Candidate capture has no tasks for the requested selection.");
     }
     const tasks = selectedCaptures.map((taskCapture) => {
         if (taskCapture.readiness?.route === "exact_registry") {
@@ -1134,6 +1298,7 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
             }
             return {
                 taskId: taskCapture.taskId,
+                ...(taskCapture.split ? { split: taskCapture.split } : {}),
                 queryClass: taskCapture.queryClass,
                 language: taskCapture.language,
                 expected: taskCapture.expected,
@@ -1179,6 +1344,7 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
         const rerankerAdmission = replayRerankerAdmission(taskCapture, localAttempts.at(-1));
         return {
             taskId: taskCapture.taskId,
+            ...(taskCapture.split ? { split: taskCapture.split } : {}),
             queryClass: taskCapture.queryClass,
             language: taskCapture.language,
             expected: taskCapture.expected,
@@ -1210,6 +1376,8 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
                     rank: rankIndex + 1,
                     fusionScore: candidate.fusionScore,
                     lexicalScore: candidate.lexicalScore,
+                    entrypointOwnerScoreBoost: candidate.entrypointOwnerScoreBoost,
+                    entrypointOwnerScoreReason: candidate.entrypointOwnerScoreReason,
                     finalScore: candidate.finalScore,
                     passes: candidate.passes,
                 })),
@@ -1231,14 +1399,15 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
         };
     });
     const replay = {
-        version: 1,
+        version: capture.version,
         kind: "satori_search_candidate_policy_replay",
+        taskSuiteVersion,
         sourceCaptureSha256: capture.sha256,
         baselineReplaySha256: baseline.sha256,
         baselineReproduced: true,
         policy,
         policySha256: sha256Canonical(policy),
-        taskPrefix,
+        ...selection,
         replayRuntime,
         providerValidationRequired: true,
         replayCoverage: {
@@ -1260,17 +1429,19 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
 }
 
 function usage() {
-    return "Usage: node scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--task-prefix <tuning|validation|all>] [--out <replay.json>]";
+    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--out <replay.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
     let captureFile;
     let policyFile;
-    let taskPrefix = "all";
+    let split;
+    let taskPrefix;
     let outFile;
     for (let index = 0; index < argv.length; index += 1) {
         if (argv[index] === "--capture") captureFile = path.resolve(argv[++index]);
         else if (argv[index] === "--policy-file") policyFile = path.resolve(argv[++index]);
+        else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--task-prefix") taskPrefix = argv[++index];
         else if (argv[index] === "--out") outFile = path.resolve(argv[++index]);
         else if (argv[index] === "--help") {
@@ -1285,7 +1456,8 @@ export function main(argv = process.argv.slice(2)) {
         ? JSON.parse(policySourceBytes.toString("utf8"))
         : "baseline";
     const replay = replayCandidateCapture(capture, policy, {
-        taskPrefix,
+        ...(split !== undefined ? { split } : {}),
+        ...(taskPrefix !== undefined ? { taskPrefix } : {}),
         ...(policySourceBytes ? { policySourceBytes } : {}),
         ...(policyFile ? { policySourceFileName: policyFile } : {}),
     });

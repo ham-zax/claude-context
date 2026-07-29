@@ -142,6 +142,40 @@ test("validateTaskSuite accepts version-1 suite and returns a normalized copy", 
     assert.deepEqual(suite, original);
 });
 
+test("validateTaskSuite version 2 requires explicit tuning or held-out authority", () => {
+    const normalized = validateTaskSuite({
+        version: 2,
+        tasks: [
+            baseTask({ id: "arbitrary-a", split: "tuning" }),
+            baseTask({ id: "arbitrary-b", split: "held_out" }),
+        ],
+    });
+
+    assert.equal(normalized.version, 2);
+    assert.deepEqual(
+        normalized.tasks.map(({ id, split }) => ({ id, split })),
+        [
+            { id: "arbitrary-a", split: "tuning" },
+            { id: "arbitrary-b", split: "held_out" },
+        ],
+    );
+    assert.throws(
+        () => validateTaskSuite({ version: 2, tasks: [baseTask()] }),
+        /split/,
+    );
+    assert.throws(
+        () => validateTaskSuite({
+            version: 2,
+            tasks: [baseTask({ split: "validation" })],
+        }),
+        /split/,
+    );
+    assert.throws(
+        () => validateTaskSuite(minimalSuite([baseTask({ split: "tuning" })])),
+        /version 2/,
+    );
+});
+
 test("version-1 observations preserve explicit absence of source evidence", () => {
     const normalized = validateObservationSet(
         minimalObservations(pairedObservations([baseObservation()]).observations),
@@ -169,7 +203,7 @@ test("callsToSource must identify an actual tool call", () => {
 });
 
 test("validateTaskSuite rejects wrong version, empty tasks, and duplicate ids", () => {
-    assert.throws(() => validateTaskSuite({ version: 2, tasks: [baseTask()] }), /version/i);
+    assert.throws(() => validateTaskSuite({ version: 3, tasks: [baseTask()] }), /version/i);
     assert.throws(() => validateTaskSuite({ version: 1, tasks: [] }), /non-empty|empty/i);
     assert.throws(
         () => validateTaskSuite(minimalSuite([baseTask({ id: "x" }), baseTask({ id: "x" })])),

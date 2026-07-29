@@ -11,8 +11,23 @@ import {
 } from "./satori-useful-context.mjs";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const TRACE_SCHEMA = "search_candidate_survival_v1";
-const CAPTURE_VERSION = 1;
+const TRACE_SCHEMA_V1 = "search_candidate_survival_v1";
+const TRACE_SCHEMA_V2 = "search_candidate_survival_v2";
+const SUPPORTED_TRACE_SCHEMAS = new Set([TRACE_SCHEMA_V1, TRACE_SCHEMA_V2]);
+const ENTRYPOINT_OWNER_SCORE_REASONS = new Set([
+    "manifest_entrypoint_owner",
+    "not_applicable",
+]);
+const ENTRYPOINT_OWNER_EVIDENCE_STATUSES = new Set([
+    "resolved",
+    "manifest_absent",
+    "manifest_too_large",
+    "manifest_entry_limit_exceeded",
+    "unsupported_manifest",
+    "no_resolved_owners",
+    "publication_incompatible",
+    "unavailable",
+]);
 const REQUIRED_REPLAY_DEPTH = 160;
 
 function isRecord(value) {
@@ -99,8 +114,36 @@ function assertNoSourcePayload(value, label) {
 
 function normalizeCandidateTrace(value, label) {
     const trace = requireRecord(value, label);
-    if (trace.schemaVersion !== TRACE_SCHEMA) {
-        throw new Error(`${label}.schemaVersion must be ${TRACE_SCHEMA}.`);
+    if (!SUPPORTED_TRACE_SCHEMAS.has(trace.schemaVersion)) {
+        throw new Error(
+            `${label}.schemaVersion must be ${[...SUPPORTED_TRACE_SCHEMAS].join(" or ")}.`,
+        );
+    }
+    let scorePolicy;
+    if (trace.schemaVersion === TRACE_SCHEMA_V2) {
+        const rawScorePolicy = requireRecord(trace.scorePolicy, `${label}.scorePolicy`);
+        requireExactKeys(
+            rawScorePolicy,
+            ["finalScorePolicyId", "entrypointOwnerMaxContribution"],
+            `${label}.scorePolicy`,
+        );
+        scorePolicy = {
+            finalScorePolicyId: requireString(
+                rawScorePolicy.finalScorePolicyId,
+                `${label}.scorePolicy.finalScorePolicyId`,
+            ),
+            entrypointOwnerMaxContribution: requireFiniteNumber(
+                rawScorePolicy.entrypointOwnerMaxContribution,
+                `${label}.scorePolicy.entrypointOwnerMaxContribution`,
+            ),
+        };
+        if (scorePolicy.entrypointOwnerMaxContribution < 0) {
+            throw new Error(
+                `${label}.scorePolicy.entrypointOwnerMaxContribution must be non-negative.`,
+            );
+        }
+    } else if (trace.scorePolicy !== undefined) {
+        throw new Error(`${label}.scorePolicy is only valid in ${TRACE_SCHEMA_V2}.`);
     }
     const maxEntriesPerStage = requireSafeCount(
         trace.maxEntriesPerStage,
@@ -223,6 +266,12 @@ function normalizeCandidateTrace(value, label) {
                     "rerankDocumentUtf8Bytes",
                     "symbolLabel",
                     "symbolId",
+                    ...(trace.schemaVersion === TRACE_SCHEMA_V2
+                        ? [
+                            "entrypointOwnerScoreBoost",
+                            "entrypointOwnerScoreReason",
+                        ]
+                        : []),
                 ], replayLabel);
                 requireFiniteNumber(replay.lexicalScore, `${replayLabel}.lexicalScore`);
                 requireFiniteNumber(replay.pathMultiplier, `${replayLabel}.pathMultiplier`);
@@ -231,6 +280,41 @@ function normalizeCandidateTrace(value, label) {
                     `${replayLabel}.changedFilesMultiplier`,
                 );
                 requireFiniteNumber(replay.agentFitMultiplier, `${replayLabel}.agentFitMultiplier`);
+                if (trace.schemaVersion === TRACE_SCHEMA_V2) {
+                    const entrypointOwnerScoreBoost = requireFiniteNumber(
+                        replay.entrypointOwnerScoreBoost,
+                        `${replayLabel}.entrypointOwnerScoreBoost`,
+                    );
+                    if (entrypointOwnerScoreBoost < 0) {
+                        throw new Error(
+                            `${replayLabel}.entrypointOwnerScoreBoost must be non-negative.`,
+                        );
+                    }
+                    if (entrypointOwnerScoreBoost > scorePolicy.entrypointOwnerMaxContribution) {
+                        throw new Error(
+                            `${replayLabel}.entrypointOwnerScoreBoost exceeds the captured policy cap.`,
+                        );
+                    }
+                    const entrypointOwnerScoreReason = requireString(
+                        replay.entrypointOwnerScoreReason,
+                        `${replayLabel}.entrypointOwnerScoreReason`,
+                    );
+                    if (!ENTRYPOINT_OWNER_SCORE_REASONS.has(entrypointOwnerScoreReason)) {
+                        throw new Error(
+                            `${replayLabel}.entrypointOwnerScoreReason is unsupported.`,
+                        );
+                    }
+                    if (
+                        (entrypointOwnerScoreReason === "not_applicable"
+                            && entrypointOwnerScoreBoost !== 0)
+                        || (entrypointOwnerScoreReason === "manifest_entrypoint_owner"
+                            && entrypointOwnerScoreBoost <= 0)
+                    ) {
+                        throw new Error(
+                            `${replayLabel} owner score and reason are inconsistent.`,
+                        );
+                    }
+                }
                 requireBoolean(replay.exactLexicalMatch, `${replayLabel}.exactLexicalMatch`);
                 requireBoolean(replay.passesMatchedMust, `${replayLabel}.passesMatchedMust`);
                 requireString(replay.rerankFamilyId, `${replayLabel}.rerankFamilyId`);
@@ -264,7 +348,8 @@ function normalizeCandidateTrace(value, label) {
     }
     const omittedRemovals = requireSafeCount(trace.omittedRemovals, `${label}.omittedRemovals`);
     const normalized = {
-        schemaVersion: TRACE_SCHEMA,
+        schemaVersion: trace.schemaVersion,
+        ...(scorePolicy ? { scorePolicy } : {}),
         maxEntriesPerStage,
         corePasses,
         queryEmbeddings,
@@ -311,6 +396,191 @@ function observationGenerationIdentity(armIdentity) {
         runtimeFingerprint: armIdentity.runtimeFingerprint,
         publication: armIdentity.publication,
     };
+}
+
+function normalizeEntrypointPublicationBinding(value, label, armPublication) {
+    const binding = requireRecord(value, label);
+    requireExactKeys(binding, [
+        "collectionName",
+        "markerRunId",
+        "policyDocumentDigest",
+        "policyHash",
+        "navigationGenerationId",
+        "symbolRegistryManifestHash",
+    ], label);
+    const normalized = {
+        collectionName: requireString(binding.collectionName, `${label}.collectionName`),
+        markerRunId: requireString(binding.markerRunId, `${label}.markerRunId`),
+        policyDocumentDigest: requireSha256(
+            binding.policyDocumentDigest,
+            `${label}.policyDocumentDigest`,
+        ),
+        policyHash: requireSha256(binding.policyHash, `${label}.policyHash`),
+        navigationGenerationId: requireString(
+            binding.navigationGenerationId,
+            `${label}.navigationGenerationId`,
+        ),
+        symbolRegistryManifestHash: requireString(
+            binding.symbolRegistryManifestHash,
+            `${label}.symbolRegistryManifestHash`,
+        ),
+    };
+    const expectedVectorBinding = {
+        collectionName: armPublication.publication.collectionName,
+        markerRunId: armPublication.publication.markerRunId,
+        policyDocumentDigest: armPublication.publication.policyDocumentDigest,
+        policyHash: armPublication.publication.indexPolicyHash,
+    };
+    const observedVectorBinding = {
+        collectionName: normalized.collectionName,
+        markerRunId: normalized.markerRunId,
+        policyDocumentDigest: normalized.policyDocumentDigest,
+        policyHash: normalized.policyHash,
+    };
+    if (canonicalJson(observedVectorBinding) !== canonicalJson(expectedVectorBinding)) {
+        throw new Error(`${label} does not match the captured vector publication.`);
+    }
+    return normalized;
+}
+
+function normalizeEntrypointOwnerEvidence(value, label, armPublication) {
+    if (value === undefined) return null;
+    const evidence = requireRecord(value, label);
+    const status = requireString(evidence.status, `${label}.status`);
+    if (!ENTRYPOINT_OWNER_EVIDENCE_STATUSES.has(status)) {
+        throw new Error(`${label}.status is unsupported.`);
+    }
+    if (!Array.isArray(evidence.owners)) {
+        throw new Error(`${label}.owners must be an array.`);
+    }
+    const manifestSourceIdentity = evidence.manifestSourceIdentity === undefined
+        ? undefined
+        : requireSha256(evidence.manifestSourceIdentity, `${label}.manifestSourceIdentity`);
+    const publicationBinding = normalizeEntrypointPublicationBinding(
+        evidence.publicationBinding,
+        `${label}.publicationBinding`,
+        armPublication,
+    );
+    const publicationIdentity = requireSha256(
+        evidence.publicationIdentity,
+        `${label}.publicationIdentity`,
+    );
+    const expectedPublicationIdentity = sha256Bytes(Buffer.from(JSON.stringify([
+        publicationBinding.collectionName,
+        publicationBinding.markerRunId,
+        publicationBinding.policyDocumentDigest,
+        publicationBinding.policyHash,
+        publicationBinding.navigationGenerationId,
+        publicationBinding.symbolRegistryManifestHash,
+    ]), "utf8"));
+    if (publicationIdentity !== expectedPublicationIdentity) {
+        throw new Error(`${label}.publicationIdentity does not match its publication binding.`);
+    }
+    const owners = evidence.owners.map((rawOwner, index) => {
+        const ownerLabel = `${label}.owners[${index}]`;
+        const owner = requireRecord(rawOwner, ownerLabel);
+        const target = requireRecord(owner.target, `${ownerLabel}.target`);
+        const sourceIdentity = requireSha256(
+            owner.sourceIdentity,
+            `${ownerLabel}.sourceIdentity`,
+        );
+        const ownerPublicationIdentity = requireSha256(
+            owner.publicationIdentity,
+            `${ownerLabel}.publicationIdentity`,
+        );
+        if (ownerPublicationIdentity !== publicationIdentity) {
+            throw new Error(`${ownerLabel} does not match the evidence publication identity.`);
+        }
+        if (manifestSourceIdentity && sourceIdentity !== manifestSourceIdentity) {
+            throw new Error(`${ownerLabel} does not match the manifest source identity.`);
+        }
+        const relativePath = requireString(
+            target.relativePath,
+            `${ownerLabel}.target.relativePath`,
+        );
+        const symbolInstanceId = requireString(
+            target.symbolInstanceId,
+            `${ownerLabel}.target.symbolInstanceId`,
+        );
+        return {
+            command: requireString(owner.command, `${ownerLabel}.command`),
+            ownerId: JSON.stringify(["symbol", relativePath, symbolInstanceId]),
+            sourceIdentity,
+            publicationIdentity: ownerPublicationIdentity,
+        };
+    });
+    const declaredOwnerCount = evidence.declaredOwnerCount === undefined
+        ? undefined
+        : requireSafeCount(evidence.declaredOwnerCount, `${label}.declaredOwnerCount`);
+    const declaredOwnerCountLowerBound = evidence.declaredOwnerCountLowerBound === undefined
+        ? undefined
+        : requireSafeCount(
+            evidence.declaredOwnerCountLowerBound,
+            `${label}.declaredOwnerCountLowerBound`,
+        );
+    if (declaredOwnerCount !== undefined && declaredOwnerCountLowerBound !== undefined) {
+        throw new Error(`${label} cannot contain both exact and lower-bound declaration counts.`);
+    }
+    const resolvedOwnerCount = requireSafeCount(
+        evidence.resolvedOwnerCount,
+        `${label}.resolvedOwnerCount`,
+    );
+    const resolutionComplete = requireBoolean(
+        evidence.resolutionComplete,
+        `${label}.resolutionComplete`,
+    );
+    if (owners.length !== resolvedOwnerCount) {
+        throw new Error(`${label}.resolvedOwnerCount does not match owners.`);
+    }
+    if ((status === "resolved") !== (owners.length > 0)) {
+        throw new Error(`${label}.status does not match its resolved owners.`);
+    }
+    if (owners.length > 0 && !manifestSourceIdentity) {
+        throw new Error(`${label} resolved owners require a manifest source identity.`);
+    }
+    if (declaredOwnerCount !== undefined && resolvedOwnerCount > declaredOwnerCount) {
+        throw new Error(`${label} resolves more owners than were declared.`);
+    }
+    if (
+        resolutionComplete
+        && (declaredOwnerCount === undefined || declaredOwnerCount !== resolvedOwnerCount)
+    ) {
+        throw new Error(`${label}.resolutionComplete has inconsistent owner counts.`);
+    }
+    return {
+        status,
+        owners,
+        ...(declaredOwnerCount !== undefined ? { declaredOwnerCount } : {}),
+        ...(declaredOwnerCountLowerBound !== undefined
+            ? { declaredOwnerCountLowerBound }
+            : {}),
+        resolvedOwnerCount,
+        resolutionComplete,
+        ...(manifestSourceIdentity ? { manifestSourceIdentity } : {}),
+        publicationBinding,
+        publicationIdentity,
+    };
+}
+
+function assertEntrypointOwnerScoringAuthority(trace, evidence, label) {
+    if (trace.schemaVersion !== TRACE_SCHEMA_V2) return;
+    const authoritativeOwnerIds = new Set(
+        (evidence?.owners ?? []).map((owner) => owner.ownerId),
+    );
+    for (const stage of trace.stages) {
+        if (stage.stage !== "mcp_replay_signals") continue;
+        for (const candidate of stage.candidates) {
+            if (candidate.replay.entrypointOwnerScoreReason !== "manifest_entrypoint_owner") {
+                continue;
+            }
+            if (evidence?.status !== "resolved"
+                || !authoritativeOwnerIds.has(candidate.ownerId)) {
+                throw new Error(
+                    `${label} candidate '${candidate.candidateId}' has no matching authoritative owner evidence.`,
+                );
+            }
+        }
+    }
 }
 
 function assertMeasurementIsolation(metadata, observationSetValue, taskIds) {
@@ -422,7 +692,7 @@ function buildPassConfiguration(debugSearch) {
     };
 }
 
-function buildObservationCapture(task, observation) {
+function buildObservationCapture(task, observation, armPublication) {
     if (task.workload.invocations.length !== 1
         || task.workload.invocations[0].tool !== "search_codebase") {
         throw new Error(
@@ -440,6 +710,23 @@ function buildObservationCapture(task, observation) {
         debugSearch.candidateSurvival,
         `Task '${task.id}' candidateSurvival`,
     );
+    let entrypointOwnerEvidence;
+    if (trace.schemaVersion === TRACE_SCHEMA_V2) {
+        entrypointOwnerEvidence = normalizeEntrypointOwnerEvidence(
+            debugSearch.entrypointOwnerEvidence,
+            `Task '${task.id}' entrypointOwnerEvidence`,
+            armPublication,
+        );
+        assertEntrypointOwnerScoringAuthority(
+            trace,
+            entrypointOwnerEvidence,
+            `Task '${task.id}' entrypoint owner scoring`,
+        );
+    } else if (debugSearch.entrypointOwnerEvidence !== undefined) {
+        throw new Error(
+            `Task '${task.id}' entrypointOwnerEvidence requires ${TRACE_SCHEMA_V2}.`,
+        );
+    }
     const { queryPlan, queryPlanDigest } = buildQueryPlan(
         task.workload.invocations[0],
         debugSearch,
@@ -454,6 +741,10 @@ function buildObservationCapture(task, observation) {
         passConfigurationDigest,
         candidateTrace: trace,
         candidateTraceDigest,
+        ...(trace.schemaVersion === TRACE_SCHEMA_V2 ? {
+            entrypointOwnerEvidence,
+            entrypointOwnerEvidenceDigest: sha256Canonical(entrypointOwnerEvidence),
+        } : {}),
         rankedResults: jsonClone(observation.results),
         rankedResultIdentityDigest: sha256Canonical(observation.results),
     };
@@ -685,7 +976,7 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
             if (canonicalJson(observation.generationReceipt) !== canonicalJson(expectedGeneration)) {
                 throw new Error(`Task '${task.id}' is not bound to the arm publication identity.`);
             }
-            return buildObservationCapture(task, observation);
+            return buildObservationCapture(task, observation, armPublication);
         });
         const baseline = observedCaptures[0];
         for (const contender of observedCaptures.slice(1)) {
@@ -693,6 +984,7 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
                 "queryPlanDigest",
                 "passConfigurationDigest",
                 "candidateTraceDigest",
+                "entrypointOwnerEvidenceDigest",
                 "rankedResultIdentityDigest",
             ]) {
                 if (contender[key] !== baseline[key]) {
@@ -702,6 +994,7 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
         }
         const taskCapture = {
             taskId: task.id,
+            ...(task.split ? { split: task.split } : {}),
             queryClass: task.queryClass,
             language: task.language,
             expected: jsonClone(task.expected),
@@ -737,9 +1030,17 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
             `Candidate captures are not replay-ready under their route-specific contracts: ${routeIncompleteTasks.join(", ")}.`,
         );
     }
+    const traceSchemas = [...new Set(
+        captures.map((taskCapture) => taskCapture.candidateTrace.schemaVersion),
+    )];
+    if (traceSchemas.length !== 1) {
+        throw new Error("Candidate captures must use one candidate-survival schema version.");
+    }
+    const captureVersion = traceSchemas[0] === TRACE_SCHEMA_V2 ? 2 : 1;
     const capture = {
-        version: CAPTURE_VERSION,
+        version: captureVersion,
         kind: "satori_search_candidate_capture",
+        taskSuiteVersion: taskSuite.version,
         policyId,
         authority: {
             gitRevision: requireString(metadata.gitRevision, "Observation metadata gitRevision"),

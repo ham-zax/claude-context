@@ -59,10 +59,12 @@ export type EntrypointOwnerEvidenceResolution = Readonly<{
         | "publication_incompatible"
         | "unavailable";
     owners: readonly EntrypointOwnerEvidence[];
-    declaredOwnerCount: number;
+    declaredOwnerCount?: number;
+    declaredOwnerCountLowerBound?: number;
     resolvedOwnerCount: number;
     resolutionComplete: boolean;
     manifestSourceIdentity?: string;
+    publicationBinding: EntrypointPublicationIdentity;
     publicationIdentity: string;
 }>;
 
@@ -179,6 +181,7 @@ export async function prepareEntrypointOwnerEvidence(input: {
     registry: SymbolRegistry;
 }): Promise<PreparedEntrypointOwnerEvidence | EntrypointOwnerEvidenceResolution> {
     const boundPublicationIdentity = publicationIdentity(input.publication);
+    const publicationBinding = { ...input.publication };
     const prepared = await prepareInspectableSource({
         codebaseRoot: input.codebaseRoot,
         relativeFile: PYPROJECT_FILE,
@@ -190,9 +193,9 @@ export async function prepareEntrypointOwnerEvidence(input: {
                 ? "manifest_too_large"
                 : "unavailable",
             owners: [],
-            declaredOwnerCount: 0,
             resolvedOwnerCount: 0,
             resolutionComplete: false,
+            publicationBinding,
             publicationIdentity: boundPublicationIdentity,
         };
     }
@@ -203,10 +206,10 @@ export async function prepareEntrypointOwnerEvidence(input: {
             resolution: {
                 status: "unsupported_manifest",
                 owners: [],
-                declaredOwnerCount: 0,
                 resolvedOwnerCount: 0,
                 resolutionComplete: false,
                 manifestSourceIdentity,
+                publicationBinding,
                 publicationIdentity: boundPublicationIdentity,
             },
             finalize: (finalizeInput) => prepared.finalizer.finalize(finalizeInput),
@@ -218,10 +221,11 @@ export async function prepareEntrypointOwnerEvidence(input: {
             resolution: {
                 status: "manifest_entry_limit_exceeded",
                 owners: [],
-                declaredOwnerCount: PROJECT_SCRIPT_ENTRY_LIMIT + 1,
+                declaredOwnerCountLowerBound: PROJECT_SCRIPT_ENTRY_LIMIT + 1,
                 resolvedOwnerCount: 0,
                 resolutionComplete: false,
                 manifestSourceIdentity,
+                publicationBinding,
                 publicationIdentity: boundPublicationIdentity,
             },
             finalize: (finalizeInput) => prepared.finalizer.finalize(finalizeInput),
@@ -277,6 +281,7 @@ export async function prepareEntrypointOwnerEvidence(input: {
             resolvedOwnerCount: owners.length,
             resolutionComplete: owners.length === entries.length,
             manifestSourceIdentity,
+            publicationBinding,
             publicationIdentity: boundPublicationIdentity,
         },
         finalize: (finalizeInput) => prepared.finalizer.finalize(finalizeInput),

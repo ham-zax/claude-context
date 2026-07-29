@@ -248,6 +248,7 @@ export interface SearchCandidateSurvivalOccurrence {
         changedFilesMultiplier: number;
         agentFitMultiplier: number;
         entrypointOwnerScoreBoost: number;
+        entrypointOwnerScoreReason: string;
         exactLexicalMatch: boolean;
         passesMatchedMust: boolean;
         rerankFamilyId: string;
@@ -289,7 +290,11 @@ export interface SearchCandidateSurvivalRemoval {
 }
 
 export interface SearchCandidateSurvivalDebug {
-    schemaVersion: "search_candidate_survival_v1";
+    schemaVersion: "search_candidate_survival_v2";
+    scorePolicy: {
+        finalScorePolicyId: "search_candidate_final_score_v2";
+        entrypointOwnerMaxContribution: number;
+    };
     maxEntriesPerStage: number;
     corePasses: Array<{
         passId: string;

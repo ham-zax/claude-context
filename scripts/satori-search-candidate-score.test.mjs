@@ -126,6 +126,57 @@ test("candidate scoring uses frozen file and symbol authority", () => {
     assert.match(comparison.sha256, /^[0-9a-f]{64}$/);
 });
 
+test("candidate scoring uses explicit task-suite v2 splits instead of ID prefixes", () => {
+    const capture = {
+        taskSuiteVersion: 2,
+        captures: [
+            {
+                ...baselineTask("held-name", "owner_discovery", ownerA, [candidateA], ["owner-a"]),
+                split: "tuning",
+            },
+            {
+                ...baselineTask("tuning-name", "exact_identifier", ownerB, [candidateB], ["owner-b"]),
+                split: "held_out",
+            },
+        ],
+    };
+    const replay = {
+        taskSuiteVersion: 2,
+        baselineReproduced: true,
+        policy: { policyId: "contender-a" },
+        tasks: [
+            {
+                ...contenderTask(
+                    "held-name",
+                    "owner_discovery",
+                    ownerA,
+                    [candidateA],
+                    ["owner-a"],
+                ),
+                split: "tuning",
+            },
+            {
+                ...contenderTask(
+                    "tuning-name",
+                    "exact_identifier",
+                    ownerB,
+                    [candidateB],
+                    ["owner-b"],
+                ),
+                split: "held_out",
+            },
+        ],
+    };
+
+    const baseline = scoreBaselineCapture(capture, "held_out");
+    const contender = scoreContenderReplay(replay, "held_out");
+
+    assert.equal(baseline.split, "held_out");
+    assert.equal(contender.split, "held_out");
+    assert.deepEqual(baseline.tasks.map((task) => task.taskId), ["tuning-name"]);
+    assert.deepEqual(contender.tasks.map((task) => task.taskId), ["tuning-name"]);
+});
+
 test("exact-registry tasks remain in non-regression checks but outside policy denominators", () => {
     const capture = {
         captures: [{

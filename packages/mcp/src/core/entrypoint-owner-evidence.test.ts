@@ -117,6 +117,7 @@ test("resolves PEP 621 scripts to exact canonical Python symbols", async () => {
         assert.equal(resolution.resolvedOwnerCount, 3);
         assert.equal(resolution.resolutionComplete, true);
         assert.equal(resolution.manifestSourceIdentity?.length, 64);
+        assert.deepEqual(resolution.publicationBinding, publication);
         assert.equal(resolution.publicationIdentity.length, 64);
         assert.deepEqual(
             resolution.owners.map((owner) => ({
@@ -326,6 +327,8 @@ test("fails closed when the scripts table exceeds the bounded entry limit", asyn
 
         assert.equal(resolution.status, "manifest_entry_limit_exceeded");
         assert.deepEqual(resolution.owners, []);
+        assert.equal(resolution.declaredOwnerCount, undefined);
+        assert.equal(resolution.declaredOwnerCountLowerBound, 65);
     });
 });
 
