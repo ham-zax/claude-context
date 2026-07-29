@@ -441,15 +441,18 @@ export function requireOutputOutsideRoot(outFile, root, label) {
 
 export function extractCompletedOperationProof(payload, expectedRoot, expectedAction) {
     const operation = payload?.operation;
+    const expectedActions = Array.isArray(expectedAction) ? expectedAction : [expectedAction];
     if (!isRecord(operation)
-        || operation.action !== expectedAction
+        || !expectedActions.includes(operation.action)
         || operation.phase !== "completed"
         || operation.canonicalRoot !== expectedRoot
         || typeof operation.id !== "string"
         || !Number.isSafeInteger(operation.generation)
         || typeof operation.lastDurableTransitionAt !== "string"
         || !isRecord(operation.runtimeFingerprint)) {
-        throw new Error(`Missing completed ${expectedAction} operation proof for '${expectedRoot}'.`);
+        throw new Error(
+            `Missing completed ${expectedActions.join(" or ")} operation proof for '${expectedRoot}'.`,
+        );
     }
     return {
         id: operation.id,
@@ -887,7 +890,7 @@ async function prepareMeasurementState(session, task, repoRoot, preparationMode)
         return {
             preparationMode,
             indexProof: {
-                ...extractCompletedOperationProof(readiness, repoRoot, "sync"),
+                ...extractCompletedOperationProof(readiness, repoRoot, ["create", "sync"]),
                 publication: extractPublicationProof(readiness, repoRoot),
             },
         };
@@ -1124,7 +1127,11 @@ export async function recordSuite(taskSuite, options) {
                 throw new Error(`Task '${task.id}' index status changed during measured calls.`);
             }
             const finalProof = {
-                ...extractCompletedOperationProof(finalStatus, repoRoot, "sync"),
+                ...extractCompletedOperationProof(
+                    finalStatus,
+                    repoRoot,
+                    options.preparationMode === "status-only" ? ["create", "sync"] : "sync",
+                ),
                 publication: extractPublicationProof(finalStatus, repoRoot),
             };
             assertSameIndexProof(prepared.indexProof, finalProof, task.id);

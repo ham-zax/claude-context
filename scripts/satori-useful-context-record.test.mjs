@@ -99,6 +99,7 @@ function writeFakeMcp(file, options = {}) {
     const authorityCandidateFile = options.authorityCandidateFile || null;
     const rejectSync = options.rejectSync === true;
     const statusPrimesSearch = options.statusPrimesSearch === true;
+    const operationAction = options.operationAction || "sync";
     fs.writeFileSync(file, `
 import fs from "node:fs";
 import readline from "node:readline";
@@ -111,11 +112,12 @@ const authorityResultFile = ${JSON.stringify(authorityResultFile)};
 const authorityCandidateFile = ${JSON.stringify(authorityCandidateFile)};
 const rejectSync = ${JSON.stringify(rejectSync)};
 const statusPrimesSearch = ${JSON.stringify(statusPrimesSearch)};
+const operationAction = ${JSON.stringify(operationAction)};
 let measuredSearchRan = false;
 let statusPrepared = false;
 const operation = () => ({
   id: measuredSearchRan && driftAfterSearch ? "op-drifted" : "op-prepared",
-  action: "sync",
+  action: operationAction,
   canonicalRoot: process.cwd(),
   generation: measuredSearchRan && driftAfterSearch ? 8 : 7,
   acceptedAt: "2026-01-01T00:00:00.000Z",
@@ -327,7 +329,11 @@ test("status-only preparation proves one publication without requesting synchron
         initializeRepo(repoRoot);
         writeJson(tasksFile, taskSuite(repoRoot));
         fs.mkdirSync(path.dirname(fakeMcp), { recursive: true });
-        writeFakeMcp(fakeMcp, { rejectSync: true, statusPrimesSearch: true });
+        writeFakeMcp(fakeMcp, {
+            rejectSync: true,
+            statusPrimesSearch: true,
+            operationAction: "create",
+        });
         commitRuntimeFixture(runtimeRoot);
 
         const run = spawnSync(process.execPath, [
@@ -348,6 +354,7 @@ test("status-only preparation proves one publication without requesting synchron
         assert.equal(output.metadata.preparationMode, "status-only");
         assert.ok(output.metadata.taskRuns.every((entry) => (
             entry.preparationMode === "status-only"
+            && entry.indexProof.action === "create"
             && entry.syncStats === undefined
             && entry.measurementRuntimeRestarted === true
             && JSON.stringify(entry.finalIndexProof) === JSON.stringify(entry.indexProof)
