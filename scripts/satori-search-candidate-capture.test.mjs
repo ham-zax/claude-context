@@ -574,6 +574,14 @@ function groupingReadyObservationSet(suite) {
             evidenceOccurrenceId: JSON.stringify([primary.candidateId, "grouped", 1, 1]),
             rank: 1,
             score: groupedScore,
+            groupReplay: {
+                displayLabel: "function reconcileIgnoreRules",
+                symbolKind: "function",
+                declarationLike: true,
+                exactLexicalMatch: false,
+                symbolKey: "owner:primary",
+                symbolInstanceId: "reconcileIgnoreRules",
+            },
         };
         delete groupedOccurrence.passId;
         trace.stages.push({

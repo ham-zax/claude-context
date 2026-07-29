@@ -145,6 +145,14 @@ test("grouped and disclosed stages retain underlying candidate identities", () =
         trace.stages.map((stage) => stage.candidates.map((candidate) => candidate.candidateId)),
         [group.__candidateIds, group.__candidateIds],
     );
+    assert.deepEqual(trace.stages[0]?.candidates[0]?.groupReplay, {
+        displayLabel: "function owner()",
+        symbolKind: null,
+        declarationLike: true,
+        exactLexicalMatch: false,
+        symbolKey: null,
+        symbolInstanceId: null,
+    });
 });
 
 test("MCP pass membership, weights, and fusion scores remain replayable", () => {

@@ -117,7 +117,7 @@ function compareGroupedSearchResults(
     return compareContractStringsAsc(a.target.symbolId, b.target.symbolId);
 }
 
-function isDeclarationSearchGroup(group: SearchGroupResult): boolean {
+export function isDeclarationSearchGroup(group: SearchGroupResult): boolean {
     const label = group.displayLabel.trim().toLowerCase();
     if (/^(?:async\s+)?(?:class|type|interface|enum|struct|function|method|def)\b/.test(label)) {
         return true;

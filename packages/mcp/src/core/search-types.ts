@@ -256,6 +256,14 @@ export interface SearchCandidateSurvivalOccurrence {
         symbolLabel: string | null;
         symbolId: string | null;
     };
+    groupReplay?: {
+        displayLabel: string;
+        symbolKind: string | null;
+        declarationLike: boolean;
+        exactLexicalMatch: boolean;
+        symbolKey: string | null;
+        symbolInstanceId: string | null;
+    };
 }
 
 export interface SearchCandidateSurvivalStage {

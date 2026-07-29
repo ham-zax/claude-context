@@ -799,12 +799,45 @@ function replayPostFusionLocalScoring(capture, attempt) {
     return { candidates: scored, removed, mustMatchesFirst };
 }
 
+function normalizeGroupReplay(value, label) {
+    const replay = requireRecord(value, label);
+    requireExactKeys(replay, [
+        "displayLabel",
+        "symbolKind",
+        "declarationLike",
+        "exactLexicalMatch",
+        "symbolKey",
+        "symbolInstanceId",
+    ], label);
+    if (typeof replay.declarationLike !== "boolean"
+        || typeof replay.exactLexicalMatch !== "boolean") {
+        throw new Error(`${label} must contain Boolean ordering evidence.`);
+    }
+    for (const field of ["symbolKind", "symbolKey", "symbolInstanceId"]) {
+        if (replay[field] !== null && typeof replay[field] !== "string") {
+            throw new Error(`${label}.${field} must be a string or null.`);
+        }
+    }
+    return {
+        displayLabel: requireString(replay.displayLabel, `${label}.displayLabel`),
+        symbolKind: replay.symbolKind,
+        declarationLike: replay.declarationLike,
+        exactLexicalMatch: replay.exactLexicalMatch,
+        symbolKey: replay.symbolKey,
+        symbolInstanceId: replay.symbolInstanceId,
+    };
+}
+
 function groupedStageAuthority(stage, label) {
     const complete = requireCompleteStage(stage, label);
     const byRank = new Map();
     for (const rawOccurrence of complete.candidates) {
         const occurrence = requireRecord(rawOccurrence, `${label} occurrence`);
         const rank = requirePositiveInteger(occurrence.rank, `${label} rank`);
+        const groupReplay = normalizeGroupReplay(
+            occurrence.groupReplay,
+            `${label} rank ${rank} ordering evidence`,
+        );
         const existing = byRank.get(rank);
         if (existing) {
             for (const field of [
@@ -818,6 +851,9 @@ function groupedStageAuthority(stage, label) {
                 if (existing[field] !== occurrence[field]) {
                     throw new Error(`${label} rank ${rank} has inconsistent '${field}'.`);
                 }
+            }
+            if (canonicalJson(existing.groupReplay) !== canonicalJson(groupReplay)) {
+                throw new Error(`${label} rank ${rank} has inconsistent ordering evidence.`);
             }
             existing.candidateIds.push(requireString(
                 occurrence.candidateId,
@@ -839,6 +875,7 @@ function groupedStageAuthority(stage, label) {
             endLine: requirePositiveInteger(occurrence.endLine, `${label} endLine`),
             language: requireString(occurrence.language, `${label} language`),
             score: requireNonNegativeFinite(occurrence.score, `${label} score`),
+            groupReplay,
             candidateIds: [requireString(occurrence.candidateId, `${label} candidateId`)],
         });
     }
@@ -878,13 +915,6 @@ function parseOwnerId(ownerId, label) {
         };
     }
     throw new Error(`${label} ownerId has an invalid shape.`);
-}
-
-function symbolKindFromLabel(value) {
-    if (typeof value !== "string") return undefined;
-    const match = /^(?:async\s+)?(class|type|interface|enum|struct|function|method|const|variable|property)\b/i
-        .exec(value.trim());
-    return match?.[1]?.toLowerCase();
 }
 
 function compareGroupedReplay(actual, expected, label) {
@@ -1012,9 +1042,8 @@ function replayFrozenGroupingAndDisclosure(
             group.ownerId,
             `Task '${capture.taskId}' grouped rank ${group.rank}`,
         );
-        const displayLabel = representative.symbolLabel
-            ?? (owner.kind === "symbol" ? owner.symbolId : `file ${owner.file}`);
-        const symbolKind = symbolKindFromLabel(displayLabel);
+        const displayLabel = group.groupReplay.displayLabel;
+        const symbolKind = group.groupReplay.symbolKind ?? undefined;
         return {
             target: {
                 file: group.relativePath,
@@ -1032,14 +1061,21 @@ function replayFrozenGroupingAndDisclosure(
                 owner: "medium",
                 semantic: "medium",
             },
-            preview: "",
+            preview: group.groupReplay.declarationLike
+                ? "function __satori_replay_declaration__()"
+                : "",
             navigation: { supported: false, reason: "not_available" },
             __groupId: group.ownerId,
             __candidateIds: [...group.candidateIds],
-            ...(owner.kind === "symbol"
-                ? { __symbolInstanceId: owner.symbolId }
+            ...(group.groupReplay.symbolKey
+                ? { __symbolKey: group.groupReplay.symbolKey }
                 : {}),
-            __exactLexicalMatch: representative.exactLexicalMatch,
+            ...(group.groupReplay.symbolInstanceId
+                ? { __symbolInstanceId: group.groupReplay.symbolInstanceId }
+                : owner.kind === "symbol"
+                    ? { __symbolInstanceId: owner.symbolId }
+                    : {}),
+            __exactLexicalMatch: group.groupReplay.exactLexicalMatch,
             __frozenOwnerId: group.ownerId,
         };
     });
@@ -1056,7 +1092,7 @@ function replayFrozenGroupingAndDisclosure(
     });
     if (assertBaseline) {
         compareGroupedReplay(
-            ranked.disclosureOrder,
+            ranked.rankedResults,
             groupedAuthority,
             `Task '${capture.taskId}' grouped replay`,
         );

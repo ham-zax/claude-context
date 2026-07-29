@@ -15,6 +15,7 @@ import {
     SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
 } from "./search-ranking-policy.js";
+import { isDeclarationSearchGroup } from "./search-group-ordering.js";
 
 export const SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE = SEARCH_MAX_DIAGNOSTIC_CANDIDATES;
 
@@ -296,6 +297,14 @@ export function appendGroupedCandidateStage(
             language: group.language,
             rank: groupIndex + 1,
             score: group.score,
+            groupReplay: {
+                displayLabel: group.displayLabel,
+                symbolKind: group.symbolKind ?? null,
+                declarationLike: isDeclarationSearchGroup(group),
+                exactLexicalMatch: group.__exactLexicalMatch,
+                symbolKey: group.__symbolKey ?? null,
+                symbolInstanceId: group.__symbolInstanceId ?? null,
+            },
         }));
     });
     appendStage(trace, { stage, occurrences });

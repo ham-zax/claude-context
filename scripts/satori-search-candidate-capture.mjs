@@ -330,6 +330,42 @@ function normalizeCandidateTrace(value, label) {
             } else if (candidate.replay !== undefined) {
                 throw new Error(`${label}.stages[${stageIndex}] replay data is only valid for mcp_replay_signals.`);
             }
+            if (stage.stage === "grouped" || stage.stage === "disclosed") {
+                if (candidate.groupReplay !== undefined) {
+                    const groupReplayLabel =
+                        `${label}.stages[${stageIndex}].candidates[${candidateIndex}].groupReplay`;
+                    const groupReplay = requireRecord(candidate.groupReplay, groupReplayLabel);
+                    requireExactKeys(groupReplay, [
+                        "displayLabel",
+                        "symbolKind",
+                        "declarationLike",
+                        "exactLexicalMatch",
+                        "symbolKey",
+                        "symbolInstanceId",
+                    ], groupReplayLabel);
+                    requireString(groupReplay.displayLabel, `${groupReplayLabel}.displayLabel`);
+                    requireBoolean(
+                        groupReplay.declarationLike,
+                        `${groupReplayLabel}.declarationLike`,
+                    );
+                    requireBoolean(
+                        groupReplay.exactLexicalMatch,
+                        `${groupReplayLabel}.exactLexicalMatch`,
+                    );
+                    for (const field of ["symbolKind", "symbolKey", "symbolInstanceId"]) {
+                        if (groupReplay[field] !== null
+                            && typeof groupReplay[field] !== "string") {
+                            throw new Error(
+                                `${groupReplayLabel}.${field} must be a string or null.`,
+                            );
+                        }
+                    }
+                }
+            } else if (candidate.groupReplay !== undefined) {
+                throw new Error(
+                    `${label}.stages[${stageIndex}] groupReplay data is only valid for grouped/disclosed stages.`,
+                );
+            }
         }
         return jsonClone(stage);
     });
@@ -958,6 +994,10 @@ function replayReadiness(capture) {
         groupingDisclosureReasons.push("grouped_or_disclosed_stage_missing");
     } else if (groupedStage.omittedOccurrences > 0 || disclosedStage.omittedOccurrences > 0) {
         groupingDisclosureReasons.push("grouped_or_disclosed_stage_truncated");
+    } else if ([groupedStage, disclosedStage].some((stage) => (
+        stage.candidates.some((candidate) => !isRecord(candidate.groupReplay))
+    ))) {
+        groupingDisclosureReasons.push("group_ordering_metadata_not_recorded");
     }
     if (capture.passConfiguration.rerank?.applied === true) {
         groupingDisclosureReasons.push("neural_reranker_order_not_replayable");
