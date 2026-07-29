@@ -44,6 +44,7 @@ test('buildSearchProjections produces byte-stable text from canonical chunk inpu
         'language:"typescript"',
         'symbol-kind:"function"',
         'symbol:"Parser.parseHTTPResponse"',
+        'symbol-terms:"parse HTTP Response"',
         'breadcrumbs:["Parser","parseHTTPResponse"]',
         `content:${chunk.content.length}`,
         chunk.content,
