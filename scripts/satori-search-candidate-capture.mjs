@@ -699,8 +699,14 @@ function buildObservationCapture(task, observation, armPublication) {
             `Task '${task.id}' candidate capture requires exactly one measured search_codebase invocation.`,
         );
     }
-    if (observation.status !== "ok") {
-        throw new Error(`Task '${task.id}' candidate capture requires successful observations.`);
+    const replayableZeroResult = observation.status === "zero_result"
+        && observation.response?.status === "ok"
+        && Array.isArray(observation.results)
+        && observation.results.length === 0;
+    if (observation.status !== "ok" && !replayableZeroResult) {
+        throw new Error(
+            `Task '${task.id}' candidate capture requires an ok or trace-complete zero-result observation.`,
+        );
     }
     const debugSearch = requireRecord(
         observation.response?.hints?.debugSearch,

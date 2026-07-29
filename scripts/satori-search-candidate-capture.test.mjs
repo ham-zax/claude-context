@@ -682,6 +682,50 @@ test("candidate capture accepts status-only preparation and rejects mixed sync e
     );
 });
 
+test("candidate capture preserves a trace-complete zero-result baseline", () => {
+    const suite = taskSuite();
+    suite.tasks[0].workload.invocations[0].args.debugCandidateLimit = 160;
+    suite.tasks[0].workload.invocations[0].args.limit = 5;
+    suite.tasks[0].workload.invocations[0].args.disclosureLimit = 5;
+    const observations = groupingReadyObservationSet(suite);
+    for (const observation of observations.observations) {
+        observation.status = "zero_result";
+        observation.results = [];
+        observation.response.results = [];
+        const stages = observation.response.hints.debugSearch.candidateSurvival.stages;
+        for (const stage of stages) {
+            stage.totalOccurrences = 0;
+            stage.uniqueCandidates = 0;
+            stage.candidates = [];
+        }
+        observation.responseBytes = Buffer.byteLength(
+            JSON.stringify(observation.response),
+            "utf8",
+        );
+    }
+
+    const capture = buildSearchCandidateCapture(suite, observations, {
+        requireReplayReady: true,
+        requireGroupingReady: true,
+        requireNeuralDisabled: true,
+    });
+    const replay = replayBaselineCandidateCapture(capture);
+
+    assert.deepEqual(capture.captures[0].rankedResults, []);
+    assert.deepEqual(replay.tasks[0].groupingDisclosure.disclosedResults, []);
+
+    observations.observations[0].status = "error";
+    observations.observations[0].response.status = "error";
+    observations.observations[0].responseBytes = Buffer.byteLength(
+        JSON.stringify(observations.observations[0].response),
+        "utf8",
+    );
+    assert.throws(
+        () => buildSearchCandidateCapture(suite, observations),
+        /ok or trace-complete zero-result observation/,
+    );
+});
+
 test("candidate capture admits a complete depth-160 AND and OR superset", () => {
     const suite = taskSuite();
     suite.tasks[0].workload.invocations[0].args.debugCandidateLimit = 160;
