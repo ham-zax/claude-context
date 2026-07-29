@@ -50,6 +50,7 @@
     "documentPrefix": "[D] ",
     "queryPrefixId": 50368,
     "documentPrefixId": 50369,
+    "padTokenId": 50284,
     "queryTokenLimit": 256,
     "documentTokenLimit": 2048,
     "lowercase": true,
@@ -89,7 +90,8 @@
       95
     ],
     "maxSim": "sum_over_query_tokens_of_max_document_token_dot_product",
-    "batchSize": 1,
+    "queryBatchSize": 1,
+    "documentBatchSize": 16,
     "intraOpThreads": 1,
     "interOpThreads": 1,
     "warmupRuns": 2,

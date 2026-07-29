@@ -113,12 +113,12 @@ function maximumVectorError(actual, expected) {
     return maximum;
 }
 
-async function loadRuntime(arguments_) {
+async function loadRuntime(transformersModule, onnxruntimeModule) {
     const transformers = await import(
-        pathToFileURL(path.resolve(arguments_["transformers-module"])).href
+        pathToFileURL(path.resolve(transformersModule)).href
     );
     const onnxRuntimeImport = await import(
-        pathToFileURL(path.resolve(arguments_["onnxruntime-module"])).href
+        pathToFileURL(path.resolve(onnxruntimeModule)).href
     );
     return {
         transformers,
@@ -141,86 +141,122 @@ function verifyArtifacts(contract, modelDirectory) {
     return requiredArtifactBytes;
 }
 
-async function encodeText({
-    text,
+async function encodeTexts({
+    texts,
     isQuery,
     tokenizer,
     session,
     onnxRuntime,
     inference,
 }) {
-    const normalizedText = inference.lowercase ? text.toLowerCase() : text;
+    const normalizedTexts = texts.map((text) => (
+        inference.lowercase ? text.toLowerCase() : text
+    ));
     const prefix = isQuery ? inference.queryPrefix : inference.documentPrefix;
     const tokenLimit = isQuery
         ? inference.queryTokenLimit
         : inference.documentTokenLimit;
-    const tokenized = tokenizer(`${prefix}${normalizedText}`, {
-        truncation: true,
-        max_length: tokenLimit,
+    const tokenizedItems = normalizedTexts.map((text) => (
+        tokenizer(`${prefix}${text}`, {
+            truncation: true,
+            max_length: tokenLimit,
+        })
+    ));
+    const batchSize = normalizedTexts.length;
+    const sequenceLength = Math.max(
+        ...tokenizedItems.map(({ input_ids: inputIds }) => inputIds.dims[1]),
+    );
+    if (!sequenceLength) {
+        throw new Error("LateOn tokenizer emitted an empty batch.");
+    }
+    const inputData = new BigInt64Array(batchSize * sequenceLength);
+    inputData.fill(BigInt(inference.padTokenId));
+    const attentionData = new BigInt64Array(batchSize * sequenceLength);
+    tokenizedItems.forEach((tokenized, batchIndex) => {
+        inputData.set(tokenized.input_ids.data, batchIndex * sequenceLength);
+        attentionData.set(
+            tokenized.attention_mask.data,
+            batchIndex * sequenceLength,
+        );
     });
-    const inputIds = Array.from(tokenized.input_ids.data, Number);
-    const attentionMask = Array.from(tokenized.attention_mask.data, Number);
+    const inputShape = [batchSize, sequenceLength];
     const output = await session.run({
         input_ids: new onnxRuntime.Tensor(
             "int64",
-            tokenized.input_ids.data,
-            tokenized.input_ids.dims,
+            inputData,
+            inputShape,
         ),
         attention_mask: new onnxRuntime.Tensor(
             "int64",
-            tokenized.attention_mask.data,
-            tokenized.attention_mask.dims,
+            attentionData,
+            inputShape,
         ),
     });
     const tensor = output[inference.outputName];
-    assertEqual(tensor.dims, [1, inputIds.length, inference.embeddingDimensions], "output shape");
+    assertEqual(
+        tensor.dims,
+        [batchSize, sequenceLength, inference.embeddingDimensions],
+        "output shape",
+    );
     if (tensor.type !== inference.outputDtype) {
         throw new Error(`Expected ${inference.outputDtype} output, received ${tensor.type}.`);
     }
     const skippedDocumentTokens = new Set(inference.documentSkipTokenIds);
-    const vectors = [];
-    for (let tokenIndex = 0; tokenIndex < inputIds.length; tokenIndex += 1) {
-        if (
-            attentionMask[tokenIndex] === 0
-            || (!isQuery && skippedDocumentTokens.has(inputIds[tokenIndex]))
-        ) {
-            continue;
-        }
-        const offset = tokenIndex * inference.embeddingDimensions;
-        vectors.push(
-            normalizeVector(
-                Array.from(
-                    tensor.data.slice(
-                        offset,
-                        offset + inference.embeddingDimensions,
+    return normalizedTexts.map((_text, batchIndex) => {
+        const inputIds = [];
+        const attentionMask = [];
+        const vectors = [];
+        for (let tokenIndex = 0; tokenIndex < sequenceLength; tokenIndex += 1) {
+            const inputOffset = batchIndex * sequenceLength + tokenIndex;
+            const tokenId = Number(inputData[inputOffset]);
+            const attended = Number(attentionData[inputOffset]);
+            if (attended === 0) continue;
+            inputIds.push(tokenId);
+            attentionMask.push(attended);
+            if (!isQuery && skippedDocumentTokens.has(tokenId)) continue;
+            const outputOffset = inputOffset * inference.embeddingDimensions;
+            vectors.push(
+                normalizeVector(
+                    Array.from(
+                        tensor.data.slice(
+                            outputOffset,
+                            outputOffset + inference.embeddingDimensions,
+                        ),
                     ),
                 ),
-            ),
-        );
+            );
+        }
+        return { inputIds, attentionMask, vectors };
+    });
+}
+
+function chunk(values, size) {
+    const chunks = [];
+    for (let index = 0; index < values.length; index += size) {
+        chunks.push(values.slice(index, index + size));
     }
-    return { inputIds, attentionMask, vectors };
+    return chunks;
 }
 
-function percentile95(values) {
-    const sorted = [...values].sort((left, right) => left - right);
-    return sorted[Math.ceil(sorted.length * 0.95) - 1];
-}
-
-async function run() {
-    const arguments_ = parseArguments(process.argv.slice(2));
-    const contract = JSON.parse(fs.readFileSync(arguments_.contract, "utf8"));
-    const reference = JSON.parse(fs.readFileSync(arguments_.reference, "utf8"));
-    const modelDirectory = path.resolve(arguments_["model-directory"]);
+export async function createLateOnRuntime({
+    contract,
+    modelDirectory,
+    transformersModule,
+    onnxruntimeModule,
+}) {
     const requiredArtifactBytes = verifyArtifacts(contract, modelDirectory);
     const rssBeforeLoad = process.memoryUsage.rss();
     const loadStarted = performance.now();
-    const { transformers, onnxRuntime } = await loadRuntime(arguments_);
+    const { transformers, onnxRuntime } = await loadRuntime(
+        transformersModule,
+        onnxruntimeModule,
+    );
     const transformersIdentity = findPackageMetadata(
-        arguments_["transformers-module"],
+        transformersModule,
         "@huggingface/transformers",
     );
     const onnxRuntimeIdentity = findPackageMetadata(
-        arguments_["onnxruntime-module"],
+        onnxruntimeModule,
         "onnxruntime-node",
     );
     if (transformersIdentity.version !== contract.runtime.transformersJs) {
@@ -249,29 +285,89 @@ async function run() {
     const modelLoadMilliseconds = performance.now() - loadStarted;
     const rssAfterLoad = process.memoryUsage.rss();
 
+    return {
+        identity: {
+            node: process.versions.node,
+            onnxruntimeNode: onnxRuntimeIdentity,
+            onnxruntimeModuleSha256: sha256File(onnxruntimeModule),
+            transformersJs: transformersIdentity,
+            transformersModuleSha256: sha256File(transformersModule),
+        },
+        loadResources: {
+            requiredArtifactBytes,
+            modelLoadMilliseconds,
+            rssBeforeLoad,
+            rssAfterLoad,
+        },
+        async score(query, documents) {
+            const [queryEncoding] = await encodeTexts({
+                texts: [query],
+                isQuery: true,
+                tokenizer,
+                session,
+                onnxRuntime,
+                inference: contract.inference,
+            });
+            const documentEncodings = [];
+            for (
+                const documentBatch of chunk(
+                    documents,
+                    contract.inference.documentBatchSize,
+                )
+            ) {
+                documentEncodings.push(
+                    ...await encodeTexts({
+                        texts: documentBatch,
+                        isQuery: false,
+                        tokenizer,
+                        session,
+                        onnxRuntime,
+                        inference: contract.inference,
+                    }),
+                );
+            }
+            return {
+                query: queryEncoding,
+                documents: documentEncodings,
+                scores: documentEncodings.map(({ vectors }) =>
+                    maxSimScore(queryEncoding.vectors, vectors)
+                ),
+            };
+        },
+        async dispose() {
+            await session.release();
+        },
+    };
+}
+
+function percentile95(values) {
+    const sorted = [...values].sort((left, right) => left - right);
+    return sorted[Math.ceil(sorted.length * 0.95) - 1];
+}
+
+async function run() {
+    const arguments_ = parseArguments(process.argv.slice(2));
+    const contract = JSON.parse(fs.readFileSync(arguments_.contract, "utf8"));
+    const reference = JSON.parse(fs.readFileSync(arguments_.reference, "utf8"));
+    const modelDirectory = path.resolve(arguments_["model-directory"]);
+    const lateOnRuntime = await createLateOnRuntime({
+        contract,
+        modelDirectory,
+        transformersModule: arguments_["transformers-module"],
+        onnxruntimeModule: arguments_["onnxruntime-module"],
+    });
+    const {
+        requiredArtifactBytes,
+        modelLoadMilliseconds,
+        rssBeforeLoad,
+        rssAfterLoad,
+    } = lateOnRuntime.loadResources;
+
     const encodeFixture = async () => {
-        const query = await encodeText({
-            text: reference.fixture.query.text,
-            isQuery: true,
-            tokenizer,
-            session,
-            onnxRuntime,
-            inference: contract.inference,
-        });
-        const documents = [];
-        for (const document of reference.fixture.documents) {
-            documents.push(
-                await encodeText({
-                    text: document.text,
-                    isQuery: false,
-                    tokenizer,
-                    session,
-                    onnxRuntime,
-                    inference: contract.inference,
-                }),
-            );
-        }
-        return { query, documents };
+        return lateOnRuntime.score(
+            reference.fixture.query.text,
+            reference.fixture.documents.map(({ text }) => text),
+        );
     };
 
     const elapsedRuns = [];
@@ -348,11 +444,7 @@ async function run() {
         contractSha256: sha256File(arguments_.contract),
         referenceSha256: sha256File(arguments_.reference),
         runtime: {
-            node: process.versions.node,
-            onnxruntimeNode: onnxRuntimeIdentity,
-            onnxruntimeModuleSha256: sha256File(arguments_["onnxruntime-module"]),
-            transformersJs: transformersIdentity,
-            transformersModuleSha256: sha256File(arguments_["transformers-module"]),
+            ...lateOnRuntime.identity,
         },
         conformance: {
             tokenIdentityExact: true,
@@ -395,7 +487,7 @@ async function run() {
         `${JSON.stringify(result, null, 2)}\n`,
         "utf8",
     );
-    await session.release();
+    await lateOnRuntime.dispose();
     if (!passed) process.exitCode = 1;
 }
 
