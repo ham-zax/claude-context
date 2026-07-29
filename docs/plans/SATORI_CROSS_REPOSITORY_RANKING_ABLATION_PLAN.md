@@ -1,12 +1,16 @@
 # Satori Cross-Repository Ranking Ablation Plan
 
-**Status:** proposed; documentation only
+**Status:** R0/R1 tooling and sealed benchmark construction complete; tuning
+baseline capture pending authorized isolated-index setup; no ablation
+authorized
 
 **Date:** 2026-07-29
 
-**Current authorization:** benchmark and experiment design only. This document
-does not authorize runtime ranking changes, model integration, dependency
-addition, index mutation, release qualification, or production activation.
+**Current authorization:** R0/R1 tooling, sealed benchmark construction, and
+baseline replay qualification. R2 remains conditional on exact baseline
+reproduction. This document does not authorize runtime ranking changes, model
+integration, dependency addition, index mutation, release qualification, or
+production activation.
 
 ## 1. Purpose
 
@@ -61,8 +65,14 @@ is pending.
 
 They are implementation evidence, not a cross-repository quality result.
 
-Before R0 opens, freeze one final live `tradingview_ratio` receipt for the
-committed `0.35` component. It must include:
+The final live `tradingview_ratio` receipt for the committed `0.35` component
+is frozen at:
+
+```text
+docs/evidence/entrypoint-owner-final-20260730/ENTRYPOINT_OWNER_FINAL_RECEIPT.md
+```
+
+It includes:
 
 ```text
 source revision and source digest
@@ -135,6 +145,15 @@ repair a missing candidate. Grouping repair cannot correct raw-arm recall.
 ## 4. Benchmark authority
 
 ### R0 — freeze tasks, repositories, and oracles
+
+R0 manifest and oracle construction may begin before R1 tooling finishes.
+Benchmark query execution and candidate capture may not begin until the R1
+qualification fixture reproduces production baseline scoring, grouping,
+diversity, and disclosure exactly under the applicable route contract. After
+that fixture gate passes, R1 may capture and reproduce baseline `B` on the
+tuning split only. Contender scoring remains blocked until that tuning
+baseline reproduces exactly, and held-out query execution remains blocked
+until the single R5 adjudication.
 
 Use multiple repositories and the languages needed by the intended support
 claim. A repository revision must belong to exactly one of:
@@ -214,6 +233,26 @@ training data disclosed for a neural contender. Training-overlap review may
 select one preregistered checkpoint before evaluation; it must not choose a
 checkpoint retrospectively from held-out scores.
 
+The initial R0 manifest is sealed at:
+
+```text
+evals/search-ranking/cross-repository-v2.manifest.json
+canonical seal SHA-256: 5428cedc074ed2c3d2b24a680be6be7b93d1f1a3c7cd18c92d02f967b3ac70f7
+artifact bytes SHA-256: 466c85d537a59938ccd81dd2a44dcf60fad9502668d0b83da3963d21f25da68f
+```
+
+It contains three independent repository families per split, 26 tuning tasks,
+24 held-out tasks, six reviewed negative tasks per split, every required query
+class, immutable Git revisions and trees, source-tree digests, exact query
+digests, and source-blob-bound oracles. The builder reads pinned Git objects,
+not working-tree bytes. Generated positive candidate suites retain version-2
+split authority; reviewed negative tasks are emitted separately so existing
+owner-at-K scoring cannot accidentally treat a hard negative as a required
+owner.
+
+No held-out query has been executed. Regenerating the manifest currently
+produces byte-identical output.
+
 ### Negative-task boundary
 
 Until the semantic abstention workstream qualifies an applicable policy, report
@@ -269,14 +308,40 @@ the preregistered contender; they may not change the metrics or gates.
 
 Freeze the statistical decision contract at the same boundary:
 
-```text
-minimum independent repositories and tasks for every important stratum
-paired estimator and unit of analysis
-uncertainty or confidence calculation
-minimum meaningful effect size
-non-inferiority margins for protected regressions
-multiple-contender selection rule, including D-L16 versus D-L32
-```
+* Each split must contain at least three independent repository families.
+* Each repository must contribute at least six positive-owner tasks and two
+  reviewed negative tasks. Each split therefore contains at least 24 tasks.
+* A query-class, language, or criticality stratum is decision-bearing only
+  when it contains at least four tasks spanning at least two repository
+  families. Smaller strata remain descriptive.
+* The primary paired unit is the task. Aggregate each metric within a
+  repository first, then report the unweighted mean of repository deltas so
+  one large repository cannot dominate.
+* Use 10,000 deterministic repository-cluster bootstrap resamples. Derive the
+  seed from the sealed manifest digest and report two-sided percentile
+  intervals.
+* A deterministic finalist must improve held-out repository-macro owner-at-3
+  by at least `0.05` and macro reciprocal rank by at least `0.03`. The
+  multiplicity-adjusted lower confidence bound for both deltas must remain
+  above zero.
+* Protected non-inferiority margins are `-0.02` for owner-at-1, `-0.01` for
+  owner-at-10 and required-role coverage, and `+0.02` for hard-negative and
+  unacceptable-owner exposure at 3. Exact-identifier, `must:`, configuration
+  pin, candidate-membership, and eligibility controls permit zero failures.
+* Complete unrelated result-list membership changes are forbidden in R2.
+  Relative-order changes are reported and must be explained by the one
+  preregistered component varied by that arm.
+* Deterministic arms must remain within `baseline p95 * 1.10 + 10 ms` and
+  `baseline peak RSS * 1.05`.
+* Compare `B-P0` and `B-A0` with `97.5%` intervals (`0.05 / 2`). Among arms
+  that clear every quality and safety gate, choose the
+  largest repository-macro MRR improvement; differences below `0.01` select
+  the simpler policy, with `B` simplest.
+* If R3 opens, compare `D-L16` and `D-L32` with `97.5%` intervals. Prefer
+  `D-L16` unless `D-L32` improves repository-macro MRR by at least `0.01`,
+  clears every protected margin, and clears the separately frozen C0 latency
+  and memory budgets. C0 must freeze those absolute neural budgets before any
+  neural measurement is run.
 
 Do not choose these values from tuning or held-out results. If the frozen
 sample cannot satisfy the contract, report insufficient evidence rather than
@@ -296,7 +361,7 @@ scripts/satori-search-candidate-replay.mjs
 The `.test.mjs` files are regression coverage, not the capture or replay
 authority.
 
-For every task, capture complete untruncated evidence for:
+For every tuning task, capture complete untruncated evidence for:
 
 ```text
 raw dense arm
@@ -331,6 +396,11 @@ nor R2 ablations may begin until baseline `B` reproduces scores within the
 frozen numerical tolerance and reproduces identity-equal order with owner
 evidence enabled.
 
+The six tuning negative tasks compile into separate version-2
+`negative_exposure` task suites. They retain reviewed hard-negative owners as
+exposure authorities, not expected answers, and must pass the same capture,
+grouping/disclosure replay, and neural-disabled gates as positive tasks.
+
 ### Current replay limitation
 
 The current replay contract:
@@ -341,11 +411,18 @@ The current replay contract:
   owner values;
 * computes final local scores through the production scoring owner;
 * replays reranker admission but not provider scores;
-* does not replay grouping or disclosure; and
+* freezes production-captured group membership, then invokes the production
+  group-score, ordering, diversity, and disclosure owners;
+* rejects a grouping replay when neural provider order was applied, a group
+  stage is truncated, or contender membership differs from the frozen set;
+* reproduces grouped and disclosed identity, score, and order, but leaves
+  grouped-response byte-budget behavior to live validation; and
 * intentionally rejects source-bearing fields.
 
-It therefore cannot yet execute the path-policy and neural arms in this plan.
-R1 must qualify one bounded extension or controlled live harness that:
+It can qualify deterministic ordering arms once a version-2 capture reproduces
+baseline `B` with `--require-grouping-ready`. It cannot execute a neural arm or
+claim response-byte reproduction. Before R3, R1/C0 must qualify a bounded
+extension or controlled live harness that:
 
 * invokes production-owned scoring, grouping, and disclosure contracts;
 * does not copy ranking formulas into an independent script authority;
@@ -356,9 +433,30 @@ R1 must qualify one bounded extension or controlled live harness that:
 * retains the existing prohibition on source code in capture artifacts and
   telemetry.
 
-If production owners are not injectable, first identify the smallest pure
-scoring/grouping extraction that preserves their single authority. Do not add a
-general plugin framework merely for the experiment.
+The deterministic harness uses the smallest shared production grouping
+extraction and does not add a plugin framework. Source-projection
+reconstruction is still required before provider reranking, not for R2 where
+neural reranking is disabled and group membership is frozen.
+
+For an R2-eligible capture, use all three fail-closed gates:
+
+```text
+--require-replay-ready
+--require-grouping-ready
+--require-neural-disabled
+```
+
+The last gate requires no reranker capability, attempt, application, candidate
+work, or input bytes. Merely ignoring provider scores after capture is not
+neural-disabled qualification.
+
+As of the initial R0 seal, the replay fixture reproduces production scoring,
+group score, grouped order, diversity, and disclosed order exactly. Tuning
+baseline `B` has not been captured or reproduced, so R2 remains closed.
+Benchmark execution requires clean isolated worktrees at the manifest's pinned
+tuning revisions and separate explicit authorization to create their Satori
+indexes. Do not create or query the held-out indexes during R1 or R2; they are
+reserved for the single R5 adjudication.
 
 ## 7. Controlled ranking ablations
 
@@ -375,23 +473,14 @@ admission or ordering.
 | --- | --- |
 | `B` | Current production policy, including currently qualified bounded authoritative evidence |
 | `B-P0` | Path score contribution neutralized; scope and explicit path operators remain unchanged |
-| `B-P1` | Path score replaced by one preregistered capped, intent-conditioned policy |
 | `B-A0` | Optional authoritative score components disabled for diagnosis; mandatory exact, `must:`, path, and configuration contracts remain enabled |
 
-`B-P1` must be specified before tuning output is opened:
-
-```text
-applicable query intents
-path categories
-maximum contribution
-composition point
-tie behavior
-interaction with exact and mandatory evidence
-```
-
-Do not search over several weights and report only the best. If more than one
-bounded policy is scientifically necessary, preregister a finite grid and
-correct the selection gate for that comparison.
+`B-P1` is formally excluded from this sealed experiment. No evidence-independent
+intent set, path-category mapping, cap, composition point, or tie contract was
+qualified before tuning output, so freezing one would introduce a guessed
+policy. Adding an intent-conditioned path contender later requires a new sealed
+experiment and fresh held-out authority; it cannot be selected from this
+experiment's tuning output.
 
 `B-A0` measures the incremental effect of already-qualified optional authority
 signals. It does not authorize removing exact or configuration truth from the
