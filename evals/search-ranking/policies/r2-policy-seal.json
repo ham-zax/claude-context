@@ -1,10 +1,10 @@
 {
   "version": 3,
   "kind": "satori_search_ranking_r2_policy_seal",
-  "sha256": "569d342aaf870659553046b71a8d4d2902106b097f94932894c31c9cf08a5a83",
-  "createdAt": "2026-07-30T05:22:13+08:00",
+  "sha256": "dc3ee089932bf1677800b54b9aa81b8c9abd4aec55577080b203685209db895a",
+  "createdAt": "2026-07-30T05:25:22+08:00",
   "createdBeforeContenderReplay": true,
-  "evaluatorAmendedBeforeResultsOpened": false,
+  "evaluatorAmendedBeforeResultsOpened": true,
   "manifest": {
     "seal": "ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445",
     "artifactSha256": "79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30"
@@ -14,10 +14,11 @@
     "sha256": "30c1c4f54602a39e20593d4dac2779ef104b60fd68fbc59679cae01fa35c55ce"
   },
   "execution": {
-    "gitRevision": "eb134b6d4a797e75614b87333ba36db89f70c7b2",
-    "gitTree": "d76ad61190bfac4df3bda7fdd76ed93b50627456",
+    "gitRevision": "d22da72991444d4d920664ee06a698eee0832fcf",
+    "gitTree": "c92f25736ae235de88654c72b6422008f0f89676",
     "replayScriptSha256": "7f669985adc8bc2542dc899a6ec1b8fc2584c347fdba8fcc417291913251a6a6",
-    "evaluatorScriptSha256": "0d89d14988e8caf000f739676b0380e75afc7693ce29e0df8e79e84e54650e29",
+    "evaluatorScriptSha256": "ce9ae4a6191a744c06396feade0ccc11e1b334abe7ac504423fb76d98937ed12",
+    "evaluatorAmendment": "Derive 19 quality, 6 negative, and 1 exact-control tasks from the sealed tuning manifest after the corrected baseline eliminated all retrieval misses; no contender replay or result was opened before this amendment.",
     "nodeVersion": "v24.13.0",
     "nodeSha256": "53fb205ae78805130177e24bcb459a69a1518c8d98f8965f31d85aae7ea840fc",
     "tsxVersion": "4.22.4",
