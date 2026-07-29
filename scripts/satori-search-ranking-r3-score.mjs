@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLanguageAnalysisService } from "../packages/core/src/language-analysis/service.ts";
 import { buildIndexedChunkId } from "../packages/core/src/core/indexed-chunk-identity.ts";
 import {
@@ -17,6 +17,37 @@ import { createLateOnRuntime } from "./satori-lateon-c0-native.mjs";
 import { canonicalJson } from "./satori-useful-context.mjs";
 
 const RESULT_SCHEMA = "satori_search_ranking_r3_scores_v1";
+const TOOL_REPOSITORY_ROOT = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+);
+const TOOL_ARTIFACTS = Object.freeze([
+    ["r3_scorer", fileURLToPath(import.meta.url)],
+    ["lateon_runtime", fileURLToPath(new URL("./satori-lateon-c0-native.mjs", import.meta.url))],
+    ["baseline_replay", fileURLToPath(new URL("./satori-search-candidate-replay.mjs", import.meta.url))],
+    [
+        "chunk_identity_owner",
+        fileURLToPath(new URL(
+            "../packages/core/src/core/indexed-chunk-identity.ts",
+            import.meta.url,
+        )),
+    ],
+    [
+        "rerank_document_owner",
+        fileURLToPath(new URL(
+            "../packages/mcp/src/core/search-rerank-document.ts",
+            import.meta.url,
+        )),
+    ],
+    [
+        "rerank_candidate_pool_owner",
+        fileURLToPath(new URL(
+            "../packages/mcp/src/core/search-rerank-policy.ts",
+            import.meta.url,
+        )),
+    ],
+    ["dependency_lockfile", fileURLToPath(new URL("../pnpm-lock.yaml", import.meta.url))],
+]);
 
 function parseArguments(argv) {
     const values = new Map();
@@ -123,6 +154,36 @@ function verifySourceRoot(sourceRoot, revision) {
         encoding: "utf8",
     }).trim();
     return { absoluteRoot, revision: actualRevision, tree };
+}
+
+function verifyToolingIdentity() {
+    const revision = execFileSync(
+        "git",
+        ["-C", TOOL_REPOSITORY_ROOT, "rev-parse", "HEAD"],
+        { encoding: "utf8" },
+    ).trim();
+    const status = execFileSync(
+        "git",
+        ["-C", TOOL_REPOSITORY_ROOT, "status", "--porcelain=v1"],
+        { encoding: "utf8" },
+    );
+    if (status.length !== 0) {
+        throw new Error("R3 scorer requires a clean, committed tooling worktree.");
+    }
+    return {
+        gitRevision: revision,
+        gitTree: execFileSync(
+            "git",
+            ["-C", TOOL_REPOSITORY_ROOT, "rev-parse", "HEAD^{tree}"],
+            { encoding: "utf8" },
+        ).trim(),
+        artifacts: TOOL_ARTIFACTS.map(([role, filePath]) => ({
+            role,
+            fileName: path.basename(filePath),
+            bytes: fs.statSync(filePath).size,
+            sha256: sha256File(filePath),
+        })),
+    };
 }
 
 function finalFilteredStage(taskCapture) {
@@ -384,6 +445,7 @@ async function run() {
     const positive = loadCapture(arguments_["positive-capture"]);
     const negative = loadCapture(arguments_["negative-capture"]);
     verifyCapturePair(positive, negative);
+    const tooling = verifyToolingIdentity();
     const source = verifySourceRoot(
         arguments_["source-root"],
         positive.capture.authority.gitRevision,
@@ -438,6 +500,7 @@ async function run() {
         },
         modelRuntime: lateOnRuntime.identity,
         modelLoadResources: lateOnRuntime.loadResources,
+        tooling,
         source,
         captures: [positive, negative].map((capture) => ({
             fileName: capture.fileName,
