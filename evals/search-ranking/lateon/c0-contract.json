@@ -121,8 +121,8 @@
     "maximumWarmD32P95Milliseconds": 1500
   },
   "r3Projection": {
-    "version": "embedding_projection_v3",
-    "source": "production semanticText reconstructed from the pinned source revision",
+    "version": "search_rerank_document_v1",
+    "source": "production reranker document reconstructed from the pinned source revision",
     "digestRequired": true
   }
 }
