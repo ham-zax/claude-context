@@ -388,8 +388,10 @@ authorized deterministic correction.
    existing compatible contribution or sidecar, and bounded on-demand
    derivation. Record why the selected placement preserves source and
    publication identity without creating a second authority. The ranking
-   policy must consume resolved evidence; it must not parse project manifests
-   at query time.
+   policy itself must consume resolved evidence and must not parse project
+   manifests. A separately owned bounded on-demand derivation may run while a
+   query is being prepared only when its source-barrier, publication-binding,
+   resource, and failure-closed contract has been qualified.
 5. Specify and freeze the prospective extension to the existing query-plan
    evidence model rather than adding one universal `entrypoint_intent`
    Boolean. Distinguish at least:
@@ -505,6 +507,12 @@ existing ranking tests can establish.
 Report owner recall in the frozen union, MRR, top-one, top-three, top-ten,
 counterexample-class accuracy, unrelated promotions, and complete result-list
 diffs.
+
+Cross-repository benchmark construction, deterministic path-policy ablations,
+neural ranking comparisons, and counterfactual robustness are owned by
+[SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md](./SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md).
+That plan may route evidence into Track C or Track F; it does not replace their
+artifact, runtime, representation, or production authority.
 
 Route the result mechanically:
 
