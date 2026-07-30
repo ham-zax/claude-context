@@ -509,13 +509,6 @@ type DurableAuthorityRestoreTransaction = {
     entries: DurableAuthorityRestoreEntry[];
 };
 
-interface CodebaseIgnoreState {
-    canonicalRoot: string;
-    fileBasedPatterns: string[];
-    effectivePatterns: string[];
-    matcher: ReturnType<typeof ignore> | null;
-}
-
 type RepairIndexOptions = {
     snapshotEvidence?: RepairSnapshotEvidence;
     preferredCollectionName?: string;
@@ -718,8 +711,6 @@ export class Context {
     private configuredExtensionOverlays: string[];
     private runtimeCustomExtensionsByCodebase: Map<string, string[]>;
     private indexProfilesByCodebase: Map<string, IndexProfile>;
-    private baseIgnorePatterns: string[];
-    private runtimeCustomIgnorePatternsByCodebase: Map<string, string[]>;
     private loadedCustomPolicyRoots: Set<string>;
     private policyFileTokensByCodebase: Map<string, string | null>;
     private policyDocumentDigestsByCodebase: Map<string, string>;
@@ -728,7 +719,6 @@ export class Context {
     private publishedResolvedPoliciesByCodebase: Map<string, ResolvedIndexPolicy>;
     private readonly indexPolicyStateRoot: string;
     private readonly indexPolicyMutationCoordinator: IndexPolicyMutationCoordinator;
-    private ignoreStateByCollection: Map<string, CodebaseIgnoreState>;
     private synchronizers = new Map<string, FileSynchronizer>();
     private synchronizerMutationTargets = new Map<string, string>();
     private reindexByChangeQueues = new Map<string, Promise<void>>();
@@ -821,9 +811,6 @@ export class Context {
             ...(config.customIgnorePatterns || []),
             ...envCustomIgnorePatterns
         ];
-        // Runtime custom ignore patterns added via MCP/manage_index
-        this.baseIgnorePatterns = allIgnorePatterns;
-        this.runtimeCustomIgnorePatternsByCodebase = new Map();
         this.loadedCustomPolicyRoots = new Set();
         this.policyFileTokensByCodebase = new Map();
         this.policyDocumentDigestsByCodebase = new Map();
@@ -841,20 +828,17 @@ export class Context {
                 this.resolveVerifiedIndexPolicyDocumentDigest(policyPath)
             ),
         });
-        this.ignoreStateByCollection = new Map();
         this.symbolRegistryStateRoot = config.symbolRegistryStateRoot;
         this.ignoreRuleService = new IgnoreRuleService({
+            basePatterns: allIgnorePatterns,
             canonicalizeCodebasePath: (codebasePath) => (
                 this.canonicalizeCodebasePath(codebasePath)
             ),
-            setFileBasedPatternsForCodebase: (codebasePath, patterns) => (
-                this.setFileBasedPatternsForCodebase(codebasePath, patterns)
+            resolveCollectionName: (codebasePath) => (
+                this.resolveCollectionName(codebasePath)
             ),
-            getActiveIgnorePatterns: (codebasePath) => (
-                this.getActiveIgnorePatterns(codebasePath)
-            ),
-            getIgnoreMatcherForCodebase: (codebasePath) => (
-                this.getIgnoreMatcherForCodebase(codebasePath)
+            ensureRuntimePolicyLoaded: (canonicalRoot) => (
+                this.loadCustomIndexPolicy(canonicalRoot)
             ),
         });
         this.indexingPipeline = new IndexingPipeline({
@@ -902,7 +886,7 @@ export class Context {
         });
         this.recoverDurableIndexAuthorityTransactions(config.durableAuthorityRecoveryPublisher);
 
-        console.log(`[Context] 🔧 Initialized with ${this.supportedExtensions.length} supported extensions and ${this.baseIgnorePatterns.length} base ignore patterns`);
+        console.log(`[Context] 🔧 Initialized with ${this.supportedExtensions.length} supported extensions and ${this.ignoreRuleService.getBasePatterns().length} base ignore patterns`);
         if (envCustomExtensions.length > 0) {
             console.log(`[Context] 📎 Loaded ${envCustomExtensions.length} custom extensions from environment: ${envCustomExtensions.join(', ')}`);
         }
@@ -964,10 +948,7 @@ export class Context {
      * Without a codebase path, returns global base+runtime layers only.
      */
     getActiveIgnorePatterns(codebasePath?: string): string[] {
-        if (!codebasePath) {
-            return [...this.baseIgnorePatterns];
-        }
-        return [...this.getOrCreateIgnoreState(codebasePath).effectivePatterns];
+        return this.ignoreRuleService.getActivePatterns(codebasePath);
     }
 
     /**
@@ -4786,7 +4767,7 @@ export class Context {
             const familyCollectionName = this.resolveCollectionName(codebasePath);
             this.synchronizers.delete(familyCollectionName);
             this.synchronizerMutationTargets.delete(familyCollectionName);
-            this.ignoreStateByCollection.delete(familyCollectionName);
+            this.ignoreRuleService.deleteCodebaseState(codebasePath);
             this.writeCollectionOverrides.delete(canonicalRoot);
             this.indexProfilesByCodebase.delete(canonicalRoot);
         });
@@ -4800,10 +4781,12 @@ export class Context {
      * @param ignorePatterns Array of base ignore patterns
      */
     updateIgnorePatterns(ignorePatterns: string[]): void {
-        this.baseIgnorePatterns = [...DEFAULT_IGNORE_PATTERNS, ...ignorePatterns];
-        this.rebuildAllIgnoreStates();
+        this.ignoreRuleService.setBasePatterns([
+            ...DEFAULT_IGNORE_PATTERNS,
+            ...ignorePatterns,
+        ]);
         this.recomputeAllPublishedPolicyRuntimeCompatibility();
-        console.log(`[Context] 🚫 Updated base ignore patterns. Base total: ${this.baseIgnorePatterns.length}`);
+        console.log(`[Context] 🚫 Updated base ignore patterns. Base total: ${this.ignoreRuleService.getBasePatterns().length}`);
     }
 
     async resolveIndexPolicyForCodebase(
@@ -4836,7 +4819,7 @@ export class Context {
             : normalizeSupportedExtensions(update.customExtensions);
         const customIgnorePatterns = update.customIgnorePatterns === undefined
             ? inheritActiveCustomPolicy
-                ? [...(this.runtimeCustomIgnorePatternsByCodebase.get(canonicalRoot) ?? [])]
+                ? this.ignoreRuleService.getRuntimeCustomPatterns(canonicalRoot)
                 : []
             : update.customIgnorePatterns.map((pattern) => pattern.trim()).filter(Boolean);
         const fileBasedPatterns: string[] = [];
@@ -4849,7 +4832,7 @@ export class Context {
             ...customExtensions,
         ]);
         const effectiveIgnorePatterns = [
-            ...this.baseIgnorePatterns,
+            ...this.ignoreRuleService.getBasePatterns(),
             ...customIgnorePatterns,
             ...fileBasedPatterns,
         ];
@@ -5379,7 +5362,10 @@ export class Context {
     ): void {
         const canonicalRoot = policy.canonicalRoot;
         this.runtimeCustomExtensionsByCodebase.set(canonicalRoot, [...policy.customExtensions]);
-        this.runtimeCustomIgnorePatternsByCodebase.set(canonicalRoot, [...policy.customIgnorePatterns]);
+        this.ignoreRuleService.setRuntimeCustomPatterns(
+            canonicalRoot,
+            policy.customIgnorePatterns,
+        );
         if (!this.indexProfilesByCodebase.has(canonicalRoot)) {
             this.indexProfilesByCodebase.set(canonicalRoot, policy.profile);
         }
@@ -5402,7 +5388,10 @@ export class Context {
             canonicalRoot,
             this.isPolicyRuntimeCompatible(policy),
         );
-        this.setFileBasedPatternsForCodebase(canonicalRoot, policy.fileBasedIgnorePatterns);
+        this.ignoreRuleService.setFileBasedPatterns(
+            canonicalRoot,
+            policy.fileBasedIgnorePatterns,
+        );
     }
 
     private isPolicyRuntimeCompatible(policy: ResolvedIndexPolicy): boolean {
@@ -5413,7 +5402,7 @@ export class Context {
             ...policy.customExtensions,
         ]);
         const expectedIgnorePatterns = [
-            ...this.baseIgnorePatterns,
+            ...this.ignoreRuleService.getBasePatterns(),
             ...policy.customIgnorePatterns,
             ...policy.fileBasedIgnorePatterns,
         ];
@@ -5460,85 +5449,13 @@ export class Context {
      * Reset ignore patterns to defaults only
      */
     resetIgnorePatternsToDefaults(): void {
-        this.baseIgnorePatterns = [...DEFAULT_IGNORE_PATTERNS];
-        this.rebuildAllIgnoreStates();
+        this.ignoreRuleService.setBasePatterns(DEFAULT_IGNORE_PATTERNS);
         this.recomputeAllPublishedPolicyRuntimeCompatibility();
-        console.log(`[Context] 🔄 Reset ignore patterns to defaults: ${this.baseIgnorePatterns.length} patterns`);
-    }
-
-    private buildEffectiveIgnorePatterns(codebasePath: string, fileBasedPatterns: string[]): string[] {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        return [
-            ...this.baseIgnorePatterns,
-            ...(this.runtimeCustomIgnorePatternsByCodebase.get(canonicalRoot) ?? []),
-            ...fileBasedPatterns,
-        ];
-    }
-
-    private rebuildAllIgnoreStates(): void {
-        for (const [collectionName, state] of this.ignoreStateByCollection.entries()) {
-            this.ignoreStateByCollection.set(collectionName, {
-                ...state,
-                effectivePatterns: this.buildEffectiveIgnorePatterns(state.canonicalRoot, state.fileBasedPatterns),
-                matcher: null,
-            });
-        }
-    }
-
-    private rebuildIgnoreStateForCodebase(codebasePath: string): void {
-        const collectionName = this.resolveCollectionName(codebasePath);
-        const state = this.ignoreStateByCollection.get(collectionName);
-        if (!state) return;
-        this.ignoreStateByCollection.set(collectionName, {
-            ...state,
-            effectivePatterns: this.buildEffectiveIgnorePatterns(codebasePath, state.fileBasedPatterns),
-            matcher: null,
-        });
-    }
-
-    private getOrCreateIgnoreState(codebasePath: string): CodebaseIgnoreState {
-        const collectionName = this.resolveCollectionName(codebasePath);
-        this.loadCustomIndexPolicy(this.canonicalizeCodebasePath(codebasePath));
-        const existing = this.ignoreStateByCollection.get(collectionName);
-        if (existing) {
-            return existing;
-        }
-
-        const initial: CodebaseIgnoreState = {
-            canonicalRoot: this.canonicalizeCodebasePath(codebasePath),
-            fileBasedPatterns: [],
-            effectivePatterns: this.buildEffectiveIgnorePatterns(codebasePath, []),
-            matcher: null,
-        };
-        this.ignoreStateByCollection.set(collectionName, initial);
-        return initial;
-    }
-
-    private setFileBasedPatternsForCodebase(codebasePath: string, fileBasedPatterns: string[]): void {
-        const collectionName = this.resolveCollectionName(codebasePath);
-        const normalizedFileBased = fileBasedPatterns
-            .filter((pattern): pattern is string => typeof pattern === 'string')
-            .filter((pattern) => pattern.length > 0);
-
-        const nextState: CodebaseIgnoreState = {
-            canonicalRoot: this.canonicalizeCodebasePath(codebasePath),
-            fileBasedPatterns: normalizedFileBased,
-            effectivePatterns: this.buildEffectiveIgnorePatterns(codebasePath, normalizedFileBased),
-            matcher: null,
-        };
-        this.ignoreStateByCollection.set(collectionName, nextState);
+        console.log(`[Context] 🔄 Reset ignore patterns to defaults: ${this.ignoreRuleService.getBasePatterns().length} patterns`);
     }
 
     private getIgnoreMatcherForCodebase(codebasePath: string): ReturnType<typeof ignore> {
-        const collectionName = this.resolveCollectionName(codebasePath);
-        const state = this.getOrCreateIgnoreState(codebasePath);
-        if (!state.matcher) {
-            const matcher = ignore();
-            matcher.add(state.effectivePatterns);
-            state.matcher = matcher;
-            this.ignoreStateByCollection.set(collectionName, state);
-        }
-        return state.matcher;
+        return this.ignoreRuleService.getMatcher(codebasePath);
     }
 
     private canonicalizeCodebasePath(codebasePath: string): string {
@@ -7716,13 +7633,13 @@ export class Context {
 
     private clearResolvedIndexPolicyRuntime(canonicalRoot: string): void {
         this.runtimeCustomExtensionsByCodebase.delete(canonicalRoot);
-        this.runtimeCustomIgnorePatternsByCodebase.delete(canonicalRoot);
+        this.ignoreRuleService.deleteRuntimeCustomPatterns(canonicalRoot);
         this.publishedPolicyBindingsByCodebase.delete(canonicalRoot);
         this.publishedResolvedPoliciesByCodebase.delete(canonicalRoot);
         this.policyRuntimeCompatibilityByCodebase.delete(canonicalRoot);
         this.policyDocumentDigestsByCodebase.delete(canonicalRoot);
         this.loadedCustomPolicyRoots.delete(canonicalRoot);
-        this.setFileBasedPatternsForCodebase(canonicalRoot, []);
+        this.ignoreRuleService.setFileBasedPatterns(canonicalRoot, []);
     }
 
     private loadCustomIndexPolicy(canonicalRoot: string): void {
@@ -7825,18 +7742,17 @@ export class Context {
         fs.mkdirSync(this.indexPolicyStateRoot, { recursive: true });
         const targetPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
         const temporaryPath = `${targetPath}.tmp-${process.pid}-${crypto.randomUUID()}`;
-        const collectionName = this.resolveCollectionName(canonicalRoot);
         const previousRuntimeState = {
             customExtensions: this.runtimeCustomExtensionsByCodebase.has(canonicalRoot)
                 ? [...(this.runtimeCustomExtensionsByCodebase.get(canonicalRoot) ?? [])]
                 : null,
-            customIgnorePatterns: this.runtimeCustomIgnorePatternsByCodebase.has(canonicalRoot)
-                ? [...(this.runtimeCustomIgnorePatternsByCodebase.get(canonicalRoot) ?? [])]
+            customIgnorePatterns: this.ignoreRuleService.hasRuntimeCustomPatterns(canonicalRoot)
+                ? this.ignoreRuleService.getRuntimeCustomPatterns(canonicalRoot)
                 : null,
             profile: this.indexProfilesByCodebase.get(canonicalRoot),
             binding: this.publishedPolicyBindingsByCodebase.get(canonicalRoot),
             resolvedPolicy: this.publishedResolvedPoliciesByCodebase.get(canonicalRoot),
-            ignoreState: this.ignoreStateByCollection.get(collectionName),
+            ignoreState: this.ignoreRuleService.captureCodebaseState(canonicalRoot),
             wasLoaded: this.loadedCustomPolicyRoots.has(canonicalRoot),
             fileToken: this.policyFileTokensByCodebase.get(canonicalRoot),
             hadFileToken: this.policyFileTokensByCodebase.has(canonicalRoot),
@@ -7850,9 +7766,12 @@ export class Context {
                 this.runtimeCustomExtensionsByCodebase.delete(canonicalRoot);
             }
             if (previousRuntimeState.customIgnorePatterns) {
-                this.runtimeCustomIgnorePatternsByCodebase.set(canonicalRoot, [...previousRuntimeState.customIgnorePatterns]);
+                this.ignoreRuleService.setRuntimeCustomPatterns(
+                    canonicalRoot,
+                    previousRuntimeState.customIgnorePatterns,
+                );
             } else {
-                this.runtimeCustomIgnorePatternsByCodebase.delete(canonicalRoot);
+                this.ignoreRuleService.deleteRuntimeCustomPatterns(canonicalRoot);
             }
             if (previousRuntimeState.profile) {
                 this.indexProfilesByCodebase.set(canonicalRoot, previousRuntimeState.profile);
@@ -7882,15 +7801,10 @@ export class Context {
             } else {
                 this.publishedResolvedPoliciesByCodebase.delete(canonicalRoot);
             }
-            if (previousRuntimeState.ignoreState) {
-                this.ignoreStateByCollection.set(collectionName, {
-                    ...previousRuntimeState.ignoreState,
-                    fileBasedPatterns: [...previousRuntimeState.ignoreState.fileBasedPatterns],
-                    effectivePatterns: [...previousRuntimeState.ignoreState.effectivePatterns],
-                });
-            } else {
-                this.ignoreStateByCollection.delete(collectionName);
-            }
+            this.ignoreRuleService.restoreCodebaseState(
+                canonicalRoot,
+                previousRuntimeState.ignoreState,
+            );
             if (previousRuntimeState.wasLoaded) {
                 this.loadedCustomPolicyRoots.add(canonicalRoot);
             } else {

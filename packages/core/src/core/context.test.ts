@@ -4839,12 +4839,11 @@ test('Context policy removal reconciles runtime state after removing a malformed
         const runtimeState = context as unknown as {
             publishedResolvedPoliciesByCodebase: Map<string, unknown>;
             publishedPolicyBindingsByCodebase: Map<string, unknown>;
-            runtimeCustomIgnorePatternsByCodebase: Map<string, unknown>;
             policyRuntimeCompatibilityByCodebase: Map<string, unknown>;
         };
         assert.equal(runtimeState.publishedResolvedPoliciesByCodebase.has(policy.canonicalRoot), false);
         assert.equal(runtimeState.publishedPolicyBindingsByCodebase.has(policy.canonicalRoot), false);
-        assert.equal(runtimeState.runtimeCustomIgnorePatternsByCodebase.has(policy.canonicalRoot), false);
+        assert.equal(context.getActiveIgnorePatterns(codebasePath).includes('generated/**'), false);
         assert.equal(runtimeState.policyRuntimeCompatibilityByCodebase.has(policy.canonicalRoot), false);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
