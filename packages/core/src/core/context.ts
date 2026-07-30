@@ -99,9 +99,7 @@ import {
 } from '../sync/synchronizer';
 import {
     assertDescriptorBoundIndexingSupported,
-    openRegularFileInsideRootNoFollow,
     readFileHandleExactly,
-    verifyStableFileObservation,
 } from '../sync/root-bound-fs';
 import type {
     RepairActivatedGeneration,
@@ -138,6 +136,12 @@ import {
     type ProjectedChunkEntry,
 } from './indexing-pipeline';
 import { IndexPolicyMutationCoordinator } from './index-policy-mutation-coordinator';
+import {
+    IgnoreRuleService,
+    getCustomExtensionsFromEnvironment,
+    getCustomIgnorePatternsFromEnvironment,
+    readIgnorePatternsFile,
+} from './ignore-rule-service';
 
 export type {
     MutationGenerationObservation,
@@ -744,6 +748,7 @@ export class Context {
     private symbolRegistryStateRoot?: string;
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
     private readonly indexingPipeline: IndexingPipeline;
+    private readonly ignoreRuleService: IgnoreRuleService;
     private vectorStoreProvider: VectorStoreProviderIdentity;
 
     constructor(config: ContextConfig = {}) {
@@ -795,7 +800,7 @@ export class Context {
         });
 
         // Load custom extensions from environment variables
-        const envCustomExtensions = this.getCustomExtensionsFromEnv();
+        const envCustomExtensions = getCustomExtensionsFromEnvironment();
 
         this.configuredExtensionOverlays = normalizeSupportedExtensions([
             ...(config.supportedExtensions || []),
@@ -807,7 +812,7 @@ export class Context {
         this.supportedExtensions = this.buildSupportedExtensions('default');
 
         // Load custom ignore patterns from environment variables
-        const envCustomIgnorePatterns = this.getCustomIgnorePatternsFromEnv();
+        const envCustomIgnorePatterns = getCustomIgnorePatternsFromEnvironment();
 
         // Base ignore patterns (defaults + static config + env)
         const allIgnorePatterns = [
@@ -838,6 +843,20 @@ export class Context {
         });
         this.ignoreStateByCollection = new Map();
         this.symbolRegistryStateRoot = config.symbolRegistryStateRoot;
+        this.ignoreRuleService = new IgnoreRuleService({
+            canonicalizeCodebasePath: (codebasePath) => (
+                this.canonicalizeCodebasePath(codebasePath)
+            ),
+            setFileBasedPatternsForCodebase: (codebasePath, patterns) => (
+                this.setFileBasedPatternsForCodebase(codebasePath, patterns)
+            ),
+            getActiveIgnorePatterns: (codebasePath) => (
+                this.getActiveIgnorePatterns(codebasePath)
+            ),
+            getIgnoreMatcherForCodebase: (codebasePath) => (
+                this.getIgnoreMatcherForCodebase(codebasePath)
+            ),
+        });
         this.indexingPipeline = new IndexingPipeline({
             getVectorDatabase: () => this.vectorDatabase,
             languageAnalyzer: this.languageAnalyzer,
@@ -7511,195 +7530,41 @@ export class Context {
     }
 
     static async getIgnorePatternsFromFile(filePath: string): Promise<string[]> {
-        try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
-            return Context.parseIgnorePatterns(content);
-        } catch (error) {
-            console.warn(`[Context] ⚠️  Could not read ignore file ${filePath}: ${error}`);
-            return [];
-        }
+        return readIgnorePatternsFile(filePath);
     }
 
-    private static parseIgnorePatterns(content: string): string[] {
-        return content
-            .split('\n')
-            .map(line => line.endsWith('\r') ? line.slice(0, -1) : line)
-            .filter(line => line.length > 0 && !line.startsWith('#'));
-    }
-
-    /**
-     * Load ignore patterns from various ignore files in the codebase.
-     * This uses replace semantics for file-based patterns to avoid stale rules.
-     */
     private async loadIgnorePatterns(codebasePath: string): Promise<void> {
-        try {
-            let fileBasedPatterns: string[] = [];
-
-            // v1 policy: only repo-root .satoriignore and .gitignore are supported.
-            const ignoreFiles = await this.findIgnoreFiles(codebasePath);
-            for (const ignoreFile of ignoreFiles) {
-                const patterns = await this.loadIgnoreFile(ignoreFile, path.basename(ignoreFile), codebasePath);
-                fileBasedPatterns.push(...patterns);
-            }
-
-            this.setFileBasedPatternsForCodebase(codebasePath, fileBasedPatterns);
-            if (fileBasedPatterns.length > 0) {
-                console.log(`[Context] 🚫 Loaded total ${fileBasedPatterns.length} ignore patterns from supported root ignore files`);
-            } else {
-                console.log('📄 No ignore files found; effective rules reset to base + runtime custom');
-            }
-        } catch (error) {
-            console.warn(`[Context] ⚠️ Failed to load ignore patterns: ${error}`);
-            // Keep existing patterns on failure to avoid destructive behavior.
-        }
+        return this.ignoreRuleService.loadIgnorePatterns(codebasePath);
     }
 
-    /**
-     * Find supported root ignore files in the codebase directory.
-     * v1 policy: only repo-root .satoriignore and .gitignore are loaded.
-     * @param codebasePath Path to the codebase
-     * @returns Array of ignore file paths
-     */
     private async findIgnoreFiles(codebasePath: string): Promise<string[]> {
-        const ignoreFiles: string[] = [];
-        const supportedIgnoreFiles = ['.satoriignore', '.gitignore'];
-
-        for (const fileName of supportedIgnoreFiles) {
-            const absolutePath = path.join(codebasePath, fileName);
-            try {
-                const stat = await fs.promises.lstat(absolutePath);
-                if (stat.isSymbolicLink()) {
-                    throw new Error(`Ignore file '${fileName}' must not be a symbolic link.`);
-                }
-                if (!stat.isFile()) {
-                    throw new Error(`Ignore file '${fileName}' is not a regular file.`);
-                }
-                ignoreFiles.push(absolutePath);
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-                throw error;
-            }
-        }
-
-        if (ignoreFiles.length > 0) {
-            console.log(`📄 Found ${ignoreFiles.length} supported root ignore file(s).`);
-        }
-
-        return ignoreFiles;
+        return this.ignoreRuleService.findIgnoreFiles(codebasePath);
     }
 
-    /**
-     * Load ignore patterns from a specific ignore file
-     * @param filePath Path to the ignore file
-     * @param fileName Display name for logging
-     * @returns Array of ignore patterns
-     */
-    private async loadIgnoreFile(filePath: string, fileName: string, codebasePath: string): Promise<string[]> {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const handle = await openRegularFileInsideRootNoFollow(filePath, canonicalRoot);
-        let content: string;
-        try {
-            const stat = await handle.stat();
-            const maximumIgnoreFileBytes = 1_048_576;
-            if (stat.size > maximumIgnoreFileBytes) {
-                throw new Error(`${fileName} exceeds the ${maximumIgnoreFileBytes}-byte policy limit.`);
-            }
-            content = (await readFileHandleExactly(handle, stat.size)).toString('utf8');
-            await verifyStableFileObservation(handle, filePath, canonicalRoot, stat, {
-                rejectFinalSymlink: true,
-            });
-        } finally {
-            await handle.close().catch(() => undefined);
-        }
-        const ignorePatterns = Context.parseIgnorePatterns(content);
-
-        if (ignorePatterns.length > 0) {
-            console.log(`[Context] 🚫 Loaded ${ignorePatterns.length} ignore patterns from ${fileName}`);
-            return ignorePatterns;
-        }
-        console.log(`📄 ${fileName} file found but no valid patterns detected`);
-        return [];
+    private async loadIgnoreFile(
+        filePath: string,
+        fileName: string,
+        codebasePath: string,
+    ): Promise<string[]> {
+        return this.ignoreRuleService.loadIgnoreFile(
+            filePath,
+            fileName,
+            codebasePath,
+        );
     }
 
-    /**
-     * Check if a path matches any ignore pattern
-     * @param filePath Path to check
-     * @param codebasePath Codebase root path used for relative pattern matching
-     * @param isDirectory Whether the path is a directory
-     * @returns True if path should be ignored
-     */
     private matchesIgnorePattern(
         filePath: string,
         codebasePath: string,
         isDirectory: boolean = false,
         matcherOverride?: ReturnType<typeof ignore>,
     ): boolean {
-        if (!matcherOverride && this.getActiveIgnorePatterns(codebasePath).length === 0) {
-            return false;
-        }
-
-        const relativePath = path.relative(codebasePath, filePath).replace(/\\/g, '/').replace(/^\/+/, '');
-        if (!relativePath || relativePath.startsWith('..')) {
-            return false;
-        }
-
-        const matcher = matcherOverride ?? this.getIgnoreMatcherForCodebase(codebasePath);
-
-        if (isDirectory) {
-            const withSlash = relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
-            return matcher.ignores(relativePath) || matcher.ignores(withSlash);
-        }
-
-        return matcher.ignores(relativePath);
-    }
-
-    /**
-     * Get custom extensions from environment variables
-     * Supports CUSTOM_EXTENSIONS as comma-separated list
-     * @returns Array of custom extensions
-     */
-    private getCustomExtensionsFromEnv(): string[] {
-        const envExtensions = envManager.get('CUSTOM_EXTENSIONS');
-        if (!envExtensions) {
-            return [];
-        }
-
-        try {
-            const extensions = envExtensions
-                .split(',')
-                .map(ext => ext.trim())
-                .filter(ext => ext.length > 0)
-                .map(ext => ext.startsWith('.') ? ext : `.${ext}`); // Ensure extensions start with dot
-
-            return extensions;
-        } catch (error) {
-            console.warn(`[Context] ⚠️  Failed to parse CUSTOM_EXTENSIONS: ${error}`);
-            return [];
-        }
-    }
-
-    /**
-     * Get custom ignore patterns from environment variables
-     * Supports CUSTOM_IGNORE_PATTERNS as comma-separated list
-     * @returns Array of custom ignore patterns
-     */
-    private getCustomIgnorePatternsFromEnv(): string[] {
-        const envIgnorePatterns = envManager.get('CUSTOM_IGNORE_PATTERNS');
-        if (!envIgnorePatterns) {
-            return [];
-        }
-
-        try {
-            const patterns = envIgnorePatterns
-                .split(',')
-                .map(pattern => pattern.trim())
-                .filter(pattern => pattern.length > 0);
-
-            return patterns;
-        } catch (error) {
-            console.warn(`[Context] ⚠️  Failed to parse CUSTOM_IGNORE_PATTERNS: ${error}`);
-            return [];
-        }
+        return this.ignoreRuleService.matchesIgnorePattern(
+            filePath,
+            codebasePath,
+            isDirectory,
+            matcherOverride,
+        );
     }
 
     private withIndexPolicyMutationLock<T>(
