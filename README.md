@@ -250,6 +250,10 @@ EMBEDDING_PROVIDER
 EMBEDDING_MODEL
 EMBEDDING_OUTPUT_DIMENSION
 VOYAGEAI_API_KEY
+SATORI_RERANKER_PROVIDER
+SATORI_LATEON_MODEL_PATH
+SATORI_LATEON_REQUEST_DEADLINE_MS
+SATORI_LATEON_INTRA_OP_THREADS
 MILVUS_ADDRESS
 MILVUS_TOKEN
 ```
@@ -268,11 +272,29 @@ the existing graph-only activation path. V3, missing, corrupt, changed, or
 ambiguous source authority requires a reindex instead of fabricating a
 compatible publication.
 
-## Future Local Reranking
+## Optional Local Reranking
 
-The current offline product is intentionally simple: exact evidence + BM25 + Potion retrieval, followed by Satori grouping and disclosure. It does not ship a local neural reranker today.
+Offline search can optionally rerank at most 16 eligible candidates with the
+Apache-2.0 `lightonai/LateOn-Code-edge` FP32 ONNX checkpoint. Model weights are
+not bundled. Put the pinned model files in one shared directory outside the
+versioned MCP runtime, then configure:
 
-Candidate identity and provenance are kept separate from primary publication authority so a future local second stage can score a complete bounded candidate set and fall back entirely to the existing ordering on failure. Optional LateOn/NextPLAID-style state remains future work; it will never control source freshness or baseline search availability.
+```text
+SATORI_RERANKER_PROVIDER=lateon
+SATORI_LATEON_MODEL_PATH=/absolute/path/to/LateOn-Code-edge
+```
+
+The runtime verifies the pinned revision's artifact digests before use, performs
+ONNX inference in a killable child process, and preserves the complete
+deterministic baseline when model loading, scoring, validation, or the request
+deadline fails. `SATORI_LATEON_REQUEST_DEADLINE_MS` and
+`SATORI_LATEON_INTRA_OP_THREADS` are optional operator overrides. The shipped
+defaults come from the measured local-WSL profile rather than an assumed
+512 MiB envelope.
+
+LateOn is query-time ranking evidence only. It does not control candidate
+eligibility, source freshness, publication authority, or baseline search
+availability.
 
 ## Language Support
 

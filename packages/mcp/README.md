@@ -101,7 +101,12 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
 - Managed offline Potion + LanceDB clients on Linux x64/WSL2 share one private
   local host. Connected providers, Milvus, and explicit Ollama runtimes keep
   the direct per-client lifecycle.
-- Offline neural reranking is not shipped today. The candidate boundary permits a future complete-set local scorer to fail back atomically to exact + BM25 + single-vector ordering.
+- Optional LateOn reranking is enabled only when
+  `SATORI_RERANKER_PROVIDER=lateon` and an absolute
+  `SATORI_LATEON_MODEL_PATH` are configured. The model directory is shared
+  outside versioned MCP runtimes, artifact digests are verified, inference runs
+  in a killable worker, and every failure falls back atomically to exact + BM25
+  + single-vector ordering.
 
 ## Development
 
