@@ -137,77 +137,12 @@ import {
     type ProcessedFileList,
     type ProjectedChunkEntry,
 } from './indexing-pipeline';
+import { IndexPolicyMutationCoordinator } from './index-policy-mutation-coordinator';
 
 export type {
     MutationGenerationObservation,
     MutationGenerationObserver,
 } from './semantic-search-service';
-
-const INDEX_POLICY_MALFORMED_LOCK_STALE_MS = 30_000;
-
-type IndexPolicyMutationLockMetadata = {
-    pid: number;
-    processStartTime?: string;
-    ownerToken: string;
-    acquiredAt: string;
-};
-
-type IndexPolicyMutationLockHandle = {
-    descriptor: number;
-    lockPath: string;
-    ownerToken: string;
-};
-
-function resolveLinuxProcessStartTime(pid: number): string | undefined {
-    if (process.platform !== 'linux' || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
-    try {
-        const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-        const commandEnd = raw.lastIndexOf(')');
-        if (commandEnd < 0) return undefined;
-        const fieldsAfterCommand = raw.slice(commandEnd + 2).trim().split(/\s+/);
-        return fieldsAfterCommand[19] || undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-function isProcessAlive(pid: number): boolean {
-    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        return (error as NodeJS.ErrnoException).code === 'EPERM';
-    }
-}
-
-function parseIndexPolicyMutationLockMetadata(raw: string): IndexPolicyMutationLockMetadata | null {
-    try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        if (
-            !parsed
-            || typeof parsed !== 'object'
-            || !Number.isSafeInteger(parsed.pid)
-            || Number(parsed.pid) <= 0
-            || typeof parsed.ownerToken !== 'string'
-            || parsed.ownerToken.length === 0
-            || typeof parsed.acquiredAt !== 'string'
-            || (parsed.processStartTime !== undefined && typeof parsed.processStartTime !== 'string')
-        ) {
-            return null;
-        }
-        return {
-            pid: Number(parsed.pid),
-            ownerToken: parsed.ownerToken,
-            acquiredAt: parsed.acquiredAt,
-            ...(typeof parsed.processStartTime === 'string'
-                ? { processStartTime: parsed.processStartTime }
-                : {}),
-        };
-    } catch {
-        return null;
-    }
-}
 
 function subtractEmbeddingMetrics(
     after: EmbeddingOperationMetricsSnapshot | null,
@@ -788,6 +723,7 @@ export class Context {
     private publishedPolicyBindingsByCodebase: Map<string, IndexPolicyBinding & { policyHash: string }>;
     private publishedResolvedPoliciesByCodebase: Map<string, ResolvedIndexPolicy>;
     private readonly indexPolicyStateRoot: string;
+    private readonly indexPolicyMutationCoordinator: IndexPolicyMutationCoordinator;
     private ignoreStateByCollection: Map<string, CodebaseIgnoreState>;
     private synchronizers = new Map<string, FileSynchronizer>();
     private synchronizerMutationTargets = new Map<string, string>();
@@ -894,6 +830,12 @@ export class Context {
                 process.env.SATORI_STATE_ROOT || path.join(os.homedir(), '.satori'),
                 'index-policy',
             );
+        this.indexPolicyMutationCoordinator = new IndexPolicyMutationCoordinator({
+            stateRoot: this.indexPolicyStateRoot,
+            verifyPolicyDocumentDigest: (policyPath) => (
+                this.resolveVerifiedIndexPolicyDocumentDigest(policyPath)
+            ),
+        });
         this.ignoreStateByCollection = new Map();
         this.symbolRegistryStateRoot = config.symbolRegistryStateRoot;
         this.indexingPipeline = new IndexingPipeline({
@@ -4796,9 +4738,9 @@ export class Context {
         progressCallback?.({ phase: 'Checking existing index...', current: 0, total: 100, percentage: 0 });
 
         progressCallback?.({ phase: 'Removing index data...', current: 50, total: 100, percentage: 50 });
-        await this.withIndexPolicyMutationLockAsync(canonicalRoot, async () => {
-            const policyPath = this.resolveCustomIndexPolicyPath(canonicalRoot);
-            this.recoverIndexPolicyTombstonesWhileLocked(policyPath);
+        await this.indexPolicyMutationCoordinator.withLockAsync(canonicalRoot, async () => {
+            const policyPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
+            this.indexPolicyMutationCoordinator.recoverTombstonesWhileLocked(policyPath);
 
             for (const collectionName of await this.listRelatedCollectionNames(codebasePath)) {
                 await deleteCollectionWithVerification(this.vectorDatabase, collectionName, {
@@ -4943,7 +4885,7 @@ export class Context {
         };
         return {
             canonicalRoot,
-            policyDocument: capture(this.resolveCustomIndexPolicyPath(canonicalRoot)),
+            policyDocument: capture(this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot)),
             navigationPointer: capture(path.join(navigationRoot, 'current.json')),
         };
     }
@@ -5055,7 +4997,7 @@ export class Context {
             || path.resolve(journalPath) !== path.resolve(expectedJournalPath)
         ) throw new Error(`Durable authority restoration journal '${journalPath}' is invalid.`);
         const expectedTargets = [
-            this.resolveCustomIndexPolicyPath(canonicalRoot),
+            this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot),
             path.join(resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot), 'current.json'),
         ];
         for (const [index, entry] of parsed.entries.entries()) {
@@ -5103,7 +5045,7 @@ export class Context {
                     if (publicationCount > 1) {
                         throw new Error(`Durable authority recovery '${transaction.id}' published more than once.`);
                     }
-                    this.withIndexPolicyMutationLock(transaction.canonicalRoot, () => {
+                    this.indexPolicyMutationCoordinator.withLock(transaction.canonicalRoot, () => {
                         if (transaction.phase === 'prepared') {
                             for (const entry of transaction.entries) {
                                 const expected = entry.expectedDigest === null
@@ -5162,7 +5104,7 @@ export class Context {
         validateArtifact('expected index policy', expectedCurrent.policyDocument);
         validateArtifact('expected navigation pointer', expectedCurrent.navigationPointer);
 
-        const policyPath = this.resolveCustomIndexPolicyPath(canonicalRoot);
+        const policyPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
         const navigationRoot = resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot);
         const pointerPath = path.join(navigationRoot, 'current.json');
         fs.mkdirSync(path.dirname(policyPath), { recursive: true });
@@ -5207,7 +5149,7 @@ export class Context {
                 if (publicationCount > 1) {
                     throw new Error('Durable index authority restoration invoked publish more than once.');
                 }
-                this.withIndexPolicyMutationLock(canonicalRoot, () => {
+                this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
                     const current = this.captureDurableIndexAuthority(canonicalRoot);
                     if (
                         !this.artifactMatchesPath(policyPath, expectedCurrent.policyDocument)
@@ -5305,7 +5247,7 @@ export class Context {
         expectedDocumentDigest?: string,
     ): IndexPolicyPublicationReceipt {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const targetPath = this.resolveCustomIndexPolicyPath(canonicalRoot);
+        const targetPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
         const receipt: IndexPolicyPublicationReceipt = {
             status: 'committed',
             operation: 'clear',
@@ -5319,12 +5261,12 @@ export class Context {
             if (publicationCount > 1) {
                 throw new Error('Index policy removal invoked more than once.');
             }
-            this.withIndexPolicyMutationLock(canonicalRoot, () => {
+            this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
                 let tombstonePath = `${targetPath}.removed-${process.pid}-${crypto.randomUUID()}`;
                 let movedPolicy = false;
                 let cleanupCommittedTombstone = false;
                 try {
-                    this.recoverIndexPolicyTombstonesWhileLocked(targetPath);
+                    this.indexPolicyMutationCoordinator.recoverTombstonesWhileLocked(targetPath);
                     try {
                         fs.renameSync(targetPath, tombstonePath);
                         movedPolicy = true;
@@ -7760,173 +7702,25 @@ export class Context {
         }
     }
 
-    private resolveCustomIndexPolicyPath(canonicalRoot: string): string {
-        const digest = crypto.createHash('sha256').update(canonicalRoot).digest('hex');
-        return path.join(this.indexPolicyStateRoot, `${digest}.json`);
+    private withIndexPolicyMutationLock<T>(
+        canonicalRoot: string,
+        operation: () => T,
+    ): T {
+        return this.indexPolicyMutationCoordinator.withLock(canonicalRoot, operation);
     }
 
-    private recoverIndexPolicyTombstonesWhileLocked(targetPath: string): void {
-        const directory = path.dirname(targetPath);
-        const prefix = `${path.basename(targetPath)}.removed-`;
-        let entries: string[];
-        try {
-            entries = fs.readdirSync(directory);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-            throw error;
-        }
-        const tombstones = entries
-            .filter((entry) => entry.startsWith(prefix))
-            .map((entry) => path.join(directory, entry));
-        const committed = tombstones.filter((entry) => path.basename(entry).startsWith(`${prefix}committed-`));
-        for (const committedPath of committed) fs.rmSync(committedPath, { force: true });
-        const pending = tombstones.filter((entry) => !committed.includes(entry));
-        if (pending.length === 0) return;
-        if (!fs.existsSync(targetPath)) {
-            if (pending.length !== 1) {
-                throw new Error(`Cannot recover index policy removal: ${pending.length} pending tombstones exist while '${targetPath}' is absent.`);
-            }
-            this.resolveVerifiedIndexPolicyDocumentDigest(pending[0]);
-            fs.renameSync(pending[0], targetPath);
-            return;
-        }
-        const targetDigest = this.resolveVerifiedIndexPolicyDocumentDigest(targetPath);
-        for (const pendingPath of pending) {
-            const pendingDigest = this.resolveVerifiedIndexPolicyDocumentDigest(pendingPath);
-            if (pendingDigest !== targetDigest) {
-                throw new Error(`Conflicting index policy removal tombstone '${pendingPath}' was preserved beside '${targetPath}'.`);
-            }
-            fs.rmSync(pendingPath, { force: true });
-        }
-    }
-
-    private tryRecoverAbandonedIndexPolicyMutationLock(lockPath: string): boolean {
-        let raw: string;
-        let observation: fs.Stats;
-        try {
-            observation = fs.statSync(lockPath);
-            raw = fs.readFileSync(lockPath, 'utf8');
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
-            throw error;
-        }
-        const metadata = parseIndexPolicyMutationLockMetadata(raw);
-        if (!metadata) {
-            if (Date.now() - observation.mtimeMs < INDEX_POLICY_MALFORMED_LOCK_STALE_MS) return false;
-        } else if (isProcessAlive(metadata.pid)) {
-            const observedStartTime = resolveLinuxProcessStartTime(metadata.pid);
-            if (!metadata.processStartTime || !observedStartTime || metadata.processStartTime === observedStartTime) {
-                return false;
-            }
-        }
-        const quarantinePath = `${lockPath}.stale-${process.pid}-${crypto.randomUUID()}`;
-        try {
-            fs.renameSync(lockPath, quarantinePath);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
-            throw error;
-        }
-        try {
-            const quarantined = fs.statSync(quarantinePath);
-            const quarantinedRaw = fs.readFileSync(quarantinePath, 'utf8');
-            const quarantinedMetadata = parseIndexPolicyMutationLockMetadata(quarantinedRaw);
-            const sameIdentity = observation.dev === quarantined.dev && observation.ino === quarantined.ino;
-            const sameOwner = metadata === null
-                ? quarantinedMetadata === null && quarantinedRaw === raw
-                : quarantinedMetadata?.ownerToken === metadata.ownerToken
-                    && quarantinedMetadata.pid === metadata.pid
-                    && quarantinedMetadata.processStartTime === metadata.processStartTime;
-            if (!sameIdentity || !sameOwner) {
-                if (!fs.existsSync(lockPath)) fs.renameSync(quarantinePath, lockPath);
-                throw new Error(`Index policy mutation lock changed during abandoned-owner recovery at '${lockPath}'.`);
-            }
-            fs.rmSync(quarantinePath, { force: true });
-            return true;
-        } catch (error) {
-            if (fs.existsSync(quarantinePath) && !fs.existsSync(lockPath)) {
-                try {
-                    fs.renameSync(quarantinePath, lockPath);
-                } catch {
-                    // Preserve the quarantine path when recovery ownership is ambiguous.
-                }
-            }
-            throw error;
-        }
-    }
-
-    private acquireIndexPolicyMutationLock(canonicalRoot: string): IndexPolicyMutationLockHandle {
-        fs.mkdirSync(this.indexPolicyStateRoot, { recursive: true });
-        const lockPath = `${this.resolveCustomIndexPolicyPath(canonicalRoot)}.mutation.lock`;
-        const ownerToken = crypto.randomUUID();
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-                const descriptor = fs.openSync(lockPath, 'wx');
-                try {
-                    const processStartTime = resolveLinuxProcessStartTime(process.pid);
-                    fs.writeFileSync(descriptor, JSON.stringify({
-                        pid: process.pid,
-                        ...(processStartTime ? { processStartTime } : {}),
-                        ownerToken,
-                        acquiredAt: new Date().toISOString(),
-                    }));
-                } catch (error) {
-                    fs.closeSync(descriptor);
-                    fs.rmSync(lockPath, { force: true });
-                    throw error;
-                }
-                return { descriptor, lockPath, ownerToken };
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-                if (this.tryRecoverAbandonedIndexPolicyMutationLock(lockPath)) continue;
-                let metadata: IndexPolicyMutationLockMetadata | null = null;
-                try {
-                    metadata = parseIndexPolicyMutationLockMetadata(fs.readFileSync(lockPath, 'utf8'));
-                } catch {
-                    // An unreadable live lock remains authoritative.
-                }
-                if (metadata?.pid === process.pid) {
-                    throw new Error(`Index policy mutation lock is already held in this process for '${canonicalRoot}'.`);
-                }
-                throw new Error(`Index policy mutation lock is held by another live or unverified owner for '${canonicalRoot}' at '${lockPath}'.`);
-            }
-        }
-        throw new Error(`Index policy mutation lock recovery did not converge for '${canonicalRoot}' at '${lockPath}'.`);
-    }
-
-    private releaseIndexPolicyMutationLock(handle: IndexPolicyMutationLockHandle): void {
-        try {
-            fs.closeSync(handle.descriptor);
-        } catch {
-            // Best-effort close; ownership is verified before unlinking.
-        }
-        try {
-            const metadata = parseIndexPolicyMutationLockMetadata(fs.readFileSync(handle.lockPath, 'utf8'));
-            if (metadata?.ownerToken === handle.ownerToken) fs.rmSync(handle.lockPath, { force: true });
-        } catch {
-            // A missing or replaced lock must not be removed by the former owner.
-        }
-    }
-
-    private withIndexPolicyMutationLock<T>(canonicalRoot: string, operation: () => T): T {
-        const handle = this.acquireIndexPolicyMutationLock(canonicalRoot);
-        try {
-            return operation();
-        } finally {
-            this.releaseIndexPolicyMutationLock(handle);
-        }
-    }
-
-    private async withIndexPolicyMutationLockAsync<T>(canonicalRoot: string, operation: () => Promise<T>): Promise<T> {
-        const handle = this.acquireIndexPolicyMutationLock(canonicalRoot);
-        try {
-            return await operation();
-        } finally {
-            this.releaseIndexPolicyMutationLock(handle);
-        }
+    private async withIndexPolicyMutationLockAsync<T>(
+        canonicalRoot: string,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        return this.indexPolicyMutationCoordinator.withLockAsync(
+            canonicalRoot,
+            operation,
+        );
     }
 
     private resolveCustomIndexPolicyFileToken(canonicalRoot: string): string | null {
-        return this.resolveFilesystemObservationToken(this.resolveCustomIndexPolicyPath(canonicalRoot));
+        return this.resolveFilesystemObservationToken(this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot));
     }
 
     private resolveRepoConfigObservationToken(canonicalRoot: string): string | null {
@@ -8079,7 +7873,7 @@ export class Context {
             this.policyFileTokensByCodebase.set(canonicalRoot, null);
             return;
         }
-        const document = fs.readFileSync(this.resolveCustomIndexPolicyPath(canonicalRoot), 'utf8');
+        const document = fs.readFileSync(this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot), 'utf8');
         try {
             const parsed = JSON.parse(document) as unknown;
             const inspected = inspectIndexPolicyDocument(parsed, canonicalRoot);
@@ -8164,7 +7958,7 @@ export class Context {
         }
         ignore().add(policy.effectiveIgnorePatterns);
         fs.mkdirSync(this.indexPolicyStateRoot, { recursive: true });
-        const targetPath = this.resolveCustomIndexPolicyPath(canonicalRoot);
+        const targetPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
         const temporaryPath = `${targetPath}.tmp-${process.pid}-${crypto.randomUUID()}`;
         const collectionName = this.resolveCollectionName(canonicalRoot);
         const previousRuntimeState = {
@@ -8297,8 +8091,8 @@ export class Context {
                     throw new Error('Index policy publication invoked more than once.');
                 }
                 try {
-                    this.withIndexPolicyMutationLock(canonicalRoot, () => {
-                        this.recoverIndexPolicyTombstonesWhileLocked(targetPath);
+                    this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
+                        this.indexPolicyMutationCoordinator.recoverTombstonesWhileLocked(targetPath);
                         fs.renameSync(temporaryPath, targetPath);
                         activationVisible = true;
                         activate?.();
