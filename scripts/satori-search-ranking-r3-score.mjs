@@ -487,6 +487,7 @@ async function run() {
     const fusionTimings = tasks
         .filter((task) => task.route === "fusion")
         .map((task) => task.elapsedMilliseconds);
+    const retainedRssBytes = process.memoryUsage().rss;
     const processPeakRssBytes = process.resourceUsage().maxRSS * 1024;
     const rejectionReasons = [
         ...(tasks.some((task) => task.status === "deadline_exceeded")
@@ -522,6 +523,7 @@ async function run() {
         tasks,
         resources: {
             processPeakRssBytes,
+            retainedRssBytes,
             coldFirstFusionTaskMilliseconds: fusionTimings[0] ?? 0,
             warmFusionTaskMilliseconds: fusionTimings.slice(1),
         },
