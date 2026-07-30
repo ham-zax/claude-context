@@ -28,6 +28,7 @@ import {
 
 export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'Potion';
 export type VectorStoreProvider = 'Milvus' | 'LanceDB';
+export type RerankerProvider = 'none' | 'voyage' | 'lateon';
 export type ResolvedVectorStoreConfig =
     | { vectorStoreProvider: 'Milvus' }
     | { vectorStoreProvider: 'LanceDB'; lanceDbPath: string };
@@ -205,13 +206,24 @@ export interface ContextMcpConfig {
     milvusApiToken?: string;
     lanceDbPath?: string;
     // Reranker configuration
+    rerankerProvider?: RerankerProvider;
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
+    lateOnModelPath?: string;
+    lateOnRequestDeadlineMs?: number;
+    lateOnIntraOpThreads?: number;
     // read_file behavior
     readFileMaxLines?: number;
     // Filesystem observation behavior
     watchSyncEnabled?: boolean;
     /** @deprecated Accepted for compatibility but ignored by observation-only watching. */
     watchDebounceMs?: number;
+}
+
+export function resolveRerankerProvider(config: ContextMcpConfig): RerankerProvider {
+    if (config.rerankerProvider) return config.rerankerProvider;
+    if (config.lateOnModelPath) return 'lateon';
+    if (config.networkPolicy.kind === 'remote-allowed' && config.voyageKey) return 'voyage';
+    return 'none';
 }
 
 export function assertExecutionPolicyAllowsRuntime(input: {
@@ -632,7 +644,73 @@ export function createMcpConfig(): ContextMcpConfig {
         }
     }
 
-    // Parse reranker model from env var
+    const configuredRerankerProvider = envManager.get('SATORI_RERANKER_PROVIDER');
+    if (
+        configuredRerankerProvider
+        && !['none', 'voyage', 'lateon'].includes(configuredRerankerProvider)
+    ) {
+        throw new Error(
+            `Invalid SATORI_RERANKER_PROVIDER '${configuredRerankerProvider}'. `
+            + 'Expected none, voyage, or lateon.',
+        );
+    }
+    const lateOnModelPathRaw = envManager.get('SATORI_LATEON_MODEL_PATH');
+    if (lateOnModelPathRaw && !path.isAbsolute(lateOnModelPathRaw)) {
+        throw new Error('SATORI_LATEON_MODEL_PATH must be absolute.');
+    }
+    const lateOnModelPath = lateOnModelPathRaw
+        ? path.resolve(lateOnModelPathRaw)
+        : undefined;
+    const rerankerProvider: RerankerProvider = configuredRerankerProvider
+        ? configuredRerankerProvider as RerankerProvider
+        : lateOnModelPath
+            ? 'lateon'
+            : executionPolicy.networkPolicy.kind === 'remote-allowed'
+                && Boolean(envManager.get('VOYAGEAI_API_KEY'))
+                ? 'voyage'
+                : 'none';
+    if (rerankerProvider === 'lateon' && !lateOnModelPath) {
+        throw new Error(
+            'SATORI_RERANKER_PROVIDER=lateon requires SATORI_LATEON_MODEL_PATH.',
+        );
+    }
+    if (
+        rerankerProvider === 'voyage'
+        && executionPolicy.networkPolicy.kind !== 'remote-allowed'
+    ) {
+        throw new Error(
+            'SATORI_RERANKER_PROVIDER=voyage is unavailable under the local-only network policy.',
+        );
+    }
+
+    const parseOptionalPositiveInteger = (
+        variable: string,
+        maximum?: number,
+    ): number | undefined => {
+        const raw = envManager.get(variable);
+        if (!raw) return undefined;
+        const parsed = Number(raw);
+        if (
+            !Number.isSafeInteger(parsed)
+            || parsed <= 0
+            || (maximum !== undefined && parsed > maximum)
+        ) {
+            const suffix = maximum === undefined ? '' : ` and at most ${maximum}`;
+            throw new Error(`${variable} must be a positive safe integer${suffix}.`);
+        }
+        return parsed;
+    };
+    const lateOnRequestDeadlineMs = rerankerProvider === 'lateon'
+        ? parseOptionalPositiveInteger('SATORI_LATEON_REQUEST_DEADLINE_MS', 300_000)
+        : undefined;
+    const lateOnIntraOpThreads = rerankerProvider === 'lateon'
+        ? parseOptionalPositiveInteger(
+            'SATORI_LATEON_INTRA_OP_THREADS',
+            os.availableParallelism(),
+        )
+        : undefined;
+
+    // Parse Voyage reranker model from env var.
     const rankerModelEnv = envManager.get('VOYAGEAI_RERANKER_MODEL');
     let rankerModel: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite' | undefined;
     if (rankerModelEnv && ['rerank-2.5', 'rerank-2.5-lite', 'rerank-2', 'rerank-2-lite'].includes(rankerModelEnv)) {
@@ -700,7 +778,11 @@ export function createMcpConfig(): ContextMcpConfig {
             ? { lanceDbPath: vectorStore.lanceDbPath }
             : {}),
         // Reranker configuration
+        rerankerProvider,
         rankerModel,
+        ...(lateOnModelPath ? { lateOnModelPath } : {}),
+        ...(lateOnRequestDeadlineMs !== undefined ? { lateOnRequestDeadlineMs } : {}),
+        ...(lateOnIntraOpThreads !== undefined ? { lateOnIntraOpThreads } : {}),
         // read_file behavior
         readFileMaxLines,
         // filesystem observation behavior
@@ -718,6 +800,7 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP]   Server: ${config.name} v${config.version}`);
     console.log(`[MCP]   Runtime Profile: ${config.executionProfile} (${config.networkPolicy.kind})`);
     console.log(`[MCP]   Embedding Provider: ${config.encoderProvider}`);
+    console.log(`[MCP]   Reranker Provider: ${resolveRerankerProvider(config)}`);
     console.log(`[MCP]   Embedding Model: ${config.encoderModel}`);
     console.log(`[MCP]   Vector Store: ${config.vectorStoreProvider}`);
     if (config.vectorStoreProvider === 'LanceDB') {

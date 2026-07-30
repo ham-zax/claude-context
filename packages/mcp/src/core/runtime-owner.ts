@@ -20,7 +20,9 @@ export interface RuntimeOwnerConfigSummary {
     schemaVersion: string;
     milvusEndpoint?: string | null;
     lanceDbPath?: string | null;
+    rerankerProvider?: string | null;
     rankerModel?: string | null;
+    rerankerArtifactPath?: string | null;
 }
 
 export interface RuntimeOwnerIdentity {
@@ -178,7 +180,11 @@ export function buildRuntimeOwnerIdentity(args: {
         ...(args.configSummary.lanceDbPath
             ? { lanceDbPath: path.resolve(args.configSummary.lanceDbPath) }
             : {}),
+        rerankerProvider: args.configSummary.rerankerProvider ?? null,
         rankerModel: args.configSummary.rankerModel ?? null,
+        ...(args.configSummary.rerankerArtifactPath
+            ? { rerankerArtifactPath: path.resolve(args.configSummary.rerankerArtifactPath) }
+            : {}),
     };
     const identityPayload = {
         satoriVersion: args.satoriVersion,
@@ -212,7 +218,9 @@ export function buildRuntimeOwnerIdentityFromConfig(args: {
             schemaVersion: args.runtimeFingerprint.schemaVersion,
             milvusEndpoint: args.config.milvusEndpoint,
             ...(args.config.lanceDbPath ? { lanceDbPath: args.config.lanceDbPath } : {}),
+            rerankerProvider: args.config.rerankerProvider || null,
             rankerModel: args.config.rankerModel || null,
+            rerankerArtifactPath: args.config.lateOnModelPath || null,
         }
     });
 }

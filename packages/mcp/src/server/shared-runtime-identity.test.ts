@@ -63,6 +63,14 @@ test("shared runtime identity is exact, non-secret, and bounded to eligible Linu
     assert.notEqual(
         buildSharedRuntimeIdentity(runtimeEntry, {
             ...env,
+            SATORI_RERANKER_PROVIDER: "lateon",
+            SATORI_LATEON_MODEL_PATH: path.join(root, "lateon"),
+        }).hash,
+        identity.hash,
+    );
+    assert.notEqual(
+        buildSharedRuntimeIdentity(runtimeEntry, {
+            ...env,
             SATORI_NAVIGATION_BACKEND: "sqlite",
         }).hash,
         identity.hash,

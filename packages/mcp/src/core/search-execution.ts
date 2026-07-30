@@ -433,13 +433,21 @@ async function rerankSearchCandidates(
             rerankerFamilyCount = selection.familyCount;
             rerankerSupplementalCandidates = selection.supplementalCandidateCount;
             rerankerCandidatePoolCount = selection.candidatePoolCount;
-            rerankerCandidateBudget = selection.budget;
-            rerankerBudgetReason = selection.budgetReason;
-            const selectedDocuments = selection.selected.map((candidate) => (
+            const providerLimit = host.reranker.getMaxDocuments?.();
+            const providerBoundedSelection = Number.isSafeInteger(providerLimit)
+                && (providerLimit as number) > 0
+                && (providerLimit as number) < selection.selected.length
+                ? selection.selected.slice(0, providerLimit)
+                : selection.selected;
+            rerankerCandidateBudget = providerBoundedSelection.length;
+            rerankerBudgetReason = providerBoundedSelection.length < selection.selected.length
+                ? "provider_limit"
+                : selection.budgetReason;
+            const selectedDocuments = providerBoundedSelection.map((candidate) => (
                 host.searchQuerySupport.buildRerankDocument(candidate.result)
             ));
             const byteSelection = selectRerankInputWithinUtf8Budget({
-                candidates: selection.selected,
+                candidates: providerBoundedSelection,
                 documents: selectedDocuments,
                 maxInputBytes: SEARCH_RERANK_INPUT_MAX_UTF8_BYTES,
             });
@@ -450,7 +458,7 @@ async function rerankSearchCandidates(
             rerankerByteBudgetOmittedCandidates = byteSelection.omittedCandidateCount;
             if (candidateSurvival) {
                 appendSearchCandidateStage(candidateSurvival, "reranker_input", rerankSlice);
-                for (const candidate of selection.selected.slice(rerankCount)) {
+                for (const candidate of providerBoundedSelection.slice(rerankCount)) {
                     appendSearchCandidateRemoval(candidateSurvival, {
                         candidateId: searchCandidateIdentity(candidate.result).candidateId,
                         afterStage: "mcp_ranked",
@@ -486,6 +494,9 @@ async function rerankSearchCandidates(
                         topK: rerankCount,
                         truncation: true,
                         returnDocuments: false,
+                        identities: rerankSlice.map((candidate) => (
+                            searchCandidateIdentity(candidate.result).candidateId
+                        )),
                     }),
                 );
             } catch {
@@ -495,6 +506,9 @@ async function rerankSearchCandidates(
 
             const rerankRanks = new Map<number, number>();
             try {
+                if (rerankResults.length !== rerankCount) {
+                    throw new Error("reranker_result_count_mismatch");
+                }
                 for (let idx = 0; idx < rerankResults.length; idx++) {
                     const originalIndex = rerankResults[idx]?.index;
                     if (
@@ -504,7 +518,12 @@ async function rerankSearchCandidates(
                         && !rerankRanks.has(originalIndex)
                     ) {
                         rerankRanks.set(originalIndex, idx + 1);
+                    } else {
+                        throw new Error("reranker_result_identity_mismatch");
                     }
+                }
+                if (rerankRanks.size !== rerankCount) {
+                    throw new Error("reranker_result_incomplete");
                 }
             } catch {
                 rerankerFailurePhase = 'parse_results';

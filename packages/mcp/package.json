@@ -28,11 +28,13 @@
     "test": "pnpm --filter @zokizuan/satori-core build && node --import tsx --import ./src/test-state-root.ts --test --test-concurrency=1 src/core/**/*.test.ts src/server/**/*.test.ts src/tools/**/*.test.ts src/cli/**/*.test.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.0.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@zokizuan/satori-core": "workspace:*",
     "chokidar": "^5.0.0",
     "ignore": "^7.0.5",
     "jsonc-parser": "^3.3.1",
+    "onnxruntime-node": "1.19.2",
     "zod": "^3.25.55",
     "zod-to-json-schema": "^3.25.1"
   },
@@ -44,6 +46,7 @@
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
+    "assets/lateon/**/*.json",
     "assets/potion/linux-x64/**/*",
     "README.md"
   ],

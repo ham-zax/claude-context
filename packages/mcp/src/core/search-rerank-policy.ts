@@ -9,7 +9,8 @@ import {
 
 export type RerankBudgetReason =
     | "complete_family_pool"
-    | "family_ambiguity";
+    | "family_ambiguity"
+    | "provider_limit";
 
 export type RerankCandidateLike = {
     result: Partial<SemanticSearchResult> & { relativePath: string };

@@ -161,6 +161,70 @@ test('Potion is selected only through explicit offline configuration', () => {
     }
 });
 
+test('offline config selects a shared LateOn model with operator overrides', () => {
+    const keys = [
+        'SATORI_RUNTIME_PROFILE',
+        'VECTOR_STORE_PROVIDER',
+        'LANCEDB_PATH',
+        'EMBEDDING_PROVIDER',
+        'POTION_HELPER_PATH',
+        'POTION_MODEL_PATH',
+        'SATORI_RERANKER_PROVIDER',
+        'SATORI_LATEON_MODEL_PATH',
+        'SATORI_LATEON_REQUEST_DEADLINE_MS',
+        'SATORI_LATEON_INTRA_OP_THREADS',
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+        for (const key of keys) delete process.env[key];
+        Object.assign(process.env, {
+            SATORI_RUNTIME_PROFILE: 'offline',
+            VECTOR_STORE_PROVIDER: 'LanceDB',
+            LANCEDB_PATH: '/tmp/satori-lancedb',
+            EMBEDDING_PROVIDER: 'Potion',
+            POTION_HELPER_PATH: '/opt/satori/potion-helper',
+            POTION_MODEL_PATH: '/opt/satori/potion-model',
+            SATORI_RERANKER_PROVIDER: 'lateon',
+            SATORI_LATEON_MODEL_PATH: '/opt/satori/models/lateon-code-edge',
+            SATORI_LATEON_REQUEST_DEADLINE_MS: '3500',
+            SATORI_LATEON_INTRA_OP_THREADS: '2',
+        });
+
+        const parsed = createMcpConfig();
+        assert.equal(parsed.rerankerProvider, 'lateon');
+        assert.equal(parsed.lateOnModelPath, '/opt/satori/models/lateon-code-edge');
+        assert.equal(parsed.lateOnRequestDeadlineMs, 3500);
+        assert.equal(parsed.lateOnIntraOpThreads, 2);
+    } finally {
+        for (const key of keys) {
+            const value = previous[key];
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
+test('LateOn config fails closed for a missing or relative shared model path', () => {
+    const keys = [
+        'SATORI_RERANKER_PROVIDER',
+        'SATORI_LATEON_MODEL_PATH',
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+        process.env.SATORI_RERANKER_PROVIDER = 'lateon';
+        delete process.env.SATORI_LATEON_MODEL_PATH;
+        assert.throws(createMcpConfig, /requires SATORI_LATEON_MODEL_PATH/);
+        process.env.SATORI_LATEON_MODEL_PATH = 'relative/model';
+        assert.throws(createMcpConfig, /must be absolute/);
+    } finally {
+        for (const key of keys) {
+            const value = previous[key];
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
 test('Potion bootstrap rejects changed inference identity', async () => {
     await assert.rejects(
         resolveMcpRuntimeBootstrap(config({

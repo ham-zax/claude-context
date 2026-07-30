@@ -1,4 +1,7 @@
-import { ContextMcpConfig } from "../config.js";
+import {
+    ContextMcpConfig,
+    resolveRerankerProvider,
+} from "../config.js";
 
 export type EmbeddingLocality = 'local' | 'cloud';
 export type PerformanceProfile = 'fast' | 'standard' | 'slow';
@@ -40,8 +43,12 @@ export class CapabilityResolver {
         const hasVectorStore = this.config.vectorStoreProvider === 'LanceDB'
             ? Boolean(this.config.lanceDbPath)
             : Boolean(this.config.milvusEndpoint);
-        const hasReranker = this.config.networkPolicy.kind === 'remote-allowed'
-            && Boolean(this.config.voyageKey);
+        const rerankerProvider = resolveRerankerProvider(this.config);
+        const hasReranker = rerankerProvider === 'lateon'
+            ? Boolean(this.config.lateOnModelPath)
+            : rerankerProvider === 'voyage'
+                && this.config.networkPolicy.kind === 'remote-allowed'
+                && Boolean(this.config.voyageKey);
 
         const defaultSearchLimit = performanceProfile === 'slow' ? 10 : 20;
 
@@ -50,7 +57,8 @@ export class CapabilityResolver {
                 performanceProfile === 'standard' ? 30 :
                     15;
 
-        const defaultRerankEnabled = hasReranker && performanceProfile !== 'slow';
+        const defaultRerankEnabled = hasReranker
+            && (rerankerProvider === 'lateon' || performanceProfile !== 'slow');
 
         return {
             hasVectorStore,

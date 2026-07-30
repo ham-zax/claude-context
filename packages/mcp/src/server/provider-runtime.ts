@@ -5,6 +5,7 @@ import {
     EmbeddingVector,
     type EmbeddingIdentity,
     MilvusVectorDatabase,
+    type Reranker,
     VectorDatabase,
     VoyageAIReranker,
 } from "@zokizuan/satori-core";
@@ -24,9 +25,11 @@ import {
     ContextMcpConfig,
     IndexFingerprint,
     resolveConfiguredEmbeddingDimension,
+    resolveRerankerProvider,
 } from "../config.js";
 import { createEmbeddingInstance, logEmbeddingProviderInfo } from "../embedding.js";
 import { MissingProviderConfigIssue, ProviderBackedOperation, ToolContext } from "../tools/types.js";
+import { LateOnReranker } from "./lateon-reranker.js";
 
 type VectorSearchResults = Awaited<ReturnType<VectorDatabase["retrieveDense"]>>;
 type VectorQueryRows = Awaited<ReturnType<VectorDatabase["queryDocuments"]>>;
@@ -62,11 +65,19 @@ type ResolvedProviderRuntimeBootstrap = Readonly<{
             databasePath: string;
         }
     >;
-    reranker: Readonly<{
-        kind: 'voyage';
-        apiKey: string;
-        model: NonNullable<ConstructorParameters<typeof VoyageAIReranker>[0]['model']>;
-    }> | null;
+    reranker: Readonly<
+        | {
+            kind: 'voyage';
+            apiKey: string;
+            model: NonNullable<ConstructorParameters<typeof VoyageAIReranker>[0]['model']>;
+        }
+        | {
+            kind: 'lateon';
+            modelDirectory: string;
+            requestDeadlineMilliseconds?: number;
+            intraOpThreads?: number;
+        }
+    > | null;
     embeddingCapable: boolean;
 }>;
 
@@ -232,6 +243,7 @@ export class ProviderRuntime {
     private vectorRuntimePromise: Promise<ToolContext> | null = null;
     private activeContexts: ToolContext[] = [];
     private readonly activeEmbeddings = new Set<Embedding>();
+    private readonly activeRerankers = new Set<Reranker>();
 
     constructor(args: {
         config: ContextMcpConfig;
@@ -286,6 +298,12 @@ export class ProviderRuntime {
                     if (!this.config.potionModelPath) missing.push("POTION_MODEL_PATH");
                     break;
             }
+            if (
+                resolveRerankerProvider(this.config) === "lateon"
+                && !this.config.lateOnModelPath
+            ) {
+                missing.push("SATORI_LATEON_MODEL_PATH");
+            }
         }
 
         if (this.config.vectorStoreProvider === 'Milvus' && !this.config.milvusEndpoint) {
@@ -331,6 +349,7 @@ export class ProviderRuntime {
     private async createRuntime(requireEmbedding: boolean): Promise<ToolContext> {
         const bootstrap = await this.resolveRuntimeBootstrap(requireEmbedding);
         const embedding = await this.createEmbeddingProvider(bootstrap);
+        let reranker: Reranker | null = null;
         try {
             const vectorDatabase = await this.createVectorBackend(bootstrap, embedding.getDimension());
             const context = new Context({
@@ -352,9 +371,11 @@ export class ProviderRuntime {
                 mutationLeaseCoordinator: this.mutationLeaseCoordinator,
                 onLifecycleActivityChanged: this.onLifecycleActivityChanged,
             });
-            const reranker = this.createReranker(bootstrap);
+            reranker = this.createReranker(bootstrap);
             if (reranker) {
-                console.log(`[RERANKER] VoyageAI Reranker initialized with model: ${this.config.rankerModel || "rerank-2.5"}`);
+                console.log(
+                    `[RERANKER] ${bootstrap.reranker?.kind ?? "unknown"} reranker initialized.`,
+                );
             }
             const toolHandlers = new ToolHandlers(
                 context,
@@ -391,9 +412,11 @@ export class ProviderRuntime {
                 providerRuntime: this,
             };
             this.activeEmbeddings.add(embedding);
+            if (reranker) this.activeRerankers.add(reranker);
             this.activeContexts.push(toolContext);
             return toolContext;
         } catch (error) {
+            await reranker?.close?.().catch(() => undefined);
             await embedding.close();
             throw error;
         }
@@ -420,13 +443,27 @@ export class ProviderRuntime {
             const missing = this.config.vectorStoreProvider === 'LanceDB' ? 'LANCEDB_PATH' : 'MILVUS_ADDRESS';
             throw new Error(`MISSING_PROVIDER_CONFIG ${missing} is not configured`);
         }
-        const reranker = requireEmbedding && this.capabilities.hasReranker()
-            ? {
-                kind: 'voyage' as const,
-                apiKey: this.config.voyageKey as string,
-                model: this.config.rankerModel || 'rerank-2.5',
-            }
-            : null;
+        const rerankerProvider = resolveRerankerProvider(this.config);
+        const reranker = !requireEmbedding || !this.capabilities.hasReranker()
+            ? null
+            : rerankerProvider === 'lateon'
+                ? {
+                    kind: 'lateon' as const,
+                    modelDirectory: this.config.lateOnModelPath as string,
+                    ...(this.config.lateOnRequestDeadlineMs !== undefined
+                        ? { requestDeadlineMilliseconds: this.config.lateOnRequestDeadlineMs }
+                        : {}),
+                    ...(this.config.lateOnIntraOpThreads !== undefined
+                        ? { intraOpThreads: this.config.lateOnIntraOpThreads }
+                        : {}),
+                }
+                : rerankerProvider === 'voyage'
+                    ? {
+                        kind: 'voyage' as const,
+                        apiKey: this.config.voyageKey as string,
+                        model: this.config.rankerModel || 'rerank-2.5',
+                    }
+                    : null;
         const embedding = requireEmbedding
             ? Object.freeze({ kind: 'configured' as const })
             : Object.freeze({
@@ -505,12 +542,22 @@ export class ProviderRuntime {
 
     private createReranker(
         bootstrap: ResolvedProviderRuntimeBootstrap,
-    ): VoyageAIReranker | null {
+    ): Reranker | null {
         if (!bootstrap.reranker) return null;
-        return new VoyageAIReranker({
-            apiKey: bootstrap.reranker.apiKey,
-            model: bootstrap.reranker.model,
-        });
+        switch (bootstrap.reranker.kind) {
+            case 'voyage':
+                return new VoyageAIReranker({
+                    apiKey: bootstrap.reranker.apiKey,
+                    model: bootstrap.reranker.model,
+                });
+            case 'lateon':
+                return new LateOnReranker({
+                    modelDirectory: bootstrap.reranker.modelDirectory,
+                    requestDeadlineMilliseconds:
+                        bootstrap.reranker.requestDeadlineMilliseconds,
+                    intraOpThreads: bootstrap.reranker.intraOpThreads,
+                });
+        }
     }
 
     private createSyncCompletionHook(context: Context): SyncCompletionHook {
@@ -539,8 +586,10 @@ export class ProviderRuntime {
                 await toolContext.context.getVectorStore().close?.();
             })),
             Promise.all([...this.activeEmbeddings].map((embedding) => embedding.close())),
+            Promise.all([...this.activeRerankers].map((reranker) => reranker.close?.())),
         ]);
         this.activeContexts = [];
         this.activeEmbeddings.clear();
+        this.activeRerankers.clear();
     }
 }

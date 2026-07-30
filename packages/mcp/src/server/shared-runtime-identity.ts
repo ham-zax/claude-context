@@ -26,6 +26,11 @@ export type SharedRuntimeIdentity = Readonly<{
     potionHelperPath: string;
     potionModelPath: string;
     potionRequestTimeoutMs: string;
+    rerankerProvider: string;
+    voyageRerankerModel: string;
+    lateOnModelPath: string;
+    lateOnRequestDeadlineMs: string;
+    lateOnIntraOpThreads: string;
     vectorStoreProvider: string;
     lanceDbPath: string;
     watcherEnabled: string;
@@ -148,6 +153,13 @@ export function buildSharedRuntimeIdentity(
             ? canonicalizePath(env.POTION_MODEL_PATH)
             : "",
         potionRequestTimeoutMs: env.POTION_REQUEST_TIMEOUT_MS ?? "",
+        rerankerProvider: env.SATORI_RERANKER_PROVIDER ?? "",
+        voyageRerankerModel: env.VOYAGEAI_RERANKER_MODEL ?? "",
+        lateOnModelPath: env.SATORI_LATEON_MODEL_PATH
+            ? canonicalizePath(env.SATORI_LATEON_MODEL_PATH)
+            : "",
+        lateOnRequestDeadlineMs: env.SATORI_LATEON_REQUEST_DEADLINE_MS ?? "",
+        lateOnIntraOpThreads: env.SATORI_LATEON_INTRA_OP_THREADS ?? "",
         vectorStoreProvider: env.VECTOR_STORE_PROVIDER ?? "",
         lanceDbPath: env.LANCEDB_PATH
             ? canonicalizePath(env.LANCEDB_PATH)

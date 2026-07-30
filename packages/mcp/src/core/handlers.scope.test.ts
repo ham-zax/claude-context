@@ -7364,10 +7364,11 @@ test('handleSearchCode debug exposes missing reranker capability without warning
     });
 });
 
-test('handleSearchCode reranks family-diverse candidates and exposes the adaptive budget', async () => {
+test('handleSearchCode honors a provider-qualified reranker candidate limit', async () => {
     await withTempRepo(async (repoPath) => {
         let rerankDocuments: string[] = [];
         const reranker = {
+            getMaxDocuments: () => 3,
             rerank: async (_query: string, documents: string[]) => {
                 rerankDocuments = documents;
                 return documents.map((_document, index) => ({ index, relevanceScore: 1 - (index * 0.01) }));
@@ -7453,33 +7454,31 @@ test('handleSearchCode reranks family-diverse candidates and exposes the adaptiv
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.equal(payload.status, 'ok');
-        assert.equal(rerankDocuments.length, 5);
+        assert.equal(rerankDocuments.length, 3);
         assert.deepEqual(rerankDocuments.map((document) => document.split('\n', 1)[0]), [
             'src/owner-a-primary.ts',
             'src/owner-b.ts',
             'src/owner-c.ts',
-            'src/owner-d.ts',
-            'src/owner-a-duplicate.ts',
         ]);
         assert.equal(payload.hints?.debugSearch?.rerank?.candidatesIn, 5);
         assert.equal(payload.hints?.debugSearch?.rerank?.familyCount, 4);
         assert.equal(payload.hints?.debugSearch?.rerank?.supplementalCandidates, 1);
         assert.equal(payload.hints?.debugSearch?.rerank?.candidatePoolCount, 5);
-        assert.equal(payload.hints?.debugSearch?.rerank?.candidatesReranked, 5);
-        assert.equal(payload.hints?.debugSearch?.rerank?.budgetReason, 'complete_family_pool');
+        assert.equal(payload.hints?.debugSearch?.rerank?.candidatesReranked, 3);
+        assert.equal(payload.hints?.debugSearch?.rerank?.budgetReason, 'provider_limit');
         assert.equal(payload.hints?.debugSearch?.candidateSurvival?.stages.find(
             (stage: { stage: string }) => stage.stage === 'reranker_input',
-        )?.uniqueCandidates, 5);
+        )?.uniqueCandidates, 3);
         assert.equal(payload.hints?.debugSearch?.candidateSurvival?.stages.find(
             (stage: { stage: string }) => stage.stage === 'reranker_output',
-        )?.uniqueCandidates, 5);
+        )?.uniqueCandidates, 3);
         assert.deepEqual(payload.hints?.debugSearch?.providerWork, {
             semanticSearchAttempts: 1,
             embeddingCallsByCurrentContract: 1,
             denseQueriesByCurrentContract: 1,
             sparseQueriesByCurrentContract: 1,
             rerankerCalls: 1,
-            rerankerCandidates: 5,
+            rerankerCandidates: 3,
             rerankerInputBytes: rerankDocuments.reduce(
                 (total, document) => total + Buffer.byteLength(document, 'utf8'),
                 0,
@@ -7753,7 +7752,8 @@ test('handleSearchCode prefers usage hits over declarations for reference-seekin
     await withTempRepo(async (repoPath) => {
         const reranker = {
             rerank: async () => [
-                { index: 1, relevanceScore: 0.95 }
+                { index: 1, relevanceScore: 0.95 },
+                { index: 0, relevanceScore: 0.05 },
             ]
         };
         const handlers = createHandlers(repoPath, [
@@ -9499,7 +9499,7 @@ test('handleSearchCode reranker can change grouped representative chunk selectio
     });
 });
 
-test('handleSearchCode leaves reranker applied false when no returned indexes are usable', async () => {
+test('handleSearchCode rejects an incomplete or invalid reranker order atomically', async () => {
     await withTempRepo(async (repoPath) => {
         const reranker = {
             rerank: async () => [
@@ -9549,6 +9549,8 @@ test('handleSearchCode leaves reranker applied false when no returned indexes ar
         assert.equal(payload.hints?.debugSearch?.rerank?.enabled, true);
         assert.equal(payload.hints?.debugSearch?.rerank?.attempted, true);
         assert.equal(payload.hints?.debugSearch?.rerank?.applied, false);
+        assert.equal(warningCodes(payload).includes('RERANKER_FAILED'), true);
+        assert.equal(payload.hints?.debugSearch?.rerank?.failurePhase, 'parse_results');
     });
 });
 

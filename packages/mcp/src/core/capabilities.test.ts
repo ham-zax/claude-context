@@ -79,6 +79,24 @@ test('Potion is a slow local embedding capability without cloud reranking', () =
     assert.equal(resolver.hasReranker(), false);
 });
 
+test('qualified LateOn enables local reranking without cloud credentials', () => {
+    const resolver = new CapabilityResolver(baseConfig({
+        executionProfile: 'offline',
+        networkPolicy: { kind: 'local-only' },
+        vectorStoreProvider: 'LanceDB',
+        lanceDbPath: '/tmp/satori-lancedb',
+        encoderProvider: 'Potion',
+        encoderModel: 'pinned-potion',
+        voyageKey: undefined,
+        rerankerProvider: 'lateon',
+        lateOnModelPath: '/opt/satori/models/lateon-code-edge',
+    }));
+
+    assert.equal(resolver.getPerformanceProfile(), 'slow');
+    assert.equal(resolver.hasReranker(), true);
+    assert.equal(resolver.getDefaultRerankEnabled(), true);
+});
+
 test('capability resolver does not treat token-only Milvus config as vector-ready', () => {
     const resolver = new CapabilityResolver(baseConfig({
         milvusEndpoint: undefined,

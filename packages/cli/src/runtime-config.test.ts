@@ -52,6 +52,36 @@ test("static runtime config accepts the installer-owned Potion offline identity"
     assert.equal(checks.find((check) => check.name === "potion_artifacts")?.status, "ok");
 });
 
+test("static runtime config accepts an absolute shared LateOn model path", () => {
+    const checks = evaluateStaticRuntimeConfig({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: "/opt/satori/potion/satori-potion",
+        POTION_MODEL_PATH: "/opt/satori/potion/model",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
+    });
+
+    assert.equal(checks.some((check) => check.status === "error"), false);
+    assert.equal(checks.find((check) => check.name === "reranker_provider")?.status, "ok");
+});
+
+test("static runtime config rejects an unbound LateOn selection", () => {
+    const checks = evaluateStaticRuntimeConfig({
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: "relative/model",
+        VOYAGEAI_API_KEY: "test",
+        MILVUS_ADDRESS: "localhost:19530",
+    });
+
+    const reranker = checks.find((check) => check.name === "reranker_provider");
+    assert.equal(reranker?.status, "error");
+    assert.match(reranker?.message || "", /absolute SATORI_LATEON_MODEL_PATH/);
+});
+
 test("static runtime config rejects a changed Potion model identity", () => {
     const checks = evaluateStaticRuntimeConfig({
         SATORI_RUNTIME_PROFILE: "offline",

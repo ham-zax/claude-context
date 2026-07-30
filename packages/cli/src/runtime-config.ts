@@ -13,6 +13,7 @@ export interface RuntimeConfigCheck {
 const SUPPORTED_EMBEDDING_PROVIDERS = new Set(["OpenAI", "VoyageAI", "Gemini", "Ollama", "Potion"]);
 const SUPPORTED_VECTOR_STORES = new Set(["Milvus", "LanceDB"]);
 const SUPPORTED_OUTPUT_DIMENSIONS = new Set([256, 512, 1024, 2048]);
+const SUPPORTED_RERANKER_PROVIDERS = new Set(["none", "voyage", "lateon"]);
 
 function selectedExecutionProfile(env: NodeJS.ProcessEnv): string {
     return env.SATORI_RUNTIME_PROFILE?.trim() || "connected";
@@ -130,6 +131,44 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
             message: `Vector store provider: ${vectorStore}.`,
         },
     ];
+
+    const rerankerProvider = env.SATORI_RERANKER_PROVIDER?.trim()
+        || (env.SATORI_LATEON_MODEL_PATH?.trim() ? "lateon" : "none");
+    if (!SUPPORTED_RERANKER_PROVIDERS.has(rerankerProvider)) {
+        checks.push({
+            name: "reranker_provider",
+            status: "error",
+            message: `Unsupported reranker provider: ${rerankerProvider}. Use none, voyage, or lateon.`,
+            nextStep: "Set SATORI_RERANKER_PROVIDER to none, voyage, or lateon.",
+        });
+    } else if (rerankerProvider === "lateon") {
+        const modelPath = env.SATORI_LATEON_MODEL_PATH?.trim();
+        checks.push(modelPath && path.isAbsolute(modelPath)
+            ? {
+                name: "reranker_provider",
+                status: "ok",
+                message: "LateOn uses an absolute shared model directory.",
+            }
+            : {
+                name: "reranker_provider",
+                status: "error",
+                message: "LateOn requires an absolute SATORI_LATEON_MODEL_PATH.",
+                nextStep: "Set SATORI_LATEON_MODEL_PATH to the pinned shared model directory.",
+            });
+    } else if (rerankerProvider === "voyage" && executionProfile === "offline") {
+        checks.push({
+            name: "reranker_provider",
+            status: "error",
+            message: "Voyage reranking is unavailable under the offline local-only policy.",
+            nextStep: "Use SATORI_RERANKER_PROVIDER=none or configure the local LateOn reranker.",
+        });
+    } else {
+        checks.push({
+            name: "reranker_provider",
+            status: "ok",
+            message: `Reranker provider: ${rerankerProvider}.`,
+        });
+    }
 
     if (executionProfile === "offline" && provider !== "Ollama" && provider !== "Potion") {
         checks.push({

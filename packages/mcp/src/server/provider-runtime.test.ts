@@ -27,6 +27,7 @@ import {
     LEXICAL_PROJECTION_VERSION,
     RELATIONSHIP_BUILDER_VERSION,
     SYMBOL_EXTRACTOR_VERSION,
+    type Reranker,
 } from "@zokizuan/satori-core";
 
 function baseConfig(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig {
@@ -243,6 +244,23 @@ test("runtime shutdown closes each provider-owned embedding once", async () => {
     runtimeInternals.activeEmbeddings.add({
         close: async () => { closeCalls += 1; },
     } as Embedding);
+
+    await runtime.shutdown();
+    await runtime.shutdown();
+
+    assert.equal(closeCalls, 1);
+});
+
+test("runtime shutdown closes each provider-owned reranker once", async () => {
+    const runtime = createRuntime(baseConfig());
+    let closeCalls = 0;
+    const runtimeInternals = runtime as unknown as {
+        activeRerankers: Set<Reranker>;
+    };
+    runtimeInternals.activeRerankers.add({
+        rerank: async () => [],
+        close: async () => { closeCalls += 1; },
+    });
 
     await runtime.shutdown();
     await runtime.shutdown();
