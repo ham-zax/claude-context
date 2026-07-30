@@ -2,15 +2,26 @@
 
 **Status:** complete. R2 retained baseline `B`; the corrected retrieval
 baseline passed; LateOn C0 FP32 conformance passed; R3 found directional quality
-improvement but no contender passed both the frozen quality and resource gates.
-R4 finalist qualification and R5 held-out adjudication were not admitted.
+improvement but no contender passed both the originally frozen quality and
+resource gates. R4 finalist qualification and R5 held-out adjudication were not
+admitted under that contract.
 
 **Date:** 2026-07-29
 **Completed:** 2026-07-30
 
-**Terminal decision:** retain product policy `B`. No LateOn finalist, runtime
-ranking change, dependency addition, release qualification, or production
-activation is authorized. Held-out evidence remains sealed.
+**Original terminal decision:** retain product policy `B`. No LateOn finalist
+was admitted under the original resource contract. Held-out evidence remains
+sealed.
+
+**Authorized follow-up:** the later empirical local-WSL runtime experiment
+replaced the assumed 512 MiB gate, removed cross-document padding amplification,
+and reproduced every qualified D-L16 score and ranking order. Its measured
+profile admits D-L16 for a separate production implementation while leaving
+this plan's frozen quality evidence unchanged:
+
+```text
+docs/evidence/lateon-runtime-profile-20260730/LATEON_RUNTIME_PROFILE_RECEIPT.md
+```
 
 Final evidence:
 

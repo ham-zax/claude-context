@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "satori_lateon_local_wsl_runtime_profile_v1",
+  "decision": "admit_lateon_d16_for_production_implementation",
+  "model": {
+    "repository": "lightonai/LateOn-Code-edge",
+    "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
+    "license": "Apache-2.0",
+    "onnxVariant": "fp32",
+    "onnxSha256": "ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef"
+  },
+  "selection": {
+    "candidateDepth": 16,
+    "documentBatchSize": 1,
+    "executionProvider": "cpu",
+    "intraOpThreads": 8,
+    "interOpThreads": 1,
+    "projectionVersion": "search_rerank_document_v1",
+    "reason": "lowest measured latency and peak RSS with score and order identity"
+  },
+  "host": {
+    "profile": "local_wsl_cpu",
+    "processor": "AMD Ryzen 7 3800X 8-Core Processor",
+    "physicalCores": 8,
+    "logicalCpus": 16,
+    "node": "24.13.0",
+    "onnxruntimeNode": "1.19.2",
+    "transformersJs": "3.0.2"
+  },
+  "measurementAuthority": {
+    "tuningManifestSha256": "ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445",
+    "toolingRevision": "7d0e8c33fc5fab596031c8db023910e2287d4a23",
+    "scoreArtifacts": {
+      "satori-r0": "c022190dca1a61d41f9fea1f9707bb114e42237b4fe0db2935b5333d4f2133d3",
+      "tradingview-r0": "57391c267ff0a2a1d17d8745a73e15eb49ddba0a95e0a83b99f15b8f7ba80024",
+      "shopify-theme-r0": "310529b8887e9c7a8f21505c6e5bdd6f5a4e9fd8f6a25caa0b07de1fa676b3e8"
+    },
+    "fusionTaskCount": 25,
+    "candidateScoreComparisons": 400,
+    "maximumScoreAbsoluteDeltaFromQualifiedD16": 0,
+    "rankingOrderMismatchCount": 0
+  },
+  "measurements": {
+    "modelLoadMaximumMilliseconds": 604.615716,
+    "scoringP50Milliseconds": 388.1540849999992,
+    "scoringP95Milliseconds": 683.4962160000005,
+    "scoringMaximumMilliseconds": 686.6959900000002,
+    "processPeakRssMaximumBytes": 648372224,
+    "processRetainedRssMaximumBytes": 529059840,
+    "modelLoadRssDeltaMaximumBytes": 157036544,
+    "deadlineFailureCount": 0
+  },
+  "derivedLimits": {
+    "maximumModelLoadMilliseconds": {
+      "value": 1000,
+      "derivation": "ceil(measured_maximum * 1.5 / 100ms) * 100ms"
+    },
+    "maximumWarmP95Milliseconds": {
+      "value": 900,
+      "derivation": "ceil(measured_p95 * 1.25 / 100ms) * 100ms"
+    },
+    "requestDeadlineMilliseconds": {
+      "value": 2000,
+      "derivation": "ceil((maximum_load + maximum_score) * 1.5 / 500ms) * 500ms"
+    },
+    "maximumProcessPeakRssBytes": {
+      "value": 872415232,
+      "derivation": "ceil(measured_peak * 1.25 / 64MiB) * 64MiB"
+    },
+    "maximumProcessRetainedRssBytes": {
+      "value": 671088640,
+      "derivation": "ceil(measured_retained * 1.25 / 64MiB) * 64MiB"
+    }
+  },
+  "quality": {
+    "baselineMacroReciprocalRank": 0.360185185185,
+    "lateOnD16MacroReciprocalRank": 0.401111111111,
+    "macroReciprocalRankDelta": 0.040925925926,
+    "baselineOwnerAt3": 0.372222222222,
+    "lateOnD16OwnerAt3": 0.494444444444,
+    "hardNegativeExposureAt3": 0,
+    "candidateMembershipIdentityEqual": true,
+    "eligibilityIdentityEqual": true,
+    "exactIdentifierIdentityEqual": true
+  },
+  "fallback": {
+    "mode": "all_or_nothing_deterministic_baseline",
+    "workerIsolationRequired": true,
+    "reason": "synchronous ONNX execution cannot be preempted safely in the MCP process"
+  },
+  "alternatives": {
+    "jinaai/jina-reranker-v2-base-multilingual": {
+      "decision": "diagnostic_only_not_bundled",
+      "reason": "CC-BY-NC-4.0 repository license is incompatible with an unrestricted production default"
+    },
+    "zeroentropy/zerank-1-small-reranker": {
+      "decision": "reject_for_local_default",
+      "reason": "1.7B parameters place it outside the selected local CPU runtime class"
+    }
+  }
+}
