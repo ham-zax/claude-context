@@ -1,6 +1,5 @@
 import {
     Embedding,
-    EmbeddingVector,
     OpenAIEmbedding,
     resolveValidatedEmbeddingIdentity,
     type EmbeddingIdentity,
@@ -9,8 +8,6 @@ import {
 import {
     VectorDatabase,
     VectorControlRecord,
-    IndexedVectorDocument,
-    SearchProjections,
     VectorFilter,
     IndexCompletionFingerprint,
     IndexCompletionMarkerDocument,
@@ -32,8 +29,6 @@ import {
     getSupportedExtensionsForIndexProfile,
 } from '../config/defaults';
 import {
-    isIndexableFileByPolicy,
-    isIndexableFileObservationByPolicy,
     normalizeSupportedExtensions,
 } from '../config/index-policy';
 import {
@@ -42,14 +37,12 @@ import {
     SatoriRepoConfigAuthorityError,
     SatoriRepoConfig,
 } from '../config/repo-config';
-import { getLanguageIdFromFilename } from '../language';
 import {
     importNavigationToSqlite,
     resolveNavigationSqlitePath,
 } from '../navigation';
 import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
-    buildSymbolRecordsForFile,
     buildSymbolRegistry,
     clearSymbolRegistrySidecar,
     computeSymbolRegistryManifestHash,
@@ -64,7 +57,6 @@ import {
     resolveCurrentNavigationGeneration,
     resolveNavigationGeneration,
     resolveNavigationSidecarRoot,
-    resolveOwnerSymbolForChunk,
     discardNavigationSidecarGeneration,
     publishNavigationSidecarGeneration,
     pruneNavigationSidecarGenerations,
@@ -84,8 +76,6 @@ import {
     LANGUAGE_PARSER_VERSION,
     RELATIONSHIP_BUILDER_VERSION,
     SYMBOL_EXTRACTOR_VERSION,
-    type CodeChunk,
-    type LanguageAnalysisResult,
     type LanguageAnalysisPort,
 } from '../language-analysis';
 import {
@@ -109,7 +99,6 @@ import {
 } from '../sync/synchronizer';
 import {
     assertDescriptorBoundIndexingSupported,
-    openRegularFileInsideRoot,
     openRegularFileInsideRootNoFollow,
     readFileHandleExactly,
     verifyStableFileObservation,
@@ -130,59 +119,30 @@ import {
     type CanonicalPublicationBinding,
 } from './persisted-index-authority';
 import {
-    buildSearchProjections,
     EMBEDDING_PROJECTION_VERSION,
     LEXICAL_PROJECTION_VERSION,
 } from './search-projections';
-import { buildIndexedChunkId } from './indexed-chunk-identity';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     SemanticSearchService,
     type MutationGenerationObservation,
     type MutationGenerationObserver,
 } from './semantic-search-service';
+import {
+    IndexingPipeline,
+    type AnalyzedFileSymbolFacts,
+    type AnalyzedIndexedFile,
+    type ExpectedIndexedChunk,
+    type IndexingPipelineMetrics,
+    type ProcessedFileList,
+    type ProjectedChunkEntry,
+} from './indexing-pipeline';
 
 export type {
     MutationGenerationObservation,
     MutationGenerationObserver,
 } from './semantic-search-service';
 
-interface ProjectedChunkEntry {
-    readonly chunk: CodeChunk;
-    readonly relativePath: RepositoryRelativePath;
-    readonly fileChunkIndex: number;
-    readonly projections: SearchProjections;
-}
-
-interface PendingIndexedChunk extends ProjectedChunkEntry {
-    readonly codebasePath: string;
-}
-
-interface AnalyzedIndexedFile {
-    readonly relativePath: RepositoryRelativePath;
-    readonly source: string;
-    /** Exact source-byte identity used to prove full-index coverage. */
-    readonly sourceHash: string;
-    /** Decoded UTF-8 identity retained by navigation manifest compatibility. */
-    readonly contentHash: string;
-    readonly language: string;
-    readonly structuralStatus: LanguageAnalysisResult['structuralStatus'];
-    readonly chunks: CodeChunk[];
-    readonly extractedSymbols: LanguageAnalysisResult['symbols'];
-    readonly moduleBindings: LanguageAnalysisResult['moduleBindings'];
-    readonly callSites: LanguageAnalysisResult['callSites'];
-    readonly receiverTypeBindings: LanguageAnalysisResult['receiverTypeBindings'];
-    readonly pythonFlowFacts: LanguageAnalysisResult['pythonFlowFacts'];
-}
-
-interface AnalyzedFileSymbolFacts {
-    readonly symbolRecords: SymbolRecord[];
-    readonly manifestFile: SymbolRegistryManifestFile;
-    readonly relationshipEvidence: RelationshipAnalysisEvidence;
-}
-
-const DEFAULT_EMBEDDING_BATCH_SIZE = 100;
-const MAX_EMBEDDING_BATCH_SIZE = 1000;
 const INDEX_POLICY_MALFORMED_LOCK_STALE_MS = 30_000;
 
 type IndexPolicyMutationLockMetadata = {
@@ -248,31 +208,6 @@ function parseIndexPolicyMutationLockMetadata(raw: string): IndexPolicyMutationL
         return null;
     }
 }
-
-function resolveEmbeddingBatchSize(
-    rawValue: string | undefined,
-    preferredSize: number = DEFAULT_EMBEDDING_BATCH_SIZE,
-    hardMaxSize: number = MAX_EMBEDDING_BATCH_SIZE,
-): number {
-    const boundedPreferredSize = Math.min(preferredSize, hardMaxSize, MAX_EMBEDDING_BATCH_SIZE);
-    if (!rawValue) return boundedPreferredSize;
-    const parsed = Number(rawValue);
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) return boundedPreferredSize;
-    return Math.min(parsed, hardMaxSize, MAX_EMBEDDING_BATCH_SIZE);
-}
-
-function estimateEmbeddingTokens(text: string): number {
-    return Math.ceil(text.length / 4);
-}
-
-type IndexingPipelineMetrics = {
-    analysisMs: number;
-    embeddedInputBytes: number;
-    logicalEmbeddingRequests: number;
-    logicalEmbeddingDurationMs: number;
-    logicalVectorWriteRequests: number;
-    logicalVectorWriteDurationMs: number;
-};
 
 function subtractEmbeddingMetrics(
     after: EmbeddingOperationMetricsSnapshot | null,
@@ -755,34 +690,6 @@ export type IndexCodebaseResult = {
     navigationCandidate?: StagedNavigationSidecarGeneration;
 };
 
-function chunksWithTrustedRelativePath(
-    chunks: readonly CodeChunk[],
-    relativePath: RepositoryRelativePath,
-): CodeChunk[] {
-    return chunks.map((chunk) => ({
-        ...chunk,
-        metadata: { ...chunk.metadata, filePath: relativePath },
-    }));
-}
-
-function chunksWithResolvedOwners(
-    chunks: readonly CodeChunk[],
-    symbols: SymbolRecord[],
-): CodeChunk[] {
-    return chunks.map((chunk) => {
-        const owner = resolveOwnerSymbolForChunk({ chunk, symbols });
-        return {
-            ...chunk,
-            metadata: {
-                ...chunk.metadata,
-                ownerSymbolKey: owner.symbolKey,
-                ownerSymbolInstanceId: owner.symbolInstanceId,
-                symbolKind: owner.kind,
-            },
-        };
-    });
-}
-
 type ReindexByChangeResult = {
     added: number;
     removed: number;
@@ -794,16 +701,6 @@ type ReindexByChangeResult = {
     totalChunks?: number;
     indexStatus?: 'completed' | 'limit_reached';
     generationReceipt?: ProvenGenerationReceipt;
-};
-
-type ExpectedIndexedChunk = {
-    id: string;
-    relativePath: string;
-    startLine: number;
-    endLine: number;
-    content: string;
-    language: string;
-    chunkIndex: number;
 };
 
 type CollectionPayloadVerification =
@@ -910,6 +807,7 @@ export class Context {
     private preparedIndexCollectionReceipts = new WeakSet<PreparedIndexCollectionReceipt>();
     private symbolRegistryStateRoot?: string;
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
+    private readonly indexingPipeline: IndexingPipeline;
     private vectorStoreProvider: VectorStoreProviderIdentity;
 
     constructor(config: ContextConfig = {}) {
@@ -998,8 +896,28 @@ export class Context {
             );
         this.ignoreStateByCollection = new Map();
         this.symbolRegistryStateRoot = config.symbolRegistryStateRoot;
+        this.indexingPipeline = new IndexingPipeline({
+            getVectorDatabase: () => this.vectorDatabase,
+            languageAnalyzer: this.languageAnalyzer,
+            getEmbedding: () => this.embedding,
+            assertEmbeddingIdentityCurrent: () => this.assertEmbeddingIdentityCurrent(),
+            isHybridEnabled: () => this.getIsHybrid(),
+            canonicalizeCodebasePath: (codebasePath) => (
+                this.canonicalizeCodebasePath(codebasePath)
+            ),
+            normalizeRelativePathForCodebase: (codebasePath, filePath) => (
+                this.normalizeRelativePathForCodebase(codebasePath, filePath)
+            ),
+            getIndexedExtensionsForCodebase: (codebasePath) => (
+                this.getIndexedExtensionsForCodebase(codebasePath)
+            ),
+            matchesIgnorePattern: (filePath, codebasePath, isDirectory, matcher) => (
+                this.matchesIgnorePattern(filePath, codebasePath, isDirectory, matcher)
+            ),
+            getSymbolExtractorVersion: () => this.getSymbolExtractorVersion(),
+        });
         this.semanticSearchService = new SemanticSearchService({
-            vectorDatabase: this.vectorDatabase,
+            getVectorDatabase: () => this.vectorDatabase,
             embeddingAccess: {
                 getEmbedding: () => this.embedding,
                 assertEmbeddingIdentityCurrent: () => this.assertEmbeddingIdentityCurrent(),
@@ -5856,44 +5774,11 @@ export class Context {
         assertMutationCurrent?.();
         await this.vectorDatabase.finalizeCollectionForSearch(this.getWriteCollectionName(codebasePath));
     }
-
-    /**
-     * Recursively get all code files in the codebase
-     */
-    private async getCodeFiles(codebasePath: string, indexPolicy?: ResolvedIndexPolicy): Promise<string[]> {
-        const files: string[] = [];
-        const supportedExtensions = indexPolicy?.supportedExtensions ?? this.getIndexedExtensionsForCodebase(codebasePath);
-        const policyMatcher = indexPolicy ? ignore().add(indexPolicy.effectiveIgnorePatterns) : null;
-
-        const traverseDirectory = async (currentPath: string) => {
-            const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
-            entries.sort((left, right) => compareContractStrings(left.name, right.name));
-
-            for (const entry of entries) {
-                const fullPath = path.join(currentPath, entry.name);
-
-                // Check if path matches ignore patterns
-                if (this.matchesIgnorePattern(fullPath, codebasePath, entry.isDirectory(), policyMatcher ?? undefined)) {
-                    continue;
-                }
-
-                if (entry.isDirectory()) {
-                    await traverseDirectory(fullPath);
-                } else if (entry.isFile()) {
-                    const stat = await fs.promises.stat(fullPath);
-                    const relativePath = path.relative(codebasePath, fullPath).replace(/\\/g, '/');
-                    if (await isIndexableFileByPolicy(relativePath, fullPath, stat.size, supportedExtensions)) {
-                        files.push(fullPath);
-                    }
-                }
-            }
-        };
-
-        await traverseDirectory(codebasePath);
-        return files.sort((left, right) => compareContractStrings(
-            path.relative(codebasePath, left).replace(/\\/g, '/'),
-            path.relative(codebasePath, right).replace(/\\/g, '/'),
-        ));
+    private async getCodeFiles(
+        codebasePath: string,
+        indexPolicy?: ResolvedIndexPolicy,
+    ): Promise<string[]> {
+        return this.indexingPipeline.getCodeFiles(codebasePath, indexPolicy);
     }
 
     private async readIndexableFileObservationInsideRoot(
@@ -5901,54 +5786,11 @@ export class Context {
         codebasePath: string,
         indexPolicy?: ResolvedIndexPolicy,
     ): Promise<{ content: string; sourceHash: string } | null> {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const handle = await openRegularFileInsideRoot(filePath, canonicalRoot);
-        try {
-            const before = await handle.stat();
-            const relativePath = this.normalizeRelativePathForCodebase(canonicalRoot, filePath);
-            if (!relativePath || !before.isFile()) {
-                throw new Error(`Indexed source is not a regular file inside the codebase root: ${filePath}`);
-            }
-            const indexable = await isIndexableFileObservationByPolicy(
-                relativePath,
-                before.size,
-                indexPolicy?.supportedExtensions ?? this.getIndexedExtensionsForCodebase(canonicalRoot),
-                async () => {
-                    const buffer = Buffer.alloc(Math.min(before.size, 8192));
-                    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-                    return buffer.subarray(0, bytesRead);
-                },
-            );
-            if (!indexable) return null;
-
-            const sourceBytes = await readFileHandleExactly(handle, before.size);
-            const content = sourceBytes.toString('utf8');
-            const after = await handle.stat();
-            if (
-                after.dev !== before.dev
-                || after.ino !== before.ino
-                || after.size !== before.size
-                || after.mtimeMs !== before.mtimeMs
-                || after.ctimeMs !== before.ctimeMs
-            ) {
-                throw new Error(`Indexed source changed while being read: ${filePath}`);
-            }
-            const currentPathHandle = await openRegularFileInsideRoot(filePath, canonicalRoot);
-            try {
-                const currentPathStat = await currentPathHandle.stat();
-                if (currentPathStat.dev !== after.dev || currentPathStat.ino !== after.ino) {
-                    throw new Error(`Indexed source path was replaced while being read: ${filePath}`);
-                }
-            } finally {
-                await currentPathHandle.close().catch(() => undefined);
-            }
-            return {
-                content,
-                sourceHash: crypto.createHash('sha256').update(sourceBytes).digest('hex'),
-            };
-        } finally {
-            await handle.close().catch(() => undefined);
-        }
+        return this.indexingPipeline.readIndexableFileObservationInsideRoot(
+            filePath,
+            codebasePath,
+            indexPolicy,
+        );
     }
 
     private async readIndexableFileInsideRoot(
@@ -5956,12 +5798,11 @@ export class Context {
         codebasePath: string,
         indexPolicy?: ResolvedIndexPolicy,
     ): Promise<string | null> {
-        const observation = await this.readIndexableFileObservationInsideRoot(
+        return this.indexingPipeline.readIndexableFileInsideRoot(
             filePath,
             codebasePath,
             indexPolicy,
         );
-        return observation?.content ?? null;
     }
 
     private async analyzeIndexedFile(
@@ -5969,67 +5810,17 @@ export class Context {
         codebasePath: string,
         indexPolicy?: ResolvedIndexPolicy,
     ): Promise<AnalyzedIndexedFile | null> {
-        const sourceObservation = await this.readIndexableFileObservationInsideRoot(
+        return this.indexingPipeline.analyzeIndexedFile(
             filePath,
             codebasePath,
             indexPolicy,
         );
-        if (sourceObservation === null) return null;
-
-        const relativePath = this.normalizeRelativePathForCodebase(codebasePath, filePath);
-        if (!relativePath) {
-            throw new Error(`Unable to derive relative path for indexed file ${filePath}`);
-        }
-        const source = sourceObservation.content;
-        const language = this.getLanguageFromFilePath(filePath);
-        const analysis = await this.languageAnalyzer.analyze({ content: source, language, relativePath });
-
-        return {
-            relativePath,
-            source,
-            sourceHash: sourceObservation.sourceHash,
-            contentHash: crypto.createHash('sha256').update(source, 'utf8').digest('hex'),
-            language,
-            structuralStatus: analysis.structuralStatus,
-            chunks: chunksWithTrustedRelativePath(analysis.chunks, relativePath),
-            extractedSymbols: analysis.symbols,
-            moduleBindings: analysis.moduleBindings,
-            callSites: analysis.callSites,
-            receiverTypeBindings: analysis.receiverTypeBindings,
-            pythonFlowFacts: analysis.pythonFlowFacts ?? [],
-        };
     }
 
-    private buildAnalyzedFileSymbolFacts(analyzed: AnalyzedIndexedFile): AnalyzedFileSymbolFacts {
-        const symbolRecords = buildSymbolRecordsForFile({
-            relativePath: analyzed.relativePath,
-            language: analyzed.language,
-            content: analyzed.source,
-            fileHash: analyzed.contentHash,
-            extractorVersion: this.getSymbolExtractorVersion(),
-            extractedSymbols: analyzed.extractedSymbols,
-            chunks: analyzed.chunks,
-        });
-        const hasDefinitions = symbolRecords.some((symbol) => symbol.kind !== 'file');
-        const definitionStatus = analyzed.structuralStatus !== 'complete'
-            ? 'structural_unavailable'
-            : hasDefinitions ? 'definitions_present' : 'definition_free';
-        return {
-            symbolRecords,
-            manifestFile: {
-                path: analyzed.relativePath,
-                hash: analyzed.contentHash,
-                language: analyzed.language,
-                symbolCount: symbolRecords.length,
-                definitionStatus,
-            },
-            relationshipEvidence: {
-                moduleBindings: analyzed.moduleBindings,
-                callSites: analyzed.callSites,
-                receiverTypeBindings: analyzed.receiverTypeBindings,
-                pythonFlowFacts: analyzed.pythonFlowFacts ?? [],
-            },
-        };
+    private buildAnalyzedFileSymbolFacts(
+        analyzed: AnalyzedIndexedFile,
+    ): AnalyzedFileSymbolFacts {
+        return this.indexingPipeline.buildAnalyzedFileSymbolFacts(analyzed);
     }
 
     private buildSupportedExtensions(profile: IndexProfile, canonicalRoot?: string): string[] {
@@ -6054,173 +5845,17 @@ export class Context {
         collectionName: string = this.getWriteCollectionName(codebasePath),
         assertMutationCurrent?: () => void,
         indexPolicy?: ResolvedIndexPolicy,
-    ): Promise<{
-        processedFiles: number;
-        totalChunks: number;
-        status: 'completed' | 'limit_reached';
-        symbolRecords: SymbolRecord[];
-        symbolManifestFiles: SymbolRegistryManifestFile[];
-        analysisByFile: Map<string, RelationshipAnalysisEvidence>;
-        indexedFileHashes: ReadonlyMap<string, string>;
-        performance: IndexingPipelineMetrics;
-    }> {
-        const isHybrid = this.getIsHybrid();
-        const batchPolicy = this.embedding.getBatchPolicy?.() ?? null;
-        const EMBEDDING_BATCH_SIZE = resolveEmbeddingBatchSize(
-            envManager.get('EMBEDDING_BATCH_SIZE'),
-            batchPolicy?.preferredMaxItems ?? DEFAULT_EMBEDDING_BATCH_SIZE,
-            batchPolicy?.hardMaxItems ?? MAX_EMBEDDING_BATCH_SIZE,
-        );
-        const targetEstimatedTokens = batchPolicy?.targetEstimatedTokens;
-        const hardTokenLimit = batchPolicy?.hardTokenLimit;
-        const CHUNK_LIMIT = 450000;
-        console.log(
-            `[Context] 🔧 Embedding batch policy: max_items=${EMBEDDING_BATCH_SIZE}`
-            + `${targetEstimatedTokens ? `, target_estimated_tokens=${targetEstimatedTokens}` : ''}`,
-        );
-
-        let chunkBuffer: PendingIndexedChunk[] = [];
-        let chunkBufferEstimatedTokens = 0;
-        let processedFiles = 0;
-        let totalChunks = 0;
-        let limitReached = false;
-        const symbolRecords: SymbolRecord[] = [];
-        const symbolManifestFiles: SymbolRegistryManifestFile[] = [];
-        const analysisByFile = new Map<string, RelationshipAnalysisEvidence>();
-        const indexedFileHashes = new Map<string, string>();
-        const describeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
-        const performance: IndexingPipelineMetrics = {
-            analysisMs: 0,
-            embeddedInputBytes: 0,
-            logicalEmbeddingRequests: 0,
-            logicalEmbeddingDurationMs: 0,
-            logicalVectorWriteRequests: 0,
-            logicalVectorWriteDurationMs: 0,
-        };
-        const flushChunkBuffer = async (failureContext: string): Promise<void> => {
-            if (chunkBuffer.length === 0) return;
-            const searchType = isHybrid === true ? 'hybrid' : 'regular';
-            try {
-                await this.processChunkBuffer(
-                    chunkBuffer,
-                    collectionName,
-                    assertMutationCurrent,
-                    performance,
-                );
-            } catch (error) {
-                console.error(`[Context] ❌ Failed to process ${failureContext} for ${searchType}:`, error);
-                if (error instanceof Error) {
-                    console.error('[Context] Stack trace:', error.stack);
-                }
-                throw new Error(`Failed to persist ${failureContext} for ${searchType}: ${describeError(error)}`);
-            } finally {
-                chunkBuffer = [];
-                chunkBufferEstimatedTokens = 0;
-            }
-        };
-
-        for (let i = 0; i < filePaths.length; i++) {
-            const filePath = filePaths[i];
-
-            try {
-                const analysisStartedAt = Date.now();
-                const analyzed = await this.analyzeIndexedFile(filePath, codebasePath, indexPolicy);
-                if (analyzed === null) continue;
-                const symbolFacts = this.buildAnalyzedFileSymbolFacts(analyzed);
-                const chunks = chunksWithResolvedOwners(analyzed.chunks, symbolFacts.symbolRecords);
-                const { relativePath } = analyzed;
-                analysisByFile.set(relativePath, symbolFacts.relationshipEvidence);
-                indexedFileHashes.set(relativePath, analyzed.sourceHash);
-                symbolRecords.push(...symbolFacts.symbolRecords);
-                symbolManifestFiles.push(symbolFacts.manifestFile);
-                performance.analysisMs += Date.now() - analysisStartedAt;
-
-                // Log files with many chunks or large content
-                if (chunks.length > 50) {
-                    console.warn(`[Context] ⚠️  File ${filePath} generated ${chunks.length} chunks (${Math.round(analyzed.source.length / 1024)}KB)`);
-                } else if (analyzed.source.length > 100000) {
-                    console.log(`📄 Large file ${filePath}: ${Math.round(analyzed.source.length / 1024)}KB -> ${chunks.length} chunks`);
-                }
-
-                let fileFullyIncluded = true;
-                // Add chunks to buffer
-                for (let fileChunkIndex = 0; fileChunkIndex < chunks.length; fileChunkIndex++) {
-                    const chunk = chunks[fileChunkIndex];
-                    const projections = buildSearchProjections({ chunk, relativePath });
-                    const chunkEstimatedTokens = estimateEmbeddingTokens(projections.embeddingText);
-                    if (hardTokenLimit !== undefined && chunkEstimatedTokens > hardTokenLimit) {
-                        throw new Error(
-                            `Embedding projection for '${relativePath}' chunk ${fileChunkIndex} is estimated at ${chunkEstimatedTokens} tokens, exceeding the provider hard limit of ${hardTokenLimit}.`,
-                        );
-                    }
-                    if (
-                        chunkBuffer.length > 0
-                        && targetEstimatedTokens !== undefined
-                        && chunkBufferEstimatedTokens + chunkEstimatedTokens > targetEstimatedTokens
-                    ) {
-                        await flushChunkBuffer(`chunk batch while indexing ${filePath}`);
-                    }
-                    chunkBuffer.push({ chunk, codebasePath, relativePath, fileChunkIndex, projections });
-                    chunkBufferEstimatedTokens += chunkEstimatedTokens;
-                    totalChunks++;
-
-                    // Process batch when buffer reaches EMBEDDING_BATCH_SIZE
-                    if (chunkBuffer.length >= EMBEDDING_BATCH_SIZE) {
-                        await flushChunkBuffer(`chunk batch while indexing ${filePath}`);
-                    }
-
-                    // Check if chunk limit is reached
-                    if (totalChunks >= CHUNK_LIMIT) {
-                        console.warn(`[Context] ⚠️  Chunk limit of ${CHUNK_LIMIT} reached. Stopping indexing.`);
-                        limitReached = true;
-                        fileFullyIncluded = fileChunkIndex === chunks.length - 1;
-                        break; // Exit the inner loop (over chunks)
-                    }
-                }
-
-                if (fileFullyIncluded) {
-                    processedFiles++;
-                    onFileProcessed?.(filePath, processedFiles, filePaths.length);
-                }
-
-                if (limitReached) {
-                    break; // Exit the outer loop (over files)
-                }
-
-            } catch (error) {
-                console.error(`[Context] ❌ Failed to index file ${filePath}: ${describeError(error)}`);
-                throw error;
-            }
-        }
-
-        // Process any remaining chunks in the buffer
-        if (chunkBuffer.length > 0) {
-            const searchType = isHybrid === true ? 'hybrid' : 'regular';
-            console.log(`📝 Processing final batch of ${chunkBuffer.length} chunks for ${searchType}`);
-            await flushChunkBuffer('final chunk batch');
-        }
-
-        if (!limitReached && indexedFileHashes.size !== processedFiles) {
-            throw new Error(
-                `Completed full index source coverage is inconsistent: ${processedFiles} processed files but ${indexedFileHashes.size} source identities.`,
-            );
-        }
-
-        return {
-            processedFiles,
-            totalChunks,
-            status: limitReached ? 'limit_reached' : 'completed',
-            symbolRecords,
-            symbolManifestFiles,
-            analysisByFile,
-            indexedFileHashes,
-            performance,
-        };
+    ): Promise<ProcessedFileList> {
+        return this.indexingPipeline.processFileList({
+            filePaths,
+            codebasePath,
+            collectionName,
+            ...(onFileProcessed ? { onFileProcessed } : {}),
+            ...(assertMutationCurrent ? { assertMutationCurrent } : {}),
+            ...(indexPolicy ? { indexPolicy } : {}),
+        });
     }
 
-    /**
-     * Rebuild expected chunks and symbol registry records from source files without embedding.
-     */
     public async getExpectedChunksAndSymbols(
         filePaths: string[],
         codebasePath: string,
@@ -6234,46 +5869,11 @@ export class Context {
         if (indexPolicy) {
             this.assertResolvedIndexPolicyRoot(codebasePath, indexPolicy);
         }
-        const expectedChunks: ExpectedIndexedChunk[] = [];
-        const symbolRecords: SymbolRecord[] = [];
-        const symbolManifestFiles: SymbolRegistryManifestFile[] = [];
-        const analysisByFile = new Map<string, RelationshipAnalysisEvidence>();
-
-        for (const filePath of filePaths) {
-            const analyzed = await this.analyzeIndexedFile(filePath, codebasePath, indexPolicy);
-            if (analyzed === null) {
-                throw new Error(`Indexed source no longer satisfies the active policy: ${filePath}`);
-            }
-            const symbolFacts = this.buildAnalyzedFileSymbolFacts(analyzed);
-            const chunks = chunksWithResolvedOwners(analyzed.chunks, symbolFacts.symbolRecords);
-            const { relativePath } = analyzed;
-            analysisByFile.set(relativePath, symbolFacts.relationshipEvidence);
-            for (let index = 0; index < chunks.length; index++) {
-                const chunk = chunks[index];
-                const startLine = chunk.metadata.startLine || 0;
-                const endLine = chunk.metadata.endLine || 0;
-                const id = this.generateId(relativePath, chunk, index);
-
-                expectedChunks.push({
-                    id,
-                    relativePath,
-                    startLine,
-                    endLine,
-                    content: chunk.content,
-                    language: chunk.metadata.language || 'unknown',
-                    chunkIndex: index,
-                });
-            }
-            symbolRecords.push(...symbolFacts.symbolRecords);
-            symbolManifestFiles.push(symbolFacts.manifestFile);
-        }
-
-        return {
-            expectedChunks,
-            symbolRecords,
-            symbolManifestFiles,
-            analysisByFile,
-        };
+        return this.indexingPipeline.getExpectedChunksAndSymbols(
+            filePaths,
+            codebasePath,
+            indexPolicy,
+        );
     }
 
     private async refreshCompletionMarkerFromCurrentSource(
@@ -7952,43 +7552,6 @@ export class Context {
             publishMutation,
         });
     }
-
-    /**
- * Process accumulated chunk buffer
- */
-    private async processChunkBuffer(
-        chunkBuffer: PendingIndexedChunk[],
-        collectionName: string,
-        assertMutationCurrent?: () => void,
-        performance?: IndexingPipelineMetrics,
-    ): Promise<void> {
-        if (chunkBuffer.length === 0) return;
-
-        // Extract chunks and ensure they all have the same codebasePath
-        const chunks = chunkBuffer.map(item => item.chunk);
-        const codebasePath = chunkBuffer[0].codebasePath;
-
-        // Estimate tokens (rough estimation: 1 token ≈ 4 characters)
-        const estimatedTokens = chunkBuffer.reduce(
-            (sum, { projections }) => sum + estimateEmbeddingTokens(projections.embeddingText),
-            0,
-        );
-
-        const isHybrid = this.getIsHybrid();
-        const searchType = isHybrid === true ? 'hybrid' : 'regular';
-        console.log(`[Context] 🔄 Processing batch of ${chunks.length} chunks (~${estimatedTokens} tokens) for ${searchType}`);
-        await this.processChunkBatch(
-            chunkBuffer,
-            codebasePath,
-            collectionName,
-            assertMutationCurrent,
-            performance,
-        );
-    }
-
-    /**
-     * Process a batch of chunks
-     */
     private async processChunkBatch(
         chunkEntries: ProjectedChunkEntry[],
         codebasePath: string,
@@ -7996,150 +7559,15 @@ export class Context {
         assertMutationCurrent?: () => void,
         performance?: IndexingPipelineMetrics,
     ): Promise<void> {
-        const indexedAt = new Date().toISOString();
-        const chunks = chunkEntries.map(({ chunk }) => chunk);
-        const projections = chunkEntries.map(({ projections: entryProjections }) => entryProjections);
-
-        // Generate embedding vectors
-        const embeddingTexts = projections.map(({ embeddingText }) => embeddingText);
-        const embeddingIdentity = this.assertEmbeddingIdentityCurrent();
-        const batchPolicy = this.embedding.getBatchPolicy?.() ?? null;
-        if (batchPolicy && chunkEntries.length > batchPolicy.hardMaxItems) {
-            throw new Error(
-                `Embedding batch contains ${chunkEntries.length} items, exceeding the provider hard limit of ${batchPolicy.hardMaxItems}.`,
-            );
-        }
-        const hardTokenLimit = batchPolicy?.hardTokenLimit;
-        if (hardTokenLimit !== undefined) {
-            const tokenEstimates = embeddingTexts.map(estimateEmbeddingTokens);
-            const oversizedIndex = tokenEstimates.findIndex((estimatedTokens) => (
-                estimatedTokens > hardTokenLimit
-            ));
-            if (oversizedIndex >= 0) {
-                const entry = chunkEntries[oversizedIndex];
-                throw new Error(
-                    `Embedding projection for '${entry.relativePath}' chunk ${entry.fileChunkIndex} is estimated at ${tokenEstimates[oversizedIndex]} tokens, exceeding the provider hard limit of ${hardTokenLimit}.`,
-                );
-            }
-            const batchEstimatedTokens = tokenEstimates.reduce((total, estimate) => total + estimate, 0);
-            if (batchEstimatedTokens > hardTokenLimit) {
-                throw new Error(
-                    `Embedding batch is estimated at ${batchEstimatedTokens} tokens, exceeding the provider hard limit of ${hardTokenLimit}.`,
-                );
-            }
-        }
-        if (performance) {
-            performance.embeddedInputBytes += embeddingTexts.reduce(
-                (total, content) => total + Buffer.byteLength(content, 'utf8'),
-                0,
-            );
-            performance.logicalEmbeddingRequests += 1;
-        }
-        const embeddingStartedAt = Date.now();
-        let embeddings: EmbeddingVector[];
-        try {
-            embeddings = await this.embedding.embedDocuments(embeddingTexts);
-        } finally {
-            if (performance) {
-                performance.logicalEmbeddingDurationMs += Date.now() - embeddingStartedAt;
-            }
-        }
-        this.assertEmbeddingIdentityCurrent();
-        const expectedDimension = embeddingIdentity.dimension;
-        if (!Array.isArray(embeddings) || embeddings.length !== chunks.length) {
-            throw new Error(`Embedding batch returned ${Array.isArray(embeddings) ? embeddings.length : 'a non-array result'} for ${chunks.length} chunks.`);
-        }
-        for (let index = 0; index < embeddings.length; index += 1) {
-            const embedding = embeddings[index] as unknown;
-            if (!embedding || typeof embedding !== 'object' || Array.isArray(embedding)) {
-                throw new Error(`Embedding batch result ${index} is not a valid embedding object.`);
-            }
-            const record = embedding as { vector?: unknown; dimension?: unknown };
-            if (!Array.isArray(record.vector)) {
-                throw new Error(`Embedding batch result ${index} has no vector array.`);
-            }
-            if (record.vector.length !== expectedDimension || record.dimension !== expectedDimension) {
-                throw new Error(`Embedding batch result ${index} has dimension ${record.vector.length}; expected ${expectedDimension}.`);
-            }
-            if (!record.vector.every((value) => typeof value === 'number' && Number.isFinite(value))) {
-                throw new Error(`Embedding batch result ${index} contains a non-finite vector value.`);
-            }
-        }
-        const documentIds = chunkEntries.map(({ chunk, relativePath, fileChunkIndex }) =>
-            this.generateId(relativePath, chunk, fileChunkIndex)
+        return this.indexingPipeline.processChunkBatch(
+            chunkEntries,
+            codebasePath,
+            collectionName,
+            assertMutationCurrent,
+            performance,
         );
-        if (new Set(documentIds).size !== documentIds.length) {
-            throw new Error(`Duplicate chunk identities generated for collection '${collectionName}'.`);
-        }
-        const persistDocuments = async (documents: IndexedVectorDocument[]): Promise<void> => {
-            assertMutationCurrent?.();
-            if (performance) performance.logicalVectorWriteRequests += 1;
-            const writeStartedAt = Date.now();
-            try {
-                await this.vectorDatabase.writeDocuments(collectionName, documents);
-            } finally {
-                if (performance) {
-                    performance.logicalVectorWriteDurationMs += Date.now() - writeStartedAt;
-                }
-            }
-        };
-
-        const documents: IndexedVectorDocument[] = chunks.map((chunk, index) => {
-            const relativePath = chunkEntries[index].relativePath;
-            const fileExtension = path.extname(relativePath);
-            const { filePath: omittedFilePath, startLine: omittedStartLine, endLine: omittedEndLine, ...restMetadata } = chunk.metadata;
-            void omittedFilePath;
-            void omittedStartLine;
-            void omittedEndLine;
-
-            return {
-                document: {
-                    id: documentIds[index],
-                    content: chunk.content,
-                    vector: embeddings[index].vector,
-                    relativePath,
-                    startLine: chunk.metadata.startLine || 0,
-                    endLine: chunk.metadata.endLine || 0,
-                    fileExtension,
-                    metadata: {
-                        ...restMetadata,
-                        codebasePath,
-                        language: chunk.metadata.language || 'unknown',
-                        chunkIndex: chunkEntries[index].fileChunkIndex,
-                        indexedAt,
-                    },
-                },
-                projections: projections[index],
-            };
-        });
-
-        await persistDocuments(documents);
     }
 
-    /**
-     * Get programming language based on file extension
-     */
-    private getLanguageFromFilePath(filePath: string): string {
-        return getLanguageIdFromFilename(filePath, 'text');
-    }
-
-    /**
-     * Generate unique ID based on chunk content and location
-     * @param relativePath Relative path to the file
-     * @param startLine Start line number
-     * @param endLine End line number
-     * @param content Chunk content
-     * @returns Hash-based unique ID
-     */
-    private generateId(relativePath: string, chunk: CodeChunk, fileChunkIndex: number): string {
-        return buildIndexedChunkId(relativePath, chunk, fileChunkIndex);
-    }
-
-    /**
-     * Read ignore patterns from file (e.g., .gitignore)
-     * @param filePath Path to the ignore file
-     * @returns Array of ignore patterns
-     */
     static async getIgnorePatternsFromFile(filePath: string): Promise<string[]> {
         try {
             const content = await fs.promises.readFile(filePath, 'utf-8');

@@ -62,7 +62,7 @@ type EmbeddingAccess = Readonly<{
 }>;
 
 type SemanticSearchServiceConfig<Receipt extends SearchGenerationReceipt> = Readonly<{
-    vectorDatabase: VectorDatabase;
+    getVectorDatabase: () => VectorDatabase;
     embeddingAccess: EmbeddingAccess;
     authority: SemanticSearchAuthority<Receipt>;
     isHybridEnabled: () => boolean;
@@ -235,7 +235,7 @@ function toSemanticSearchResult(
 }
 
 export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
-    private readonly vectorDatabase: VectorDatabase;
+    private readonly getVectorDatabase: () => VectorDatabase;
     private readonly embeddingAccess: EmbeddingAccess;
     private readonly authority: SemanticSearchAuthority<Receipt>;
     private readonly isHybridEnabled: () => boolean;
@@ -243,7 +243,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
     private readonly mutationGenerationObserver?: MutationGenerationObserver;
 
     constructor(config: SemanticSearchServiceConfig<Receipt>) {
-        this.vectorDatabase = config.vectorDatabase;
+        this.getVectorDatabase = config.getVectorDatabase;
         this.embeddingAccess = config.embeddingAccess;
         this.authority = config.authority;
         this.isHybridEnabled = config.isHybridEnabled;
@@ -385,10 +385,11 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 candidateTraceOptions.diagnosticCandidateLimit ?? resolvedRequest.topK,
             )
             : resolvedRequest.topK;
+        const vectorDatabase = this.getVectorDatabase();
         const hybridCollection = this.isHybridEnabled();
         const isSparseOnly = resolvedRequest.retrievalMode === 'lexical' && hybridCollection;
         const isHybrid = resolvedRequest.retrievalMode === 'hybrid' && hybridCollection;
-        const lexicalMatchMode = semanticSearchLexicalMatchMode(this.vectorDatabase);
+        const lexicalMatchMode = semanticSearchLexicalMatchMode(vectorDatabase);
         const captureLexicalFallback = candidateTraceOptions.captureLexicalFallback === true
             && lexicalMatchMode === 'all_terms'
             && (isSparseOnly || isHybrid);
@@ -468,13 +469,13 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
 
         if (isSparseOnly) {
             const [searchResults, lexicalFallback] = await Promise.all([
-                this.vectorDatabase.retrieveLexical(collectionName, {
+                vectorDatabase.retrieveLexical(collectionName, {
                     query: resolvedRequest.query,
                     limit: candidateRetrievalLimit,
                     filter: resolvedRequest.filter,
                 }),
                 captureLexicalFallback
-                    ? this.vectorDatabase.retrieveLexical(collectionName, {
+                    ? vectorDatabase.retrieveLexical(collectionName, {
                         query: lexicalFallbackQuery,
                         limit: candidateRetrievalLimit,
                         filter: resolvedRequest.filter,
@@ -546,18 +547,18 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             );
             console.log('[Context] 🔍 Executing hybrid search with RRF reranking...');
             const [denseCandidates, lexicalCandidates, lexicalFallback] = await Promise.all([
-                this.vectorDatabase.retrieveDense(collectionName, {
+                vectorDatabase.retrieveDense(collectionName, {
                     vector: queryEmbedding.vector,
                     limit: candidateRetrievalLimit,
                     filter: resolvedRequest.filter,
                 }),
-                this.vectorDatabase.retrieveLexical(collectionName, {
+                vectorDatabase.retrieveLexical(collectionName, {
                     query: resolvedRequest.query,
                     limit: candidateRetrievalLimit,
                     filter: resolvedRequest.filter,
                 }),
                 captureLexicalFallback
-                    ? this.vectorDatabase.retrieveLexical(collectionName, {
+                    ? vectorDatabase.retrieveLexical(collectionName, {
                         query: lexicalFallbackQuery,
                         limit: candidateRetrievalLimit,
                         filter: resolvedRequest.filter,
@@ -630,7 +631,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         const denseThreshold = resolvedRequest.scorePolicy.kind === 'dense_similarity_min'
             ? resolvedRequest.scorePolicy.min
             : undefined;
-        const searchResults = await this.vectorDatabase.retrieveDense(collectionName, {
+        const searchResults = await vectorDatabase.retrieveDense(collectionName, {
             vector: queryEmbedding.vector,
             limit: candidateRetrievalLimit,
             minimumScore: denseThreshold,

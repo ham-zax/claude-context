@@ -701,6 +701,43 @@ test('Context embeds and persists the same Core-owned projections', async () => 
     assert.equal(vectorDatabase.indexedDocuments[0].document.content, chunk.content);
 });
 
+test('Context indexing pipeline follows an explicitly replaced vector database', async () => {
+    const originalVectorDatabase = new InMemoryVectorDatabase();
+    const replacementVectorDatabase = new InMemoryVectorDatabase();
+    await replacementVectorDatabase.createHybridCollection('chunks');
+    const facade = new Context({
+        embedding: new TestEmbedding(),
+        vectorDatabase: originalVectorDatabase,
+    });
+    facade.updateVectorDatabase(replacementVectorDatabase);
+    const context = facade as unknown as ContextWithProcessChunkBatch;
+    const chunk: CodeChunk = {
+        content: 'export const replacementOwned = true;',
+        metadata: {
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+        },
+    };
+
+    await context.processChunkBatch(
+        [{
+            chunk,
+            relativePath: 'src/replacement.ts',
+            fileChunkIndex: 0,
+            projections: buildSearchProjections({
+                chunk,
+                relativePath: 'src/replacement.ts',
+            }),
+        }],
+        '/repo',
+        'chunks',
+    );
+
+    assert.equal(originalVectorDatabase.indexedDocuments.length, 0);
+    assert.equal(replacementVectorDatabase.indexedDocuments.length, 1);
+});
+
 test('Context enforces projected-input token limits at the final embedding boundary', async () => {
     let embedDocumentsCalled = false;
     class HardLimitEmbedding extends TestEmbedding {
