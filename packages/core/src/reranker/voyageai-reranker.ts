@@ -5,6 +5,8 @@
  * Supports rerank-2.5 (best quality) and rerank-2.5-lite (faster).
  */
 
+import type { Reranker, RerankOptions, RerankResult } from "./reranker";
+
 export type VoyageRerankerModel = 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
 
 export interface VoyageAIRerankerConfig {
@@ -12,19 +14,7 @@ export interface VoyageAIRerankerConfig {
     model?: VoyageRerankerModel;
 }
 
-export interface RerankResult {
-    index: number;
-    relevanceScore: number;
-    document?: string;
-}
-
-export interface RerankOptions {
-    topK?: number;
-    returnDocuments?: boolean;
-    truncation?: boolean;
-}
-
-export class VoyageAIReranker {
+export class VoyageAIReranker implements Reranker {
     private apiKey: string;
     private model: VoyageRerankerModel;
     private baseUrl = 'https://api.voyageai.com/v1';

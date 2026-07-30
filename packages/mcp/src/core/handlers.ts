@@ -11,7 +11,7 @@ import {
     type PreparedGenerationRevalidation,
     createRuntimeNavigationStore,
     type NavigationStore,
-    VoyageAIReranker,
+    type Reranker,
     getSupportedExtensionsForCapability,
     isLanguageCapabilitySupportedForExtension,
     isLanguageCapabilitySupportedForFilename,
@@ -719,7 +719,7 @@ export class ToolHandlers {
     private currentWorkspace: string;
     private readonly now: () => number;
     private readonly callGraphManager: CallGraphSidecarManager;
-    private readonly reranker: VoyageAIReranker | null;
+    private readonly reranker: Reranker | null;
     private readonly navigationStore: NavigationStore;
     private readonly canonicalNavigationAuthorityAvailable: boolean;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
@@ -746,7 +746,7 @@ export class ToolHandlers {
         capabilities: CapabilityResolver,
         now: () => number = () => Date.now(),
         callGraphManager?: CallGraphSidecarManager,
-        reranker?: VoyageAIReranker | null,
+        reranker?: Reranker | null,
         gitignoreForceReloadEveryN: number = SEARCH_GITIGNORE_FORCE_RELOAD_EVERY_N,
         navigationStore: NavigationStore = createRuntimeNavigationStore(),
         private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null = null,

@@ -1,7 +1,7 @@
 import type {
+    Reranker,
     SemanticSearchExecutionResult,
     SemanticSearchResult,
-    VoyageAIReranker,
 } from "@zokizuan/satori-core";
 import {
     SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
@@ -348,7 +348,7 @@ export type SearchExecutionHost = {
         scorePolicy: { kind: "topk_only" } | { kind: "dense_similarity_min"; min: number };
         diagnosticLexicalFallbackTerms?: string[];
     }) => Promise<SemanticSearchResult[] | SemanticSearchExecutionResult>;
-    reranker: VoyageAIReranker | null;
+    reranker: Reranker | null;
     shouldForceSearchPassFailure: (passId: SearchPassId) => boolean;
     classifyEmbeddingProviderError: (error: unknown) => EmbeddingProviderDiagnostic | null;
     classifyVectorBackendError: (error: unknown) => VectorBackendDiagnostic | null;

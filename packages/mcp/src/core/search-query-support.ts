@@ -14,7 +14,7 @@ import {
     sourceIoOwnerForCurrentOperation,
     type SourceMeasurementObservation,
     type SymbolRecord,
-    type VoyageAIReranker,
+    type Reranker,
 } from "@zokizuan/satori-core";
 import type { CapabilityResolver } from "./capabilities.js";
 import type { IndexFingerprint } from "../config.js";
@@ -179,7 +179,7 @@ export type SearchQuerySupportHost = {
     getSyncWatchDebounceMs(): number;
     capabilities: CapabilityResolver;
     runtimeFingerprint: IndexFingerprint;
-    reranker: VoyageAIReranker | null;
+    reranker: Reranker | null;
     rootGitignoreMatcherCache: Map<string, GitignoreMatcherCacheEntry>;
     gitignoreForceReloadEveryN: number;
 };
@@ -239,7 +239,7 @@ export class SearchQuerySupport {
         return this.host.runtimeFingerprint;
     }
 
-    private get reranker(): VoyageAIReranker | null {
+    private get reranker(): Reranker | null {
         return this.host.reranker;
     }
 

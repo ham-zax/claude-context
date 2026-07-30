@@ -1,6 +1,6 @@
 import path from "node:path";
 import { z } from "zod";
-import { Context, VoyageAIReranker } from "@zokizuan/satori-core";
+import { Context, type Reranker } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
@@ -35,7 +35,7 @@ export interface ToolContext {
     snapshotManager: SnapshotManager;
     syncManager: SyncManager;
     capabilities: CapabilityResolver;
-    reranker: VoyageAIReranker | null;
+    reranker: Reranker | null;
     runtimeFingerprint: IndexFingerprint;
     toolHandlers: ToolHandlers;
     readFileMaxLines: number;
