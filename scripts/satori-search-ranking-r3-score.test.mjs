@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     resolveLateOnScoreOutcome,
+    selectR3ScoreTasks,
     verifyCapturePair,
 } from "./satori-search-ranking-r3-score.mjs";
 
@@ -74,4 +75,14 @@ test("capture pairing permits independently qualified runtimes on one publicatio
             },
         },
     ));
+});
+
+test("R3 scorer can isolate one frozen task for runtime experiments", () => {
+    const tasks = [{ taskId: "first" }, { taskId: "second" }];
+
+    assert.deepEqual(selectR3ScoreTasks(tasks, "second"), [{ taskId: "second" }]);
+    assert.throws(
+        () => selectR3ScoreTasks(tasks, "missing"),
+        /No capture task matches 'missing'/,
+    );
 });

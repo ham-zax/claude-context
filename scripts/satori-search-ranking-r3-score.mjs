@@ -138,6 +138,15 @@ export function verifyCapturePair(positive, negative) {
     }
 }
 
+export function selectR3ScoreTasks(taskCaptures, taskId) {
+    if (!taskId) return [...taskCaptures];
+    const selected = taskCaptures.filter((task) => task.taskId === taskId);
+    if (selected.length === 0) {
+        throw new Error(`No capture task matches '${taskId}'.`);
+    }
+    return selected;
+}
+
 function verifySourceRoot(sourceRoot, revision) {
     const absoluteRoot = path.resolve(sourceRoot);
     const actualRevision = execFileSync("git", ["-C", absoluteRoot, "rev-parse", "HEAD"], {
@@ -457,7 +466,8 @@ async function run() {
         onnxruntimeModule: arguments_["onnxruntime-module"],
     });
     const analysisService = createLanguageAnalysisService();
-    const taskCaptures = [...positive.capture.captures, ...negative.capture.captures];
+    const allTaskCaptures = [...positive.capture.captures, ...negative.capture.captures];
+    const taskCaptures = selectR3ScoreTasks(allTaskCaptures, arguments_["task-id"]);
     const tasks = [];
     try {
         for (const taskCapture of taskCaptures) {
