@@ -65,6 +65,7 @@ import {
     projectGroupedDisclosure,
     resolveSearchGroupedResultCounts,
 } from "./search-disclosure.js";
+import { WARNING_CODES } from "./warnings.js";
 
 type CallGraphUnavailableReason = Extract<CallGraphHint, { supported: false }>["reason"];
 type ChangedFilesState = { available: boolean; files: Set<string> };
@@ -653,7 +654,12 @@ export async function finalizeSearchResults(
                 debugMode: input.debugMode,
                 freshnessDecision: input.freshnessDecision,
                 freshnessSummary,
-                warnings: finalizedSearchWarnings,
+                warnings: resultCounts.remainingGroupCount > 0
+                    ? [
+                        ...finalizedSearchWarnings,
+                        WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+                    ]
+                    : finalizedSearchWarnings,
                 ...buildDebugProjection(groupedSearchResults.diversitySummary, results),
                 proofDebugHint: input.proofDebugHint,
                 noiseMitigationHint,

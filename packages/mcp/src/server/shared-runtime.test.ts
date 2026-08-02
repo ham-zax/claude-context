@@ -87,7 +87,10 @@ test("one runtime host serves independent MCP sessions over separate transports"
         continuationCoordinator: SearchContinuationCoordinator;
         resources: {
             localHandlers: ToolHandlers;
-            providerRuntime: { providerRuntime: unknown };
+            providerRuntime: {
+                providerRuntime: unknown;
+                continuationCoordinator: SearchContinuationCoordinator;
+            };
             toolContext: {
                 context: unknown;
                 snapshotManager: {
@@ -103,6 +106,18 @@ test("one runtime host serves independent MCP sessions over separate transports"
         continuationCoordinator: SearchContinuationCoordinator;
         resources: typeof firstInternals.resources;
     };
+    assert.equal(
+        (firstInternals.continuationCoordinator as unknown as { pool: unknown }).pool,
+        (secondInternals.continuationCoordinator as unknown as { pool: unknown }).pool,
+    );
+    assert.equal(
+        firstInternals.resources.providerRuntime.continuationCoordinator,
+        firstInternals.continuationCoordinator,
+    );
+    assert.equal(
+        secondInternals.resources.providerRuntime.continuationCoordinator,
+        secondInternals.continuationCoordinator,
+    );
     assert.equal(
         firstInternals.resources.toolContext.context,
         secondInternals.resources.toolContext.context,
@@ -152,9 +167,12 @@ test("one runtime host serves independent MCP sessions over separate transports"
         {
             value: {} as FrozenSearchResultSet,
             nextOffset: 1,
+            reservedReplayBytes: 0,
             nowMs: 1,
         },
     );
+    assert.equal(stored.status, "stored");
+    if (stored.status !== "stored") throw new Error("Expected stored result set.");
     assert.equal(
         secondInternals.continuationCoordinator.lookup(stored.handle, 1).status,
         "not_found",
@@ -162,6 +180,10 @@ test("one runtime host serves independent MCP sessions over separate transports"
 
     await first.client.close();
     await first.session.shutdown();
+    assert.equal(
+        firstInternals.continuationCoordinator.lookup(stored.handle, 1).status,
+        "not_found",
+    );
     assert.deepEqual(host.getActivity(), { sessions: 1, operations: 0 });
 
     const stillAvailable = await second.client.listTools();

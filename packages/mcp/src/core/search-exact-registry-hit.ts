@@ -190,7 +190,12 @@ export function buildExactRegistryHitEnvelope(
                 debugMode: input.debugMode,
                 freshnessDecision: input.freshnessDecision,
                 freshnessSummary: input.freshnessSummary,
-                warnings: finalizedSearchWarnings,
+                warnings: resultCounts.remainingGroupCount > 0
+                    ? [
+                        ...finalizedSearchWarnings,
+                        WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+                    ]
+                    : finalizedSearchWarnings,
                 ...(input.debugSummary ? { debugSummary: input.debugSummary } : {}),
                 ...(projectedDebugSearch ? { debugSearch: projectedDebugSearch } : {}),
                 proofDebugHint: input.proofDebugHint,

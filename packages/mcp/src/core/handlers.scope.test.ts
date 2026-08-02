@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import {
     type FrozenSearchResultSet,
     SearchContinuationCoordinator,
+    SearchContinuationCoordinatorPool,
     ToolHandlers,
 } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
@@ -1943,6 +1944,52 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.equal(
             JSON.parse(removedModelContinuation.content[0]?.text || '{}').code,
             'SEARCH_RESULT_SET_NOT_FOUND',
+        );
+
+        const inadmissiblePool = new SearchContinuationCoordinatorPool({
+            maxEntries: 32,
+            maxEntryBytes: 1,
+            maxCacheBytes: 16,
+            ttlMs: 15 * 60_000,
+        });
+        const inadmissible = prepareHandlers(
+            true,
+            new SearchContinuationCoordinator(inadmissiblePool),
+        );
+        const inadmissibleResponse = await inadmissible.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+        });
+        const inadmissiblePayload = JSON.parse(
+            inadmissibleResponse.content[0]?.text || '{}',
+        );
+        assert.equal(inadmissibleResponse.isError, undefined);
+        assert.equal(inadmissiblePayload.status, 'ok');
+        assert.equal(inadmissiblePayload.results.length, 10);
+        assert.equal(inadmissiblePayload.continuation, undefined);
+        assert.equal(inadmissiblePayload.rankedSetDigest, undefined);
+        assert.deepEqual(inadmissiblePayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 10,
+            remainingGroupCount: 10,
+        });
+        const admissionWarning = inadmissiblePayload.warnings.find(
+            (warning: { code: string }) => (
+                warning.code === 'SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE'
+            ),
+        );
+        assert.ok(admissionWarning);
+        assert.match(admissionWarning.action, /narrower search/i);
+        assert.ok(
+            Buffer.byteLength(inadmissibleResponse.content[0]?.text || '', 'utf8')
+                <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
         );
 
         const consumedResponse = await paged.handlers.handleContinueSearch({

@@ -160,14 +160,17 @@ test("LanceDB runtime selection seals backend identity without requiring Milvus"
     const stored = searchContinuationCoordinator.store(toolContext.toolHandlers, {
         value: {} as never,
         nextOffset: 0,
+        reservedReplayBytes: 0,
         nowMs: 0,
     });
+    assert.equal(stored.status, "stored");
+    if (stored.status !== "stored") throw new Error("Expected stored result set.");
     assert.equal(searchContinuationCoordinator.lookup(stored.handle, 1).status, "hit");
 
     await runtime.shutdown();
     assert.equal(
         searchContinuationCoordinator.lookup(stored.handle, 1).status,
-        "owner_unavailable",
+        "not_found",
     );
     await assert.rejects(vectorStore.listCollections(), /closed/);
 });

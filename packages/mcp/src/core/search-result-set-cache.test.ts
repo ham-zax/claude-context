@@ -1,17 +1,70 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { serializeCanonicalJson } from "./canonical-json.js";
 import {
+    MAX_RESULT_SET_CACHE_BYTES,
+    MAX_RESULT_SET_CACHE_ENTRIES,
+    MAX_RESULT_SET_ENTRY_BYTES,
+    MIN_RESIDENT_RESULT_SETS,
+    RESULT_SET_TTL_MS,
     SearchResultSetCache,
     SearchResultSetCoordinator,
+    SearchResultSetCoordinatorPool,
+    type SearchResultSetStoreResult,
 } from "./search-result-set-cache.js";
 
-test("search result-set cache is bounded by bytes and evicts least-recently-used entries", () => {
-    const entryBytes = Buffer.byteLength(JSON.stringify({ value: "a".repeat(20) }), "utf8");
-    const cache = new SearchResultSetCache<{ value: string }>(3, entryBytes * 2, 1_000);
-    const first = cache.store({ value: { value: "a".repeat(20) }, nextOffset: 1, nowMs: 0 });
-    const second = cache.store({ value: { value: "b".repeat(20) }, nextOffset: 1, nowMs: 0 });
+test("search result-set cache defaults preserve the frozen P0 capacity contract", () => {
+    assert.equal(MAX_RESULT_SET_ENTRY_BYTES, 8 * 1024 * 1024);
+    assert.equal(MAX_RESULT_SET_CACHE_BYTES, 16 * 1024 * 1024);
+    assert.equal(MIN_RESIDENT_RESULT_SETS, 2);
+    assert.equal(
+        MAX_RESULT_SET_ENTRY_BYTES * MIN_RESIDENT_RESULT_SETS,
+        MAX_RESULT_SET_CACHE_BYTES,
+    );
+    assert.equal(MAX_RESULT_SET_CACHE_ENTRIES, 32);
+    assert.equal(RESULT_SET_TTL_MS, 15 * 60_000);
+});
+
+function requireStored(result: SearchResultSetStoreResult): Extract<
+    SearchResultSetStoreResult,
+    { status: "stored" }
+> {
+    assert.equal(result.status, "stored");
+    if (result.status !== "stored") throw new Error("Expected stored result set.");
+    return result;
+}
+
+function valueBytes(value: unknown): number {
+    return Buffer.byteLength(serializeCanonicalJson(value), "utf8");
+}
+
+test("search result-set cache reserves replay bytes and evicts least-recently-used entries", () => {
+    const bytes = valueBytes({ value: "a".repeat(20) });
+    const cache = new SearchResultSetCache<{ value: string }>({
+        maxEntries: 3,
+        maxEntryBytes: bytes,
+        maxCacheBytes: bytes * 2,
+        ttlMs: 1_000,
+    });
+    const first = requireStored(cache.store({
+        value: { value: "a".repeat(20) },
+        nextOffset: 1,
+        reservedReplayBytes: 0,
+        nowMs: 0,
+    }));
+    const second = requireStored(cache.store({
+        value: { value: "b".repeat(20) },
+        nextOffset: 1,
+        reservedReplayBytes: 0,
+        nowMs: 0,
+    }));
     assert.equal(cache.lookup(first.handle, 1).status, "hit");
-    const third = cache.store({ value: { value: "c".repeat(20) }, nextOffset: 1, nowMs: 1 });
+    const third = requireStored(cache.store({
+        value: { value: "c".repeat(20) },
+        nextOffset: 1,
+        reservedReplayBytes: 0,
+        nowMs: 1,
+    }));
 
     assert.equal(cache.lookup(second.handle, 2).status, "not_found");
     assert.equal(cache.lookup(first.handle, 2).status, "hit");
@@ -19,8 +72,18 @@ test("search result-set cache is bounded by bytes and evicts least-recently-used
 });
 
 test("search result-set cache distinguishes expiry and concurrent offset conflicts", () => {
-    const cache = new SearchResultSetCache<{ value: string }>(2, 1024, 100);
-    const stored = cache.store({ value: { value: "result" }, nextOffset: 2, nowMs: 10 });
+    const cache = new SearchResultSetCache<{ value: string }>({
+        maxEntries: 2,
+        maxEntryBytes: 1_024,
+        maxCacheBytes: 2_048,
+        ttlMs: 100,
+    });
+    const stored = requireStored(cache.store({
+        value: { value: "result" },
+        nextOffset: 2,
+        reservedReplayBytes: 100,
+        nowMs: 10,
+    }));
     assert.equal(cache.advance({
         handle: stored.handle,
         expectedOffset: 1,
@@ -49,11 +112,21 @@ test("search result-set cache distinguishes expiry and concurrent offset conflic
     assert.equal(cache.lookup(stored.handle, 111).status, "not_found");
 });
 
-test("search result-set cache charges retry pages against its byte budget", () => {
+test("search result-set replay overflow leaves admitted state unchanged", () => {
     const value = { value: "result" };
-    const valueBytes = Buffer.byteLength(JSON.stringify(value), "utf8");
-    const cache = new SearchResultSetCache<typeof value>(2, valueBytes + 4, 100);
-    const stored = cache.store({ value, nextOffset: 0, nowMs: 0 });
+    const bytes = valueBytes(value);
+    const cache = new SearchResultSetCache<typeof value>({
+        maxEntries: 2,
+        maxEntryBytes: bytes + 4,
+        maxCacheBytes: (bytes + 4) * 2,
+        ttlMs: 100,
+    });
+    const stored = requireStored(cache.store({
+        value,
+        nextOffset: 0,
+        reservedReplayBytes: 4,
+        nowMs: 0,
+    }));
 
     assert.equal(cache.advance({
         handle: stored.handle,
@@ -70,56 +143,113 @@ test("search result-set cache charges retry pages against its byte budget", () =
     }
 });
 
-test("search result-set cache rejects an entry larger than its total byte budget", () => {
-    const cache = new SearchResultSetCache<{ value: string }>(2, 16, 100);
-    assert.throws(() => cache.store({
+test("search result-set entry rejection is typed and leaves existing state unchanged", () => {
+    const firstValue = { value: "first" };
+    const firstBytes = valueBytes(firstValue);
+    const cache = new SearchResultSetCache<{ value: string }>({
+        maxEntries: 2,
+        maxEntryBytes: firstBytes,
+        maxCacheBytes: firstBytes * 2,
+        ttlMs: 100,
+    });
+    const first = requireStored(cache.store({
+        value: firstValue,
+        nextOffset: 0,
+        reservedReplayBytes: 0,
+        nowMs: 0,
+    }));
+    const rejected = cache.store({
         value: { value: "too large" },
         nextOffset: 0,
-        nowMs: 0,
-    }), /byte budget/);
-});
-
-test("search result-set coordinator routes one bounded cache entry to its registered owner", () => {
-    const coordinator = new SearchResultSetCoordinator<{ value: string }, object>(1, 4096, 100);
-    const firstOwner = {};
-    const secondOwner = {};
-    coordinator.registerOwner(firstOwner);
-    coordinator.registerOwner(secondOwner);
-
-    const first = coordinator.store(firstOwner, {
-        value: { value: "first" },
-        nextOffset: 1,
-        nowMs: 0,
-    });
-    const second = coordinator.store(secondOwner, {
-        value: { value: "second" },
-        nextOffset: 2,
+        reservedReplayBytes: firstBytes,
         nowMs: 1,
     });
 
-    assert.equal(coordinator.lookup(first.handle, 2).status, "not_found");
-    const hit = coordinator.lookup(second.handle, 2);
-    assert.equal(hit.status, "hit");
-    if (hit.status === "hit") {
-        assert.equal(hit.owner, secondOwner);
-        assert.deepEqual(hit.entry, { value: "second" });
-    }
-
-    coordinator.unregisterOwner(secondOwner);
-    assert.equal(coordinator.lookup(second.handle, 2).status, "owner_unavailable");
-    assert.equal(coordinator.lookup(second.handle, 2).status, "not_found");
-    assert.equal(coordinator.lookup("f".repeat(48), 2).status, "not_found");
+    assert.deepEqual(rejected, {
+        status: "not_admissible",
+        reason: "entry_too_large",
+        valueBytes: valueBytes({ value: "too large" }),
+        reservedReplayBytes: firstBytes,
+        reservationBytes: valueBytes({ value: "too large" }) + firstBytes,
+        maxEntryBytes: firstBytes,
+    });
+    assert.equal(cache.lookup(first.handle, 2).status, "hit");
 });
 
-test("search result-set coordinator removes expired ownership with the cached entry", () => {
-    const coordinator = new SearchResultSetCoordinator<{ value: string }, object>(2, 4096, 10);
+test("two maximum reservations coexist and a third evicts the deterministic oldest", () => {
+    const value = { value: "maximum" };
+    const reservationBytes = valueBytes(value) + 10;
+    const cache = new SearchResultSetCache<typeof value>({
+        maxEntries: 32,
+        maxEntryBytes: reservationBytes,
+        maxCacheBytes: reservationBytes * 2,
+        ttlMs: 1_000,
+    });
+    const first = requireStored(cache.store({ value, nextOffset: 0, reservedReplayBytes: 10, nowMs: 0 }));
+    const second = requireStored(cache.store({ value, nextOffset: 0, reservedReplayBytes: 10, nowMs: 1 }));
+    assert.equal(cache.lookup(first.handle, 2).status, "hit");
+    const third = requireStored(cache.store({ value, nextOffset: 0, reservedReplayBytes: 10, nowMs: 3 }));
+
+    assert.equal(cache.lookup(second.handle, 4).status, "not_found");
+    assert.equal(cache.lookup(first.handle, 4).status, "hit");
+    assert.equal(cache.lookup(third.handle, 4).status, "hit");
+});
+
+test("coordinator scopes share aggregate capacity without sharing handle authority", () => {
+    const value = { value: "shared" };
+    const reservationBytes = valueBytes({ scopeId: "x".repeat(48), ownerId: "x".repeat(48), value }) + 5;
+    const pool = new SearchResultSetCoordinatorPool<typeof value>({
+        maxEntries: 2,
+        maxEntryBytes: reservationBytes,
+        maxCacheBytes: reservationBytes * 2,
+        ttlMs: 100,
+    });
+    const firstScope = new SearchResultSetCoordinator<typeof value, object>(pool);
+    const secondScope = new SearchResultSetCoordinator<typeof value, object>(pool);
+    const firstOwner = {};
+    const secondOwner = {};
+    firstScope.registerOwner(firstOwner);
+    secondScope.registerOwner(secondOwner);
+
+    const first = requireStored(firstScope.store(firstOwner, {
+        value,
+        nextOffset: 1,
+        reservedReplayBytes: 5,
+        nowMs: 0,
+    }));
+    const second = requireStored(secondScope.store(secondOwner, {
+        value,
+        nextOffset: 2,
+        reservedReplayBytes: 5,
+        nowMs: 1,
+    }));
+    assert.equal(secondScope.lookup(first.handle, 2).status, "not_found");
+    assert.equal(firstScope.lookup(second.handle, 2).status, "not_found");
+    assert.equal(firstScope.lookup(first.handle, 2).status, "hit");
+
+    firstScope.unregisterOwner(firstOwner);
+    assert.equal(firstScope.lookup(first.handle, 2).status, "not_found");
+    assert.equal(secondScope.lookup(second.handle, 2).status, "hit");
+    pool.clear();
+    assert.equal(secondScope.lookup(second.handle, 2).status, "not_found");
+});
+
+test("coordinator removes expired ownership with the cached entry", () => {
+    const pool = new SearchResultSetCoordinatorPool<{ value: string }>({
+        maxEntries: 2,
+        maxEntryBytes: 4_096,
+        maxCacheBytes: 8_192,
+        ttlMs: 10,
+    });
+    const coordinator = new SearchResultSetCoordinator<{ value: string }, object>(pool);
     const owner = {};
     coordinator.registerOwner(owner);
-    const stored = coordinator.store(owner, {
+    const stored = requireStored(coordinator.store(owner, {
         value: { value: "result" },
         nextOffset: 1,
+        reservedReplayBytes: 100,
         nowMs: 0,
-    });
+    }));
 
     assert.equal(coordinator.lookup(stored.handle, 10).status, "expired");
     assert.equal(coordinator.lookup(stored.handle, 11).status, "not_found");

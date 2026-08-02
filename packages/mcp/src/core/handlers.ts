@@ -116,6 +116,7 @@ import {
     compareNullableStringsAsc as compareNullableStringsAscHelper,
 } from "./search-grouping.js";
 import {
+    buildSearchWarningDetails,
     buildOutlineSpanWarningCodes as buildSearchOutlineSpanWarningCodes,
     normalizeSearchSymbolLabel as normalizeSearchSymbolLabelHelper,
     SEARCH_GROUP_PREVIEW_MAX_BYTES,
@@ -200,6 +201,7 @@ import {
 } from "./search-result-finalization.js";
 import {
     SearchResultSetCoordinator,
+    SearchResultSetCoordinatorPool,
     type SearchResultSetCoordinatorLookup,
 } from "./search-result-set-cache.js";
 import {
@@ -291,10 +293,18 @@ export type FrozenSearchResultSet = {
     recommendedActions: Array<SearchRecommendedNextAction | null>;
 };
 
+export class SearchContinuationCoordinatorPool extends SearchResultSetCoordinatorPool<
+    FrozenSearchResultSet
+> {}
+
 export class SearchContinuationCoordinator extends SearchResultSetCoordinator<
     FrozenSearchResultSet,
     ToolHandlers
-> {}
+> {
+    constructor(pool: SearchContinuationCoordinatorPool = new SearchContinuationCoordinatorPool()) {
+        super(pool);
+    }
+}
 
 type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
     FrozenSearchResultSet,
@@ -329,6 +339,19 @@ function freezeContinuationHints(
         frozen.debugSearch = debugSearch;
     }
     return Object.keys(frozen).length > 0 ? frozen : undefined;
+}
+
+function removeCacheAdmissionWarning(
+    envelope: SearchGroupedResponseEnvelope,
+): SearchGroupedResponseEnvelope {
+    const warnings = envelope.warnings?.filter(
+        (warning) => warning.code !== WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+    );
+    const { warnings: _warnings, ...withoutWarnings } = envelope;
+    return {
+        ...withoutWarnings,
+        ...(warnings && warnings.length > 0 ? { warnings } : {}),
+    };
 }
 
 function resolveSearchRerankerBindingIdentity(
@@ -4379,7 +4402,10 @@ export class ToolHandlers {
                 if (!preparedObservation) {
                     throw new Error("Search continuation requires a prepared publication and source observation.");
                 }
-                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(envelope);
+                const successfulEnvelope = removeCacheAdmissionWarning(envelope);
+                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(
+                    successfulEnvelope,
+                );
                 const resultSpecificHints = baseEnvelopeDraft.hints;
                 delete baseEnvelopeDraft.results;
                 delete baseEnvelopeDraft.disclosure;
@@ -4434,10 +4460,27 @@ export class ToolHandlers {
                         recommendedActions: [...resultSet.recommendedActions],
                     },
                     nextOffset: resultSet.initialReturnedCount,
+                    reservedReplayBytes: debugMode === "full"
+                        ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
+                        : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
                     nowMs: this.now(),
                 });
+                if (stored.status === "not_admissible") {
+                    const {
+                        continuation: _continuation,
+                        rankedSetDigest: _rankedSetDigest,
+                        ...initialEnvelope
+                    } = envelope;
+                    return {
+                        ...initialEnvelope,
+                        warnings: buildSearchWarningDetails([
+                            ...(envelope.warnings?.map((warning) => warning.code) ?? []),
+                            WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+                        ]),
+                    };
+                }
                 return {
-                    ...envelope,
+                    ...successfulEnvelope,
                     rankedSetDigest: rankedSetBinding.rankedSetDigest,
                     continuation: {
                         ...envelope.continuation,
