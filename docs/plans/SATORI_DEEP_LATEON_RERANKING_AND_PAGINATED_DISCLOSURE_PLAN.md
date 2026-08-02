@@ -16,7 +16,7 @@ The intended pipeline is:
 
 ```text
 Potion dense retrieval + BM25 lexical retrieval
-    -> bounded first-stage arms/passes at depth 80
+    -> adaptively sized first-stage arms/passes, maximum depth 80
     -> deduplicated frozen candidate union
     -> eligibility and authoritative evidence
     -> owner-family deduplication
@@ -119,7 +119,11 @@ Every contender and implementation must preserve:
 4. Candidate-family identity uses canonical owner evidence when available and
    never guesses ownership from a display label.
 5. A LateOn timeout, crash, unavailable model, invalid response, or incomplete
-   order restores the complete deterministic baseline byte-for-byte.
+   order restores the deterministic product result state: candidate
+   membership, scores, relative order, grouping, and disclosure are
+   byte-identical to the no-reranker baseline. The complete response need not
+   be byte-identical because truthful `RERANKER_FAILED` warning and failure-phase
+   diagnostics remain permitted.
 6. Continuation performs no new embedding, retrieval, eligibility decision,
    grouping, or reranking.
 7. Pagination exposes one immutable ranked set. It cannot mix pages from
@@ -131,11 +135,17 @@ Every contender and implementation must preserve:
 10. No query-specific exceptions, repository-specific weights, or new blanket
     path constants are permitted.
 
+Rerank application must be transactional. Validate the complete provider order
+and compute every adjusted score on a detached candidate copy before committing
+any score or rank to product state. Any failure discards the detached copy and
+retains the untouched deterministic baseline while diagnostics record the
+attempt.
+
 ## 4. Track P — frozen result-set pagination
 
 Track P is deterministic product work and does not depend on LateOn admission.
 
-### P0 — freeze the five independent values
+### P0 — freeze the independent values and bounds
 
 Before implementation, derive and freeze:
 
@@ -148,7 +158,7 @@ effectiveFrozenTotal
     pipeline-derived MAX_FROZEN_RESULTS bound
 
 retrievalDepth
-    per first-stage arm/pass depth; initially 80
+    adaptive per first-stage arm/pass depth; maximum 80
 
 rerankerDepth
     provider-qualified neural input depth; independent of pagination
@@ -158,12 +168,52 @@ pageSize
     response-byte budget
 ```
 
+Freeze the calculation exactly as:
+
+```text
+effectiveFrozenTotal = min(
+    requestedTotal,
+    availableGroupedResults,
+    MAX_FROZEN_RESULTS
+)
+```
+
+P0 must also freeze the separate bounds and their consumers:
+
+| Bound/value | Required consumer |
+| --- | --- |
+| `requestedTotal` | `search_codebase` schema/handler only; positive safe integer, no performance-profile maximum |
+| `effectiveFrozenTotal` | grouping finalization and result-set construction |
+| `retrievalDepth` | `resolveSearchPolicy` and first-stage arm/pass requests |
+| `rerankerDepth` | reranker selection, provider profile, worker protocol, and diagnostics |
+| `MAX_FROZEN_RESULTS` | result-set construction, continuation cursor/offset validation, and cache admission |
+| `MAX_PAGE_SIZE` | initial `disclosureLimit`, `continue_search.limit`, and page projection |
+| `MAX_RESULT_SET_ENTRY_BYTES` | admission of one serialized frozen set plus its reserved maximum replay page |
+| `MAX_RESULT_SET_CACHE_BYTES` | aggregate storage, eviction, and capacity accounting across every live handle |
+| `MIN_RESIDENT_RESULT_SETS` | concurrency/lifecycle-derived minimum number of maximum-size entries the global cache must retain |
+| grouped response-byte limits | initial disclosure, continuation pages, and optional compact-index admission |
+
+The current `getMaxSearchLimit()` must no longer be reused for logical total,
+page size, and cursor validation. Each consumer must use the bound it actually
+owns.
+
 `MAX_FROZEN_RESULTS` must be derived from the bounded arm/pass union,
-deduplication, grouping, result-set cache byte budget, and lifecycle—not from
+deduplication, grouping, per-entry cache byte budget, and lifecycle—not from
 `performanceProfile`. `MAX_PAGE_SIZE` must be derived from the grouped response
-byte contract. P0 must record the exact numeric values, formulae, and policy
-identity before P1 changes validation or observes new pagination results.
-P1 and P2 remain closed until that P0 receipt exists.
+byte contract. P0 must ensure:
+
+```text
+MAX_RESULT_SET_ENTRY_BYTES < MAX_RESULT_SET_CACHE_BYTES
+
+MAX_RESULT_SET_ENTRY_BYTES * MIN_RESIDENT_RESULT_SETS
+    <= MAX_RESULT_SET_CACHE_BYTES
+```
+
+`MIN_RESIDENT_RESULT_SETS` must be derived from the frozen concurrency and
+result-set lifecycle rather than selected to preserve the existing cache size.
+P0 must record the exact numeric values, formulae, and policy identity before
+P1 changes validation or observes new pagination results. P1 and P2 remain
+closed until that P0 receipt exists.
 
 ### P1 — decouple request size from performance profile
 
@@ -193,10 +243,65 @@ The response must report the requested, effective, available, returned, and
 remaining counts. A request larger than the available frozen set is satisfied
 by exhausting that set rather than rejected by the embedding performance tier.
 
-The first implementation may keep each first-stage request at depth 80. It must
-report arm, pass, union, eligible, grouped, frozen, disclosed, and remaining
-counts separately instead of implying either an 80-result total ceiling or
-repository-wide recall.
+The first implementation may keep the existing adaptive first-stage policy
+with maximum depth 80. It must report arm, pass, union, eligible, grouped,
+frozen, disclosed, and remaining counts separately instead of implying either
+an 80-result total ceiling or repository-wide recall.
+
+### P1.1 — bind the immutable ranked set
+
+Extend the frozen result-set contract with:
+
+```text
+rankedSetDigest
+queryPolicyDigest
+rankingPolicyIdentity
+disclosurePolicyVersion
+publication identity
+prepared/source observation identities
+reranker provider/model/profile identity, or deterministic-baseline identity
+reranker projection identity, or not_applicable
+ordered canonical group records:
+    canonical group identity
+    canonical pageable-group projection digest
+```
+
+Compute `rankedSetDigest` from a canonical serialization of every field above,
+including the complete ordered group-record sequence. Each group-projection
+digest must cover the exact cached target, score components, evidence,
+navigation metadata, and recommended action that continuation can disclose.
+It excludes only explicitly non-pageable request diagnostics. Store the ranked
+set digest with the cached set, publish it in the initial continuation contract,
+and echo it on every page. The existing `queryPolicyDigest` becomes an input to
+this binding; it must not remain computed-but-unconsumed metadata.
+
+Continuation must revalidate publication and source observations as it does
+today, verify the cached binding before projecting a page, and remove the
+handle on any digest or identity mismatch. A page never adopts a later runtime
+model, projection, ranking policy, or disclosure policy.
+
+### P1.2 — define cache admission failure
+
+Enforce `MAX_RESULT_SET_ENTRY_BYTES` independently from the global cache
+capacity. Reserve within that per-entry bound enough bytes for the frozen set
+plus one maximum-size replay page. Construct `effectiveFrozenTotal` from final
+rank order so the complete retained set is cache-admissible before issuing a
+handle. Global admission and eviction then use `MAX_RESULT_SET_CACHE_BYTES`
+without allowing one valid entry to consume the entire cache. If the configured
+count bound and actual serialized bytes disagree:
+
+```text
+do not create a continuation handle
+return the valid initial result page
+publish SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE
+report available, frozen, returned, and omitted counts
+recommend a new narrower search
+```
+
+Do not throw away an otherwise valid initial search response, fabricate a
+handle, silently drop tail results, or persist a set that cannot retain one
+idempotent replay page. P0/P2 qualification fails until every maximum-shape
+fixture is cache-admissible under the frozen bounds.
 
 ### P2 — qualify frozen continuation
 
@@ -216,12 +321,33 @@ pagination_identity_or_order_rejected
 
 ## 5. Track I — optional compact result index
 
+Track I begins with an I0 public-contract receipt. No implementation begins
+until it freezes:
+
+```text
+search_codebase input
+    includeResultIndex?: boolean
+    valid only for grouped results; default false
+
+initial grouped response
+    resultIndex.contractVersion
+    resultIndex.rankedSetDigest
+    resultIndex.disclosurePolicyVersion
+    resultIndex.availableEntryCount
+    resultIndex.returnedEntryCount
+    resultIndex.complete
+    resultIndex.entries
+
+continuation response
+    echoes rankedSetDigest but does not repeat the complete index
+```
+
 Evaluate an optional compact index generated from the final frozen order. Each
 entry may contain only:
 
 ```text
 rank
-canonical candidate identity
+canonical final-group identity
 display label
 repository-relative path
 symbol or file kind
@@ -232,6 +358,15 @@ It must not contain source excerpts, model scores, internal filesystem paths,
 or a separately computed order. Its byte budget and truncation state must be
 explicit. The index is navigation assistance; normal full results and
 `read_file` remain the evidence surface.
+
+I0 must freeze `MAX_RESULT_INDEX_ENTRIES` and `MAX_RESULT_INDEX_BYTES`. Both are
+independent from `MAX_PAGE_SIZE` but count toward the initial grouped response
+byte budget. Entries must be the exact prefix of the final frozen group order.
+If the requested index cannot fit, return its bounded prefix with
+`complete=false` and truthful counts; never remove full result groups to make
+room for the optional index. Every index identity must resolve to exactly one
+full group in the same ranked set, whether that group appears initially or
+through continuation.
 
 The product comparison must measure whether the compact index helps agents
 select continuations or targeted reads. Do not ship it merely because it is
@@ -339,6 +474,54 @@ Any revised selection rule applied to the already-observed projection-v1
 D-L16/D-L32 results must be declared post-hoc and reported separately. It cannot
 retroactively qualify either arm or replace `B`.
 
+New-arm quality rules extend the frozen cross-repository contract:
+
+* A decision-bearing split requires at least six independent repository
+  families, at least six positive owner tasks and two reviewed negative tasks
+  per repository, and therefore at least 48 tasks. The existing three-family
+  split remains valid diagnostic evidence but is insufficient by itself for a
+  Track L selection or default-policy conclusion.
+* Aggregate paired task deltas within each repository, then use the unweighted
+  repository mean.
+* Use 10,000 deterministic repository-cluster bootstrap resamples with the seed
+  derived from the sealed manifest digest.
+* Treat projection-v1 D-L50 and projection-v2 D-L16/D-L32/D-L50 as one family
+  of at most four new contenders. Use two-sided `98.75%` Bonferroni-adjusted
+  percentile intervals (`0.05 / 4`) when all four are admitted; freeze the
+  divisor to the actual preregistered arm count if fewer arms are admitted.
+* A candidate must improve repository-macro owner-at-three by at least `0.05`
+  and macro reciprocal rank by at least `0.03` versus `B`, with adjusted lower
+  bounds above zero for both.
+* Protected non-inferiority margins remain `-0.02` for owner-at-one, `-0.01`
+  for owner-at-ten and required-role coverage, and `+0.02` for hard-negative
+  and unacceptable-owner exposure at three.
+* Exact identifier, `must:`, configuration pin, candidate-membership,
+  eligibility, fallback, and frozen-pagination controls permit zero failures.
+* Among safe candidates, prefer the shallower depth unless a deeper arm improves
+  repository-macro MRR by at least `0.01` and clears every protected margin.
+
+The `+0.05` owner-at-three and `+0.03` MRR practical-effect thresholds are
+reused from the cross-repository contract frozen in `fe86a1a`, before the
+D-L16/D-L32 outcomes recorded in `3b7b731`; they were not selected around those
+results. Their product meaning is conjunctive: at least a five-percentage-point
+increase in the repository-macro rate of exposing the expected owner among the
+first three results, plus a `0.03` repository-macro reciprocal-rank improvement
+so that the gain is not merely a boundary shuffle at rank three.
+
+The optimized D-L16 receipt's `1,000 ms` model-load, `900 ms` warm-p95,
+`2,000 ms` request-deadline, `832 MiB` peak-RSS, and `640 MiB` retained-RSS
+values are the current measured-profile reference. L0 must either adopt those
+exact values or publish a new target deployment profile with exact absolute
+numbers and derivation before any optimized D-L32/D-L50 resource result is
+opened. Resource limits cannot be revised after observing the new arms.
+
+Ten thousand bootstrap resamples control Monte Carlo precision; they do not
+create independent repository evidence. If the six-family/task minima are not
+met, an adjusted interval is inconclusive, or evidence cannot distinguish
+contenders under the frozen practical-effect rules, record
+`insufficient_evidence`; do not describe a three-family interval as strong
+statistical proof or select the numerically highest point estimate.
+
 Held-out tasks remain sealed during L0 through L4.
 
 ### L1 — validate and replay known authority
@@ -392,12 +575,20 @@ Selection is mechanical:
 Any safety, identity, or fallback regression
     -> reject that depth
 
-Deeper depth has no preregistered material quality benefit
-    -> retain the shallower passing depth
+New arm misses either +0.05 owner@3, +0.03 MRR, adjusted-positive lower
+bounds, a protected non-inferiority margin, or the frozen absolute resource
+profile
+    -> reject that arm
 
-Deeper depth has a material safe quality benefit and an acceptable measured
-deployment profile
-    -> select it
+Deeper safe arm improves MRR by less than 0.01 over a shallower safe arm
+    -> retain the shallower arm
+
+All admitted arms are inconclusive under the frozen sample/interval rules
+    -> insufficient_evidence
+
+One safe arm clears every gate, or a deeper safe arm clears the 0.01 depth
+effect over every shallower safe arm
+    -> select that arm as the disabled candidate
 
 No depth improves safely
     -> retain deterministic baseline B; D-L16 remains runtime-qualified but
@@ -418,8 +609,8 @@ candidate:
 
 1. Publish a new versioned LateOn runtime profile containing the selected depth
    and measured defaults.
-2. Make the provider report the selected profile depth instead of an unrelated
-   code constant.
+2. Verify that `getMaxDocuments()` continues to report the selected profile
+   depth and that admission never substitutes an unrelated code constant.
 3. Keep explicit operator overrides within the qualified contract.
 4. Preserve worker isolation and all-or-nothing fallback.
 5. Keep deterministic grouping, disclosure, and continuation downstream of the
@@ -435,9 +626,18 @@ candidate:
    while queued, discard all neural work for that request and restore its
    deterministic baseline without a partial order.
 
+Projection v2 requires an explicit runtime-contract change. Version the
+projection identity in `lateon-reranker-protocol.ts`, the worker handshake, and
+the runtime profile loader. The provider and worker must reject an unknown or
+mismatched projection identity before scoring; a profile cannot silently feed
+projection-v2 bytes through the `search_rerank_document_v1` contract.
+
 The concurrency receipt must prove active and queued counts remain bounded,
 deadlines include queue wait, shutdown rejects and drains every queued/pending
 request, and no worker or promise remains live after cancellation or closure.
+Focused tests must cover queue saturation, cancellation before admission,
+cancellation while queued, cancellation during worker execution, and shutdown
+with both queued and active requests.
 
 ### L5 — held-out adjudication
 
@@ -462,6 +662,7 @@ Use the existing owners rather than adding policy to `Context`:
 | Capability advertisement | `packages/mcp/src/core/capabilities.ts` |
 | Public search and continuation validation | `packages/mcp/src/tools/search_codebase.ts`, `continue_search.ts` |
 | Frozen result-set lifecycle | `packages/mcp/src/core/search-result-set-cache.ts` |
+| Ranked-set identity and continuation binding | `packages/mcp/src/core/handlers.ts`, `search-result-set-cache.ts` |
 | Owner-family reranker admission | `packages/mcp/src/core/search-rerank-policy.ts` |
 | Reranker execution and deterministic fallback | `packages/mcp/src/core/search-execution.ts` |
 | Reranker document serialization | `packages/mcp/src/core/search-rerank-document.ts` |
@@ -482,6 +683,9 @@ At minimum, cover:
   value larger than the available frozen set;
 * complete pagination with no duplicate, missing, reordered, or recomputed
   groups;
+* pagination over a LateOn-ranked frozen set preserves the exact neural final
+  order across the initial page and every continuation while recording zero
+  additional reranker calls, candidates, or bytes;
 * handle expiry, eviction, owner shutdown, retry, and wrong-offset behavior;
 * a compact index whose identities and order exactly match final grouping;
 * D-L16, D-L32, and D-L50 with zero, partial, and complete candidate pools;
@@ -544,6 +748,7 @@ lateon_depth_32_disabled_candidate
 lateon_depth_50_disabled_candidate
 lateon_projection_v2_disabled_candidate
 lateon_default_policy_qualified_after_held_out
+insufficient_evidence
 blocked_by_projection_authority
 blocked_by_candidate_replay
 rejected_for_safety_regression
