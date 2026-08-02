@@ -1691,6 +1691,26 @@ test('search continuation preserves the full grouped order without new retrieval
         const baselineFiles = baselinePayload.results.map((result: { target: { file: string } }) => result.target.file);
         assert.equal(baselineFiles.length, 20, JSON.stringify(baselinePayload));
 
+        const largerThanAvailable = await baseline.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 10_000,
+            disclosureLimit: 200,
+        });
+        const largerThanAvailablePayload = JSON.parse(largerThanAvailable.content[0]?.text || '{}');
+        assert.deepEqual(largerThanAvailablePayload.resultCounts, {
+            requestedTotal: 10_000,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 20,
+            remainingGroupCount: 0,
+        });
+        assert.equal(largerThanAvailablePayload.continuation, undefined);
+
         const coordinator = new SearchContinuationCoordinator();
         const paged = prepareHandlers(true, coordinator);
         const startupHandlers = createHandlers(repoPath, [], undefined, {
@@ -1714,6 +1734,13 @@ test('search continuation preserves the full grouped order without new retrieval
             omittedGroupCount: 10,
             truncated: true,
             reasons: ['initial_budget'],
+        });
+        assert.deepEqual(initialPayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 10,
+            remainingGroupCount: 10,
         });
         assert.match(initialPayload.continuation.handle, /^[a-f0-9]{48}$/);
         assert.ok(Buffer.byteLength(initialResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
@@ -1775,6 +1802,20 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.equal(paged.getRetrievalCalls(), retrievalCallsBeforeContinuation);
         assert.equal(pageTwoPayload.results.length, 5);
         assert.equal(pageThreePayload.results.length, 5);
+        assert.deepEqual(pageTwoPayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 5,
+            remainingGroupCount: 5,
+        });
+        assert.deepEqual(pageThreePayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 5,
+            remainingGroupCount: 0,
+        });
         assert.equal(pageThreePayload.continuation, undefined);
         assert.ok(Buffer.byteLength(pageTwoResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
         assert.ok(Buffer.byteLength(pageThreeResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
@@ -1951,6 +1992,36 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.equal(expiredResponse.isError, true);
         assert.equal(expiredPayload.code, 'SEARCH_RESULT_SET_EXPIRED');
         assert.equal(expired.getRetrievalCalls(), expiredRetrievalCalls);
+    });
+});
+
+test('initial grouped disclosure fails without a handle when the first complete group cannot fit', async () => {
+    await withTempRepo(async (repoPath) => {
+        const handlers = createHandlers(repoPath, [{
+            content: 'export function owner() { return true; }',
+            relativePath: `src/${'x'.repeat(140_000)}.ts`,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }]);
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find owner implementation',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 1,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.code, 'SEARCH_RESULT_SET_PAGE_TOO_LARGE');
+        assert.equal(payload.continuation, undefined);
+        assert.deepEqual(payload.results, []);
     });
 });
 
@@ -3603,6 +3674,50 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
                 boundedPayload.results.map((result: { target: { symbolId?: string } }) => result.target.symbolId),
                 [caller.symbolInstanceId],
             );
+
+            const pagedHandlers = createHandlers(repoPath, [], undefined, {
+                enableVectorReceipt: true,
+            });
+            const pagedContext = (pagedHandlers as unknown as ToolHandlersTestOverrides).context as MutableHandlerContext & {
+                getIndexAuthorityObservations: () => { vector: string; navigation: string };
+            };
+            const pagedInternals = pagedHandlers as unknown as {
+                mutationLeaseCoordinator: {
+                    observe: () => { mutationActive: boolean; generation: number };
+                    getActiveLease: () => null;
+                };
+            };
+            pagedContext.getIndexAuthorityObservations = () => ({
+                vector: 'exact-vector-authority',
+                navigation: 'exact-navigation-authority',
+            });
+            pagedInternals.mutationLeaseCoordinator = {
+                observe: () => ({ mutationActive: false, generation: 1 }),
+                getActiveLease: () => null,
+            };
+            pagedContext.semanticSearch = async () => {
+                throw new Error('semanticSearch should not run for paged deterministic caller hits');
+            };
+            const pagedResponse = await pagedHandlers.handleSearchCode({
+                path: repoPath,
+                query: 'who calls writeSourceCheckpoint',
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 2,
+                disclosureLimit: 1,
+            });
+            const pagedPayload = JSON.parse(pagedResponse.content[0]?.text || '{}');
+            assert.equal(pagedResponse.isError, undefined, JSON.stringify(pagedPayload));
+            assert.equal(pagedPayload.results.length, 1, JSON.stringify(pagedPayload));
+            assert.match(pagedPayload.continuation?.handle ?? '', /^[a-f0-9]{48}$/);
+            assert.deepEqual(pagedPayload.resultCounts, {
+                requestedTotal: 2,
+                effectiveFrozenTotal: 2,
+                availableGroupCount: 2,
+                returnedGroupCount: 1,
+                remainingGroupCount: 1,
+            });
         });
     });
 });

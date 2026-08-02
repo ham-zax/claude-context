@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectGroupedDisclosure } from "./search-disclosure.js";
+import {
+    projectGroupedDisclosure,
+    resolveSearchGroupedResultCounts,
+} from "./search-disclosure.js";
 import type {
     SearchDisclosureSummary,
     SearchGroupResult,
@@ -66,6 +69,35 @@ test("grouped disclosure preserves the unannotated baseline when no boundary app
     assert.equal(projected.envelope.disclosure, undefined);
     assert.equal(projected.results.length, 2);
     assert.equal(projected.responseBytes, Buffer.byteLength(JSON.stringify(projected.envelope), "utf8"));
+});
+
+test("grouped result counts separate requested, available, frozen, returned, and remaining totals", () => {
+    for (const requestedTotal of [1, 10, 15, 16, 32, 50, 80]) {
+        const counts = resolveSearchGroupedResultCounts({
+            requestedTotal,
+            availableGroupCount: 80,
+            returnedGroupCount: Math.min(10, requestedTotal),
+        });
+        assert.deepEqual(counts, {
+            requestedTotal,
+            effectiveFrozenTotal: requestedTotal,
+            availableGroupCount: 80,
+            returnedGroupCount: Math.min(10, requestedTotal),
+            remainingGroupCount: Math.max(0, requestedTotal - 10),
+        });
+    }
+
+    assert.deepEqual(resolveSearchGroupedResultCounts({
+        requestedTotal: 10_000,
+        availableGroupCount: 37,
+        returnedGroupCount: 10,
+    }), {
+        requestedTotal: 10_000,
+        effectiveFrozenTotal: 37,
+        availableGroupCount: 37,
+        returnedGroupCount: 10,
+        remainingGroupCount: 27,
+    });
 });
 
 test("grouped disclosure reports an explicit smaller initial budget", () => {
@@ -152,4 +184,31 @@ test("grouped disclosure refuses to drop the authority envelope to satisfy a bud
         includeSummary: true,
         buildEnvelope,
     }), /authority envelope/);
+});
+
+test("grouped disclosure reports page-too-large when a complete first group cannot fit", () => {
+    const first = result(0, "");
+    const emptyDisclosure: SearchDisclosureSummary = {
+        policyVersion: "search_disclosure_v1",
+        availableGroupCount: 1,
+        returnedGroupCount: 0,
+        omittedGroupCount: 1,
+        truncated: true,
+        reasons: ["utf8_byte_budget"],
+    };
+    const emptyEnvelopeBytes = Buffer.byteLength(
+        JSON.stringify(buildEnvelope([], emptyDisclosure)),
+        "utf8",
+    );
+    const projection = projectGroupedDisclosure({
+        orderedResults: [first],
+        callerLimit: 1,
+        disclosureLimit: 1,
+        maxResponseBytes: emptyEnvelopeBytes,
+        includeSummary: true,
+        buildEnvelope,
+    });
+
+    assert.equal(projection.status, "page_too_large");
+    assert.equal(projection.results.length, 0);
 });

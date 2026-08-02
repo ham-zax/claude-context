@@ -715,7 +715,10 @@ interface SearchBaseResponseEnvelope {
     formatVersion: typeof SEARCH_RESPONSE_FORMAT_VERSION;
     status: "ok" | "requires_reindex" | "not_indexed" | "not_ready";
     reason?: NonOkReason;
-    code?: "MISSING_PROVIDER_CONFIG" | VectorBackendResponseCode | EmbeddingProviderResponseCode;
+    code?: "MISSING_PROVIDER_CONFIG"
+        | "SEARCH_RESULT_SET_PAGE_TOO_LARGE"
+        | VectorBackendResponseCode
+        | EmbeddingProviderResponseCode;
     path: string;
     codebaseRoot?: string;
     query: string;
@@ -734,6 +737,7 @@ interface SearchBaseResponseEnvelope {
 
 export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelope {
     resultMode: "grouped";
+    resultCounts?: SearchGroupedResultCounts;
     disclosure?: SearchDisclosureSummary;
     continuation?: {
         handle: string;
@@ -741,6 +745,14 @@ export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelop
         remainingGroupCount: number;
     };
     results: SearchGroupedResultV2[];
+}
+
+export interface SearchGroupedResultCounts {
+    requestedTotal: number;
+    effectiveFrozenTotal: number;
+    availableGroupCount: number;
+    returnedGroupCount: number;
+    remainingGroupCount: number;
 }
 
 export type SearchDisclosureReason =

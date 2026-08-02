@@ -193,7 +193,10 @@ import {
     type PreparedEntrypointOwnerEvidence,
 } from "./entrypoint-owner-evidence.js";
 import { runExactRegistryFastPath } from "./search-exact-fast-path.js";
-import { finalizeSearchResults } from "./search-result-finalization.js";
+import {
+    finalizeSearchResults,
+    type FinalizedSearchResultSet,
+} from "./search-result-finalization.js";
 import {
     SearchResultSetCoordinator,
     type SearchResultSetCoordinatorLookup,
@@ -4298,6 +4301,64 @@ export class ToolHandlers {
                 navigationStatus,
                 preparedObservation,
             };
+            const attachSearchContinuation = (
+                envelope: SearchGroupedResponseEnvelope,
+                resultSet: FinalizedSearchResultSet | undefined,
+            ): SearchGroupedResponseEnvelope => {
+                if (!resultSet || !envelope.continuation) return envelope;
+                if (!vectorReceipt) {
+                    throw new Error("Search continuation requires a proven vector publication.");
+                }
+                if (!preparedObservation) {
+                    throw new Error("Search continuation requires a prepared publication and source observation.");
+                }
+                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(envelope);
+                const resultSpecificHints = baseEnvelopeDraft.hints;
+                delete baseEnvelopeDraft.results;
+                delete baseEnvelopeDraft.disclosure;
+                delete baseEnvelopeDraft.continuation;
+                delete baseEnvelopeDraft.recommendedNextAction;
+                delete baseEnvelopeDraft.hints;
+                const frozenHints = freezeContinuationHints(resultSpecificHints);
+                const baseEnvelope = {
+                    ...baseEnvelopeDraft,
+                    ...(frozenHints ? { hints: frozenHints } : {}),
+                } as FrozenSearchResultSet["baseEnvelope"];
+                const queryPolicyDigest = crypto.createHash("sha256").update(JSON.stringify([
+                    input.query,
+                    input.scope,
+                    input.groupBy,
+                    input.rankingMode,
+                    retrievalPolicy,
+                    queryPlan,
+                ]), "utf8").digest("hex");
+                const stored = this.searchContinuationCoordinator.store(this, {
+                    value: {
+                        canonicalRoot: effectiveRoot,
+                        vectorReceipt,
+                        ...(generationReceipt ? { generationReceipt } : {}),
+                        preparedObservation,
+                        sourceObservation: finalSourceObservation.sourceObservation,
+                        queryPolicyDigest,
+                        responseByteLimit: debugMode === "full"
+                            ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
+                            : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
+                        pageSize: retrievalPolicy.disclosureResultLimit,
+                        baseEnvelope,
+                        orderedResults: [...resultSet.orderedResults],
+                        recommendedActions: [...resultSet.recommendedActions],
+                    },
+                    nextOffset: resultSet.initialReturnedCount,
+                    nowMs: this.now(),
+                });
+                return {
+                    ...envelope,
+                    continuation: {
+                        ...envelope.continuation,
+                        handle: stored.handle,
+                    },
+                };
+            };
             if (
                 preparedObservation
                 && this.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
@@ -4324,6 +4385,7 @@ export class ToolHandlers {
                 groupBy: input.groupBy,
                 resultMode: input.resultMode,
                 limit: input.limit,
+                disclosureLimit: retrievalPolicy.disclosureResultLimit,
                 debugMode,
                 rankingMode: input.rankingMode,
                 semanticQuery,
@@ -4407,10 +4469,21 @@ export class ToolHandlers {
                         meta: { searchDiagnostics },
                     };
                 }
+                let exactEnvelope = exactFastPath.finalized.envelope;
+                if (
+                    exactFastPath.finalized.kind === "ok"
+                    && exactEnvelope.resultMode === "grouped"
+                ) {
+                    exactEnvelope = attachSearchContinuation(
+                        exactEnvelope,
+                        exactFastPath.finalized.resultSet,
+                    );
+                }
                 await this.touchWatchedCodebaseBestEffort(effectiveRoot);
                 this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
                 return {
-                    content: [{ type: "text", text: this.stringifyToolJson(exactFastPath.envelope) }],
+                    content: [{ type: "text", text: this.stringifyToolJson(exactEnvelope) }],
+                    ...(exactFastPath.finalized.kind === "page_too_large" ? { isError: true } : {}),
                     meta: {
                         searchDiagnostics: {
                             ...searchDiagnostics,
@@ -4692,6 +4765,7 @@ export class ToolHandlers {
                 now: this.now,
             });
             let envelope = finalized.envelope;
+            const initialPageTooLarge = finalized.kind === "page_too_large";
             let barrierChanged = false;
             if (preparedEntrypointOwnerEvidence) {
                 const finalizedEntrypointEvidence = await preparedEntrypointOwnerEvidence.finalize({
@@ -4745,66 +4819,15 @@ export class ToolHandlers {
                     meta: { searchDiagnostics },
                 };
             }
-            if (
-                finalized.resultSet
-                && envelope.resultMode === "grouped"
-                && envelope.continuation
-            ) {
-                if (!vectorReceipt || !preparedObservation) {
-                    throw new Error("Search continuation requires a proven publication and source observation.");
-                }
-                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(envelope);
-                const resultSpecificHints = baseEnvelopeDraft.hints;
-                delete baseEnvelopeDraft.results;
-                delete baseEnvelopeDraft.disclosure;
-                delete baseEnvelopeDraft.continuation;
-                delete baseEnvelopeDraft.recommendedNextAction;
-                delete baseEnvelopeDraft.hints;
-                const frozenHints = freezeContinuationHints(resultSpecificHints);
-                const baseEnvelope = {
-                    ...baseEnvelopeDraft,
-                    ...(frozenHints ? { hints: frozenHints } : {}),
-                } as FrozenSearchResultSet["baseEnvelope"];
-                const queryPolicyDigest = crypto.createHash("sha256").update(JSON.stringify([
-                    input.query,
-                    input.scope,
-                    input.groupBy,
-                    input.rankingMode,
-                    retrievalPolicy,
-                    queryPlan,
-                ]), "utf8").digest("hex");
-                const stored = this.searchContinuationCoordinator.store(this, {
-                    value: {
-                        canonicalRoot: effectiveRoot,
-                        vectorReceipt,
-                        ...(generationReceipt ? { generationReceipt } : {}),
-                        preparedObservation,
-                        sourceObservation: finalSourceObservation.sourceObservation,
-                        queryPolicyDigest,
-                        responseByteLimit: debugMode === "full"
-                            ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
-                            : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
-                        pageSize: retrievalPolicy.disclosureResultLimit,
-                        baseEnvelope,
-                        orderedResults: [...finalized.resultSet.orderedResults],
-                        recommendedActions: [...finalized.resultSet.recommendedActions],
-                    },
-                    nextOffset: finalized.resultSet.initialReturnedCount,
-                    nowMs: this.now(),
-                });
-                envelope = {
-                    ...envelope,
-                    continuation: {
-                        ...envelope.continuation,
-                        handle: stored.handle,
-                    },
-                };
+            if (finalized.kind === "ok" && envelope.resultMode === "grouped") {
+                envelope = attachSearchContinuation(envelope, finalized.resultSet);
             }
 
             await this.touchWatchedCodebaseBestEffort(effectiveRoot);
             this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
             return {
                 content: [{ type: "text", text: this.stringifyToolJson(envelope) }],
+                ...(initialPageTooLarge ? { isError: true } : {}),
                 meta: { searchDiagnostics }
             };
         } catch (error) {
@@ -4995,6 +5018,18 @@ export class ToolHandlers {
             maxResponseBytes: entry.responseByteLimit,
             includeSummary: true,
             buildEnvelope: (results, disclosure) => {
+                const resultCounts = entry.baseEnvelope.resultCounts
+                    ? {
+                        ...entry.baseEnvelope.resultCounts,
+                        returnedGroupCount: results.length,
+                        remainingGroupCount: Math.max(
+                            0,
+                            entry.baseEnvelope.resultCounts.effectiveFrozenTotal
+                                - lookup.nextOffset
+                                - results.length,
+                        ),
+                    }
+                    : undefined;
                 const recommendedNextAction = entry.recommendedActions[lookup.nextOffset] ?? null;
                 const noiseMitigationHint = this.searchQuerySupport.buildNoiseMitigationHint(
                     entry.canonicalRoot,
@@ -5023,24 +5058,26 @@ export class ToolHandlers {
                 };
                 const envelope: SearchGroupedResponseEnvelope = {
                     ...entry.baseEnvelope,
+                    ...(resultCounts ? { resultCounts } : {}),
                     ...(Object.keys(pageHints).length > 0 ? { hints: pageHints } : {}),
                     ...(recommendedNextAction ? { recommendedNextAction } : {}),
                     ...(disclosure ? { disclosure } : {}),
                     results: [...results],
                 };
-                return results.length < remainingResults.length
+                return (resultCounts?.remainingGroupCount ?? (remainingResults.length - results.length)) > 0
                     ? {
                         ...envelope,
                         continuation: {
                             handle,
                             nextOffset: lookup.nextOffset + results.length,
-                            remainingGroupCount: remainingResults.length - results.length,
+                            remainingGroupCount: resultCounts?.remainingGroupCount
+                                ?? (remainingResults.length - results.length),
                         },
                     }
                     : envelope;
             },
         });
-        if (projection.results.length === 0) {
+        if (projection.status === "page_too_large") {
             return fail("SEARCH_RESULT_SET_PAGE_TOO_LARGE", "The next search result cannot fit within the response byte budget. Use read_file on an earlier target or run a narrower search.");
         }
         const proofAfterProjection = await revalidate.call(

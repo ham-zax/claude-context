@@ -4,6 +4,7 @@ import {
     SEARCH_CHANGED_FIRST_MULTIPLIER,
     SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES,
     SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
+    SEARCH_MAX_FROZEN_RESULTS,
     SEARCH_RERANK_AMBIGUOUS_CANDIDATES_PER_RESULT,
     SEARCH_RERANK_BOUNDED_CANDIDATES_PER_RESULT,
     SEARCH_RERANK_DOC_MAX_CHARS,
@@ -59,7 +60,10 @@ import {
     appendSearchCandidateRemoval,
     appendSearchCandidateStage,
 } from "./search-candidate-survival.js";
-import { projectGroupedDisclosure } from "./search-disclosure.js";
+import {
+    projectGroupedDisclosure,
+    resolveSearchGroupedResultCounts,
+} from "./search-disclosure.js";
 
 type CallGraphUnavailableReason = Extract<CallGraphHint, { supported: false }>["reason"];
 type ChangedFilesState = { available: boolean; files: Set<string> };
@@ -166,10 +170,16 @@ export type FinalizedSearchResultSet = Readonly<{
     initialReturnedCount: number;
 }>;
 
-export type FinalizedSearchResults = Readonly<{
-    envelope: SearchResponseEnvelope;
-    resultSet?: FinalizedSearchResultSet;
-}>;
+export type FinalizedSearchResults =
+    | Readonly<{
+        kind: "ok";
+        envelope: SearchResponseEnvelope;
+        resultSet?: FinalizedSearchResultSet;
+    }>
+    | Readonly<{
+        kind: "page_too_large";
+        envelope: SearchGroupedResponseEnvelope;
+    }>;
 
 export async function finalizeSearchResults(
     input: FinalizeSearchResultsInput,
@@ -448,6 +458,7 @@ export async function finalizeSearchResults(
             })),
         );
         return {
+            kind: "ok",
             envelope: buildRawSearchEnvelopeHelper({
                 codebaseRoot: input.effectiveRoot,
                 absolutePath: input.absolutePath,
@@ -493,6 +504,7 @@ export async function finalizeSearchResults(
             searchSymbolRegistryUnavailableReason = "missing_symbol_registry";
         } else if (registryState.status === "incompatible" && needsRegistryRepair) {
             return {
+                kind: "ok",
                 envelope: host.buildRequiresReindexPayload(
                     input.effectiveRoot,
                     `Symbol registry is incompatible: ${registryState.reason}`,
@@ -539,7 +551,7 @@ export async function finalizeSearchResults(
         // Freeze the complete caller-bounded diversity order before applying the
         // smaller presentation budget. Otherwise disclosureLimit would also
         // change which candidates can be reached by continuation.
-        limit: input.limit,
+        limit: Math.min(input.limit, SEARCH_MAX_FROZEN_RESULTS),
         queryPlan: input.queryPlan,
         mustMatchesFirst: input.parsedOperators.must.length > 0,
         registry: searchSymbolRegistry,
@@ -593,20 +605,30 @@ export async function finalizeSearchResults(
     rankingProvenance.registryRepairGroupCount += groupedSearchResults.registryRepairGroupCount;
 
     const completeDisclosureOrder = groupedSearchResults.disclosureOrder;
-    const eligibleResults = completeDisclosureOrder.slice(0, input.limit);
+    const frozenCounts = resolveSearchGroupedResultCounts({
+        requestedTotal: input.limit,
+        availableGroupCount: completeDisclosureOrder.length,
+        returnedGroupCount: 0,
+    });
+    const eligibleResults = completeDisclosureOrder.slice(0, frozenCounts.effectiveFrozenTotal);
     const disclosureProjection = projectGroupedDisclosure({
         // The projector needs the complete order to report caller_limit
         // truthfully, while the continuation cache below remains bounded by the
         // caller's explicit limit.
         orderedResults: completeDisclosureOrder,
-        callerLimit: input.limit,
+        callerLimit: frozenCounts.effectiveFrozenTotal,
         disclosureLimit: input.disclosureLimit,
         maxResponseBytes: input.debugMode === "full"
             ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
             : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
-        includeSummary: input.disclosureLimit < input.limit
-            || completeDisclosureOrder.length > input.limit,
+        includeSummary: input.disclosureLimit < frozenCounts.effectiveFrozenTotal
+            || completeDisclosureOrder.length > frozenCounts.effectiveFrozenTotal,
         buildEnvelope: (results, disclosure) => {
+            const resultCounts = resolveSearchGroupedResultCounts({
+                requestedTotal: input.limit,
+                availableGroupCount: completeDisclosureOrder.length,
+                returnedGroupCount: results.length,
+            });
             const noiseMitigationHint = host.searchQuerySupport.buildNoiseMitigationHint(
                 input.effectiveRoot,
                 results.map((result) => result.target.file),
@@ -635,21 +657,35 @@ export async function finalizeSearchResults(
                 proofDebugHint: input.proofDebugHint,
                 noiseMitigationHint,
                 generatedArtifactsHint,
+                resultCounts,
                 ...(disclosure ? { disclosure } : {}),
                 results: [...results],
             }) as SearchGroupedResponseEnvelope;
-            return results.length < eligibleResults.length
+            return resultCounts.remainingGroupCount > 0
                 ? {
                     ...envelope,
                     continuation: {
                         handle: SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
                         nextOffset: results.length,
-                        remainingGroupCount: eligibleResults.length - results.length,
+                        remainingGroupCount: resultCounts.remainingGroupCount,
                     },
                 }
                 : envelope;
         },
     });
+    if (disclosureProjection.status === "page_too_large") {
+        const { continuation: _continuation, ...authorityEnvelope } = disclosureProjection.envelope;
+        return {
+            kind: "page_too_large",
+            envelope: {
+                ...authorityEnvelope,
+                status: "not_ready",
+                code: "SEARCH_RESULT_SET_PAGE_TOO_LARGE",
+                message: "The first search result cannot fit within the response byte budget. Run a narrower search.",
+                results: [],
+            },
+        };
+    }
     const resultSet = disclosureProjection.envelope.continuation
         ? {
             orderedResults: eligibleResults.map(projectGroupedResultV2),
@@ -660,6 +696,7 @@ export async function finalizeSearchResults(
         }
         : undefined;
     return {
+        kind: "ok",
         envelope: disclosureProjection.envelope,
         ...(resultSet ? { resultSet } : {}),
     };
