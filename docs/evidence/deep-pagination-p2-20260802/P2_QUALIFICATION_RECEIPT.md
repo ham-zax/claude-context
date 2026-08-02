@@ -36,17 +36,19 @@ Canonical policy manifest (UTF-8, LF-terminated):
 
 ```text
 default_ranking_policy=B
-logical_limit_max=200
+requested_total_contract=positive_safe_integer
+frozen_result_max=200
 disclosure_group_limit_max=200
 reservation_entry_max_bytes=8388608
 reservation_owner_max_bytes=16777216
-reservation_owner_max_entries=2
+minimum_resident_result_sets=2
+result_set_cache_max_entries=32
 lateon_provider=lateon
 lateon_model=lightonai/LateOn-Code-edge@07ef20f406c86badca122464808f4cac2f6e4b25
 lateon_profile=satori_lateon_runtime_profile_v1
 ```
 
-SHA-256: `b045a4b111c1fb25813a9bb0bc86e560519ddbadd188500a3f27e900cea08b47`
+SHA-256: `12034cfbe66f5af7a2f2325c3925aa9ee9dce7247c620e6856afeb2c075c898b`
 
 ## Cross-track qualification
 
@@ -65,7 +67,7 @@ The focused Track P matrix also proves the amendment's remaining safety gates:
 
 | Gate | Evidence |
 | --- | --- |
-| Positive-safe bounded requests and limits no greater than 200 | handler and public-tool validation tests |
+| Positive-safe requested totals; frozen-set and disclosure limits no greater than 200 | handler and public-tool validation tests |
 | Exact requested path, source identity, publication identity, and response-byte accounting | handler, identity, and disclosure tests |
 | Dynamic 200-byte projected continuation cursor uses actual returned count | disclosure tests |
 | At most two reservations remain below the 16 MiB owner cap; a third uses deterministic LRU eviction | result-set cache tests |
