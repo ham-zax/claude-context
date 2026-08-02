@@ -97,10 +97,7 @@ import {
     type SourceFreshnessCheckpointEvidence,
     type SourceFreshnessPathComparison,
 } from '../sync/synchronizer';
-import {
-    assertDescriptorBoundIndexingSupported,
-    readFileHandleExactly,
-} from '../sync/root-bound-fs';
+import { assertDescriptorBoundIndexingSupported } from '../sync/root-bound-fs';
 import type {
     RepairActivatedGeneration,
     RepairIndexResult,
@@ -120,10 +117,8 @@ import {
     EMBEDDING_PROJECTION_VERSION,
     LEXICAL_PROJECTION_VERSION,
 } from './search-projections';
-import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     SemanticSearchService,
-    type MutationGenerationObservation,
     type MutationGenerationObserver,
 } from './semantic-search-service';
 import {
