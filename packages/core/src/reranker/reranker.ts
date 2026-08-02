@@ -4,6 +4,12 @@ export interface RerankResult {
     document?: string;
 }
 
+export interface RerankerIdentity {
+    provider: string;
+    model: string;
+    profile: string;
+}
+
 export interface RerankOptions {
     topK?: number;
     returnDocuments?: boolean;
@@ -16,6 +22,7 @@ export interface RerankOptions {
 }
 
 export interface Reranker {
+    getIdentity(): Readonly<RerankerIdentity>;
     rerank(
         query: string,
         documents: string[],

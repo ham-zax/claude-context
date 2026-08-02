@@ -6,6 +6,8 @@ import type {
 } from "./search-types.js";
 import { SEARCH_MAX_FROZEN_RESULTS } from "./search-constants.js";
 
+export const SEARCH_DISCLOSURE_POLICY_VERSION = "search_disclosure_v1" as const;
+
 type DisclosureProjection<T> = Readonly<{
     status: "ok" | "page_too_large";
     envelope: SearchGroupedResponseEnvelope;
@@ -75,7 +77,7 @@ function buildSummary(input: {
 }): SearchDisclosureSummary {
     const reasons = orderedReasons(input.reasons);
     return {
-        policyVersion: "search_disclosure_v1",
+        policyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
         availableGroupCount: input.availableGroupCount,
         returnedGroupCount: input.returnedGroupCount,
         omittedGroupCount: input.availableGroupCount - input.returnedGroupCount,

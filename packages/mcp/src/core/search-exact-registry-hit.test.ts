@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SymbolRecord } from "@zokizuan/satori-core";
 import { buildExactRegistryHitEnvelope } from "./search-exact-registry-hit.js";
+import { SEARCH_RESULT_SET_DIGEST_PLACEHOLDER } from "./search-constants.js";
 import type { SearchNavigationHelpers } from "./search-navigation.js";
 
 const navigationHelpers: SearchNavigationHelpers = {
@@ -82,6 +83,7 @@ test("exact registry retains the complete frozen order behind a compact first pa
     });
     assert.equal(built.envelope.continuation?.nextOffset, 10);
     assert.equal(built.envelope.continuation?.remainingGroupCount, 6);
+    assert.equal(built.envelope.rankedSetDigest, SEARCH_RESULT_SET_DIGEST_PLACEHOLDER);
     assert.equal(built.resultSet?.orderedResults.length, 16);
     assert.equal(built.resultSet?.initialReturnedCount, 10);
 });

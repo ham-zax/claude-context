@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
+    type FrozenSearchResultSet,
     SearchContinuationCoordinator,
     ToolHandlers,
 } from './handlers.js';
@@ -728,6 +729,20 @@ function createHandlers(
         options?.searchContinuationCoordinator,
     );
     const overrides = handlers as unknown as ToolHandlersTestOverrides;
+    const vectorReceipt = {
+        collectionName: 'committed-v3',
+        marker: {
+            runId: 'test-completion-run',
+            indexPolicyHash: 'test-index-policy-hash',
+        },
+        policy: {},
+        policyDocumentDigest: 'b'.repeat(64),
+        exactPayloadCount: searchResults.length,
+        observations: {
+            profileFileToken: null,
+            policyFileToken: 'test-policy-token',
+        },
+    };
     overrides.validateCompletionProof = async () => ({
         outcome: 'valid',
         navigationStatus: 'valid',
@@ -735,7 +750,7 @@ function createHandlers(
             navigation: { navigationSealHash: 'a'.repeat(64) },
         },
         ...(options?.enableVectorReceipt
-            ? { vectorReceipt: { collectionName: 'committed-v3' } as never }
+            ? { vectorReceipt: vectorReceipt as never }
             : {}),
     });
     if (options?.sourceBarrierMode !== 'native') {
@@ -1513,8 +1528,9 @@ test('search continuation preserves the full grouped order without new retrieval
         const prepareHandlers = (
             initialSourceAvailable = true,
             searchContinuationCoordinator?: SearchContinuationCoordinator,
+            reranker?: HandlerReranker,
         ) => {
-            const handlers = createHandlers(repoPath, searchResults, undefined, {
+            const handlers = createHandlers(repoPath, searchResults, reranker, {
                 enableVectorReceipt: true,
                 respectSemanticTopK: true,
                 searchContinuationCoordinator,
@@ -1743,6 +1759,7 @@ test('search continuation preserves the full grouped order without new retrieval
             remainingGroupCount: 10,
         });
         assert.match(initialPayload.continuation.handle, /^[a-f0-9]{48}$/);
+        assert.match(initialPayload.rankedSetDigest, /^[a-f0-9]{64}$/);
         assert.ok(Buffer.byteLength(initialResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
 
         const freshnessProbe = prepareHandlers();
@@ -1770,6 +1787,7 @@ test('search continuation preserves the full grouped order without new retrieval
         });
         assert.equal(pageTwoResponse.isError, undefined, pageTwoResponse.content[0]?.text);
         const pageTwoPayload = JSON.parse(pageTwoResponse.content[0]?.text || '{}');
+        assert.equal(pageTwoPayload.rankedSetDigest, initialPayload.rankedSetDigest);
         const mismatchedRetry = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
             expectedOffset: initialPayload.continuation.nextOffset,
@@ -1792,6 +1810,7 @@ test('search continuation preserves the full grouped order without new retrieval
             limit: 5,
         });
         const pageThreePayload = JSON.parse(pageThreeResponse.content[0]?.text || '{}');
+        assert.equal(pageThreePayload.rankedSetDigest, initialPayload.rankedSetDigest);
         const pageThreeRetry = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
             expectedOffset: pageTwoPayload.continuation.nextOffset,
@@ -1827,6 +1846,104 @@ test('search continuation preserves the full grouped order without new retrieval
             ...pageThreePayload.results,
         ].map((result: { target: { file: string } }) => result.target.file);
         assert.deepEqual(pagedFiles, baselineFiles);
+
+        class TamperingCoordinator extends SearchContinuationCoordinator {
+            public tamperNextLookup = false;
+
+            override lookup(
+                handle: string,
+                nowMs: number,
+            ): ReturnType<SearchContinuationCoordinator["lookup"]> {
+                const lookup = super.lookup(handle, nowMs);
+                if (!this.tamperNextLookup || lookup.status !== "hit") return lookup;
+                this.tamperNextLookup = false;
+                const entry: FrozenSearchResultSet = structuredClone(lookup.entry);
+                entry.orderedResults[0]!.score += 1;
+                return { ...lookup, entry };
+            }
+        }
+        const tamperingCoordinator = new TamperingCoordinator();
+        const tampered = prepareHandlers(true, tamperingCoordinator);
+        const tamperedInitialResponse = await tampered.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+        });
+        const tamperedInitialPayload = JSON.parse(
+            tamperedInitialResponse.content[0]?.text || '{}',
+        );
+        tamperingCoordinator.tamperNextLookup = true;
+        const tamperedContinuation = await tampered.handlers.handleContinueSearch({
+            handle: tamperedInitialPayload.continuation.handle,
+            expectedOffset: tamperedInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(tamperedContinuation.isError, true);
+        assert.equal(
+            JSON.parse(tamperedContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_STALE',
+        );
+        const removedContinuation = await tampered.handlers.handleContinueSearch({
+            handle: tamperedInitialPayload.continuation.handle,
+            expectedOffset: tamperedInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(
+            JSON.parse(removedContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_NOT_FOUND',
+        );
+
+        let activeModel = 'reranker-model-v1';
+        let rerankerCalls = 0;
+        const providerCoordinator = new SearchContinuationCoordinator();
+        const providerRanked = prepareHandlers(true, providerCoordinator, {
+            getIdentity: () => ({
+                provider: 'test-provider',
+                model: activeModel,
+                profile: 'test-profile-v1',
+            }),
+            rerank: async (_query, documents) => {
+                rerankerCalls += 1;
+                return documents.map((_document, index) => ({
+                    index,
+                    relevanceScore: documents.length - index,
+                }));
+            },
+        });
+        const providerInitialResponse = await providerRanked.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+        });
+        const providerInitialPayload = JSON.parse(
+            providerInitialResponse.content[0]?.text || '{}',
+        );
+        assert.equal(rerankerCalls, 1);
+        activeModel = 'reranker-model-v2';
+        const changedModelContinuation = await providerRanked.handlers.handleContinueSearch({
+            handle: providerInitialPayload.continuation.handle,
+            expectedOffset: providerInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(changedModelContinuation.isError, true);
+        assert.equal(
+            JSON.parse(changedModelContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_STALE',
+        );
+        assert.equal(rerankerCalls, 1);
+        const removedModelContinuation = await providerRanked.handlers.handleContinueSearch({
+            handle: providerInitialPayload.continuation.handle,
+            expectedOffset: providerInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(
+            JSON.parse(removedModelContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_NOT_FOUND',
+        );
 
         const consumedResponse = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
@@ -3711,6 +3828,7 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
             assert.equal(pagedResponse.isError, undefined, JSON.stringify(pagedPayload));
             assert.equal(pagedPayload.results.length, 1, JSON.stringify(pagedPayload));
             assert.match(pagedPayload.continuation?.handle ?? '', /^[a-f0-9]{48}$/);
+            assert.match(pagedPayload.rankedSetDigest ?? '', /^[a-f0-9]{64}$/);
             assert.deepEqual(pagedPayload.resultCounts, {
                 requestedTotal: 2,
                 effectiveFrozenTotal: 2,

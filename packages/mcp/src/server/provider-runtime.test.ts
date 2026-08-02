@@ -258,6 +258,11 @@ test("runtime shutdown closes each provider-owned reranker once", async () => {
         activeRerankers: Set<Reranker>;
     };
     runtimeInternals.activeRerankers.add({
+        getIdentity: () => ({
+            provider: "test",
+            model: "test-model",
+            profile: "test-profile",
+        }),
         rerank: async () => [],
         close: async () => { closeCalls += 1; },
     });

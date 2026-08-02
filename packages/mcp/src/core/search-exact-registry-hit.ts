@@ -34,7 +34,10 @@ import {
     projectGroupedDisclosure,
     resolveSearchGroupedResultCounts,
 } from "./search-disclosure.js";
-import { SEARCH_RESULT_SET_HANDLE_PLACEHOLDER } from "./search-constants.js";
+import {
+    SEARCH_RESULT_SET_DIGEST_PLACEHOLDER,
+    SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
+} from "./search-constants.js";
 import type { FinalizedSearchResults } from "./search-result-finalization.js";
 
 export type BuildExactRegistryHitEnvelopeInput = {
@@ -200,6 +203,7 @@ export function buildExactRegistryHitEnvelope(
             return resultCounts.remainingGroupCount > 0
                 ? {
                     ...envelope,
+                    rankedSetDigest: SEARCH_RESULT_SET_DIGEST_PLACEHOLDER,
                     continuation: {
                         handle: SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
                         nextOffset: results.length,

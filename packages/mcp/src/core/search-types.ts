@@ -737,6 +737,7 @@ interface SearchBaseResponseEnvelope {
 
 export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelope {
     resultMode: "grouped";
+    rankedSetDigest?: string;
     resultCounts?: SearchGroupedResultCounts;
     disclosure?: SearchDisclosureSummary;
     continuation?: {

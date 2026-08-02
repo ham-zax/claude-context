@@ -130,6 +130,7 @@ import {
     isTestPath as isSearchTestPath,
     isWriterActionTerm as isWriterActionTermHelper,
     normalizeSearchPath as normalizeSearchPathHelper,
+    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     shouldIncludeCategoryInScope,
 } from "./search-ranking-policy.js";
 import { SearchQuerySupport } from "./search-query-support.js";
@@ -201,7 +202,19 @@ import {
     SearchResultSetCoordinator,
     type SearchResultSetCoordinatorLookup,
 } from "./search-result-set-cache.js";
-import { projectGroupedDisclosure } from "./search-disclosure.js";
+import {
+    projectGroupedDisclosure,
+    SEARCH_DISCLOSURE_POLICY_VERSION,
+} from "./search-disclosure.js";
+import {
+    buildSearchRankedSetBinding,
+    verifySearchRankedSetBinding,
+    type SearchRankedSetBinding,
+    type SearchRankedSetBindingInput,
+    type SearchRerankerBindingIdentity,
+} from "./search-result-set-identity.js";
+import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
+import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
     SearchQueryPlan,
     SearchResultLike,
@@ -267,6 +280,7 @@ export type FrozenSearchResultSet = {
     preparedObservation: string;
     sourceObservation: string | null;
     queryPolicyDigest: string;
+    rankedSetBinding: SearchRankedSetBinding;
     responseByteLimit: number;
     pageSize: number;
     baseEnvelope: Omit<
@@ -315,6 +329,58 @@ function freezeContinuationHints(
         frozen.debugSearch = debugSearch;
     }
     return Object.keys(frozen).length > 0 ? frozen : undefined;
+}
+
+function resolveSearchRerankerBindingIdentity(
+    reranker: Reranker | null,
+    rerankerApplied: boolean,
+): SearchRerankerBindingIdentity {
+    if (!rerankerApplied) {
+        return { kind: "deterministic_baseline", policy: "B" };
+    }
+    if (!reranker) {
+        throw new Error("Applied search reranking requires a stable provider identity.");
+    }
+    const identity = reranker.getIdentity();
+    return {
+        kind: "provider",
+        provider: identity.provider,
+        model: identity.model,
+        profile: identity.profile,
+    };
+}
+
+function buildFrozenSearchRankedSetBindingInput(input: {
+    vectorReceipt: ProvenVectorGenerationReceipt;
+    generationReceipt?: ProvenGenerationReceipt;
+    preparedObservation: string;
+    sourceObservation: string | null;
+    queryPolicyDigest: string;
+    rerankerIdentity: SearchRerankerBindingIdentity;
+    orderedResults: readonly SearchGroupedResultV2[];
+    recommendedActions: readonly (SearchRecommendedNextAction | null)[];
+}): SearchRankedSetBindingInput {
+    return {
+        queryPolicyDigest: input.queryPolicyDigest,
+        rankingPolicyIdentity: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+        disclosurePolicyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
+        publicationIdentity: {
+            collectionName: input.vectorReceipt.collectionName,
+            marker: input.vectorReceipt.marker,
+            policyDocumentDigest: input.vectorReceipt.policyDocumentDigest,
+            navigation: input.generationReceipt
+                ? { status: "sealed", receipt: input.generationReceipt.navigation }
+                : { status: "not_bound" },
+        },
+        preparedObservation: input.preparedObservation,
+        sourceObservation: input.sourceObservation,
+        rerankerIdentity: input.rerankerIdentity,
+        rerankerProjectionIdentity: input.rerankerIdentity.kind === "provider"
+            ? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION
+            : "not_applicable",
+        orderedResults: input.orderedResults,
+        recommendedActions: input.recommendedActions,
+    };
 }
 
 type SearchPhaseTimings = Record<SearchPhaseTimingKey, number>;
@@ -4304,6 +4370,7 @@ export class ToolHandlers {
             const attachSearchContinuation = (
                 envelope: SearchGroupedResponseEnvelope,
                 resultSet: FinalizedSearchResultSet | undefined,
+                rerankerApplied: boolean,
             ): SearchGroupedResponseEnvelope => {
                 if (!resultSet || !envelope.continuation) return envelope;
                 if (!vectorReceipt) {
@@ -4318,13 +4385,10 @@ export class ToolHandlers {
                 delete baseEnvelopeDraft.disclosure;
                 delete baseEnvelopeDraft.continuation;
                 delete baseEnvelopeDraft.recommendedNextAction;
+                delete baseEnvelopeDraft.rankedSetDigest;
                 delete baseEnvelopeDraft.hints;
                 const frozenHints = freezeContinuationHints(resultSpecificHints);
-                const baseEnvelope = {
-                    ...baseEnvelopeDraft,
-                    ...(frozenHints ? { hints: frozenHints } : {}),
-                } as FrozenSearchResultSet["baseEnvelope"];
-                const queryPolicyDigest = crypto.createHash("sha256").update(JSON.stringify([
+                const queryPolicyDigest = crypto.createHash("sha256").update(serializeCanonicalJson([
                     input.query,
                     input.scope,
                     input.groupBy,
@@ -4332,6 +4396,26 @@ export class ToolHandlers {
                     retrievalPolicy,
                     queryPlan,
                 ]), "utf8").digest("hex");
+                const rerankerIdentity = resolveSearchRerankerBindingIdentity(
+                    this.reranker,
+                    rerankerApplied,
+                );
+                const bindingInput = buildFrozenSearchRankedSetBindingInput({
+                    vectorReceipt,
+                    ...(generationReceipt ? { generationReceipt } : {}),
+                    preparedObservation,
+                    sourceObservation: finalSourceObservation.sourceObservation,
+                    queryPolicyDigest,
+                    rerankerIdentity,
+                    orderedResults: resultSet.orderedResults,
+                    recommendedActions: resultSet.recommendedActions,
+                });
+                const rankedSetBinding = buildSearchRankedSetBinding(bindingInput);
+                const baseEnvelope = {
+                    ...baseEnvelopeDraft,
+                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                    ...(frozenHints ? { hints: frozenHints } : {}),
+                } as FrozenSearchResultSet["baseEnvelope"];
                 const stored = this.searchContinuationCoordinator.store(this, {
                     value: {
                         canonicalRoot: effectiveRoot,
@@ -4340,6 +4424,7 @@ export class ToolHandlers {
                         preparedObservation,
                         sourceObservation: finalSourceObservation.sourceObservation,
                         queryPolicyDigest,
+                        rankedSetBinding,
                         responseByteLimit: debugMode === "full"
                             ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
                             : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
@@ -4353,6 +4438,7 @@ export class ToolHandlers {
                 });
                 return {
                     ...envelope,
+                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
                     continuation: {
                         ...envelope.continuation,
                         handle: stored.handle,
@@ -4477,6 +4563,7 @@ export class ToolHandlers {
                     exactEnvelope = attachSearchContinuation(
                         exactEnvelope,
                         exactFastPath.finalized.resultSet,
+                        false,
                     );
                 }
                 await this.touchWatchedCodebaseBestEffort(effectiveRoot);
@@ -4820,7 +4907,11 @@ export class ToolHandlers {
                 };
             }
             if (finalized.kind === "ok" && envelope.resultMode === "grouped") {
-                envelope = attachSearchContinuation(envelope, finalized.resultSet);
+                envelope = attachSearchContinuation(
+                    envelope,
+                    finalized.resultSet,
+                    searchDiagnostics.rerankerUsed,
+                );
             }
 
             await this.touchWatchedCodebaseBestEffort(effectiveRoot);
@@ -4962,6 +5053,39 @@ export class ToolHandlers {
         }
 
         const entry = lookup.entry;
+        let bindingValid = false;
+        try {
+            const rerankerIdentity = resolveSearchRerankerBindingIdentity(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
+            bindingValid = entry.baseEnvelope.rankedSetDigest
+                === entry.rankedSetBinding.rankedSetDigest
+                && verifySearchRankedSetBinding(
+                    entry.rankedSetBinding,
+                    buildFrozenSearchRankedSetBindingInput({
+                        vectorReceipt: entry.vectorReceipt,
+                        ...(entry.generationReceipt
+                            ? { generationReceipt: entry.generationReceipt }
+                            : {}),
+                        preparedObservation: entry.preparedObservation,
+                        sourceObservation: entry.sourceObservation,
+                        queryPolicyDigest: entry.queryPolicyDigest,
+                        rerankerIdentity,
+                        orderedResults: entry.orderedResults,
+                        recommendedActions: entry.recommendedActions,
+                    }),
+                );
+        } catch {
+            bindingValid = false;
+        }
+        if (!bindingValid) {
+            this.searchContinuationCoordinator.remove(handle);
+            return fail(
+                "SEARCH_RESULT_SET_STALE",
+                "Search result-set identity changed. Run search_codebase again.",
+            );
+        }
         const observationBefore = this.getPreparedReadCacheObservation(entry.canonicalRoot);
         const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
         if (

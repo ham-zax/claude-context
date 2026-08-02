@@ -45,6 +45,23 @@ test("LateOn runtime profile freezes the qualified D-L16 contract", () => {
     assert.equal(profile.measuredProfile.requestDeadlineMilliseconds, 2000);
 });
 
+test("LateOn reranker exposes the immutable model and runtime-profile identity", () => {
+    const reranker = new LateOnReranker({ modelDirectory: "/unused" });
+    const identity = reranker.getIdentity();
+
+    assert.equal(identity.provider, "lateon");
+    assert.equal(
+        identity.model,
+        "lightonai/LateOn-Code-edge@07ef20f406c86badca122464808f4cac2f6e4b25",
+    );
+    assert.equal(
+        identity.profile,
+        "3593ce0284d7a5aded475ec4be118b6cb738c47643ef27ca70660f67191f12f0",
+    );
+    assert.equal(Object.isFrozen(identity), true);
+    assert.deepEqual(new LateOnReranker({ modelDirectory: "/other" }).getIdentity(), identity);
+});
+
 test("LateOn reranker returns a complete deterministic order from its worker", async (t) => {
     const reranker = new LateOnReranker({
         modelDirectory: "/unused/by/fake-worker",

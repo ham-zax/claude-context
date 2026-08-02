@@ -15,6 +15,7 @@ import {
     SEARCH_RERANK_RRF_K,
     SEARCH_RERANK_TOP_K,
     SEARCH_RERANK_WEIGHT,
+    SEARCH_RESULT_SET_DIGEST_PLACEHOLDER,
     SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
     SEARCH_RRF_K,
     type SearchGroupBy,
@@ -664,6 +665,7 @@ export async function finalizeSearchResults(
             return resultCounts.remainingGroupCount > 0
                 ? {
                     ...envelope,
+                    rankedSetDigest: SEARCH_RESULT_SET_DIGEST_PLACEHOLDER,
                     continuation: {
                         handle: SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
                         nextOffset: results.length,

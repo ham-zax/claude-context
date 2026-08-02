@@ -1,10 +1,16 @@
 import type { ChildProcess } from "node:child_process";
 import { fork } from "node:child_process";
+import * as crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Reranker, RerankOptions, RerankResult } from "@zokizuan/satori-core";
+import type {
+    Reranker,
+    RerankOptions,
+    RerankResult,
+} from "@zokizuan/satori-core";
+import { serializeCanonicalJson } from "../core/canonical-json.js";
 import type {
     LateOnRuntimeProfile,
     LateOnWorkerRequest,
@@ -59,6 +65,7 @@ export function loadLateOnRuntimeProfile(
 
 export class LateOnReranker implements Reranker {
     private readonly profile: LateOnRuntimeProfile;
+    private readonly identity: ReturnType<Reranker["getIdentity"]>;
     private readonly modelDirectory: string;
     private readonly requestDeadlineMilliseconds: number;
     private readonly intraOpThreads: number;
@@ -72,6 +79,13 @@ export class LateOnReranker implements Reranker {
 
     constructor(config: LateOnRerankerConfig) {
         this.profile = loadLateOnRuntimeProfile();
+        this.identity = Object.freeze({
+            provider: "lateon",
+            model: `${this.profile.identity.repository}@${this.profile.identity.revision}`,
+            profile: crypto.createHash("sha256")
+                .update(serializeCanonicalJson(this.profile), "utf8")
+                .digest("hex"),
+        });
         this.modelDirectory = path.resolve(config.modelDirectory);
         this.requestDeadlineMilliseconds = positiveSafeInteger(
             config.requestDeadlineMilliseconds
@@ -89,6 +103,10 @@ export class LateOnReranker implements Reranker {
         this.workerPath = config.workerPath
             ? path.resolve(config.workerPath)
             : fileURLToPath(new URL("./lateon-reranker-worker.js", import.meta.url));
+    }
+
+    getIdentity(): ReturnType<Reranker["getIdentity"]> {
+        return this.identity;
     }
 
     getMaxDocuments(): number {

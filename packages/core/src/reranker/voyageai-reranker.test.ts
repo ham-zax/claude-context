@@ -104,3 +104,16 @@ test('VoyageAIReranker.rerank rejects malformed response rows', async () => {
         });
     });
 });
+
+test('VoyageAIReranker exposes its stable provider and model identity', () => {
+    const reranker = new VoyageAIReranker({
+        apiKey: 'voyage-test-key',
+        model: 'rerank-2.5',
+    });
+
+    assert.deepEqual(reranker.getIdentity(), {
+        provider: 'voyage',
+        model: 'rerank-2.5',
+        profile: 'voyage_reranker_api_v1',
+    });
+});
