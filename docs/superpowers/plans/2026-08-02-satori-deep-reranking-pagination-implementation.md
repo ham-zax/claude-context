@@ -222,6 +222,12 @@ isolated LateOn worker.
 **Files:**
 - Create: `packages/mcp/src/core/search-result-set-identity.ts`
 - Create: `packages/mcp/src/core/search-result-set-identity.test.ts`
+- Modify: `packages/core/src/reranker/reranker.ts`
+- Modify: `packages/core/src/reranker/voyageai-reranker.ts`
+- Modify: `packages/core/src/reranker/voyageai-reranker.test.ts`
+- Modify: `packages/mcp/src/server/lateon-reranker.ts`
+- Modify: `packages/mcp/src/server/lateon-reranker.test.ts`
+- Modify: `packages/mcp/src/core/search-disclosure.ts`
 - Modify: `packages/mcp/src/core/search-types.ts`
 - Modify: `packages/mcp/src/core/handlers.ts`
 - Modify: `packages/mcp/src/core/handlers.scope.test.ts`
@@ -231,6 +237,14 @@ isolated LateOn worker.
 - Produces: canonical per-group projection digests and `rankedSetDigest` bound to
   publication, source observations, query/ranking/disclosure policies, provider
   model/profile or baseline identity, projection identity, and complete order.
+
+`ToolHandlers` must obtain neural identity through a typed `Reranker` contract.
+Do not infer it from constructor names, capability flags, or concrete-provider
+duck typing. Voyage owns its configured provider/model identity; LateOn owns
+its immutable runtime-profile identity. The deterministic path uses the frozen
+baseline identity `B`. The proven generation receipt's policy-document digest,
+marker, collection, and navigation receipt form the publication identity; the
+policy-document digest transitively binds the canonical v4 publication record.
 
 - [ ] Write failing tests proving that changing target, score, evidence,
   navigation, recommended action, order, publication, policy, model, or
