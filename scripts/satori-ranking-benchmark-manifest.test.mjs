@@ -141,6 +141,16 @@ function seal(value) {
     return validateRankingBenchmarkManifest(value);
 }
 
+function resealNormalizedManifest(value) {
+    const { sha256: _seal, ...unsealed } = structuredClone(value);
+    return {
+        ...unsealed,
+        sha256: crypto.createHash("sha256")
+            .update(canonicalJson(unsealed), "utf8")
+            .digest("hex"),
+    };
+}
+
 test("version 2 manifest uses explicit split authority independent of task IDs", () => {
     const query = "Which function handles startup?";
     const value = manifest({
@@ -607,6 +617,40 @@ test("version 3 seals four unopened arms, prospective captures, statistics, and 
     assert.throws(
         () => validateRankingBenchmarkManifest(tampered, { requireSealed: true }),
         /new arms do not match|digest does not match/,
+    );
+});
+
+test("version 3 rejects a re-sealed mutation of the known LateOn projection", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v3.manifest.json"),
+        "utf8",
+    ));
+    const tampered = structuredClone(committed);
+    tampered.lateOnL0Authority.knownEvidence.projectionVersion = "search_rerank_document_v2";
+
+    assert.throws(
+        () => validateRankingBenchmarkManifest(
+            resealNormalizedManifest(tampered),
+            { requireSealed: true },
+        ),
+        /known LateOn evidence does not match the frozen L0 authority/,
+    );
+});
+
+test("version 3 rejects a re-sealed mutation of the known LateOn decision", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v3.manifest.json"),
+        "utf8",
+    ));
+    const tampered = structuredClone(committed);
+    tampered.lateOnL0Authority.knownEvidence.originalDecision = "select_projection_v1_d_l32";
+
+    assert.throws(
+        () => validateRankingBenchmarkManifest(
+            resealNormalizedManifest(tampered),
+            { requireSealed: true },
+        ),
+        /known LateOn evidence does not match the frozen L0 authority/,
     );
 });
 

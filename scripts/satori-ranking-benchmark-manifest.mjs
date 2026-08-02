@@ -955,6 +955,11 @@ function assertVersion3L0Contract(tasks, contract, authority) {
     if (authority.knownEvidence.candidateCaptures.length !== 6) {
         throw new Error("Version 3 known D-L16/D-L32 candidate-capture authority is incomplete.");
     }
+    if (authority.knownEvidence.projectionVersion !== "search_rerank_document_v1"
+        || authority.knownEvidence.originalDecision
+        !== "retain_baseline_b_lateon_quality_directional_but_not_qualified_or_deployable") {
+        throw new Error("Version 3 known LateOn evidence does not match the frozen L0 authority.");
+    }
     const resources = authority.resourceProfile;
     if (resources.maximumModelLoadMilliseconds !== 1000
         || resources.maximumWarmP95Milliseconds !== 900
