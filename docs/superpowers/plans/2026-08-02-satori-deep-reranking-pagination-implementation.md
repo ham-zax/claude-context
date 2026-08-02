@@ -192,6 +192,7 @@ isolated LateOn worker.
 - Modify: `packages/mcp/src/core/search-result-finalization.ts`
 - Modify: `packages/mcp/src/core/search-disclosure.ts`
 - Modify: `packages/mcp/src/core/search-disclosure.test.ts`
+- Modify: `packages/mcp/src/core/search-exact-fast-path.ts`
 - Modify: `packages/mcp/src/core/search-exact-registry-hit.ts`
 - Create: `packages/mcp/src/core/search-exact-registry-hit.test.ts`
 - Modify: `packages/mcp/src/core/search-types.ts`
