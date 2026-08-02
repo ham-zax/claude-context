@@ -30,6 +30,14 @@ docs/evidence/lateon-r3-diagnostic-20260730/LATEON_R3_DIAGNOSTIC_RECEIPT.md
 docs/evidence/lateon-r3-diagnostic-20260730/lateon-r3-diagnostic-artifacts.tar.gz
 ```
 
+The proposed follow-up for deeper D-L32/D-L50 qualification, removal of the
+slow-profile total-disclosure ceiling, compact owner projections, and paginated
+access to the complete frozen result set is:
+
+```text
+docs/plans/SATORI_DEEP_LATEON_RERANKING_AND_PAGINATED_DISCLOSURE_PLAN.md
+```
+
 ## 1. Purpose
 
 Determine from frozen tuning and held-out evidence whether Satori should:
