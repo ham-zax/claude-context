@@ -3668,8 +3668,8 @@ export class ToolHandlers {
             resultMode,
             groupBy,
             rankingMode,
-            limit: Number.isFinite(rawLimit) ? Math.max(1, rawLimit) : 10,
-            ...(Number.isFinite(rawDisclosureLimit)
+            limit: args.limit === undefined ? 10 : rawLimit,
+            ...(args.disclosureLimit !== undefined
                 ? { disclosureLimit: rawDisclosureLimit }
                 : {}),
             debugMode,
@@ -3682,6 +3682,9 @@ export class ToolHandlers {
         const isResultModeValid = input.resultMode === 'grouped' || input.resultMode === 'raw';
         const isGroupByValid = input.groupBy === 'symbol' || input.groupBy === 'file';
         const isRankingModeValid = input.rankingMode === 'default' || input.rankingMode === 'auto_changed_first';
+        const isLimitValid = Number.isSafeInteger(input.limit)
+            && input.limit > 0
+            && input.limit <= this.capabilities.getMaxSearchResultTotal();
 
         const isDebugCandidateLimitValid = input.debugCandidateLimit === undefined
             || (debugMode === 'full'
@@ -3691,9 +3694,10 @@ export class ToolHandlers {
             || (input.resultMode === 'grouped'
                 && Number.isInteger(input.disclosureLimit)
                 && input.disclosureLimit > 0
+                && input.disclosureLimit <= this.capabilities.getMaxSearchPageSize()
                 && input.disclosureLimit <= input.limit);
 
-        if (!isScopeValid || !isResultModeValid || !isGroupByValid || !isRankingModeValid || !isDebugCandidateLimitValid || !isDisclosureLimitValid || typeof input.query !== 'string' || input.query.trim().length === 0) {
+        if (!isScopeValid || !isResultModeValid || !isGroupByValid || !isRankingModeValid || !isLimitValid || !isDebugCandidateLimitValid || !isDisclosureLimitValid || typeof input.query !== 'string' || input.query.trim().length === 0) {
             const payload = this.buildInvalidSearchRequestPayload({
                 path: typeof input.path === 'string' ? input.path : '',
                 query: typeof input.query === 'string' ? input.query : '',
@@ -4900,22 +4904,22 @@ export class ToolHandlers {
         if (
             !Number.isSafeInteger(expectedOffset)
             || expectedOffset < 0
-            || expectedOffset > this.capabilities.getMaxSearchLimit()
+            || expectedOffset > this.capabilities.getMaxFrozenSearchResults()
         ) {
             return fail(
                 "SEARCH_RESULT_SET_OFFSET_INVALID",
-                `Search continuation expectedOffset must be an integer from 0 to ${this.capabilities.getMaxSearchLimit()}.`,
+                `Search continuation expectedOffset must be an integer from 0 to ${this.capabilities.getMaxFrozenSearchResults()}.`,
             );
         }
         if (
             args.limit !== undefined
             && (!Number.isSafeInteger(requestedLimit)
                 || requestedLimit <= 0
-                || requestedLimit > this.capabilities.getMaxSearchLimit())
+                || requestedLimit > this.capabilities.getMaxSearchPageSize())
         ) {
             return fail(
                 "SEARCH_RESULT_SET_LIMIT_INVALID",
-                `Search continuation limit must be an integer from 1 to ${this.capabilities.getMaxSearchLimit()}.`,
+                `Search continuation limit must be an integer from 1 to ${this.capabilities.getMaxSearchPageSize()}.`,
             );
         }
 

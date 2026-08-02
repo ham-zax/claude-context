@@ -17,6 +17,7 @@ import {
     type SearchResultMode,
     type SearchScope,
 } from "./search-constants.js";
+import { resolveFrozenSearchResultLimit } from "./search-policy.js";
 import { buildExactRegistryHitEnvelope } from "./search-exact-registry-hit.js";
 import type { SearchQueryPlan } from "./search-lexical-scoring.js";
 import type { ParsedSearchOperators } from "./search-query-planning.js";
@@ -184,6 +185,7 @@ export async function runExactRegistryFastPath(
     input: SearchExactFastPathInput,
     host: SearchExactFastPathHost,
 ): Promise<SearchExactFastPathOutcome> {
+    const frozenResultLimit = resolveFrozenSearchResultLimit(input.limit);
     const eligible = isExactRegistryEligible(input, host);
     if (!eligible) {
         return {
@@ -315,7 +317,7 @@ export async function runExactRegistryFastPath(
                 resolvedSymbol: exactRegistrySymbol,
                 direction,
                 depth: 1,
-                limit: input.limit,
+                limit: frozenResultLimit,
             }),
         );
         if (!relationshipGraph) {
@@ -362,8 +364,8 @@ export async function runExactRegistryFastPath(
             };
         }
 
-        resultSymbols = peerSymbols.slice(0, input.limit);
-        if (resultSymbols.length < input.limit) {
+        resultSymbols = peerSymbols.slice(0, frozenResultLimit);
+        if (resultSymbols.length < frozenResultLimit) {
             resultSymbols = [...resultSymbols, exactRegistrySymbol];
         }
         relationshipPassUsed = true;

@@ -98,6 +98,8 @@ test('search_codebase schema exposes scoped grouped/raw controls', () => {
     assert.equal(properties.groupBy.default, 'symbol');
     assert.equal(properties.rankingMode.default, 'auto_changed_first');
     assert.equal(properties.limit.default, 20);
+    assert.equal(properties.limit.maximum, Number.MAX_SAFE_INTEGER);
+    assert.equal(properties.disclosureLimit.maximum, 200);
     assert.match(String(properties.disclosureLimit.description), /at most 10 results initially/i);
     assert.deepEqual(properties.debugMode.enum, ['summary', 'ranking', 'freshness', 'full']);
     assert.equal(properties.debugCandidateLimit.maximum, 160);
@@ -116,8 +118,8 @@ test('continue_search schema requires an idempotent cursor offset and bounds its
     const properties = continueTool!.inputSchema.properties as Record<string, SchemaProperty>;
     assert.deepEqual(Object.keys(properties), ['handle', 'expectedOffset', 'limit']);
     assert.equal(properties.expectedOffset.minimum, 0);
-    assert.equal(properties.expectedOffset.maximum, 50);
-    assert.equal(properties.limit.maximum, 50);
+    assert.equal(properties.expectedOffset.maximum, 200);
+    assert.equal(properties.limit.maximum, 200);
 
     const required = continueTool!.inputSchema.required as string[];
     assert.deepEqual(required, ['handle', 'expectedOffset']);

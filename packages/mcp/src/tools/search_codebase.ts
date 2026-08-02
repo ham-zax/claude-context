@@ -226,8 +226,8 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
     resultMode: z.enum(["grouped", "raw"]).default("grouped").optional().describe("Output mode. grouped returns merged search groups, raw returns chunk hits."),
     groupBy: z.enum(["symbol", "file"]).default("symbol").optional().describe("Grouping strategy in grouped mode."),
     rankingMode: z.enum(["default", "auto_changed_first"]).default("auto_changed_first").optional().describe("Ranking policy. auto_changed_first boosts files changed in the current git working tree when available."),
-    limit: z.number().int().positive().max(ctx.capabilities.getMaxSearchLimit()).default(ctx.capabilities.getDefaultSearchLimit()).optional().describe("Maximum groups (grouped mode) or chunks (raw mode)."),
-    disclosureLimit: z.number().int().positive().max(ctx.capabilities.getMaxSearchLimit()).optional().describe("Optional initial grouped-result disclosure limit. Grouped searches show at most 10 results initially when omitted; set this equal to limit to expose the full result set immediately. Retrieval depth and reranker admission continue to use limit."),
+    limit: z.number().int().positive().max(ctx.capabilities.getMaxSearchResultTotal()).default(ctx.capabilities.getDefaultSearchLimit()).optional().describe("Desired total groups (grouped mode) or chunks (raw mode) from the bounded frozen search pipeline."),
+    disclosureLimit: z.number().int().positive().max(ctx.capabilities.getMaxSearchPageSize()).optional().describe("Optional initial grouped-result page size. Grouped searches show at most 10 results initially when omitted; continuation exposes the remaining frozen order. Retrieval depth and reranker admission are independent."),
     debug: z.boolean().optional().describe("Backward-compatible debug toggle. true selects full diagnostics when debugMode is omitted."),
     debugMode: z.enum(["summary", "ranking", "freshness", "full"]).optional().describe("Bounded diagnostic projection. May be used without debug; debug=true remains an alias for full."),
     debugCandidateLimit: z.number().int().positive().max(SEARCH_MAX_DIAGNOSTIC_CANDIDATES).optional().describe("Diagnostic-only retrieval depth. Valid only with full diagnostics; it does not change the visible result limit or reranker ceilings."),
@@ -255,9 +255,9 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
             message: "disclosureLimit is available only with grouped results.",
         });
     }
+    const effectiveRequestedTotal = value.limit ?? ctx.capabilities.getDefaultSearchLimit();
     if (value.disclosureLimit !== undefined
-        && value.limit !== undefined
-        && value.disclosureLimit > value.limit) {
+        && value.disclosureLimit > effectiveRequestedTotal) {
         refinementContext.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["disclosureLimit"],
@@ -315,7 +315,7 @@ export const searchCodebaseTool: McpTool = {
             debugMode: normalizedDebugMode,
         };
         const startedAt = Date.now();
-        const limit = Math.max(1, Math.min(ctx.capabilities.getMaxSearchLimit(), input.limit ?? ctx.capabilities.getDefaultSearchLimit()));
+        const limit = input.limit ?? ctx.capabilities.getDefaultSearchLimit();
         const profile = getProfile(ctx);
         const parsedOperators = parseSearchOperators(input.query);
         const queryPlan = buildSearchQueryPlan(

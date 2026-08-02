@@ -77,6 +77,10 @@ test('Potion is a slow local embedding capability without cloud reranking', () =
     assert.equal(resolver.getEmbeddingLocality(), 'local');
     assert.equal(resolver.getPerformanceProfile(), 'slow');
     assert.equal(resolver.hasReranker(), false);
+    assert.equal(resolver.getMaxSearchResultTotal(), Number.MAX_SAFE_INTEGER);
+    assert.equal(resolver.getMaxFrozenSearchResults(), 200);
+    assert.equal(resolver.getMaxSearchPageSize(), 200);
+    assert.equal(resolver.getMaxSearchLimit(), Number.MAX_SAFE_INTEGER);
 });
 
 test('qualified LateOn enables local reranking without cloud credentials', () => {

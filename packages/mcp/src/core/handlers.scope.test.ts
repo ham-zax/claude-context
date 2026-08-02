@@ -166,6 +166,9 @@ type ToolHandlersTestOverrides = {
         observation: string;
         sourceObservation: string;
     };
+    buildRelationshipBackedCallGraph: (
+        input: { limit: number; [key: string]: unknown },
+    ) => Promise<unknown>;
 };
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
@@ -748,6 +751,59 @@ function installVerifiedSourceBarrier(handlers: ToolHandlers): void {
             sourceObservation: 'scope-source-observation',
         });
 }
+
+test('handleSearchCode rejects unsafe direct logical and disclosure limits', async () => {
+    await withTempStateRoot(async () => {
+        await withTempRepo(async (repoPath) => {
+            const handlers = createHandlers(repoPath, []);
+            for (const args of [
+                { limit: 0 },
+                { limit: 1.5 },
+                { limit: Number.POSITIVE_INFINITY },
+                { limit: Number.MAX_SAFE_INTEGER + 1 },
+                { limit: 10, disclosureLimit: Number.NaN },
+                { limit: 10, disclosureLimit: Number.POSITIVE_INFINITY },
+                { limit: 201, disclosureLimit: 201 },
+            ]) {
+                const response = await handlers.handleSearchCode({
+                    path: repoPath,
+                    query: 'auth ownership',
+                    scope: 'runtime',
+                    resultMode: 'grouped',
+                    groupBy: 'symbol',
+                    ...args,
+                });
+                assert.equal(response.isError, true);
+                assert.match(
+                    JSON.parse(response.content[0]?.text || '{}').message ?? '',
+                    /Invalid search arguments/,
+                );
+            }
+        });
+    });
+});
+
+test('handleContinueSearch rejects direct cursor and page values outside frozen bounds', async () => {
+    await withTempStateRoot(async () => {
+        await withTempRepo(async (repoPath) => {
+            const handlers = createHandlers(repoPath, []);
+            for (const [args, expectedCode] of [
+                [{ expectedOffset: 201, limit: 1 }, 'SEARCH_RESULT_SET_OFFSET_INVALID'],
+                [{ expectedOffset: 0, limit: 201 }, 'SEARCH_RESULT_SET_LIMIT_INVALID'],
+            ] as const) {
+                const response = await handlers.handleContinueSearch({
+                    handle: 'a'.repeat(48),
+                    ...args,
+                });
+                assert.equal(response.isError, true);
+                assert.equal(
+                    JSON.parse(response.content[0]?.text || '{}').code,
+                    expectedCode,
+                );
+            }
+        });
+    });
+});
 
 test('handleSearchCode falls back from structural ownership when completion proof omits navigation evidence', async () => {
     await withTempStateRoot(async () => {
@@ -3489,6 +3545,15 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
             const { target, caller } = await writeCallerSearchFixture(repoPath);
 
             const handlers = createHandlers(repoPath, []);
+            const overrides = handlers as unknown as ToolHandlersTestOverrides;
+            const originalBuildRelationshipBackedCallGraph = overrides
+                .buildRelationshipBackedCallGraph
+                .bind(handlers);
+            const observedRelationshipLimits: number[] = [];
+            overrides.buildRelationshipBackedCallGraph = async (input) => {
+                observedRelationshipLimits.push(input.limit);
+                return originalBuildRelationshipBackedCallGraph(input);
+            };
             (handlers as unknown as ToolHandlersTestOverrides).context.semanticSearch = async () => {
                 throw new Error('semanticSearch should not run for deterministic caller hits');
             };
@@ -3499,7 +3564,7 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
                 scope: 'runtime',
                 resultMode: 'grouped',
                 groupBy: 'symbol',
-                limit: 2,
+                limit: Number.MAX_SAFE_INTEGER,
                 debugMode: 'full',
             });
 
@@ -3511,6 +3576,7 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
             );
             assert.equal(payload.hints?.debugSearch?.route?.kind, 'references');
             assert.equal(payload.hints?.debugSearch?.passesUsed?.includes('relationships'), true);
+            assert.equal(observedRelationshipLimits[0], 200);
             assert.deepEqual(payload.hints?.debugSearch?.providerWork, {
                 semanticSearchAttempts: 0,
                 embeddingCallsByCurrentContract: 0,
