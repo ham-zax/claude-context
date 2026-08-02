@@ -21,7 +21,7 @@ Potion dense retrieval + BM25 lexical retrieval
     -> eligibility and authoritative evidence
     -> owner-family deduplication
     -> compact reranker projections
-    -> qualified LateOn depth: 16, 32, or 50
+    -> selected LateOn candidate depth: 16, 32, or 50
     -> deterministic grouping and final order
     -> 10 full results initially
     -> optional compact title/path index
@@ -38,6 +38,18 @@ conflates:
 | Logical result-set request | How much of the frozen ranking the caller may eventually inspect | No performance-profile ceiling below the available frozen set |
 | Disclosure page size | Full results returned in one response | Keep bounded; default to 10 and continue from the same frozen set |
 
+Execution is split into three independent tracks:
+
+```text
+Track P  frozen result-set pagination
+Track L  LateOn projection and depth qualification
+Track I  optional compact result index
+```
+
+Track P may qualify even if every LateOn contender is rejected. Track I may be
+rejected or deferred without blocking Track P or Track L. Each track requires
+its own authority, receipt, and terminal outcome.
+
 “No limit on how much the agent can request” does not mean an unbounded response
 or unbounded retrieval work. A caller may request the complete available frozen
 set and page through it until exhaustion. Multiple bounded arms and semantic
@@ -45,7 +57,7 @@ passes may produce a deduplicated union larger than one arm's depth of 80.
 Per-page response-byte, cache-byte, safe-integer, and expiry bounds remain
 mandatory.
 
-## 2. Current qualified baseline
+## 2. Current evidence authority
 
 The current implementation has these independent facts:
 
@@ -58,10 +70,10 @@ slow-profile maximum request      15
 ```
 
 The generic reranker path can construct a pool of up to 50 candidates, but the
-qualified LateOn provider reports a maximum of 16 documents. The offline Potion
-profile is also classified as slow, which currently prevents an agent from
-requesting more than 15 results even though first-stage retrieval may already
-have produced a larger frozen pool.
+runtime-qualified LateOn provider reports a maximum of 16 documents. The
+offline Potion profile is also classified as slow, which currently prevents an
+agent from requesting more than 15 results even though first-stage retrieval
+may already have produced a larger frozen pool.
 
 The completed cross-repository experiment remains the baseline authority:
 
@@ -70,10 +82,29 @@ docs/plans/SATORI_CROSS_REPOSITORY_RANKING_ABLATION_PLAN.md
 docs/evidence/lateon-runtime-profile-20260730/LATEON_RUNTIME_PROFILE_RECEIPT.md
 ```
 
-At D-L16 it measured a macro-MRR increase from `0.360185185185` to
-`0.401111111111` and owner-at-three from `0.372222222222` to
-`0.494444444444`, with zero hard-negative exposure at three. Those are tuning
-results, not permission to assume that D-L32 or D-L50 is better.
+The evidence must be interpreted narrowly:
+
+| Arm | Previously observed quality | Authority |
+| --- | --- | --- |
+| `B` | Macro MRR `0.3602`, owner-at-three `0.3722` | Default qualified product ranking policy |
+| `D-L16` projection v1 | Macro MRR `0.4011`, owner-at-three `0.4944` | Directional tuning quality; failed the frozen owner-at-three interval gate |
+| `D-L32` projection v1 | Macro MRR `0.4174`, owner-at-three `0.4944`; MRR `+0.0163` over D-L16 | Previously observed diagnostic winner; failed the same frozen quality gate |
+| Optimized D-L16 runtime | Reproduced the prior D-L16 scores and order | Runtime-qualified for optional isolated implementation, not quality-qualified as default policy |
+
+The frozen R3 decision remains authoritative: neither D-L16 nor D-L32 passed
+every quality gate, and `B` remains the default qualified ranking policy. The
+later runtime receipt replaced the assumed resource envelope; it did not
+replace the R3 quality decision.
+
+The original D-L16/D-L32 resource failures are also already observed. The
+optimized runtime receipt remeasured D-L16 only. Optimized D-L32 and D-L50
+resource profiles remain unopened work.
+
+D-L16 and D-L32 projection-v1 outcomes are already known. A new rule applied to
+those results must be labeled revised and post-hoc and cannot be described as
+preregistered evidence. Only unopened D-L50 projection-v1 results and
+prospectively frozen projection-v2 arms can receive new preregistered quality
+authority.
 
 ## 3. Non-negotiable invariants
 
@@ -100,9 +131,41 @@ Every contender and implementation must preserve:
 10. No query-specific exceptions, repository-specific weights, or new blanket
     path constants are permitted.
 
-## 4. Public result and pagination contract
+## 4. Track P — frozen result-set pagination
 
-### 4.1 Decouple request size from performance profile
+Track P is deterministic product work and does not depend on LateOn admission.
+
+### P0 — freeze the five independent values
+
+Before implementation, derive and freeze:
+
+```text
+requestedTotal
+    caller's positive safe-integer request; not capped by performance profile
+
+effectiveFrozenTotal
+    groups actually retained in the immutable result set after applying the
+    pipeline-derived MAX_FROZEN_RESULTS bound
+
+retrievalDepth
+    per first-stage arm/pass depth; initially 80
+
+rerankerDepth
+    provider-qualified neural input depth; independent of pagination
+
+pageSize
+    groups disclosed in one response after applying MAX_PAGE_SIZE and the
+    response-byte budget
+```
+
+`MAX_FROZEN_RESULTS` must be derived from the bounded arm/pass union,
+deduplication, grouping, result-set cache byte budget, and lifecycle—not from
+`performanceProfile`. `MAX_PAGE_SIZE` must be derived from the grouped response
+byte contract. P0 must record the exact numeric values, formulae, and policy
+identity before P1 changes validation or observes new pagination results.
+P1 and P2 remain closed until that P0 receipt exists.
+
+### P1 — decouple request size from performance profile
 
 The public search contract must stop using `performanceProfile` to reject a
 logical request merely because it exceeds 10, 15, 20, 30, or 50 results.
@@ -131,10 +194,27 @@ remaining counts. A request larger than the available frozen set is satisfied
 by exhausting that set rather than rejected by the embedding performance tier.
 
 The first implementation may keep each first-stage request at depth 80. It must
-report arm, pass, union, eligible, grouped, and disclosed counts separately
-instead of implying either an 80-result total ceiling or repository-wide recall.
+report arm, pass, union, eligible, grouped, frozen, disclosed, and remaining
+counts separately instead of implying either an 80-result total ceiling or
+repository-wide recall.
 
-### 4.2 Compact result index
+### P2 — qualify frozen continuation
+
+Qualify complete traversal independently with LateOn disabled. Require every
+frozen group to appear exactly once, in final order, with no new retrieval,
+eligibility, grouping, or ranking work. Expiry, eviction, server-owner shutdown,
+wrong offsets, retries, and response-byte truncation must fail explicitly and
+must never create a replacement ranking under the old handle.
+
+Track P terminal outcomes are:
+
+```text
+pagination_complete_frozen_set_qualified
+pagination_bound_derivation_blocked
+pagination_identity_or_order_rejected
+```
+
+## 5. Track I — optional compact result index
 
 Evaluate an optional compact index generated from the final frozen order. Each
 entry may contain only:
@@ -157,7 +237,15 @@ The product comparison must measure whether the compact index helps agents
 select continuations or targeted reads. Do not ship it merely because it is
 small.
 
-## 5. Owner-diverse reranker input
+Track I is independently terminal:
+
+```text
+compact_result_index_qualified
+compact_result_index_rejected
+compact_result_index_deferred
+```
+
+## 6. Track L — owner-diverse LateOn input
 
 Retain the existing owner-family pool as the single authority for reranker
 admission:
@@ -181,13 +269,18 @@ projection-byte omissions
 reranked count
 ```
 
-## 6. Compact projection qualification
+## 7. Compact projection qualification
 
 Do not change projection and depth in the same uncontrolled comparison.
 
-First compare the existing `search_rerank_document_v1` projection with one
-prospective compact owner projection at D-L16. Freeze the compact projection
-before opening D-L32 or D-L50 results.
+Reuse the immutable projection-v1 D-L16 and D-L32 scores when their model,
+query, candidate identities, and projection digest are unchanged. Do not spend
+new scoring work to rediscover known quality results.
+
+Define one prospective projection v2, then freeze its D-L16, D-L32, and D-L50
+arms before viewing any projection-v2 output. Those are new factorial arms and
+may receive preregistered authority. Projection-v1 D-L50 is also unopened and
+may be preregistered. Do not tune projection v2 after viewing its D-L16 result.
 
 The prospective projection should contain, when authoritative evidence exists:
 
@@ -196,7 +289,7 @@ repository-relative path
 language and symbol kind
 canonical symbol label
 signature or declaration
-bounded docstring/documentation summary
+bounded verbatim docstring or documentation excerpt
 query-relevant bounded source excerpt
 bounded owner siblings only when required
 ```
@@ -214,10 +307,17 @@ The projection owner must guarantee:
 * no mutable working-tree evidence without a valid prepared-source barrier;
 * no silent loss of the declaration merely to retain a lower-value excerpt.
 
+“Query-relevant” must be mechanical. Reuse the versioned
+`selectBoundedSource` policy with normalized query tokens, authoritative symbol
+spans, validated evidence spans, deterministic byte/line windows, and its
+existing stable tie order. Do not add an LLM-generated summary, an undisclosed
+heuristic, or a model-selected source window. Any selector change requires a
+new selection-policy identity and its own isolated comparison.
+
 If the compact projection changes D-L16 ordering or scores, record that as a
 projection experiment. Do not attribute the change to candidate depth.
 
-## 7. LateOn depth qualification
+## 8. Track L — LateOn depth qualification
 
 ### L0 — freeze authority
 
@@ -228,27 +328,38 @@ Before viewing new contender output, freeze:
 * model, tokenizer, ONNX artifact, and loader digests;
 * query formatting and compact projection identity;
 * owner-family admission policy;
-* D-L16, D-L32, and D-L50 executable policy artifacts;
+* hashes of the already-observed projection-v1 D-L16/D-L32 artifacts and their
+  original frozen quality decision;
+* unopened projection-v1 D-L50 and projection-v2 D-L16/D-L32/D-L50 executable
+  policy artifacts;
 * process isolation, thread count, warmup, and measurement order;
 * exact quality, safety, practical-effect, and uncertainty rules.
 
+Any revised selection rule applied to the already-observed projection-v1
+D-L16/D-L32 results must be declared post-hoc and reported separately. It cannot
+retroactively qualify either arm or replace `B`.
+
 Held-out tasks remain sealed during L0 through L4.
 
-### L1 — reproduce D-L16
+### L1 — validate and replay known authority
 
-Run the current qualified depth through the new projection/runtime harness.
-Require identical candidate membership and eligibility. If the projection is
-unchanged, require identical scores and order. If the compact projection was
-selected, require its preregistered non-inferiority gates and retain both
-orders in the receipt.
+Validate the immutable D-L16/D-L32 artifact hashes, model identity, candidate
+captures, and projection-v1 identity. Replay their existing scores without new
+model scoring and require identical candidate membership, eligibility, scores,
+and order.
 
-Stop if D-L16 cannot be reproduced; deeper results would lack authority.
+Stop if either known arm cannot be reproduced; new depth comparisons would lack
+a trustworthy control.
 
-### L2 — measure D-L32 and D-L50
+### L2 — measure new quality arms and optimized resources
 
-Run 16, 32, and 50 against identical frozen candidates in isolated processes.
-Counterbalance execution order so later depths cannot inherit model caches or
-allocator state.
+For projection v1, score only the unopened D-L50 quality arm. Reuse the known
+D-L16/D-L32 scores. If projection v2 was admitted, score its preregistered
+D-L16/D-L32/D-L50 factorial arms.
+
+Rerun resource measurements for depths 16, 32, and 50 under the optimized
+runtime in isolated processes. Counterbalance execution order so later depths
+cannot inherit model caches or allocator state.
 
 Measure separately:
 
@@ -273,7 +384,7 @@ decision procedure before results are opened. A small latency miss is not an
 automatic rejection: quality, latency, memory, and failure containment must be
 reported as a Pareto comparison with the preregistered practical-effect rule.
 
-### L3 — select at most one depth
+### L3 — select at most one disabled neural candidate
 
 Selection is mechanical:
 
@@ -289,15 +400,21 @@ deployment profile
     -> select it
 
 No depth improves safely
-    -> retain deterministic baseline or the already-qualified D-L16 option
+    -> retain deterministic baseline B; D-L16 remains runtime-qualified but
+       quality-directional and optional
 ```
 
 Do not select D-L50 merely because it is the largest. Do not reduce first-stage
 retrieval or disclosure safety to compensate for model cost.
 
-### L4 — production implementation
+Projection-v1 D-L16/D-L32 retain their original failed quality verdict. A new
+candidate may advance only from an unopened preregistered arm. Selection at L3
+creates a disabled candidate implementation; `B` remains the default policy.
 
-Only after L3 selects a depth:
+### L4 — extend the existing provider as a disabled candidate
+
+Isolated D-L16 provider support already exists. Only after L3 selects a new
+candidate:
 
 1. Publish a new versioned LateOn runtime profile containing the selected depth
    and measured defaults.
@@ -309,6 +426,18 @@ Only after L3 selects a depth:
    complete reranked order.
 6. Add diagnostics that distinguish retrieval pool, eligible pool, reranker
    pool, reranked count, disclosed count, and remaining continuation count.
+7. Keep the candidate disabled by default and require an explicit experimental
+   selection until held-out adjudication passes.
+8. Freeze maximum simultaneous reranks, bounded queue length, admission
+   behavior, cancellation semantics, shutdown behavior, and worker-termination
+   deadlines in the versioned runtime profile.
+9. When the queue is full, a request is cancelled, or its deadline expires
+   while queued, discard all neural work for that request and restore its
+   deterministic baseline without a partial order.
+
+The concurrency receipt must prove active and queued counts remain bounded,
+deadlines include queue wait, shutdown rejects and drains every queued/pending
+request, and no worker or promise remains live after cancellation or closure.
 
 ### L5 — held-out adjudication
 
@@ -316,7 +445,14 @@ Open held-out evidence once, only after the implementation reproduces its
 tuning receipt. A held-out failure retains the previous product policy. Do not
 tune depth, projection, weights, or thresholds after opening held-out results.
 
-## 8. Implementation ownership
+### L6 — default-policy decision
+
+Default activation may be considered only after L5 passes every frozen quality,
+safety, identity, resource, and fallback gate. Otherwise `B` remains default.
+An L5 pass is necessary but does not authorize release or activation by itself;
+record that decision in a separate production-policy receipt.
+
+## 9. Implementation ownership
 
 Use the existing owners rather than adding policy to `Context`:
 
@@ -328,15 +464,17 @@ Use the existing owners rather than adding policy to `Context`:
 | Frozen result-set lifecycle | `packages/mcp/src/core/search-result-set-cache.ts` |
 | Owner-family reranker admission | `packages/mcp/src/core/search-rerank-policy.ts` |
 | Reranker execution and deterministic fallback | `packages/mcp/src/core/search-execution.ts` |
-| Reranker document projection | the existing search query-support/projection owner |
+| Reranker document serialization | `packages/mcp/src/core/search-rerank-document.ts` |
+| Mechanical bounded source selection | `packages/mcp/src/core/bounded-source-selector.ts` |
 | LateOn model/runtime contract | `packages/mcp/src/server/lateon-reranker*.ts` and the versioned profile asset |
+| LateOn concurrency and backpressure | `packages/mcp/src/server/lateon-reranker.ts` |
 | Grouping and disclosure | existing search grouping/finalization owners |
 
 `Context` remains the composition root and compatibility façade. This work must
 not move search policy, model lifecycle, continuation state, or disclosure
 state back into it.
 
-## 9. Verification matrix
+## 10. Verification matrix
 
 At minimum, cover:
 
@@ -352,13 +490,19 @@ At minimum, cover:
 * file-level Markdown, configuration, tests, scripts, and source symbols;
 * model missing, digest mismatch, timeout, crash, malformed output, incomplete
   output, and out-of-order identities;
+* simultaneous requests at, below, and above the frozen active/queue bounds;
+* cancellation before admission, while queued, and during worker execution;
+* shutdown with queued and active work and proof that the worker is terminated;
 * aggregate projection-byte exhaustion;
 * unchanged candidate membership and eligibility across every depth;
 * deterministic baseline restoration after every failure.
 
-## 10. Completion receipt
+## 11. Independent completion receipts
 
-The final receipt must include:
+Tracks P, L, and I each produce a separate receipt. A combined summary may link
+them but must not turn one track's rejection into another track's failure.
+
+Each applicable receipt must include:
 
 ```text
 source revision and tree digest
@@ -376,15 +520,35 @@ selected depth or explicit retain-baseline decision
 held-out opening record, if L5 was authorized
 ```
 
-The plan is complete only when one of these terminal outcomes is recorded:
+Track P records one of:
 
 ```text
-lateon_depth_16_retained
-lateon_depth_32_qualified
-lateon_depth_50_qualified
-deterministic_baseline_retained
+pagination_complete_frozen_set_qualified
+pagination_bound_derivation_blocked
+pagination_identity_or_order_rejected
+```
+
+Track I records one of:
+
+```text
+compact_result_index_qualified
+compact_result_index_rejected
+compact_result_index_deferred
+```
+
+Track L records one of:
+
+```text
+baseline_b_retained
+lateon_depth_32_disabled_candidate
+lateon_depth_50_disabled_candidate
+lateon_projection_v2_disabled_candidate
+lateon_default_policy_qualified_after_held_out
 blocked_by_projection_authority
 blocked_by_candidate_replay
 rejected_for_safety_regression
 rejected_for_deployment_profile
 ```
+
+The plan is complete when every authorized track has its own terminal receipt.
+Track P completion does not require Track L or Track I authorization or success.
