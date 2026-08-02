@@ -654,6 +654,13 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
             groupBy: 'symbol',
             limit: 5,
             resultMode: 'grouped',
+            resultCounts: {
+                requestedTotal: 5,
+                effectiveFrozenTotal: 1,
+                availableGroupCount: 1,
+                returnedGroupCount: 1,
+                remainingGroupCount: 0,
+            },
             recommendedNextAction: {
                 resultIndex: 0,
                 tool: 'read_file',

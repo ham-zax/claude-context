@@ -1485,7 +1485,7 @@ test('status-prepared search routes an untracked pending watcher event through f
     });
 });
 
-test('search continuation preserves the full grouped order without new retrieval or reranking', async () => {
+test('search continuation preserves deterministic and LateOn-ranked grouped order without recomputation', async () => {
     await withTempRepo(async (repoPath) => {
         const searchResults: SearchFixtureResult[] = [
             {
@@ -1530,8 +1530,9 @@ test('search continuation preserves the full grouped order without new retrieval
             initialSourceAvailable = true,
             searchContinuationCoordinator?: SearchContinuationCoordinator,
             reranker?: HandlerReranker,
+            preparedSearchResults: SearchFixtureResult[] = searchResults,
         ) => {
-            const handlers = createHandlers(repoPath, searchResults, reranker, {
+            const handlers = createHandlers(repoPath, preparedSearchResults, reranker, {
                 enableVectorReceipt: true,
                 respectSemanticTopK: true,
                 searchContinuationCoordinator,
@@ -2156,6 +2157,140 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.equal(expiredResponse.isError, true);
         assert.equal(expiredPayload.code, 'SEARCH_RESULT_SET_EXPIRED');
         assert.equal(expired.getRetrievalCalls(), expiredRetrievalCalls);
+
+        const lateOnBaselineFiles = [
+            'src/lateon-01.ts',
+            'src/lateon-02.ts',
+            'src/lateon-03.ts',
+            'src/lateon-04.ts',
+            'src/lateon-05.ts',
+            'src/lateon-06.ts',
+            'src/lateon-07.ts',
+            'src/lateon-08.ts',
+            'src/lateon-09.ts',
+            'src/lateon-10.ts',
+            'src/lateon-11.ts',
+            'src/lateon-12.ts',
+        ];
+        const expectedLateOnOrder = [
+            'src/lateon-12.ts',
+            'src/lateon-11.ts',
+            'src/lateon-10.ts',
+            'src/lateon-09.ts',
+            'src/lateon-08.ts',
+            'src/lateon-07.ts',
+            'src/lateon-06.ts',
+            'src/lateon-05.ts',
+            'src/lateon-04.ts',
+            'src/lateon-03.ts',
+            'src/lateon-02.ts',
+            'src/lateon-01.ts',
+        ];
+        const lateOnSearchResults = lateOnBaselineFiles.map((relativePath, index) => ({
+            content: `export function lateOnCandidate${index + 1}() { return true; }`,
+            relativePath,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.5,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }));
+        let lateOnCalls = 0;
+        let lateOnCandidates = 0;
+        let lateOnInputBytes = 0;
+        const lateOnCoordinator = new SearchContinuationCoordinator();
+        const lateOnRanked = prepareHandlers(
+            true,
+            lateOnCoordinator,
+            {
+                getIdentity: () => ({
+                    provider: 'lateon',
+                    model: 'lightonai/LateOn-Code-edge@07ef20f406c86badca122464808f4cac2f6e4b25',
+                    profile: 'satori_lateon_runtime_profile_v1',
+                }),
+                getMaxDocuments: () => 16,
+                rerank: async (_query, documents) => {
+                    lateOnCalls += 1;
+                    lateOnCandidates += documents.length;
+                    lateOnInputBytes += documents.reduce(
+                        (total, document) => total + Buffer.byteLength(document, 'utf8'),
+                        0,
+                    );
+                    assert.deepEqual(
+                        documents.map((document) => document.split('\n', 1)[0]),
+                        lateOnBaselineFiles,
+                    );
+                    return [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].map(
+                        (index) => ({ index, relevanceScore: 1 }),
+                    );
+                },
+            },
+            lateOnSearchResults,
+        );
+        const lateOnInitialResponse = await lateOnRanked.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'rank neural pagination behavior',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 12,
+            disclosureLimit: 3,
+            debugMode: 'full',
+        });
+        assert.equal(
+            lateOnInitialResponse.isError,
+            undefined,
+            lateOnInitialResponse.content[0]?.text,
+        );
+        let lateOnPayload = JSON.parse(lateOnInitialResponse.content[0]?.text || '{}');
+        const neuralWorkAfterInitial = {
+            calls: lateOnCalls,
+            candidates: lateOnCandidates,
+            inputBytes: lateOnInputBytes,
+            retrievalCalls: lateOnRanked.getRetrievalCalls(),
+        };
+        assert.equal(neuralWorkAfterInitial.calls, 1);
+        assert.equal(neuralWorkAfterInitial.candidates, 12);
+        assert.equal(neuralWorkAfterInitial.inputBytes > 0, true);
+        assert.deepEqual(lateOnPayload.hints?.debugSearch?.providerWork, {
+            semanticSearchAttempts: 1,
+            embeddingCallsByCurrentContract: 1,
+            denseQueriesByCurrentContract: 1,
+            sparseQueriesByCurrentContract: 1,
+            rerankerCalls: 1,
+            rerankerCandidates: 12,
+            rerankerInputBytes: neuralWorkAfterInitial.inputBytes,
+            candidatesWithSemanticEvidence: 12,
+            candidatesWithLexicalEvidence: 0,
+            candidatesWithCurrentSourceEvidence: 0,
+        });
+        const lateOnFiles = lateOnPayload.results.map(
+            (result: { target: { file: string } }) => result.target.file,
+        );
+        while (lateOnPayload.continuation) {
+            const request = {
+                handle: lateOnPayload.continuation.handle,
+                expectedOffset: lateOnPayload.continuation.nextOffset,
+                limit: 4,
+            };
+            const page = await lateOnRanked.handlers.handleContinueSearch(request);
+            assert.equal(page.isError, undefined, page.content[0]?.text);
+            const retry = await lateOnRanked.handlers.handleContinueSearch(request);
+            assert.equal(retry.content[0]?.text, page.content[0]?.text);
+            lateOnPayload = JSON.parse(page.content[0]?.text || '{}');
+            lateOnFiles.push(...lateOnPayload.results.map(
+                (result: { target: { file: string } }) => result.target.file,
+            ));
+            assert.deepEqual({
+                calls: lateOnCalls,
+                candidates: lateOnCandidates,
+                inputBytes: lateOnInputBytes,
+                retrievalCalls: lateOnRanked.getRetrievalCalls(),
+            }, neuralWorkAfterInitial);
+        }
+        assert.deepEqual(lateOnFiles, expectedLateOnOrder);
+        assert.equal(new Set(lateOnFiles).size, expectedLateOnOrder.length);
     });
 });
 
