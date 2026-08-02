@@ -172,4 +172,3 @@ ONNX execution must run outside the MCP process. Synchronous Node ONNX work
 cannot be safely interrupted by an in-process timer. Worker isolation is
 required so timeout, crash, or unavailable model preserves the complete
 baseline order and cannot destabilize the MCP server.
-
