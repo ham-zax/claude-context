@@ -1,0 +1,4044 @@
+{
+  "version": 3,
+  "kind": "satori_cross_repository_ranking_manifest",
+  "repositories": [
+    {
+      "id": "gitnexus-r0",
+      "family": "gitnexus",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/abhigyanpatwari/GitNexus.git",
+      "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+      "gitTree": "134f62ea16b1a96a35ed04555a661f0a0612de6a",
+      "sourceTreeSha256": "23ab552eac7413ec58db33e0d9aa3d574f9087d3b785fd40df09b784eacdd608",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "bookmark-ai-organizer-r0",
+      "family": "bookmark_ai_organizer",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/Edmon02/bookmark-ai-organizer.git",
+      "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+      "gitTree": "08a9f1739597edc485091aacf2667e91947d30f3",
+      "sourceTreeSha256": "d16888fa92476b5207f726641677501e4e67d682d0c47ec569440cd3ca894861",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "duas-r0",
+      "family": "duas",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/duas.git",
+      "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+      "gitTree": "43c6cfadf2dd096ee7c8719f83946cb405a53bc2",
+      "sourceTreeSha256": "ecf940f51b97738db23a226cd6222a01257f1e4acebca41823d49aab21452e81",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "vox-infinity-r0",
+      "family": "vox_infinity",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/VoxInfinity.git",
+      "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+      "gitTree": "02986e689211b83ac20784ed83d1572e1614195f",
+      "sourceTreeSha256": "00dd582a86d0703e137e9be396562fea64671305c03fc729d410dbdecfdee0d5",
+      "primaryLanguage": "javascript"
+    },
+    {
+      "id": "rpc-r0",
+      "family": "rpc_learner_engine",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/rpc.git",
+      "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+      "gitTree": "8a73121c2e7a09d315cbb746f2d950306d435fff",
+      "sourceTreeSha256": "2aaaf72aa6a4dea8c6fbfdd39d50561da470b0ed82050d8b6ba5d9f0ef5d93c3",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "edge-tts-app-r0",
+      "family": "edge_tts_app",
+      "split": "tuning",
+      "sourceRepository": "https://github.com/ham-zax/edge-tts-app.git",
+      "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+      "gitTree": "d53c827a51dc2621a28ad632d0e37550c53a6b17",
+      "sourceTreeSha256": "20224491a147e6af6198dcbc2d46d9b640dfc76ef7ede7d9897f847ca01fde2e",
+      "primaryLanguage": "python"
+    },
+    {
+      "id": "promptready-r0",
+      "family": "promptready",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/PromptReady.git",
+      "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+      "gitTree": "0111598a1c3ac9228fedc62c9e0a88a5047a98a5",
+      "sourceTreeSha256": "03caf89e635f51940c4a9076afdac14052dfa31280abe36c8cdcc3e901199862",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "fastcontext-r0",
+      "family": "fastcontext",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/microsoft/fastcontext.git",
+      "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+      "gitTree": "c81d38f19b2e9b87575c621eb55db9921c43f63a",
+      "sourceTreeSha256": "b4d1da142850adccfaed9aa0a57223ab30883c7f99ea8f806d0b887ed5c0ad58",
+      "primaryLanguage": "python"
+    },
+    {
+      "id": "recovery-dashboard-r0",
+      "family": "recovery_dashboard",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/recovery_dashboard.git",
+      "revision": "14dfdaf380aa705205497402c17a382fae650677",
+      "gitTree": "f74693f44808d28e031e1ac2eaa0f98052982113",
+      "sourceTreeSha256": "a826a37de52d2174dcf2187f82aca34fba01c6175aed27002edcc84d826b8420",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "ai-studio-prompt-library-r0",
+      "family": "ai_studio_prompt_library",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/ai-studio-prompt-library.git",
+      "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+      "gitTree": "deb265f14f00ff0cd4a58aa8d295ead24fedb57f",
+      "sourceTreeSha256": "15cbbc50af8f3dccf95cd8efbefabcbd2a268dfd9dff498cc2fb5082fdf089df",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "portfolio-r0",
+      "family": "portfolio",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/portfolio.git",
+      "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+      "gitTree": "43da77fa66e54752c253b63af591fdd0110bc052",
+      "sourceTreeSha256": "b0c900aa9f860384a9e47750aad942b75a7cf5618526bbb83889dfd41af38004",
+      "primaryLanguage": "typescript"
+    },
+    {
+      "id": "supply-chain-api-r0",
+      "family": "supply_chain_api",
+      "split": "held_out",
+      "sourceRepository": "https://github.com/ham-zax/Supply_Chain_API.git",
+      "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+      "gitTree": "c35a28cdbe33082fa8bee781f241149fcab1b838",
+      "sourceTreeSha256": "68476eac5f6ca37fbcce8d4973fe34c59344dbb3c9adadb9db5ba465f5035727",
+      "primaryLanguage": "python"
+    }
+  ],
+  "leakage": {
+    "tuningOnlyRepositoryFamilies": [
+      "gitnexus",
+      "bookmark_ai_organizer",
+      "duas",
+      "vox_infinity",
+      "rpc_learner_engine",
+      "edge_tts_app",
+      "satori",
+      "tradingview_ratio",
+      "noor_and_knot_shopify",
+      "entrypoint_owner_implementation_fixtures",
+      "owner_score_calibration"
+    ],
+    "tuningOnlyRevisions": [
+      "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+      "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+      "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+      "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+      "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+      "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+      "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+      "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+      "34a00887a5904c091c5c049843e383c96ff41f6f"
+    ],
+    "tuningOnlyTaskIds": [
+      "gitnexus-analyze-command",
+      "gitnexus-heritage",
+      "gitnexus-processes",
+      "gitnexus-walk-repository",
+      "gitnexus-process-calls",
+      "gitnexus-create-graph",
+      "gitnexus-negative-sql-migration",
+      "gitnexus-negative-oauth-refresh",
+      "bookmark-route-message",
+      "bookmark-create",
+      "bookmark-classify-url",
+      "bookmark-openrouter-models",
+      "bookmark-popup-classify",
+      "bookmark-store-api-key",
+      "bookmark-negative-csv-export",
+      "bookmark-negative-jwt-decrypt",
+      "duas-reader-items",
+      "duas-sync-write",
+      "duas-login-post",
+      "duas-reader-path",
+      "duas-builtin-paths",
+      "duas-reader-flow-test",
+      "duas-negative-python-backtest",
+      "duas-negative-oauth-migration",
+      "vox-split-text",
+      "vox-build-payload",
+      "vox-create-speech",
+      "vox-generation-queue",
+      "vox-boot",
+      "vox-configure-patch",
+      "vox-negative-oauth-refresh",
+      "vox-negative-relational-insert",
+      "rpc-choose-next-task",
+      "rpc-grade-attempt",
+      "rpc-rebuild-recall",
+      "rpc-format-term",
+      "rpc-strictness-config",
+      "rpc-extension-entry",
+      "rpc-negative-email-digest",
+      "rpc-negative-db-migration",
+      "edge-voice-options",
+      "edge-generate-audio",
+      "edge-start-server",
+      "edge-http-get",
+      "edge-http-post",
+      "edge-player-stop",
+      "edge-negative-sql-migration",
+      "edge-negative-browser-routes",
+      "satori-entrypoint-evidence",
+      "satori-final-score",
+      "satori-group-results",
+      "satori-query-plan",
+      "satori-disclosure",
+      "satori-finalization",
+      "satori-entrypoint-intent-test",
+      "satori-ranking-plan-document",
+      "satori-negative-payments",
+      "satori-negative-product-gallery",
+      "tradingview-qap-owner",
+      "tradingview-backtest",
+      "tradingview-root-cli",
+      "tradingview-lazy-map",
+      "tradingview-engine-intent",
+      "tradingview-cointegration-exact",
+      "tradingview-negative-react-routes",
+      "tradingview-negative-cart-drawer",
+      "shopify-cart-items",
+      "shopify-predictive-search",
+      "shopify-facets",
+      "shopify-focus-trap",
+      "shopify-publish-event",
+      "shopify-recommendations",
+      "shopify-negative-backtest",
+      "shopify-negative-token-refresh",
+      "owner-launches-cli",
+      "owner-running-qap",
+      "owner-installed-target",
+      "owner-plain-exact-control",
+      "owner-must-control"
+    ],
+    "tuningOnlyQuerySha256": [
+      "e62b11b0c658ff6a340b167c92b1e37c75b43ebb4696c7bafa5428fb46bf2c83",
+      "22bb7b5e687d853c160cefbe322dfa0fae92cfadae5434bbc08b09f7020796be",
+      "58cf156b75a05da0a14b4af6261faf34f19c5728a759425d2ba63114ea3785af",
+      "c03f021cbc138a72c620ee0c506eb6061769a5add0feb1c9e76fa40a91d49cf1",
+      "2920c445c7dee00fd1b5a7e1c15387efc2d9a769d5ebbcd29b05e3b5f24761ce",
+      "16c647c44b0b6697cb83fb6c9d195606222f2f4ea8d931d7a38f385dee40c7fd",
+      "a6fa8e07cea8c5610c136d3de8cf5827b0520a28c653a59ead9e88404593273d",
+      "5c58cbfdcd2ba46fe25b88690d509c9c539d12210a79b03394ae7d6784d0db03",
+      "8333e75d5c80b88293dafe2cf2d1e46a651b4a5106d7caf628b1f33f471bc8cf",
+      "088b71525e5cf4e2e5bebd6f375d79559070a316a4039a700f17c8fcebe91a21",
+      "0e2acd9e5f93c8571621bce4121be9659d5f2ab7b6ef2a7a7e2a78a07dd3be92",
+      "0e5db16932f155479a59f2c9d40666b25bcda48036cc41e8c35e46fb8c3128c5",
+      "0c67d63d5aa821ae0017fd45b729fcc148cbb3b3ec1d1bd6223ab6ba663d9b63",
+      "10597ca184b824bb4240fa338111d4bde6aa2fcc56e9e11c7df984f6849ac4ae",
+      "555a1b0e2814a0bf8bbb4669c31b052e4ce1d138cd558d4e14e8dfe10b210824",
+      "5036596f296035abcda6c4e93cf4f14d2b48870a5590455743cc0a62fac29378",
+      "c19ecfda9f14748238cc8ee2ae3088a653b626d426a092f39dcfbcf0b0714ecc",
+      "aad3d81e14191d69a49c7f9688a63eafc71d4c1c6dd91b34c1d24bdcaf4707ec",
+      "c5735640a8cc433794d90911d546113c62d084217ec020c30237c2f3d482d001",
+      "e5c763b51da0d25855c2e87e856c13d38bbfcd9fea5b5f6feeac84da1992cddd",
+      "3c467899d77934470a41c8ba23b8726a24bce91198cfa554fa0a567ff54b6df1",
+      "214a275df466359df954bfe131c9971e235856190a1149db79fe04a90a5de3f0",
+      "1d1f8509c25494b1ea00f93ca57b144fa18c9d1ab7e2e1922581b1548f16e3e3",
+      "ecb20ac88fc6d09b7fbcdba2a2e007e3e37ff2039a648b70a34dc243f66f143b",
+      "91c9b46d81d89d9e7d95bfb8ff5f6888edc176d53f0b4c0c0336621330189508",
+      "aefae47c43cdfde433c44eb0e5c14a552a6a9f46001eac73e0e227fc91a910a7",
+      "c3e9946d2055b7dd5104aaf54c07de29c82b4efbf1c22d6a268f65afc65397dd",
+      "d919ed3cbbca93e76b37652225c3c811106f189a4ecf7c1ea9269caf35742517",
+      "0ce658d6ff9eeede20671d2a2aedc0437c041c52f710bee3b82bcccad4d8ec20",
+      "b37039bf1b299e6cade17530d5abf96f1c49dd6a246c1f6cbdaa60cfb915c96e",
+      "8524ecc137427c41477f8aafd8a7e8a5335db2815b49db6c8cbd7a6487b85e33",
+      "78b8b013f49d30dadb27b07ad43e9c7c6a70bf371fafb02ed91f3a924de55e5b",
+      "0e78a3af89e9cf73b0c9523f8074f585f6b77e1df9dae8484bbfa9175edfc0d3",
+      "323ee212616a40c8b034a8f9b0195100482a245da0560ffd12581f8b7e2df530",
+      "2af9d7e2d3bcfcfefb5f50ca8d82fa227f2658320e6c77ff48ea77e76506db98",
+      "3449e602b9d254037bd8401338df3765a45f8348542efeb4abc41a9f3c44f0cd",
+      "51ee37c3d989ff0b574fb4124ef28db2f41d04f80b3b8cefe3a345d021bbf0fa",
+      "bc03c780f60aeaa08ade5b3da4a0f07614cbec4d79dea4295b7e150a47ead6c0",
+      "9e0f6331ec426eb62f90e04d7a9ea8601dd606045a4456a3358fb5f471bd1ff5",
+      "8515e8ec173696fb06027a281a44e5cbe2058cae6a6a87ebea7e96e3f7d55dcd",
+      "f0948f551e4ebf550c0a7b43d6f851e2cb7f77499001e39a7e20499aa8ec60b7",
+      "858b424281007c3237329955bc06ea88ba9ad4d1849328fd351145ef213eef13",
+      "cab3109ce3f20ddd56a6f380c3ed97fbc0901fb6ae0a932829ab5728ce6ce343",
+      "5659491a35e0131476c4d47cbda0dd260f0bd796675d7a953e5c950b438a3679",
+      "99e711c7861899016b8a390fbd1e41613027b4f7101ebb5f535a73b4d6c28498",
+      "f2cabf2f3ac19948ef61364a48c9afff0445e1f7e16bc3d5dc279d77ac65f318",
+      "40d006bcb8fbdb192fd1b6493a59ea38f8e4bb9b55361f20df6045eaa8fca534",
+      "23f5a6022c367033acd96c4b68c99c19f89f835ac2b397afd9cb616a5536aa30",
+      "5e9175f7248661a3c4ac33adf1d7bd8e8a48cc355fa7ccede1e71a5bf38e831c",
+      "5301fd7109bac5366a7f02aada57c11d759d2bca50bb6df71238042a8bc56f52",
+      "85e5456c252cef9958205c97dac5777fd6c6d8b9844d14cbd1fc6f38ce8bc5f2",
+      "09ea2ec6541fc06cd2e117248d237e43d5fc966d6c40a1dcfb434f91d089570b",
+      "1d68e76025fc0f6dcc3db10540db0ec947c1b201c08ccdaa9a3d5230ad76fe2e",
+      "d751ef2bac65ca9480467e927ed4e6f916b79fff16f408663fd06c03fed33128",
+      "f6dfb3fb929391e1ca62a74842e88815027891f52da627357e28aa8a60cb2a1b",
+      "d70b67449500551a09a881c20357863170640b7f3de1976a90955733ad41a875",
+      "24c407aacde0a6a9036ed32523f728cac86fe65c1387b7a6c4a996b3e62a0af4",
+      "d15d7be1d14390cff203d637a11959112ac0e96e0476b09f01d363d664f4f471",
+      "373e300e955612484523c40e5f5acaecc447ed2af954431cd26e6c3d01a555eb",
+      "25798c9d643590abc82f4d70a741f2246195f160503d6f46c8509c13547f42f5",
+      "0b50e8aae5089bcc6aa7c58e9a2da04fcd407839c01cf971bb2a608cb1e25e02",
+      "1a6405fdb391a2f61e56e4fe48c2353a80f69477cdb370af8589677400fefa86",
+      "d3b70b67092e2af32a38d36b0e96c29876c46982d57600c6eccbcbf5ff38fc5d",
+      "581b05be51faa37f400e5b35fcf8d3fdd7f9ca4c3356d8f1c64f2f1c7bddf288",
+      "e79437093aee3b36e9d32d300a721aa072821a36cac0bdd750678afa779232dc",
+      "44d96b843bb89b480c2cf81dbde62ac27c70573aabd6f98d680880a933eef13f",
+      "84a91e06be77fb94a9fd0f309c01f2e49fe0535623a81f4fefcfc038a4c9199b",
+      "c0b479c9d9c524a23fee49521295d88d92015c59d581d992d5be2e1f762be5e3",
+      "e874e2216c13a15b092c08310f7698c80d7128baa2a8f82cf5edd2f8d01c61d3",
+      "fe5aef47837cdd4b15805648741e6920e02459c2bfa8de5771fa29f31199511d",
+      "1585e8c9e34c6d5ba8f5f606712184d930684e60281712b14e350275952c69a2",
+      "0728bb563852910cee92e44f2ade27e56f26944ed3dd001a56c5ce9cc5365061",
+      "f831bb7ce4172a978a53ab8e5d93d391102338620b43b2dfc2998c288c476ba7",
+      "aa7b4659dd5321925f9de2d3da746377bf076dd67b9dda5ede56884f679aa817",
+      "a17a6a30bde8d8f15f51d154eef6c5f2a1ec847cd67599924136c291ff268775",
+      "ec0c2158b2af3491ecdedf8d544bbd8c917602dd353e927134e3392838df984c",
+      "e38d411c4456f03d029115fe86eef5017bb8c0761812f303bb101203ea846011"
+    ],
+    "priorDecisionEvidence": {
+      "categories": [
+        "prior_lateon_tuning",
+        "tradingview_ratio",
+        "owner_score_calibration",
+        "implementation_fixtures"
+      ],
+      "repositoryFamilies": [
+        "satori",
+        "tradingview_ratio",
+        "noor_and_knot_shopify"
+      ],
+      "revisions": [
+        "5c1896e6a70b9d31a801e17c207b2a65b44348c5",
+        "8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7",
+        "34a00887a5904c091c5c049843e383c96ff41f6f"
+      ],
+      "taskIds": [
+        "satori-entrypoint-evidence",
+        "satori-final-score",
+        "satori-group-results",
+        "satori-query-plan",
+        "satori-disclosure",
+        "satori-finalization",
+        "satori-entrypoint-intent-test",
+        "satori-ranking-plan-document",
+        "satori-negative-payments",
+        "satori-negative-product-gallery",
+        "tradingview-qap-owner",
+        "tradingview-backtest",
+        "tradingview-root-cli",
+        "tradingview-lazy-map",
+        "tradingview-engine-intent",
+        "tradingview-cointegration-exact",
+        "tradingview-negative-react-routes",
+        "tradingview-negative-cart-drawer",
+        "shopify-cart-items",
+        "shopify-predictive-search",
+        "shopify-facets",
+        "shopify-focus-trap",
+        "shopify-publish-event",
+        "shopify-recommendations",
+        "shopify-negative-backtest",
+        "shopify-negative-token-refresh",
+        "owner-launches-cli",
+        "owner-running-qap",
+        "owner-installed-target",
+        "owner-plain-exact-control",
+        "owner-must-control"
+      ],
+      "querySha256": [
+        "23f5a6022c367033acd96c4b68c99c19f89f835ac2b397afd9cb616a5536aa30",
+        "5e9175f7248661a3c4ac33adf1d7bd8e8a48cc355fa7ccede1e71a5bf38e831c",
+        "5301fd7109bac5366a7f02aada57c11d759d2bca50bb6df71238042a8bc56f52",
+        "85e5456c252cef9958205c97dac5777fd6c6d8b9844d14cbd1fc6f38ce8bc5f2",
+        "09ea2ec6541fc06cd2e117248d237e43d5fc966d6c40a1dcfb434f91d089570b",
+        "1d68e76025fc0f6dcc3db10540db0ec947c1b201c08ccdaa9a3d5230ad76fe2e",
+        "d751ef2bac65ca9480467e927ed4e6f916b79fff16f408663fd06c03fed33128",
+        "f6dfb3fb929391e1ca62a74842e88815027891f52da627357e28aa8a60cb2a1b",
+        "d70b67449500551a09a881c20357863170640b7f3de1976a90955733ad41a875",
+        "24c407aacde0a6a9036ed32523f728cac86fe65c1387b7a6c4a996b3e62a0af4",
+        "d15d7be1d14390cff203d637a11959112ac0e96e0476b09f01d363d664f4f471",
+        "373e300e955612484523c40e5f5acaecc447ed2af954431cd26e6c3d01a555eb",
+        "25798c9d643590abc82f4d70a741f2246195f160503d6f46c8509c13547f42f5",
+        "0b50e8aae5089bcc6aa7c58e9a2da04fcd407839c01cf971bb2a608cb1e25e02",
+        "1a6405fdb391a2f61e56e4fe48c2353a80f69477cdb370af8589677400fefa86",
+        "d3b70b67092e2af32a38d36b0e96c29876c46982d57600c6eccbcbf5ff38fc5d",
+        "581b05be51faa37f400e5b35fcf8d3fdd7f9ca4c3356d8f1c64f2f1c7bddf288",
+        "e79437093aee3b36e9d32d300a721aa072821a36cac0bdd750678afa779232dc",
+        "44d96b843bb89b480c2cf81dbde62ac27c70573aabd6f98d680880a933eef13f",
+        "84a91e06be77fb94a9fd0f309c01f2e49fe0535623a81f4fefcfc038a4c9199b",
+        "c0b479c9d9c524a23fee49521295d88d92015c59d581d992d5be2e1f762be5e3",
+        "e874e2216c13a15b092c08310f7698c80d7128baa2a8f82cf5edd2f8d01c61d3",
+        "fe5aef47837cdd4b15805648741e6920e02459c2bfa8de5771fa29f31199511d",
+        "1585e8c9e34c6d5ba8f5f606712184d930684e60281712b14e350275952c69a2",
+        "0728bb563852910cee92e44f2ade27e56f26944ed3dd001a56c5ce9cc5365061",
+        "f831bb7ce4172a978a53ab8e5d93d391102338620b43b2dfc2998c288c476ba7",
+        "aa7b4659dd5321925f9de2d3da746377bf076dd67b9dda5ede56884f679aa817",
+        "a17a6a30bde8d8f15f51d154eef6c5f2a1ec847cd67599924136c291ff268775",
+        "ec0c2158b2af3491ecdedf8d544bbd8c917602dd353e927134e3392838df984c",
+        "e38d411c4456f03d029115fe86eef5017bb8c0761812f303bb101203ea846011"
+      ]
+    }
+  },
+  "statisticalContract": {
+    "version": 2,
+    "independentRepositoryFamiliesPerSplit": 6,
+    "positiveTasksPerRepository": 6,
+    "negativeTasksPerRepository": 2,
+    "minimumTasksPerSplit": 48,
+    "newContenderCount": 4,
+    "decisionStratumMinimumTasks": 4,
+    "decisionStratumMinimumRepositoryFamilies": 2,
+    "pairedEstimator": "repository_macro_mean_of_paired_task_deltas",
+    "uncertainty": "deterministic_repository_cluster_percentile_bootstrap",
+    "clusterBootstrapResamples": 10000,
+    "bootstrapSeed": "sealed_manifest_sha256",
+    "multiplicityAdjustedConfidence": {
+      "deterministic": 0.975,
+      "neural": 0.9875,
+      "newContenders": 0.9875
+    },
+    "minimumEffects": {
+      "ownerAt3": 0.05,
+      "macroReciprocalRank": 0.03,
+      "lateOn32Over16MacroReciprocalRank": 0.01,
+      "simplicityTie": 0.01
+    },
+    "nonInferiorityMargins": {
+      "ownerAt1": -0.02,
+      "ownerAt10": -0.01,
+      "requiredRoleCoverage": -0.01,
+      "hardNegativeExposureAt3": 0.02,
+      "unacceptableOwnerExposureAt3": 0.02
+    },
+    "deterministicPerformance": {
+      "p95Multiplier": 1.1,
+      "p95AdditionalMs": 10,
+      "peakRssMultiplier": 1.05
+    },
+    "zeroFailureControls": [
+      "exact_identifier",
+      "must",
+      "configuration_pin",
+      "candidate_membership",
+      "eligibility",
+      "fallback",
+      "frozen_pagination"
+    ],
+    "contenderSelection": "conjunctive_effects_adjusted_bounds_protected_margins_then_shallower_unless_mrr_gain_at_least_0.01"
+  },
+  "neuralTrainingOverlapReview": {
+    "status": "suspected_overlap",
+    "rationale": "The accepted repositories are public and the pinned LateOn checkpoint does not disclose an authoritative training corpus, so overlap cannot be excluded before scoring."
+  },
+  "lateOnL0Authority": {
+    "version": 1,
+    "phase": "L0",
+    "status": "authority_frozen_outputs_unopened",
+    "heldOutState": "unopened_no_index_or_capture",
+    "knownEvidence": {
+      "tuningManifestSha256": "ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445",
+      "projectionVersion": "search_rerank_document_v1",
+      "originalDecision": "retain_baseline_b_lateon_quality_directional_but_not_qualified_or_deployable",
+      "resultCanonicalSha256": "93d6e6ed7ce289b6378a5f9617ff02f294e018b757bf8ea69c7f0332d228ab7c",
+      "artifacts": [
+        {
+          "role": "known_d_l16_d_l32_archive",
+          "path": "docs/evidence/lateon-r3-diagnostic-20260730/lateon-r3-diagnostic-artifacts.tar.gz",
+          "sha256": "f63ffc2b9d7b378bf099f79484d13712494424aa1eba39d0a6cbfb773b1bdb16"
+        },
+        {
+          "role": "optimized_d_l16_archive",
+          "path": "docs/evidence/lateon-runtime-profile-20260730/lateon-runtime-profile-artifacts.tar.gz",
+          "sha256": "9f28d8ea275e214c753554ba68f0e8eb9848e7fe0d66c4ecd3791904380d6d6b"
+        },
+        {
+          "role": "c0_contract",
+          "path": "evals/search-ranking/lateon/c0-contract.json",
+          "sha256": "698d865a35ef9219c7aadcbb850a947c907d46fc7f42abb38c6190b4c9991f2d"
+        },
+        {
+          "role": "measured_runtime_profile",
+          "path": "evals/search-ranking/lateon/local-wsl-runtime-profile-v1.json",
+          "sha256": "86ee8fbcffcfabbdb06cdb524dbdf16a8501bf4e7fba51199f9368b48aa08faf"
+        }
+      ],
+      "candidateCaptures": [
+        {
+          "repositoryId": "satori-r0",
+          "suite": "positive",
+          "fileSha256": "bc5cefd861bf66fdac2bcffcad74f4168bb6f69741ff9b7769851788ce8a8e60",
+          "captureSha256": "bf8ea6f7f567d0142a2aa427d0758c19e4ac3de8336961c5638134294d33655a",
+          "baselineReplaySha256": "95ee3685789b4ec4861ccd548825a1e06ba8eb44c021200a5e3dd37a52a90af4"
+        },
+        {
+          "repositoryId": "satori-r0",
+          "suite": "negative",
+          "fileSha256": "38780419f93ecac15fd60f77b98a338528163b46c6303a98f834c74493687567",
+          "captureSha256": "3e71ca66e6862fc4cd293b5cd3d2f9b0280a1bc67e1e95ea33d9e9d17c0b0f97",
+          "baselineReplaySha256": "c981119e0aa85b472d5ce55d63b4142a52d346ce47c1815eb958f76fe64ea9ef"
+        },
+        {
+          "repositoryId": "tradingview-r0",
+          "suite": "positive",
+          "fileSha256": "d78d3e14d05d8fabc7901bc55abc2b3c6255945890840cdd889c7cc2db767e37",
+          "captureSha256": "badafd2aed8941cb6316cb596dc66d4aa695d12491f6114f6d1d4eb9d80adab6",
+          "baselineReplaySha256": "d0f9817019ed44390b76a8faeaa9657dfad642af278cc97638b506b5b5b51f0b"
+        },
+        {
+          "repositoryId": "tradingview-r0",
+          "suite": "negative",
+          "fileSha256": "51c8539db24bc5f022b1ac03604d1a0163b32659aed7645f3e3e740330f7fd11",
+          "captureSha256": "fbda472a5ec9f59dc81bd84165ceb52e8afde11cb4df8d6a5390f6cdbcfd2464",
+          "baselineReplaySha256": "3ae0f1e6dd415b5f661ef6ce1ff08902b44daca3ea095a41bbc0246d3b4b82e3"
+        },
+        {
+          "repositoryId": "shopify-theme-r0",
+          "suite": "positive",
+          "fileSha256": "ebf975f39019c565eb37f02d3c83f62453e1dead41813757a50097341bab0998",
+          "captureSha256": "f7d132f37dfa40e950b106704a659bc89f5498b6b9be2e3a0706119d4421e088",
+          "baselineReplaySha256": "169b359fa726220db1ba711f6801ee7f231f48e1cb212d954aba50fcc2e93c8f"
+        },
+        {
+          "repositoryId": "shopify-theme-r0",
+          "suite": "negative",
+          "fileSha256": "780b9928e49a2b268aef3b36e2bd4962cde17304c5a8550fb87e2b72bd007174",
+          "captureSha256": "50df34018e98f2c5532702cffe381892f35eff619507286aba9a2fa6c07ec257",
+          "baselineReplaySha256": "393e99b93f771df2e30a022a6e7f8ab329de00853f70212ecdf4c01b1f5631b2"
+        }
+      ]
+    },
+    "model": {
+      "repository": "lightonai/LateOn-Code-edge",
+      "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
+      "license": "Apache-2.0",
+      "artifacts": [
+        {
+          "role": "onnx_fp32",
+          "path": "model.onnx",
+          "sha256": "ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef"
+        },
+        {
+          "role": "tokenizer",
+          "path": "tokenizer.json",
+          "sha256": "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+        },
+        {
+          "role": "tokenizer_config",
+          "path": "tokenizer_config.json",
+          "sha256": "1621afee1f3dbc2c42901841ca46016c83102a8e070d32b90f80f80b214172a4"
+        },
+        {
+          "role": "onnx_config",
+          "path": "onnx_config.json",
+          "sha256": "fa4fef89820dcdc33c5504c62c1d5efc19603cfbfebf02368a70d51a4dbe6651"
+        },
+        {
+          "role": "special_tokens",
+          "path": "special_tokens_map.json",
+          "sha256": "6edfb9d64c0d7e5cbaa53516e90280fe1f42ba5ea7923d005a5f9b6e082142cf"
+        }
+      ]
+    },
+    "runtime": {
+      "sourceRevision": "1209de56723671eaabbc041a40a95df761760860",
+      "sourceTree": "7edd68e8a1ee2589b8b54b297c577315e3e8d5c0",
+      "node": "24.13.0",
+      "onnxruntimeNode": "1.19.2",
+      "transformersJs": "3.0.2",
+      "artifacts": [
+        {
+          "role": "candidate_capture",
+          "path": "scripts/satori-search-candidate-capture.mjs",
+          "sha256": "91d1591c0f0ac9e5c6c237e4dfe189551ceb73ed4ef087106057cfef3545d98d"
+        },
+        {
+          "role": "candidate_replay",
+          "path": "scripts/satori-search-candidate-replay.mjs",
+          "sha256": "598ab0f939e2cfb29d8ef15361ad18ac3bc85a70321dbcb6f8e6eb76dabcac55"
+        },
+        {
+          "role": "lateon_loader",
+          "path": "scripts/satori-lateon-c0-native.mjs",
+          "sha256": "9f1195d5c67b5c19e01cee079508c2affde4e23c5d0a4388243af5641a5d1fdc"
+        },
+        {
+          "role": "lateon_score",
+          "path": "scripts/satori-search-ranking-r3-score.mjs",
+          "sha256": "79fca89c9b38ad955037fb54c852a821db55662a2f840b92b72aaa6128619fe6"
+        },
+        {
+          "role": "quality_decision",
+          "path": "scripts/satori-search-ranking-r3.mjs",
+          "sha256": "69c75bb4d72d5843463c508fb7617be6b891d3193dfe1e819d54ceedb60a37f5"
+        },
+        {
+          "role": "bounded_source_selector",
+          "path": "packages/mcp/src/core/bounded-source-selector.ts",
+          "sha256": "4f8958c2c60064c72b2d06748197d01b9534b6373080f365824de525d42bc8fb"
+        },
+        {
+          "role": "rerank_document_v1",
+          "path": "packages/mcp/src/core/search-rerank-document.ts",
+          "sha256": "eac182988956fe1dc62e08695f2e52f6961fe3def7b8ee374349a02fefcd5af4"
+        },
+        {
+          "role": "runtime_profile_loader",
+          "path": "packages/mcp/src/server/lateon-reranker.ts",
+          "sha256": "e687cd36978a97e1ba485559d57da4f06a592f627ad3ab4f2b232215a444ac9f"
+        },
+        {
+          "role": "worker_protocol",
+          "path": "packages/mcp/src/server/lateon-reranker-protocol.ts",
+          "sha256": "19498fb6f7910019f00d5287d5af059671f0a3cf2bc167b036f0055fb23befef"
+        },
+        {
+          "role": "runtime_profile",
+          "path": "packages/mcp/assets/lateon/runtime-profile-v1.json",
+          "sha256": "9d1c6e9b8e76e243541c1bb9291ed6985cf4a848226c1e0190db0764b7a8528e"
+        }
+      ]
+    },
+    "projectionPolicies": [
+      {
+        "id": "search_rerank_document_v1",
+        "status": "known_diagnostic_replay_only",
+        "serialization": "newline_delimited_fields",
+        "maximumLines": 200,
+        "maximumCharacters": 4000,
+        "fieldOrder": [
+          "repository_relative_path",
+          "language",
+          "canonical_symbol_label",
+          "content"
+        ],
+        "sourceOwner": {
+          "role": "rerank_document_v1",
+          "path": "packages/mcp/src/core/search-rerank-document.ts",
+          "sha256": "eac182988956fe1dc62e08695f2e52f6961fe3def7b8ee374349a02fefcd5af4"
+        }
+      },
+      {
+        "id": "search_rerank_document_v2",
+        "status": "prospective_frozen",
+        "serialization": "canonical_json_utf8",
+        "maximumUtf8Bytes": 4000,
+        "maximumLines": 200,
+        "fieldOrder": [
+          "repository_relative_path",
+          "language",
+          "symbol_kind",
+          "canonical_symbol_label",
+          "signature_or_declaration",
+          "documentation_excerpt",
+          "query_relevant_source_excerpt",
+          "required_owner_siblings"
+        ],
+        "selector": {
+          "version": "bounded_source_selection_v1",
+          "queryTokens": "normalized_query_tokens_v1",
+          "maxExcerpts": 5,
+          "maxExcerptLines": 40,
+          "contextLines": 2,
+          "byteBudgets": "all_source_excerpt_budgets_equal_remaining_projection_utf8_bytes",
+          "evidenceSpans": "validated_only",
+          "stableTieOrder": "bounded_source_selection_v1",
+          "declarationRetention": "mandatory_or_minimum_projection_exceeds_budget"
+        },
+        "fileLevelProjection": "path_heading_or_declaration_and_bounded_relevant_text",
+        "sourceOwner": {
+          "role": "bounded_source_selector",
+          "path": "packages/mcp/src/core/bounded-source-selector.ts",
+          "sha256": "4f8958c2c60064c72b2d06748197d01b9534b6373080f365824de525d42bc8fb"
+        }
+      }
+    ],
+    "candidateCaptureContract": {
+      "state": "prospective_not_created",
+      "heldOutState": "unopened_no_index_or_capture",
+      "candidateCaptureSha256": null,
+      "contenderOutputSha256": null,
+      "digestBinding": "sha256_canonical_json_after_capture_before_scoring"
+    },
+    "newArms": [
+      {
+        "id": "projection-v1-d-l50",
+        "projectionVersion": "search_rerank_document_v1",
+        "candidateDepth": 50,
+        "status": "preregistered_unopened"
+      },
+      {
+        "id": "projection-v2-d-l16",
+        "projectionVersion": "search_rerank_document_v2",
+        "candidateDepth": 16,
+        "status": "preregistered_unopened"
+      },
+      {
+        "id": "projection-v2-d-l32",
+        "projectionVersion": "search_rerank_document_v2",
+        "candidateDepth": 32,
+        "status": "preregistered_unopened"
+      },
+      {
+        "id": "projection-v2-d-l50",
+        "projectionVersion": "search_rerank_document_v2",
+        "candidateDepth": 50,
+        "status": "preregistered_unopened"
+      }
+    ],
+    "executionOrder": {
+      "qualityArms": [
+        "projection-v1-d-l50",
+        "projection-v2-d-l16",
+        "projection-v2-d-l32",
+        "projection-v2-d-l50"
+      ],
+      "resourceDepthOrders": [
+        [
+          16,
+          32,
+          50
+        ],
+        [
+          32,
+          50,
+          16
+        ],
+        [
+          50,
+          16,
+          32
+        ]
+      ],
+      "processIsolation": "one_depth_per_fresh_process_no_cache_or_allocator_reuse",
+      "warmupRuns": 2
+    },
+    "resourceProfile": {
+      "profile": "local_wsl_cpu",
+      "maximumModelLoadMilliseconds": 1000,
+      "maximumWarmP95Milliseconds": 900,
+      "requestDeadlineMilliseconds": 2000,
+      "maximumProcessPeakRssBytes": 872415232,
+      "maximumProcessRetainedRssBytes": 671088640,
+      "documentBatchSize": 1,
+      "intraOpThreads": 8,
+      "interOpThreads": 1,
+      "executionProvider": "cpu"
+    }
+  },
+  "tasks": [
+    {
+      "id": "promptready-primary-action",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function records the primary CTA and opens the configured Chrome store URL?",
+      "querySha256": "1f703c9a59cc127bc0d8f9b2f5ddf1c0fde6b45a894c598e4e45101671dd2ba7",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/App.tsx",
+          "symbol": "handlePrimaryAction"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The nested handler records analytics and opens the environment-owned destination.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/App.tsx",
+          "symbol": "handlePrimaryAction",
+          "sourceBlobSha256": "656df6aa32fa382c69626a715fe148d91210f582c479597e3358815ffd14e81b"
+        }
+      }
+    },
+    {
+      "id": "promptready-route-table",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "configuration",
+      "query": "Which component declares the landing-page route table and page-view transition wrapper?",
+      "querySha256": "1a5d6b9edebb89c902a6af1876e19971431b8d743e5715c9883e0f95e14f7478",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/router/LandingFlowRouter.tsx",
+          "symbol": "AnimatedRoutes"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This component owns route declarations and transition/page-view behavior.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/router/LandingFlowRouter.tsx",
+          "symbol": "AnimatedRoutes",
+          "sourceBlobSha256": "3c6c50f3310f37dbb513aa7c0736354706d9fcbfd0153edf86cdb60ad8a6f4b8"
+        }
+      }
+    },
+    {
+      "id": "promptready-canonical-url",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function creates a canonical production URL from a pathname?",
+      "querySha256": "f4b49d5c431dd89172b4c4ee41117481d2d0aa9dfb9bf996d1ffac7287c00da1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/canonicalUrl.ts",
+          "symbol": "getCanonicalUrl"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This utility normalizes the path against the production domain.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/utils/canonicalUrl.ts",
+          "symbol": "getCanonicalUrl",
+          "sourceBlobSha256": "2b828782444cbbd403dc78c58d72856af0cb1101e17ac8d65dc94e3e24dc5fe4"
+        }
+      }
+    },
+    {
+      "id": "promptready-seo-hook",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which hook derives canonical, social, and robots metadata for the current page?",
+      "querySha256": "9ba3da7bada61dd4acabac4457343e84453c9dc4b3742c4ed1a5be80d5670fab",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/hooks/useSEO.ts",
+          "symbol": "useSEO"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The hook composes SEO values from route and deployment context.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/hooks/useSEO.ts",
+          "symbol": "useSEO",
+          "sourceBlobSha256": "5f806d1e98634ff9c43521f6d4dc77432c3a9928e3e85429a4fe1a5810fd4afd"
+        }
+      }
+    },
+    {
+      "id": "promptready-analytics",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "callers_references",
+      "query": "Which function sends a named analytics event with an optional payload?",
+      "querySha256": "c13fab57e1619e787b068f051f9a852d15af8992a82d5f4c61a1d1d47dfb7f40",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/hooks/useAnalytics.ts",
+          "symbol": "trackEvent"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This is the shared analytics event boundary used by feature-specific helpers.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/hooks/useAnalytics.ts",
+          "symbol": "trackEvent",
+          "sourceBlobSha256": "5315659e064d5c0e8f2a728ca917e809563ca920fdd434baaebcf23ae5c13e2d"
+        }
+      }
+    },
+    {
+      "id": "promptready-hero-actions",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which component chooses the hero CTA variant and tracks primary and demo actions?",
+      "querySha256": "ab17600af917c280f19616d15283054bd039d3a320333b52fb12a20e19ad22a1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/components/Hero/HeroActions.tsx",
+          "symbol": "HeroActions"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This component owns CTA feature-flag text and interaction callbacks.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/components/Hero/HeroActions.tsx",
+          "symbol": "HeroActions",
+          "sourceBlobSha256": "a30e828c6f293f9ca7cae9e0477fad0da118910e16cbfd2b1712b1acc261227c"
+        }
+      }
+    },
+    {
+      "id": "promptready-negative-migration",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "negative",
+      "query": "Which function applies database schema migrations?",
+      "querySha256": "bf7e1bb5d8bc5589bf83a21f7ba10c388c4251f9afd902f21251ecb0a2d46423",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/router/LandingFlowRouter.tsx",
+            "symbol": "AnimatedRoutes"
+          }
+        ],
+        "rationale": "The browser route component is a reviewed hard negative for an absent database migration owner.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/router/LandingFlowRouter.tsx",
+          "symbol": "AnimatedRoutes",
+          "sourceBlobSha256": "3c6c50f3310f37dbb513aa7c0736354706d9fcbfd0153edf86cdb60ad8a6f4b8"
+        }
+      }
+    },
+    {
+      "id": "promptready-negative-cli-install",
+      "split": "held_out",
+      "repositoryId": "promptready-r0",
+      "queryClass": "negative",
+      "query": "Which Python console-script function installs the application command?",
+      "querySha256": "ef7b53a1f817143930d116381776182d53dd46bb9247672487825753d05499e9",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/App.tsx",
+            "symbol": "handlePrimaryAction"
+          }
+        ],
+        "rationale": "The browser CTA handler is unrelated to Python packaging and console scripts.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "517df1ff06d81fe5d9f772525948de3a1f4af157",
+          "file": "src/App.tsx",
+          "symbol": "handlePrimaryAction",
+          "sourceBlobSha256": "656df6aa32fa382c69626a715fe148d91210f582c479597e3358815ffd14e81b"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-ripgrep",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "development_script",
+      "query": "Which function builds and executes the ripgrep subprocess command?",
+      "querySha256": "5676f2a3bab60a0815ce06cd81f67c1b900409d86fa15b9a2e9f31ebfb6b23d5",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/fastcontext/agent/tool/grep.py",
+          "symbol": "run_rg"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns rg argument construction, execution, and output/error handling.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/tool/grep.py",
+          "symbol": "run_rg",
+          "sourceBlobSha256": "ccd9150daf1f7cecaf109fddafb83e6c0d69da5182aa3edacb8deae34dfbc9e2"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-system-prompt",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "configuration",
+      "query": "Which function loads a system prompt template and renders built-in arguments?",
+      "querySha256": "0708836a7474653f3d906886c6bfbb7b43d5e03aedb5904f72c3d4265569405b",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "_load_system_prompt"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This helper owns prompt-file loading and template rendering.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "_load_system_prompt",
+          "sourceBlobSha256": "ff438b4d17c2e239e7da5a8796524bcf7024afcdb61ad25d4a7beb9e74406584"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-final-answer",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function extracts the final answer section from an agent response?",
+      "querySha256": "0cba15ec6ae7ee979b594c36c3b9aa2fb2cbddf63bb6c0952b880e26939a802d",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "get_final_answer"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns final-answer extraction.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/utils.py",
+          "symbol": "get_final_answer",
+          "sourceBlobSha256": "ff438b4d17c2e239e7da5a8796524bcf7024afcdb61ad25d4a7beb9e74406584"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-file-score",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which public function scores predicted citation files against edited files?",
+      "querySha256": "7331114d2be15981723e399af9fcaf737679e7d97e98b4fd99640747dc45c1dd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_file"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This evaluator computes file-level citation precision, recall, and exploration score.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_file",
+          "sourceBlobSha256": "2db70364fb4c02d8ce662dff419df8e146925a14ff600541c0b7902f5e49e8e5"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-line-score",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function scores whether predicted citation line ranges overlap edits?",
+      "querySha256": "c8df5f997f0165b9a536b45c8610c762739d32283ed41ae88f47aaf564302621",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_line"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This evaluator owns line-range overlap scoring.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_line",
+          "sourceBlobSha256": "2db70364fb4c02d8ce662dff419df8e146925a14ff600541c0b7902f5e49e8e5"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-container-setup",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "development_script",
+      "query": "Which function installs and configures FastContext inside a benchmark container?",
+      "querySha256": "bcf4383de02f1407b06695660d8e25e5f624a2287d0c584a5638a488cea8b82b",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "benchmark/evaluation/bench_mini_swe_agent.py",
+          "symbol": "setup_fastcontext_in_container"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns container-side benchmark setup.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/bench_mini_swe_agent.py",
+          "symbol": "setup_fastcontext_in_container",
+          "sourceBlobSha256": "ce53d7c8eb49d9ad8dc883cdc679df0e96740561ae233e2b60cd1ae976af7ce7"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-negative-react-route",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "negative",
+      "query": "Which React component defines the browser route table?",
+      "querySha256": "8b753817422ec4a901ccf912cdc7ef9fd05989ea027346c2904a3a3f821476a7",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/fastcontext/agent/tool/grep.py",
+            "symbol": "run_rg"
+          }
+        ],
+        "rationale": "The Python rg executor is a reviewed hard negative for an absent React router.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "src/fastcontext/agent/tool/grep.py",
+          "symbol": "run_rg",
+          "sourceBlobSha256": "ccd9150daf1f7cecaf109fddafb83e6c0d69da5182aa3edacb8deae34dfbc9e2"
+        }
+      }
+    },
+    {
+      "id": "fastcontext-negative-sql-transaction",
+      "split": "held_out",
+      "repositoryId": "fastcontext-r0",
+      "queryClass": "negative",
+      "query": "Which function commits a customer payment SQL transaction?",
+      "querySha256": "893b0a9485391493692eb2faaa663a46c3fba1c54e87d4b29a78efcbac607796",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "benchmark/evaluation/utils.py",
+            "symbol": "calculate_score_file"
+          }
+        ],
+        "rationale": "The citation evaluator is unrelated to payments or SQL transaction ownership.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "788342a5c1f5ffbd9280fdbc813cc6bdb0024db4",
+          "file": "benchmark/evaluation/utils.py",
+          "symbol": "calculate_score_file",
+          "sourceBlobSha256": "2db70364fb4c02d8ce662dff419df8e146925a14ff600541c0b7902f5e49e8e5"
+        }
+      }
+    },
+    {
+      "id": "recovery-dashboard-api",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which route handler serves dashboard data for the requested day range?",
+      "querySha256": "2326fad923ff01c6b045e433221916d66d10264b8a7f51bbe5c6c36ab7056fcb",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/app/api/dashboard/route.ts",
+          "symbol": "GET"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This Next.js route validates the range and delegates dashboard data retrieval.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/app/api/dashboard/route.ts",
+          "symbol": "GET",
+          "sourceBlobSha256": "2e268f526f3bd8814c0d31c6a42aa08fba4504991a475ce54de6051d9a7da2d5"
+        }
+      }
+    },
+    {
+      "id": "recovery-weekly-review",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function assembles the weekly recovery review response?",
+      "querySha256": "c4bf8ac78268c10b2bf7e8b77569bea16a3c1aa2a34d8c8af17bb074dd48f1b5",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/reviewData.ts",
+          "symbol": "getWeeklyReviewData"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the weekly review query and response assembly.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/reviewData.ts",
+          "symbol": "getWeeklyReviewData",
+          "sourceBlobSha256": "097d558287809ec6e5f17cede10573b3a7a916d687d4112d226299a0e9618d52"
+        }
+      }
+    },
+    {
+      "id": "recovery-day-normalization",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function normalizes a date to the start of its UTC day?",
+      "querySha256": "68b66090debfa56e03525bdcb647c9f14d38ef4bc27a9c97c53af6f15427c0fa",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/validation.ts",
+          "symbol": "startOfDayUtc"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This utility constructs the UTC midnight boundary.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/validation.ts",
+          "symbol": "startOfDayUtc",
+          "sourceBlobSha256": "221c2c1080cdfa5f6751c88906eae1e91669ba171f14f8ac37823ba6412e67cf"
+        }
+      }
+    },
+    {
+      "id": "recovery-protocol-update",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function closes the active protocol and creates its replacement transactionally?",
+      "querySha256": "b6607fa72d0a01043fa1cbff524b28afcc6677fa802a979e06f238a3f8cf3fb1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/protocol.ts",
+          "symbol": "updateActiveProtocol"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the protocol transition transaction and audit relation.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/protocol.ts",
+          "symbol": "updateActiveProtocol",
+          "sourceBlobSha256": "5fdc386019ab9e1b7e35e937cf6c9cf04510672c32f8a0ecd8aab3dd132120c2"
+        }
+      }
+    },
+    {
+      "id": "recovery-protocol-lock",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function determines whether protocol edits are locked?",
+      "querySha256": "f0ce7c508f0894390a9678fc331ecb5612568f5d7466e6a980e4ac0b8fc5287f",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/lib/lock.ts",
+          "symbol": "isProtocolLocked"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function queries the lock condition used by protocol update callers.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/lock.ts",
+          "symbol": "isProtocolLocked",
+          "sourceBlobSha256": "408921d1a04cf5de6ab3aabbcea1f8105e0d416a03ec88b200792a0995ab1f0e"
+        }
+      }
+    },
+    {
+      "id": "recovery-checkin-form",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which component owns the daily check-in fields and submission request?",
+      "querySha256": "a4355b5a0dcff3fed8ac4288c176e641dd26e5f3c82330fb20322e97dce0e4ad",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/components/CheckInForm.tsx",
+          "symbol": "CheckInForm"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This component owns form state, validation conversion, and API submission.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/components/CheckInForm.tsx",
+          "symbol": "CheckInForm",
+          "sourceBlobSha256": "bb74a22812e28a9c3b79ebe6661b4f1964bcc0886f1657124e0f25c6d4055799"
+        }
+      }
+    },
+    {
+      "id": "recovery-negative-compiler",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "negative",
+      "query": "Which function parses and type-checks a Rust source file?",
+      "querySha256": "85fa815f682b2b210ef6a4d717a6750afcc4560974c8528b7dcc32b13bb00eb0",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/lib/validation.ts",
+            "symbol": "startOfDayUtc"
+          }
+        ],
+        "rationale": "The date utility is a reviewed hard negative for an absent compiler frontend.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/lib/validation.ts",
+          "symbol": "startOfDayUtc",
+          "sourceBlobSha256": "221c2c1080cdfa5f6751c88906eae1e91669ba171f14f8ac37823ba6412e67cf"
+        }
+      }
+    },
+    {
+      "id": "recovery-negative-cli-entry",
+      "split": "held_out",
+      "repositoryId": "recovery-dashboard-r0",
+      "queryClass": "negative",
+      "query": "Which installed terminal command starts this application?",
+      "querySha256": "244458beab50f0e64fab818a0eddb24a44843e6763c5cae97c35932fb51ad656",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/app/api/dashboard/route.ts",
+            "symbol": "GET"
+          }
+        ],
+        "rationale": "The HTTP route is not an installed terminal-command owner.",
+        "reviewer": "local_source_oracle_review_2026_07_30",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14dfdaf380aa705205497402c17a382fae650677",
+          "file": "src/app/api/dashboard/route.ts",
+          "symbol": "GET",
+          "sourceBlobSha256": "2e268f526f3bd8814c0d31c6a42aa08fba4504991a475ce54de6051d9a7da2d5"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-analyze-command",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "entrypoint",
+      "query": "Which command analyzes a repository and builds its GitNexus knowledge graph?",
+      "querySha256": "e62b11b0c658ff6a340b167c92b1e37c75b43ebb4696c7bafa5428fb46bf2c83",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "gitnexus/src/cli/analyze.ts",
+          "symbol": "analyzeCommand"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This command owns the end-to-end repository analysis workflow.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/cli/analyze.ts",
+          "symbol": "analyzeCommand",
+          "sourceBlobSha256": "2939eb9b82b26b8864e98eab04f0bed05544c001da3395e22bf7f3db1978b9e8"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-heritage",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which ingestion function records class inheritance and interface implementation relationships?",
+      "querySha256": "22bb7b5e687d853c160cefbe322dfa0fae92cfadae5434bbc08b09f7020796be",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "gitnexus/src/core/ingestion/heritage-processor.ts",
+          "symbol": "processHeritage"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns heritage relationship extraction for parsed files.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/ingestion/heritage-processor.ts",
+          "symbol": "processHeritage",
+          "sourceBlobSha256": "d6a44f17cb0821c82dfd7fed0d81173af7e111105dd7c4a83c079a3e10ea8712"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-processes",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function detects execution processes from repository graph memberships?",
+      "querySha256": "58cf156b75a05da0a14b4af6261faf34f19c5728a759425d2ba63114ea3785af",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "gitnexus/src/core/ingestion/process-processor.ts",
+          "symbol": "processProcesses"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns process detection during ingestion.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/ingestion/process-processor.ts",
+          "symbol": "processProcesses",
+          "sourceBlobSha256": "36027f77043ecf7e64c12db6ecd62ba9ef7b97bae91976765bd9eed2b5c00286"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-walk-repository",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "development_script",
+      "query": "Which function walks repository paths while applying ignore and language filters?",
+      "querySha256": "c03f021cbc138a72c620ee0c506eb6061769a5add0feb1c9e76fa40a91d49cf1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "gitnexus/src/core/ingestion/filesystem-walker.ts",
+          "symbol": "walkRepositoryPaths"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns repository filesystem discovery.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/ingestion/filesystem-walker.ts",
+          "symbol": "walkRepositoryPaths",
+          "sourceBlobSha256": "71d9b3fdac7e54de914db3221fa8f7336cc9d8e336a53dfce98bfde2e382f437"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-process-calls",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "callers_references",
+      "query": "Which function resolves call relationships during GitNexus ingestion?",
+      "querySha256": "2920c445c7dee00fd1b5a7e1c15387efc2d9a769d5ebbcd29b05e3b5f24761ce",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "gitnexus/src/core/ingestion/call-processor.ts",
+          "symbol": "processCalls"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns call-edge processing for parsed sources.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/ingestion/call-processor.ts",
+          "symbol": "processCalls",
+          "sourceBlobSha256": "ece81cb9b64e29ee3ddc5b24333edd47e5b04744f7af5d5cd43a574eef9d48a4"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-create-graph",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which factory creates a new GitNexus knowledge graph?",
+      "querySha256": "16c647c44b0b6697cb83fb6c9d195606222f2f4ea8d931d7a38f385dee40c7fd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "gitnexus/src/core/graph/graph.ts",
+          "symbol": "createKnowledgeGraph"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This factory owns knowledge-graph construction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/graph/graph.ts",
+          "symbol": "createKnowledgeGraph",
+          "sourceBlobSha256": "695f9424a8835411165cce8957fec14c0f31313837844cf37fe46f4bd906a09c"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-negative-sql-migration",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "negative",
+      "query": "Which function applies a relational database schema migration?",
+      "querySha256": "a6fa8e07cea8c5610c136d3de8cf5827b0520a28c653a59ead9e88404593273d",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "gitnexus/src/core/ingestion/community-processor.ts",
+            "symbol": "processCommunities"
+          },
+          {
+            "file": "gitnexus/src/storage/repo-manager.ts",
+            "symbol": "saveMeta"
+          }
+        ],
+        "rationale": "Community analysis and repository metadata are reviewed hard negatives for an absent SQL migration.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/ingestion/community-processor.ts",
+          "symbol": "processCommunities",
+          "sourceBlobSha256": "70eebfde12f1c493188182335a786e2fc307fbc8acc100b4adf88a2e9ca0ce53"
+        }
+      }
+    },
+    {
+      "id": "gitnexus-negative-oauth-refresh",
+      "split": "tuning",
+      "repositoryId": "gitnexus-r0",
+      "queryClass": "negative",
+      "query": "Which function refreshes an OAuth access token?",
+      "querySha256": "5c58cbfdcd2ba46fe25b88690d509c9c539d12210a79b03394ae7d6784d0db03",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "gitnexus/src/core/ingestion/filesystem-walker.ts",
+            "symbol": "readFileContents"
+          },
+          {
+            "file": "gitnexus/src/storage/repo-manager.ts",
+            "symbol": "getStoragePath"
+          }
+        ],
+        "rationale": "Filesystem reading and storage-path selection are reviewed hard negatives for absent OAuth refresh.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "6c18ae08f7480be5120602908aa19b4ce38e18dc",
+          "file": "gitnexus/src/core/ingestion/filesystem-walker.ts",
+          "symbol": "readFileContents",
+          "sourceBlobSha256": "71d9b3fdac7e54de914db3221fa8f7336cc9d8e336a53dfce98bfde2e382f437"
+        }
+      }
+    },
+    {
+      "id": "bookmark-route-message",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function routes extension messages to bookmark and classification operations?",
+      "querySha256": "8333e75d5c80b88293dafe2cf2d1e46a651b4a5106d7caf628b1f33f471bc8cf",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/background/service-worker.ts",
+          "symbol": "routeMessage"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns background message dispatch.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/background/service-worker.ts",
+          "symbol": "routeMessage",
+          "sourceBlobSha256": "c89e9b517c5caed8505039b9712809ff54d02c381540d063405961b7f245653f"
+        }
+      }
+    },
+    {
+      "id": "bookmark-create",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function creates a bookmark under a normalized folder path?",
+      "querySha256": "088b71525e5cf4e2e5bebd6f375d79559070a316a4039a700f17c8fcebe91a21",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/bookmark-manager.ts",
+          "symbol": "createBookmark"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns folder resolution and bookmark creation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/utils/bookmark-manager.ts",
+          "symbol": "createBookmark",
+          "sourceBlobSha256": "16be108c4eacdb4d0960c89880479c2aeca01f6b7d987caa2d2e121733d7b5c9"
+        }
+      }
+    },
+    {
+      "id": "bookmark-classify-url",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function classifies a URL together with page metadata using the configured language model?",
+      "querySha256": "0e2acd9e5f93c8571621bce4121be9659d5f2ab7b6ef2a7a7e2a78a07dd3be92",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/llm-classifier.ts",
+          "symbol": "classifyUrlWithMeta"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns metadata-aware URL classification.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/utils/llm-classifier.ts",
+          "symbol": "classifyUrlWithMeta",
+          "sourceBlobSha256": "00872f2f11185a040efb0259690cc9ad5f626a4e10ee0f3d4ff37be224d5b8e9"
+        }
+      }
+    },
+    {
+      "id": "bookmark-openrouter-models",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function fetches the available OpenRouter models?",
+      "querySha256": "0e5db16932f155479a59f2c9d40666b25bcda48036cc41e8c35e46fb8c3128c5",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/openrouter.ts",
+          "symbol": "fetchOpenRouterModels"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the OpenRouter model-list request.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/utils/openrouter.ts",
+          "symbol": "fetchOpenRouterModels",
+          "sourceBlobSha256": "f73831eff569f7fe1e537958d5cc5f469a85496e221dfebf58802cdc8ec36045"
+        }
+      }
+    },
+    {
+      "id": "bookmark-popup-classify",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which popup function classifies the current page before saving its bookmark?",
+      "querySha256": "0c67d63d5aa821ae0017fd45b729fcc148cbb3b3ec1d1bd6223ab6ba663d9b63",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/popup/popup.ts",
+          "symbol": "classifyBookmark"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the popup classification interaction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/popup/popup.ts",
+          "symbol": "classifyBookmark",
+          "sourceBlobSha256": "d939fe0cd50f96146656da00e36fc763cd7ac2e473f331797b109ce60d6182cc"
+        }
+      }
+    },
+    {
+      "id": "bookmark-store-api-key",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "configuration",
+      "query": "Which function stores and migrates the extension API key?",
+      "querySha256": "10597ca184b824bb4240fa338111d4bde6aa2fcc56e9e11c7df984f6849ac4ae",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/security.ts",
+          "symbol": "storeApiKey"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns API-key persistence.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/utils/security.ts",
+          "symbol": "storeApiKey",
+          "sourceBlobSha256": "1495540f7448febbd883382d5d8d65d45cf3ad46eebe02902ba9bcc826c05c03"
+        }
+      }
+    },
+    {
+      "id": "bookmark-negative-csv-export",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "negative",
+      "query": "Which function exports all bookmarks as a CSV file?",
+      "querySha256": "555a1b0e2814a0bf8bbb4669c31b052e4ce1d138cd558d4e14e8dfe10b210824",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/utils/bookmark-manager.ts",
+            "symbol": "createBookmark"
+          }
+        ],
+        "rationale": "Bookmark creation is a reviewed nearby owner for an absent CSV exporter.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/utils/bookmark-manager.ts",
+          "symbol": "createBookmark",
+          "sourceBlobSha256": "16be108c4eacdb4d0960c89880479c2aeca01f6b7d987caa2d2e121733d7b5c9"
+        }
+      }
+    },
+    {
+      "id": "bookmark-negative-jwt-decrypt",
+      "split": "tuning",
+      "repositoryId": "bookmark-ai-organizer-r0",
+      "queryClass": "negative",
+      "query": "Which function decrypts and verifies a JSON Web Token?",
+      "querySha256": "5036596f296035abcda6c4e93cf4f14d2b48870a5590455743cc0a62fac29378",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/utils/security.ts",
+            "symbol": "storeApiKey"
+          }
+        ],
+        "rationale": "API-key storage is a reviewed nearby owner for absent JWT decryption.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "da961257cbbb3d7b50bc3e375a8e2ed4759a93bc",
+          "file": "src/utils/security.ts",
+          "symbol": "storeApiKey",
+          "sourceBlobSha256": "1495540f7448febbd883382d5d8d65d45cf3ad46eebe02902ba9bcc826c05c03"
+        }
+      }
+    },
+    {
+      "id": "duas-reader-items",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which selector builds reader items for the chosen source and path?",
+      "querySha256": "c19ecfda9f14748238cc8ee2ae3088a653b626d426a092f39dcfbcf0b0714ecc",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/domain/selectors.ts",
+          "symbol": "getReaderItems"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This selector owns reader-list materialization.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/domain/selectors.ts",
+          "symbol": "getReaderItems",
+          "sourceBlobSha256": "1e935ed5798d43321a167662fc919412b8ef8eb854c7044ed834edb44588bcd3"
+        }
+      }
+    },
+    {
+      "id": "duas-sync-write",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function resolves an incoming user-state write against the remote snapshot?",
+      "querySha256": "aad3d81e14191d69a49c7f9688a63eafc71d4c1c6dd91b34c1d24bdcaf4707ec",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/cloudflare/sync.ts",
+          "symbol": "resolveSyncWrite"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns synchronization conflict resolution.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/cloudflare/sync.ts",
+          "symbol": "resolveSyncWrite",
+          "sourceBlobSha256": "2baa69b517f7d20bb72f112e103e3647ae9a86d19948fc639b1410acaad56cbf"
+        }
+      }
+    },
+    {
+      "id": "duas-login-post",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "entrypoint",
+      "query": "Which Cloudflare request handler processes login POST requests?",
+      "querySha256": "c5735640a8cc433794d90911d546113c62d084217ec020c30237c2f3d482d001",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "functions/api/login.ts",
+          "symbol": "onRequestPost"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This exported handler owns the login request boundary.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "functions/api/login.ts",
+          "symbol": "onRequestPost",
+          "sourceBlobSha256": "2d29cb43208110b1029394e5939f9c8535cad041b8dce8e7c4cdd6a839eef430"
+        }
+      }
+    },
+    {
+      "id": "duas-reader-path",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "path_role",
+      "query": "Which function constructs a reader route from source and identifier inputs?",
+      "querySha256": "e5c763b51da0d25855c2e87e856c13d38bbfcd9fea5b5f6feeac84da1992cddd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/app/routes.ts",
+          "symbol": "buildReaderPath"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns reader URL construction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/app/routes.ts",
+          "symbol": "buildReaderPath",
+          "sourceBlobSha256": "ded933e9992705e1f6ad0f54a35f886bfe943db47edcf773adcbebafc30999b6"
+        }
+      }
+    },
+    {
+      "id": "duas-builtin-paths",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "configuration",
+      "query": "Where are the built-in dua reading paths declared?",
+      "querySha256": "3c467899d77934470a41c8ba23b8726a24bce91198cfa554fa0a567ff54b6df1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/domain/paths.ts",
+          "symbol": "builtinPaths"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This declaration owns the built-in path catalog.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/domain/paths.ts",
+          "symbol": "builtinPaths",
+          "sourceBlobSha256": "0d4d820c805af5432dec553e004e849063d22f6d68b228ab3490ca1c94a324e0"
+        }
+      }
+    },
+    {
+      "id": "duas-reader-flow-test",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "tests_fixtures",
+      "query": "Which test proves reader lists work for topic-list and my-dua-list sources?",
+      "querySha256": "214a275df466359df954bfe131c9971e235856190a1149db79fe04a90a5de3f0",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/app/flow.test.ts",
+          "symbol": "builds reader lists for topic-list and my-dua-list sources"
+        },
+        "ownerMatch": "file",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The named test owns the cross-source reader-flow regression.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/app/flow.test.ts",
+          "symbol": "builds reader lists for topic-list and my-dua-list sources",
+          "sourceBlobSha256": "a68c2bf6cf68aa26c73034aa33a93870fee315176cbc4a8004cc3989c772bf31"
+        }
+      }
+    },
+    {
+      "id": "duas-negative-python-backtest",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "negative",
+      "query": "Which Python function runs a statistical trading backtest?",
+      "querySha256": "1d1f8509c25494b1ea00f93ca57b144fa18c9d1ab7e2e1922581b1548f16e3e3",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/domain/selectors.ts",
+            "symbol": "getReaderItems"
+          }
+        ],
+        "rationale": "The TypeScript reader selector is a reviewed hard negative for an absent Python backtest.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/domain/selectors.ts",
+          "symbol": "getReaderItems",
+          "sourceBlobSha256": "1e935ed5798d43321a167662fc919412b8ef8eb854c7044ed834edb44588bcd3"
+        }
+      }
+    },
+    {
+      "id": "duas-negative-oauth-migration",
+      "split": "tuning",
+      "repositoryId": "duas-r0",
+      "queryClass": "negative",
+      "query": "Which SQL migration creates an OAuth token table?",
+      "querySha256": "ecb20ac88fc6d09b7fbcdba2a2e007e3e37ff2039a648b70a34dc243f66f143b",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/cloudflare/sync.ts",
+            "symbol": "resolveSyncWrite"
+          }
+        ],
+        "rationale": "User-state synchronization is a reviewed hard negative for an absent OAuth SQL migration.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "673df7ac7aa8fc28dc10aebaf76f14aac234a470",
+          "file": "src/cloudflare/sync.ts",
+          "symbol": "resolveSyncWrite",
+          "sourceBlobSha256": "2baa69b517f7d20bb72f112e103e3647ae9a86d19948fc639b1410acaad56cbf"
+        }
+      }
+    },
+    {
+      "id": "vox-split-text",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which userscript function splits long text into generation chunks?",
+      "querySha256": "91c9b46d81d89d9e7d95bfb8ff5f6888edc176d53f0b4c0c0336621330189508",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "splitLongText"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns long-form text chunking.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "splitLongText",
+          "sourceBlobSha256": "6164132f78d60e64742dc214fc96ac48e88c3d1f0ec533de942598cbf91f7737"
+        }
+      }
+    },
+    {
+      "id": "vox-build-payload",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function builds the direct speech-generation request payload?",
+      "querySha256": "aefae47c43cdfde433c44eb0e5c14a552a6a9f46001eac73e0e227fc91a910a7",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "buildPayload"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns direct API payload construction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "buildPayload",
+          "sourceBlobSha256": "6164132f78d60e64742dc214fc96ac48e88c3d1f0ec533de942598cbf91f7737"
+        }
+      }
+    },
+    {
+      "id": "vox-create-speech",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function sends one direct speech-generation request and creates its audio clip?",
+      "querySha256": "c3e9946d2055b7dd5104aaf54c07de29c82b4efbf1c22d6a268f65afc65397dd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "directCreateSpeech"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns one direct speech request.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "directCreateSpeech",
+          "sourceBlobSha256": "6164132f78d60e64742dc214fc96ac48e88c3d1f0ec533de942598cbf91f7737"
+        }
+      }
+    },
+    {
+      "id": "vox-generation-queue",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function admits queued chunks up to the configured generation concurrency?",
+      "querySha256": "d919ed3cbbca93e76b37652225c3c811106f189a4ecf7c1ea9269caf35742517",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "pumpGenerationQueue"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns direct generation queue admission.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "pumpGenerationQueue",
+          "sourceBlobSha256": "6164132f78d60e64742dc214fc96ac48e88c3d1f0ec533de942598cbf91f7737"
+        }
+      }
+    },
+    {
+      "id": "vox-boot",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "entrypoint",
+      "query": "Which userscript function boots the Vox Infinity controls?",
+      "querySha256": "0ce658d6ff9eeede20671d2a2aedc0437c041c52f710bee3b82bcccad4d8ec20",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "boot"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns userscript initialization.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "boot",
+          "sourceBlobSha256": "6164132f78d60e64742dc214fc96ac48e88c3d1f0ec533de942598cbf91f7737"
+        }
+      }
+    },
+    {
+      "id": "vox-configure-patch",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "development_script",
+      "query": "Which Python function patches target values into a userscript template?",
+      "querySha256": "b37039bf1b299e6cade17530d5abf96f1c49dd6a246c1f6cbdaa60cfb915c96e",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "configure.py",
+          "symbol": "patch"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns deterministic configuration patching.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "configure.py",
+          "symbol": "patch",
+          "sourceBlobSha256": "685c32ac39225406cc079d23ff039e9c2d4abd8e5bcc7f73758b60162bea7fae"
+        }
+      }
+    },
+    {
+      "id": "vox-negative-oauth-refresh",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "negative",
+      "query": "Which function refreshes an OAuth access token?",
+      "querySha256": "5c58cbfdcd2ba46fe25b88690d509c9c539d12210a79b03394ae7d6784d0db03",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "scripts/vox-infinity-direct-api.user.js",
+            "symbol": "directCreateSpeech"
+          }
+        ],
+        "rationale": "Direct speech generation is a reviewed hard negative for absent OAuth refresh.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "scripts/vox-infinity-direct-api.user.js",
+          "symbol": "directCreateSpeech",
+          "sourceBlobSha256": "6164132f78d60e64742dc214fc96ac48e88c3d1f0ec533de942598cbf91f7737"
+        }
+      }
+    },
+    {
+      "id": "vox-negative-relational-insert",
+      "split": "tuning",
+      "repositoryId": "vox-infinity-r0",
+      "queryClass": "negative",
+      "query": "Which function inserts a row in a relational database transaction?",
+      "querySha256": "8524ecc137427c41477f8aafd8a7e8a5335db2815b49db6c8cbd7a6487b85e33",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "configure.py",
+            "symbol": "patch"
+          }
+        ],
+        "rationale": "The configuration patcher is a reviewed hard negative for absent relational persistence.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "1cb93c66dd28bb4ccca4e1ec510df4b08d392838",
+          "file": "configure.py",
+          "symbol": "patch",
+          "sourceBlobSha256": "685c32ac39225406cc079d23ff039e9c2d4abd8e5bcc7f73758b60162bea7fae"
+        }
+      }
+    },
+    {
+      "id": "rpc-choose-next-task",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function chooses the learner's next adaptive task?",
+      "querySha256": "78b8b013f49d30dadb27b07ad43e9c7c6a70bf371fafb02ed91f3a924de55e5b",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/adapt.ts",
+          "symbol": "chooseNextTask"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns adaptive next-task selection.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/adapt.ts",
+          "symbol": "chooseNextTask",
+          "sourceBlobSha256": "d1d54a76d42eafb2deaa7af214643f4ebebf0dddcaf7994cd0b0b3761ff8ea31"
+        }
+      }
+    },
+    {
+      "id": "rpc-grade-attempt",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function grades a learner attempt against task rubric checks?",
+      "querySha256": "0e78a3af89e9cf73b0c9523f8074f585f6b77e1df9dae8484bbfa9175edfc0d3",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/grader.ts",
+          "symbol": "gradeAttempt"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns deterministic attempt grading.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/grader.ts",
+          "symbol": "gradeAttempt",
+          "sourceBlobSha256": "f03670a4c396f92c889ef91d4ab3ab0de0a3ee1b4b66008bd12be5392613fb2b"
+        }
+      }
+    },
+    {
+      "id": "rpc-rebuild-recall",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function rebuilds the due recall queue from learner state?",
+      "querySha256": "323ee212616a40c8b034a8f9b0195100482a245da0560ffd12581f8b7e2df530",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/athar.ts",
+          "symbol": "rebuildDueRecallQueue"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns due-recall queue reconstruction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/athar.ts",
+          "symbol": "rebuildDueRecallQueue",
+          "sourceBlobSha256": "33cdd478ed37b0cc937ad3f6ba989fc683a1d755bed0b33bc5cea11d93822c89"
+        }
+      }
+    },
+    {
+      "id": "rpc-format-term",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function formats a learner term for display?",
+      "querySha256": "2af9d7e2d3bcfcfefb5f50ca8d82fa227f2658320e6c77ff48ea77e76506db98",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/terms.ts",
+          "symbol": "formatTerm"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns term display formatting.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/terms.ts",
+          "symbol": "formatTerm",
+          "sourceBlobSha256": "17d7a97d8fb779e4a03368585555c924b281e09173dcb4488e62801bd7ef108b"
+        }
+      }
+    },
+    {
+      "id": "rpc-strictness-config",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "exact_identifier",
+      "query": "must:MODE_STRICTNESS_CONFIG MODE_STRICTNESS_CONFIG",
+      "querySha256": "3449e602b9d254037bd8401338df3765a45f8348542efeb4abc41a9f3c44f0cd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/config.ts",
+          "symbol": "MODE_STRICTNESS_CONFIG"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This declaration owns mode strictness parameters.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/config.ts",
+          "symbol": "MODE_STRICTNESS_CONFIG",
+          "sourceBlobSha256": "d4ba525224c64f2f70fbdd515191a723cfacfc8949d0cf364c1563b902eb08b5"
+        }
+      }
+    },
+    {
+      "id": "rpc-extension-entry",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "entrypoint",
+      "query": "Which function registers the cognitive learner engine extension?",
+      "querySha256": "51ee37c3d989ff0b574fb4124ef28db2f41d04f80b3b8cefe3a345d021bbf0fa",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/index.ts",
+          "symbol": "cogEngineExtension"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns extension registration.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/index.ts",
+          "symbol": "cogEngineExtension",
+          "sourceBlobSha256": "a1f86a18516bc74d5b5e9110b8f2262d8b8812d0f6f0ed56e379c468835dac61"
+        }
+      }
+    },
+    {
+      "id": "rpc-negative-email-digest",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "negative",
+      "query": "Which function emails a daily learner progress digest?",
+      "querySha256": "bc03c780f60aeaa08ade5b3da4a0f07614cbec4d79dea4295b7e150a47ead6c0",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "pi-cog-engine/extensions/cog-engine/terms.ts",
+            "symbol": "formatTerm"
+          }
+        ],
+        "rationale": "Term formatting is a reviewed hard negative for an absent email digest.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/terms.ts",
+          "symbol": "formatTerm",
+          "sourceBlobSha256": "17d7a97d8fb779e4a03368585555c924b281e09173dcb4488e62801bd7ef108b"
+        }
+      }
+    },
+    {
+      "id": "rpc-negative-db-migration",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "negative",
+      "query": "Which function applies the learner database schema migration?",
+      "querySha256": "9e0f6331ec426eb62f90e04d7a9ea8601dd606045a4456a3358fb5f471bd1ff5",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "pi-cog-engine/extensions/cog-engine/config.ts",
+            "symbol": "MODE_STRICTNESS_CONFIG"
+          }
+        ],
+        "rationale": "Strictness configuration is a reviewed hard negative for an absent database migration.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/config.ts",
+          "symbol": "MODE_STRICTNESS_CONFIG",
+          "sourceBlobSha256": "d4ba525224c64f2f70fbdd515191a723cfacfc8949d0cf364c1563b902eb08b5"
+        }
+      }
+    },
+    {
+      "id": "edge-voice-options",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "exact_identifier",
+      "query": "get_voice_options",
+      "querySha256": "8515e8ec173696fb06027a281a44e5cbe2058cae6a6a87ebea7e96e3f7d55dcd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "tts_core.py",
+          "symbol": "get_voice_options"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns voice-option enumeration.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "tts_core.py",
+          "symbol": "get_voice_options",
+          "sourceBlobSha256": "572d6d640ba3a17f329533b3afc8345f2367221f6db1ae22984219685e6cdbb2"
+        }
+      }
+    },
+    {
+      "id": "edge-generate-audio",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function generates audio for text and a selected voice?",
+      "querySha256": "f0948f551e4ebf550c0a7b43d6f851e2cb7f77499001e39a7e20499aa8ec60b7",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "tts_core.py",
+          "symbol": "generate_audio"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns text-to-speech audio generation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "tts_core.py",
+          "symbol": "generate_audio",
+          "sourceBlobSha256": "572d6d640ba3a17f329533b3afc8345f2367221f6db1ae22984219685e6cdbb2"
+        }
+      }
+    },
+    {
+      "id": "edge-start-server",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "entrypoint",
+      "query": "Which method starts the local HTTP server for the desktop UI?",
+      "querySha256": "858b424281007c3237329955bc06ea88ba9ad4d1849328fd351145ef213eef13",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "ui.py",
+          "symbol": "start_server"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns local server startup.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "ui.py",
+          "symbol": "start_server",
+          "sourceBlobSha256": "048bdd273f0c221f7aff048f175506959349c6c9553ae34af58b9268c468c67b"
+        }
+      }
+    },
+    {
+      "id": "edge-http-get",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which request-handler method serves HTTP GET requests?",
+      "querySha256": "cab3109ce3f20ddd56a6f380c3ed97fbc0901fb6ae0a932829ab5728ce6ce343",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "ui.py",
+          "symbol": "do_GET"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns GET request handling.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "ui.py",
+          "symbol": "do_GET",
+          "sourceBlobSha256": "048bdd273f0c221f7aff048f175506959349c6c9553ae34af58b9268c468c67b"
+        }
+      }
+    },
+    {
+      "id": "edge-http-post",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which request-handler method processes text-to-speech POST actions?",
+      "querySha256": "5659491a35e0131476c4d47cbda0dd260f0bd796675d7a953e5c950b438a3679",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "ui.py",
+          "symbol": "do_POST"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns POST request handling.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "ui.py",
+          "symbol": "do_POST",
+          "sourceBlobSha256": "048bdd273f0c221f7aff048f175506959349c6c9553ae34af58b9268c468c67b"
+        }
+      }
+    },
+    {
+      "id": "edge-player-stop",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which player method stops current audio playback?",
+      "querySha256": "99e711c7861899016b8a390fbd1e41613027b4f7101ebb5f535a73b4d6c28498",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "player.py",
+          "symbol": "stop"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns playback termination.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "player.py",
+          "symbol": "stop",
+          "sourceBlobSha256": "ffa62ab0d2578fbafcac8da6f9d9f1389eece7277e976b1e247ef6f96356bfe5"
+        }
+      }
+    },
+    {
+      "id": "edge-negative-sql-migration",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "negative",
+      "query": "Which function applies a SQL database migration?",
+      "querySha256": "f2cabf2f3ac19948ef61364a48c9afff0445e1f7e16bc3d5dc279d77ac65f318",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "tts_core.py",
+            "symbol": "generate_audio"
+          }
+        ],
+        "rationale": "Audio generation is a reviewed hard negative for absent SQL migrations.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "tts_core.py",
+          "symbol": "generate_audio",
+          "sourceBlobSha256": "572d6d640ba3a17f329533b3afc8345f2367221f6db1ae22984219685e6cdbb2"
+        }
+      }
+    },
+    {
+      "id": "edge-negative-browser-routes",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "negative",
+      "query": "Which function declares a browser application's route table?",
+      "querySha256": "40d006bcb8fbdb192fd1b6493a59ea38f8e4bb9b55361f20df6045eaa8fca534",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "ui.py",
+            "symbol": "do_GET"
+          }
+        ],
+        "rationale": "The local HTTP GET handler is a reviewed hard negative for an absent browser router.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "ui.py",
+          "symbol": "do_GET",
+          "sourceBlobSha256": "048bdd273f0c221f7aff048f175506959349c6c9553ae34af58b9268c468c67b"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-state",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function reads the prompt library state from extension storage?",
+      "querySha256": "2138146f4614f80f9b09949ccefaf4d501427ef5419745238a8d79fcf2498666",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "getState"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns stored-state retrieval.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "getState",
+          "sourceBlobSha256": "fbdd27f7fdaa8a985da7be3446b3ad54a19ed155c38f869dbb367c79249946eb"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-import",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function validates and imports a JSON prompt library?",
+      "querySha256": "c88ee756191cc44a169c83aa2085c391f174aa8b00ba1903bab7a9fc366702e0",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "importJson"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns JSON import and replacement safeguards.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "importJson",
+          "sourceBlobSha256": "fbdd27f7fdaa8a985da7be3446b3ad54a19ed155c38f869dbb367c79249946eb"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-textarea",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function finds the target system-prompt textarea?",
+      "querySha256": "9d056ab7ba83a0bb5f3ac80380c095bd165507f3efa73aad7928febd85282b2f",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/content/index.ts",
+          "symbol": "findSystemTextarea"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns target textarea discovery.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/content/index.ts",
+          "symbol": "findSystemTextarea",
+          "sourceBlobSha256": "ed6ab1fdb6335f6a8a903aaafcbf8e69db3094241bb23e2e603ea4673821436d"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-insert",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function applies replace, append, or prepend prompt insertion?",
+      "querySha256": "5a6df3897358d82aaeeaeeddc2841df0d5ca78511221d65a0ee41e3fbaacb46d",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/content/index.ts",
+          "symbol": "applyInsert"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns text insertion behavior.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/content/index.ts",
+          "symbol": "applyInsert",
+          "sourceBlobSha256": "ed6ab1fdb6335f6a8a903aaafcbf8e69db3094241bb23e2e603ea4673821436d"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-context-menus",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function rebuilds browser context menus from stored prompts?",
+      "querySha256": "711cafd369d4cca5fc17680956df4663e634cf134a15cfabe41a800ddeb239e5",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/background/index.ts",
+          "symbol": "rebuildContextMenus"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns context-menu reconstruction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/background/index.ts",
+          "symbol": "rebuildContextMenus",
+          "sourceBlobSha256": "ed28e8bc946c07c24d8bb8a8d60bd3b8cfc0e7af9a3c1adf0d04e8290f5edc1e"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-popup-insert",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which popup function sends a selected prompt for insertion?",
+      "querySha256": "7e08a7e8062334623c8647ac86fa7dd4d9064454deb89a9b7665224ad122fb65",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/popup/main.ts",
+          "symbol": "sendInsert"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns the popup insertion message.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/popup/main.ts",
+          "symbol": "sendInsert",
+          "sourceBlobSha256": "64115d816259b1aa43bffdd4733fba1f07776335c20459094c972f0156a33201"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-negative-remote-upload",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "negative",
+      "query": "Which function uploads the prompt library to a remote server?",
+      "querySha256": "118c89cce8cb3347dae69be9356bef1924336a1f211e71e1237082d7fdd5fcd0",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "extension/src/shared/storage.ts",
+            "symbol": "importJson"
+          }
+        ],
+        "rationale": "Local JSON import is a reviewed hard negative for absent remote upload.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "importJson",
+          "sourceBlobSha256": "fbdd27f7fdaa8a985da7be3446b3ad54a19ed155c38f869dbb367c79249946eb"
+        }
+      }
+    },
+    {
+      "id": "prompt-library-negative-embeddings",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "negative",
+      "query": "Which function creates semantic embeddings for prompts?",
+      "querySha256": "ee2a979baf3184b567a4d527f492c64c8db091cb9a163150331938f3dfeaf0ad",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "extension/src/content/index.ts",
+            "symbol": "findSystemTextarea"
+          }
+        ],
+        "rationale": "Textarea discovery is a reviewed hard negative for absent semantic embeddings.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/content/index.ts",
+          "symbol": "findSystemTextarea",
+          "sourceBlobSha256": "ed6ab1fdb6335f6a8a903aaafcbf8e69db3094241bb23e2e603ea4673821436d"
+        }
+      }
+    },
+    {
+      "id": "portfolio-page-items",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which utility returns the items for a requested pagination page?",
+      "querySha256": "27b49c24543945a00ae49a26bd1da35afd6fb20d9151fe2d1bcd7d415d001ef1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/pagination.ts",
+          "symbol": "getPageItems"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This utility owns page slicing.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/utils/pagination.ts",
+          "symbol": "getPageItems",
+          "sourceBlobSha256": "75b8bec98382b504d9cc0b0c664013512d91c517a4a87acee390f462a5ff4552"
+        }
+      }
+    },
+    {
+      "id": "portfolio-writing-tags",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which function derives all writing tags and their counts?",
+      "querySha256": "a86f1168bf4744abe07d68e74045af5f2feaaf5c0a1c8299010c1e59ac8e3bb6",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/tags.ts",
+          "symbol": "getAllWritingTags"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns writing-tag aggregation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/utils/tags.ts",
+          "symbol": "getAllWritingTags",
+          "sourceBlobSha256": "b76b1121a706f9645c99618f01354402697e3842aa85f72687c66e7ae27d8820"
+        }
+      }
+    },
+    {
+      "id": "portfolio-rss",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "entrypoint",
+      "query": "Which endpoint function generates the site's RSS feed?",
+      "querySha256": "c3b2b354612b81316b3e8e57f5cea1ae7ff83cd3d18045108fd437a8e01cc750",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/pages/rss.xml.ts",
+          "symbol": "GET"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This endpoint owns RSS response generation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/pages/rss.xml.ts",
+          "symbol": "GET",
+          "sourceBlobSha256": "ea9ac162ef9ccf0e0fe7fc0256b6df38b61b2a0c3f9e637d1f314b5be8f28718"
+        }
+      }
+    },
+    {
+      "id": "portfolio-project-status",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "configuration",
+      "query": "Where is the allowed project status vocabulary declared?",
+      "querySha256": "070d65857059efb07864d8d1eedf061184ee613ea63f4657b1e526f30adaa539",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/content.config.ts",
+          "symbol": "projectStatusSchema"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This schema owns project status validation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/content.config.ts",
+          "symbol": "projectStatusSchema",
+          "sourceBlobSha256": "ec8437fee86c5a4ee2b093897056275fcc08bc4925f32d722d343d1cb96c1185"
+        }
+      }
+    },
+    {
+      "id": "portfolio-writing-paths",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "path_role",
+      "query": "Which function generates static routes for individual writing entries?",
+      "querySha256": "52a536bcdea87e261fff4ddd34aab25c0dd4b9ee0b71eaf7a200006f04848bc1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/pages/writing/[slug].astro",
+          "symbol": "getStaticPaths"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns dynamic writing-route generation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/pages/writing/[slug].astro",
+          "symbol": "getStaticPaths",
+          "sourceBlobSha256": "add1f0e53674c60471a02df387b256d5886837ea5bf7ddeff53f835fb9d2edcf"
+        }
+      }
+    },
+    {
+      "id": "portfolio-status-regression",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "tests_fixtures",
+      "query": "Which test proves project status handling is constrained and not substring matched?",
+      "querySha256": "f3c42ae88d267d99e582004690ab6f0a10cd1af3fbad7f7ef4600b48735dbcd1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "tests/static-ui-regressions.test.mjs",
+          "symbol": "project status handling is constrained and not substring matched"
+        },
+        "ownerMatch": "file",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The named test owns the status-matching regression.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "tests/static-ui-regressions.test.mjs",
+          "symbol": "project status handling is constrained and not substring matched",
+          "sourceBlobSha256": "db094154344ad08d12ac3271e8bc22e7827a8be9c1585240ba7f055a6c2c8926"
+        }
+      }
+    },
+    {
+      "id": "portfolio-negative-db-migration",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "negative",
+      "query": "Which function applies a database schema migration?",
+      "querySha256": "89e5e4980099df649e9f9119ad14a261f4dcb860d4ab4b742b01860d75ee05e1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/utils/tags.ts",
+            "symbol": "slugifyTag"
+          }
+        ],
+        "rationale": "Tag slugification is the reviewed nearby hard negative for an absent database migration.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/utils/tags.ts",
+          "symbol": "slugifyTag",
+          "sourceBlobSha256": "b76b1121a706f9645c99618f01354402697e3842aa85f72687c66e7ae27d8820"
+        }
+      }
+    },
+    {
+      "id": "portfolio-negative-jwt-signing",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "negative",
+      "query": "Which function signs a JSON Web Token?",
+      "querySha256": "a07b4efe067e742992fe675bb8b9c25faafb68bfb6d7bd0e7c2cdfb78e0fa869",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/utils/pagination.ts",
+            "symbol": "getPageCount"
+          }
+        ],
+        "rationale": "Pagination counting is the reviewed nearby hard negative for absent JWT signing.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/utils/pagination.ts",
+          "symbol": "getPageCount",
+          "sourceBlobSha256": "75b8bec98382b504d9cc0b0c664013512d91c517a4a87acee390f462a5ff4552"
+        }
+      }
+    },
+    {
+      "id": "supply-create-app",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which function creates and configures the supply-chain FastAPI application?",
+      "querySha256": "699b2179cde88d7954a21caf702e0e9f14e525ac78544b70ce14193ca2b73ad1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/main.py",
+          "symbol": "create_app"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This function owns application construction.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "src/main.py",
+          "symbol": "create_app",
+          "sourceBlobSha256": "cd8dcb68bbfe78f42fda92d0c92ba7cbe85f72d7e77363955f171073f55856cd"
+        }
+      }
+    },
+    {
+      "id": "supply-low-stock",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which endpoint returns inventory items below their reorder level?",
+      "querySha256": "09db516dcf0b92ce48edad104fda440b654cf1b9e8d6c02b1144f2eea4a4be7e",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/api/v1/endpoints/inventory.py",
+          "symbol": "get_low_stock_items"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This endpoint owns low-stock HTTP retrieval.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "src/api/v1/endpoints/inventory.py",
+          "symbol": "get_low_stock_items",
+          "sourceBlobSha256": "19de4dfd1ac48ac5ddecd30980770c76b5eb787843bcae06d1755012ef643893"
+        }
+      }
+    },
+    {
+      "id": "supply-inventory-transaction",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "Which model records an inventory quantity transaction?",
+      "querySha256": "c7716ac3045eb3ba007772609fbdf8026abeafcde10221e8cd2135e56dd821bb",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/models/inventory.py",
+          "symbol": "InventoryTransaction"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This model owns persisted inventory transaction records.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "src/models/inventory.py",
+          "symbol": "InventoryTransaction",
+          "sourceBlobSha256": "9c28ed9455b0a8a4dbf7810bb586f9581620c8fbc06a5ec1e4294d27b593799c"
+        }
+      }
+    },
+    {
+      "id": "supply-create-transaction",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "ownership_implementation",
+      "query": "Which service method validates and creates an inventory transaction?",
+      "querySha256": "20d4cc2239fdbefb27b6580b39aa90079a4abedf4c7f5600475586338f09dafa",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/services/inventory.py",
+          "symbol": "create_transaction"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This method owns inventory transaction creation.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "src/services/inventory.py",
+          "symbol": "create_transaction",
+          "sourceBlobSha256": "cc0ea23b70d1e3a8309de54a275d8cd05dfeeafc2b2358607089de6d35c3610d"
+        }
+      }
+    },
+    {
+      "id": "supply-running-api-doc",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "documentation",
+      "query": "Which documentation section explains how to run the API?",
+      "querySha256": "f5f76b03157c00d762c78899b1f64844938e7423aacf7fac78e547cc22fc0bb1",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "README.md",
+          "symbol": "Running the API"
+        },
+        "ownerMatch": "file",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This README section owns API startup instructions.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "README.md",
+          "symbol": "Running the API",
+          "sourceBlobSha256": "971cf162da62cb471490977d3619295712fa7ffb33966dd57f59a112a11ee93d"
+        }
+      }
+    },
+    {
+      "id": "supply-fastapi-pin",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "configuration",
+      "query": "Where is the FastAPI dependency version pinned?",
+      "querySha256": "0d1009b2039b0608270728df3fabd813fbe2befb71a8e597c792dae9fa1782c5",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "requirements.txt",
+          "symbol": "fastapi==0.95.2"
+        },
+        "ownerMatch": "file",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "This requirements entry owns the FastAPI version pin.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "requirements.txt",
+          "symbol": "fastapi==0.95.2",
+          "sourceBlobSha256": "0eb2ac92ce3b658d993a74ab958ecd95349a31a167ba962fa8ec004892541fa3"
+        }
+      }
+    },
+    {
+      "id": "supply-negative-payment-transaction",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "negative",
+      "query": "Which function charges a customer payment transaction?",
+      "querySha256": "e0ecb88d0bfb99095523b8f9f0ade54af71f3c6c158fb23b1fa9d094bd059fa8",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/services/inventory.py",
+            "symbol": "create_transaction"
+          }
+        ],
+        "rationale": "Inventory transaction creation is a reviewed hard negative for absent payment processing.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "src/services/inventory.py",
+          "symbol": "create_transaction",
+          "sourceBlobSha256": "cc0ea23b70d1e3a8309de54a275d8cd05dfeeafc2b2358607089de6d35c3610d"
+        }
+      }
+    },
+    {
+      "id": "supply-negative-image-gallery",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "negative",
+      "query": "Which function renders an image gallery?",
+      "querySha256": "f36e53a8da3b54843527ca7b35edfadd8f8a774735527364af443f0aa751ebe7",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "diagnostic",
+      "oracle": {
+        "kind": "negative",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [
+          {
+            "file": "src/api/v1/endpoints/inventory.py",
+            "symbol": "get_items"
+          }
+        ],
+        "rationale": "Inventory item retrieval is a reviewed hard negative for an absent image gallery.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "src/api/v1/endpoints/inventory.py",
+          "symbol": "get_items",
+          "sourceBlobSha256": "19de4dfd1ac48ac5ddecd30980770c76b5eb787843bcae06d1755012ef643893"
+        }
+      }
+    }
+  ],
+  "sha256": "72bd15767140f60d936028c4dfa07238aec1d1452ecec01f6fdd6c10aac510a5"
+}

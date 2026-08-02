@@ -13,6 +13,7 @@ import {
     canonicalJson,
     validateTaskSuite,
 } from "./satori-useful-context.mjs";
+import { buildCrossRepositoryManifest } from "../evals/search-ranking/build-cross-repository-manifest.mjs";
 
 const REVISION_A = "a".repeat(40);
 const REVISION_B = "b".repeat(40);
@@ -440,4 +441,180 @@ test("candidate-suite compilation preserves explicit file-level owner matching",
     assert.ok(suite);
     assert.equal(suite.candidateTaskSuite.tasks[0].expected.ownerMatch, "file");
     assert.doesNotThrow(() => validateTaskSuite(suite.candidateTaskSuite));
+});
+
+test("version 2 authority remains byte-compatible after version 3 admission", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v2.manifest.json"),
+        "utf8",
+    ));
+
+    const normalized = validateRankingBenchmarkManifest(
+        committed,
+        { requireSealed: true, requireCompleteBenchmark: true },
+    );
+
+    assert.equal(normalized.version, 2);
+    assert.equal(normalized.sha256, "ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445");
+    assert.ok(buildRankingCandidateTaskSuites(normalized).every(({ candidateTaskSuite }) => (
+        candidateTaskSuite.version === 2
+    )));
+    assert.deepEqual(buildCrossRepositoryManifest({ version: 2 }), committed);
+});
+
+test("version 3 authority has exact six-family and 48-task decision splits without prior leakage", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v3.manifest.json"),
+        "utf8",
+    ));
+    const normalized = validateRankingBenchmarkManifest(
+        committed,
+        { requireSealed: true, requireCompleteBenchmark: true },
+    );
+
+    const splitSummary = Object.fromEntries(["tuning", "held_out"].map((split) => [
+        split,
+        {
+            families: new Set(normalized.repositories
+                .filter((repository) => repository.split === split)
+                .map((repository) => repository.family)).size,
+            tasks: normalized.tasks.filter((task) => task.split === split).length,
+        },
+    ]));
+    assert.deepEqual(splitSummary, {
+        tuning: { families: 6, tasks: 48 },
+        held_out: { families: 6, tasks: 48 },
+    });
+
+    const priorFamilies = new Set([
+        "satori",
+        "tradingview_ratio",
+        "noor_and_knot_shopify",
+    ]);
+    assert.ok(normalized.repositories.every(({ family }) => !priorFamilies.has(family)));
+    assert.ok([...priorFamilies].every((family) => (
+        normalized.leakage.priorDecisionEvidence.repositoryFamilies.includes(family)
+    )));
+    assert.deepEqual(
+        normalized.leakage.priorDecisionEvidence.categories,
+        [
+            "prior_lateon_tuning",
+            "tradingview_ratio",
+            "owner_score_calibration",
+            "implementation_fixtures",
+        ],
+    );
+    assert.equal(normalized.neuralTrainingOverlapReview.status, "suspected_overlap");
+    assert.match(normalized.neuralTrainingOverlapReview.rationale, /does not disclose an authoritative training corpus/);
+    const newRepositoryIds = new Set([
+        "gitnexus-r0",
+        "bookmark-ai-organizer-r0",
+        "duas-r0",
+        "vox-infinity-r0",
+        "rpc-r0",
+        "edge-tts-app-r0",
+        "ai-studio-prompt-library-r0",
+        "portfolio-r0",
+        "supply-chain-api-r0",
+    ]);
+    assert.ok(normalized.tasks
+        .filter(({ repositoryId }) => newRepositoryIds.has(repositoryId))
+        .every(({ oracle }) => oracle.reviewer === "local_source_oracle_review_2026_08_03"));
+});
+
+test("version 3 rejects a split below six families and any prior-evidence overlap", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v3.manifest.json"),
+        "utf8",
+    ));
+    const { sha256: _seal, ...unsealed } = committed;
+    const belowMinimum = structuredClone(unsealed);
+    belowMinimum.repositories = belowMinimum.repositories.filter(({ id }) => id !== "gitnexus-r0");
+    belowMinimum.tasks = belowMinimum.tasks.filter(({ repositoryId }) => repositoryId !== "gitnexus-r0");
+    assert.throws(
+        () => validateRankingBenchmarkManifest(
+            belowMinimum,
+            { requireCompleteBenchmark: true },
+        ),
+        /independent repository-family minimum/,
+    );
+
+    const leaked = structuredClone(unsealed);
+    leaked.leakage.priorDecisionEvidence.repositoryFamilies.push("gitnexus");
+    assert.throws(
+        () => validateRankingBenchmarkManifest(leaked),
+        /overlaps prior decision evidence/,
+    );
+});
+
+test("version 3 seals four unopened arms, prospective captures, statistics, and absolute resources", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v3.manifest.json"),
+        "utf8",
+    ));
+    const normalized = validateRankingBenchmarkManifest(
+        committed,
+        { requireSealed: true, requireCompleteBenchmark: true },
+    );
+
+    assert.equal(normalized.version, 3);
+    assert.equal(normalized.statisticalContract.version, 2);
+    assert.equal(normalized.statisticalContract.minimumTasksPerSplit, 48);
+    assert.equal(normalized.statisticalContract.clusterBootstrapResamples, 10_000);
+    assert.equal(
+        normalized.statisticalContract.multiplicityAdjustedConfidence.newContenders,
+        0.9875,
+    );
+    assert.deepEqual(
+        normalized.lateOnL0Authority.newArms.map(({ id, status }) => [id, status]),
+        [
+            ["projection-v1-d-l50", "preregistered_unopened"],
+            ["projection-v2-d-l16", "preregistered_unopened"],
+            ["projection-v2-d-l32", "preregistered_unopened"],
+            ["projection-v2-d-l50", "preregistered_unopened"],
+        ],
+    );
+    assert.deepEqual(normalized.lateOnL0Authority.candidateCaptureContract, {
+        state: "prospective_not_created",
+        heldOutState: "unopened_no_index_or_capture",
+        candidateCaptureSha256: null,
+        contenderOutputSha256: null,
+        digestBinding: "sha256_canonical_json_after_capture_before_scoring",
+    });
+    assert.deepEqual(normalized.lateOnL0Authority.resourceProfile, {
+        profile: "local_wsl_cpu",
+        maximumModelLoadMilliseconds: 1000,
+        maximumWarmP95Milliseconds: 900,
+        requestDeadlineMilliseconds: 2000,
+        maximumProcessPeakRssBytes: 872415232,
+        maximumProcessRetainedRssBytes: 671088640,
+        documentBatchSize: 1,
+        intraOpThreads: 8,
+        interOpThreads: 1,
+        executionProvider: "cpu",
+    });
+    const suites = buildRankingCandidateTaskSuites(normalized);
+    assert.equal(suites.length, 12);
+    assert.ok(suites.every(({ candidateTaskSuite, negativeExposureSuite }) => (
+        candidateTaskSuite.version === 2
+        && negativeExposureSuite.version === 2
+        && candidateTaskSuite.tasks.length === 6
+        && negativeExposureSuite.tasks.length === 2
+    )));
+
+    const tampered = structuredClone(committed);
+    tampered.lateOnL0Authority.newArms[0].candidateDepth = 32;
+    assert.throws(
+        () => validateRankingBenchmarkManifest(tampered, { requireSealed: true }),
+        /new arms do not match|digest does not match/,
+    );
+});
+
+test("version 3 builder reproduces the committed sealed authority from pinned Git objects", () => {
+    const committed = JSON.parse(fs.readFileSync(
+        path.join(REPO_ROOT, "evals/search-ranking/cross-repository-v3.manifest.json"),
+        "utf8",
+    ));
+
+    assert.deepEqual(buildCrossRepositoryManifest(), committed);
 });
