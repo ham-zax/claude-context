@@ -6304,12 +6304,26 @@ test('Context hybrid search uses the proven collection without a non-gating quer
             lexicalFallbackTerms: ['hybridValue'],
         });
 
-        assert.equal(execution.results.length, 5);
+        assert.equal(
+            productResults.length,
+            2,
+            'the top-five raw chunks cover two file owners after owner-level arm deduplication',
+        );
+        assert.equal(execution.results.length, productResults.length);
         assert.deepEqual(
             execution.results.map((result) => result.id),
             productResults.map((result) => result.id),
             'trace-only depth must not change product candidates or ordering',
         );
+        const disclosedOwnerIds = execution.results.map((result) => (
+            result.ownerSymbolInstanceId
+                ? JSON.stringify([
+                    result.relativePath,
+                    result.ownerSymbolInstanceId,
+                ])
+                : result.relativePath
+        ));
+        assert.equal(new Set(disclosedOwnerIds).size, execution.results.length);
         assert.equal(execution.diagnosticCandidateArms?.dense?.length, 8);
         assert.equal(execution.diagnosticCandidateArms?.preciseLexical?.length, 8);
         assert.equal(execution.diagnosticCandidateArms?.fallbackLexical?.length, 8);
@@ -6330,7 +6344,7 @@ test('Context hybrid search uses the proven collection without a non-gating quer
         assert.ok(execution.candidateTrace.stages.every((stage) => stage.omittedOccurrences === 0));
         assert.equal(
             execution.candidateTrace.stages.find((stage) => stage.stage === 'core_fusion')?.totalOccurrences,
-            5,
+            productResults.length,
         );
         assert.ok(execution.candidateTrace.stages.every((stage) => (
             stage.candidates.every((candidate) => candidate.candidateId.length > 0)
