@@ -844,7 +844,14 @@ export function assertMeasuredReadiness(task, phase, invocation, readiness, cont
     }
 
     if (phase === "warm") {
-        if (readiness.proofMode !== "warm") {
+        const checkpointRevalidatedWarmProof = readiness.proofMode === "cold"
+            && readiness.operations.preparedCacheHits >= 1
+            && readiness.operations.warmReceiptRevalidations >= 1
+            && readiness.operations.postFreshnessColdChecks >= 1
+            && readiness.operations.exactPayloadRecounts === 0
+            && readiness.requestProof?.finalFullComparisons >= 1
+            && readiness.watcher?.checkpointStatus === "valid";
+        if (readiness.proofMode !== "warm" && !checkpointRevalidatedWarmProof) {
             failedPredicates.push(`proofMode===warm (actual=${readiness.proofMode})`);
         }
         if (readiness.operations.preparedCacheHits < 1) {

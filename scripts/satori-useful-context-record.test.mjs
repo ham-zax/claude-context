@@ -63,6 +63,51 @@ test("recorder accepts a cold proof bound to a valid post-freshness checkpoint",
     ), /checkpoint-bound/);
 });
 
+test("recorder accepts a warm receipt followed by a fully compared checkpoint revalidation", () => {
+    const task = {
+        id: "checkpoint-warm",
+        workload: {
+            invocations: [{ tool: "search_codebase", args: { debugMode: "full" } }],
+        },
+    };
+    const invocation = task.workload.invocations[0];
+    const readiness = {
+        proofMode: "cold",
+        invalidationReason: "observation_changed",
+        operations: {
+            preparedCacheLookups: 1,
+            preparedCacheHits: 1,
+            coldReadinessChecks: 1,
+            postFreshnessColdChecks: 1,
+            warmReceiptRevalidations: 1,
+            exactPayloadRecounts: 0,
+        },
+        requestProof: {
+            preRetrievalFullComparisons: 0,
+            finalFullComparisons: 1,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+
+    assert.doesNotThrow(() => assertMeasuredReadiness(
+        task,
+        "warm",
+        invocation,
+        readiness,
+        { sample: 1, invocationIndex: 0 },
+    ));
+    assert.throws(() => assertMeasuredReadiness(
+        task,
+        "warm",
+        invocation,
+        {
+            ...readiness,
+            requestProof: { ...readiness.requestProof, finalFullComparisons: 0 },
+        },
+        { sample: 1, invocationIndex: 0 },
+    ), /proofMode===warm/);
+});
+
 function writeJson(file, value) {
     fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
