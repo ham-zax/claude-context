@@ -324,4 +324,15 @@ test("LateOn close rejects active and queued work and joins its worker", async (
     await activeRejection;
     await queuedRejection;
     assert.equal(reranker.getOperationalState(), "closed");
+    assert.deepEqual(reranker.getOperationalSnapshot(), {
+        state: "closed",
+        closed: true,
+        workerAttached: false,
+        activeRequest: false,
+        activeTask: false,
+        queuedRequest: false,
+        pendingWorkerRequests: 0,
+        readinessTimerActive: false,
+        terminationActive: false,
+    });
 });

@@ -304,6 +304,30 @@ export class LateOnReranker implements Reranker {
         return this.workerState;
     }
 
+    getOperationalSnapshot(): Readonly<{
+        state: WorkerState;
+        closed: boolean;
+        workerAttached: boolean;
+        activeRequest: boolean;
+        activeTask: boolean;
+        queuedRequest: boolean;
+        pendingWorkerRequests: number;
+        readinessTimerActive: boolean;
+        terminationActive: boolean;
+    }> {
+        return Object.freeze({
+            state: this.workerState,
+            closed: this.closed,
+            workerAttached: this.worker !== null,
+            activeRequest: this.activeRequest !== null,
+            activeTask: this.activeTask !== null,
+            queuedRequest: this.queued !== null,
+            pendingWorkerRequests: this.pending.size,
+            readinessTimerActive: this.readinessTimer !== undefined,
+            terminationActive: this.termination !== null,
+        });
+    }
+
     async waitUntilReady(): Promise<void> {
         if (this.closed) {
             throw operationalError("lateon_cancelled", "LateOn reranker is closed.");
