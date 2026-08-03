@@ -57,6 +57,7 @@ Current execution state:
 | P — pagination | `pagination_complete_frozen_set_qualified` | `docs/evidence/deep-pagination-p2-20260802/P2_QUALIFICATION_RECEIPT.md` |
 | L — LateOn | `baseline_b_retained` | `docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md` |
 | I — compact result index | `compact_result_index_qualified` | `docs/evidence/deep-result-index-i2-20260804/I2_QUALIFICATION_RECEIPT.md` |
+| O — offline operationalization | `D32 operationally qualified; held-out opening consumed without decision; disabled` | `docs/evidence/lateon-track-o-o2-carry-forward-20260804/O2_CARRY_FORWARD_RECEIPT.md` and `docs/evidence/lateon-track-o-closure-20260804/TRACK_O_CLOSURE_RECEIPT.md` |
 
 “No limit on how much the agent can request” does not mean an unbounded response
 or unbounded retrieval work. A caller may request the complete available frozen
