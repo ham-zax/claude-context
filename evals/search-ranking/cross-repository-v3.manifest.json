@@ -187,6 +187,7 @@
       "rpc-format-term",
       "rpc-strictness-config",
       "rpc-extension-entry",
+      "rpc-strictness-safety-control",
       "rpc-negative-email-digest",
       "rpc-negative-db-migration",
       "edge-voice-options",
@@ -195,6 +196,7 @@
       "edge-http-get",
       "edge-http-post",
       "edge-player-stop",
+      "edge-voice-options-safety-control",
       "edge-negative-sql-migration",
       "edge-negative-browser-routes",
       "satori-entrypoint-evidence",
@@ -422,6 +424,10 @@
       "requiredRoleCoverage": -0.01,
       "hardNegativeExposureAt3": 0.02,
       "unacceptableOwnerExposureAt3": 0.02
+    },
+    "metricApplicability": {
+      "requiredRoleCoverage": "not_applicable_no_required_role_oracle",
+      "ownerAt10": "applicable_protected_retrieval_depth_metric"
     },
     "deterministicPerformance": {
       "p95Multiplier": 1.1,
@@ -2871,6 +2877,44 @@
       }
     },
     {
+      "id": "rpc-strictness-safety-control",
+      "split": "tuning",
+      "repositoryId": "rpc-r0",
+      "queryClass": "configuration",
+      "query": "must:MODE_STRICTNESS_CONFIG MODE_STRICTNESS_CONFIG",
+      "querySha256": "3449e602b9d254037bd8401338df3765a45f8348542efeb4abc41a9f3c44f0cd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "safetyControls": [
+        "must",
+        "configuration_pin"
+      ],
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "pi-cog-engine/extensions/cog-engine/config.ts",
+          "symbol": "MODE_STRICTNESS_CONFIG"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The existing reviewed strictness declaration provides an additive must/configuration control.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "5a1e5bbf395a2bb815dc7a12ce8266604a7fa644",
+          "file": "pi-cog-engine/extensions/cog-engine/config.ts",
+          "symbol": "MODE_STRICTNESS_CONFIG",
+          "sourceBlobSha256": "d4ba525224c64f2f70fbdd515191a723cfacfc8949d0cf364c1563b902eb08b5"
+        }
+      }
+    },
+    {
       "id": "rpc-negative-email-digest",
       "split": "tuning",
       "repositoryId": "rpc-r0",
@@ -3141,6 +3185,43 @@
           "file": "player.py",
           "symbol": "stop",
           "sourceBlobSha256": "ffa62ab0d2578fbafcac8da6f9d9f1389eece7277e976b1e247ef6f96356bfe5"
+        }
+      }
+    },
+    {
+      "id": "edge-voice-options-safety-control",
+      "split": "tuning",
+      "repositoryId": "edge-tts-app-r0",
+      "queryClass": "exact_identifier",
+      "query": "get_voice_options",
+      "querySha256": "8515e8ec173696fb06027a281a44e5cbe2058cae6a6a87ebea7e96e3f7d55dcd",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "safetyControls": [
+        "exact_identifier"
+      ],
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "tts_core.py",
+          "symbol": "get_voice_options"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The existing reviewed voice-option owner provides an additive exact-identifier control.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "48dadeec920a7e3f229169405fe8818ca6cf91b5",
+          "file": "tts_core.py",
+          "symbol": "get_voice_options",
+          "sourceBlobSha256": "572d6d640ba3a17f329533b3afc8345f2367221f6db1ae22984219685e6cdbb2"
         }
       }
     },
@@ -3419,6 +3500,43 @@
       }
     },
     {
+      "id": "prompt-library-state-exact-control",
+      "split": "held_out",
+      "repositoryId": "ai-studio-prompt-library-r0",
+      "queryClass": "exact_identifier",
+      "query": "getState",
+      "querySha256": "f84ee9b4bc4e81e9176bceee637ff9180f717f191375bef00e5b2984e5db8554",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "safetyControls": [
+        "exact_identifier"
+      ],
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "getState"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The existing reviewed state-retrieval oracle provides a metadata-only exact-identifier control.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "3b2f996d047c76e9b27e7b0932ac93fb93058bb5",
+          "file": "extension/src/shared/storage.ts",
+          "symbol": "getState",
+          "sourceBlobSha256": "fbdd27f7fdaa8a985da7be3446b3ad54a19ed155c38f869dbb367c79249946eb"
+        }
+      }
+    },
+    {
       "id": "prompt-library-negative-remote-upload",
       "split": "held_out",
       "repositoryId": "ai-studio-prompt-library-r0",
@@ -3690,6 +3808,43 @@
           "file": "tests/static-ui-regressions.test.mjs",
           "symbol": "project status handling is constrained and not substring matched",
           "sourceBlobSha256": "db094154344ad08d12ac3271e8bc22e7827a8be9c1585240ba7f055a6c2c8926"
+        }
+      }
+    },
+    {
+      "id": "portfolio-page-items-must-control",
+      "split": "held_out",
+      "repositoryId": "portfolio-r0",
+      "queryClass": "natural_language_behavior",
+      "query": "must:getPageItems getPageItems",
+      "querySha256": "f8f4df1aafab7d52c8ea09dc21ef7cb7058434ce8d243304f74ad8ceabb71469",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "safetyControls": [
+        "must"
+      ],
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "src/utils/pagination.ts",
+          "symbol": "getPageItems"
+        },
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The existing reviewed page-slicing oracle provides a metadata-only must-operator control.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "14f37d4cc651227578dc685bae8c47cb16fb05ac",
+          "file": "src/utils/pagination.ts",
+          "symbol": "getPageItems",
+          "sourceBlobSha256": "75b8bec98382b504d9cc0b0c664013512d91c517a4a87acee390f462a5ff4552"
         }
       }
     },
@@ -3970,6 +4125,44 @@
       }
     },
     {
+      "id": "supply-fastapi-configuration-control",
+      "split": "held_out",
+      "repositoryId": "supply-chain-api-r0",
+      "queryClass": "configuration",
+      "query": "path:requirements.txt fastapi==0.95.2",
+      "querySha256": "24e6fef6fd6c02adf536636bf275429def8edddd2cacd1c20c51a162391c06cf",
+      "search": {
+        "scope": "mixed",
+        "resultMode": "grouped",
+        "groupBy": "symbol",
+        "limit": 15,
+        "disclosureLimit": 10
+      },
+      "criticality": "important",
+      "safetyControls": [
+        "configuration_pin"
+      ],
+      "oracle": {
+        "kind": "owner",
+        "requiredOwner": {
+          "file": "requirements.txt",
+          "symbol": "fastapi==0.95.2"
+        },
+        "ownerMatch": "file",
+        "acceptableAlternativeOwners": [],
+        "hardNegativeOwners": [],
+        "rationale": "The existing reviewed dependency-pin oracle provides a metadata-only configuration control.",
+        "reviewer": "local_source_oracle_review_2026_08_03",
+        "evidence": {
+          "kind": "source_symbol",
+          "revision": "77484710f91dbae2f56d779c4d5a7dec1e705c8c",
+          "file": "requirements.txt",
+          "symbol": "fastapi==0.95.2",
+          "sourceBlobSha256": "0eb2ac92ce3b658d993a74ab958ecd95349a31a167ba962fa8ec004892541fa3"
+        }
+      }
+    },
+    {
       "id": "supply-negative-payment-transaction",
       "split": "held_out",
       "repositoryId": "supply-chain-api-r0",
@@ -4040,5 +4233,5 @@
       }
     }
   ],
-  "sha256": "72bd15767140f60d936028c4dfa07238aec1d1452ecec01f6fdd6c10aac510a5"
+  "sha256": "7d1ebfc551c58bf1251521b201a523f8517d1be9bd92a84773d3ef3612792c08"
 }

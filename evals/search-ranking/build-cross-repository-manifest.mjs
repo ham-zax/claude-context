@@ -135,6 +135,9 @@ function ownerTask(repositoryId, id, queryClass, query, file, symbol, rationale,
         queryClass,
         query,
         criticality: options.criticality ?? "important",
+        ...(options.safetyControls
+            ? { safetyControls: [...options.safetyControls] }
+            : {}),
         oracle: {
             kind: "owner",
             ...(options.ownerMatch ? { ownerMatch: options.ownerMatch } : {}),
@@ -616,6 +619,11 @@ const V3_NEW_TASKS = [
         "Which function registers the cognitive learner engine extension?",
         "pi-cog-engine/extensions/cog-engine/index.ts", "cogEngineExtension",
         "This function owns extension registration."),
+    ownerTask("rpc-r0", "rpc-strictness-safety-control", "configuration",
+        "must:MODE_STRICTNESS_CONFIG MODE_STRICTNESS_CONFIG",
+        "pi-cog-engine/extensions/cog-engine/config.ts", "MODE_STRICTNESS_CONFIG",
+        "The existing reviewed strictness declaration provides an additive must/configuration control.",
+        { safetyControls: ["must", "configuration_pin"] }),
     negativeTask("rpc-r0", "rpc-negative-email-digest",
         "Which function emails a daily learner progress digest?",
         "pi-cog-engine/extensions/cog-engine/terms.ts", "formatTerm",
@@ -649,6 +657,11 @@ const V3_NEW_TASKS = [
         "Which player method stops current audio playback?",
         "player.py", "stop",
         "This method owns playback termination."),
+    ownerTask("edge-tts-app-r0", "edge-voice-options-safety-control", "exact_identifier",
+        "get_voice_options",
+        "tts_core.py", "get_voice_options",
+        "The existing reviewed voice-option owner provides an additive exact-identifier control.",
+        { safetyControls: ["exact_identifier"] }),
     negativeTask("edge-tts-app-r0", "edge-negative-sql-migration",
         "Which function applies a SQL database migration?",
         "tts_core.py", "generate_audio",
@@ -682,6 +695,11 @@ const V3_NEW_TASKS = [
         "Which popup function sends a selected prompt for insertion?",
         "extension/src/popup/main.ts", "sendInsert",
         "This function owns the popup insertion message."),
+    ownerTask("ai-studio-prompt-library-r0", "prompt-library-state-exact-control", "exact_identifier",
+        "getState",
+        "extension/src/shared/storage.ts", "getState",
+        "The existing reviewed state-retrieval oracle provides a metadata-only exact-identifier control.",
+        { safetyControls: ["exact_identifier"] }),
     negativeTask("ai-studio-prompt-library-r0", "prompt-library-negative-remote-upload",
         "Which function uploads the prompt library to a remote server?",
         "extension/src/shared/storage.ts", "importJson",
@@ -716,6 +734,11 @@ const V3_NEW_TASKS = [
         "tests/static-ui-regressions.test.mjs", "project status handling is constrained and not substring matched",
         "The named test owns the status-matching regression.",
         { ownerMatch: "file" }),
+    ownerTask("portfolio-r0", "portfolio-page-items-must-control", "natural_language_behavior",
+        "must:getPageItems getPageItems",
+        "src/utils/pagination.ts", "getPageItems",
+        "The existing reviewed page-slicing oracle provides a metadata-only must-operator control.",
+        { safetyControls: ["must"] }),
     negativeTask("portfolio-r0", "portfolio-negative-db-migration",
         "Which function applies a database schema migration?",
         "src/utils/tags.ts", "slugifyTag",
@@ -751,6 +774,11 @@ const V3_NEW_TASKS = [
         "requirements.txt", "fastapi==0.95.2",
         "This requirements entry owns the FastAPI version pin.",
         { ownerMatch: "file" }),
+    ownerTask("supply-chain-api-r0", "supply-fastapi-configuration-control", "configuration",
+        "path:requirements.txt fastapi==0.95.2",
+        "requirements.txt", "fastapi==0.95.2",
+        "The existing reviewed dependency-pin oracle provides a metadata-only configuration control.",
+        { ownerMatch: "file", safetyControls: ["configuration_pin"] }),
     negativeTask("supply-chain-api-r0", "supply-negative-payment-transaction",
         "Which function charges a customer payment transaction?",
         "src/services/inventory.py", "create_transaction",
@@ -771,6 +799,10 @@ const V3_STATISTICAL_CONTRACT = Object.freeze({
     negativeTasksPerRepository: 2,
     minimumTasksPerSplit: 48,
     newContenderCount: 4,
+    metricApplicability: {
+        requiredRoleCoverage: "not_applicable_no_required_role_oracle",
+        ownerAt10: "applicable_protected_retrieval_depth_metric",
+    },
     decisionStratumMinimumTasks: 4,
     decisionStratumMinimumRepositoryFamilies: 2,
     pairedEstimator: "repository_macro_mean_of_paired_task_deltas",
@@ -869,7 +901,7 @@ function assertPinnedOwner(repository, owner, label) {
     return sourceBytes;
 }
 
-function materializeTask(task, repositoriesById) {
+function materializeTask(task, repositoriesById, options = {}) {
     const repository = repositoriesById.get(task.repositoryId);
     const owners = [
         ...(task.oracle.requiredOwner ? [task.oracle.requiredOwner] : []),
@@ -894,6 +926,9 @@ function materializeTask(task, repositoriesById) {
         querySha256: sha256(task.query),
         search: { ...SEARCH },
         criticality: task.criticality,
+        ...(options.includeSafetyControls !== false && task.safetyControls
+            ? { safetyControls: [...task.safetyControls] }
+            : {}),
         oracle: {
             ...task.oracle,
             evidence: {
@@ -1083,7 +1118,11 @@ function buildVersion2Manifest() {
         repository.id,
         repository,
     ]));
-    const tasks = TASKS.map((task) => materializeTask(task, repositoriesById));
+    const tasks = TASKS.map((task) => materializeTask(
+        task,
+        repositoriesById,
+        { includeSafetyControls: false },
+    ));
     const tuningRepositories = repositories.filter(({ split }) => split === "tuning");
     const tuningTasks = tasks.filter(({ split }) => split === "tuning");
     return validateRankingBenchmarkManifest({

@@ -21,6 +21,15 @@ function seal(value) {
     };
 }
 
+function resealCaptureAuthority(authority) {
+    const unsigned = structuredClone(authority);
+    delete unsigned.sha256;
+    unsigned.aggregateCaptureSha256 = crypto.createHash("sha256")
+        .update(canonicalJson(unsigned.repositories), "utf8")
+        .digest("hex");
+    return seal(unsigned);
+}
+
 function trackLFixture() {
     const tooling = getTrackLScoringToolingAuthority();
     const c0Contract = {
@@ -89,16 +98,40 @@ function trackLFixture() {
             digestBinding: "sha256_canonical_json_after_capture_before_scoring",
         },
     };
-    const repositories = Array.from({ length: 6 }, (_, index) => ({
+    const tuningRepositories = Array.from({ length: 6 }, (_, index) => ({
         id: `repo-${index + 1}`,
         split: "tuning",
         revision: String(index + 1).repeat(40),
         gitTree: String(index + 1).repeat(40),
         sourceTreeSha256: String(index + 1).repeat(64),
     }));
+    const repositories = [
+        ...tuningRepositories,
+        {
+            id: "repo-heldout",
+            split: "heldout",
+            revision: "7".repeat(40),
+            gitTree: "7".repeat(40),
+            sourceTreeSha256: "7".repeat(64),
+        },
+    ];
     const tasks = repositories.flatMap((repository) => ([
-        { id: `${repository.id}-owner`, repositoryId: repository.id, oracle: { kind: "owner" } },
-        { id: `${repository.id}-negative`, repositoryId: repository.id, oracle: { kind: "negative" } },
+        {
+            id: `${repository.id}-owner`,
+            repositoryId: repository.id,
+            split: repository.split,
+            queryClass: "entrypoint",
+            safetyControls: ["exact_identifier", "must"],
+            oracle: { kind: "owner" },
+        },
+        {
+            id: `${repository.id}-negative`,
+            repositoryId: repository.id,
+            split: repository.split,
+            queryClass: "negative",
+            safetyControls: ["configuration_pin"],
+            oracle: { kind: "negative" },
+        },
     ]));
     const manifest = seal({ version: 3, repositories, tasks, lateOnL0Authority });
     return {
@@ -289,9 +322,14 @@ test("Track L scoring CLI requires one explicit arm, manifest, and runtime profi
     );
 });
 
-function captureFixture(repository, taskId, fileSha256) {
+function captureFixture(repository, task, fileSha256) {
+    const queryClass = task.queryClass === "exact_identifier"
+        ? "exact_identifier"
+        : task.queryClass === "negative"
+            ? "negative_exposure"
+            : "owner_discovery";
     return {
-        fileName: `${taskId}.json`,
+        fileName: `${task.id}.json`,
         fileSha256,
         replaySha256: "f".repeat(64),
         capture: seal({
@@ -306,27 +344,41 @@ function captureFixture(repository, taskId, fileSha256) {
                     publication: { collectionName: repository.id },
                 },
             },
-            captures: [{ taskId }],
+            captures: [{
+                taskId: task.id,
+                split: task.split,
+                queryClass,
+                ...(task.safetyControls ? {
+                    safetyControls: [...task.safetyControls],
+                } : {}),
+            }],
         }),
     };
 }
 
-test("Track L scoring binds one repository to a post-capture authority over all tuning captures", () => {
-    const fixture = trackLFixture();
+function capturePairsFixture(fixture) {
     const digestCharacters = "123456789abcdef";
-    const capturePairs = fixture.manifest.repositories.map((repository, index) => ({
+    const tuningRepositories = fixture.manifest.repositories.filter(
+        ({ split }) => split === "tuning",
+    );
+    return tuningRepositories.map((repository, index) => ({
         repositoryId: repository.id,
         positive: captureFixture(
             repository,
-            `${repository.id}-owner`,
+            fixture.manifest.tasks.find(({ id }) => id === `${repository.id}-owner`),
             digestCharacters[index].repeat(64),
         ),
         negative: captureFixture(
             repository,
-            `${repository.id}-negative`,
+            fixture.manifest.tasks.find(({ id }) => id === `${repository.id}-negative`),
             digestCharacters[index + 6].repeat(64),
         ),
     }));
+}
+
+test("Track L scoring binds one repository to a post-capture authority over all tuning captures", () => {
+    const fixture = trackLFixture();
+    const capturePairs = capturePairsFixture(fixture);
     const authority = buildTrackLCaptureAuthority({
         manifest: fixture.manifest,
         expectedManifestSeal: fixture.expectedManifestSeal,
@@ -334,6 +386,8 @@ test("Track L scoring binds one repository to a post-capture authority over all 
     });
 
     assert.equal(authority.repositories.length, 6);
+    assert.equal(authority.schemaVersion, "satori_search_ranking_track_l_capture_authority_v2");
+    assert.equal(authority.repositories.some(({ id }) => id === "repo-heldout"), false);
     assert.match(authority.aggregateCaptureSha256, /^[0-9a-f]{64}$/);
     assert.deepEqual(
         resolveTrackLCaptureAuthority({
@@ -343,9 +397,30 @@ test("Track L scoring binds one repository to a post-capture authority over all 
             repositoryId: "repo-1",
             positive: capturePairs[0].positive,
             negative: capturePairs[0].negative,
-        }).repository.taskIds,
-        { positive: ["repo-1-owner"], negative: ["repo-1-negative"] },
+        }).repository.tasks,
+        {
+            positive: [{
+                taskId: "repo-1-owner",
+                split: "tuning",
+                queryClass: "owner_discovery",
+                safetyControls: ["exact_identifier", "must"],
+            }],
+            negative: [{
+                taskId: "repo-1-negative",
+                split: "tuning",
+                queryClass: "negative_exposure",
+                safetyControls: ["configuration_pin"],
+            }],
+        },
     );
+    assert.throws(() => resolveTrackLCaptureAuthority({
+        manifest: fixture.manifest,
+        expectedManifestSeal: fixture.expectedManifestSeal,
+        authority,
+        repositoryId: "repo-heldout",
+        positive: capturePairs[0].positive,
+        negative: capturePairs[0].negative,
+    }), /no repository 'repo-heldout'/i);
 
     const tampered = structuredClone(authority);
     tampered.repositories[0].positive.fileSha256 = "e".repeat(64);
@@ -357,6 +432,70 @@ test("Track L scoring binds one repository to a post-capture authority over all 
         positive: capturePairs[0].positive,
         negative: capturePairs[0].negative,
     }), /digest|capture authority|contents/i);
+
+    const incomplete = structuredClone(authority);
+    incomplete.repositories.pop();
+    assert.throws(() => resolveTrackLCaptureAuthority({
+        manifest: fixture.manifest,
+        expectedManifestSeal: fixture.expectedManifestSeal,
+        authority: resealCaptureAuthority(incomplete),
+        repositoryId: "repo-1",
+        positive: capturePairs[0].positive,
+        negative: capturePairs[0].negative,
+    }), /capture repository IDs does not match/i);
+});
+
+test("Track L capture authority rejects task metadata drift despite matching task IDs", () => {
+    const fixture = trackLFixture();
+    const capturePairs = capturePairsFixture(fixture);
+    const authority = buildTrackLCaptureAuthority({
+        manifest: fixture.manifest,
+        expectedManifestSeal: fixture.expectedManifestSeal,
+        capturePairs,
+    });
+    const mutations = [
+        (task) => { delete task.safetyControls; },
+        (task) => { task.safetyControls[0] = "configuration_pin"; },
+        (task) => { task.safetyControls[0] = "unknown_control"; },
+        (task) => { task.safetyControls.reverse(); },
+        (task) => { task.split = "heldout"; },
+        (task) => { task.queryClass = "exact_identifier"; },
+        (task) => { task.taskId = "unknown-task"; },
+    ];
+
+    for (const mutate of mutations) {
+        const positive = structuredClone(capturePairs[0].positive);
+        mutate(positive.capture.captures[0]);
+        assert.throws(() => resolveTrackLCaptureAuthority({
+            manifest: fixture.manifest,
+            expectedManifestSeal: fixture.expectedManifestSeal,
+            authority,
+            repositoryId: "repo-1",
+            positive,
+            negative: capturePairs[0].negative,
+        }), /Positive capture tasks does not match the frozen Track L authority/);
+    }
+});
+
+test("Track L capture authority rejects internally resealed unknown task authority", () => {
+    const fixture = trackLFixture();
+    const capturePairs = capturePairsFixture(fixture);
+    const authority = buildTrackLCaptureAuthority({
+        manifest: fixture.manifest,
+        expectedManifestSeal: fixture.expectedManifestSeal,
+        capturePairs,
+    });
+    const unknownAuthority = structuredClone(authority);
+    unknownAuthority.repositories[0].tasks.positive[0].taskId = "unknown-task";
+
+    assert.throws(() => resolveTrackLCaptureAuthority({
+        manifest: fixture.manifest,
+        expectedManifestSeal: fixture.expectedManifestSeal,
+        authority: resealCaptureAuthority(unknownAuthority),
+        repositoryId: "repo-1",
+        positive: capturePairs[0].positive,
+        negative: capturePairs[0].negative,
+    }), /Repository 'repo-1' tasks does not match the frozen Track L authority/);
 });
 
 test("Track L scorer rejects a different resealed manifest or external artifact bytes", () => {

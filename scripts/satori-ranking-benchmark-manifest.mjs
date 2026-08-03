@@ -27,6 +27,15 @@ const QUERY_CLASSES = new Set([
 const ORACLE_KINDS = new Set(["owner", "negative"]);
 const OWNER_MATCH_KINDS = new Set(["symbol", "file"]);
 const CRITICALITIES = new Set(["critical", "important", "diagnostic"]);
+const TASK_SAFETY_CONTROLS = new Set([
+    "exact_identifier",
+    "must",
+    "configuration_pin",
+    "candidate_membership",
+    "eligibility",
+    "fallback",
+    "frozen_pagination",
+]);
 const NEURAL_OVERLAP_STATUSES = new Set([
     "deferred_r3_closed",
     "no_known_overlap",
@@ -239,6 +248,14 @@ function normalizeTask(value, index, repositoriesById) {
     if (disclosureLimit > limit) {
         throw new Error(`${label}.search.disclosureLimit must not exceed limit.`);
     }
+    const safetyControls = task.safetyControls === undefined
+        ? undefined
+        : requireStringArray(task.safetyControls, `${label}.safetyControls`)
+            .map((control, controlIndex) => requireEnum(
+                control,
+                TASK_SAFETY_CONTROLS,
+                `${label}.safetyControls[${controlIndex}]`,
+            ));
     return {
         id: requireString(task.id, `${label}.id`),
         split,
@@ -266,6 +283,7 @@ function normalizeTask(value, index, repositoriesById) {
             disclosureLimit,
         },
         criticality: requireEnum(task.criticality, CRITICALITIES, `${label}.criticality`),
+        ...(safetyControls ? { safetyControls } : {}),
         oracle: normalizeOracle(task.oracle, `${label}.oracle`, repository),
     };
 }
@@ -361,6 +379,12 @@ function normalizeStatisticalContract(value) {
     if (version !== 1 && version !== 2) {
         throw new Error("statisticalContract.version is unsupported.");
     }
+    const metricApplicability = version === 2
+        ? requireRecord(
+            contract.metricApplicability,
+            "statisticalContract.metricApplicability",
+        )
+        : undefined;
     return {
         version,
         independentRepositoryFamiliesPerSplit: requirePositiveInteger(
@@ -465,6 +489,18 @@ function normalizeStatisticalContract(value) {
                 "statisticalContract.nonInferiorityMargins.unacceptableOwnerExposureAt3",
             ),
         },
+        ...(metricApplicability ? {
+            metricApplicability: {
+                requiredRoleCoverage: requireString(
+                    metricApplicability.requiredRoleCoverage,
+                    "statisticalContract.metricApplicability.requiredRoleCoverage",
+                ),
+                ownerAt10: requireString(
+                    metricApplicability.ownerAt10,
+                    "statisticalContract.metricApplicability.ownerAt10",
+                ),
+            },
+        } : {}),
         deterministicPerformance: {
             p95Multiplier: requireFiniteNumber(
                 performance.p95Multiplier,
@@ -895,6 +931,12 @@ function assertVersion3L0Contract(tasks, contract, authority) {
     for (const [actual, expected, label] of requiredNumbers) {
         if (actual !== expected) throw new Error(`Version 3 ${label} is not the frozen L0 value.`);
     }
+    if (contract.metricApplicability.requiredRoleCoverage
+        !== "not_applicable_no_required_role_oracle"
+        || contract.metricApplicability.ownerAt10
+        !== "applicable_protected_retrieval_depth_metric") {
+        throw new Error("Version 3 metric applicability does not match the frozen L0 contract.");
+    }
     const requiredZeroFailureControls = new Set([
         "exact_identifier",
         "must",
@@ -908,10 +950,16 @@ function assertVersion3L0Contract(tasks, contract, authority) {
         || !contract.zeroFailureControls.every((control) => requiredZeroFailureControls.has(control))) {
         throw new Error("Version 3 zero-failure controls do not match the frozen L0 contract.");
     }
-    if (!tasks.some((task) => task.queryClass === "exact_identifier" && !task.query.startsWith("must:"))
-        || !tasks.some((task) => task.query.startsWith("must:"))
-        || !tasks.some((task) => task.queryClass === "configuration")) {
-        throw new Error("Version 3 tasks do not exercise exact, must, and configuration controls.");
+    for (const split of SPLITS) {
+        for (const control of ["exact_identifier", "must", "configuration_pin"]) {
+            if (!tasks.some((task) => (
+                task.split === split && task.safetyControls?.includes(control)
+            ))) {
+                throw new Error(
+                    `Version 3 split '${split}' has no '${control}' safety-control denominator.`,
+                );
+            }
+        }
     }
     if (authority.version !== 1
         || authority.phase !== "L0"
@@ -1103,6 +1151,9 @@ export function buildRankingCandidateTaskSuites(manifestValue) {
                     queryClass: task.queryClass === "exact_identifier"
                         ? "exact_identifier"
                         : "owner_discovery",
+                    ...(task.safetyControls
+                        ? { safetyControls: [...task.safetyControls] }
+                        : {}),
                     language: repository.primaryLanguage,
                     expected: {
                         ownerFile: task.oracle.requiredOwner.file,
@@ -1121,6 +1172,9 @@ export function buildRankingCandidateTaskSuites(manifestValue) {
                 id: task.id,
                 split: task.split,
                 queryClass: "negative_exposure",
+                ...(task.safetyControls
+                    ? { safetyControls: [...task.safetyControls] }
+                    : {}),
                 language: repository.primaryLanguage,
                 expected: {
                     hardNegativeOwners: task.oracle.hardNegativeOwners,

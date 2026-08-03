@@ -231,18 +231,48 @@ function verifyTrackLManifestSeal(manifest, expectedManifestSeal) {
     return { manifest: manifestRecord, manifestSeal: suppliedSeal };
 }
 
-function sortedUniqueTaskIds(capture, label) {
+function normalizeSafetyControls(value, label) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${label} must be a non-empty array when present.`);
+    }
+    const controls = value.map((control, index) => requireString(
+        control,
+        `${label}[${index}]`,
+    ));
+    if (new Set(controls).size !== controls.length) {
+        throw new Error(`${label} contains duplicate controls.`);
+    }
+    return controls;
+}
+
+function normalizeTaskAuthority(task, idField, label) {
+    const record = requireRecord(task, label);
+    return {
+        taskId: requireString(record[idField], `${label} ${idField}`),
+        split: requireString(record.split, `${label} split`),
+        queryClass: requireString(record.queryClass, `${label} queryClass`),
+        safetyControls: normalizeSafetyControls(
+            record.safetyControls,
+            `${label} safetyControls`,
+        ),
+    };
+}
+
+function sortedUniqueCaptureTasks(capture, label) {
     const captures = Array.isArray(capture?.capture?.captures)
         ? capture.capture.captures
         : [];
-    const taskIds = captures.map((task, index) => requireString(
-        task?.taskId,
+    const tasks = captures.map((task, index) => normalizeTaskAuthority(
+        task,
+        "taskId",
         `${label} task ${index + 1}`,
-    )).sort(compareContractStrings);
-    if (new Set(taskIds).size !== taskIds.length) {
+    )).sort((left, right) => compareContractStrings(left.taskId, right.taskId));
+    const taskIds = tasks.map(({ taskId }) => taskId);
+    if (new Set(taskIds).size !== tasks.length) {
         throw new Error(`${label} contains duplicate task IDs.`);
     }
-    return taskIds;
+    return tasks;
 }
 
 function repositoryAuthorityFromManifest(manifest, repositoryId) {
@@ -262,30 +292,67 @@ function repositoryAuthorityFromManifest(manifest, repositoryId) {
     };
 }
 
-function expectedRepositoryTaskIds(manifest, repositoryId) {
+function tuningRepositoryIds(manifest) {
+    const repositoryIds = (Array.isArray(manifest.repositories) ? manifest.repositories : [])
+        .filter((repository) => repository?.split === "tuning")
+        .map((repository, index) => requireString(
+            repository.id,
+            `Track L tuning repository ${index + 1} id`,
+        ))
+        .sort(compareContractStrings);
+    if (repositoryIds.length < 6 || new Set(repositoryIds).size !== repositoryIds.length) {
+        throw new Error("Track L capture authority requires at least six unique tuning repositories.");
+    }
+    return repositoryIds;
+}
+
+function expectedRepositoryTasks(manifest, repositoryId) {
     const positive = [];
     const negative = [];
+    const taskIds = new Set();
     for (const task of Array.isArray(manifest.tasks) ? manifest.tasks : []) {
         if (task?.repositoryId !== repositoryId) continue;
+        const manifestTaskAuthority = normalizeTaskAuthority(
+            task,
+            "id",
+            `Repository '${repositoryId}' task`,
+        );
+        if (manifestTaskAuthority.split !== "tuning") {
+            throw new Error(
+                `Task '${manifestTaskAuthority.taskId}' is not a frozen tuning task.`,
+            );
+        }
+        const taskAuthority = {
+            ...manifestTaskAuthority,
+            queryClass: task.oracle?.kind === "negative"
+                ? "negative_exposure"
+                : task.queryClass === "exact_identifier"
+                    ? "exact_identifier"
+                    : "owner_discovery",
+        };
+        if (taskIds.has(taskAuthority.taskId)) {
+            throw new Error(`Task '${taskAuthority.taskId}' is duplicated.`);
+        }
+        taskIds.add(taskAuthority.taskId);
         const target = task.oracle?.kind === "owner"
             ? positive
             : task.oracle?.kind === "negative"
                 ? negative
                 : null;
         if (!target) throw new Error(`Task '${task?.id}' has unsupported Track L oracle authority.`);
-        target.push(requireString(task.id, `Repository '${repositoryId}' task id`));
+        target.push(taskAuthority);
     }
-    positive.sort(compareContractStrings);
-    negative.sort(compareContractStrings);
+    positive.sort((left, right) => compareContractStrings(left.taskId, right.taskId));
+    negative.sort((left, right) => compareContractStrings(left.taskId, right.taskId));
     if (positive.length === 0 || negative.length === 0) {
         throw new Error(`Repository '${repositoryId}' requires positive and negative Track L tasks.`);
     }
     return { positive, negative };
 }
 
-function normalizeCaptureBinding(capture, expectedTaskIds, label) {
-    const taskIds = sortedUniqueTaskIds(capture, label);
-    assertCanonicalEqual(taskIds, expectedTaskIds, `${label} task IDs`);
+function normalizeCaptureBinding(capture, expectedTasks, label) {
+    const tasks = sortedUniqueCaptureTasks(capture, label);
+    assertCanonicalEqual(tasks, expectedTasks, `${label} tasks`);
     return {
         fileSha256: requireSha256(capture.fileSha256, `${label} file digest`),
         captureSha256: requireSha256(capture.capture?.sha256, `${label} capture digest`),
@@ -293,7 +360,7 @@ function normalizeCaptureBinding(capture, expectedTaskIds, label) {
             capture.replaySha256,
             `${label} baseline replay digest`,
         ),
-        taskIds,
+        tasks,
     };
 }
 
@@ -306,41 +373,35 @@ export function buildTrackLCaptureAuthority({
     if (!Array.isArray(capturePairs)) {
         throw new Error("Track L capture pairs must be an array.");
     }
-    const tuningRepositories = sealed.manifest.repositories
-        .filter((repository) => repository.split === "tuning")
-        .map(({ id }) => id)
-        .sort(compareContractStrings);
-    if (tuningRepositories.length < 6) {
-        throw new Error("Track L capture authority requires at least six tuning repositories.");
-    }
+    const tuningRepositories = tuningRepositoryIds(sealed.manifest);
     const pairIds = capturePairs.map(({ repositoryId }) => repositoryId)
         .sort(compareContractStrings);
     assertCanonicalEqual(pairIds, tuningRepositories, "Track L capture repository IDs");
     const repositories = capturePairs.map((pair) => {
         const repository = repositoryAuthorityFromManifest(sealed.manifest, pair.repositoryId);
-        const taskIds = expectedRepositoryTaskIds(sealed.manifest, repository.id);
+        const tasks = expectedRepositoryTasks(sealed.manifest, repository.id);
         verifyCapturePair(pair.positive, pair.negative);
         if (pair.positive.capture.authority.gitRevision !== repository.revision) {
             throw new Error(`Repository '${repository.id}' positive capture revision mismatch.`);
         }
         return {
             ...repository,
-            taskIds,
+            tasks,
             publicationSha256: sha256Canonical(pair.positive.capture.authority.armPublication),
             positive: normalizeCaptureBinding(
                 pair.positive,
-                taskIds.positive,
+                tasks.positive,
                 `Repository '${repository.id}' positive capture`,
             ),
             negative: normalizeCaptureBinding(
                 pair.negative,
-                taskIds.negative,
+                tasks.negative,
                 `Repository '${repository.id}' negative capture`,
             ),
         };
     }).sort((left, right) => compareContractStrings(left.id, right.id));
     const unsigned = {
-        schemaVersion: "satori_search_ranking_track_l_capture_authority_v1",
+        schemaVersion: "satori_search_ranking_track_l_capture_authority_v2",
         manifestSeal: sealed.manifestSeal,
         digestBinding: sealed.manifest.lateOnL0Authority?.candidateCaptureContract?.digestBinding,
         repositories,
@@ -368,40 +429,62 @@ export function resolveTrackLCaptureAuthority({
         throw new Error("Track L capture authority digest does not match its contents.");
     }
     if (
-        record.schemaVersion !== "satori_search_ranking_track_l_capture_authority_v1"
+        record.schemaVersion !== "satori_search_ranking_track_l_capture_authority_v2"
         || record.manifestSeal !== sealed.manifestSeal
         || record.digestBinding !== "sha256_canonical_json_after_capture_before_scoring"
     ) {
         throw new Error("Track L capture authority is incompatible with the sealed manifest.");
     }
+    if (!Array.isArray(record.repositories)) {
+        throw new Error("Track L capture authority repositories must be an array.");
+    }
     if (sha256Canonical(record.repositories) !== record.aggregateCaptureSha256) {
         throw new Error("Track L capture authority aggregate digest does not match its contents.");
+    }
+    const expectedRepositoryIds = tuningRepositoryIds(sealed.manifest);
+    const authorityRepositoryIds = record.repositories.map((candidate, index) => requireString(
+        candidate?.id,
+        `Track L capture authority repository ${index + 1} id`,
+    )).sort(compareContractStrings);
+    assertCanonicalEqual(
+        authorityRepositoryIds,
+        expectedRepositoryIds,
+        "Track L capture repository IDs",
+    );
+    const expectedTasksByRepository = new Map();
+    for (const candidate of record.repositories) {
+        const expectedRepository = repositoryAuthorityFromManifest(sealed.manifest, candidate.id);
+        const expectedTasks = expectedRepositoryTasks(sealed.manifest, candidate.id);
+        assertCanonicalEqual(
+            {
+                id: candidate.id,
+                revision: candidate.revision,
+                gitTree: candidate.gitTree,
+                sourceTreeSha256: candidate.sourceTreeSha256,
+            },
+            expectedRepository,
+            `Repository '${candidate.id}' authority`,
+        );
+        assertCanonicalEqual(
+            candidate.tasks,
+            expectedTasks,
+            `Repository '${candidate.id}' tasks`,
+        );
+        expectedTasksByRepository.set(candidate.id, expectedTasks);
     }
     const repository = record.repositories.find((candidate) => candidate?.id === repositoryId);
     if (!repository) {
         throw new Error(`Track L capture authority has no repository '${repositoryId}'.`);
     }
-    const expectedRepository = repositoryAuthorityFromManifest(sealed.manifest, repositoryId);
-    const expectedTaskIds = expectedRepositoryTaskIds(sealed.manifest, repositoryId);
-    assertCanonicalEqual(
-        {
-            id: repository.id,
-            revision: repository.revision,
-            gitTree: repository.gitTree,
-            sourceTreeSha256: repository.sourceTreeSha256,
-        },
-        expectedRepository,
-        `Repository '${repositoryId}' authority`,
-    );
-    assertCanonicalEqual(repository.taskIds, expectedTaskIds, `Repository '${repositoryId}' tasks`);
+    const expectedTasks = expectedTasksByRepository.get(repositoryId);
     assertCanonicalEqual(
         repository.positive,
-        normalizeCaptureBinding(positive, expectedTaskIds.positive, "Positive capture"),
+        normalizeCaptureBinding(positive, expectedTasks.positive, "Positive capture"),
         "Positive capture binding",
     );
     assertCanonicalEqual(
         repository.negative,
-        normalizeCaptureBinding(negative, expectedTaskIds.negative, "Negative capture"),
+        normalizeCaptureBinding(negative, expectedTasks.negative, "Negative capture"),
         "Negative capture binding",
     );
     verifyCapturePair(positive, negative);
@@ -1116,6 +1199,9 @@ async function scoreTask({
             taskId: taskCapture.taskId,
             split: taskCapture.split,
             queryClass: taskCapture.queryClass,
+            ...(taskCapture.safetyControls ? {
+                safetyControls: [...taskCapture.safetyControls],
+            } : {}),
             route: "exact_registry",
             policyAffected: false,
             selectedCandidateIds: [],
@@ -1151,6 +1237,9 @@ async function scoreTask({
         taskId: taskCapture.taskId,
         split: taskCapture.split,
         queryClass: taskCapture.queryClass,
+        ...(taskCapture.safetyControls ? {
+            safetyControls: [...taskCapture.safetyControls],
+        } : {}),
         route: "fusion",
         ...outcome,
         candidateDepth: depth,
