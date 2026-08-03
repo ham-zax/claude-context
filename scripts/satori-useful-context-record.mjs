@@ -981,7 +981,10 @@ export async function recordPhase(session, task, phase, repoRoot, sample, evalua
         const freshnessMode = called.payload?.freshnessDecision?.mode;
         if (typeof freshnessMode === "string") freshnessModes.push(freshnessMode);
         if (["synced", "reconciled_ignore_change", "coalesced"].includes(freshnessMode)) {
-            throw new Error(`Task '${task.id}' measured call caused or joined sync freshness mode '${freshnessMode}'.`);
+            throw new Error(
+                `Task '${task.id}' ${phase} measured call caused or joined sync freshness mode '${freshnessMode}'. `
+                + `decision=${JSON.stringify(called.payload?.freshnessDecision ?? null)}`,
+            );
         }
         finalResult = called.result;
         finalPayload = called.payload;
