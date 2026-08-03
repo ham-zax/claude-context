@@ -37,6 +37,7 @@ const QUERY_CLASSES = [
     "caller_recovery",
     "dirty_owner",
     "stale_recovery",
+    "negative_exposure",
 ];
 
 function baseTask(overrides = {}) {
@@ -174,6 +175,30 @@ test("validateTaskSuite version 2 requires explicit tuning or held-out authority
         () => validateTaskSuite(minimalSuite([baseTask({ split: "tuning" })])),
         /version 2/,
     );
+});
+
+test("validateTaskSuite preserves explicit version-2 safety controls", () => {
+    const normalized = validateTaskSuite({
+        version: 2,
+        tasks: [baseTask({
+            id: "exact-control",
+            split: "tuning",
+            safetyControls: ["must", "exact_identifier"],
+        })],
+    });
+
+    assert.deepEqual(normalized.tasks[0].safetyControls, ["must", "exact_identifier"]);
+    assert.throws(() => validateTaskSuite({
+        version: 2,
+        tasks: [baseTask({
+            id: "duplicate-control",
+            split: "tuning",
+            safetyControls: ["must", "must"],
+        })],
+    }), /duplicate.*safety control/i);
+    assert.throws(() => validateTaskSuite(minimalSuite([baseTask({
+        safetyControls: ["must"],
+    })])), /safetyControls.*version 2/i);
 });
 
 test("validateTaskSuite defaults owner matching to symbols and validates explicit file matching", () => {

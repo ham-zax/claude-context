@@ -24,6 +24,15 @@ const COMPARISON_CLASSES = new Set([
 const PHASES = new Set(["cold", "warm"]);
 const PHASE_ORDER = ["cold", "warm"];
 const TASK_SPLITS = new Set(["tuning", "held_out"]);
+const TASK_SAFETY_CONTROLS = new Set([
+    "exact_identifier",
+    "must",
+    "configuration_pin",
+    "candidate_membership",
+    "eligibility",
+    "fallback",
+    "frozen_pagination",
+]);
 const OWNER_MATCH_KINDS = new Set(["symbol", "file"]);
 const STATUSES = new Set(["ok", "zero_result", "fallback", "error"]);
 const BASELINE_KEYS = ["maxLatencyMs", "maxPayloadBytes", "maxContextBytes"];
@@ -329,13 +338,36 @@ export function validateTaskSuite(value) {
             }
         }
         let split;
+        let safetyControls;
         if (suite.version === 2) {
             split = requireNonEmptyString(task.split, `tasks[${index}].split`);
             if (!TASK_SPLITS.has(split)) {
                 throw new Error(`tasks[${index}].split is unsupported.`);
             }
+            if (task.safetyControls !== undefined) {
+                if (!Array.isArray(task.safetyControls) || task.safetyControls.length === 0) {
+                    throw new Error(`tasks[${index}].safetyControls must be a non-empty array.`);
+                }
+                const seenSafetyControls = new Set();
+                safetyControls = task.safetyControls.map((rawControl, controlIndex) => {
+                    const control = requireNonEmptyString(
+                        rawControl,
+                        `tasks[${index}].safetyControls[${controlIndex}]`,
+                    );
+                    if (!TASK_SAFETY_CONTROLS.has(control)) {
+                        throw new Error(`tasks[${index}].safetyControls contains unsupported '${control}'.`);
+                    }
+                    if (seenSafetyControls.has(control)) {
+                        throw new Error(`tasks[${index}].safetyControls contains duplicate safety control '${control}'.`);
+                    }
+                    seenSafetyControls.add(control);
+                    return control;
+                });
+            }
         } else if (task.split !== undefined) {
             throw new Error(`tasks[${index}].split requires task suite version 2.`);
+        } else if (task.safetyControls !== undefined) {
+            throw new Error(`tasks[${index}].safetyControls requires task suite version 2.`);
         }
 
         const normalized = {
@@ -343,6 +375,7 @@ export function validateTaskSuite(value) {
             ...(split ? { split } : {}),
             queryClass: task.queryClass,
             ...(comparisonClass !== undefined ? { comparisonClass } : {}),
+            ...(safetyControls ? { safetyControls } : {}),
             language: requireNonEmptyString(task.language, `tasks[${index}].language`),
             expected,
             workload: requireWorkload(task.workload, `tasks[${index}].workload`),

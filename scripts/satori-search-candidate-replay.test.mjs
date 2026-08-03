@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 import {
     applyFrozenNeuralOrder,
+    assertTrackLNeuralAuthority,
+    buildFrozenPaginationReplay,
     replayCoreFusion,
+    validateNeuralScoreArtifact,
 } from "./satori-search-candidate-replay.mjs";
+import { canonicalJson } from "./satori-useful-context.mjs";
+
+function seal(value) {
+    return {
+        ...value,
+        sha256: crypto.createHash("sha256").update(canonicalJson(value), "utf8").digest("hex"),
+    };
+}
 
 function candidate(candidateId, stage, relativePath, score) {
     return {
@@ -138,4 +150,66 @@ test("neural replay rejects candidates outside the eligible union", () => {
         removed: [],
         mustMatchesFirst: false,
     }, [{ candidateId: "missing", score: 1 }]), /outside the eligible union/);
+});
+
+test("neural replay validates preregistered Track L depth and projection identities", () => {
+    const artifact = seal({
+        schemaVersion: "satori_search_ranking_track_l_scores_v2",
+        contenderId: "projection-v2-d-l50",
+        candidateDepth: 50,
+        contract: {
+            manifestSeal: "a".repeat(64),
+            projectionVersion: "search_rerank_document_v2",
+        },
+        captures: [],
+        authority: {},
+        tasks: [],
+    });
+
+    assert.equal(validateNeuralScoreArtifact(artifact).candidateDepth, 50);
+    assert.doesNotThrow(() => assertTrackLNeuralAuthority(artifact, {
+        expectedManifestSeal: "a".repeat(64),
+        allowedContenderIds: ["projection-v2-d-l50"],
+    }));
+    assert.throws(() => assertTrackLNeuralAuthority(artifact, {
+        expectedManifestSeal: "b".repeat(64),
+        allowedContenderIds: ["projection-v2-d-l50"],
+    }), /manifest seal/i);
+
+    const wrongDepth = seal({ ...artifact, candidateDepth: 32, sha256: undefined });
+    assert.throws(
+        () => validateNeuralScoreArtifact(wrongDepth),
+        /contender.*depth|depth.*contender/i,
+    );
+    const wrongProjection = seal({
+        ...artifact,
+        contract: { ...artifact.contract, projectionVersion: "search_rerank_document_v1" },
+        sha256: undefined,
+    });
+    assert.throws(
+        () => validateNeuralScoreArtifact(wrongProjection),
+        /contender.*projection|projection.*contender/i,
+    );
+});
+
+test("frozen pagination preserves complete grouped order without another reranker call", () => {
+    const pagination = buildFrozenPaginationReplay({
+        groupedResults: ["a", "b", "c", "d", "e"].map((ownerId, index) => ({
+            rank: index + 1,
+            ownerId,
+            candidateIds: [`candidate-${ownerId}`],
+            score: 5 - index,
+        })),
+        disclosedResults: [
+            { rank: 1, ownerId: "a" },
+            { rank: 2, ownerId: "b" },
+        ],
+    }, 2);
+
+    assert.deepEqual(
+        pagination.pages.flatMap((page) => page.ownerIds),
+        ["a", "b", "c", "d", "e"],
+    );
+    assert.equal(pagination.additionalRerankerCalls, 0);
+    assert.match(pagination.orderedGroupDigest, /^[a-f0-9]{64}$/);
 });

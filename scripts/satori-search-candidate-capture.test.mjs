@@ -16,7 +16,7 @@ import {
     replayBaselineCandidateCapture,
     replayCandidateCapture,
 } from "./satori-search-candidate-replay.mjs";
-import { canonicalJson } from "./satori-useful-context.mjs";
+import { canonicalJson, validateTaskSuite } from "./satori-useful-context.mjs";
 
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
@@ -47,7 +47,10 @@ test("captured Core arms slice adapter order before normalized score ranking", (
         occurrence("raw_dense", 1, 0.4),
         occurrence("raw_dense", 2, 0.9),
         occurrence("raw_dense", 3, 1.0),
-    ];
+    ].map((candidate) => ({
+        ...candidate,
+        ownerId: JSON.stringify(["symbol", candidate.relativePath, candidate.candidateId]),
+    }));
     const stage = {
         stage: "raw_dense",
         totalOccurrences: candidates.length,
@@ -543,7 +546,7 @@ function observationSet(suite = taskSuite()) {
         metadata: {
             repoRoot: "/repo",
             gitRevision: "d".repeat(40),
-            taskSuiteSha256: sha256Canonical(suite),
+            taskSuiteSha256: sha256Canonical(validateTaskSuite(suite)),
             qualificationRuntime: { sha256: DIGEST_C },
             armIndexProof: {
                 canonicalRoot: "/repo",
@@ -668,6 +671,7 @@ test("candidate capture binds stable query, runtime, publication, and trace auth
     assert.deepEqual(capture.captures[0].expected, {
         ownerFile: "src/sync.ts",
         ownerSymbol: "reconcileIgnoreRules",
+        ownerMatch: "symbol",
     });
     assert.equal(
         capture.captures[0].queryPlan.queryUtf8Sha256,
@@ -694,6 +698,34 @@ test("candidate capture binds stable query, runtime, publication, and trace auth
         "mcp_replay_signals_not_recorded",
     ]);
     assert.match(capture.sha256, /^[0-9a-f]{64}$/);
+});
+
+test("candidate capture and replay preserve explicit safety-control authority", () => {
+    const suite = taskSuite();
+    suite.version = 2;
+    suite.tasks[0].split = "tuning";
+    suite.tasks[0].safetyControls = ["exact_identifier", "must"];
+    suite.tasks[0].expected.ownerMatch = "symbol";
+
+    const capture = buildSearchCandidateCapture(suite, observationSet(suite));
+    const replay = replayBaselineCandidateCapture(capture);
+
+    assert.deepEqual(capture.captures[0].safetyControls, ["exact_identifier", "must"]);
+    assert.deepEqual(replay.tasks[0].safetyControls, ["exact_identifier", "must"]);
+});
+
+test("candidate capture retains the production ranked-set digest for pagination controls", () => {
+    const suite = taskSuite();
+    suite.tasks[0].expected.ownerMatch = "symbol";
+    const observations = groupingReadyObservationSet(suite);
+    for (const observation of observations.observations) {
+        observation.response.rankedSetDigest = DIGEST_C;
+        observation.responseBytes = Buffer.byteLength(JSON.stringify(observation.response), "utf8");
+    }
+
+    const capture = buildSearchCandidateCapture(suite, observations);
+
+    assert.equal(capture.captures[0].rankedSetDigest, DIGEST_C);
 });
 
 test("candidate capture accepts status-only preparation and rejects mixed sync evidence", () => {

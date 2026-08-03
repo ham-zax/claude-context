@@ -783,6 +783,12 @@ function buildObservationCapture(task, observation, armPublication) {
     );
     const { passConfiguration, passConfigurationDigest } = buildPassConfiguration(debugSearch);
     const candidateTraceDigest = sha256Canonical(trace);
+    const rankedSetDigest = observation.response?.rankedSetDigest === undefined
+        ? undefined
+        : requireSha256(
+            observation.response.rankedSetDigest,
+            `Task '${task.id}' rankedSetDigest`,
+        );
     return {
         queryPlan,
         queryPlanDigest,
@@ -796,6 +802,7 @@ function buildObservationCapture(task, observation, armPublication) {
         } : {}),
         rankedResults: jsonClone(observation.results),
         rankedResultIdentityDigest: sha256Canonical(observation.results),
+        ...(rankedSetDigest ? { rankedSetDigest } : {}),
     };
 }
 
@@ -1096,6 +1103,7 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
                 "candidateTraceDigest",
                 "entrypointOwnerEvidenceDigest",
                 "rankedResultIdentityDigest",
+                "rankedSetDigest",
             ]) {
                 if (contender[key] !== baseline[key]) {
                     throw new Error(`Task '${task.id}' changed ${key} across cold/warm samples.`);
@@ -1105,6 +1113,7 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
         const taskCapture = {
             taskId: task.id,
             ...(task.split ? { split: task.split } : {}),
+            ...(task.safetyControls ? { safetyControls: [...task.safetyControls] } : {}),
             queryClass: task.queryClass,
             language: task.language,
             expected: jsonClone(task.expected),
