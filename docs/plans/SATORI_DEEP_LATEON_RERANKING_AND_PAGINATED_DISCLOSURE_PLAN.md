@@ -1,8 +1,8 @@
 # Satori Deep LateOn Reranking and Paginated Disclosure Plan
 
-**Status:** execution in progress. Track P is qualified and Track L is terminal
-with baseline `B` retained. Track I remains the only unfinished authorized track.
-Held-out evaluation and production activation remain closed.
+**Status:** complete for every authorized track. Track P and Track I are
+qualified; Track L is terminal with baseline `B` retained. Held-out evaluation
+and production activation remain closed.
 
 **Date:** 2026-08-02
 
@@ -56,7 +56,7 @@ Current execution state:
 | --- | --- | --- |
 | P — pagination | `pagination_complete_frozen_set_qualified` | `docs/evidence/deep-pagination-p2-20260802/P2_QUALIFICATION_RECEIPT.md` |
 | L — LateOn | `baseline_b_retained` | `docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md` |
-| I — compact result index | implementation pending | Complete independently without reopening Track L or held-out evidence |
+| I — compact result index | `compact_result_index_qualified` | `docs/evidence/deep-result-index-i2-20260804/I2_QUALIFICATION_RECEIPT.md` |
 
 “No limit on how much the agent can request” does not mean an unbounded response
 or unbounded retrieval work. A caller may request the complete available frozen
@@ -385,9 +385,10 @@ room for the optional index. Every index identity must resolve to exactly one
 full group in the same ranked set, whether that group appears initially or
 through continuation.
 
-The product comparison must measure whether the compact index helps agents
-select continuations or targeted reads. Do not ship it merely because it is
-small.
+The I0 authority narrowed qualification to the bounded opt-in contract and did
+not authorize an agent-utility claim. Track I therefore qualifies only the
+index's ordering, identity, byte, continuation, and fail-closed invariants;
+production activation remains a separate closed decision.
 
 Track I is independently terminal:
 
