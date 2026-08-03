@@ -728,6 +728,22 @@ test("candidate capture retains the production ranked-set digest for pagination 
     assert.equal(capture.captures[0].rankedSetDigest, DIGEST_C);
 });
 
+test("candidate capture permits distinct frozen-set digests across equivalent search requests", () => {
+    const suite = taskSuite();
+    suite.tasks[0].expected.ownerMatch = "symbol";
+    const observations = groupingReadyObservationSet(suite);
+    observations.observations[0].response.rankedSetDigest = DIGEST_C;
+    observations.observations[1].response.rankedSetDigest = DIGEST_A;
+    for (const observation of observations.observations) {
+        observation.responseBytes = Buffer.byteLength(JSON.stringify(observation.response), "utf8");
+    }
+
+    const capture = buildSearchCandidateCapture(suite, observations);
+
+    assert.equal(capture.captures[0].rankedSetDigest, DIGEST_C);
+    assert.equal(capture.captures[0].stableSampleCount, 2);
+});
+
 test("candidate capture accepts status-only preparation and rejects mixed sync evidence", () => {
     const suite = taskSuite();
     const observations = observationSet(suite);

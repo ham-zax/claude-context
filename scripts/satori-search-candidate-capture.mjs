@@ -1103,7 +1103,6 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
                 "candidateTraceDigest",
                 "entrypointOwnerEvidenceDigest",
                 "rankedResultIdentityDigest",
-                "rankedSetDigest",
             ]) {
                 if (contender[key] !== baseline[key]) {
                     throw new Error(`Task '${task.id}' changed ${key} across cold/warm samples.`);
