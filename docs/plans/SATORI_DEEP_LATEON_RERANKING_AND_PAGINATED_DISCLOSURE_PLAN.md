@@ -275,6 +275,13 @@ set digest with the cached set, publish it in the initial continuation contract,
 and echo it on every page. The existing `queryPolicyDigest` becomes an input to
 this binding; it must not remain computed-but-unconsumed metadata.
 
+The digest identifies one frozen search-result instance. Independent cold and
+warm executions may have different digests when their pageable diagnostics,
+such as request-time graph validation evidence, differ. Qualification compares
+candidate traces, ranked result identities, and disclosure order across those
+executions; it requires digest equality only between the initial response and
+continuations of the same frozen instance.
+
 Continuation must revalidate publication and source observations as it does
 today, verify the cached binding before projecting a page, and remove the
 handle on any digest or identity mismatch. A page never adopts a later runtime
@@ -457,7 +464,7 @@ projection experiment. Do not attribute the change to candidate depth.
 ### L0 — freeze authority
 
 Current executable authority: the version 3 manifest is sealed at
-`241ba375149b592fab7b60ce14ab52b0cf6b511f00bd5bd13b7bd8e97a711222`
+`1f0e738833d0b37fb4a533be49331a1fde344cd577fcadb60f2b92173b144265`
 and binds the committed scorer/evaluator boundary. New tuning and held-out model
 outputs remain unopened. The earlier descriptive seal is superseded and has no
 execution authority.

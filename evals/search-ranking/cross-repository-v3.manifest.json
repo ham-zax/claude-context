@@ -559,8 +559,8 @@
       ]
     },
     "runtime": {
-      "sourceRevision": "ca3671af8b6116b9e63fc68b143a9a97a9485ea7",
-      "sourceTree": "b239bfb7c13e1824fa2abf53efcb5ded30779cdd",
+      "sourceRevision": "b8020e717ee1b2b37073d72fe49dbf7f6e014724",
+      "sourceTree": "9f8e882bf6749c348a5cd4451582027d23ea0767",
       "node": "24.13.0",
       "onnxruntimeNode": "1.19.2",
       "transformersJs": "3.0.2",
@@ -568,7 +568,7 @@
         {
           "role": "candidate_capture",
           "path": "scripts/satori-search-candidate-capture.mjs",
-          "sha256": "3b3605d2fa76598f404d5820b5b538fb2be382762d45c504ba320d446a5f0902"
+          "sha256": "d19ff4f062b4685cecded77567e8725ac5e948e5fe86c6028a7c02e037c45111"
         },
         {
           "role": "candidate_replay",
@@ -4233,5 +4233,5 @@
       }
     }
   ],
-  "sha256": "241ba375149b592fab7b60ce14ab52b0cf6b511f00bd5bd13b7bd8e97a711222"
+  "sha256": "1f0e738833d0b37fb4a533be49331a1fde344cd577fcadb60f2b92173b144265"
 }
