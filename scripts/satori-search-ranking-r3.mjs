@@ -530,8 +530,8 @@ function trackLSafetyEvidence({ baseline, contender, positiveCapture, negativeCa
         candidateMembershipOrEligibility: [],
         queryControls: [],
         frozenPagination: [],
-        disclosedMembership: [],
     };
+    const disclosedMembershipChanges = [];
     const disclosedDiffs = [];
     const baselinePositive = requireUniqueTaskMap(baseline.positive, "Track L baseline positive");
     const contenderPositive = requireUniqueTaskMap(contender.positive, "Track L contender positive");
@@ -561,7 +561,7 @@ function trackLSafetyEvidence({ baseline, contender, positiveCapture, negativeCa
                 const diff = diffDisclosedLists(baselineTask, contenderTask);
                 disclosedDiffs.push({ suite, taskId, ...diff });
                 if (!diff.membershipIdentityEqual) {
-                    failures.disclosedMembership.push({ suite, taskId });
+                    disclosedMembershipChanges.push({ suite, taskId });
                 }
             }
             if (suite === "positive" && (taskCapture.safetyControls ?? []).some(
@@ -586,7 +586,18 @@ function trackLSafetyEvidence({ baseline, contender, positiveCapture, negativeCa
             }
         }
     }
-    return { failures, disclosedDiffs };
+    return { failures, disclosedMembershipChanges, disclosedDiffs };
+}
+
+export function passesTrackLZeroFailureSafety(failures) {
+    return [
+        "candidateMembershipOrEligibility",
+        "queryControls",
+        "frozenPagination",
+    ].every((field) => requireArray(
+        failures[field],
+        `Track L safety failures '${field}'`,
+    ).length === 0);
 }
 
 function mean(values) {
@@ -904,8 +915,8 @@ function evaluateTrackLContender({
         candidateMembershipOrEligibility: [],
         queryControls: [],
         frozenPagination: [],
-        disclosedMembership: [],
     };
+    const disclosedMembershipChanges = [];
     const disclosedDiffs = [];
     for (const repositoryId of repositoryIds) {
         const safety = repositoryResults[repositoryId][contender.contenderId].safety;
@@ -915,10 +926,13 @@ function evaluateTrackLContender({
                 ...failure,
             })));
         }
+        disclosedMembershipChanges.push(...safety.disclosedMembershipChanges.map(
+            (change) => ({ repositoryId, ...change }),
+        ));
         disclosedDiffs.push(...safety.disclosedDiffs.map((diff) => ({ repositoryId, ...diff })));
     }
     const { minimumEffects, nonInferiorityMargins } = authority.statisticalContract;
-    const safetyPasses = Object.values(safetyFailures).every((failures) => failures.length === 0);
+    const safetyPasses = passesTrackLZeroFailureSafety(safetyFailures);
     const qualityGates = {
         ownerAt3Improvement:
             qualityMetrics.ownerAt3.delta >= minimumEffects.ownerAt3
@@ -949,7 +963,7 @@ function evaluateTrackLContender({
         candidateDepth: contender.candidateDepth,
         qualityMetrics,
         negativeExposure,
-        qualitySafety: { failures: safetyFailures, disclosedDiffs },
+        qualitySafety: { failures: safetyFailures, disclosedMembershipChanges, disclosedDiffs },
         qualityGates,
         evidenceConclusive,
         passesEveryQualityGate,

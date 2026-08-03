@@ -6,6 +6,7 @@ import {
     buildR3Decision,
     buildTrackLDecision,
     evaluateTrackL,
+    passesTrackLZeroFailureSafety,
     resolveTrackLEvaluationAuthority,
     trackLNegativeTasks,
     trackLOwnerRank,
@@ -165,6 +166,21 @@ test("Track L negative exposure uses captured disclosure for compact baseline re
         exposureAt3: 1,
         task: compactBaselineReplay.tasks[0],
     }]);
+});
+
+test("Track L safety allows disclosed-page membership to change after reranking", () => {
+    const requiredFailures = {
+        candidateMembershipOrEligibility: [],
+        queryControls: [],
+        frozenPagination: [],
+        disclosedMembership: [{ taskId: "owner-promoted-into-first-page" }],
+    };
+
+    assert.equal(passesTrackLZeroFailureSafety(requiredFailures), true);
+    assert.equal(passesTrackLZeroFailureSafety({
+        ...requiredFailures,
+        candidateMembershipOrEligibility: [{ taskId: "candidate-changed" }],
+    }), false);
 });
 
 test("Track L evaluator refuses to mix replay output with an existing directory", () => {
