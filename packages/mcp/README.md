@@ -108,7 +108,7 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
   in a killable worker, and every failure falls back atomically to exact + BM25
   + single-vector ordering. `SATORI_LATEON_PROFILE` may explicitly select
   `lateon_projection_v2_d16_v1` or
-  `lateon_offline_quality_projection_v2_d32_v1`; the runtime never substitutes
+  `lateon_offline_quality_projection_v2_d32_v2`; the runtime never substitutes
   one depth for the other.
 
 ## Development

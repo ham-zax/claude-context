@@ -251,10 +251,10 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
         assert.equal(d16.lateOnMaximumActiveReranks, 1);
         assert.equal(d16.lateOnMaximumQueuedReranks, 0);
 
-        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v2_d32_v1';
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v2_d32_v2';
         assert.equal(
             createMcpConfig().lateOnProfileId,
-            'lateon_offline_quality_projection_v2_d32_v1',
+            'lateon_offline_quality_projection_v2_d32_v2',
         );
 
         process.env.SATORI_LATEON_PROFILE = 'lateon_projection_v2_d50_unknown';

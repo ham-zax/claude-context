@@ -99,7 +99,7 @@ function buildFixture(tempDir) {
         maximumWarmScoreP95Milliseconds: 1750,
         maximumScoreMilliseconds: 2000,
         maximumRerankerStageMilliseconds: 2500,
-        maximumProcessPeakRssBytes: 872415232,
+        maximumProcessPeakRssBytes: 1073741824,
         maximumProcessRetainedRssBytes: 671088640,
         maximumInvalidOrIncompleteOrders: 0,
         maximumSafetyOrIdentityFailures: 0,
@@ -122,7 +122,7 @@ function buildFixture(tempDir) {
             serviceClass: "offline_quality",
         },
         qualifiedServiceProfile: {
-            id: "lateon_offline_quality_projection_v2_d32_v1",
+            id: "lateon_offline_quality_projection_v2_d32_v2",
             operationalBounds,
         },
         operationalQualification: {
@@ -188,7 +188,7 @@ function buildFixture(tempDir) {
     const o0Bytes = writeJson(o0AuthorityFile, o0Authority);
     const profile = {
         schemaVersion: "satori_lateon_runtime_profile_v2",
-        profileId: "lateon_offline_quality_projection_v2_d32_v1",
+        profileId: "lateon_offline_quality_projection_v2_d32_v2",
         qualificationStatus: "disabled_track_o_candidate",
         identity: {
             repository: candidate.model.repository,
@@ -215,7 +215,7 @@ function buildFixture(tempDir) {
             maximumReadinessMilliseconds: 2000,
             maximumScoreMilliseconds: 2000,
             maximumRerankerStageMilliseconds: 2500,
-            maximumProcessPeakRssBytes: 872415232,
+            maximumProcessPeakRssBytes: 1073741824,
             maximumProcessRetainedRssBytes: 671088640,
         },
     };

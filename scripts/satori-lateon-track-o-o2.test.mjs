@@ -94,12 +94,12 @@ function evidenceFixture() {
     };
     const authorityBinding = {
         authorityFileSha256:
-            "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39",
+            "337201db7c1d0e2b5281104f3a1ad7a6f406dfb9c006cfccc4864bc1c42a0526",
         expectedAuthorityFileSha256:
-            "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39",
+            "337201db7c1d0e2b5281104f3a1ad7a6f406dfb9c006cfccc4864bc1c42a0526",
         candidate,
         profileBinding: {
-            id: "lateon_offline_quality_projection_v2_d32_v1",
+            id: "lateon_offline_quality_projection_v2_d32_v2",
             assetFileSha256: "1".repeat(64),
             assetCanonicalSha256: "2".repeat(64),
             effectiveIdentitySha256: "3".repeat(64),

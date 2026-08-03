@@ -1,7 +1,7 @@
 export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
     legacyD16: "lateon_projection_v1_d16_legacy",
     projectionV2D16: "lateon_projection_v2_d16_v1",
-    offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v1",
+    offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v2",
 } as const);
 
 export type LateOnRuntimeProfileId =
@@ -64,7 +64,7 @@ export type LateOnRuntimeProfileV2 = LateOnRuntimeProfileBase & Readonly<{
     schemaVersion: "satori_lateon_runtime_profile_v2";
     profileId:
         | "lateon_projection_v2_d16_v1"
-        | "lateon_offline_quality_projection_v2_d32_v1";
+        | "lateon_offline_quality_projection_v2_d32_v2";
     qualificationStatus:
         | "disabled_optional_not_track_o_or_held_out_candidate"
         | "disabled_track_o_candidate";

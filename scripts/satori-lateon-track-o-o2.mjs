@@ -24,7 +24,7 @@ import {
 
 export const O2_EVIDENCE_SCHEMA = "satori_lateon_track_o_o2_evidence_v1";
 export const O2_RECEIPT_KIND = "satori_lateon_track_o_operational_qualification_receipt";
-const PROFILE_ID = "lateon_offline_quality_projection_v2_d32_v1";
+const PROFILE_ID = "lateon_offline_quality_projection_v2_d32_v2";
 const CANDIDATE_ID = "projection-v2-d-l32";
 const EXPECTED_QUALITY_TASKS = 36;
 const EXPECTED_NEURAL_REQUESTS = 34;

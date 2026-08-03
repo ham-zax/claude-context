@@ -15,7 +15,7 @@ import { canonicalJson } from "./satori-useful-context.mjs";
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
 const DIGEST_C = "c".repeat(64);
-const O0_SHA256 = "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39";
+const O0_SHA256 = "337201db7c1d0e2b5281104f3a1ad7a6f406dfb9c006cfccc4864bc1c42a0526";
 const EXCLUDED_TASK_ID = "promptready-primary-action";
 const CANDIDATE = Object.freeze({
     id: "projection-v2-d-l32",
@@ -34,7 +34,7 @@ const CANDIDATE = Object.freeze({
     ],
 });
 const PROFILE = Object.freeze({
-    id: "lateon_offline_quality_projection_v2_d32_v1",
+    id: "lateon_offline_quality_projection_v2_d32_v2",
     assetFileSha256: DIGEST_A,
     assetCanonicalSha256: DIGEST_B,
     effectiveIdentitySha256: DIGEST_C,

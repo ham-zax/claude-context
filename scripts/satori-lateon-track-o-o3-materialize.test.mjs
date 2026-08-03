@@ -28,7 +28,7 @@ const CANDIDATE = Object.freeze({
     artifacts: [{ role: "onnx_fp32", path: "model.onnx", sha256: DIGEST_B }],
 });
 const PROFILE = Object.freeze({
-    id: "lateon_offline_quality_projection_v2_d32_v1",
+    id: "lateon_offline_quality_projection_v2_d32_v2",
     assetFileSha256: DIGEST_A,
     assetCanonicalSha256: DIGEST_B,
     effectiveIdentitySha256: DIGEST_C,

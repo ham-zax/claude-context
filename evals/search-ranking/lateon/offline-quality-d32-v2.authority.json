@@ -5,7 +5,7 @@
   "status": "prospective_authority_outputs_unopened",
   "plan": {
     "path": "docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md",
-    "sha256": "a7d9f130bcd95290255517191e24814acd78ed963fc804eb1b18065583aed9bc"
+    "sha256": "abdf46523380454119e736539a5c4edf0de7e08b58334d29e8042f9cf085fd9a"
   },
   "historicalAuthority": {
     "l3Receipt": {
@@ -22,6 +22,18 @@
     "runtimeReceipt": {
       "path": "docs/evidence/lateon-runtime-profile-20260730/LATEON_RUNTIME_PROFILE_RECEIPT.md",
       "sha256": "c0d023835cf2a45b434659e26d7c80fdc4eee04c78b6138993de7632e95bc0ff"
+    },
+    "trackOV1OperationalEvidence": {
+      "receiptPath": "docs/evidence/lateon-track-o-o2-v1-20260804/O2_V1_OPERATIONAL_QUALIFICATION_RECEIPT.md",
+      "archivePath": "docs/evidence/lateon-track-o-o2-v1-20260804/track-o-o2-v1-evidence.tar.gz",
+      "archiveSha256": "f4166e2954837f2b8a9c4c59a6a01d2b522538e7f00b94f12470d99247130105",
+      "sourceRevision": "1fc21e85ac4cd16c45d36066d3b38ce91e5e7d34",
+      "evidenceFileSha256": "6a4f8dd51a556035a8509473a1025492c470c7c40ea704188395e51670634b1a",
+      "evidenceResultSha256": "d2ed0567618090c73812c09a9763b041d67402a068443f6bcca611d2f64ab3a9",
+      "outcome": "rejected_for_peak_rss",
+      "observedPeakRssBytes": 954859520,
+      "maximumPeakRssBytes": 872415232,
+      "otherGatesPassed": true
     }
   },
   "candidate": {
@@ -82,7 +94,7 @@
       "status": "disabled_optional_not_track_o_or_held_out_candidate"
     },
     {
-      "id": "lateon_offline_quality_projection_v2_d32_v1",
+      "id": "lateon_offline_quality_projection_v2_d32_v2",
       "projection": "search_rerank_document_v2",
       "candidateDepth": 32,
       "status": "disabled_track_o_candidate"
@@ -96,7 +108,7 @@
     "selectedProfileIsIdentityBearing": true
   },
   "qualifiedServiceProfile": {
-    "id": "lateon_offline_quality_projection_v2_d32_v1",
+    "id": "lateon_offline_quality_projection_v2_d32_v2",
     "scoringIdentity": {
       "workerProcesses": 1,
       "activeModelSessions": 1,
@@ -127,7 +139,7 @@
       "maximumWarmScoreP95Milliseconds": 1750,
       "maximumScoreMilliseconds": 2000,
       "maximumRerankerStageMilliseconds": 2500,
-      "maximumProcessPeakRssBytes": 872415232,
+      "maximumProcessPeakRssBytes": 1073741824,
       "maximumProcessRetainedRssBytes": 671088640,
       "maximumInvalidOrIncompleteOrders": 0,
       "maximumSafetyOrIdentityFailures": 0

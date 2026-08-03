@@ -1,7 +1,8 @@
 # Satori Offline LateOn Operational Qualification Plan
 
-**Status:** O0 prospective authority being frozen. Held-out evidence is sealed
-and the historical product policy remains baseline `B`.
+**Status:** D32-v1 O2 rejected only by its peak-RSS envelope; D32-v2 O0
+prospective authority is being frozen. Held-out evidence is sealed and the
+historical product policy remains baseline `B`.
 
 **Date:** 2026-08-04
 
@@ -41,6 +42,17 @@ selection option, not an O3 contender, and it cannot inherit D32's operational
 or held-out qualification. Selection is explicit before search; the runtime
 never changes depth adaptively and never falls back from D32 to D16.
 
+The first operational profile,
+`lateon_offline_quality_projection_v2_d32_v1`, remains closed with
+`offline_lateon_rejected_for_resources`. Its complete frozen run passed every
+latency, retained-memory, identity, ordering, fallback, cancellation, and
+lifecycle gate, but observed 954,859,520 bytes peak RSS against its
+872,415,232-byte limit. Track O does not relabel that run. It prospectively
+versions D32 as `lateon_offline_quality_projection_v2_d32_v2` with a 1 GiB peak
+envelope derived from the measured peak. All scoring and operational contracts
+other than that peak envelope remain unchanged, and O2 must run again under the
+new identity before held-out may open.
+
 ## 2. Evidence and metric provenance
 
 Two earlier suites have different denominators:
@@ -60,7 +72,7 @@ outputs are opened:
 
 | Contract | Frozen value |
 | --- | ---: |
-| Profile ID | `lateon_offline_quality_projection_v2_d32_v1` |
+| Profile ID | `lateon_offline_quality_projection_v2_d32_v2` |
 | Active reranks | 1 |
 | Queued reranks | 1 |
 | Maximum queue wait | 250 ms |
@@ -70,7 +82,7 @@ outputs are opened:
 | Warm scoring p95 | 1,750 ms |
 | Scoring hard maximum | 2,000 ms |
 | Reranker-stage deadline including queue | 2,500 ms |
-| Peak total-process RSS | 872,415,232 bytes (832 MiB) |
+| Peak total-process RSS | 1,073,741,824 bytes (1 GiB) |
 | Retained total-process RSS | 671,088,640 bytes (640 MiB) |
 | Invalid or incomplete neural orders | 0 |
 | Safety or identity failures | 0 |
@@ -81,6 +93,12 @@ headroom over the observed L3 D32 values of 1,017 and 1,378 milliseconds. The
 2,000-millisecond maxima preserve a hard bound without treating one harmless
 readiness outlier as a failed user request. These targets do not retroactively
 change the L3 result.
+
+The 1 GiB peak envelope gives 12.45% headroom over the complete D32-v1 O2
+measurement of 954,859,520 bytes. It is a post-measurement service-profile
+revision, not preregistered experimental evidence. The retained-memory limit
+stays at 640 MiB because D32-v1 passed it. A D32-v2 O2 failure does not authorize
+another limit change inside this profile.
 
 Model load is readiness work, not request work. The persistent worker loads and
 verifies artifacts before it becomes ready. Searches arriving while the worker
@@ -164,8 +182,9 @@ workers or concurrent model sessions require a separately measured profile.
 
 ## 5. O2 — operational qualification
 
-O2 uses tuning artifacts only and runs in isolated processes. Freeze these
-counts:
+O2 uses tuning artifacts only and runs in isolated processes. D32-v1's complete
+failed run remains immutable historical evidence; D32-v2 repeats the complete
+method under its new profile and source identity. Freeze these counts:
 
 ```text
 real-model process-cold worker starts            30

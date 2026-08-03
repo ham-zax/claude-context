@@ -12,12 +12,12 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/;
 
 export const TRACK_O_O0_AUTHORITY_SHA256 =
-    "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39";
+    "337201db7c1d0e2b5281104f3a1ad7a6f406dfb9c006cfccc4864bc1c42a0526";
 export const TRACK_O_MANIFEST_FILE_SHA256 =
     "281c5354d98c42e8d576e607de50046230e7d31ca4059a6d77d89e7454b1db09";
 export const TRACK_O_MANIFEST_SEAL_SHA256 =
     "05fb273715d6205bcdf5adc1fdec94a892d8b40fc651a386ab36ccfb9475b7bc";
-export const TRACK_O_PROFILE_ID = "lateon_offline_quality_projection_v2_d32_v1";
+export const TRACK_O_PROFILE_ID = "lateon_offline_quality_projection_v2_d32_v2";
 export const TRACK_O_CANDIDATE_ID = "projection-v2-d-l32";
 const TRACK_O_CANDIDATE = Object.freeze({
     id: TRACK_O_CANDIDATE_ID,

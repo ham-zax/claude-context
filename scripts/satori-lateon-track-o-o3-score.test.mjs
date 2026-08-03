@@ -51,7 +51,7 @@ function fixture() {
     const frozenCandidate = candidate();
     const profile = {
         schemaVersion: "satori_lateon_runtime_profile_v2",
-        profileId: "lateon_offline_quality_projection_v2_d32_v1",
+        profileId: "lateon_offline_quality_projection_v2_d32_v2",
         qualificationStatus: "disabled_track_o_candidate",
         identity: {
             repository: frozenCandidate.model.repository,

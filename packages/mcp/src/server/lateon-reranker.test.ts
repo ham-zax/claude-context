@@ -128,7 +128,7 @@ test("LateOn identity binds named profile selection and effective operational bo
     assert.notEqual(defaultD32.getIdentity().profile, stricterD32.getIdentity().profile);
     assert.equal(
         defaultD32.getIdentity().profile,
-        "d9b3a9b933bfb32ad11fc77aed8fbab4cf67643f8663e6bbc6c8e771cfee272f",
+        "f7d1043ac0606bc065cced6b53d3620cc3b8cf2f4b4dcf867aa76883f51ff222",
     );
     assert.notEqual(defaultD32.getIdentity().profile, d16.getIdentity().profile);
     assert.throws(() => new LateOnReranker({
