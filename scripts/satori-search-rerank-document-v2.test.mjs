@@ -95,6 +95,34 @@ test("projection v2 gives file-level Markdown a heading declaration and relevant
     assert.match(parsed.query_relevant_source_excerpt, /Rotate the lease/);
 });
 
+test("projection v2 recognizes Markdown by path when indexing reports text", () => {
+    const projection = buildSearchRerankDocumentV2({
+        relativePath: "README.md",
+        language: "text",
+        symbolKind: "file",
+        canonicalSymbolLabel: "README.md",
+        symbolSpan: { startLine: 1, endLine: 2 },
+        content: "# Product guide\nRun the worker locally.",
+        query: "run worker",
+    });
+
+    assert.equal(JSON.parse(projection.text).signature_or_declaration, "# Product guide");
+});
+
+test("projection v2 uses the canonical file label when no structural heading exists", () => {
+    const projection = buildSearchRerankDocumentV2({
+        relativePath: "notes.txt",
+        language: "text",
+        symbolKind: "file",
+        canonicalSymbolLabel: "notes.txt",
+        symbolSpan: { startLine: 1, endLine: 1 },
+        content: "plain operational notes",
+        query: "operational notes",
+    });
+
+    assert.equal(JSON.parse(projection.text).signature_or_declaration, "notes.txt");
+});
+
 test("projection v2 preserves every required owner sibling in contract order", () => {
     const projection = buildSearchRerankDocumentV2({
         relativePath: "src/worker.ts",

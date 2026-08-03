@@ -176,12 +176,16 @@ function sourceLinesInSpan(lines, span) {
     return lines.slice(span.startLine - 1, span.endLine);
 }
 
-function firstStructuralDeclaration(lines, language, symbolKind) {
+function firstStructuralDeclaration(lines, language, symbolKind, relativePath) {
     const normalizedLanguage = language.toLowerCase();
+    const normalizedPath = relativePath.toLowerCase();
     const isFileLevel = symbolKind === "file" || symbolKind === "module";
     const candidates = lines.map((line) => line.trim()).filter(Boolean);
     if (!isFileLevel) return candidates[0] ?? "";
-    if (["markdown", "md", "mdx"].includes(normalizedLanguage)) {
+    if (
+        ["markdown", "md", "mdx"].includes(normalizedLanguage)
+        || /\.mdx?$/u.test(normalizedPath)
+    ) {
         return candidates.find((line) => /^#{1,6}\s+\S/u.test(line)) ?? "";
     }
     const configLike = [
@@ -270,14 +274,24 @@ export function buildSearchRerankDocumentV2(rawInput) {
     const content = requireString(rawInput.content, "content", { allowEmpty: true });
     const lines = sourceLines(content);
     const symbolSpan = requireLineSpan(rawInput.symbolSpan, "symbolSpan", lines.length);
+    const relativePath = requireSafeRelativePath(rawInput.relativePath);
+    const language = requireString(rawInput.language, "language");
+    const symbolKind = requireString(rawInput.symbolKind, "symbolKind");
+    const canonicalSymbolLabel = requireString(
+        rawInput.canonicalSymbolLabel,
+        "canonicalSymbolLabel",
+    );
     const inferredDeclaration = firstStructuralDeclaration(
         sourceLinesInSpan(lines, symbolSpan),
-        requireString(rawInput.language, "language"),
-        requireString(rawInput.symbolKind, "symbolKind"),
+        language,
+        symbolKind,
+        relativePath,
     );
+    const inferredOrFileHeading = inferredDeclaration
+        || (["file", "module"].includes(symbolKind) ? canonicalSymbolLabel : "");
     const signatureOrDeclaration = rawInput.signatureOrDeclaration === undefined
         ? requireBoundedPhysicalLine(
-            inferredDeclaration,
+            inferredOrFileHeading,
             "inferred signatureOrDeclaration",
             MAXIMUM_DECLARATION_UTF8_BYTES,
         )
@@ -287,13 +301,10 @@ export function buildSearchRerankDocumentV2(rawInput) {
             MAXIMUM_DECLARATION_UTF8_BYTES,
         );
     const input = {
-        relativePath: requireSafeRelativePath(rawInput.relativePath),
-        language: rawInput.language,
-        symbolKind: rawInput.symbolKind,
-        canonicalSymbolLabel: requireString(
-            rawInput.canonicalSymbolLabel,
-            "canonicalSymbolLabel",
-        ),
+        relativePath,
+        language,
+        symbolKind,
+        canonicalSymbolLabel,
         signatureOrDeclaration,
         documentationExcerpt: rawInput.documentationExcerpt === undefined
             ? ""
