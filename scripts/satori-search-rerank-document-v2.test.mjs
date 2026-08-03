@@ -4,6 +4,36 @@ import {
     SEARCH_RERANK_DOCUMENT_V2_POLICY,
     buildSearchRerankDocumentV2,
 } from "./satori-search-rerank-document-v2.mjs";
+import {
+    SEARCH_RERANK_DOCUMENT_V2_POLICY as PRODUCTION_SEARCH_RERANK_DOCUMENT_V2_POLICY,
+    buildSearchRerankDocumentV2 as buildProductionSearchRerankDocumentV2,
+} from "../packages/mcp/src/core/search-rerank-document-v2.ts";
+
+test("projection v2 compatibility entrypoint is byte-identical to its production owner", () => {
+    const input = {
+        relativePath: "src/café.ts",
+        language: "typescript",
+        symbolKind: "function",
+        canonicalSymbolLabel: "serveRequest",
+        symbolSpan: { startLine: 1, endLine: 4 },
+        content: [
+            "export async function serveRequest(request: Request) {",
+            "  const ignored = prepareFallback();",
+            "  return routeAuthenticatedRequest(request);",
+            "}",
+        ].join("\n"),
+        query: "route authenticated request",
+    };
+
+    assert.deepEqual(
+        buildSearchRerankDocumentV2(input),
+        buildProductionSearchRerankDocumentV2(input),
+    );
+    assert.deepEqual(
+        SEARCH_RERANK_DOCUMENT_V2_POLICY,
+        PRODUCTION_SEARCH_RERANK_DOCUMENT_V2_POLICY,
+    );
+});
 
 test("projection v2 serializes the frozen fields deterministically within its UTF-8 budget", () => {
     const input = {
