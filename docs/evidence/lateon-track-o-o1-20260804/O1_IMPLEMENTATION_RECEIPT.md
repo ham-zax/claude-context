@@ -5,15 +5,15 @@ Stage: O1
 Result: `disabled_versioned_implementation_complete`
 
 This receipt records the disabled implementation required by
-[`SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md`](../../../plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md).
+[`SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md`](../../plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md).
 It does not qualify ranking quality, operational resources, held-out quality, or
 production activation. Baseline `B` remains the default.
 
 ## Source authority
 
 ```text
-implementation revision  1c3661bab82ae349e774e1f82ff20789cf026ad2
-implementation tree      71cd5f18ea1c8c9c77109f22c5b43c8452e4fed3
+implementation revision  24bdeb5bf4f2459e4e3f866d3078253576dc0584
+implementation tree      6fed197a088acae3d2f74779109ed90d382265be
 O0 authority SHA-256     b1db9ac92597ce625746b2812f294afa99b0d4f6d00a2b2e321e3a976c0d30b2
 lockfile SHA-256         35293d291cab8f0529329ae40fba1807f7604b835142dfdfd52c01a506d2a51a
 ```
@@ -47,7 +47,7 @@ configuration owner source
 provider composition source
   092bb99d17b0d84a12b3c3ebd505f9feb41c484b2f2ad5bf8298e88c0b33b2c9
 held-out opening gate source
-  357003c4c3129a558eacefedf61eafc24c7681ed04aa91ba990bfcb9b6810d0e
+  4d902cd6f6c49702ee807d23306a5166f80813bdbe86d17b7e7456af798ff437
 ```
 
 ```text
@@ -79,7 +79,10 @@ shared-runtime and frozen ranked-set binding.
 - Operational diagnostics disclose bounded reason codes without source or model
   inputs.
 - Held-out capture, replay, and scoring require one durable external opening
-  record. The manifest remains opaque until that record is created.
+  record. The manifest remains opaque until that record is created. The opening
+  also requires a separately hashed O2 evidence artifact with every frozen
+  observation count, row digest, resource/safety gate, and source/profile/model
+  identity; a receipt that merely asserts `passed` has no authority.
 
 ## Focused verification
 
@@ -88,7 +91,7 @@ LateOn runtime lifecycle/profile tests                  11 passed
 projection and ranked-set identity tests                17 passed
 profile configuration/shared-runtime tests              29 passed after using the package-owned test cwd
 operational diagnostic handler tests                     2 passed
-opening/capture/replay/score authority tests             51 passed
+opening/capture/replay/score authority tests             52 passed
 @zokizuan/satori-mcp typecheck                           passed
 focused ESLint and git diff checks                       passed
 ```
