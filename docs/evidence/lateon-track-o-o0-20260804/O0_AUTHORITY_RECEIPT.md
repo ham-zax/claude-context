@@ -20,19 +20,20 @@ Track O plan
     docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md
 
 Track O plan SHA-256
-    aef188451e9eb829f1de3111c088bcc24206e0a0f0263903e93240c9c461d8b3
+    a7d9f130bcd95290255517191e24814acd78ed963fc804eb1b18065583aed9bc
 
 O0 executable authority
     evals/search-ranking/lateon/offline-quality-d32-v1.authority.json
 
 O0 executable authority SHA-256
-    37bfaf2bec4b5232352f4fa813a4ae2246cf5b5adc705fcce4009e4ad88390a9
+    994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39
 ```
 
-No O2 measurement or held-out access occurred before this O0 revision was
-committed and sealed. O1 and O2 must run from later clean committed revisions
-that retain this authority unchanged and bind their implementation artifacts in
-their own receipts.
+No O2 measurement, model output, aggregate metric, or ranking result was opened
+before this O0 revision was committed and sealed. The pre-open access incidents
+below are part of this prospective authority. O1 and O2 must run from later
+clean committed revisions that retain this authority unchanged and bind their
+implementation artifacts in their own receipts.
 
 ## Historical authority preserved
 
@@ -128,6 +129,14 @@ metric under reason
 `pre_open_read_only_lane_access_before_o2_no_edits_or_results`. The remaining
 35 quality tasks retain decision authority; thresholds and statistics are
 unchanged.
+
+After that task exclusion was sealed, a synthetic tooling test process parsed
+the manifest before failing on an unrelated historical capture-artifact digest.
+A separate structural search emitted only field names and line locations. No
+task query, owner oracle, source payload, model output, aggregate metric, or
+ranking result was emitted or observed. Authority records this as
+`automated-manifest-structural-access-20260804`, with no additional task
+exclusion or decision impact.
 
 Before reading a held-out task payload, O3 must validate the opaque manifest
 file/seal, this O0 authority, a passing O2 receipt, and D32's effective profile

@@ -281,6 +281,15 @@ it remains only a bound protocol-incident record. The remaining 35 quality
 tasks, all 12 negative tasks, and all three safety controls retain decision
 authority. Thresholds, aggregation, and uncertainty rules are unchanged.
 
+After that exclusion was sealed, one synthetic tooling test process parsed the
+manifest before failing on an unrelated historical capture-artifact digest, and
+one structural search reported only manifest field names and line locations.
+Neither operation emitted or exposed a task query, owner oracle, source payload,
+model output, aggregate metric, or ranking result. This is recorded as automated
+pre-open structural access with no decision-bearing exclusion: no human or
+implementation lane received new task evidence, and the already-frozen
+candidate, thresholds, aggregation, and task authorities remain unchanged.
+
 A candidate-capture digest cannot exist before task materialization. After the
 opening is consumed, O3 may materialize the held-out tasks and capture. The O3
 receipt must bind the resulting index, publication, capture, replay, score, and
