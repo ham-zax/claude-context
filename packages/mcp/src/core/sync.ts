@@ -194,6 +194,7 @@ interface EnsureFreshnessOptions {
     mutationLease?: RootMutationLease;
     preparedVectorReceipt?: ProvenVectorGenerationReceipt;
     exactSourceComparisonPaths?: readonly string[];
+    fullSourceComparison?: boolean;
     onPhaseTiming?: (
         phase:
             | 'checkpoint_proof'
@@ -843,6 +844,29 @@ export class SyncManager {
                 options.onPhaseTiming?.(
                     'exact_path_comparison',
                     Math.max(0, Date.now() - exactComparisonStartedAt),
+                );
+                if (comparison.status === 'matches') {
+                    return {
+                        mode: 'skipped_source_unchanged',
+                        checkedAt,
+                        thresholdMs,
+                    };
+                }
+            }
+        }
+
+        if (options.fullSourceComparison === true) {
+            const compareAllSource = this.context.compareAllSourceToFreshnessCheckpoint;
+            if (typeof compareAllSource === 'function') {
+                const fullComparisonStartedAt = Date.now();
+                const comparison = await compareAllSource.call(
+                    this.context,
+                    codebasePath,
+                    options.preparedVectorReceipt,
+                );
+                options.onPhaseTiming?.(
+                    'exact_path_comparison',
+                    Math.max(0, Date.now() - fullComparisonStartedAt),
                 );
                 if (comparison.status === 'matches') {
                     return {

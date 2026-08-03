@@ -1267,6 +1267,77 @@ test('ensureFreshness skips publication only when exact dirty paths match the ac
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
+test('ensureFreshness skips watcher-disabled publication only after a complete source comparison', async () => {
+    const codebasePath = createTempDir();
+    const preparedVectorReceipt = { collectionName: 'generation-bound' } as never;
+    let comparisonStatus: 'matches' | 'differs' = 'matches';
+    let syncCalls = 0;
+    let comparedReceipt: unknown;
+    const context = {
+        async inspectSourceFreshnessCheckpoint() {
+            return {
+                status: 'valid' as const,
+                observationToken: 'checkpoint-v1',
+                merkleRoot: 'a'.repeat(64),
+                documentDigest: 'b'.repeat(64),
+            };
+        },
+        async compareAllSourceToFreshnessCheckpoint(_path: string, receipt?: unknown) {
+            comparedReceipt = receipt;
+            return { status: comparisonStatus };
+        },
+        async reindexByChange() {
+            syncCalls += 1;
+            return {
+                added: 0,
+                removed: 0,
+                modified: 1,
+                changedFiles: ['src/owner.ts'],
+                collectionName: 'generation-next',
+            };
+        },
+        getActiveIgnorePatterns() {
+            return [];
+        },
+        hasSynchronizerForCodebase() {
+            return true;
+        },
+        getTrackedRelativePaths() {
+            return ['src/owner.ts'];
+        },
+    };
+    const snapshot = {
+        getCodebaseStatus: () => 'indexed',
+        getCodebaseInfo: () => ({ indexStatus: 'completed' }),
+        getCodebaseIgnoreControlSignature: () => 'current',
+        setCodebaseIndexManifest() {},
+        setCodebaseSyncCompleted() {},
+        saveCodebaseSnapshot() {},
+    };
+    const manager = new SyncManager(
+        context as unknown as SyncContext,
+        snapshot as unknown as SyncSnapshotManager,
+        { watchEnabled: false },
+    );
+    const options = {
+        skipIgnoreControlCheck: true,
+        preparedVectorReceipt,
+        fullSourceComparison: true,
+    };
+
+    const unchanged = await manager.ensureFreshness(codebasePath, 0, options);
+    assert.equal(unchanged.mode, 'skipped_source_unchanged');
+    assert.equal(comparedReceipt, preparedVectorReceipt);
+    assert.equal(syncCalls, 0);
+
+    comparisonStatus = 'differs';
+    const changed = await manager.ensureFreshness(codebasePath, 0, options);
+    assert.equal(changed.mode, 'synced');
+    assert.equal(syncCalls, 1);
+
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
 test('ensureFreshness validates the authority checkpoint before ignore reconciliation', async () => {
     const codebasePath = createTempDir();
     let reloadCalls = 0;

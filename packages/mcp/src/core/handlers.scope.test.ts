@@ -2650,9 +2650,12 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
                 ensureFreshness: (
                     codebasePath: string,
                     thresholdMs: number,
-                    options?: { exactSourceComparisonPaths?: readonly string[] },
+                    options?: {
+                        exactSourceComparisonPaths?: readonly string[];
+                        fullSourceComparison?: boolean;
+                    },
                 ) => Promise<{
-                    mode: 'synced';
+                    mode: 'skipped_source_unchanged';
                     checkedAt: string;
                     thresholdMs: number;
                 }>;
@@ -2716,8 +2719,9 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
         internals.syncManager.ensureFreshness = async (_root, thresholdMs, options) => {
             assert.equal(thresholdMs, 0);
             assert.equal(options?.exactSourceComparisonPaths, undefined);
+            assert.equal(options?.fullSourceComparison, true);
             return {
-                mode: 'synced',
+                mode: 'skipped_source_unchanged',
                 checkedAt: '2026-01-01T01:00:00.000Z',
                 thresholdMs,
             };
@@ -2746,7 +2750,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
             freshnessComparisonMode: 'full',
             exactPathCount: 0,
             checkpointBindings: 1,
-            preRetrievalFullComparisons: 0,
+            preRetrievalFullComparisons: 1,
             finalFullComparisons: 1,
         });
     });

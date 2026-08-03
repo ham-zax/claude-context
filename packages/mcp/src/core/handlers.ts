@@ -495,6 +495,7 @@ type CompletedFreshnessRequestProof = Readonly<{
     indexPolicyHash: string;
     comparisonMode: 'full' | 'exact_paths';
     exactPathCount: number;
+    preRetrievalFullComparisons: number;
 }>;
 
 const WATCHER_UNAVAILABLE_SOURCE_REASONS = new Set([
@@ -4026,6 +4027,9 @@ export class ToolHandlers {
                                 ...(exactSourceComparisonPaths
                                     ? { exactSourceComparisonPaths }
                                     : {}),
+                                ...(fullSourceComparisonRequired && !exactSourceComparisonRequired
+                                    ? { fullSourceComparison: true }
+                                    : {}),
                                 ...(debugMode === 'freshness' || debugMode === 'full'
                                     ? {
                                         onPhaseTiming: (
@@ -4102,6 +4106,12 @@ export class ToolHandlers {
                                         ? 'exact_paths'
                                         : 'full',
                                     exactPathCount: exactSourceComparisonPaths?.length ?? 0,
+                                    preRetrievalFullComparisons:
+                                        decision.mode === 'skipped_source_unchanged'
+                                        && fullSourceComparisonRequired
+                                        && !exactSourceComparisonRequired
+                                            ? 1
+                                            : 0,
                                 };
                             }
                         }
@@ -4223,7 +4233,8 @@ export class ToolHandlers {
                             completedFreshnessRequestProof!.comparisonMode,
                         exactPathCount: completedFreshnessRequestProof!.exactPathCount,
                         checkpointBindings: 1,
-                        preRetrievalFullComparisons: 0,
+                        preRetrievalFullComparisons:
+                            completedFreshnessRequestProof!.preRetrievalFullComparisons,
                         finalFullComparisons: 0,
                     };
                 } else {
