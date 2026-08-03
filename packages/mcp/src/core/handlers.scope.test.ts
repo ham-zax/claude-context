@@ -2623,9 +2623,27 @@ test('source observation failure blocks without returning vector results', async
 
 test('watcher-disabled search uses the existing full checkpoint comparison as its request barrier', async () => {
     await withTempRepo(async (repoPath) => {
+        const relativePath = 'src/owner.ts';
+        const content = 'export function owner() { return true; }';
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(repoPath, relativePath), content, 'utf8');
+        const symbols = await writeSearchSymbolRegistry({
+            repoPath,
+            relativePath,
+            content,
+            chunks: [{
+                content,
+                startLine: 1,
+                endLine: 1,
+                symbolLabel: 'function owner()',
+                breadcrumbs: ['function owner()'],
+            }],
+        });
+        const owner = symbols.find((symbol) => symbol.name === 'owner');
+        assert.ok(owner);
         const handlers = createHandlers(repoPath, [{
-            content: 'export function owner() { return true; }',
-            relativePath: 'src/owner.ts',
+            content,
+            relativePath,
             startLine: 1,
             endLine: 1,
             language: 'typescript',
@@ -2733,7 +2751,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
-            query: 'where is owner behavior handled',
+            query: 'owner',
             scope: 'runtime',
             resultMode: 'grouped',
             groupBy: 'symbol',
@@ -2744,6 +2762,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
 
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results.length, 1);
+        assert.equal(payload.results[0].target.symbolId, owner.symbolInstanceId);
         assert.equal(checkpointInspectionCalls, 2);
         assert.equal(finalComparisonCalls, 1);
         assert.deepEqual(payload.hints.debugSearch.readiness.requestProof, {

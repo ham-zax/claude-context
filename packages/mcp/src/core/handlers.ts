@@ -4672,6 +4672,18 @@ export class ToolHandlers {
                     };
                 }
                 let exactEnvelope = exactFastPath.finalized.envelope;
+                if (exactEnvelope.hints?.debugSearch) {
+                    exactEnvelope = {
+                        ...exactEnvelope,
+                        hints: {
+                            ...exactEnvelope.hints,
+                            debugSearch: {
+                                ...exactEnvelope.hints.debugSearch,
+                                readiness: structuredClone(readinessDebug),
+                            },
+                        },
+                    };
+                }
                 if (
                     exactFastPath.finalized.kind === "ok"
                     && exactEnvelope.resultMode === "grouped"
