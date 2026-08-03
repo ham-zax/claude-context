@@ -1,8 +1,8 @@
 # Satori Deep LateOn Reranking and Paginated Disclosure Plan
 
-**Status:** proposed; documentation only. This plan does not authorize runtime
-changes, model downloads, index mutation, held-out evaluation, or production
-activation.
+**Status:** execution in progress. Track P is qualified and Track L is terminal
+with baseline `B` retained. Track I remains the only unfinished authorized track.
+Held-out evaluation and production activation remain closed.
 
 **Date:** 2026-08-02
 
@@ -50,6 +50,14 @@ Track P may qualify even if every LateOn contender is rejected. Track I may be
 rejected or deferred without blocking Track P or Track L. Each track requires
 its own authority, receipt, and terminal outcome.
 
+Current execution state:
+
+| Track | State | Receipt or next boundary |
+| --- | --- | --- |
+| P — pagination | `pagination_complete_frozen_set_qualified` | `docs/evidence/deep-pagination-p2-20260802/P2_QUALIFICATION_RECEIPT.md` |
+| L — LateOn | `baseline_b_retained` | `docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md` |
+| I — compact result index | implementation pending | Complete independently without reopening Track L or held-out evidence |
+
 “No limit on how much the agent can request” does not mean an unbounded response
 or unbounded retrieval work. A caller may request the complete available frozen
 set and page through it until exhaustion. Multiple bounded arms and semantic
@@ -96,15 +104,17 @@ every quality gate, and `B` remains the default qualified ranking policy. The
 later runtime receipt replaced the assumed resource envelope; it did not
 replace the R3 quality decision.
 
-The original D-L16/D-L32 resource failures are also already observed. The
-optimized runtime receipt remeasured D-L16 only. Optimized D-L32 and D-L50
-resource profiles remain unopened work.
+The original D-L16/D-L32 resource failures were already observed, and the
+optimized runtime receipt remeasured D-L16 only. L0 subsequently preregistered
+the unopened D-L50 projection-v1 and projection-v2 arms before any new output
+was inspected.
 
-D-L16 and D-L32 projection-v1 outcomes are already known. A new rule applied to
-those results must be labeled revised and post-hoc and cannot be described as
-preregistered evidence. Only unopened D-L50 projection-v1 results and
-prospectively frozen projection-v2 arms can receive new preregistered quality
-authority.
+The completed L3 qualification now supersedes the earlier tuning-only status
+for those new arms. All four passed every frozen quality gate; projection-v2 at
+depth 32 was strongest on owner-at-three and MRR. None passed the frozen local
+WSL CPU resource profile, so no contender was selected, held-out remained
+sealed, and baseline `B` remains product policy. See
+`docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md`.
 
 ## 3. Non-negotiable invariants
 
@@ -463,11 +473,12 @@ projection experiment. Do not attribute the change to candidate depth.
 
 ### L0 — freeze authority
 
-Current executable authority: the version 3 manifest is sealed at
+Final executable tuning authority: the version 3 manifest is sealed at
 `05fb273715d6205bcdf5adc1fdec94a892d8b40fc651a386ab36ccfb9475b7bc`
-and binds the committed scorer/evaluator boundary. New tuning and held-out model
-outputs remain unopened. The earlier descriptive seal is superseded and has no
-execution authority.
+and binds the committed scorer/evaluator boundary. The preregistered tuning arms
+were opened under this authority and reached `baseline_b_retained`; held-out
+model outputs remain unopened. Earlier descriptive seals are superseded and
+have no execution authority.
 
 Before viewing new contender output, freeze:
 
