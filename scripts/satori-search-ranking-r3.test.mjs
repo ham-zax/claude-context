@@ -7,6 +7,7 @@ import {
     buildTrackLDecision,
     evaluateTrackL,
     resolveTrackLEvaluationAuthority,
+    trackLOwnerRank,
 } from "./satori-search-ranking-r3.mjs";
 
 function contender(contenderId, reciprocalRank, {
@@ -108,6 +109,28 @@ test("Track L evaluator binds score artifacts to repository, arm, profile, and t
         expectedTaskIds,
         taskAuthority.tasksById,
     ), /authority is incompatible/);
+});
+
+test("Track L owner rank uses captured disclosure for compact baseline replay", () => {
+    const owner = {
+        file: "src/owner.ts",
+        symbol: "runOwner",
+        match: "symbol",
+    };
+    const compactBaselineTask = {
+        taskId: "owner-task",
+        route: { kind: "fusion", fusionReplay: "exact" },
+        mcpAttempts: [{ attemptId: "attempt:1", candidateCount: 20 }],
+    };
+    const capture = {
+        taskId: "owner-task",
+        rankedResults: [
+            { kind: "symbol", file: "src/decoy.ts", symbol: "decoy" },
+            { kind: "symbol", file: "src/owner.ts", symbol: "runOwner" },
+        ],
+    };
+
+    assert.equal(trackLOwnerRank(compactBaselineTask, owner, capture), 2);
 });
 
 test("Track L evaluator refuses to mix replay output with an existing directory", () => {

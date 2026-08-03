@@ -456,9 +456,10 @@ function exactRegistryOwnerRank(task, owner) {
     return index < 0 ? null : index + 1;
 }
 
-function trackLOwnerRank(task, owner) {
-    return task.route?.kind === "exact_registry"
-        ? exactRegistryOwnerRank(task, owner)
+export function trackLOwnerRank(task, owner, taskCapture = task) {
+    const finalAttempt = Array.isArray(task.mcpAttempts) ? task.mcpAttempts.at(-1) : undefined;
+    return task.route?.kind === "exact_registry" || !Array.isArray(finalAttempt?.candidates)
+        ? exactRegistryOwnerRank(taskCapture, owner)
         : ownerRank(task, owner);
 }
 
@@ -472,7 +473,11 @@ function trackLQualityTasks(replay, capture) {
             const taskId = requireString(taskCapture.taskId, "Track L positive task id");
             const task = replayTasks.get(taskId);
             if (!task) throw new Error(`Track L replay lacks positive task '${taskId}'.`);
-            const rank = trackLOwnerRank(task, expectedOwnerFromCapture(taskCapture));
+            const rank = trackLOwnerRank(
+                task,
+                expectedOwnerFromCapture(taskCapture),
+                taskCapture,
+            );
             return { taskId, rank, metrics: metricForRank(rank), task };
         });
 }
