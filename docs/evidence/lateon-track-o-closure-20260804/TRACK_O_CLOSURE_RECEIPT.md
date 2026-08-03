@@ -1,7 +1,8 @@
 # Track O closure receipt
 
-**Date:** 2026-08-04  
-**Stage:** Track O closure  
+**Date:** 2026-08-04
+
+**Stage:** Track O closure
 **Terminal outcome:** `offline_lateon_opening_consumed_without_valid_decision`
 
 This receipt closes Track O without reopening the consumed O3 opening. It records
@@ -18,6 +19,14 @@ pre-receipt revision  5dbaadd150c4cdbcd87e94b8ea148f5f622ce8de
 pre-receipt Git tree   73f1042e0b8fabef390f5f5ecab647ddae92426d
 ```
 
+The historical boundaries are explicit:
+
+| Boundary | Revision | Git tree |
+| --- | --- | --- |
+| Verified pre-carry implementation | `daae615992dea1225f7bd70591a264b9b03899ac` | `967e0111271dc9822839746b87de240222299d9b` |
+| Original carry-forward receipt commit | `5dbaadd150c4cdbcd87e94b8ea148f5f622ce8de` | `73f1042e0b8fabef390f5f5ecab647ddae92426d` |
+| Original closure commit | `39bcd0e343140d57eef45a04483d5446f409e94f` | `d5105105c691ae0011d0cb59c7482a765922dc2e` |
+
 The receipt deliberately does not contain its own digest. The pre-receipt
 revision/tree and the committed receipt file digest recorded by the enclosing
 commit provide a non-self-referential finalization boundary.
@@ -26,8 +35,13 @@ commit provide a non-self-referential finalization boundary.
 
 * [D32-v2 O0 authority](../lateon-track-o-o0-v2-20260804/O0_V2_AUTHORITY_RECEIPT.md)
   — profile and prospective authority seal
+* [D32-v2 passing O2 receipt](</home/hamza/repo/satori-track-o-o2-v2-20260804-thab79/o2-receipt.json>)
+  — external passing receipt, file SHA-256
+  `8eb27428c07a764fe84f700b847f6032c1471cacf98acffd4072ff6e953f38f4`,
+  canonical result SHA-256
+  `de3c693c2461d11ede5f0ffa8ea410e4fbabe0053d87b43e52707b2f4d92fde4`
 * [D32-v1 O2 receipt](../lateon-track-o-o2-v1-20260804/O2_V1_OPERATIONAL_QUALIFICATION_RECEIPT.md)
-  — historical resource rejection, not the carried pass
+  — historical resource rejection, not the carried passing authority
 * [D32-v2 O2 carry-forward](../lateon-track-o-o2-carry-forward-20260804/O2_CARRY_FORWARD_RECEIPT.md)
   — original passing O2 evidence, immutable replay, and non-scoring delta audit
 * [O3 protocol-failure receipt](../lateon-track-o-o3-protocol-20260804/O3_PROTOCOL_FAILURE_RECEIPT.md)

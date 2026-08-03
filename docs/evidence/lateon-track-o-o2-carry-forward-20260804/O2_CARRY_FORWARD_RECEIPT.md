@@ -1,7 +1,8 @@
 # Track O D32-v2 O2 carry-forward receipt
 
-**Date:** 2026-08-04  
-**Stage:** O2 carry-forward  
+**Date:** 2026-08-04
+
+**Stage:** O2 carry-forward
 **Result:** `offline_lateon_o2_carry_forward_passed`
 
 This receipt carries the original passing D32-v2 operational qualification
@@ -14,8 +15,12 @@ O3, create a new model result, qualify held-out evidence, or authorize O4.
 | --- | --- |
 | Original O2 source revision | `07fba989b73d11c4f0446210a16cc1232713a2e4` |
 | Original O2 source Git tree | `0d54897bd7b3e6fb8338c1b83d80f165b40e9771` |
-| Current revision | `daae615992dea1225f7bd70591a264b9b03899ac` |
-| Current Git tree | `967e0111271dc9822839746b87de240222299d9b` |
+| Verified pre-carry implementation revision | `daae615992dea1225f7bd70591a264b9b03899ac` |
+| Verified pre-carry implementation Git tree | `967e0111271dc9822839746b87de240222299d9b` |
+| Original carry-forward receipt commit | `5dbaadd150c4cdbcd87e94b8ea148f5f622ce8de` |
+| Original carry-forward receipt tree | `73f1042e0b8fabef390f5f5ecab647ddae92426d` |
+| Original closure commit | `39bcd0e343140d57eef45a04483d5446f409e94f` |
+| Original closure tree | `d5105105c691ae0011d0cb59c7482a765922dc2e` |
 | Original O2 receipt | `/home/hamza/repo/satori-track-o-o2-v2-20260804-thab79/o2-receipt.json` |
 | O2 receipt file SHA-256 | `8eb27428c07a764fe84f700b847f6032c1471cacf98acffd4072ff6e953f38f4` |
 | O2 receipt result SHA-256 | `de3c693c2461d11ede5f0ffa8ea410e4fbabe0053d87b43e52707b2f4d92fde4` |
@@ -68,12 +73,15 @@ query the consumed held-out workspace and did not run model inference.
 | Immutable Track L archive | `docs/evidence/deep-lateon-l3-20260804/deep-lateon-l3-artifacts.tar.gz` |
 | Track L archive SHA-256 | `71faba8d308c239e9e49b029b363957662288ec1470876b2c9c796256fb168b1` |
 | D32 replay root | `/home/hamza/repo/satori-track-l-0c8f535e/replay-final-05fb2737` |
-| Replay verification digest | `9ab5675f173e0104d22cd62c5cd6effb2280eed66b20f4050009eb247ec0b301` |
+| Carry-forward audit canonical result SHA-256 | `3f8dbf6d712043fc8a8b38108f48d4bfc6bd3dd5fa1623702b77304c8a808036` |
 
 The deterministic replay audit established:
 
-* all 36 frozen quality/control tasks were present in the six-repository
-  tuning authority;
+* all 38 positive/control records were present: 36 decision-bearing quality
+  tasks and two additional exact-registry safety controls;
+* the 36 quality tasks contained 34 fusion/neural-eligible tasks and two
+  exact-registry/non-neural tasks;
+* all 12 negative tasks were present in the six negative replay files;
 * all 34 neural-eligible tasks had the exact recorded D32-v2 candidate
   permutation and finite recorded neural scores;
 * all recorded neural candidates were admitted from the frozen candidate set;
@@ -95,6 +103,24 @@ The six D32 replay file digests are:
 | `gitnexus-r0` | `f55442c1ddc978e8276e462d4afaa0e52b33aa2f60773eca5d3dd9cf8eb9e7d3` |
 | `rpc-r0` | `2430fec7dcd93d698349d79a2a1288d55ed264761c2c467791de927e9b3072ea` |
 | `vox-infinity-r0` | `dd472e5c3a941f2f0b27308198e6d91bf0243c431886d38bd15d5b4031b5493f` |
+
+The deterministic verifier and its machine-readable audit are:
+
+```text
+verifier path       scripts/satori-track-o-o2-carry-forward-audit.mjs
+verifier SHA-256    005eea877b9b15cf45a8048bf5817bfac9ef9945c8de74c222f95fda1bb267e8
+audit path          docs/evidence/lateon-track-o-o2-carry-forward-20260804/O2_CARRY_FORWARD_AUDIT.json
+audit file SHA-256  7dcc9057dbe0fab0ca1cc2ba658b044702c5f5934ba0fa6e1792b39ff5bb4377
+canonical result    3f8dbf6d712043fc8a8b38108f48d4bfc6bd3dd5fa1623702b77304c8a808036
+exact command       node scripts/satori-track-o-o2-carry-forward-audit.mjs --repo-root /home/hamza/repo/satori-worktrees/deep-reranking-pagination-20260802 --capture-authority /home/hamza/repo/satori-track-l-0c8f535e/artifacts/capture-authority-05fb2737.json --replay-root /home/hamza/repo/satori-track-l-0c8f535e/replay-final-05fb2737 --score-root /home/hamza/repo/satori-track-l-0c8f535e/scores-05fb2737-rebound --o2-receipt /home/hamza/repo/satori-track-o-o2-v2-20260804-thab79/o2-receipt.json --output /home/hamza/repo/satori-worktrees/deep-reranking-pagination-20260802/docs/evidence/lateon-track-o-o2-carry-forward-20260804/O2_CARRY_FORWARD_AUDIT.json
+counts             38 positive/control, 36 quality, 34 neural-eligible, 2 exact quality, 2 safety, 12 negative
+```
+
+The audit records all six positive and six negative replay file hashes, all
+capture and baseline bindings, old/current Git blob and raw-byte identities for
+every O2-owned input, provider and projection identity, candidate/eligibility
+invariants, recorded neural order, grouping/disclosure/pagination order, and
+zero continuation reranker calls. It performed no model inference.
 
 ## Post-O2 delta audit
 
@@ -137,7 +163,7 @@ original O2 revision and the current revision:
 packages/mcp/src/core/search-rerank-document-v2.ts
 packages/mcp/src/core/search-rerank-policy.ts
 packages/mcp/src/core/search-execution.ts
-packages/mcp/src/core/search-finalization.ts
+packages/mcp/src/core/search-result-finalization.ts
 packages/mcp/src/server/lateon-reranker.ts
 scripts/satori-captured-rerank-projection-v2.mjs
 scripts/satori-lateon-track-o-o2.mjs
@@ -159,7 +185,7 @@ Focused lifecycle and replay verification passed at the current revision:
 watcher-disabled unchanged-source lifecycle proof       passed
 source drift / ignore drift / checkpoint mismatch paths  passed
 exact-path readiness final-barrier regression             passed
-36-task reconstruction                                   passed
+38 positive/control records (36 quality + 2 safety)      passed
 34-task recorded D32 replay                               passed
 candidate and eligibility identity checks                 passed
 neural/group/disclosure/pagination order checks            passed
