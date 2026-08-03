@@ -6,12 +6,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { canonicalJson } from "./satori-useful-context.mjs";
+import { validateO2MeasurementOutcome } from "./satori-lateon-track-o-o2-evidence.mjs";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/;
 
 export const TRACK_O_O0_AUTHORITY_SHA256 =
-    "b1db9ac92597ce625746b2812f294afa99b0d4f6d00a2b2e321e3a976c0d30b2";
+    "37bfaf2bec4b5232352f4fa813a4ae2246cf5b5adc705fcce4009e4ad88390a9";
 export const TRACK_O_MANIFEST_FILE_SHA256 =
     "281c5354d98c42e8d576e607de50046230e7d31ca4059a6d77d89e7454b1db09";
 export const TRACK_O_MANIFEST_SEAL_SHA256 =
@@ -132,6 +133,10 @@ function validateO0Authority(authority, authorityFileSha256, expectedO0Authority
     }
     const manifest = requireRecord(authority.heldOutDecision?.manifest, "O0 held-out manifest");
     const profile = requireRecord(authority.qualifiedServiceProfile, "O0 qualified service profile");
+    const tuningRequestSet = requireRecord(
+        authority.operationalQualification?.tuningRequestSet,
+        "O0 tuning request set",
+    );
     if (manifest.version !== 3
         || authority.candidate?.id !== TRACK_O_CANDIDATE_ID
         || authority.candidate?.candidateDepth !== 32
@@ -142,6 +147,22 @@ function validateO0Authority(authority, authorityFileSha256, expectedO0Authority
         || authority.heldOutDecision?.opening?.failureConsumesOpening !== true) {
         throw new Error("O0 authority does not authorize the frozen unopened D32 flow.");
     }
+    requireEqual(tuningRequestSet, {
+        totalQualityAndControlTasks: 36,
+        neuralEligibleRequests: 34,
+        policyInvariantControls: [
+            "edge-tts-app-r0/edge-voice-options",
+            "rpc-r0/rpc-strictness-config",
+        ],
+        selectionAndWarmScheduleScope: "neural_eligible_requests_only",
+        reconstructionAndControlScope: "all_quality_and_control_tasks",
+    }, "O0 tuning request set");
+    requireEqual(authority.heldOutDecision?.decisionBearingQualityOwnerTasks, 35,
+        "O0 decision-bearing quality task count");
+    requireEqual(authority.heldOutDecision?.protocolExclusions, [{
+        taskId: "promptready-primary-action",
+        reason: "pre_open_read_only_lane_access_before_o2_no_edits_or_results",
+    }], "O0 held-out protocol exclusions");
     requireEqual(authority.state, {
         o2MeasurementsOpened: false,
         heldOutIndexCreatedOrQueried: false,
@@ -291,6 +312,7 @@ const O2_GATE_KEYS = Object.freeze([
     "groupIdentity",
     "paginationExactMustControls",
     "fallbackResultState",
+    "runtimeFailureReasons",
     "lifecycleLeaks",
     "scenarioCounts",
 ]);
@@ -310,6 +332,7 @@ function validateO2QualificationEvidence(evidence, evidenceBytes, inputs) {
         "methodology",
         "observations",
         "resources",
+        "productFallbackProof",
         "gates",
         "implementationArtifacts",
         "sha256",
@@ -334,6 +357,29 @@ function validateO2QualificationEvidence(evidence, evidenceBytes, inputs) {
     }, "O2 evidence authority");
     requireEqual(evidence.profile, inputs.profile, "O2 evidence profile");
     requireEqual(evidence.candidate, inputs.candidate, "O2 evidence candidate");
+
+    const tuningRequestSet = requireRecord(
+        evidence.tuningRequestSet,
+        "O2 evidence tuning request set",
+    );
+    requireEqual(tuningRequestSet.totalTasks, 36, "O2 total tuning tasks");
+    requireEqual(tuningRequestSet.neuralEligibleRequests, 34, "O2 neural-eligible requests");
+    requireEqual(
+        tuningRequestSet.policyInvariantControls?.map(({ id }) => id),
+        [
+            "edge-tts-app-r0/edge-voice-options",
+            "rpc-r0/rpc-strictness-config",
+        ],
+        "O2 policy-invariant controls",
+    );
+    requireSha256(tuningRequestSet.requestSetSha256, "O2 request-set digest");
+    requireSha256(tuningRequestSet.aggregateCaptureSha256, "O2 aggregate capture digest");
+    requireSha256(
+        tuningRequestSet.captureAuthorityFileSha256,
+        "O2 capture-authority digest",
+    );
+    requireRecord(evidence.resources, "O2 evidence resources");
+    requireRecord(evidence.productFallbackProof, "O2 product fallback proof");
 
     const frozenCounts = requireRecord(
         inputs.o0Authority.operationalQualification?.observationCounts,
@@ -395,6 +441,7 @@ function validateO2QualificationEvidence(evidence, evidenceBytes, inputs) {
     for (const [gateName, limit] of Object.entries(expectedLimits)) {
         requireEqual(gates[gateName].limit, limit, `O2 evidence gate '${gateName}' limit`);
     }
+    validateO2MeasurementOutcome(evidence, inputs.o0Authority);
     requireEqual(
         evidence.implementationArtifacts,
         inputs.implementationArtifacts,
@@ -467,7 +514,16 @@ function validateO2Receipt(receipt, inputs) {
         artifacts: inputs.o0Artifacts,
     }, "O2 D32 candidate binding");
     const implementation = requireRecord(receipt.implementationArtifacts, "O2 implementationArtifacts");
-    const requiredRoles = ["projectionSource", "runtimeSource", "measurementScript"];
+    const requiredRoles = [
+        "projectionSource",
+        "runtimeSource",
+        "measurementScript",
+        "scenarioWorker",
+        "runtimeWorker",
+        "productFallbackTest",
+        "evidenceDerivation",
+        "baselineReplayOwner",
+    ];
     requireEqual(Object.keys(implementation).sort(), [...requiredRoles].sort(), "O2 implementation artifact roles");
     const implementationBindings = requiredRoles.map((role) => ({
         role,
