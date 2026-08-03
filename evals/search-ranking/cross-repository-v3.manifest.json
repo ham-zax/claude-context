@@ -559,8 +559,8 @@
       ]
     },
     "runtime": {
-      "sourceRevision": "7259bfc252f35039abef3bad90cb0ebc54443127",
-      "sourceTree": "93bdffddc5c1ca2baefa984995beac4c4fbf41a4",
+      "sourceRevision": "9e08b1de6c912044d4187516de6fc95daeb95eae",
+      "sourceTree": "3aa7687f46e8d3b6356599b7e521a10f8c0e4347",
       "node": "24.13.0",
       "onnxruntimeNode": "1.19.2",
       "transformersJs": "3.0.2",
@@ -608,7 +608,7 @@
         {
           "role": "rerank_document_v2",
           "path": "scripts/satori-search-rerank-document-v2.mjs",
-          "sha256": "4d343975168a636195d18ebd3bd3d6a1e2c4e8f9b8d48897f6383dcc50b2e499"
+          "sha256": "635b0a683b2a1c7dec8b6f0822f21e750724d5d4d18503eee112c4dbd242d687"
         },
         {
           "role": "owner_family_admission",
@@ -735,7 +735,7 @@
         "sourceOwner": {
           "role": "rerank_document_v2",
           "path": "scripts/satori-search-rerank-document-v2.mjs",
-          "sha256": "4d343975168a636195d18ebd3bd3d6a1e2c4e8f9b8d48897f6383dcc50b2e499"
+          "sha256": "635b0a683b2a1c7dec8b6f0822f21e750724d5d4d18503eee112c4dbd242d687"
         }
       }
     ],
@@ -4301,5 +4301,5 @@
       }
     }
   ],
-  "sha256": "e67881c7f39bf5ce3afe81c7b91fe8fb0df7831417f37e5b6e7d70ab21b793c6"
+  "sha256": "127c451e824903ed295aa1a5fc19e4093abb59812441c5124cbf69d47f196106"
 }

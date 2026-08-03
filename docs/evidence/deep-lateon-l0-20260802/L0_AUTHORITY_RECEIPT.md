@@ -27,13 +27,14 @@ SHA-256 `23a1efa2f76991aeecbb3d1e717c3117fafd39369187afb5e258cf49a55e3bda`.
 | Executable evaluator commit | `ca3671af8b6116b9e63fc68b143a9a97a9485ea7` |
 | Frozen-set capture correction commit | `b8020e717ee1b2b37073d72fe49dbf7f6e014724` |
 | Frozen diversity replay correction commit | `7259bfc252f35039abef3bad90cb0ebc54443127` |
+| File-level projection correction commit | `9e08b1de6c912044d4187516de6fc95daeb95eae` |
 | Authority reseal commit | `2fecda3c9f7fb7dfdca75864b8a7a3e237f173a6` |
 | Authority reseal tree | `29a4eceac2bf10cf44ff3aad15a991e27dcb4db7` |
-| Pinned L0 source revision | `7259bfc252f35039abef3bad90cb0ebc54443127` |
-| Pinned L0 source tree | `93bdffddc5c1ca2baefa984995beac4c4fbf41a4` |
+| Pinned L0 source revision | `9e08b1de6c912044d4187516de6fc95daeb95eae` |
+| Pinned L0 source tree | `3aa7687f46e8d3b6356599b7e521a10f8c0e4347` |
 | Version 3 authority | `evals/search-ranking/cross-repository-v3.manifest.json` |
-| Version 3 internal canonical seal | `e67881c7f39bf5ce3afe81c7b91fe8fb0df7831417f37e5b6e7d70ab21b793c6` |
-| Version 3 file SHA-256 | `0bb8378447cf5c1a9bbca9b1ce25ab7b7e29ea123e3fc28f62317c21251cb99b` |
+| Version 3 internal canonical seal | `127c451e824903ed295aa1a5fc19e4093abb59812441c5124cbf69d47f196106` |
+| Version 3 file SHA-256 | `9ccecf2408d866509d39d9807932dbef99e6957b65d88e611be9a17ba45148da` |
 | Preserved version 2 internal seal | `ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445` |
 | Preserved version 2 file SHA-256 | `79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30` |
 
@@ -71,6 +72,13 @@ and owner-family-admission contracts instead of an older descriptive sketch.
 A focused integration test resolves every preregistered arm directly from the
 committed manifest through the production scoring authority before model work
 is allowed.
+
+The projection-v2 canary then reached document construction and exposed a
+file-level Markdown chunk indexed with language `text`. Commit `9e08b1d`
+recognizes Markdown from its repository-relative extension and uses the
+canonical file label when no structural heading exists. This is a general
+file-level projection rule; it does not special-case a task, query, or
+repository.
 
 ## Decision-bearing corpus
 
