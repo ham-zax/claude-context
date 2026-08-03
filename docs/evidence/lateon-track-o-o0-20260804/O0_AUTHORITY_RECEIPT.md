@@ -8,22 +8,25 @@
 
 ```text
 authority revision
-    c15f09bce7ea823014c951498527bedb3781e359
+    6666604c46b28f7c81374109d9f1d60178a85507
 
 authority tree
-    8cff57bf2b7d684740fccefc952ad2eeb32c8616
+    254165bc402912b3bd31e544f62a6861b3376ece
+
+initial Track O contract revision
+    c15f09bce7ea823014c951498527bedb3781e359
 
 Track O plan
     docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md
 
 Track O plan SHA-256
-    0df987f0f5975ff337ac28ae99419b1818e1d189ead09f240b5ebeac91182ebc
+    dd900296a02f80a58f921121e9e93b55139d9c2f12fa635f452a1e2c34711569
 
 O0 executable authority
     evals/search-ranking/lateon/offline-quality-d32-v1.authority.json
 
 O0 executable authority SHA-256
-    9d94bb227355bec6316409f294832fcd442dcd898782bab75750f20628545a52
+    b1db9ac92597ce625746b2812f294afa99b0d4f6d00a2b2e321e3a976c0d30b2
 ```
 
 No O2 measurement or held-out access occurred before this O0 revision was
@@ -117,10 +120,13 @@ quality-owner tasks, 12 negative tasks, and the exact controls
 `local_source_oracle_review_2026_07_30` and
 `local_source_oracle_review_2026_08_03`.
 
-Before reading a held-out task payload, O3 must validate this manifest, a passing
-O2 receipt, D32's effective profile identity, and the new capture digest, then
-atomically consume a durable one-time opening record. A failed opening remains
-consumed and cannot be retried.
+Before reading a held-out task payload, O3 must validate the opaque manifest
+file/seal, this O0 authority, a passing O2 receipt, and D32's effective profile
+and artifact identities, then atomically create and fsync a durable write-once
+opening record. A failed opening remains consumed and cannot be retried. The
+capture cannot exist before task materialization; the post-opening O3 receipt
+must bind the resulting index, publication, capture, replay, score, and evaluator
+digests before adjudication.
 
 ## Frozen operational profile
 
