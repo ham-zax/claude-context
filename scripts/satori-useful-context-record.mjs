@@ -814,13 +814,15 @@ export function assertMeasuredReadiness(task, phase, invocation, readiness, cont
                 `coldReadinessChecks>=1 (actual=${readiness.operations.coldReadinessChecks})`,
             );
         }
-        if (readiness.operations.exactPayloadRecounts < 1) {
+        const checkpointBoundColdProof = readiness.operations.postFreshnessColdChecks >= 1
+            && readiness.watcher?.checkpointStatus === "valid";
+        if (readiness.operations.exactPayloadRecounts < 1 && !checkpointBoundColdProof) {
             failedPredicates.push(
-                `exactPayloadRecounts>=1 (actual=${readiness.operations.exactPayloadRecounts})`,
+                "exactPayloadRecounts>=1 or valid checkpoint-bound post-freshness proof",
             );
         }
         if (failedPredicates.length > 0) {
-            const message = `Task '${task.id}' cold search did not prove a cold authority check with an exact payload recount.`;
+            const message = `Task '${task.id}' cold search did not prove a cold authority check with an exact recount or valid freshness checkpoint.`;
             console.error(JSON.stringify({
                 event: "readiness_proof_failed",
                 message,
