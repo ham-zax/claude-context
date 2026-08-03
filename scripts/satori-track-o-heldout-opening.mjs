@@ -12,7 +12,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/;
 
 export const TRACK_O_O0_AUTHORITY_SHA256 =
-    "37bfaf2bec4b5232352f4fa813a4ae2246cf5b5adc705fcce4009e4ad88390a9";
+    "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39";
 export const TRACK_O_MANIFEST_FILE_SHA256 =
     "281c5354d98c42e8d576e607de50046230e7d31ca4059a6d77d89e7454b1db09";
 export const TRACK_O_MANIFEST_SEAL_SHA256 =
@@ -163,6 +163,25 @@ function validateO0Authority(authority, authorityFileSha256, expectedO0Authority
         taskId: "promptready-primary-action",
         reason: "pre_open_read_only_lane_access_before_o2_no_edits_or_results",
     }], "O0 held-out protocol exclusions");
+    requireEqual(authority.heldOutDecision?.preOpenAccessIncidents, [
+        {
+            id: "promptready-primary-action-record-exposure",
+            kind: "isolated_lane_task_record_printed",
+            taskPayloadObservedByIsolatedLane: true,
+            taskPayloadPropagated: false,
+            oraclePropagated: false,
+            modelOrRankingOutputOpened: false,
+            decisionImpact: "task_excluded_from_all_o3_decision_metrics",
+        },
+        {
+            id: "automated-manifest-structural-access-20260804",
+            kind: "synthetic_test_parse_and_field_name_search",
+            taskPayloadEmittedOrObserved: false,
+            oracleEmittedOrObserved: false,
+            modelOrRankingOutputOpened: false,
+            decisionImpact: "none",
+        },
+    ], "O0 pre-open access incidents");
     requireEqual(authority.state, {
         o2MeasurementsOpened: false,
         heldOutIndexCreatedOrQueried: false,

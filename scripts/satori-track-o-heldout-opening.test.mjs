@@ -149,6 +149,25 @@ function buildFixture(tempDir) {
                 taskId: "promptready-primary-action",
                 reason: "pre_open_read_only_lane_access_before_o2_no_edits_or_results",
             }],
+            preOpenAccessIncidents: [
+                {
+                    id: "promptready-primary-action-record-exposure",
+                    kind: "isolated_lane_task_record_printed",
+                    taskPayloadObservedByIsolatedLane: true,
+                    taskPayloadPropagated: false,
+                    oraclePropagated: false,
+                    modelOrRankingOutputOpened: false,
+                    decisionImpact: "task_excluded_from_all_o3_decision_metrics",
+                },
+                {
+                    id: "automated-manifest-structural-access-20260804",
+                    kind: "synthetic_test_parse_and_field_name_search",
+                    taskPayloadEmittedOrObserved: false,
+                    oracleEmittedOrObserved: false,
+                    modelOrRankingOutputOpened: false,
+                    decisionImpact: "none",
+                },
+            ],
             opening: {
                 requiresPassingO2Receipt: true,
                 durableExclusiveOneTimeRecord: true,

@@ -93,9 +93,9 @@ function evidenceFixture() {
     };
     const authorityBinding = {
         authorityFileSha256:
-            "37bfaf2bec4b5232352f4fa813a4ae2246cf5b5adc705fcce4009e4ad88390a9",
+            "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39",
         expectedAuthorityFileSha256:
-            "37bfaf2bec4b5232352f4fa813a4ae2246cf5b5adc705fcce4009e4ad88390a9",
+            "994b79b634684c851fa21f388adaf1fc5cbec92200103d5fd48ee7e592d36a39",
         candidate,
         profileBinding: {
             id: "lateon_offline_quality_projection_v2_d32_v1",
