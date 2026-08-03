@@ -116,6 +116,19 @@ WSL CPU resource profile, so no contender was selected, held-out remained
 sealed, and baseline `B` remains product policy. See
 `docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md`.
 
+That L3 terminal result applies only to the deployment profile frozen by L0. It
+does not assert that D32 is unusable on the measured host or under every product
+service class. A separate prospective operational authority may evaluate D32
+without rewriting L3; see
+`docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md`.
+
+Metric provenance must remain explicit. The earlier three-family diagnostic
+suite produced baseline MRR `0.3602` and owner-at-three `0.3722`. The later
+six-family decision-bearing tuning suite produced baseline MRR `0.2900` and
+owner-at-three `0.3611`, with projection-v2 D32 at MRR `0.5046` and
+owner-at-three `0.6389`. These are different denominators and must not be
+presented as measurements from one benchmark population.
+
 ## 3. Non-negotiable invariants
 
 Every contender and implementation must preserve:

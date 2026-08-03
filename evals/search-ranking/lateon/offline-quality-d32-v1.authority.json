@@ -1,0 +1,256 @@
+{
+  "version": 1,
+  "kind": "satori_lateon_track_o_authority",
+  "phase": "O0",
+  "status": "prospective_authority_outputs_unopened",
+  "plan": {
+    "path": "docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md",
+    "sha256": "0df987f0f5975ff337ac28ae99419b1818e1d189ead09f240b5ebeac91182ebc"
+  },
+  "historicalAuthority": {
+    "l3Receipt": {
+      "path": "docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md",
+      "sha256": "05661b8d86c328a18a9710c8510bfed924670af54f7032ddfed66c3378a8daee",
+      "outcome": "baseline_b_retained",
+      "selectedContender": null
+    },
+    "l3Archive": {
+      "path": "docs/evidence/deep-lateon-l3-20260804/deep-lateon-l3-artifacts.tar.gz",
+      "sha256": "71faba8d308c239e9e49b029b363957662288ec1470876b2c9c796256fb168b1",
+      "aggregateTuningCaptureSha256": "0e425bbf16fe3fdec61767399b46b69bbe6204aa8f638f62c88b46c3317672b9"
+    },
+    "runtimeReceipt": {
+      "path": "docs/evidence/lateon-runtime-profile-20260730/LATEON_RUNTIME_PROFILE_RECEIPT.md",
+      "sha256": "c0d023835cf2a45b434659e26d7c80fdc4eee04c78b6138993de7632e95bc0ff"
+    }
+  },
+  "candidate": {
+    "nomination": "prospective_track_o_nomination_from_frozen_l3_tuning_evidence",
+    "id": "projection-v2-d-l32",
+    "serviceClass": "offline_quality",
+    "model": {
+      "repository": "lightonai/LateOn-Code-edge",
+      "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
+      "license": "Apache-2.0"
+    },
+    "artifacts": [
+      {
+        "role": "onnx_fp32",
+        "path": "model.onnx",
+        "sha256": "ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef"
+      },
+      {
+        "role": "tokenizer",
+        "path": "tokenizer.json",
+        "sha256": "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+      },
+      {
+        "role": "tokenizer_config",
+        "path": "tokenizer_config.json",
+        "sha256": "1621afee1f3dbc2c42901841ca46016c83102a8e070d32b90f80f80b214172a4"
+      },
+      {
+        "role": "onnx_config",
+        "path": "onnx_config.json",
+        "sha256": "fa4fef89820dcdc33c5504c62c1d5efc19603cfbfebf02368a70d51a4dbe6651"
+      },
+      {
+        "role": "special_tokens",
+        "path": "special_tokens_map.json",
+        "sha256": "6edfb9d64c0d7e5cbaa53516e90280fe1f42ba5ea7923d005a5f9b6e082142cf"
+      }
+    ],
+    "projection": {
+      "id": "search_rerank_document_v2",
+      "path": "scripts/satori-search-rerank-document-v2.mjs",
+      "sha256": "635b0a683b2a1c7dec8b6f0822f21e750724d5d4d18503eee112c4dbd242d687"
+    },
+    "candidateDepth": 32,
+    "admissionPolicy": "owner_representative_then_bounded_supplemental_rounds_v1",
+    "admissionOwner": {
+      "path": "packages/mcp/src/core/search-rerank-policy.ts",
+      "sha256": "fe8fd56e4d50eedf2bbec9edf5a80b94b32cfc9778c121584bd9667b0931d6b5"
+    },
+    "scoreApplication": "complete_validated_neural_order_or_baseline_b",
+    "fallback": "complete_deterministic_baseline_b"
+  },
+  "operatorSelectableProfiles": [
+    {
+      "id": "lateon_projection_v2_d16_v1",
+      "projection": "search_rerank_document_v2",
+      "candidateDepth": 16,
+      "status": "disabled_optional_not_track_o_or_held_out_candidate"
+    },
+    {
+      "id": "lateon_offline_quality_projection_v2_d32_v1",
+      "projection": "search_rerank_document_v2",
+      "candidateDepth": 32,
+      "status": "disabled_track_o_candidate"
+    }
+  ],
+  "profileSelection": {
+    "explicitBeforeSearch": true,
+    "adaptiveDepth": false,
+    "automaticD32ToD16Fallback": false,
+    "failureFallback": "complete_deterministic_baseline_b",
+    "selectedProfileIsIdentityBearing": true
+  },
+  "qualifiedServiceProfile": {
+    "id": "lateon_offline_quality_projection_v2_d32_v1",
+    "scoringIdentity": {
+      "workerProcesses": 1,
+      "activeModelSessions": 1,
+      "executionProvider": "cpu",
+      "intraOpThreads": 8,
+      "interOpThreads": 1,
+      "executionMode": "sequential",
+      "graphOptimizationLevel": "all",
+      "queryBatchSize": 1,
+      "documentBatchSize": 1,
+      "documentEncoding": "serial",
+      "tokenizerParallelism": false,
+      "queryTokenLimit": 256,
+      "documentTokenLimit": 2048,
+      "aggregateRequestTokenLimit": 65792,
+      "padding": "none_single_sequence",
+      "truncationSide": "right",
+      "truncationStrategy": "longest_suffix_discarded",
+      "warmupRequests": 2
+    },
+    "operationalBounds": {
+      "maximumActiveReranks": 1,
+      "maximumQueuedReranks": 1,
+      "maximumQueueWaitMilliseconds": 250,
+      "maximumReadinessP95Milliseconds": 1300,
+      "maximumReadinessMilliseconds": 2000,
+      "maximumColdFirstScoreMilliseconds": 2000,
+      "maximumWarmScoreP95Milliseconds": 1750,
+      "maximumScoreMilliseconds": 2000,
+      "maximumRerankerStageMilliseconds": 2500,
+      "maximumProcessPeakRssBytes": 872415232,
+      "maximumProcessRetainedRssBytes": 671088640,
+      "maximumInvalidOrIncompleteOrders": 0,
+      "maximumSafetyOrIdentityFailures": 0
+    },
+    "operatorOverridePolicy": {
+      "immutable": [
+        "model",
+        "tokenizer",
+        "projection",
+        "candidate_depth",
+        "candidate_admission",
+        "score_application",
+        "thread_policy",
+        "batch_policy"
+      ],
+      "reducibleOnly": [
+        "maximum_active_reranks",
+        "maximum_queued_reranks",
+        "maximum_queue_wait",
+        "scoring_deadline",
+        "reranker_stage_deadline"
+      ],
+      "effectiveIdentityRequired": true
+    }
+  },
+  "operationalQualification": {
+    "observationCounts": {
+      "processColdWorkerStarts": 30,
+      "coldFirstScoreRequests": 30,
+      "warmRequests": 200,
+      "queueSaturationRepetitions": 20,
+      "queuedCancellationRepetitions": 10,
+      "executingCancellationRepetitions": 10,
+      "activeAndQueuedShutdownRepetitions": 10,
+      "malformedOutputRepetitions": 10,
+      "workerFailureRepetitions": 10
+    },
+    "coldDefinition": "fresh_worker_process_without_model_initialization_os_page_cache_unchanged",
+    "requestSelection": [
+      "highest_aggregate_retained_token_count",
+      "highest_aggregate_input_tensor_bytes",
+      "canonical_request_identity"
+    ],
+    "warmSchedule": "canonical_reverse_then_rotated_repository_and_task_offsets",
+    "percentile": "nearest_rank_sorted_ceil_p_times_n_minus_one",
+    "rssSamplingMilliseconds": 25,
+    "retainedRssCooldownMilliseconds": 1000,
+    "explicitGarbageCollection": false,
+    "selectiveRerunsPermitted": false
+  },
+  "heldOutDecision": {
+    "manifest": {
+      "path": "evals/search-ranking/cross-repository-v3.manifest.json",
+      "version": 3,
+      "canonicalSealSha256": "05fb273715d6205bcdf5adc1fdec94a892d8b40fc651a386ab36ccfb9475b7bc",
+      "fileSha256": "281c5354d98c42e8d576e607de50046230e7d31ca4059a6d77d89e7454b1db09"
+    },
+    "split": "held_out",
+    "independentRepositoryFamilies": 6,
+    "qualityOwnerTasks": 36,
+    "negativeTasks": 12,
+    "safetyControls": {
+      "exact_identifier": "prompt-library-state-exact-control",
+      "must": "portfolio-page-items-must-control",
+      "configuration_pin": "supply-fastapi-configuration-control"
+    },
+    "oracleReviewers": [
+      "local_source_oracle_review_2026_07_30",
+      "local_source_oracle_review_2026_08_03"
+    ],
+    "oracleAuthoritySha256": "e12c50759ee0c703657a4c71daaa08c6635e781368c3e4d24bb0b617ef39830a",
+    "negativeAuthoritySha256": "69f00e7968785168e6d429aa2dfb596aedd907a8e1b07bce51698c6d5704c8ab",
+    "safetyControlAuthoritySha256": "26b7409e020dab22089a7f878e46a4b5dc05753301da8a78aded8934abdeb4cc",
+    "statistics": {
+      "pairedUnit": "task",
+      "aggregation": "unweighted_repository_mean_of_within_repository_metric_deltas",
+      "uncertainty": "deterministic_repository_cluster_percentile_bootstrap",
+      "resamples": 10000,
+      "seed": "manifest_canonical_seal",
+      "twoSidedConfidence": 0.95,
+      "minimumOwnerAt3Delta": 0.05,
+      "minimumMacroReciprocalRankDelta": 0.03,
+      "ownerAt1NonInferiorityMargin": -0.02,
+      "ownerAt10NonInferiorityMargin": -0.01,
+      "maximumHardNegativeExposureAt3Delta": 0.02,
+      "maximumUnacceptableOwnerExposureAt3Delta": 0.02,
+      "zeroFailureControls": [
+        "exact_identifier",
+        "must",
+        "configuration_pin",
+        "candidate_membership",
+        "eligibility",
+        "fallback",
+        "frozen_pagination"
+      ],
+      "inconclusiveOutcome": "offline_lateon_insufficient_held_out_evidence"
+    },
+    "opening": {
+      "requiresPassingO2Receipt": true,
+      "durableExclusiveOneTimeRecord": true,
+      "failureConsumesOpening": true,
+      "preOpenTaskPayloadEmission": false
+    }
+  },
+  "targetHost": {
+    "cpu": "AMD Ryzen 7 3800X 8-Core Processor",
+    "physicalCores": 8,
+    "logicalCores": 16,
+    "ramBytes": 8325328896,
+    "windowsVersion": "10.0.26200.8875",
+    "wslVersion": "2.7.10.0",
+    "wslKernel": "6.18.33.2-2",
+    "node": "24.13.0",
+    "python": "3.12.3",
+    "onnxruntimeNode": "1.19.2",
+    "transformersJs": "3.0.2",
+    "powerMode": "not_observable_from_wsl_not_decision_bearing"
+  },
+  "state": {
+    "o2MeasurementsOpened": false,
+    "heldOutIndexCreatedOrQueried": false,
+    "heldOutCaptureCreated": false,
+    "heldOutScoresOpened": false,
+    "productionActivated": false
+  }
+}
