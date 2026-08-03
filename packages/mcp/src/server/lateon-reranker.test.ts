@@ -126,6 +126,10 @@ test("LateOn identity binds named profile selection and effective operational bo
     assert.equal(d16.getMaxDocuments(), 16);
     assert.equal(defaultD32.getDocumentProjectionVersion(), "search_rerank_document_v2");
     assert.notEqual(defaultD32.getIdentity().profile, stricterD32.getIdentity().profile);
+    assert.equal(
+        defaultD32.getIdentity().profile,
+        "d9b3a9b933bfb32ad11fc77aed8fbab4cf67643f8663e6bbc6c8e771cfee272f",
+    );
     assert.notEqual(defaultD32.getIdentity().profile, d16.getIdentity().profile);
     assert.throws(() => new LateOnReranker({
         modelDirectory: "/unused",
