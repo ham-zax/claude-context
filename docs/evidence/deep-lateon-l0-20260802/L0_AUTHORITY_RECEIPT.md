@@ -29,13 +29,14 @@ SHA-256 `23a1efa2f76991aeecbb3d1e717c3117fafd39369187afb5e258cf49a55e3bda`.
 | Frozen diversity replay correction commit | `7259bfc252f35039abef3bad90cb0ebc54443127` |
 | File-level projection correction commit | `9e08b1de6c912044d4187516de6fc95daeb95eae` |
 | Compact-baseline evaluator correction commit | `23ddf51320a405e85307f5ac342a48d14277032a` |
+| Compact-negative evaluator correction commit | `597afae56eaedb16a674ad82969f2cefadf0bba8` |
 | Authority reseal commit | `2fecda3c9f7fb7dfdca75864b8a7a3e237f173a6` |
 | Authority reseal tree | `29a4eceac2bf10cf44ff3aad15a991e27dcb4db7` |
-| Pinned L0 source revision | `23ddf51320a405e85307f5ac342a48d14277032a` |
-| Pinned L0 source tree | `426fc48443a5b19cb25dc2f5e01271e0a2479e05` |
+| Pinned L0 source revision | `597afae56eaedb16a674ad82969f2cefadf0bba8` |
+| Pinned L0 source tree | `89bf8a64b857c0c96b02a65de7ee124f800e594a` |
 | Version 3 authority | `evals/search-ranking/cross-repository-v3.manifest.json` |
-| Version 3 internal canonical seal | `1ab22de1dfd702e521f56fb20055651d1ab0ae2fe57b47a6ef9f282b843c07f5` |
-| Version 3 file SHA-256 | `541b6851dc2ca4069c3a2998d24a29ba70e3f5ab675de22f4f214ed4bc600f7a` |
+| Version 3 internal canonical seal | `3a547bf4b190fe9959d8325971c13fca3f943309b75787ada5a60d5a1c9dc04d` |
+| Version 3 file SHA-256 | `eed3aa6c867ba39c0f86f0f69c4cf1128b322c9f55488a2663758762845d28f3` |
 | Preserved version 2 internal seal | `ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445` |
 | Preserved version 2 file SHA-256 | `79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30` |
 
