@@ -2,7 +2,7 @@
 
 Terminal outcome: `authority_frozen_outputs_unopened`
 
-Authority date: 2026-08-03 (Asia/Shanghai)
+Authority date: 2026-08-04 (Asia/Shanghai)
 
 ## Decision and boundary
 
@@ -23,13 +23,15 @@ SHA-256 `23a1efa2f76991aeecbb3d1e717c3117fafd39369187afb5e258cf49a55e3bda`.
 
 | Item | Frozen value |
 | --- | --- |
-| Implementation commit | `87d313d03e97c013858d4a83c467f2289d8819d5` |
-| Implementation tree | `aef885032550253f9a0e2498c32bc19c602b9eda` |
-| Pinned L0 source revision | `1209de56723671eaabbc041a40a95df761760860` |
-| Pinned L0 source tree | `7edd68e8a1ee2589b8b54b297c577315e3e8d5c0` |
+| Task/capture authority commit | `d1b9684` |
+| Executable evaluator commit | `ca3671af8b6116b9e63fc68b143a9a97a9485ea7` |
+| Authority reseal commit | `2fecda3c9f7fb7dfdca75864b8a7a3e237f173a6` |
+| Authority reseal tree | `29a4eceac2bf10cf44ff3aad15a991e27dcb4db7` |
+| Pinned L0 source revision | `ca3671af8b6116b9e63fc68b143a9a97a9485ea7` |
+| Pinned L0 source tree | `b239bfb7c13e1824fa2abf53efcb5ded30779cdd` |
 | Version 3 authority | `evals/search-ranking/cross-repository-v3.manifest.json` |
-| Version 3 internal canonical seal | `72bd15767140f60d936028c4dfa07238aec1d1452ecec01f6fdd6c10aac510a5` |
-| Version 3 file SHA-256 | `0288095e7579f13fc99cc9ece1c536715d4a613735260b60f0d1e1c8c262be99` |
+| Version 3 internal canonical seal | `241ba375149b592fab7b60ce14ab52b0cf6b511f00bd5bd13b7bd8e97a711222` |
+| Version 3 file SHA-256 | `d895a241a73f5912f1d7f815793ed8a297392256d122b5824d896b6653bf25c4` |
 | Preserved version 2 internal seal | `ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445` |
 | Preserved version 2 file SHA-256 | `79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30` |
 
@@ -42,13 +44,15 @@ owners, hard-negative owners, evidence symbols, query digest, and source blob di
 
 ## Decision-bearing corpus
 
-Each repository contributes exactly six positive owner tasks and two negative
-exposure tasks.
+Each repository contributes exactly six quality owner tasks and two negative
+exposure tasks. Safety controls are additive and excluded from the quality
+estimator, so they cannot make the owner metrics easier or create unequal quality
+denominators.
 
-| Split | Independent families | Tasks | Positive | Negative |
-| --- | ---: | ---: | ---: | ---: |
-| tuning | 6 | 48 | 36 | 12 |
-| held-out | 6 | 48 | 36 | 12 |
+| Split | Independent families | Tasks | Quality owners | Safety controls | Negative |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| tuning | 6 | 50 | 36 | 2 | 12 |
+| held-out | 6 | 51 | 36 | 3 | 12 |
 
 The tuning families are `gitnexus`, `bookmark_ai_organizer`, `duas`,
 `vox_infinity`, `rpc_learner_engine`, and `edge_tts_app`. The held-out families are
@@ -58,7 +62,11 @@ The tuning families are `gitnexus`, `bookmark_ai_organizer`, `duas`,
 The new oracle review identity is
 `local_source_oracle_review_2026_08_03`. Retained held-out oracles preserve their
 earlier sealed reviewer identity. Exact-identifier, literal `must:`, and
-configuration queries are present as decision-bearing controls.
+configuration queries are present as separately identified zero-failure controls.
+Tuning uses `edge-voice-options-safety-control` for the plain exact route and
+`rpc-strictness-safety-control` for `must:` plus configuration ownership.
+Held-out declarations add one exact, one `must:`, and one configuration-pin
+control without opening or querying any held-out index.
 
 The former Satori, TradingView Ratio, and Noor & Knot Shopify families are absent
 from the decision-bearing repositories. They are sealed only as prior decision
@@ -114,6 +122,9 @@ The statistical authority requires six independent families and 48 tasks per spl
 four new contenders, the frozen minimum effects and non-inferiority margins, and
 zero failures for exact-identifier, `must:`, configuration-pin,
 candidate-membership, eligibility, fallback, and frozen-pagination controls.
+The inherited required-role-coverage margin is explicitly not applicable because
+this corpus has no independently reviewed required-role oracle. It is not silently
+approximated; owner-at-ten remains the protected retrieval-depth metric.
 
 The absolute local WSL CPU profile is sealed at: model load no more than 1,000 ms;
 warm p95 no more than 900 ms; request deadline 2,000 ms; process peak RSS no more
@@ -131,18 +142,23 @@ L0 limitation, not evidence that any held-out output was opened.
 
 ## Verification
 
-The focused acceptance checks passed from the implementation commit:
+The focused acceptance checks passed from the executable authority commits:
 
 ```text
-rtk node --check scripts/satori-ranking-benchmark-manifest.mjs
-rtk node --check evals/search-ranking/build-cross-repository-manifest.mjs
-rtk node --test scripts/satori-ranking-benchmark-manifest.test.mjs
+node --import tsx --test scripts/satori-search-ranking-r3-score.test.mjs
+node --import tsx --test \
+  scripts/satori-ranking-benchmark-manifest.test.mjs \
+  scripts/satori-search-ranking-r3.test.mjs
+node --test --test-name-pattern="version 3 builder reproduces" \
+  scripts/satori-ranking-benchmark-manifest.test.mjs
 ```
 
-The test result was 13 passed, 0 failed. It proves exact version 2 compatibility,
-six-family/48-task split authority, prior-evidence isolation, unopened contender and
-resource contracts, tamper rejection, candidate-suite compilation, and deterministic
-reproduction of the committed version 3 manifest from pinned Git objects.
+The scorer suite passed 12/12, the final manifest/evaluator suite passed 24/24,
+and the post-reseal builder reproduction passed 1/1. Together they prove exact
+version 2 compatibility, six equal quality strata, additive split-local safety
+controls, task/control capture binding, six-repository/four-arm evaluation,
+unopened contender and resource contracts, tamper rejection, and deterministic
+reproduction from pinned Git objects.
 
 `rtk git diff --check` also passed before the implementation commit. No held-out
 index, candidate capture, contender output, model run, scoring result, dependency,

@@ -456,6 +456,12 @@ projection experiment. Do not attribute the change to candidate depth.
 
 ### L0 — freeze authority
 
+Current executable authority: the version 3 manifest is sealed at
+`241ba375149b592fab7b60ce14ab52b0cf6b511f00bd5bd13b7bd8e97a711222`
+and binds the committed scorer/evaluator boundary. New tuning and held-out model
+outputs remain unopened. The earlier descriptive seal is superseded and has no
+execution authority.
+
 Before viewing new contender output, freeze:
 
 * tuning task and negative-control identities;
@@ -499,6 +505,19 @@ New-arm quality rules extend the frozen cross-repository contract:
   eligibility, fallback, and frozen-pagination controls permit zero failures.
 * Among safe candidates, prefer the shallower depth unless a deeper arm improves
   repository-macro MRR by at least `0.01` and clears every protected margin.
+
+The executable L0 authority keeps query controls outside the quality estimator.
+Every repository retains six independently reviewed quality-owner tasks; exact,
+`must:`, and configuration-pin controls are additive and carry explicit sealed
+`safetyControls` metadata through suite compilation, capture, scoring, and replay.
+This prevents easy control queries from diluting the quality comparison or creating
+unequal per-repository denominators.
+
+Required-role coverage is not decision-bearing in this corpus because the task
+oracle does not declare independently reviewed required roles. L0 records it as
+`not_applicable_no_required_role_oracle`; it must not be inferred from path classes
+or approximated after results are visible. Owner-at-ten remains the protected
+retrieval-depth metric.
 
 The `+0.05` owner-at-three and `+0.03` MRR practical-effect thresholds are
 reused from the cross-repository contract frozen in `fe86a1a`, before the
