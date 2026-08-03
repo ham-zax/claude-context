@@ -757,6 +757,58 @@ test("gradeObservation uses recorder response bytes and retains readiness eviden
     assert.deepEqual(graded.readiness, warmReadiness);
 });
 
+test("validateObservationSet accepts fully compared prepared and checkpoint-revalidated proofs", () => {
+    const baseOperations = {
+        preparedCacheLookups: 1,
+        preparedCacheHits: 1,
+        coldReadinessChecks: 0,
+        postFreshnessColdChecks: 0,
+        warmReceiptRevalidations: 0,
+        exactPayloadRecounts: 0,
+    };
+    const preparedCold = {
+        proofMode: "warm",
+        invalidationReason: "none",
+        operations: baseOperations,
+        requestProof: {
+            preRetrievalFullComparisons: 1,
+            finalFullComparisons: 1,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+    const checkpointWarm = {
+        proofMode: "cold",
+        invalidationReason: "observation_changed",
+        operations: {
+            ...baseOperations,
+            coldReadinessChecks: 1,
+            postFreshnessColdChecks: 1,
+            warmReceiptRevalidations: 1,
+        },
+        requestProof: {
+            preRetrievalFullComparisons: 1,
+            finalFullComparisons: 1,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+
+    assert.doesNotThrow(() => validateObservationSet(minimalObservations([
+        baseObservation({ readiness: [preparedCold] }),
+        baseObservation({ phase: "warm", readiness: [checkpointWarm] }),
+    ]), ["t-owner"]));
+    assert.throws(() => validateObservationSet(minimalObservations([
+        baseObservation({
+            readiness: [{
+                ...preparedCold,
+                requestProof: {
+                    ...preparedCold.requestProof,
+                    finalFullComparisons: 0,
+                },
+            }],
+        }),
+    ]), ["t-owner"]), /match observation phase/);
+});
+
 // ---------------------------------------------------------------------------
 // summarizeUsefulContext
 // ---------------------------------------------------------------------------

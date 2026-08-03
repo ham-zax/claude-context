@@ -117,9 +117,6 @@ function normalizeReadiness(value, label, phase) {
         if (!READINESS_PROOF_MODES.has(entry.proofMode)) {
             throw new Error(`${entryLabel}.proofMode must be cold or warm.`);
         }
-        if (entry.proofMode !== phase) {
-            throw new Error(`${entryLabel}.proofMode must match observation phase '${phase}'.`);
-        }
         if (!READINESS_INVALIDATION_REASONS.has(entry.invalidationReason)) {
             throw new Error(`${entryLabel}.invalidationReason is unsupported.`);
         }
@@ -137,14 +134,48 @@ function normalizeReadiness(value, label, phase) {
             }
             return [key, operation];
         }));
+        const postFreshnessColdChecks = Number.isSafeInteger(rawOperations.postFreshnessColdChecks)
+            && rawOperations.postFreshnessColdChecks >= 0
+            ? rawOperations.postFreshnessColdChecks
+            : 0;
+        const requestProof = isRecord(entry.requestProof) ? entry.requestProof : {};
+        const watcher = isRecord(entry.watcher) ? entry.watcher : {};
+        const preparedColdProof = phase === "cold"
+            && entry.proofMode === "warm"
+            && operations.preparedCacheHits >= 1
+            && requestProof.preRetrievalFullComparisons >= 1
+            && requestProof.finalFullComparisons >= 1
+            && watcher.checkpointStatus === "valid";
+        const checkpointBoundColdProof = phase === "cold"
+            && entry.proofMode === "cold"
+            && postFreshnessColdChecks >= 1
+            && watcher.checkpointStatus === "valid";
+        const checkpointRevalidatedWarmProof = phase === "warm"
+            && entry.proofMode === "cold"
+            && operations.preparedCacheHits >= 1
+            && operations.warmReceiptRevalidations >= 1
+            && postFreshnessColdChecks >= 1
+            && operations.exactPayloadRecounts === 0
+            && requestProof.finalFullComparisons >= 1
+            && watcher.checkpointStatus === "valid";
+        if (
+            entry.proofMode !== phase
+            && !preparedColdProof
+            && !checkpointRevalidatedWarmProof
+        ) {
+            throw new Error(`${entryLabel}.proofMode must match observation phase '${phase}'.`);
+        }
         if (
             operations.preparedCacheLookups < 1
             || operations.preparedCacheHits > operations.preparedCacheLookups
-            || operations.preparedCacheHits > operations.warmReceiptRevalidations
+            || (
+                operations.preparedCacheHits > operations.warmReceiptRevalidations
+                && !preparedColdProof
+            )
         ) {
             throw new Error(`${entryLabel}.operations contains contradictory cache counters.`);
         }
-        if (entry.proofMode === "warm" && (
+        if (phase === "warm" && !checkpointRevalidatedWarmProof && (
             operations.preparedCacheHits < 1
             || operations.coldReadinessChecks !== 0
             || operations.warmReceiptRevalidations < 1
@@ -152,9 +183,9 @@ function normalizeReadiness(value, label, phase) {
         )) {
             throw new Error(`${entryLabel}.operations does not prove warm receipt reuse.`);
         }
-        if (entry.proofMode === "cold" && (
+        if (phase === "cold" && !preparedColdProof && (
             operations.coldReadinessChecks < 1
-            || operations.exactPayloadRecounts < 1
+            || (operations.exactPayloadRecounts < 1 && !checkpointBoundColdProof)
         )) {
             throw new Error(`${entryLabel}.operations does not prove a cold authority check.`);
         }
