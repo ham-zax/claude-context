@@ -28,13 +28,14 @@ SHA-256 `23a1efa2f76991aeecbb3d1e717c3117fafd39369187afb5e258cf49a55e3bda`.
 | Frozen-set capture correction commit | `b8020e717ee1b2b37073d72fe49dbf7f6e014724` |
 | Frozen diversity replay correction commit | `7259bfc252f35039abef3bad90cb0ebc54443127` |
 | File-level projection correction commit | `9e08b1de6c912044d4187516de6fc95daeb95eae` |
+| Compact-baseline evaluator correction commit | `23ddf51320a405e85307f5ac342a48d14277032a` |
 | Authority reseal commit | `2fecda3c9f7fb7dfdca75864b8a7a3e237f173a6` |
 | Authority reseal tree | `29a4eceac2bf10cf44ff3aad15a991e27dcb4db7` |
-| Pinned L0 source revision | `9e08b1de6c912044d4187516de6fc95daeb95eae` |
-| Pinned L0 source tree | `3aa7687f46e8d3b6356599b7e521a10f8c0e4347` |
+| Pinned L0 source revision | `23ddf51320a405e85307f5ac342a48d14277032a` |
+| Pinned L0 source tree | `426fc48443a5b19cb25dc2f5e01271e0a2479e05` |
 | Version 3 authority | `evals/search-ranking/cross-repository-v3.manifest.json` |
-| Version 3 internal canonical seal | `127c451e824903ed295aa1a5fc19e4093abb59812441c5124cbf69d47f196106` |
-| Version 3 file SHA-256 | `9ccecf2408d866509d39d9807932dbef99e6957b65d88e611be9a17ba45148da` |
+| Version 3 internal canonical seal | `1ab22de1dfd702e521f56fb20055651d1ab0ae2fe57b47a6ef9f282b843c07f5` |
+| Version 3 file SHA-256 | `541b6851dc2ca4069c3a2998d24a29ba70e3f5ab675de22f4f214ed4bc600f7a` |
 | Preserved version 2 internal seal | `ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445` |
 | Preserved version 2 file SHA-256 | `79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30` |
 
@@ -79,6 +80,13 @@ recognizes Markdown from its repository-relative extension and uses the
 canonical file label when no structural heading exists. This is a general
 file-level projection rule; it does not special-case a task, query, or
 repository.
+
+The first aggregate evaluator pass failed transactionally because compact
+baseline replay stores candidate counts while preserving the authoritative
+disclosed owner identities in the capture. Commit `23ddf51` now measures
+baseline owner rank from that captured disclosure and continues to measure
+neural contenders from their full replayed candidate/group state. Thresholds,
+metrics, bootstrap rules, and contender outputs were not inspected or changed.
 
 ## Decision-bearing corpus
 
