@@ -106,7 +106,10 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
   `SATORI_LATEON_MODEL_PATH` are configured. The model directory is shared
   outside versioned MCP runtimes, artifact digests are verified, inference runs
   in a killable worker, and every failure falls back atomically to exact + BM25
-  + single-vector ordering.
+  + single-vector ordering. `SATORI_LATEON_PROFILE` may explicitly select
+  `lateon_projection_v2_d16_v1` or
+  `lateon_offline_quality_projection_v2_d32_v1`; the runtime never substitutes
+  one depth for the other.
 
 ## Development
 

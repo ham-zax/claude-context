@@ -1,3 +1,12 @@
+export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
+    legacyD16: "lateon_projection_v1_d16_legacy",
+    projectionV2D16: "lateon_projection_v2_d16_v1",
+    offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v1",
+} as const);
+
+export type LateOnRuntimeProfileId =
+    typeof LATEON_RUNTIME_PROFILE_IDS[keyof typeof LATEON_RUNTIME_PROFILE_IDS];
+
 export type LateOnArtifactContract = Readonly<{
     path: string;
     sha256: string;

@@ -204,6 +204,73 @@ test('offline config selects a shared LateOn model with operator overrides', () 
     }
 });
 
+test('LateOn config selects explicit D16 or D32 profiles with bounded operational overrides', () => {
+    const keys = [
+        'SATORI_RUNTIME_PROFILE',
+        'VECTOR_STORE_PROVIDER',
+        'LANCEDB_PATH',
+        'EMBEDDING_PROVIDER',
+        'POTION_HELPER_PATH',
+        'POTION_MODEL_PATH',
+        'SATORI_RERANKER_PROVIDER',
+        'SATORI_LATEON_MODEL_PATH',
+        'SATORI_LATEON_PROFILE',
+        'SATORI_LATEON_REQUEST_DEADLINE_MS',
+        'SATORI_LATEON_MAX_QUEUE_WAIT_MS',
+        'SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS',
+        'SATORI_LATEON_MAX_ACTIVE_RERANKS',
+        'SATORI_LATEON_MAX_QUEUED_RERANKS',
+        'SATORI_LATEON_INTRA_OP_THREADS',
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+        for (const key of keys) delete process.env[key];
+        Object.assign(process.env, {
+            SATORI_RUNTIME_PROFILE: 'offline',
+            VECTOR_STORE_PROVIDER: 'LanceDB',
+            LANCEDB_PATH: '/tmp/satori-lancedb',
+            EMBEDDING_PROVIDER: 'Potion',
+            POTION_HELPER_PATH: '/opt/satori/potion-helper',
+            POTION_MODEL_PATH: '/opt/satori/potion-model',
+            SATORI_RERANKER_PROVIDER: 'lateon',
+            SATORI_LATEON_MODEL_PATH: '/opt/satori/models/lateon-code-edge',
+            SATORI_LATEON_PROFILE: 'lateon_projection_v2_d16_v1',
+            SATORI_LATEON_REQUEST_DEADLINE_MS: '1800',
+            SATORI_LATEON_MAX_QUEUE_WAIT_MS: '200',
+            SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS: '2200',
+            SATORI_LATEON_MAX_ACTIVE_RERANKS: '1',
+            SATORI_LATEON_MAX_QUEUED_RERANKS: '0',
+            SATORI_LATEON_INTRA_OP_THREADS: '8',
+        });
+
+        const d16 = createMcpConfig();
+        assert.equal(d16.lateOnProfileId, 'lateon_projection_v2_d16_v1');
+        assert.equal(d16.lateOnRequestDeadlineMs, 1800);
+        assert.equal(d16.lateOnMaximumQueueWaitMs, 200);
+        assert.equal(d16.lateOnRerankerStageDeadlineMs, 2200);
+        assert.equal(d16.lateOnMaximumActiveReranks, 1);
+        assert.equal(d16.lateOnMaximumQueuedReranks, 0);
+
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v2_d32_v1';
+        assert.equal(
+            createMcpConfig().lateOnProfileId,
+            'lateon_offline_quality_projection_v2_d32_v1',
+        );
+
+        process.env.SATORI_LATEON_PROFILE = 'lateon_projection_v2_d50_unknown';
+        assert.throws(createMcpConfig, /Invalid SATORI_LATEON_PROFILE/);
+        process.env.SATORI_LATEON_PROFILE = 'lateon_projection_v2_d16_v1';
+        process.env.SATORI_LATEON_MAX_ACTIVE_RERANKS = '2';
+        assert.throws(createMcpConfig, /must be 0 or 1/);
+    } finally {
+        for (const key of keys) {
+            const value = previous[key];
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
 test('LateOn config fails closed for a missing or relative shared model path', () => {
     const keys = [
         'SATORI_RERANKER_PROVIDER',

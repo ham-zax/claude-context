@@ -18,15 +18,13 @@ import type {
     LateOnWorkerRequest,
     LateOnWorkerResponse,
 } from "./lateon-reranker-protocol.js";
+import {
+    LATEON_RUNTIME_PROFILE_IDS,
+    type LateOnRuntimeProfileId,
+} from "./lateon-reranker-protocol.js";
 
-export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
-    legacyD16: "lateon_projection_v1_d16_legacy",
-    projectionV2D16: "lateon_projection_v2_d16_v1",
-    offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v1",
-} as const);
-
-export type LateOnRuntimeProfileId =
-    typeof LATEON_RUNTIME_PROFILE_IDS[keyof typeof LATEON_RUNTIME_PROFILE_IDS];
+export { LATEON_RUNTIME_PROFILE_IDS } from "./lateon-reranker-protocol.js";
+export type { LateOnRuntimeProfileId } from "./lateon-reranker-protocol.js";
 
 export type LateOnOperationalReason =
     | "lateon_not_ready"

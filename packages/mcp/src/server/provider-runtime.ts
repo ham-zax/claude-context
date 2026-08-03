@@ -30,6 +30,7 @@ import {
 import { createEmbeddingInstance, logEmbeddingProviderInfo } from "../embedding.js";
 import { MissingProviderConfigIssue, ProviderBackedOperation, ToolContext } from "../tools/types.js";
 import { LateOnReranker } from "./lateon-reranker.js";
+import type { LateOnRuntimeProfileId } from "./lateon-reranker-protocol.js";
 
 type VectorSearchResults = Awaited<ReturnType<VectorDatabase["retrieveDense"]>>;
 type VectorQueryRows = Awaited<ReturnType<VectorDatabase["queryDocuments"]>>;
@@ -74,7 +75,12 @@ type ResolvedProviderRuntimeBootstrap = Readonly<{
         | {
             kind: 'lateon';
             modelDirectory: string;
+            profileId?: LateOnRuntimeProfileId;
             requestDeadlineMilliseconds?: number;
+            maximumQueueWaitMilliseconds?: number;
+            rerankerStageDeadlineMilliseconds?: number;
+            maximumActiveReranks?: 0 | 1;
+            maximumQueuedReranks?: 0 | 1;
             intraOpThreads?: number;
         }
     > | null;
@@ -450,8 +456,23 @@ export class ProviderRuntime {
                 ? {
                     kind: 'lateon' as const,
                     modelDirectory: this.config.lateOnModelPath as string,
+                    ...(this.config.lateOnProfileId !== undefined
+                        ? { profileId: this.config.lateOnProfileId }
+                        : {}),
                     ...(this.config.lateOnRequestDeadlineMs !== undefined
                         ? { requestDeadlineMilliseconds: this.config.lateOnRequestDeadlineMs }
+                        : {}),
+                    ...(this.config.lateOnMaximumQueueWaitMs !== undefined
+                        ? { maximumQueueWaitMilliseconds: this.config.lateOnMaximumQueueWaitMs }
+                        : {}),
+                    ...(this.config.lateOnRerankerStageDeadlineMs !== undefined
+                        ? { rerankerStageDeadlineMilliseconds: this.config.lateOnRerankerStageDeadlineMs }
+                        : {}),
+                    ...(this.config.lateOnMaximumActiveReranks !== undefined
+                        ? { maximumActiveReranks: this.config.lateOnMaximumActiveReranks }
+                        : {}),
+                    ...(this.config.lateOnMaximumQueuedReranks !== undefined
+                        ? { maximumQueuedReranks: this.config.lateOnMaximumQueuedReranks }
                         : {}),
                     ...(this.config.lateOnIntraOpThreads !== undefined
                         ? { intraOpThreads: this.config.lateOnIntraOpThreads }
@@ -553,8 +574,15 @@ export class ProviderRuntime {
             case 'lateon':
                 return new LateOnReranker({
                     modelDirectory: bootstrap.reranker.modelDirectory,
+                    profileId: bootstrap.reranker.profileId,
                     requestDeadlineMilliseconds:
                         bootstrap.reranker.requestDeadlineMilliseconds,
+                    maximumQueueWaitMilliseconds:
+                        bootstrap.reranker.maximumQueueWaitMilliseconds,
+                    rerankerStageDeadlineMilliseconds:
+                        bootstrap.reranker.rerankerStageDeadlineMilliseconds,
+                    maximumActiveReranks: bootstrap.reranker.maximumActiveReranks,
+                    maximumQueuedReranks: bootstrap.reranker.maximumQueuedReranks,
                     intraOpThreads: bootstrap.reranker.intraOpThreads,
                 });
         }

@@ -29,7 +29,12 @@ export type SharedRuntimeIdentity = Readonly<{
     rerankerProvider: string;
     voyageRerankerModel: string;
     lateOnModelPath: string;
+    lateOnProfile: string;
     lateOnRequestDeadlineMs: string;
+    lateOnMaximumQueueWaitMs: string;
+    lateOnRerankerStageDeadlineMs: string;
+    lateOnMaximumActiveReranks: string;
+    lateOnMaximumQueuedReranks: string;
     lateOnIntraOpThreads: string;
     vectorStoreProvider: string;
     lanceDbPath: string;
@@ -158,7 +163,13 @@ export function buildSharedRuntimeIdentity(
         lateOnModelPath: env.SATORI_LATEON_MODEL_PATH
             ? canonicalizePath(env.SATORI_LATEON_MODEL_PATH)
             : "",
+        lateOnProfile: env.SATORI_LATEON_PROFILE ?? "",
         lateOnRequestDeadlineMs: env.SATORI_LATEON_REQUEST_DEADLINE_MS ?? "",
+        lateOnMaximumQueueWaitMs: env.SATORI_LATEON_MAX_QUEUE_WAIT_MS ?? "",
+        lateOnRerankerStageDeadlineMs:
+            env.SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS ?? "",
+        lateOnMaximumActiveReranks: env.SATORI_LATEON_MAX_ACTIVE_RERANKS ?? "",
+        lateOnMaximumQueuedReranks: env.SATORI_LATEON_MAX_QUEUED_RERANKS ?? "",
         lateOnIntraOpThreads: env.SATORI_LATEON_INTRA_OP_THREADS ?? "",
         vectorStoreProvider: env.VECTOR_STORE_PROVIDER ?? "",
         lanceDbPath: env.LANCEDB_PATH
