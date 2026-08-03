@@ -3,12 +3,18 @@ import {
     BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
     selectBoundedSource,
 } from "../packages/mcp/src/core/bounded-source-selector.ts";
+import { validateRepositoryRelativePath } from "../packages/core/src/paths/repository-path.ts";
 
 const MAXIMUM_UTF8_BYTES = 4_000;
 const MAXIMUM_LINES = 200;
 const MAXIMUM_EXCERPTS = 5;
 const MAXIMUM_EXCERPT_LINES = 40;
 const CONTEXT_LINES = 2;
+const MAXIMUM_DECLARATION_UTF8_BYTES = 1_000;
+const MAXIMUM_DOCUMENTATION_UTF8_BYTES = 1_000;
+const MAXIMUM_DOCUMENTATION_LINES = 8;
+const MAXIMUM_DOCUMENTATION_LINE_UTF8_BYTES = 512;
+const MAXIMUM_SELECTION_ATTEMPTS = 14;
 
 export const SEARCH_RERANK_DOCUMENT_V2_POLICY = Object.freeze({
     id: "search_rerank_document_v2",
@@ -35,11 +41,20 @@ export const SEARCH_RERANK_DOCUMENT_V2_POLICY = Object.freeze({
         evidenceSpans: "validated_only",
         stableTieOrder: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
         declarationRetention: "mandatory_or_minimum_projection_exceeds_budget",
+        serializedSourceBudget: "remaining_projection_utf8_bytes",
+        maximumSelectionAttempts: MAXIMUM_SELECTION_ATTEMPTS,
     }),
-    declarationSelection: "first_nonempty_normalized_physical_line_v1",
-    documentationSelection: "authoritative_caller_value_or_empty_v1",
+    declarationSelection:
+        "authoritative_symbol_span_declaration_or_file_heading_or_config_declaration_v2",
+    declarationMaximumUtf8Bytes: MAXIMUM_DECLARATION_UTF8_BYTES,
+    documentationSelection: "authoritative_caller_physical_lines_or_empty_v2",
+    documentationMaximumUtf8Bytes: MAXIMUM_DOCUMENTATION_UTF8_BYTES,
+    documentationMaximumLines: MAXIMUM_DOCUMENTATION_LINES,
+    documentationMaximumLineUtf8Bytes: MAXIMUM_DOCUMENTATION_LINE_UTF8_BYTES,
     requiredOwnerSiblingOrder:
         "repository_relative_path_then_canonical_symbol_label_contract_string_v1",
+    fileLevelProjection:
+        "first_heading_or_structural_declaration_plus_bounded_query_relevant_text_v2",
     queryFormatting: Object.freeze({
         semanticQuery: "captured_query_plan_semantic_query_utf8",
         runtimePrefix: "c0_contract_inference_query_prefix",
@@ -73,11 +88,12 @@ function requireString(value, label, { allowEmpty = false } = {}) {
 }
 
 function requireSafeRelativePath(value) {
-    const relativePath = requireString(value, "relativePath").replaceAll("\\", "/");
-    if (relativePath.startsWith("/") || relativePath.split("/").includes("..")) {
-        throw new TypeError("relativePath must be a safe repository-relative path.");
+    const relativePath = requireString(value, "relativePath");
+    try {
+        return validateRepositoryRelativePath(relativePath);
+    } catch {
+        throw new TypeError("relativePath must be a canonical repository-relative path.");
     }
-    return relativePath;
 }
 
 function compareContractStrings(left, right) {
@@ -89,8 +105,93 @@ function sourceLines(content) {
     return content.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
 }
 
-function firstDeclaration(lines) {
-    return lines.find((line) => line.trim().length > 0)?.trim() ?? "";
+function requireBoundedPhysicalLine(value, label, maximumUtf8Bytes) {
+    const line = requireString(value, label).trim();
+    if (/[\r\n]/.test(line)) {
+        throw new TypeError(`${label} must be one physical line.`);
+    }
+    if (Buffer.byteLength(line, "utf8") > maximumUtf8Bytes) {
+        throw new RangeError(`${label} exceeds ${maximumUtf8Bytes} UTF-8 bytes.`);
+    }
+    return line;
+}
+
+function requireBoundedDocumentation(value) {
+    const normalized = requireString(value, "documentationExcerpt", { allowEmpty: true })
+        .replaceAll("\r\n", "\n")
+        .replaceAll("\r", "\n");
+    const lines = normalized.split("\n");
+    if (lines.length > MAXIMUM_DOCUMENTATION_LINES) {
+        throw new RangeError(
+            `documentationExcerpt exceeds ${MAXIMUM_DOCUMENTATION_LINES} physical lines.`,
+        );
+    }
+    for (const line of lines) {
+        if (Buffer.byteLength(line, "utf8") > MAXIMUM_DOCUMENTATION_LINE_UTF8_BYTES) {
+            throw new RangeError(
+                `documentationExcerpt physical line exceeds ${MAXIMUM_DOCUMENTATION_LINE_UTF8_BYTES} UTF-8 bytes.`,
+            );
+        }
+    }
+    if (Buffer.byteLength(normalized, "utf8") > MAXIMUM_DOCUMENTATION_UTF8_BYTES) {
+        throw new RangeError(
+            `documentationExcerpt exceeds ${MAXIMUM_DOCUMENTATION_UTF8_BYTES} UTF-8 bytes.`,
+        );
+    }
+    return normalized;
+}
+
+function requireLineSpan(value, label, lineCount) {
+    if (
+        !isRecord(value)
+        || !Number.isSafeInteger(value.startLine)
+        || !Number.isSafeInteger(value.endLine)
+        || value.startLine < 1
+        || value.endLine < value.startLine
+        || value.endLine > lineCount
+    ) {
+        throw new RangeError(`${label} must be a valid one-based inclusive source span.`);
+    }
+    return { startLine: value.startLine, endLine: value.endLine };
+}
+
+function normalizeEvidenceSpans(value, symbolSpan, lineCount) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+        throw new TypeError("evidenceSpans must be an array when provided.");
+    }
+    return value.map((span, index) => {
+        const normalized = requireLineSpan(span, `evidenceSpans[${index}]`, lineCount);
+        if (
+            normalized.startLine < symbolSpan.startLine
+            || normalized.endLine > symbolSpan.endLine
+        ) {
+            throw new RangeError(`evidenceSpans[${index}] must be contained by symbolSpan.`);
+        }
+        return normalized;
+    });
+}
+
+function sourceLinesInSpan(lines, span) {
+    return lines.slice(span.startLine - 1, span.endLine);
+}
+
+function firstStructuralDeclaration(lines, language, symbolKind) {
+    const normalizedLanguage = language.toLowerCase();
+    const isFileLevel = symbolKind === "file" || symbolKind === "module";
+    const candidates = lines.map((line) => line.trim()).filter(Boolean);
+    if (!isFileLevel) return candidates[0] ?? "";
+    if (["markdown", "md", "mdx"].includes(normalizedLanguage)) {
+        return candidates.find((line) => /^#{1,6}\s+\S/u.test(line)) ?? "";
+    }
+    const configLike = [
+        "toml", "yaml", "yml", "json", "jsonc", "ini", "xml",
+        "properties", "dockerfile",
+    ].includes(normalizedLanguage);
+    const structuralPattern = configLike
+        ? /^(?:\[[^\]]+\]|[\p{L}_][\p{L}\p{N}_.-]*\s*[:=]|[{[]|<[^!?][^>]*>|---\s*$)/u
+        : /^(?:(?:export\s+)?(?:async\s+)?(?:class|interface|type|enum|function|const|let|var)\b|(?:async\s+)?def\b|class\b|fn\b|func\b|package\b|module\b|namespace\b|import\b|from\b|use\b|#include\b)/u;
+    return candidates.find((line) => structuralPattern.test(line)) ?? "";
 }
 
 function normalizeRequiredOwnerSiblings(value) {
@@ -141,10 +242,9 @@ function buildProjection(input, queryRelevantSourceExcerpt) {
 
 function selectSource(input, maxSourceBytes) {
     const bytes = Buffer.from(input.content, "utf8");
-    const lineCount = sourceLines(input.content).length;
     return selectBoundedSource({
         sourceBytes: bytes,
-        symbolSpan: { startLine: 1, endLine: lineCount },
+        symbolSpan: input.symbolSpan,
         budgets: {
             maxSourceBytes,
             maxSourceLines: MAXIMUM_LINES,
@@ -152,9 +252,7 @@ function selectSource(input, maxSourceBytes) {
             maxExcerptBytes: maxSourceBytes,
             maxExcerptLines: MAXIMUM_EXCERPT_LINES,
             contextLines: CONTEXT_LINES,
-            // This bounds selector metadata, not the final projection. The final
-            // canonical JSON byte budget is enforced below.
-            maxSerializedSourceBytes: 64_000,
+            maxSerializedSourceBytes: maxSourceBytes,
         },
         capabilities: {
             localLexical: "available",
@@ -163,7 +261,7 @@ function selectSource(input, maxSourceBytes) {
             controlFlowAnchors: "not_requested",
         },
         ...(input.query ? { query: input.query } : {}),
-        ...(input.evidenceSpans ? { evidenceSpans: input.evidenceSpans } : {}),
+        ...(input.evidenceSpans.length > 0 ? { evidenceSpans: input.evidenceSpans } : {}),
     });
 }
 
@@ -171,13 +269,27 @@ export function buildSearchRerankDocumentV2(rawInput) {
     if (!isRecord(rawInput)) throw new TypeError("Projection input must be an object.");
     const content = requireString(rawInput.content, "content", { allowEmpty: true });
     const lines = sourceLines(content);
+    const symbolSpan = requireLineSpan(rawInput.symbolSpan, "symbolSpan", lines.length);
+    const inferredDeclaration = firstStructuralDeclaration(
+        sourceLinesInSpan(lines, symbolSpan),
+        requireString(rawInput.language, "language"),
+        requireString(rawInput.symbolKind, "symbolKind"),
+    );
     const signatureOrDeclaration = rawInput.signatureOrDeclaration === undefined
-        ? firstDeclaration(lines)
-        : requireString(rawInput.signatureOrDeclaration, "signatureOrDeclaration");
+        ? requireBoundedPhysicalLine(
+            inferredDeclaration,
+            "inferred signatureOrDeclaration",
+            MAXIMUM_DECLARATION_UTF8_BYTES,
+        )
+        : requireBoundedPhysicalLine(
+            rawInput.signatureOrDeclaration,
+            "signatureOrDeclaration",
+            MAXIMUM_DECLARATION_UTF8_BYTES,
+        );
     const input = {
         relativePath: requireSafeRelativePath(rawInput.relativePath),
-        language: requireString(rawInput.language, "language"),
-        symbolKind: requireString(rawInput.symbolKind, "symbolKind"),
+        language: rawInput.language,
+        symbolKind: rawInput.symbolKind,
         canonicalSymbolLabel: requireString(
             rawInput.canonicalSymbolLabel,
             "canonicalSymbolLabel",
@@ -185,15 +297,14 @@ export function buildSearchRerankDocumentV2(rawInput) {
         signatureOrDeclaration,
         documentationExcerpt: rawInput.documentationExcerpt === undefined
             ? ""
-            : requireString(rawInput.documentationExcerpt, "documentationExcerpt", {
-                allowEmpty: true,
-            }),
+            : requireBoundedDocumentation(rawInput.documentationExcerpt),
         requiredOwnerSiblings: normalizeRequiredOwnerSiblings(rawInput.requiredOwnerSiblings),
         content,
         query: rawInput.query === undefined
             ? ""
             : requireString(rawInput.query, "query", { allowEmpty: true }),
-        evidenceSpans: rawInput.evidenceSpans,
+        symbolSpan,
+        evidenceSpans: normalizeEvidenceSpans(rawInput.evidenceSpans, symbolSpan, lines.length),
     };
 
     const minimumText = canonicalJson(buildProjection(input, ""));
@@ -204,13 +315,17 @@ export function buildSearchRerankDocumentV2(rawInput) {
         );
     }
 
-    let sourceBudget = Math.max(1, MAXIMUM_UTF8_BYTES - minimumBytes);
+    let lowerBudget = 1;
+    let upperBudget = Math.max(1, MAXIMUM_UTF8_BYTES - minimumBytes);
     let selectedSource;
     let text = minimumText;
-    while (sourceBudget >= 1) {
+    let selectionAttemptCount = 0;
+    for (let attempt = 0; attempt < MAXIMUM_SELECTION_ATTEMPTS && lowerBudget <= upperBudget; attempt += 1) {
+        selectionAttemptCount += 1;
+        const sourceBudget = Math.floor((lowerBudget + upperBudget) / 2);
         const selection = selectSource(input, sourceBudget);
         if (selection.status !== "selected") {
-            sourceBudget -= 1;
+            lowerBudget = sourceBudget + 1;
             continue;
         }
         const excerpt = selectedExcerptText(selection.source);
@@ -219,16 +334,14 @@ export function buildSearchRerankDocumentV2(rawInput) {
         if (candidateBytes <= MAXIMUM_UTF8_BYTES) {
             selectedSource = selection.source;
             text = candidateText;
-            break;
+            lowerBudget = sourceBudget + 1;
+            continue;
         }
-        sourceBudget -= Math.max(1, candidateBytes - MAXIMUM_UTF8_BYTES);
+        upperBudget = sourceBudget - 1;
     }
 
     if (!selectedSource) {
-        const emptySelection = selectSource(input, 1);
-        selectedSource = emptySelection.status === "selected"
-            ? emptySelection.source
-            : { returnedLines: 0, excerptCount: 0, truncated: content.length > 0 };
+        selectedSource = { returnedLines: 0, excerptCount: 0, truncated: content.length > 0 };
     }
     return {
         version: SEARCH_RERANK_DOCUMENT_V2_POLICY.id,
@@ -237,5 +350,6 @@ export function buildSearchRerankDocumentV2(rawInput) {
         selectedSourceLineCount: selectedSource.returnedLines,
         selectedSourceExcerptCount: selectedSource.excerptCount,
         sourceTruncated: selectedSource.truncated,
+        selectionAttemptCount,
     };
 }
