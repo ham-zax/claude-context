@@ -1,8 +1,10 @@
 # Satori Deep LateOn Reranking and Paginated Disclosure Plan
 
-**Status:** proposed; documentation only. This plan does not authorize runtime
-changes, model downloads, index mutation, held-out evaluation, or production
-activation.
+**Status:** complete for every authorized track. Track P and Track I are
+qualified; Track L is terminal with baseline `B` retained. Track O is terminal:
+the O3 opening was consumed without a valid quality decision, so no held-out
+quality authority was produced. Any future held-out evaluation and all
+production activation remain closed.
 
 **Date:** 2026-08-02
 
@@ -50,6 +52,21 @@ Track P may qualify even if every LateOn contender is rejected. Track I may be
 rejected or deferred without blocking Track P or Track L. Each track requires
 its own authority, receipt, and terminal outcome.
 
+Current execution state:
+
+| Track | State | Receipt or next boundary |
+| --- | --- | --- |
+| P — pagination | `pagination_complete_frozen_set_qualified` | `docs/evidence/deep-pagination-p2-20260802/P2_QUALIFICATION_RECEIPT.md` |
+| L — LateOn | `baseline_b_retained` | `docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md` |
+| I — compact result index | `compact_result_index_qualified` | `docs/evidence/deep-result-index-i2-20260804/I2_QUALIFICATION_RECEIPT.md` |
+| O — offline operationalization | `D32 operationally qualified; held-out opening consumed without decision; disabled` | `docs/evidence/lateon-track-o-merge-qualification-20260804/MERGE_QUALIFICATION_RECEIPT.md`, `docs/evidence/lateon-track-o-portable-20260804/PORTABLE_EVIDENCE_RECEIPT.md`, and `docs/evidence/lateon-track-o-finalization-20260804/TRACK_O_CORRECTION_FINALIZATION_RECEIPT.md` |
+
+The Track O merge-qualification receipt is the latest pre-merge integration
+authority. The portable-evidence receipt is the latest portability authority,
+and the evidence-correction finalization remains the decision authority. The
+earlier O2 carry-forward and Track O closure receipts remain historical inputs
+to that finalization.
+
 “No limit on how much the agent can request” does not mean an unbounded response
 or unbounded retrieval work. A caller may request the complete available frozen
 set and page through it until exhaustion. Multiple bounded arms and semantic
@@ -96,15 +113,30 @@ every quality gate, and `B` remains the default qualified ranking policy. The
 later runtime receipt replaced the assumed resource envelope; it did not
 replace the R3 quality decision.
 
-The original D-L16/D-L32 resource failures are also already observed. The
-optimized runtime receipt remeasured D-L16 only. Optimized D-L32 and D-L50
-resource profiles remain unopened work.
+The original D-L16/D-L32 resource failures were already observed, and the
+optimized runtime receipt remeasured D-L16 only. L0 subsequently preregistered
+the unopened D-L50 projection-v1 and projection-v2 arms before any new output
+was inspected.
 
-D-L16 and D-L32 projection-v1 outcomes are already known. A new rule applied to
-those results must be labeled revised and post-hoc and cannot be described as
-preregistered evidence. Only unopened D-L50 projection-v1 results and
-prospectively frozen projection-v2 arms can receive new preregistered quality
-authority.
+The completed L3 qualification now supersedes the earlier tuning-only status
+for those new arms. All four passed every frozen quality gate; projection-v2 at
+depth 32 was strongest on owner-at-three and MRR. None passed the frozen local
+WSL CPU resource profile, so no contender was selected, held-out remained
+sealed, and baseline `B` remains product policy. See
+`docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md`.
+
+That L3 terminal result applies only to the deployment profile frozen by L0. It
+does not assert that D32 is unusable on the measured host or under every product
+service class. A separate prospective operational authority may evaluate D32
+without rewriting L3; see
+`docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md`.
+
+Metric provenance must remain explicit. The earlier three-family diagnostic
+suite produced baseline MRR `0.3602` and owner-at-three `0.3722`. The later
+six-family decision-bearing tuning suite produced baseline MRR `0.2900` and
+owner-at-three `0.3611`, with projection-v2 D32 at MRR `0.5046` and
+owner-at-three `0.6389`. These are different denominators and must not be
+presented as measurements from one benchmark population.
 
 ## 3. Non-negotiable invariants
 
@@ -275,6 +307,13 @@ set digest with the cached set, publish it in the initial continuation contract,
 and echo it on every page. The existing `queryPolicyDigest` becomes an input to
 this binding; it must not remain computed-but-unconsumed metadata.
 
+The digest identifies one frozen search-result instance. Independent cold and
+warm executions may have different digests when their pageable diagnostics,
+such as request-time graph validation evidence, differ. Qualification compares
+candidate traces, ranked result identities, and disclosure order across those
+executions; it requires digest equality only between the initial response and
+continuations of the same frozen instance.
+
 Continuation must revalidate publication and source observations as it does
 today, verify the cached binding before projecting a page, and remove the
 handle on any digest or identity mismatch. A page never adopts a later runtime
@@ -368,9 +407,10 @@ room for the optional index. Every index identity must resolve to exactly one
 full group in the same ranked set, whether that group appears initially or
 through continuation.
 
-The product comparison must measure whether the compact index helps agents
-select continuations or targeted reads. Do not ship it merely because it is
-small.
+The I0 authority narrowed qualification to the bounded opt-in contract and did
+not authorize an agent-utility claim. Track I therefore qualifies only the
+index's ordering, identity, byte, continuation, and fail-closed invariants;
+production activation remains a separate closed decision.
 
 Track I is independently terminal:
 
@@ -456,6 +496,13 @@ projection experiment. Do not attribute the change to candidate depth.
 
 ### L0 — freeze authority
 
+Final executable tuning authority: the version 3 manifest is sealed at
+`05fb273715d6205bcdf5adc1fdec94a892d8b40fc651a386ab36ccfb9475b7bc`
+and binds the committed scorer/evaluator boundary. The preregistered tuning arms
+were opened under this authority and reached `baseline_b_retained`; held-out
+model outputs remain unopened. Earlier descriptive seals are superseded and
+have no execution authority.
+
 Before viewing new contender output, freeze:
 
 * tuning task and negative-control identities;
@@ -499,6 +546,19 @@ New-arm quality rules extend the frozen cross-repository contract:
   eligibility, fallback, and frozen-pagination controls permit zero failures.
 * Among safe candidates, prefer the shallower depth unless a deeper arm improves
   repository-macro MRR by at least `0.01` and clears every protected margin.
+
+The executable L0 authority keeps query controls outside the quality estimator.
+Every repository retains six independently reviewed quality-owner tasks; exact,
+`must:`, and configuration-pin controls are additive and carry explicit sealed
+`safetyControls` metadata through suite compilation, capture, scoring, and replay.
+This prevents easy control queries from diluting the quality comparison or creating
+unequal per-repository denominators.
+
+Required-role coverage is not decision-bearing in this corpus because the task
+oracle does not declare independently reviewed required roles. L0 records it as
+`not_applicable_no_required_role_oracle`; it must not be inferred from path classes
+or approximated after results are visible. Owner-at-ten remains the protected
+retrieval-depth metric.
 
 The `+0.05` owner-at-three and `+0.03` MRR practical-effect thresholds are
 reused from the cross-repository contract frozen in `fe86a1a`, before the

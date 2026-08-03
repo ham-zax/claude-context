@@ -252,7 +252,12 @@ EMBEDDING_OUTPUT_DIMENSION
 VOYAGEAI_API_KEY
 SATORI_RERANKER_PROVIDER
 SATORI_LATEON_MODEL_PATH
+SATORI_LATEON_PROFILE
 SATORI_LATEON_REQUEST_DEADLINE_MS
+SATORI_LATEON_MAX_QUEUE_WAIT_MS
+SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS
+SATORI_LATEON_MAX_ACTIVE_RERANKS
+SATORI_LATEON_MAX_QUEUED_RERANKS
 SATORI_LATEON_INTRA_OP_THREADS
 MILVUS_ADDRESS
 MILVUS_TOKEN
@@ -274,9 +279,9 @@ compatible publication.
 
 ## Optional Local Reranking
 
-Offline search can optionally rerank at most 16 eligible candidates with the
-Apache-2.0 `lightonai/LateOn-Code-edge` FP32 ONNX checkpoint. Model weights are
-not bundled. Put the pinned model files in one shared directory outside the
+Offline search can optionally rerank eligible candidates with the Apache-2.0
+`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint. Model weights are not
+bundled. Put the pinned model files in one shared directory outside the
 versioned MCP runtime, then configure:
 
 ```text
@@ -284,13 +289,26 @@ SATORI_RERANKER_PROVIDER=lateon
 SATORI_LATEON_MODEL_PATH=/absolute/path/to/LateOn-Code-edge
 ```
 
+The compatibility default remains the projection-v1 depth-16 profile. Two
+explicit projection-v2 choices are also available:
+
+```text
+SATORI_LATEON_PROFILE=lateon_projection_v2_d16_v1
+SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v1
+```
+
+D16 and D32 are distinct identity-bearing profiles. Satori never switches
+between them automatically; an unavailable, overloaded, timed-out, cancelled,
+or invalid neural run restores the deterministic baseline order.
+
 The runtime verifies the pinned revision's artifact digests before use, performs
 ONNX inference in a killable child process, and preserves the complete
 deterministic baseline when model loading, scoring, validation, or the request
-deadline fails. `SATORI_LATEON_REQUEST_DEADLINE_MS` and
-`SATORI_LATEON_INTRA_OP_THREADS` are optional operator overrides. The shipped
-defaults come from the measured local-WSL profile rather than an assumed
-512 MiB envelope.
+deadline fails. Projection-v2 profiles freeze model, projection, depth, thread,
+and batching behavior. Operators may only reduce their request deadline, queue
+wait, reranker-stage deadline, or active/queued capacity using the corresponding
+variables listed above. The resulting effective profile remains part of the
+shared-runtime and frozen-result identity.
 
 LateOn is query-time ranking evidence only. It does not control candidate
 eligibility, source freshness, publication authority, or baseline search

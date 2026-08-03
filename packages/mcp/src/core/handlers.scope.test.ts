@@ -6,7 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
+    type FrozenSearchResultSet,
     SearchContinuationCoordinator,
+    SearchContinuationCoordinatorPool,
     ToolHandlers,
 } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
@@ -166,6 +168,9 @@ type ToolHandlersTestOverrides = {
         observation: string;
         sourceObservation: string;
     };
+    buildRelationshipBackedCallGraph: (
+        input: { limit: number; [key: string]: unknown },
+    ) => Promise<unknown>;
 };
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
@@ -725,6 +730,20 @@ function createHandlers(
         options?.searchContinuationCoordinator,
     );
     const overrides = handlers as unknown as ToolHandlersTestOverrides;
+    const vectorReceipt = {
+        collectionName: 'committed-v3',
+        marker: {
+            runId: 'test-completion-run',
+            indexPolicyHash: 'test-index-policy-hash',
+        },
+        policy: {},
+        policyDocumentDigest: 'b'.repeat(64),
+        exactPayloadCount: searchResults.length,
+        observations: {
+            profileFileToken: null,
+            policyFileToken: 'test-policy-token',
+        },
+    };
     overrides.validateCompletionProof = async () => ({
         outcome: 'valid',
         navigationStatus: 'valid',
@@ -732,7 +751,7 @@ function createHandlers(
             navigation: { navigationSealHash: 'a'.repeat(64) },
         },
         ...(options?.enableVectorReceipt
-            ? { vectorReceipt: { collectionName: 'committed-v3' } as never }
+            ? { vectorReceipt: vectorReceipt as never }
             : {}),
     });
     if (options?.sourceBarrierMode !== 'native') {
@@ -748,6 +767,59 @@ function installVerifiedSourceBarrier(handlers: ToolHandlers): void {
             sourceObservation: 'scope-source-observation',
         });
 }
+
+test('handleSearchCode rejects unsafe direct logical and disclosure limits', async () => {
+    await withTempStateRoot(async () => {
+        await withTempRepo(async (repoPath) => {
+            const handlers = createHandlers(repoPath, []);
+            for (const args of [
+                { limit: 0 },
+                { limit: 1.5 },
+                { limit: Number.POSITIVE_INFINITY },
+                { limit: Number.MAX_SAFE_INTEGER + 1 },
+                { limit: 10, disclosureLimit: Number.NaN },
+                { limit: 10, disclosureLimit: Number.POSITIVE_INFINITY },
+                { limit: 201, disclosureLimit: 201 },
+            ]) {
+                const response = await handlers.handleSearchCode({
+                    path: repoPath,
+                    query: 'auth ownership',
+                    scope: 'runtime',
+                    resultMode: 'grouped',
+                    groupBy: 'symbol',
+                    ...args,
+                });
+                assert.equal(response.isError, true);
+                assert.match(
+                    JSON.parse(response.content[0]?.text || '{}').message ?? '',
+                    /Invalid search arguments/,
+                );
+            }
+        });
+    });
+});
+
+test('handleContinueSearch rejects direct cursor and page values outside frozen bounds', async () => {
+    await withTempStateRoot(async () => {
+        await withTempRepo(async (repoPath) => {
+            const handlers = createHandlers(repoPath, []);
+            for (const [args, expectedCode] of [
+                [{ expectedOffset: 201, limit: 1 }, 'SEARCH_RESULT_SET_OFFSET_INVALID'],
+                [{ expectedOffset: 0, limit: 201 }, 'SEARCH_RESULT_SET_LIMIT_INVALID'],
+            ] as const) {
+                const response = await handlers.handleContinueSearch({
+                    handle: 'a'.repeat(48),
+                    ...args,
+                });
+                assert.equal(response.isError, true);
+                assert.equal(
+                    JSON.parse(response.content[0]?.text || '{}').code,
+                    expectedCode,
+                );
+            }
+        });
+    });
+});
 
 test('handleSearchCode falls back from structural ownership when completion proof omits navigation evidence', async () => {
     await withTempStateRoot(async () => {
@@ -1151,25 +1223,36 @@ test('manage status prepares one reusable proof and genuine authority drift stil
         let mutationGeneration = 1;
         let completionProofReads = 0;
         let freshnessCalls = 0;
+        let sourceObservationAvailable = false;
         let semanticReceipt: unknown;
         const internals = handlers as unknown as {
             context: HandlerContext & {
                 getIndexAuthorityObservations: () => { vector: string; navigation: string };
                 isPreparedVectorReceiptBoundToCurrentAuthority: () => boolean;
                 revalidatePreparedGeneration: () => Promise<never>;
+                compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                compareSourceObservationToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
                 semanticSearchInProvenGeneration: (
                     receipt: unknown,
                     request: { topK: number },
                 ) => Promise<SearchFixtureResult[]>;
             };
             syncManager: HandlerSyncManager & {
-                ensureFreshness: () => Promise<never>;
+                ensureFreshness: () => Promise<never> | Promise<{
+                    mode: 'skipped_recent';
+                    checkedAt: string;
+                    thresholdMs: number;
+                }>;
                 getPreparedReadObservation: () => {
                     available: true;
                     observation: {
                         freshnessEpoch: number;
                         watcherState: 'ready';
                     };
+                } | {
+                    available: false;
+                    reason: 'watcher_disabled';
+                    freshnessEpoch: number;
                 };
             };
             mutationLeaseCoordinator: {
@@ -1195,17 +1278,25 @@ test('manage status prepares one reusable proof and genuine authority drift stil
         internals.context.revalidatePreparedGeneration = async () => {
             throw new Error('status-prepared reuse must not reread the completion proof');
         };
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
+        internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
         internals.context.semanticSearchInProvenGeneration = async (receipt, request) => {
             semanticReceipt = receipt;
             return semanticSearch(receipt, request);
         };
-        internals.syncManager.getPreparedReadObservation = () => ({
-            available: true,
-            observation: {
+        internals.syncManager.getPreparedReadObservation = () => sourceObservationAvailable
+            ? {
+                available: true,
+                observation: {
+                    freshnessEpoch: 1,
+                    watcherState: 'ready',
+                },
+            }
+            : {
+                available: false,
+                reason: 'watcher_disabled',
                 freshnessEpoch: 1,
-                watcherState: 'ready',
-            },
-        });
+            };
         internals.syncManager.ensureFreshness = async () => {
             freshnessCalls += 1;
             throw new Error('status-prepared reuse must not synchronize');
@@ -1253,9 +1344,17 @@ test('manage status prepares one reusable proof and genuine authority drift stil
                 registryLoads: 0,
                 navigationValidationRuns: 0,
             },
+            requestProof: {
+                freshnessComparisonMode: 'full',
+                exactPathCount: 0,
+                checkpointBindings: 0,
+                preRetrievalFullComparisons: 1,
+                finalFullComparisons: 1,
+            },
         });
         assert.equal(firstPayload.freshnessDecision.operation, undefined);
 
+        sourceObservationAvailable = true;
         await handlers.handleGetIndexingStatus({ path: repoPath, detail: 'summary' });
         assert.equal(completionProofReads, 2);
         mutationGeneration += 1;
@@ -1413,7 +1512,7 @@ test('status-prepared search routes an untracked pending watcher event through f
     });
 });
 
-test('search continuation preserves the full grouped order without new retrieval or reranking', async () => {
+test('search continuation preserves deterministic and LateOn-ranked grouped order without recomputation', async () => {
     await withTempRepo(async (repoPath) => {
         const searchResults: SearchFixtureResult[] = [
             {
@@ -1457,8 +1556,10 @@ test('search continuation preserves the full grouped order without new retrieval
         const prepareHandlers = (
             initialSourceAvailable = true,
             searchContinuationCoordinator?: SearchContinuationCoordinator,
+            reranker?: HandlerReranker,
+            preparedSearchResults: SearchFixtureResult[] = searchResults,
         ) => {
-            const handlers = createHandlers(repoPath, searchResults, undefined, {
+            const handlers = createHandlers(repoPath, preparedSearchResults, reranker, {
                 enableVectorReceipt: true,
                 respectSemanticTopK: true,
                 searchContinuationCoordinator,
@@ -1634,6 +1735,27 @@ test('search continuation preserves the full grouped order without new retrieval
         const baselinePayload = JSON.parse(baselineResponse.content[0]?.text || '{}');
         const baselineFiles = baselinePayload.results.map((result: { target: { file: string } }) => result.target.file);
         assert.equal(baselineFiles.length, 20, JSON.stringify(baselinePayload));
+        assert.equal(baselinePayload.resultIndex, undefined);
+
+        const largerThanAvailable = await baseline.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 10_000,
+            disclosureLimit: 200,
+        });
+        const largerThanAvailablePayload = JSON.parse(largerThanAvailable.content[0]?.text || '{}');
+        assert.deepEqual(largerThanAvailablePayload.resultCounts, {
+            requestedTotal: 10_000,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 20,
+            remainingGroupCount: 0,
+        });
+        assert.equal(largerThanAvailablePayload.continuation, undefined);
 
         const coordinator = new SearchContinuationCoordinator();
         const paged = prepareHandlers(true, coordinator);
@@ -1659,7 +1781,16 @@ test('search continuation preserves the full grouped order without new retrieval
             truncated: true,
             reasons: ['initial_budget'],
         });
+        assert.deepEqual(initialPayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 10,
+            remainingGroupCount: 10,
+        });
         assert.match(initialPayload.continuation.handle, /^[a-f0-9]{48}$/);
+        assert.match(initialPayload.rankedSetDigest, /^[a-f0-9]{64}$/);
+        assert.equal(initialPayload.resultIndex, undefined);
         assert.ok(Buffer.byteLength(initialResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
 
         const freshnessProbe = prepareHandlers();
@@ -1687,6 +1818,7 @@ test('search continuation preserves the full grouped order without new retrieval
         });
         assert.equal(pageTwoResponse.isError, undefined, pageTwoResponse.content[0]?.text);
         const pageTwoPayload = JSON.parse(pageTwoResponse.content[0]?.text || '{}');
+        assert.equal(pageTwoPayload.rankedSetDigest, initialPayload.rankedSetDigest);
         const mismatchedRetry = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
             expectedOffset: initialPayload.continuation.nextOffset,
@@ -1709,6 +1841,7 @@ test('search continuation preserves the full grouped order without new retrieval
             limit: 5,
         });
         const pageThreePayload = JSON.parse(pageThreeResponse.content[0]?.text || '{}');
+        assert.equal(pageThreePayload.rankedSetDigest, initialPayload.rankedSetDigest);
         const pageThreeRetry = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
             expectedOffset: pageTwoPayload.continuation.nextOffset,
@@ -1719,6 +1852,20 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.equal(paged.getRetrievalCalls(), retrievalCallsBeforeContinuation);
         assert.equal(pageTwoPayload.results.length, 5);
         assert.equal(pageThreePayload.results.length, 5);
+        assert.deepEqual(pageTwoPayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 5,
+            remainingGroupCount: 5,
+        });
+        assert.deepEqual(pageThreePayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 5,
+            remainingGroupCount: 0,
+        });
         assert.equal(pageThreePayload.continuation, undefined);
         assert.ok(Buffer.byteLength(pageTwoResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
         assert.ok(Buffer.byteLength(pageThreeResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
@@ -1730,6 +1877,152 @@ test('search continuation preserves the full grouped order without new retrieval
             ...pageThreePayload.results,
         ].map((result: { target: { file: string } }) => result.target.file);
         assert.deepEqual(pagedFiles, baselineFiles);
+
+        class TamperingCoordinator extends SearchContinuationCoordinator {
+            public tamperNextLookup = false;
+
+            override lookup(
+                handle: string,
+                nowMs: number,
+            ): ReturnType<SearchContinuationCoordinator["lookup"]> {
+                const lookup = super.lookup(handle, nowMs);
+                if (!this.tamperNextLookup || lookup.status !== "hit") return lookup;
+                this.tamperNextLookup = false;
+                const entry: FrozenSearchResultSet = structuredClone(lookup.entry);
+                entry.orderedResults[0]!.score += 1;
+                return { ...lookup, entry };
+            }
+        }
+        const tamperingCoordinator = new TamperingCoordinator();
+        const tampered = prepareHandlers(true, tamperingCoordinator);
+        const tamperedInitialResponse = await tampered.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+        });
+        const tamperedInitialPayload = JSON.parse(
+            tamperedInitialResponse.content[0]?.text || '{}',
+        );
+        tamperingCoordinator.tamperNextLookup = true;
+        const tamperedContinuation = await tampered.handlers.handleContinueSearch({
+            handle: tamperedInitialPayload.continuation.handle,
+            expectedOffset: tamperedInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(tamperedContinuation.isError, true);
+        assert.equal(
+            JSON.parse(tamperedContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_STALE',
+        );
+        const removedContinuation = await tampered.handlers.handleContinueSearch({
+            handle: tamperedInitialPayload.continuation.handle,
+            expectedOffset: tamperedInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(
+            JSON.parse(removedContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_NOT_FOUND',
+        );
+
+        let activeModel = 'reranker-model-v1';
+        let rerankerCalls = 0;
+        const providerCoordinator = new SearchContinuationCoordinator();
+        const providerRanked = prepareHandlers(true, providerCoordinator, {
+            getIdentity: () => ({
+                provider: 'test-provider',
+                model: activeModel,
+                profile: 'test-profile-v1',
+            }),
+            rerank: async (_query, documents) => {
+                rerankerCalls += 1;
+                return documents.map((_document, index) => ({
+                    index,
+                    relevanceScore: documents.length - index,
+                }));
+            },
+        });
+        const providerInitialResponse = await providerRanked.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+        });
+        const providerInitialPayload = JSON.parse(
+            providerInitialResponse.content[0]?.text || '{}',
+        );
+        assert.equal(rerankerCalls, 1);
+        activeModel = 'reranker-model-v2';
+        const changedModelContinuation = await providerRanked.handlers.handleContinueSearch({
+            handle: providerInitialPayload.continuation.handle,
+            expectedOffset: providerInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(changedModelContinuation.isError, true);
+        assert.equal(
+            JSON.parse(changedModelContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_STALE',
+        );
+        assert.equal(rerankerCalls, 1);
+        const removedModelContinuation = await providerRanked.handlers.handleContinueSearch({
+            handle: providerInitialPayload.continuation.handle,
+            expectedOffset: providerInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(
+            JSON.parse(removedModelContinuation.content[0]?.text || '{}').code,
+            'SEARCH_RESULT_SET_NOT_FOUND',
+        );
+
+        const inadmissiblePool = new SearchContinuationCoordinatorPool({
+            maxEntries: 32,
+            maxEntryBytes: 1,
+            maxCacheBytes: 16,
+            ttlMs: 15 * 60_000,
+        });
+        const inadmissible = prepareHandlers(
+            true,
+            new SearchContinuationCoordinator(inadmissiblePool),
+        );
+        const inadmissibleResponse = await inadmissible.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+            includeResultIndex: true,
+        });
+        const inadmissiblePayload = JSON.parse(
+            inadmissibleResponse.content[0]?.text || '{}',
+        );
+        assert.equal(inadmissibleResponse.isError, undefined);
+        assert.equal(inadmissiblePayload.status, 'ok');
+        assert.equal(inadmissiblePayload.results.length, 10);
+        assert.equal(inadmissiblePayload.continuation, undefined);
+        assert.equal(inadmissiblePayload.rankedSetDigest, undefined);
+        assert.equal(inadmissiblePayload.resultIndex, undefined);
+        assert.deepEqual(inadmissiblePayload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 20,
+            returnedGroupCount: 10,
+            remainingGroupCount: 10,
+        });
+        const admissionWarning = inadmissiblePayload.warnings.find(
+            (warning: { code: string }) => (
+                warning.code === 'SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE'
+            ),
+        );
+        assert.ok(admissionWarning);
+        assert.match(admissionWarning.action, /narrower search/i);
+        assert.ok(
+            Buffer.byteLength(inadmissibleResponse.content[0]?.text || '', 'utf8')
+                <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
+        );
 
         const consumedResponse = await paged.handlers.handleContinueSearch({
             handle: initialPayload.continuation.handle,
@@ -1895,6 +2188,184 @@ test('search continuation preserves the full grouped order without new retrieval
         assert.equal(expiredResponse.isError, true);
         assert.equal(expiredPayload.code, 'SEARCH_RESULT_SET_EXPIRED');
         assert.equal(expired.getRetrievalCalls(), expiredRetrievalCalls);
+
+        const lateOnBaselineFiles = [
+            'src/lateon-01.ts',
+            'src/lateon-02.ts',
+            'src/lateon-03.ts',
+            'src/lateon-04.ts',
+            'src/lateon-05.ts',
+            'src/lateon-06.ts',
+            'src/lateon-07.ts',
+            'src/lateon-08.ts',
+            'src/lateon-09.ts',
+            'src/lateon-10.ts',
+            'src/lateon-11.ts',
+            'src/lateon-12.ts',
+        ];
+        const expectedLateOnOrder = [
+            'src/lateon-12.ts',
+            'src/lateon-11.ts',
+            'src/lateon-10.ts',
+            'src/lateon-09.ts',
+            'src/lateon-08.ts',
+            'src/lateon-07.ts',
+            'src/lateon-06.ts',
+            'src/lateon-05.ts',
+            'src/lateon-04.ts',
+            'src/lateon-03.ts',
+            'src/lateon-02.ts',
+            'src/lateon-01.ts',
+        ];
+        const lateOnSearchResults = lateOnBaselineFiles.map((relativePath, index) => ({
+            content: `export function lateOnCandidate${index + 1}() { return true; }`,
+            relativePath,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.5,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }));
+        let lateOnCalls = 0;
+        let lateOnCandidates = 0;
+        let lateOnInputBytes = 0;
+        const lateOnCoordinator = new SearchContinuationCoordinator();
+        const lateOnRanked = prepareHandlers(
+            true,
+            lateOnCoordinator,
+            {
+                getIdentity: () => ({
+                    provider: 'lateon',
+                    model: 'lightonai/LateOn-Code-edge@07ef20f406c86badca122464808f4cac2f6e4b25',
+                    profile: 'satori_lateon_runtime_profile_v1',
+                }),
+                getMaxDocuments: () => 16,
+                rerank: async (_query, documents) => {
+                    lateOnCalls += 1;
+                    lateOnCandidates += documents.length;
+                    lateOnInputBytes += documents.reduce(
+                        (total, document) => total + Buffer.byteLength(document, 'utf8'),
+                        0,
+                    );
+                    assert.deepEqual(
+                        documents.map((document) => document.split('\n', 1)[0]),
+                        lateOnBaselineFiles,
+                    );
+                    return [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].map(
+                        (index) => ({ index, relevanceScore: 1 }),
+                    );
+                },
+            },
+            lateOnSearchResults,
+        );
+        const lateOnInitialResponse = await lateOnRanked.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'rank neural pagination behavior',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 12,
+            disclosureLimit: 3,
+            includeResultIndex: true,
+            debugMode: 'full',
+        });
+        assert.equal(
+            lateOnInitialResponse.isError,
+            undefined,
+            lateOnInitialResponse.content[0]?.text,
+        );
+        let lateOnPayload = JSON.parse(lateOnInitialResponse.content[0]?.text || '{}');
+        const lateOnRankedSetDigest = lateOnPayload.rankedSetDigest;
+        const neuralWorkAfterInitial = {
+            calls: lateOnCalls,
+            candidates: lateOnCandidates,
+            inputBytes: lateOnInputBytes,
+            retrievalCalls: lateOnRanked.getRetrievalCalls(),
+        };
+        assert.equal(neuralWorkAfterInitial.calls, 1);
+        assert.equal(neuralWorkAfterInitial.candidates, 12);
+        assert.equal(neuralWorkAfterInitial.inputBytes > 0, true);
+        assert.deepEqual(lateOnPayload.hints?.debugSearch?.providerWork, {
+            semanticSearchAttempts: 1,
+            embeddingCallsByCurrentContract: 1,
+            denseQueriesByCurrentContract: 1,
+            sparseQueriesByCurrentContract: 1,
+            rerankerCalls: 1,
+            rerankerCandidates: 12,
+            rerankerInputBytes: neuralWorkAfterInitial.inputBytes,
+            candidatesWithSemanticEvidence: 12,
+            candidatesWithLexicalEvidence: 0,
+            candidatesWithCurrentSourceEvidence: 0,
+        });
+        assert.equal(lateOnPayload.resultIndex.rankedSetDigest, lateOnRankedSetDigest);
+        assert.equal(lateOnPayload.resultIndex.availableEntryCount, 12);
+        assert.equal(lateOnPayload.resultIndex.returnedEntryCount, 12);
+        assert.equal(lateOnPayload.resultIndex.complete, true);
+        assert.deepEqual(
+            lateOnPayload.resultIndex.entries.map(
+                (entry: { target: { file: string } }) => entry.target.file,
+            ),
+            expectedLateOnOrder,
+        );
+        const lateOnFiles = lateOnPayload.results.map(
+            (result: { target: { file: string } }) => result.target.file,
+        );
+        while (lateOnPayload.continuation) {
+            const request = {
+                handle: lateOnPayload.continuation.handle,
+                expectedOffset: lateOnPayload.continuation.nextOffset,
+                limit: 4,
+            };
+            const page = await lateOnRanked.handlers.handleContinueSearch(request);
+            assert.equal(page.isError, undefined, page.content[0]?.text);
+            const retry = await lateOnRanked.handlers.handleContinueSearch(request);
+            assert.equal(retry.content[0]?.text, page.content[0]?.text);
+            lateOnPayload = JSON.parse(page.content[0]?.text || '{}');
+            assert.equal(lateOnPayload.rankedSetDigest, lateOnRankedSetDigest);
+            assert.equal(lateOnPayload.resultIndex, undefined);
+            lateOnFiles.push(...lateOnPayload.results.map(
+                (result: { target: { file: string } }) => result.target.file,
+            ));
+            assert.deepEqual({
+                calls: lateOnCalls,
+                candidates: lateOnCandidates,
+                inputBytes: lateOnInputBytes,
+                retrievalCalls: lateOnRanked.getRetrievalCalls(),
+            }, neuralWorkAfterInitial);
+        }
+        assert.deepEqual(lateOnFiles, expectedLateOnOrder);
+        assert.equal(new Set(lateOnFiles).size, expectedLateOnOrder.length);
+    });
+});
+
+test('initial grouped disclosure fails without a handle when the first complete group cannot fit', async () => {
+    await withTempRepo(async (repoPath) => {
+        const handlers = createHandlers(repoPath, [{
+            content: 'export function owner() { return true; }',
+            relativePath: `src/${'x'.repeat(140_000)}.ts`,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }]);
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find owner implementation',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 1,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.code, 'SEARCH_RESULT_SET_PAGE_TOO_LARGE');
+        assert.equal(payload.continuation, undefined);
+        assert.deepEqual(payload.results, []);
     });
 });
 
@@ -2152,9 +2623,27 @@ test('source observation failure blocks without returning vector results', async
 
 test('watcher-disabled search uses the existing full checkpoint comparison as its request barrier', async () => {
     await withTempRepo(async (repoPath) => {
+        const relativePath = 'src/owner.ts';
+        const content = 'export function owner() { return true; }';
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(repoPath, relativePath), content, 'utf8');
+        const symbols = await writeSearchSymbolRegistry({
+            repoPath,
+            relativePath,
+            content,
+            chunks: [{
+                content,
+                startLine: 1,
+                endLine: 1,
+                symbolLabel: 'function owner()',
+                breadcrumbs: ['function owner()'],
+            }],
+        });
+        const owner = symbols.find((symbol) => symbol.name === 'owner');
+        assert.ok(owner);
         const handlers = createHandlers(repoPath, [{
-            content: 'export function owner() { return true; }',
-            relativePath: 'src/owner.ts',
+            content,
+            relativePath,
             startLine: 1,
             endLine: 1,
             language: 'typescript',
@@ -2179,9 +2668,12 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
                 ensureFreshness: (
                     codebasePath: string,
                     thresholdMs: number,
-                    options?: { exactSourceComparisonPaths?: readonly string[] },
+                    options?: {
+                        exactSourceComparisonPaths?: readonly string[];
+                        fullSourceComparison?: boolean;
+                    },
                 ) => Promise<{
-                    mode: 'synced';
+                    mode: 'skipped_source_unchanged';
                     checkedAt: string;
                     thresholdMs: number;
                 }>;
@@ -2245,8 +2737,9 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
         internals.syncManager.ensureFreshness = async (_root, thresholdMs, options) => {
             assert.equal(thresholdMs, 0);
             assert.equal(options?.exactSourceComparisonPaths, undefined);
+            assert.equal(options?.fullSourceComparison, true);
             return {
-                mode: 'synced',
+                mode: 'skipped_source_unchanged',
                 checkedAt: '2026-01-01T01:00:00.000Z',
                 thresholdMs,
             };
@@ -2258,7 +2751,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
-            query: 'where is owner behavior handled',
+            query: 'owner',
             scope: 'runtime',
             resultMode: 'grouped',
             groupBy: 'symbol',
@@ -2269,13 +2762,14 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
 
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results.length, 1);
+        assert.equal(payload.results[0].target.symbolId, owner.symbolInstanceId);
         assert.equal(checkpointInspectionCalls, 2);
         assert.equal(finalComparisonCalls, 1);
         assert.deepEqual(payload.hints.debugSearch.readiness.requestProof, {
             freshnessComparisonMode: 'full',
             exactPathCount: 0,
             checkpointBindings: 1,
-            preRetrievalFullComparisons: 0,
+            preRetrievalFullComparisons: 1,
             finalFullComparisons: 1,
         });
     });
@@ -3352,17 +3846,28 @@ test('handleSearchCode exact registry fast path returns a grouped symbol despite
                 resultMode: 'grouped',
                 groupBy: 'symbol',
                 limit: 5,
+                includeResultIndex: true,
                 debugMode: 'full',
             });
 
             const rawText = response.content[0]?.text || '{}';
             const payload = JSON.parse(rawText);
-            assert.equal(payload.status, 'ok');
+            assert.equal(payload.status, 'ok', rawText);
             assert.doesNotMatch(rawText, /\n\s+"/);
             assert.equal(semanticSearchCalls, 0);
             assert.equal(rerankCalls, 0);
             assert.equal(payload.results.length, 1);
             assert.equal(payload.results[0].target.symbolId, owner.symbolInstanceId);
+            assert.equal(payload.resultIndex, undefined);
+            assert.equal(payload.rankedSetDigest, undefined);
+            assert.equal(
+                payload.warnings.some(
+                    (warning: { code: string }) => (
+                        warning.code === 'SEARCH_RESULT_INDEX_NOT_ADMISSIBLE'
+                    ),
+                ),
+                true,
+            );
             assert.match(payload.results[0].preview, /return path/);
             assert.doesNotMatch(payload.results[0].preview, /export class ToolHandlers/);
             assert.equal(typeof payload.results[0].navigation?.graph, 'string');
@@ -3489,6 +3994,15 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
             const { target, caller } = await writeCallerSearchFixture(repoPath);
 
             const handlers = createHandlers(repoPath, []);
+            const overrides = handlers as unknown as ToolHandlersTestOverrides;
+            const originalBuildRelationshipBackedCallGraph = overrides
+                .buildRelationshipBackedCallGraph
+                .bind(handlers);
+            const observedRelationshipLimits: number[] = [];
+            overrides.buildRelationshipBackedCallGraph = async (input) => {
+                observedRelationshipLimits.push(input.limit);
+                return originalBuildRelationshipBackedCallGraph(input);
+            };
             (handlers as unknown as ToolHandlersTestOverrides).context.semanticSearch = async () => {
                 throw new Error('semanticSearch should not run for deterministic caller hits');
             };
@@ -3499,7 +4013,7 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
                 scope: 'runtime',
                 resultMode: 'grouped',
                 groupBy: 'symbol',
-                limit: 2,
+                limit: Number.MAX_SAFE_INTEGER,
                 debugMode: 'full',
             });
 
@@ -3511,6 +4025,7 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
             );
             assert.equal(payload.hints?.debugSearch?.route?.kind, 'references');
             assert.equal(payload.hints?.debugSearch?.passesUsed?.includes('relationships'), true);
+            assert.equal(observedRelationshipLimits[0], 200);
             assert.deepEqual(payload.hints?.debugSearch?.providerWork, {
                 semanticSearchAttempts: 0,
                 embeddingCallsByCurrentContract: 0,
@@ -3537,6 +4052,51 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
                 boundedPayload.results.map((result: { target: { symbolId?: string } }) => result.target.symbolId),
                 [caller.symbolInstanceId],
             );
+
+            const pagedHandlers = createHandlers(repoPath, [], undefined, {
+                enableVectorReceipt: true,
+            });
+            const pagedContext = (pagedHandlers as unknown as ToolHandlersTestOverrides).context as MutableHandlerContext & {
+                getIndexAuthorityObservations: () => { vector: string; navigation: string };
+            };
+            const pagedInternals = pagedHandlers as unknown as {
+                mutationLeaseCoordinator: {
+                    observe: () => { mutationActive: boolean; generation: number };
+                    getActiveLease: () => null;
+                };
+            };
+            pagedContext.getIndexAuthorityObservations = () => ({
+                vector: 'exact-vector-authority',
+                navigation: 'exact-navigation-authority',
+            });
+            pagedInternals.mutationLeaseCoordinator = {
+                observe: () => ({ mutationActive: false, generation: 1 }),
+                getActiveLease: () => null,
+            };
+            pagedContext.semanticSearch = async () => {
+                throw new Error('semanticSearch should not run for paged deterministic caller hits');
+            };
+            const pagedResponse = await pagedHandlers.handleSearchCode({
+                path: repoPath,
+                query: 'who calls writeSourceCheckpoint',
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 2,
+                disclosureLimit: 1,
+            });
+            const pagedPayload = JSON.parse(pagedResponse.content[0]?.text || '{}');
+            assert.equal(pagedResponse.isError, undefined, JSON.stringify(pagedPayload));
+            assert.equal(pagedPayload.results.length, 1, JSON.stringify(pagedPayload));
+            assert.match(pagedPayload.continuation?.handle ?? '', /^[a-f0-9]{48}$/);
+            assert.match(pagedPayload.rankedSetDigest ?? '', /^[a-f0-9]{64}$/);
+            assert.deepEqual(pagedPayload.resultCounts, {
+                requestedTotal: 2,
+                effectiveFrozenTotal: 2,
+                availableGroupCount: 2,
+                returnedGroupCount: 1,
+                remainingGroupCount: 1,
+            });
         });
     });
 });
@@ -7368,6 +7928,11 @@ test('handleSearchCode honors a provider-qualified reranker candidate limit', as
     await withTempRepo(async (repoPath) => {
         let rerankDocuments: string[] = [];
         const reranker = {
+            getIdentity: () => ({
+                provider: 'lateon',
+                model: 'test-model',
+                profile: 'test-profile',
+            }),
             getMaxDocuments: () => 3,
             rerank: async (_query: string, documents: string[]) => {
                 rerankDocuments = documents;
@@ -7466,6 +8031,7 @@ test('handleSearchCode honors a provider-qualified reranker candidate limit', as
         assert.equal(payload.hints?.debugSearch?.rerank?.candidatePoolCount, 5);
         assert.equal(payload.hints?.debugSearch?.rerank?.candidatesReranked, 3);
         assert.equal(payload.hints?.debugSearch?.rerank?.budgetReason, 'provider_limit');
+        assert.equal(payload.hints?.debugSearch?.rerank?.operationalReason, 'lateon_applied');
         assert.equal(payload.hints?.debugSearch?.candidateSurvival?.stages.find(
             (stage: { stage: string }) => stage.stage === 'reranker_input',
         )?.uniqueCandidates, 3);
@@ -7500,7 +8066,9 @@ test('handleSearchCode degrades gracefully when reranker fails', async () => {
     await withTempRepo(async (repoPath) => {
         const reranker = {
             rerank: async () => {
-                throw new Error('rerank failed');
+                throw Object.assign(new Error('rerank failed'), {
+                    reason: 'lateon_execution_timeout',
+                });
             }
         };
         const handlers = createHandlers(repoPath, [
@@ -7553,6 +8121,73 @@ test('handleSearchCode degrades gracefully when reranker fails', async () => {
         assert.equal(payload.hints?.debugSearch?.rerank?.applied, false);
         assert.equal(payload.hints?.debugSearch?.rerank?.errorCode, 'RERANKER_FAILED');
         assert.equal(payload.hints?.debugSearch?.rerank?.failurePhase, 'api_call');
+        assert.equal(
+            payload.hints?.debugSearch?.rerank?.operationalReason,
+            'lateon_execution_timeout',
+        );
+    });
+});
+
+test('handleSearchCode restores the exact product result state for every LateOn failure', async () => {
+    await withTempRepo(async (repoPath) => {
+        const searchResults = [
+            {
+                content: 'primary runtime path',
+                relativePath: 'src/one.ts',
+                startLine: 1,
+                endLine: 3,
+                language: 'typescript',
+                score: 0.99,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_one',
+                symbolLabel: 'one'
+            },
+            {
+                content: 'secondary runtime path',
+                relativePath: 'src/two.ts',
+                startLine: 1,
+                endLine: 3,
+                language: 'typescript',
+                score: 0.98,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_two',
+                symbolLabel: 'two'
+            }
+        ];
+        const search = async (reranker?: HandlerReranker) => {
+            const response = await createHandlers(repoPath, searchResults, reranker)
+                .handleSearchCode({
+                    path: repoPath,
+                    query: 'runtime path',
+                    scope: 'runtime',
+                    resultMode: 'grouped',
+                    groupBy: 'symbol',
+                    limit: 2,
+                    debugMode: 'full'
+                });
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            return {
+                status: payload.status,
+                results: payload.results,
+            };
+        };
+        const baselineProductState = await search();
+        for (const reason of [
+            'lateon_not_ready',
+            'lateon_capacity_fallback',
+            'lateon_queue_timeout',
+            'lateon_execution_timeout',
+            'lateon_cancelled',
+            'lateon_invalid_output',
+            'lateon_worker_failure',
+        ]) {
+            const failedProductState = await search({
+                rerank: async () => {
+                    throw Object.assign(new Error(reason), { reason });
+                }
+            });
+            assert.deepEqual(failedProductState, baselineProductState, reason);
+        }
     });
 });
 

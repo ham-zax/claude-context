@@ -13,12 +13,12 @@ const buildContinueSearchSchema = (ctx: ToolContext) => z.object({
     expectedOffset: z.number()
         .int()
         .nonnegative()
-        .max(ctx.capabilities.getMaxSearchLimit())
+        .max(ctx.capabilities.getMaxFrozenSearchResults())
         .describe("Exact nextOffset from the search or continuation response. Retrying the same handle, expectedOffset, and limit replays the same page."),
     limit: z.number()
         .int()
         .positive()
-        .max(ctx.capabilities.getMaxSearchLimit())
+        .max(ctx.capabilities.getMaxSearchPageSize())
         .optional()
         .describe("Optional maximum number of additional groups. Defaults to the initial disclosure size."),
 }).strict();

@@ -2,6 +2,8 @@ import type { SymbolRegistry } from "@zokizuan/satori-core";
 import {
     SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
     SEARCH_CHANGED_FIRST_MULTIPLIER,
+    SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES,
+    SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
     SEARCH_RERANK_AMBIGUOUS_CANDIDATES_PER_RESULT,
     SEARCH_RERANK_BOUNDED_CANDIDATES_PER_RESULT,
     SEARCH_RERANK_DOC_MAX_CHARS,
@@ -17,7 +19,9 @@ import {
     type SearchResultMode,
     type SearchScope,
 } from "./search-constants.js";
+import { resolveFrozenSearchResultLimit } from "./search-policy.js";
 import { buildExactRegistryHitEnvelope } from "./search-exact-registry-hit.js";
+import type { FinalizedSearchResults } from "./search-result-finalization.js";
 import type { SearchQueryPlan } from "./search-lexical-scoring.js";
 import type { ParsedSearchOperators } from "./search-query-planning.js";
 import type { SearchQuerySupport } from "./search-query-support.js";
@@ -81,6 +85,8 @@ type SearchExactFastPathInput = {
     groupBy: SearchGroupBy;
     resultMode: SearchResultMode;
     limit: number;
+    disclosureLimit: number;
+    includeResultIndex: boolean;
     debugMode: "none" | "summary" | "ranking" | "freshness" | "full";
     rankingMode: "default" | "auto_changed_first";
     semanticQuery: string;
@@ -113,7 +119,7 @@ type SearchExactFastPathHandled = {
     searchSymbolRegistry: SymbolRegistry;
     searchSymbolRegistryManifestHash: string;
     exactRegistryFallbackForTrackedLexical: boolean;
-    envelope: SearchResponseEnvelope;
+    finalized: FinalizedSearchResults;
     resultsBeforeFilter: number;
     resultsAfterFilter: number;
 };
@@ -184,6 +190,7 @@ export async function runExactRegistryFastPath(
     input: SearchExactFastPathInput,
     host: SearchExactFastPathHost,
 ): Promise<SearchExactFastPathOutcome> {
+    const frozenResultLimit = resolveFrozenSearchResultLimit(input.limit);
     const eligible = isExactRegistryEligible(input, host);
     if (!eligible) {
         return {
@@ -315,7 +322,7 @@ export async function runExactRegistryFastPath(
                 resolvedSymbol: exactRegistrySymbol,
                 direction,
                 depth: 1,
-                limit: input.limit,
+                limit: frozenResultLimit,
             }),
         );
         if (!relationshipGraph) {
@@ -362,8 +369,8 @@ export async function runExactRegistryFastPath(
             };
         }
 
-        resultSymbols = peerSymbols.slice(0, input.limit);
-        if (resultSymbols.length < input.limit) {
+        resultSymbols = peerSymbols.slice(0, frozenResultLimit);
+        if (resultSymbols.length < frozenResultLimit) {
             resultSymbols = [...resultSymbols, exactRegistrySymbol];
         }
         relationshipPassUsed = true;
@@ -535,13 +542,18 @@ export async function runExactRegistryFastPath(
                 ? { phaseTimingsMs: input.phaseTimings, readiness: input.readiness, ...(changedCode ? { changedCode } : {}) }
                 : undefined;
 
-    const envelope = buildExactRegistryHitEnvelope({
+    const finalized = buildExactRegistryHitEnvelope({
         codebaseRoot: input.effectiveRoot,
         absolutePath: input.absolutePath,
         query: input.query,
         scope: input.scope,
         groupBy: input.groupBy,
         limit: input.limit,
+        disclosureLimit: input.disclosureLimit,
+        includeResultIndex: input.includeResultIndex,
+        maxResponseBytes: input.debugMode === "full"
+            ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
+            : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
         freshnessDecision: input.freshnessDecision,
         freshnessSummary: input.freshnessSummary,
         proofDebugHint: input.proofDebugHint,
@@ -568,7 +580,7 @@ export async function runExactRegistryFastPath(
         buildGeneratedArtifactsVerificationHint: (results) => host.buildGeneratedArtifactsVerificationHint(input.effectiveRoot, results),
     });
 
-    if (!envelope) {
+    if (!finalized) {
         return {
             kind: "continue",
             exactRegistryDebug,
@@ -585,7 +597,7 @@ export async function runExactRegistryFastPath(
         searchSymbolRegistry: registryState.registry,
         searchSymbolRegistryManifestHash: registryState.manifestHash,
         exactRegistryFallbackForTrackedLexical: true,
-        envelope,
+        finalized,
         resultsBeforeFilter: exactRegistryMatch.debug.inspectedSymbolCount,
         resultsAfterFilter: resultSymbols.length,
     };

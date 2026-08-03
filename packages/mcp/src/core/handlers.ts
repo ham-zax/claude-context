@@ -116,6 +116,7 @@ import {
     compareNullableStringsAsc as compareNullableStringsAscHelper,
 } from "./search-grouping.js";
 import {
+    buildSearchWarningDetails,
     buildOutlineSpanWarningCodes as buildSearchOutlineSpanWarningCodes,
     normalizeSearchSymbolLabel as normalizeSearchSymbolLabelHelper,
     SEARCH_GROUP_PREVIEW_MAX_BYTES,
@@ -130,6 +131,7 @@ import {
     isTestPath as isSearchTestPath,
     isWriterActionTerm as isWriterActionTermHelper,
     normalizeSearchPath as normalizeSearchPathHelper,
+    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     shouldIncludeCategoryInScope,
 } from "./search-ranking-policy.js";
 import { SearchQuerySupport } from "./search-query-support.js";
@@ -193,12 +195,31 @@ import {
     type PreparedEntrypointOwnerEvidence,
 } from "./entrypoint-owner-evidence.js";
 import { runExactRegistryFastPath } from "./search-exact-fast-path.js";
-import { finalizeSearchResults } from "./search-result-finalization.js";
+import {
+    finalizeSearchResults,
+    type FinalizedSearchResultSet,
+} from "./search-result-finalization.js";
+import { attachCompactSearchResultIndex } from "./search-result-index.js";
 import {
     SearchResultSetCoordinator,
+    SearchResultSetCoordinatorPool,
     type SearchResultSetCoordinatorLookup,
 } from "./search-result-set-cache.js";
-import { projectGroupedDisclosure } from "./search-disclosure.js";
+import {
+    projectGroupedDisclosure,
+    SEARCH_DISCLOSURE_POLICY_VERSION,
+} from "./search-disclosure.js";
+import {
+    buildSearchRankedSetBinding,
+    verifySearchRankedSetBinding,
+    type SearchRankedSetBinding,
+    type SearchRankedSetBindingInput,
+    type SearchRerankerBindingIdentity,
+} from "./search-result-set-identity.js";
+import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
+import { buildPublicationBoundSearchRerankDocumentV2 } from "./search-rerank-projection.js";
+import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
+import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
     SearchQueryPlan,
     SearchResultLike,
@@ -264,20 +285,29 @@ export type FrozenSearchResultSet = {
     preparedObservation: string;
     sourceObservation: string | null;
     queryPolicyDigest: string;
+    rankedSetBinding: SearchRankedSetBinding;
     responseByteLimit: number;
     pageSize: number;
     baseEnvelope: Omit<
         SearchGroupedResponseEnvelope,
-        "results" | "disclosure" | "continuation" | "recommendedNextAction"
+        "results" | "disclosure" | "continuation" | "recommendedNextAction" | "resultIndex"
     >;
     orderedResults: SearchGroupedResultV2[];
     recommendedActions: Array<SearchRecommendedNextAction | null>;
 };
 
+export class SearchContinuationCoordinatorPool extends SearchResultSetCoordinatorPool<
+    FrozenSearchResultSet
+> {}
+
 export class SearchContinuationCoordinator extends SearchResultSetCoordinator<
     FrozenSearchResultSet,
     ToolHandlers
-> {}
+> {
+    constructor(pool: SearchContinuationCoordinatorPool = new SearchContinuationCoordinatorPool()) {
+        super(pool);
+    }
+}
 
 type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
     FrozenSearchResultSet,
@@ -312,6 +342,84 @@ function freezeContinuationHints(
         frozen.debugSearch = debugSearch;
     }
     return Object.keys(frozen).length > 0 ? frozen : undefined;
+}
+
+function removeCacheAdmissionWarning(
+    envelope: SearchGroupedResponseEnvelope,
+): SearchGroupedResponseEnvelope {
+    const warnings = envelope.warnings?.filter(
+        (warning) => warning.code !== WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+    );
+    const withoutWarnings = { ...envelope };
+    delete withoutWarnings.warnings;
+    return {
+        ...withoutWarnings,
+        ...(warnings && warnings.length > 0 ? { warnings } : {}),
+    };
+}
+
+function resolveSearchRerankerBindingIdentity(
+    reranker: Reranker | null,
+    rerankerApplied: boolean,
+): SearchRerankerBindingIdentity {
+    if (!rerankerApplied) {
+        return { kind: "deterministic_baseline", policy: "B" };
+    }
+    if (!reranker) {
+        throw new Error("Applied search reranking requires a stable provider identity.");
+    }
+    const identity = reranker.getIdentity();
+    return {
+        kind: "provider",
+        provider: identity.provider,
+        model: identity.model,
+        profile: identity.profile,
+    };
+}
+
+function resolveSearchRerankerProjectionIdentity(
+    reranker: Reranker | null,
+    rerankerApplied: boolean,
+): string {
+    if (!rerankerApplied) return "not_applicable";
+    const projection = reranker?.getDocumentProjectionVersion?.()
+        ?? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
+    if (!projection.trim()) {
+        throw new Error("Applied search reranking requires a stable projection identity.");
+    }
+    return projection;
+}
+
+function buildFrozenSearchRankedSetBindingInput(input: {
+    vectorReceipt: ProvenVectorGenerationReceipt;
+    generationReceipt?: ProvenGenerationReceipt;
+    preparedObservation: string;
+    sourceObservation: string | null;
+    queryPolicyDigest: string;
+    rerankerIdentity: SearchRerankerBindingIdentity;
+    rerankerProjectionIdentity: string;
+    orderedResults: readonly SearchGroupedResultV2[];
+    recommendedActions: readonly (SearchRecommendedNextAction | null)[];
+}): SearchRankedSetBindingInput {
+    return {
+        queryPolicyDigest: input.queryPolicyDigest,
+        rankingPolicyIdentity: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+        disclosurePolicyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
+        publicationIdentity: {
+            collectionName: input.vectorReceipt.collectionName,
+            marker: input.vectorReceipt.marker,
+            policyDocumentDigest: input.vectorReceipt.policyDocumentDigest,
+            navigation: input.generationReceipt
+                ? { status: "sealed", receipt: input.generationReceipt.navigation }
+                : { status: "not_bound" },
+        },
+        preparedObservation: input.preparedObservation,
+        sourceObservation: input.sourceObservation,
+        rerankerIdentity: input.rerankerIdentity,
+        rerankerProjectionIdentity: input.rerankerProjectionIdentity,
+        orderedResults: input.orderedResults,
+        recommendedActions: input.recommendedActions,
+    };
 }
 
 type SearchPhaseTimings = Record<SearchPhaseTimingKey, number>;
@@ -388,6 +496,7 @@ type CompletedFreshnessRequestProof = Readonly<{
     indexPolicyHash: string;
     comparisonMode: 'full' | 'exact_paths';
     exactPathCount: number;
+    preRetrievalFullComparisons: number;
 }>;
 
 const WATCHER_UNAVAILABLE_SOURCE_REASONS = new Set([
@@ -3668,9 +3777,12 @@ export class ToolHandlers {
             resultMode,
             groupBy,
             rankingMode,
-            limit: Number.isFinite(rawLimit) ? Math.max(1, rawLimit) : 10,
-            ...(Number.isFinite(rawDisclosureLimit)
+            limit: args.limit === undefined ? 10 : rawLimit,
+            ...(args.disclosureLimit !== undefined
                 ? { disclosureLimit: rawDisclosureLimit }
+                : {}),
+            ...(args.includeResultIndex !== undefined
+                ? { includeResultIndex: args.includeResultIndex === true }
                 : {}),
             debugMode,
             ...(Number.isFinite(rawDebugCandidateLimit)
@@ -3682,6 +3794,9 @@ export class ToolHandlers {
         const isResultModeValid = input.resultMode === 'grouped' || input.resultMode === 'raw';
         const isGroupByValid = input.groupBy === 'symbol' || input.groupBy === 'file';
         const isRankingModeValid = input.rankingMode === 'default' || input.rankingMode === 'auto_changed_first';
+        const isLimitValid = Number.isSafeInteger(input.limit)
+            && input.limit > 0
+            && input.limit <= this.capabilities.getMaxSearchResultTotal();
 
         const isDebugCandidateLimitValid = input.debugCandidateLimit === undefined
             || (debugMode === 'full'
@@ -3691,9 +3806,13 @@ export class ToolHandlers {
             || (input.resultMode === 'grouped'
                 && Number.isInteger(input.disclosureLimit)
                 && input.disclosureLimit > 0
+                && input.disclosureLimit <= this.capabilities.getMaxSearchPageSize()
                 && input.disclosureLimit <= input.limit);
+        const isResultIndexValid = args.includeResultIndex === undefined
+            || (typeof args.includeResultIndex === "boolean"
+                && input.resultMode === "grouped");
 
-        if (!isScopeValid || !isResultModeValid || !isGroupByValid || !isRankingModeValid || !isDebugCandidateLimitValid || !isDisclosureLimitValid || typeof input.query !== 'string' || input.query.trim().length === 0) {
+        if (!isScopeValid || !isResultModeValid || !isGroupByValid || !isRankingModeValid || !isLimitValid || !isDebugCandidateLimitValid || !isDisclosureLimitValid || !isResultIndexValid || typeof input.query !== 'string' || input.query.trim().length === 0) {
             const payload = this.buildInvalidSearchRequestPayload({
                 path: typeof input.path === 'string' ? input.path : '',
                 query: typeof input.query === 'string' ? input.query : '',
@@ -3701,7 +3820,7 @@ export class ToolHandlers {
                 groupBy: input.groupBy,
                 resultMode: input.resultMode,
                 limit: input.limit
-            }, 'Invalid search arguments. Required: path, query. Valid scope: runtime|mixed|docs. Valid resultMode: grouped|raw. Valid groupBy: symbol|file. Valid rankingMode: default|auto_changed_first. disclosureLimit is a grouped-result integer no greater than limit. debugCandidateLimit is an integer from 1 to 160 and requires debugMode=full.');
+            }, 'Invalid search arguments. Required: path, query. Valid scope: runtime|mixed|docs. Valid resultMode: grouped|raw. Valid groupBy: symbol|file. Valid rankingMode: default|auto_changed_first. disclosureLimit is a grouped-result integer no greater than limit. includeResultIndex is a grouped-result boolean. debugCandidateLimit is an integer from 1 to 160 and requires debugMode=full.');
             return {
                 content: [{ type: "text", text: this.stringifyToolJson(payload) }],
                 isError: true,
@@ -3882,10 +4001,13 @@ export class ToolHandlers {
                         // Status proves the publication, not current source. Preserve the
                         // one-use shortcut only with a valid source observation or the
                         // established watcher-disabled fallback.
+                        const statusPreparedSourceIsBound =
+                            typeof statusPreparedSourceObservation?.sourceObservation === 'string'
+                            || statusPreparedSourceObservation?.unavailableReason === 'watcher_disabled';
                         if (
                             preparedRead?.statusPrepared === true
                             && !exactSourceComparisonRequired
-                            && typeof statusPreparedSourceObservation?.sourceObservation === 'string'
+                            && statusPreparedSourceIsBound
                         ) {
                             return Promise.resolve({
                                 mode: 'skipped_recent' as const,
@@ -3905,6 +4027,9 @@ export class ToolHandlers {
                                     : {}),
                                 ...(exactSourceComparisonPaths
                                     ? { exactSourceComparisonPaths }
+                                    : {}),
+                                ...(fullSourceComparisonRequired && !exactSourceComparisonRequired
+                                    ? { fullSourceComparison: true }
                                     : {}),
                                 ...(debugMode === 'freshness' || debugMode === 'full'
                                     ? {
@@ -3982,6 +4107,12 @@ export class ToolHandlers {
                                         ? 'exact_paths'
                                         : 'full',
                                     exactPathCount: exactSourceComparisonPaths?.length ?? 0,
+                                    preRetrievalFullComparisons:
+                                        decision.mode === 'skipped_source_unchanged'
+                                        && fullSourceComparisonRequired
+                                        && !exactSourceComparisonRequired
+                                            ? 1
+                                            : 0,
                                 };
                             }
                         }
@@ -4103,7 +4234,8 @@ export class ToolHandlers {
                             completedFreshnessRequestProof!.comparisonMode,
                         exactPathCount: completedFreshnessRequestProof!.exactPathCount,
                         checkpointBindings: 1,
-                        preRetrievalFullComparisons: 0,
+                        preRetrievalFullComparisons:
+                            completedFreshnessRequestProof!.preRetrievalFullComparisons,
                         finalFullComparisons: 0,
                     };
                 } else {
@@ -4294,6 +4426,139 @@ export class ToolHandlers {
                 navigationStatus,
                 preparedObservation,
             };
+            const attachSearchResultSet = (
+                envelope: SearchGroupedResponseEnvelope,
+                resultSet: FinalizedSearchResultSet | undefined,
+                rerankerApplied: boolean,
+            ): SearchGroupedResponseEnvelope => {
+                if (!resultSet) return envelope;
+                if (!vectorReceipt) {
+                    throw new Error("Search result-set binding requires a proven vector publication.");
+                }
+                if (!preparedObservation) {
+                    throw new Error("Search result-set binding requires a prepared publication and source observation.");
+                }
+                const responseByteLimit = debugMode === "full"
+                    ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
+                    : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES;
+                const successfulEnvelope = removeCacheAdmissionWarning(envelope);
+                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(
+                    successfulEnvelope,
+                );
+                const resultSpecificHints = baseEnvelopeDraft.hints;
+                delete baseEnvelopeDraft.results;
+                delete baseEnvelopeDraft.disclosure;
+                delete baseEnvelopeDraft.continuation;
+                delete baseEnvelopeDraft.recommendedNextAction;
+                delete baseEnvelopeDraft.rankedSetDigest;
+                delete baseEnvelopeDraft.resultIndex;
+                delete baseEnvelopeDraft.hints;
+                const frozenHints = freezeContinuationHints(resultSpecificHints);
+                const queryPolicyDigest = crypto.createHash("sha256").update(serializeCanonicalJson([
+                    input.query,
+                    input.scope,
+                    input.groupBy,
+                    input.rankingMode,
+                    retrievalPolicy,
+                    queryPlan,
+                ]), "utf8").digest("hex");
+                const rerankerIdentity = resolveSearchRerankerBindingIdentity(
+                    this.reranker,
+                    rerankerApplied,
+                );
+                const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
+                    this.reranker,
+                    rerankerApplied,
+                );
+                const bindingInput = buildFrozenSearchRankedSetBindingInput({
+                    vectorReceipt,
+                    ...(generationReceipt ? { generationReceipt } : {}),
+                    preparedObservation,
+                    sourceObservation: finalSourceObservation.sourceObservation,
+                    queryPolicyDigest,
+                    rerankerIdentity,
+                    rerankerProjectionIdentity,
+                    orderedResults: resultSet.orderedResults,
+                    recommendedActions: resultSet.recommendedActions,
+                });
+                const rankedSetBinding = buildSearchRankedSetBinding(bindingInput);
+                const baseEnvelope = {
+                    ...baseEnvelopeDraft,
+                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                    ...(frozenHints ? { hints: frozenHints } : {}),
+                } as FrozenSearchResultSet["baseEnvelope"];
+                let boundEnvelope: SearchGroupedResponseEnvelope;
+                if (envelope.continuation) {
+                    const stored = this.searchContinuationCoordinator.store(this, {
+                        value: {
+                            canonicalRoot: effectiveRoot,
+                            vectorReceipt,
+                            ...(generationReceipt ? { generationReceipt } : {}),
+                            preparedObservation,
+                            sourceObservation: finalSourceObservation.sourceObservation,
+                            queryPolicyDigest,
+                            rankedSetBinding,
+                            responseByteLimit,
+                            pageSize: retrievalPolicy.disclosureResultLimit,
+                            baseEnvelope,
+                            orderedResults: [...resultSet.orderedResults],
+                            recommendedActions: [...resultSet.recommendedActions],
+                        },
+                        nextOffset: resultSet.initialReturnedCount,
+                        reservedReplayBytes: responseByteLimit,
+                        nowMs: this.now(),
+                    });
+                    if (stored.status === "not_admissible") {
+                        const initialEnvelope = { ...envelope };
+                        delete initialEnvelope.continuation;
+                        delete initialEnvelope.rankedSetDigest;
+                        delete initialEnvelope.resultIndex;
+                        return {
+                            ...initialEnvelope,
+                            warnings: buildSearchWarningDetails([
+                                ...(envelope.warnings?.map((warning) => warning.code) ?? []),
+                                WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+                            ]),
+                        };
+                    }
+                    boundEnvelope = {
+                        ...successfulEnvelope,
+                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                        continuation: {
+                            ...envelope.continuation,
+                            handle: stored.handle,
+                        },
+                    };
+                } else {
+                    boundEnvelope = {
+                        ...successfulEnvelope,
+                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                    };
+                }
+                if (input.includeResultIndex !== true) return boundEnvelope;
+                const indexed = attachCompactSearchResultIndex({
+                    envelope: boundEnvelope,
+                    orderedResults: resultSet.orderedResults,
+                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                    maxResponseBytes: responseByteLimit,
+                });
+                if (indexed.status === "attached") return indexed.envelope;
+                const warnedEnvelope: SearchGroupedResponseEnvelope = {
+                    ...successfulEnvelope,
+                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                    ...(boundEnvelope.continuation
+                        ? { continuation: boundEnvelope.continuation }
+                        : {}),
+                    warnings: buildSearchWarningDetails([
+                        ...(boundEnvelope.warnings?.map((warning) => warning.code) ?? []),
+                        WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE,
+                    ]),
+                };
+                return Buffer.byteLength(JSON.stringify(warnedEnvelope), "utf8")
+                    <= responseByteLimit
+                    ? warnedEnvelope
+                    : boundEnvelope;
+            };
             if (
                 preparedObservation
                 && this.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
@@ -4320,6 +4585,8 @@ export class ToolHandlers {
                 groupBy: input.groupBy,
                 resultMode: input.resultMode,
                 limit: input.limit,
+                disclosureLimit: retrievalPolicy.disclosureResultLimit,
+                includeResultIndex: input.includeResultIndex === true,
                 debugMode,
                 rankingMode: input.rankingMode,
                 semanticQuery,
@@ -4403,10 +4670,56 @@ export class ToolHandlers {
                         meta: { searchDiagnostics },
                     };
                 }
+                let exactEnvelope = exactFastPath.finalized.envelope;
+                if (
+                    (debugMode === 'freshness' || debugMode === 'full')
+                    && exactEnvelope.hints?.debugSearch
+                ) {
+                    exactEnvelope = {
+                        ...exactEnvelope,
+                        hints: {
+                            ...exactEnvelope.hints,
+                            debugSearch: {
+                                ...exactEnvelope.hints.debugSearch,
+                                readiness: structuredClone(readinessDebug),
+                            },
+                        },
+                    };
+                }
+                if (
+                    exactFastPath.finalized.kind === "ok"
+                    && exactEnvelope.resultMode === "grouped"
+                ) {
+                    if (vectorReceipt && preparedObservation) {
+                        exactEnvelope = attachSearchResultSet(
+                            exactEnvelope,
+                            exactFastPath.finalized.resultSet,
+                            false,
+                        );
+                    } else if (exactFastPath.finalized.resultSet) {
+                        const unboundEnvelope = { ...exactEnvelope };
+                        delete unboundEnvelope.continuation;
+                        delete unboundEnvelope.rankedSetDigest;
+                        delete unboundEnvelope.resultIndex;
+                        exactEnvelope = {
+                            ...unboundEnvelope,
+                            warnings: buildSearchWarningDetails([
+                                ...(exactEnvelope.warnings?.map((warning) => warning.code) ?? []),
+                                ...(exactEnvelope.continuation
+                                    ? [WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE]
+                                    : []),
+                                ...(input.includeResultIndex === true
+                                    ? [WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE]
+                                    : []),
+                            ]),
+                        };
+                    }
+                }
                 await this.touchWatchedCodebaseBestEffort(effectiveRoot);
                 this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
                 return {
-                    content: [{ type: "text", text: this.stringifyToolJson(exactFastPath.envelope) }],
+                    content: [{ type: "text", text: this.stringifyToolJson(exactEnvelope) }],
+                    ...(exactFastPath.finalized.kind === "page_too_large" ? { isError: true } : {}),
                     meta: {
                         searchDiagnostics: {
                             ...searchDiagnostics,
@@ -4562,6 +4875,44 @@ export class ToolHandlers {
                         : this.context.semanticSearch(request);
                 },
                 reranker: this.reranker,
+                ...(this.reranker?.getDocumentProjectionVersion?.()
+                    === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
+                    ? {
+                        buildRerankDocument: async (
+                            rerankQuery: string,
+                            result: SearchResultLike,
+                        ): Promise<string | undefined> => {
+                            if (!generationReceipt || navigationStatus !== "valid") {
+                                return undefined;
+                            }
+                            if (
+                                !searchSymbolRegistry
+                                || searchSymbolRegistryManifestHash
+                                    !== generationReceipt.navigation.symbolRegistryManifestHash
+                            ) {
+                                const registryState = await this.loadPreparedNavigationManifest(
+                                    preparedReadState,
+                                    readinessDebug.operations,
+                                );
+                                if (
+                                    registryState.status !== "ok"
+                                    || registryState.manifestHash
+                                        !== generationReceipt.navigation.symbolRegistryManifestHash
+                                ) {
+                                    return undefined;
+                                }
+                                searchSymbolRegistry = registryState.registry;
+                                searchSymbolRegistryManifestHash = registryState.manifestHash;
+                            }
+                            return buildPublicationBoundSearchRerankDocumentV2({
+                                codebaseRoot: effectiveRoot,
+                                semanticQuery: rerankQuery,
+                                result,
+                                registry: searchSymbolRegistry,
+                            });
+                        },
+                    }
+                    : {}),
                 shouldForceSearchPassFailure: (passId) => this.shouldForceSearchPassFailure(passId),
                 classifyEmbeddingProviderError,
                 classifyVectorBackendError,
@@ -4646,6 +4997,7 @@ export class ToolHandlers {
                 resultMode: input.resultMode,
                 limit: input.limit,
                 disclosureLimit: retrievalPolicy.disclosureResultLimit,
+                includeResultIndex: input.includeResultIndex === true,
                 rerankerResultLimit: retrievalPolicy.rerankerResultLimit,
                 debugMode,
                 rankingMode: input.rankingMode,
@@ -4688,6 +5040,7 @@ export class ToolHandlers {
                 now: this.now,
             });
             let envelope = finalized.envelope;
+            const initialPageTooLarge = finalized.kind === "page_too_large";
             let barrierChanged = false;
             if (preparedEntrypointOwnerEvidence) {
                 const finalizedEntrypointEvidence = await preparedEntrypointOwnerEvidence.finalize({
@@ -4741,66 +5094,19 @@ export class ToolHandlers {
                     meta: { searchDiagnostics },
                 };
             }
-            if (
-                finalized.resultSet
-                && envelope.resultMode === "grouped"
-                && envelope.continuation
-            ) {
-                if (!vectorReceipt || !preparedObservation) {
-                    throw new Error("Search continuation requires a proven publication and source observation.");
-                }
-                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(envelope);
-                const resultSpecificHints = baseEnvelopeDraft.hints;
-                delete baseEnvelopeDraft.results;
-                delete baseEnvelopeDraft.disclosure;
-                delete baseEnvelopeDraft.continuation;
-                delete baseEnvelopeDraft.recommendedNextAction;
-                delete baseEnvelopeDraft.hints;
-                const frozenHints = freezeContinuationHints(resultSpecificHints);
-                const baseEnvelope = {
-                    ...baseEnvelopeDraft,
-                    ...(frozenHints ? { hints: frozenHints } : {}),
-                } as FrozenSearchResultSet["baseEnvelope"];
-                const queryPolicyDigest = crypto.createHash("sha256").update(JSON.stringify([
-                    input.query,
-                    input.scope,
-                    input.groupBy,
-                    input.rankingMode,
-                    retrievalPolicy,
-                    queryPlan,
-                ]), "utf8").digest("hex");
-                const stored = this.searchContinuationCoordinator.store(this, {
-                    value: {
-                        canonicalRoot: effectiveRoot,
-                        vectorReceipt,
-                        ...(generationReceipt ? { generationReceipt } : {}),
-                        preparedObservation,
-                        sourceObservation: finalSourceObservation.sourceObservation,
-                        queryPolicyDigest,
-                        responseByteLimit: debugMode === "full"
-                            ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
-                            : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
-                        pageSize: retrievalPolicy.disclosureResultLimit,
-                        baseEnvelope,
-                        orderedResults: [...finalized.resultSet.orderedResults],
-                        recommendedActions: [...finalized.resultSet.recommendedActions],
-                    },
-                    nextOffset: finalized.resultSet.initialReturnedCount,
-                    nowMs: this.now(),
-                });
-                envelope = {
-                    ...envelope,
-                    continuation: {
-                        ...envelope.continuation,
-                        handle: stored.handle,
-                    },
-                };
+            if (finalized.kind === "ok" && envelope.resultMode === "grouped") {
+                envelope = attachSearchResultSet(
+                    envelope,
+                    finalized.resultSet,
+                    searchDiagnostics.rerankerUsed,
+                );
             }
 
             await this.touchWatchedCodebaseBestEffort(effectiveRoot);
             this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
             return {
                 content: [{ type: "text", text: this.stringifyToolJson(envelope) }],
+                ...(initialPageTooLarge ? { isError: true } : {}),
                 meta: { searchDiagnostics }
             };
         } catch (error) {
@@ -4900,22 +5206,22 @@ export class ToolHandlers {
         if (
             !Number.isSafeInteger(expectedOffset)
             || expectedOffset < 0
-            || expectedOffset > this.capabilities.getMaxSearchLimit()
+            || expectedOffset > this.capabilities.getMaxFrozenSearchResults()
         ) {
             return fail(
                 "SEARCH_RESULT_SET_OFFSET_INVALID",
-                `Search continuation expectedOffset must be an integer from 0 to ${this.capabilities.getMaxSearchLimit()}.`,
+                `Search continuation expectedOffset must be an integer from 0 to ${this.capabilities.getMaxFrozenSearchResults()}.`,
             );
         }
         if (
             args.limit !== undefined
             && (!Number.isSafeInteger(requestedLimit)
                 || requestedLimit <= 0
-                || requestedLimit > this.capabilities.getMaxSearchLimit())
+                || requestedLimit > this.capabilities.getMaxSearchPageSize())
         ) {
             return fail(
                 "SEARCH_RESULT_SET_LIMIT_INVALID",
-                `Search continuation limit must be an integer from 1 to ${this.capabilities.getMaxSearchLimit()}.`,
+                `Search continuation limit must be an integer from 1 to ${this.capabilities.getMaxSearchPageSize()}.`,
             );
         }
 
@@ -4935,6 +5241,44 @@ export class ToolHandlers {
         }
 
         const entry = lookup.entry;
+        let bindingValid = false;
+        try {
+            const rerankerIdentity = resolveSearchRerankerBindingIdentity(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
+            const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
+            bindingValid = entry.baseEnvelope.rankedSetDigest
+                === entry.rankedSetBinding.rankedSetDigest
+                && verifySearchRankedSetBinding(
+                    entry.rankedSetBinding,
+                    buildFrozenSearchRankedSetBindingInput({
+                        vectorReceipt: entry.vectorReceipt,
+                        ...(entry.generationReceipt
+                            ? { generationReceipt: entry.generationReceipt }
+                            : {}),
+                        preparedObservation: entry.preparedObservation,
+                        sourceObservation: entry.sourceObservation,
+                        queryPolicyDigest: entry.queryPolicyDigest,
+                        rerankerIdentity,
+                        rerankerProjectionIdentity,
+                        orderedResults: entry.orderedResults,
+                        recommendedActions: entry.recommendedActions,
+                    }),
+                );
+        } catch {
+            bindingValid = false;
+        }
+        if (!bindingValid) {
+            this.searchContinuationCoordinator.remove(handle);
+            return fail(
+                "SEARCH_RESULT_SET_STALE",
+                "Search result-set identity changed. Run search_codebase again.",
+            );
+        }
         const observationBefore = this.getPreparedReadCacheObservation(entry.canonicalRoot);
         const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
         if (
@@ -4991,6 +5335,18 @@ export class ToolHandlers {
             maxResponseBytes: entry.responseByteLimit,
             includeSummary: true,
             buildEnvelope: (results, disclosure) => {
+                const resultCounts = entry.baseEnvelope.resultCounts
+                    ? {
+                        ...entry.baseEnvelope.resultCounts,
+                        returnedGroupCount: results.length,
+                        remainingGroupCount: Math.max(
+                            0,
+                            entry.baseEnvelope.resultCounts.effectiveFrozenTotal
+                                - lookup.nextOffset
+                                - results.length,
+                        ),
+                    }
+                    : undefined;
                 const recommendedNextAction = entry.recommendedActions[lookup.nextOffset] ?? null;
                 const noiseMitigationHint = this.searchQuerySupport.buildNoiseMitigationHint(
                     entry.canonicalRoot,
@@ -5019,24 +5375,26 @@ export class ToolHandlers {
                 };
                 const envelope: SearchGroupedResponseEnvelope = {
                     ...entry.baseEnvelope,
+                    ...(resultCounts ? { resultCounts } : {}),
                     ...(Object.keys(pageHints).length > 0 ? { hints: pageHints } : {}),
                     ...(recommendedNextAction ? { recommendedNextAction } : {}),
                     ...(disclosure ? { disclosure } : {}),
                     results: [...results],
                 };
-                return results.length < remainingResults.length
+                return (resultCounts?.remainingGroupCount ?? (remainingResults.length - results.length)) > 0
                     ? {
                         ...envelope,
                         continuation: {
                             handle,
                             nextOffset: lookup.nextOffset + results.length,
-                            remainingGroupCount: remainingResults.length - results.length,
+                            remainingGroupCount: resultCounts?.remainingGroupCount
+                                ?? (remainingResults.length - results.length),
                         },
                     }
                     : envelope;
             },
         });
-        if (projection.results.length === 0) {
+        if (projection.status === "page_too_large") {
             return fail("SEARCH_RESULT_SET_PAGE_TOO_LARGE", "The next search result cannot fit within the response byte budget. Use read_file on an earlier target or run a narrower search.");
         }
         const proofAfterProjection = await revalidate.call(

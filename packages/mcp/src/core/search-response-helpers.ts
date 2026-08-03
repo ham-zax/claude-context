@@ -171,6 +171,24 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Use a narrower path: query or debug search evidence to inspect malformed backend metadata.",
         };
     }
+    if (code === WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE) {
+        return {
+            code,
+            severity: "caution",
+            blocksUse: false,
+            message: "The initial results are valid, but the complete frozen result set exceeds the continuation cache entry budget.",
+            action: "Run a narrower search to create a pageable result set; no continuation handle was issued.",
+        };
+    }
+    if (code === WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE) {
+        return {
+            code,
+            severity: "caution",
+            blocksUse: false,
+            message: "The full search results are valid, but the optional compact result index could not fit its UTF-8 response budget.",
+            action: "Use the disclosed results and continue_search pages; no result order or group was removed to make room for the index.",
+        };
+    }
     if (code.startsWith("SEARCH_PARTIAL_INDEX:")) {
         return {
             code,

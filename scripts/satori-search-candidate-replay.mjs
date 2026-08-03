@@ -20,6 +20,10 @@ import {
 } from "../packages/mcp/src/core/search-group-results.ts";
 import { projectGroupedDisclosure } from "../packages/mcp/src/core/search-disclosure.ts";
 import { canonicalJson } from "./satori-useful-context.mjs";
+import {
+    bindTrackOHeldOutOpening,
+    readTrackOHeldOutOpeningRecord,
+} from "./satori-track-o-heldout-opening.mjs";
 
 const CORE_RRF_K = 100;
 const SCORE_TOLERANCE = 1e-12;
@@ -1532,6 +1536,7 @@ function replayTaskCapture(capture) {
         return {
             taskId: record.taskId,
             ...(record.split ? { split: record.split } : {}),
+            ...(record.safetyControls ? { safetyControls: [...record.safetyControls] } : {}),
             route: {
                 kind: "exact_registry",
                 fusionReplay: "not_applicable",
@@ -1634,6 +1639,7 @@ function replayTaskCapture(capture) {
     return {
         taskId: record.taskId,
         ...(record.split ? { split: record.split } : {}),
+        ...(record.safetyControls ? { safetyControls: [...record.safetyControls] } : {}),
         route: { kind: "fusion", fusionReplay: "exact" },
         policyAffected: true,
         corePasses,
@@ -1653,6 +1659,12 @@ function replayTaskCapture(capture) {
             },
         } : {}),
         ...(groupingDisclosure ? { groupingDisclosure } : {}),
+        ...(groupingDisclosure ? {
+            frozenPagination: buildFrozenPaginationReplay(
+                groupingDisclosure,
+                record.queryPlan.invocationArgs.disclosureLimit,
+            ),
+        } : {}),
     };
 }
 
@@ -1827,9 +1839,64 @@ export function applyFrozenNeuralOrder(localScoring, neuralRanking, {
     };
 }
 
-function validateNeuralScoreArtifact(value) {
+export function buildFrozenPaginationReplay(groupingDisclosure, pageSize) {
+    const disclosureOrder = requireArray(
+        groupingDisclosure?.disclosureOrder,
+        "Frozen pagination disclosure order",
+    );
+    const disclosedResults = requireArray(
+        groupingDisclosure?.disclosedResults,
+        "Frozen pagination disclosed results",
+    );
+    const normalizedPageSize = requirePositiveInteger(pageSize, "Frozen pagination page size");
+    const orderedGroups = disclosureOrder.map((group, index) => {
+        const record = requireRecord(group, `Frozen pagination group ${index + 1}`);
+        return {
+            rank: record.rank,
+            ownerId: requireString(record.ownerId, `Frozen pagination group ${index + 1} ownerId`),
+            candidateIds: [...requireArray(
+                record.candidateIds,
+                `Frozen pagination group ${index + 1} candidateIds`,
+            )],
+            score: requireNonNegativeFinite(
+                record.score,
+                `Frozen pagination group ${index + 1} score`,
+            ),
+        };
+    });
+    const disclosedOwnerIds = disclosedResults.map((group, index) => requireString(
+        group?.ownerId,
+        `Frozen pagination disclosed group ${index + 1} ownerId`,
+    ));
+    const expectedInitialOwnerIds = orderedGroups
+        .slice(0, disclosedOwnerIds.length)
+        .map(({ ownerId }) => ownerId);
+    if (canonicalJson(disclosedOwnerIds) !== canonicalJson(expectedInitialOwnerIds)) {
+        throw new Error("Frozen pagination initial disclosure is not a grouped-order prefix.");
+    }
+    const pages = [];
+    for (let offset = 0; offset < orderedGroups.length; offset += normalizedPageSize) {
+        pages.push({
+            offset,
+            ownerIds: orderedGroups
+                .slice(offset, offset + normalizedPageSize)
+                .map(({ ownerId }) => ownerId),
+        });
+    }
+    return {
+        pageSize: normalizedPageSize,
+        orderedGroupDigest: sha256Canonical(orderedGroups),
+        initialDisclosureOwnerIds: disclosedOwnerIds,
+        pages,
+        additionalRerankerCalls: 0,
+    };
+}
+
+export function validateNeuralScoreArtifact(value) {
     const artifact = requireRecord(value, "Neural score artifact");
-    if (artifact.schemaVersion !== "satori_search_ranking_r3_scores_v1") {
+    const legacy = artifact.schemaVersion === "satori_search_ranking_r3_scores_v1";
+    const trackL = artifact.schemaVersion === "satori_search_ranking_track_l_scores_v2";
+    if (!legacy && !trackL) {
         throw new Error("Neural score artifact schema is unsupported.");
     }
     const suppliedDigest = requireSha256(artifact.sha256, "Neural score artifact sha256");
@@ -1837,15 +1904,47 @@ function validateNeuralScoreArtifact(value) {
     if (sha256Canonical(unsignedArtifact) !== suppliedDigest) {
         throw new Error("Neural score artifact digest does not match its contents.");
     }
-    if (!["D-L16", "D-L32"].includes(artifact.contenderId)) {
+    if (legacy && !["D-L16", "D-L32"].includes(artifact.contenderId)) {
         throw new Error("Neural score artifact contender is unsupported.");
     }
+    if (trackL) {
+        const match = /^projection-v([12])-d-l(16|32|50)$/.exec(artifact.contenderId);
+        if (!match || Number(match[2]) !== artifact.candidateDepth) {
+            throw new Error("Track L contender and candidate depth are incompatible.");
+        }
+        const expectedProjection = `search_rerank_document_v${match[1]}`;
+        if (artifact.contract?.projectionVersion !== expectedProjection) {
+            throw new Error("Track L contender and projection identity are incompatible.");
+        }
+        requireSha256(artifact.contract?.manifestSeal, "Track L manifest seal");
+        requireArray(artifact.captures, "Track L score captures");
+        requireArray(artifact.tasks, "Track L score tasks");
+    }
     return artifact;
+}
+
+export function assertTrackLNeuralAuthority(artifact, options) {
+    if (artifact.schemaVersion !== "satori_search_ranking_track_l_scores_v2") return;
+    const expectedManifestSeal = requireSha256(
+        options?.expectedManifestSeal,
+        "Expected Track L manifest seal",
+    );
+    if (artifact.contract.manifestSeal !== expectedManifestSeal) {
+        throw new Error("Neural score artifact does not match the expected Track L manifest seal.");
+    }
+    const allowedContenderIds = requireArray(
+        options?.allowedContenderIds,
+        "Allowed Track L contender IDs",
+    );
+    if (!allowedContenderIds.includes(artifact.contenderId)) {
+        throw new Error(`Neural score artifact contender '${artifact.contenderId}' is not allowed.`);
+    }
 }
 
 export function replayNeuralCandidateCapture(captureValue, neuralValue, options = {}) {
     const capture = requireRecord(captureValue, "Candidate capture");
     const neural = validateNeuralScoreArtifact(neuralValue);
+    assertTrackLNeuralAuthority(neural, options);
     const baseline = replayBaselineCandidateCapture(capture, {
         requireNeuralDisabled: true,
         requireGroupingReady: true,
@@ -1879,6 +1978,9 @@ export function replayNeuralCandidateCapture(captureValue, neuralValue, options 
             return {
                 taskId: taskCapture.taskId,
                 split: taskCapture.split,
+                ...(taskCapture.safetyControls ? {
+                    safetyControls: [...taskCapture.safetyControls],
+                } : {}),
                 queryClass: taskCapture.queryClass,
                 language: taskCapture.language,
                 expected: taskCapture.expected,
@@ -1945,9 +2047,16 @@ export function replayNeuralCandidateCapture(captureValue, neuralValue, options 
             adjusted,
             { assertBaseline: false },
         );
+        const frozenPagination = buildFrozenPaginationReplay(
+            groupingDisclosure,
+            taskCapture.queryPlan.invocationArgs.disclosureLimit,
+        );
         return {
             taskId: taskCapture.taskId,
             split: taskCapture.split,
+            ...(taskCapture.safetyControls ? {
+                safetyControls: [...taskCapture.safetyControls],
+            } : {}),
             queryClass: taskCapture.queryClass,
             language: taskCapture.language,
             expected: taskCapture.expected,
@@ -1975,6 +2084,7 @@ export function replayNeuralCandidateCapture(captureValue, neuralValue, options 
                 removed: adjusted.removed,
             }],
             groupingDisclosure,
+            frozenPagination,
             invariants: {
                 candidateMembershipIdentityEqual: true,
                 eligibilityIdentityEqual: true,
@@ -2025,6 +2135,9 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
             return {
                 taskId: taskCapture.taskId,
                 ...(taskCapture.split ? { split: taskCapture.split } : {}),
+                ...(taskCapture.safetyControls ? {
+                    safetyControls: [...taskCapture.safetyControls],
+                } : {}),
                 queryClass: taskCapture.queryClass,
                 language: taskCapture.language,
                 expected: taskCapture.expected,
@@ -2132,6 +2245,9 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
         return {
             taskId: taskCapture.taskId,
             ...(taskCapture.split ? { split: taskCapture.split } : {}),
+            ...(taskCapture.safetyControls ? {
+                safetyControls: [...taskCapture.safetyControls],
+            } : {}),
             queryClass: taskCapture.queryClass,
             language: taskCapture.language,
             expected: taskCapture.expected,
@@ -2196,6 +2312,12 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
                 inputUtf8Bytes: rerankerAdmission.inputUtf8Bytes,
             },
             ...(groupingDisclosure ? { groupingDisclosure } : {}),
+            ...(groupingDisclosure ? {
+                frozenPagination: buildFrozenPaginationReplay(
+                    groupingDisclosure,
+                    taskCapture.queryPlan.invocationArgs.disclosureLimit,
+                ),
+            } : {}),
         };
     });
     const groupingIncompleteTasks = selectedCaptures
@@ -2244,7 +2366,7 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
 }
 
 function usage() {
-    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
+    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--held-out-opening <opening.json>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -2252,6 +2374,7 @@ export function main(argv = process.argv.slice(2)) {
     let policyFile;
     let split;
     let taskPrefix;
+    let heldOutOpeningFile;
     let outFile;
     let requireGroupingReady = false;
     let requireNeuralDisabled = false;
@@ -2260,6 +2383,9 @@ export function main(argv = process.argv.slice(2)) {
         else if (argv[index] === "--policy-file") policyFile = path.resolve(argv[++index]);
         else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--task-prefix") taskPrefix = argv[++index];
+        else if (argv[index] === "--held-out-opening") {
+            heldOutOpeningFile = path.resolve(argv[++index]);
+        }
         else if (argv[index] === "--require-grouping-ready") requireGroupingReady = true;
         else if (argv[index] === "--require-neural-disabled") requireNeuralDisabled = true;
         else if (argv[index] === "--out") outFile = path.resolve(argv[++index]);
@@ -2270,11 +2396,25 @@ export function main(argv = process.argv.slice(2)) {
     }
     if (!captureFile) throw new Error("--capture is required.");
     const capture = JSON.parse(fs.readFileSync(captureFile, "utf8"));
+    const selectedSplit = split ?? "all";
+    const requiresHeldOutOpening = capture.taskSuiteVersion === 2
+        && selectedSplit !== "tuning"
+        && Array.isArray(capture.captures)
+        && capture.captures.some((taskCapture) => taskCapture?.split === "held_out");
+    if (requiresHeldOutOpening && !heldOutOpeningFile) {
+        throw new Error("Held-out or mixed-split replay requires --held-out-opening.");
+    }
+    const heldOutOpening = requiresHeldOutOpening
+        ? readTrackOHeldOutOpeningRecord(heldOutOpeningFile)
+        : null;
+    if (heldOutOpening && capture.heldOutOpeningSha256 !== heldOutOpening.sha256) {
+        throw new Error("Held-out capture is not bound to the supplied opening record.");
+    }
     const policySourceBytes = policyFile ? fs.readFileSync(policyFile) : undefined;
     const policy = policySourceBytes
         ? JSON.parse(policySourceBytes.toString("utf8"))
         : "baseline";
-    const replay = replayCandidateCapture(capture, policy, {
+    const builtReplay = replayCandidateCapture(capture, policy, {
         ...(split !== undefined ? { split } : {}),
         ...(taskPrefix !== undefined ? { taskPrefix } : {}),
         requireGroupingReady,
@@ -2282,6 +2422,9 @@ export function main(argv = process.argv.slice(2)) {
         ...(policySourceBytes ? { policySourceBytes } : {}),
         ...(policyFile ? { policySourceFileName: policyFile } : {}),
     });
+    const replay = heldOutOpening
+        ? bindTrackOHeldOutOpening(builtReplay, heldOutOpening)
+        : builtReplay;
     const serialized = `${JSON.stringify(replay, null, 2)}\n`;
     if (outFile) fs.writeFileSync(outFile, serialized);
     else process.stdout.write(serialized);

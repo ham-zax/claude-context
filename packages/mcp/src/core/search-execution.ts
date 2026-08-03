@@ -21,6 +21,7 @@ import type {
     SearchFreshnessSummary,
     SearchOperatorSummary,
     SearchProviderWorkDebugHint,
+    SearchRerankerOperationalReason,
 } from "./search-types.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
 import {
@@ -73,6 +74,24 @@ type SearchPassId = "primary" | "expanded";
 type BackendScoreKind = "dense_similarity" | "lexical_rank" | "rrf_fusion" | "unknown";
 type ChangedFilesState = { available: boolean; files: Set<string> };
 const SEARCH_EXPANSION_MIN_PRIMARY_SCOPED_CANDIDATES = 5;
+const LATEON_OPERATIONAL_REASONS = new Set<SearchRerankerOperationalReason>([
+    "lateon_not_ready",
+    "lateon_capacity_fallback",
+    "lateon_queue_timeout",
+    "lateon_execution_timeout",
+    "lateon_cancelled",
+    "lateon_invalid_output",
+    "lateon_worker_failure",
+]);
+
+function resolveLateOnOperationalReason(error: unknown): SearchRerankerOperationalReason | undefined {
+    if (!error || typeof error !== "object" || !("reason" in error)) return undefined;
+    const reason = (error as { reason?: unknown }).reason;
+    return typeof reason === "string"
+        && LATEON_OPERATIONAL_REASONS.has(reason as SearchRerankerOperationalReason)
+        ? reason as SearchRerankerOperationalReason
+        : undefined;
+}
 
 export type SearchExpansionReason =
     | "lexical_route"
@@ -310,7 +329,8 @@ export type SearchExecutionOutcome =
         rerankerAttempted: boolean;
         rerankerApplied: boolean;
         skippedByExactPin: boolean;
-        rerankerFailurePhase?: "api_call" | "parse_results";
+        rerankerFailurePhase?: "document_projection" | "api_call" | "parse_results";
+        rerankerOperationalReason?: SearchRerankerOperationalReason;
         rerankerCandidatesIn: number;
         rerankerCandidatesReranked: number;
         rerankerFamilyCount: number;
@@ -349,6 +369,10 @@ export type SearchExecutionHost = {
         diagnosticLexicalFallbackTerms?: string[];
     }) => Promise<SemanticSearchResult[] | SemanticSearchExecutionResult>;
     reranker: Reranker | null;
+    buildRerankDocument?: (
+        semanticQuery: string,
+        result: SearchResultLike,
+    ) => Promise<string | undefined>;
     shouldForceSearchPassFailure: (passId: SearchPassId) => boolean;
     classifyEmbeddingProviderError: (error: unknown) => EmbeddingProviderDiagnostic | null;
     classifyVectorBackendError: (error: unknown) => VectorBackendDiagnostic | null;
@@ -380,7 +404,8 @@ type RerankPhaseResult = {
     rerankerAttempted: boolean;
     rerankerApplied: boolean;
     skippedByExactPin: boolean;
-    rerankerFailurePhase?: 'api_call' | 'parse_results';
+    rerankerFailurePhase?: 'document_projection' | 'api_call' | 'parse_results';
+    rerankerOperationalReason?: SearchRerankerOperationalReason;
     rerankerCandidatesIn: number;
     rerankerCandidatesReranked: number;
     rerankerFamilyCount: number;
@@ -404,7 +429,15 @@ async function rerankSearchCandidates(
     let exactMatchPinningApplied = initialExactMatchPinningApplied;
     let rerankerApplied = false;
     let rerankerAttempted = false;
-    let rerankerFailurePhase: 'api_call' | 'parse_results' | undefined;
+    let rerankerFailurePhase: 'document_projection' | 'api_call' | 'parse_results' | undefined;
+    let rerankerOperationalReason: SearchRerankerOperationalReason | undefined;
+    const lateOnProvider = (() => {
+        try {
+            return host.reranker?.getIdentity().provider === "lateon";
+        } catch {
+            return false;
+        }
+    })();
     const rerankerCandidatesIn = scored.length;
     let rerankerCandidatesReranked = 0;
     let rerankerFamilyCount = 0;
@@ -443,9 +476,21 @@ async function rerankSearchCandidates(
             rerankerBudgetReason = providerBoundedSelection.length < selection.selected.length
                 ? "provider_limit"
                 : selection.budgetReason;
-            const selectedDocuments = providerBoundedSelection.map((candidate) => (
-                host.searchQuerySupport.buildRerankDocument(candidate.result)
-            ));
+            let selectedDocuments: string[];
+            try {
+                selectedDocuments = await Promise.all(providerBoundedSelection.map(async (candidate) => {
+                    const document = host.buildRerankDocument
+                        ? await host.buildRerankDocument(input.semanticQuery, candidate.result)
+                        : host.searchQuerySupport.buildRerankDocument(candidate.result);
+                    if (typeof document !== "string" || document.length === 0) {
+                        throw new Error("reranker_document_projection_unavailable");
+                    }
+                    return document;
+                }));
+            } catch {
+                rerankerFailurePhase = "document_projection";
+                throw new Error("reranker_document_projection_failed");
+            }
             const byteSelection = selectRerankInputWithinUtf8Budget({
                 candidates: providerBoundedSelection,
                 documents: selectedDocuments,
@@ -499,8 +544,9 @@ async function rerankSearchCandidates(
                         )),
                     }),
                 );
-            } catch {
+            } catch (error) {
                 rerankerFailurePhase = 'api_call';
+                rerankerOperationalReason = resolveLateOnOperationalReason(error);
                 throw new Error('reranker_api_call_failed');
             }
 
@@ -554,6 +600,9 @@ async function rerankSearchCandidates(
                 input.parsedOperators.must.length > 0,
             ) || exactMatchPinningApplied;
             rerankerApplied = rerankerUpdatedCandidates > 0;
+            if (rerankerApplied && lateOnProvider) {
+                rerankerOperationalReason = "lateon_applied";
+            }
         } catch {
             rerankerFailurePhase ||= 'parse_results';
         }
@@ -565,6 +614,7 @@ async function rerankSearchCandidates(
         rerankerApplied,
         skippedByExactPin,
         rerankerFailurePhase,
+        rerankerOperationalReason,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -1287,6 +1337,7 @@ export async function runSearchExecution(
         rerankerApplied,
         skippedByExactPin,
         rerankerFailurePhase,
+        rerankerOperationalReason,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -1356,6 +1407,7 @@ export async function runSearchExecution(
         rerankerApplied,
         skippedByExactPin,
         rerankerFailurePhase,
+        rerankerOperationalReason,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,

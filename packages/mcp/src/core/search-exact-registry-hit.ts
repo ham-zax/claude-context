@@ -11,13 +11,16 @@ import type {
 } from "./search-navigation.js";
 import {
     buildGroupedSearchEnvelope,
+    projectGroupedResultV2,
 } from "./search-response-envelopes.js";
 import {
+    buildSearchGroupRecommendedAction,
     buildSearchSpanWarningCodes,
 } from "./search-response-helpers.js";
 import type {
     SearchDebugMode,
     SearchFreshnessSummary,
+    SearchGroupedResponseEnvelope,
     SearchResponseHints,
     SearchResponseEnvelope,
     SearchSpan,
@@ -27,6 +30,15 @@ import type { FreshnessDecision } from "./sync.js";
 import { WARNING_CODES } from "./warnings.js";
 import { appendGroupedCandidateStage } from "./search-candidate-survival.js";
 import type { SearchCandidateSurvivalDebug } from "./search-types.js";
+import {
+    projectGroupedDisclosure,
+    resolveSearchGroupedResultCounts,
+} from "./search-disclosure.js";
+import {
+    SEARCH_RESULT_SET_DIGEST_PLACEHOLDER,
+    SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
+} from "./search-constants.js";
+import type { FinalizedSearchResults } from "./search-result-finalization.js";
 
 export type BuildExactRegistryHitEnvelopeInput = {
     codebaseRoot: string;
@@ -35,6 +47,9 @@ export type BuildExactRegistryHitEnvelopeInput = {
     scope: SearchResponseEnvelope["scope"];
     groupBy: SearchResponseEnvelope["groupBy"];
     limit: number;
+    disclosureLimit: number;
+    includeResultIndex: boolean;
+    maxResponseBytes: number;
     freshnessDecision: FreshnessDecision;
     freshnessSummary: SearchFreshnessSummary;
     proofDebugHint?: CompletionProbeDebugHint;
@@ -86,7 +101,7 @@ function buildExactRegistryWarnings(input: {
 
 export function buildExactRegistryHitEnvelope(
     input: BuildExactRegistryHitEnvelopeInput,
-): SearchResponseEnvelope | undefined {
+): FinalizedSearchResults | undefined {
     const repairedMatches = input.matches.map((match) => ({
         ...match,
         repair: repairSourceBackedPythonSpan({
@@ -126,33 +141,110 @@ export function buildExactRegistryHitEnvelope(
     }
     if (input.candidateSurvival) {
         appendGroupedCandidateStage(input.candidateSurvival, "grouped", visibleGroupedResults);
-        appendGroupedCandidateStage(input.candidateSurvival, "disclosed", visibleGroupedResults);
     }
-    const noiseMitigationHint = input.buildNoiseMitigationHint(
-        visibleGroupedResults.map((result) => result.target.file),
-    );
-    const generatedArtifactsHint = input.buildGeneratedArtifactsVerificationHint(
-        visibleGroupedResults.map((result) => ({
-            file: result.target.file,
-            span: result.target.span,
-        })),
-    );
-    return buildGroupedSearchEnvelope({
-        codebaseRoot: input.codebaseRoot,
-        absolutePath: input.absolutePath,
-        query: input.query,
-        scope: input.scope,
-        groupBy: input.groupBy,
-        limit: input.limit,
-        debugMode: input.debugMode,
-        freshnessDecision: input.freshnessDecision,
-        freshnessSummary: input.freshnessSummary,
-        warnings: finalizedSearchWarnings,
-        ...(input.debugSummary ? { debugSummary: input.debugSummary } : {}),
-        ...(input.debugSearch ? { debugSearch: input.debugSearch } : {}),
-        proofDebugHint: input.proofDebugHint,
-        noiseMitigationHint,
-        generatedArtifactsHint,
-        results: visibleGroupedResults,
+    const frozenCounts = resolveSearchGroupedResultCounts({
+        requestedTotal: input.limit,
+        availableGroupCount: visibleGroupedResults.length,
+        returnedGroupCount: 0,
     });
+    const eligibleResults = visibleGroupedResults.slice(0, frozenCounts.effectiveFrozenTotal);
+    const projection = projectGroupedDisclosure({
+        orderedResults: visibleGroupedResults,
+        callerLimit: frozenCounts.effectiveFrozenTotal,
+        disclosureLimit: input.disclosureLimit,
+        maxResponseBytes: input.maxResponseBytes,
+        includeSummary: input.disclosureLimit < frozenCounts.effectiveFrozenTotal
+            || visibleGroupedResults.length > frozenCounts.effectiveFrozenTotal,
+        buildEnvelope: (results, disclosure) => {
+            const resultCounts = resolveSearchGroupedResultCounts({
+                requestedTotal: input.limit,
+                availableGroupCount: visibleGroupedResults.length,
+                returnedGroupCount: results.length,
+            });
+            const projectedDebugSearch = input.debugSearch && input.candidateSurvival
+                ? (() => {
+                    const debugSearch = structuredClone(input.debugSearch);
+                    const candidateSurvival = structuredClone(input.candidateSurvival);
+                    candidateSurvival.stages = candidateSurvival.stages.filter(
+                        (stage) => stage.stage !== "disclosed",
+                    );
+                    appendGroupedCandidateStage(candidateSurvival, "disclosed", results);
+                    return { ...debugSearch, candidateSurvival };
+                })()
+                : input.debugSearch;
+            const noiseMitigationHint = input.buildNoiseMitigationHint(
+                results.map((result) => result.target.file),
+            );
+            const generatedArtifactsHint = input.buildGeneratedArtifactsVerificationHint(
+                results.map((result) => ({
+                    file: result.target.file,
+                    span: result.target.span,
+                })),
+            );
+            const envelope = buildGroupedSearchEnvelope({
+                codebaseRoot: input.codebaseRoot,
+                absolutePath: input.absolutePath,
+                query: input.query,
+                scope: input.scope,
+                groupBy: input.groupBy,
+                limit: input.limit,
+                debugMode: input.debugMode,
+                freshnessDecision: input.freshnessDecision,
+                freshnessSummary: input.freshnessSummary,
+                warnings: resultCounts.remainingGroupCount > 0
+                    ? [
+                        ...finalizedSearchWarnings,
+                        WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+                    ]
+                    : finalizedSearchWarnings,
+                ...(input.debugSummary ? { debugSummary: input.debugSummary } : {}),
+                ...(projectedDebugSearch ? { debugSearch: projectedDebugSearch } : {}),
+                proofDebugHint: input.proofDebugHint,
+                noiseMitigationHint,
+                generatedArtifactsHint,
+                resultCounts,
+                ...(disclosure ? { disclosure } : {}),
+                results: [...results],
+            }) as SearchGroupedResponseEnvelope;
+            return resultCounts.remainingGroupCount > 0
+                ? {
+                    ...envelope,
+                    rankedSetDigest: SEARCH_RESULT_SET_DIGEST_PLACEHOLDER,
+                    continuation: {
+                        handle: SEARCH_RESULT_SET_HANDLE_PLACEHOLDER,
+                        nextOffset: results.length,
+                        remainingGroupCount: resultCounts.remainingGroupCount,
+                    },
+                }
+                : envelope;
+        },
+    });
+    if (projection.status === "page_too_large") {
+        const authorityEnvelope = { ...projection.envelope };
+        delete authorityEnvelope.continuation;
+        return {
+            kind: "page_too_large",
+            envelope: {
+                ...authorityEnvelope,
+                status: "not_ready",
+                code: "SEARCH_RESULT_SET_PAGE_TOO_LARGE",
+                message: "The first search result cannot fit within the response byte budget. Run a narrower search.",
+                results: [],
+            },
+        };
+    }
+    const resultSet = projection.envelope.continuation || input.includeResultIndex
+        ? {
+            orderedResults: eligibleResults.map(projectGroupedResultV2),
+            recommendedActions: eligibleResults.map((result) => (
+                buildSearchGroupRecommendedAction(input.codebaseRoot, result) ?? null
+            )),
+            initialReturnedCount: projection.results.length,
+        }
+        : undefined;
+    return {
+        kind: "ok",
+        envelope: projection.envelope,
+        ...(resultSet ? { resultSet } : {}),
+    };
 }

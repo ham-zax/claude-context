@@ -5,6 +5,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { canonicalJson } from "./satori-useful-context.mjs";
+import {
+    bindTrackOHeldOutOpening,
+    readTrackOHeldOutOpeningRecord,
+} from "./satori-track-o-heldout-opening.mjs";
 
 function isRecord(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -354,7 +358,7 @@ export function compareCandidateScores(baseline, contender) {
 }
 
 function usage() {
-    return "Usage: node scripts/satori-search-candidate-score.mjs --capture <capture.json> [--replay <replay.json>] [--split <tuning|held_out|all> | --split-prefix <tuning|validation|all>] [--out <score.json>]";
+    return "Usage: node scripts/satori-search-candidate-score.mjs --capture <capture.json> [--replay <replay.json>] [--split <tuning|held_out|all> | --split-prefix <tuning|validation|all>] [--held-out-opening <opening.json>] [--out <score.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -362,12 +366,16 @@ export function main(argv = process.argv.slice(2)) {
     let replayFile;
     let split;
     let splitPrefix;
+    let heldOutOpeningFile;
     let outFile;
     for (let index = 0; index < argv.length; index += 1) {
         if (argv[index] === "--capture") captureFile = path.resolve(argv[++index]);
         else if (argv[index] === "--replay") replayFile = path.resolve(argv[++index]);
         else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--split-prefix") splitPrefix = argv[++index];
+        else if (argv[index] === "--held-out-opening") {
+            heldOutOpeningFile = path.resolve(argv[++index]);
+        }
         else if (argv[index] === "--out") outFile = path.resolve(argv[++index]);
         else if (argv[index] === "--help") {
             process.stdout.write(`${usage()}\n`);
@@ -379,9 +387,27 @@ export function main(argv = process.argv.slice(2)) {
         throw new Error("--split and --split-prefix are mutually exclusive.");
     }
     const capture = JSON.parse(fs.readFileSync(captureFile, "utf8"));
+    const selectedSplit = split ?? "all";
+    const requiresHeldOutOpening = capture.taskSuiteVersion === 2
+        && selectedSplit !== "tuning"
+        && Array.isArray(capture.captures)
+        && capture.captures.some((taskCapture) => taskCapture?.split === "held_out");
+    if (requiresHeldOutOpening && !heldOutOpeningFile) {
+        throw new Error("Held-out or mixed-split score requires --held-out-opening.");
+    }
+    const heldOutOpening = requiresHeldOutOpening
+        ? readTrackOHeldOutOpeningRecord(heldOutOpeningFile)
+        : null;
+    if (heldOutOpening && capture.heldOutOpeningSha256 !== heldOutOpening.sha256) {
+        throw new Error("Held-out capture is not bound to the supplied opening record.");
+    }
     const replay = replayFile
         ? JSON.parse(fs.readFileSync(replayFile, "utf8"))
         : null;
+    if (heldOutOpening && replay
+        && replay.heldOutOpeningSha256 !== heldOutOpening.sha256) {
+        throw new Error("Held-out replay is not bound to the supplied opening record.");
+    }
     if (replay && replay.sourceCaptureSha256 !== capture.sha256) {
         throw new Error("Candidate replay is not bound to the supplied capture.");
     }
@@ -399,6 +425,7 @@ export function main(argv = process.argv.slice(2)) {
         };
         output = { ...output, sha256: sha256Canonical(output) };
     }
+    if (heldOutOpening) output = bindTrackOHeldOutOpening(output, heldOutOpening);
     const serialized = `${JSON.stringify(output, null, 2)}\n`;
     if (outFile) fs.writeFileSync(outFile, serialized);
     else process.stdout.write(serialized);

@@ -9,6 +9,7 @@ import { CapabilityResolver } from "../core/capabilities.js";
 import { CallGraphSidecarManager } from "../core/call-graph.js";
 import {
     SearchContinuationCoordinator,
+    SearchContinuationCoordinatorPool,
     ToolHandlers,
 } from "../core/handlers.js";
 import { MutationLeaseCoordinator } from "../core/mutation-lease.js";
@@ -112,6 +113,7 @@ export class SharedRuntimeHost {
     private readonly mutationLeaseCoordinator: MutationLeaseCoordinator;
     private readonly localContext: ReturnType<typeof createLocalOnlyContext>;
     private readonly localSyncManager: SyncManager;
+    private readonly searchContinuationPool = new SearchContinuationCoordinatorPool();
     private readonly recoveryHandlers: ToolHandlers;
     private readonly providerRuntime: ProviderRuntime;
     private readonly readFileMaxLines: number;
@@ -170,7 +172,7 @@ export class SharedRuntimeHost {
             undefined,
             this.runtimeOwnerRegistry,
             this.mutationLeaseCoordinator,
-            new SearchContinuationCoordinator(),
+            new SearchContinuationCoordinator(this.searchContinuationPool),
         );
         this.providerRuntime = new ProviderRuntime({
             config,
@@ -184,6 +186,9 @@ export class SharedRuntimeHost {
             callGraphManager: this.callGraphManager,
             runtimeOwnerGate: this.runtimeOwnerRegistry,
             mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+            searchContinuationCoordinator: new SearchContinuationCoordinator(
+                this.searchContinuationPool,
+            ),
             onLifecycleActivityChanged: () => this.notifyActivityChanged(),
         });
 
@@ -195,6 +200,10 @@ export class SharedRuntimeHost {
             throw new Error("Shared Satori runtime host is shutting down.");
         }
         return new McpSession(this);
+    }
+
+    createSearchContinuationCoordinator(): SearchContinuationCoordinator {
+        return new SearchContinuationCoordinator(this.searchContinuationPool);
     }
 
     createSessionResources(
@@ -292,13 +301,14 @@ export class SharedRuntimeHost {
         await this.localSyncManager.stopAndDrainLifecycle();
         await this.providerRuntime.shutdown();
         this.recoveryHandlers.releaseSearchContinuationOwnership();
+        this.searchContinuationPool.clear();
         this.runtimeOwnerRegistry.unregisterCurrentOwner();
     }
 }
 
 export class McpSession {
     private readonly server: Server;
-    private readonly continuationCoordinator = new SearchContinuationCoordinator();
+    private readonly continuationCoordinator: SearchContinuationCoordinator;
     private readonly resources: SessionResources;
     private activeToolCalls = 0;
     private connected = false;
@@ -309,6 +319,7 @@ export class McpSession {
     private keepAliveTimer: NodeJS.Timeout | null = null;
 
     constructor(private readonly host: SharedRuntimeHost) {
+        this.continuationCoordinator = host.createSearchContinuationCoordinator();
         this.server = new Server(
             {
                 name: host.config.name,

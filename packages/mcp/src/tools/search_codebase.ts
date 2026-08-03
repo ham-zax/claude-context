@@ -226,8 +226,9 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
     resultMode: z.enum(["grouped", "raw"]).default("grouped").optional().describe("Output mode. grouped returns merged search groups, raw returns chunk hits."),
     groupBy: z.enum(["symbol", "file"]).default("symbol").optional().describe("Grouping strategy in grouped mode."),
     rankingMode: z.enum(["default", "auto_changed_first"]).default("auto_changed_first").optional().describe("Ranking policy. auto_changed_first boosts files changed in the current git working tree when available."),
-    limit: z.number().int().positive().max(ctx.capabilities.getMaxSearchLimit()).default(ctx.capabilities.getDefaultSearchLimit()).optional().describe("Maximum groups (grouped mode) or chunks (raw mode)."),
-    disclosureLimit: z.number().int().positive().max(ctx.capabilities.getMaxSearchLimit()).optional().describe("Optional initial grouped-result disclosure limit. Grouped searches show at most 10 results initially when omitted; set this equal to limit to expose the full result set immediately. Retrieval depth and reranker admission continue to use limit."),
+    limit: z.number().int().positive().max(ctx.capabilities.getMaxSearchResultTotal()).default(ctx.capabilities.getDefaultSearchLimit()).optional().describe("Desired total groups (grouped mode) or chunks (raw mode) from the bounded frozen search pipeline."),
+    disclosureLimit: z.number().int().positive().max(ctx.capabilities.getMaxSearchPageSize()).optional().describe("Optional initial grouped-result page size. Grouped searches show at most 10 results initially when omitted; continuation exposes the remaining frozen order. Retrieval depth and reranker admission are independent."),
+    includeResultIndex: z.boolean().optional().describe("Optional grouped-mode compact index over the frozen ranked results. Defaults to false when omitted."),
     debug: z.boolean().optional().describe("Backward-compatible debug toggle. true selects full diagnostics when debugMode is omitted."),
     debugMode: z.enum(["summary", "ranking", "freshness", "full"]).optional().describe("Bounded diagnostic projection. May be used without debug; debug=true remains an alias for full."),
     debugCandidateLimit: z.number().int().positive().max(SEARCH_MAX_DIAGNOSTIC_CANDIDATES).optional().describe("Diagnostic-only retrieval depth. Valid only with full diagnostics; it does not change the visible result limit or reranker ceilings."),
@@ -255,9 +256,16 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
             message: "disclosureLimit is available only with grouped results.",
         });
     }
+    if (value.includeResultIndex !== undefined && value.resultMode === "raw") {
+        refinementContext.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["includeResultIndex"],
+            message: "includeResultIndex is available only with grouped results.",
+        });
+    }
+    const effectiveRequestedTotal = value.limit ?? ctx.capabilities.getDefaultSearchLimit();
     if (value.disclosureLimit !== undefined
-        && value.limit !== undefined
-        && value.disclosureLimit > value.limit) {
+        && value.disclosureLimit > effectiveRequestedTotal) {
         refinementContext.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["disclosureLimit"],
@@ -276,7 +284,7 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
 export const searchCodebaseTool: McpTool = {
     name: "search_codebase",
     description: () =>
-        "Unified semantic search with a runtime-first scope=\"runtime\" default, grouped/raw output modes, and deterministic ranking/freshness behavior. Operators are parsed from a query prefix block: lang:, path:, -path:, must:, exclude: (escape with \\\\ to keep literals). Grouped formatVersion 3 results publish one canonical target, bounded source-only preview, quality evidence, and compact graph readiness; use the envelope-level recommendedNextAction first. disclosureLimit can expose a smaller initial page without lowering retrieval limit or reranker admission; when continuation is present, pass its opaque handle and exact nextOffset to continue_search to reveal more groups from the same frozen ranking. A concrete target opens through the returned canonical read_file request, which includes mode, open_symbol contractVersion 2, one identity, and one bounded context operation; a target without symbolId opens through its 1-based inclusive span. Pass a target directly to call_graph only when navigation.graph=\"ready\". Every graph-ready result carries navigation.inbound=\"verify\"; callerSearchTerm is an optional identifier for a separate must:<term> <term> inbound-reference verification search. Follow structured blocker actions and remediation hints; use .satoriignore plus manage_index sync to remove persistent indexed noise. Normal successful responses omit internal freshness evidence; use debugMode=summary|ranking|freshness|full for bounded diagnostics. debug:true remains a backward-compatible alias for full.",
+        "Unified semantic search with a runtime-first scope=\"runtime\" default, grouped/raw output modes, and deterministic ranking/freshness behavior. Operators are parsed from a query prefix block: lang:, path:, -path:, must:, exclude: (escape with \\\\ to keep literals). Grouped formatVersion 3 results publish one canonical target, bounded source-only preview, quality evidence, and compact graph readiness; use the envelope-level recommendedNextAction first. disclosureLimit can expose a smaller initial page without lowering retrieval limit or reranker admission; includeResultIndex can add compact navigation metadata for the frozen grouped ranking. When continuation is present, pass its opaque handle and exact nextOffset to continue_search to reveal more groups from the same frozen ranking. A concrete target opens through the returned canonical read_file request, which includes mode, open_symbol contractVersion 2, one identity, and one bounded context operation; a target without symbolId opens through its 1-based inclusive span. Pass a target directly to call_graph only when navigation.graph=\"ready\". Every graph-ready result carries navigation.inbound=\"verify\"; callerSearchTerm is an optional identifier for a separate must:<term> <term> inbound-reference verification search. Follow structured blocker actions and remediation hints; use .satoriignore plus manage_index sync to remove persistent indexed noise. Normal successful responses omit internal freshness evidence; use debugMode=summary|ranking|freshness|full for bounded diagnostics. debug:true remains a backward-compatible alias for full.",
     inputSchemaZod: (ctx: ToolContext) => buildSearchSchema(ctx),
     execute: async (args: unknown, ctx: ToolContext) => {
         const schema = buildSearchSchema(ctx);
@@ -315,7 +323,7 @@ export const searchCodebaseTool: McpTool = {
             debugMode: normalizedDebugMode,
         };
         const startedAt = Date.now();
-        const limit = Math.max(1, Math.min(ctx.capabilities.getMaxSearchLimit(), input.limit ?? ctx.capabilities.getDefaultSearchLimit()));
+        const limit = input.limit ?? ctx.capabilities.getDefaultSearchLimit();
         const profile = getProfile(ctx);
         const parsedOperators = parseSearchOperators(input.query);
         const queryPlan = buildSearchQueryPlan(

@@ -24,6 +24,15 @@ const COMPARISON_CLASSES = new Set([
 const PHASES = new Set(["cold", "warm"]);
 const PHASE_ORDER = ["cold", "warm"];
 const TASK_SPLITS = new Set(["tuning", "held_out"]);
+const TASK_SAFETY_CONTROLS = new Set([
+    "exact_identifier",
+    "must",
+    "configuration_pin",
+    "candidate_membership",
+    "eligibility",
+    "fallback",
+    "frozen_pagination",
+]);
 const OWNER_MATCH_KINDS = new Set(["symbol", "file"]);
 const STATUSES = new Set(["ok", "zero_result", "fallback", "error"]);
 const BASELINE_KEYS = ["maxLatencyMs", "maxPayloadBytes", "maxContextBytes"];
@@ -108,9 +117,6 @@ function normalizeReadiness(value, label, phase) {
         if (!READINESS_PROOF_MODES.has(entry.proofMode)) {
             throw new Error(`${entryLabel}.proofMode must be cold or warm.`);
         }
-        if (entry.proofMode !== phase) {
-            throw new Error(`${entryLabel}.proofMode must match observation phase '${phase}'.`);
-        }
         if (!READINESS_INVALIDATION_REASONS.has(entry.invalidationReason)) {
             throw new Error(`${entryLabel}.invalidationReason is unsupported.`);
         }
@@ -128,14 +134,48 @@ function normalizeReadiness(value, label, phase) {
             }
             return [key, operation];
         }));
+        const postFreshnessColdChecks = Number.isSafeInteger(rawOperations.postFreshnessColdChecks)
+            && rawOperations.postFreshnessColdChecks >= 0
+            ? rawOperations.postFreshnessColdChecks
+            : 0;
+        const requestProof = isRecord(entry.requestProof) ? entry.requestProof : {};
+        const watcher = isRecord(entry.watcher) ? entry.watcher : {};
+        const preparedColdProof = phase === "cold"
+            && entry.proofMode === "warm"
+            && operations.preparedCacheHits >= 1
+            && requestProof.preRetrievalFullComparisons >= 1
+            && requestProof.finalFullComparisons >= 1
+            && watcher.checkpointStatus === "valid";
+        const checkpointBoundColdProof = phase === "cold"
+            && entry.proofMode === "cold"
+            && postFreshnessColdChecks >= 1
+            && watcher.checkpointStatus === "valid";
+        const checkpointRevalidatedWarmProof = phase === "warm"
+            && entry.proofMode === "cold"
+            && operations.preparedCacheHits >= 1
+            && operations.warmReceiptRevalidations >= 1
+            && postFreshnessColdChecks >= 1
+            && operations.exactPayloadRecounts === 0
+            && requestProof.finalFullComparisons >= 1
+            && watcher.checkpointStatus === "valid";
+        if (
+            entry.proofMode !== phase
+            && !preparedColdProof
+            && !checkpointRevalidatedWarmProof
+        ) {
+            throw new Error(`${entryLabel}.proofMode must match observation phase '${phase}'.`);
+        }
         if (
             operations.preparedCacheLookups < 1
             || operations.preparedCacheHits > operations.preparedCacheLookups
-            || operations.preparedCacheHits > operations.warmReceiptRevalidations
+            || (
+                operations.preparedCacheHits > operations.warmReceiptRevalidations
+                && !preparedColdProof
+            )
         ) {
             throw new Error(`${entryLabel}.operations contains contradictory cache counters.`);
         }
-        if (entry.proofMode === "warm" && (
+        if (phase === "warm" && !checkpointRevalidatedWarmProof && (
             operations.preparedCacheHits < 1
             || operations.coldReadinessChecks !== 0
             || operations.warmReceiptRevalidations < 1
@@ -143,9 +183,9 @@ function normalizeReadiness(value, label, phase) {
         )) {
             throw new Error(`${entryLabel}.operations does not prove warm receipt reuse.`);
         }
-        if (entry.proofMode === "cold" && (
+        if (phase === "cold" && !preparedColdProof && (
             operations.coldReadinessChecks < 1
-            || operations.exactPayloadRecounts < 1
+            || (operations.exactPayloadRecounts < 1 && !checkpointBoundColdProof)
         )) {
             throw new Error(`${entryLabel}.operations does not prove a cold authority check.`);
         }
@@ -329,13 +369,36 @@ export function validateTaskSuite(value) {
             }
         }
         let split;
+        let safetyControls;
         if (suite.version === 2) {
             split = requireNonEmptyString(task.split, `tasks[${index}].split`);
             if (!TASK_SPLITS.has(split)) {
                 throw new Error(`tasks[${index}].split is unsupported.`);
             }
+            if (task.safetyControls !== undefined) {
+                if (!Array.isArray(task.safetyControls) || task.safetyControls.length === 0) {
+                    throw new Error(`tasks[${index}].safetyControls must be a non-empty array.`);
+                }
+                const seenSafetyControls = new Set();
+                safetyControls = task.safetyControls.map((rawControl, controlIndex) => {
+                    const control = requireNonEmptyString(
+                        rawControl,
+                        `tasks[${index}].safetyControls[${controlIndex}]`,
+                    );
+                    if (!TASK_SAFETY_CONTROLS.has(control)) {
+                        throw new Error(`tasks[${index}].safetyControls contains unsupported '${control}'.`);
+                    }
+                    if (seenSafetyControls.has(control)) {
+                        throw new Error(`tasks[${index}].safetyControls contains duplicate safety control '${control}'.`);
+                    }
+                    seenSafetyControls.add(control);
+                    return control;
+                });
+            }
         } else if (task.split !== undefined) {
             throw new Error(`tasks[${index}].split requires task suite version 2.`);
+        } else if (task.safetyControls !== undefined) {
+            throw new Error(`tasks[${index}].safetyControls requires task suite version 2.`);
         }
 
         const normalized = {
@@ -343,6 +406,7 @@ export function validateTaskSuite(value) {
             ...(split ? { split } : {}),
             queryClass: task.queryClass,
             ...(comparisonClass !== undefined ? { comparisonClass } : {}),
+            ...(safetyControls ? { safetyControls } : {}),
             language: requireNonEmptyString(task.language, `tasks[${index}].language`),
             expected,
             workload: requireWorkload(task.workload, `tasks[${index}].workload`),

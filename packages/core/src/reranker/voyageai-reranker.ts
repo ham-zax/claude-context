@@ -5,7 +5,12 @@
  * Supports rerank-2.5 (best quality) and rerank-2.5-lite (faster).
  */
 
-import type { Reranker, RerankOptions, RerankResult } from "./reranker";
+import type {
+    Reranker,
+    RerankerIdentity,
+    RerankOptions,
+    RerankResult,
+} from "./reranker";
 
 export type VoyageRerankerModel = 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
 
@@ -22,6 +27,14 @@ export class VoyageAIReranker implements Reranker {
     constructor(config: VoyageAIRerankerConfig) {
         this.apiKey = config.apiKey;
         this.model = config.model || 'rerank-2.5-lite';
+    }
+
+    getIdentity(): Readonly<RerankerIdentity> {
+        return Object.freeze({
+            provider: 'voyage',
+            model: this.model,
+            profile: 'voyage_reranker_api_v1',
+        });
     }
 
     /**

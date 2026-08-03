@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import * as transformers from "@huggingface/transformers";
 import * as onnxRuntime from "onnxruntime-node";
+import { serializeCanonicalJson } from "../core/canonical-json.js";
 import type {
     LateOnRuntimeProfile,
     LateOnWorkerRequest,
@@ -19,6 +20,11 @@ type TokenizedInput = Readonly<{
         data: BigInt64Array;
         dims: readonly number[];
     }>;
+}>;
+
+type EncodedText = Readonly<{
+    vectors: readonly number[][];
+    tokenCount: number;
 }>;
 
 type RuntimeState = Readonly<{
@@ -100,7 +106,7 @@ async function encodeText(
     state: RuntimeState,
     text: string,
     isQuery: boolean,
-): Promise<number[][]> {
+): Promise<EncodedText> {
     const { inference } = state.profile;
     const normalizedText = inference.lowercase ? text.toLowerCase() : text;
     const tokenized = state.tokenizer(
@@ -152,13 +158,19 @@ async function encodeText(
             tensor.data.slice(offset, offset + inference.embeddingDimensions),
         )));
     }
-    return vectors;
+    return { vectors, tokenCount: sequenceLength };
 }
 
 async function initialize(
     request: Extract<LateOnWorkerRequest, { type: "initialize" }>,
 ): Promise<void> {
     if (runtime) throw new Error("LateOn worker is already initialized.");
+    const computedProfileDigest = crypto.createHash("sha256")
+        .update(serializeCanonicalJson(request.profile), "utf8")
+        .digest("hex");
+    if (computedProfileDigest !== request.profileDigest) {
+        throw new Error("LateOn worker profile digest does not match the initialization contract.");
+    }
     if (request.profile.runtime.transformersJs !== resolvePackageVersion("@huggingface/transformers")) {
         throw new Error("Transformers.js version does not match the LateOn profile.");
     }
@@ -166,18 +178,28 @@ async function initialize(
         throw new Error("ONNX Runtime version does not match the LateOn profile.");
     }
     assertArtifacts(request.profile, request.modelDirectory);
+    process.env.TOKENIZERS_PARALLELISM = "false";
     transformers.env.allowRemoteModels = false;
     transformers.env.allowLocalModels = true;
     transformers.env.localModelPath = `${path.dirname(request.modelDirectory)}${path.sep}`;
     const tokenizer = await transformers.AutoTokenizer.from_pretrained(
         path.basename(request.modelDirectory),
     );
+    if (request.profile.schemaVersion === "satori_lateon_runtime_profile_v2") {
+        (tokenizer as unknown as { truncation_side: "right" }).truncation_side = "right";
+    }
     const session = await onnxRuntime.InferenceSession.create(
         path.join(request.modelDirectory, request.profile.inference.modelPath),
         {
             executionProviders: [request.profile.runtime.executionProvider],
             intraOpNumThreads: request.intraOpThreads,
             interOpNumThreads: request.profile.inference.interOpThreads,
+            ...(request.profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+                ? {
+                    executionMode: request.profile.execution.executionMode,
+                    graphOptimizationLevel: request.profile.execution.graphOptimizationLevel,
+                }
+                : {}),
         },
     );
     runtime = {
@@ -188,6 +210,9 @@ async function initialize(
     send({
         type: "ready",
         modelRevision: request.profile.identity.revision,
+        profileDigest: computedProfileDigest,
+        projectionVersion: request.profile.identity.projectionVersion,
+        candidateDepth: request.profile.inference.candidateDepth,
     });
 }
 
@@ -201,14 +226,22 @@ async function rerank(
     ) {
         throw new Error("LateOn rerank request violates the candidate contract.");
     }
-    const queryVectors = await encodeText(runtime, request.query, true);
+    const queryEncoding = await encodeText(runtime, request.query, true);
+    let aggregateTokenCount = queryEncoding.tokenCount;
     const scored: Array<{ index: number; identity: string; relevanceScore: number }> = [];
     for (let index = 0; index < request.documents.length; index++) {
-        const documentVectors = await encodeText(runtime, request.documents[index], false);
+        const documentEncoding = await encodeText(runtime, request.documents[index], false);
+        aggregateTokenCount += documentEncoding.tokenCount;
+        if (
+            runtime.profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+            && aggregateTokenCount > runtime.profile.execution.aggregateRequestTokenLimit
+        ) {
+            throw new Error("LateOn rerank request exceeds the aggregate token contract.");
+        }
         scored.push({
             index,
             identity: request.identities[index],
-            relevanceScore: maxSimScore(queryVectors, documentVectors),
+            relevanceScore: maxSimScore(queryEncoding.vectors, documentEncoding.vectors),
         });
     }
     scored.sort((left, right) => (
@@ -241,5 +274,8 @@ process.on("message", (message: LateOnWorkerRequest) => {
 });
 
 process.once("disconnect", () => {
-    void runtime?.session.release().finally(() => process.exit(0));
+    void operation
+        .catch(() => undefined)
+        .then(() => runtime?.session.release())
+        .finally(() => process.exit(0));
 });

@@ -1,9 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    resolveFrozenSearchResultLimit,
     resolveNextSearchCandidateLimit,
     resolveSearchPolicy,
 } from './search-policy.js';
+
+test('search policy separates an unbounded logical total from the frozen candidate ceiling', () => {
+    assert.equal(resolveFrozenSearchResultLimit(Number.MAX_SAFE_INTEGER), 200);
+    assert.deepEqual(resolveSearchPolicy({
+        resultLimit: Number.MAX_SAFE_INTEGER,
+        hasMustOperators: false,
+    }), {
+        retrievalResultLimit: 200,
+        rerankerResultLimit: 200,
+        disclosureResultLimit: 10,
+        candidateLimit: 80,
+        maxCandidateLimit: 80,
+        maxAttempts: 1,
+    });
+});
 
 test('resolveSearchPolicy preserves the bounded 32-to-80 candidate formula', () => {
     assert.deepEqual(

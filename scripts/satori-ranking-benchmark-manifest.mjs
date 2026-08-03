@@ -27,6 +27,15 @@ const QUERY_CLASSES = new Set([
 const ORACLE_KINDS = new Set(["owner", "negative"]);
 const OWNER_MATCH_KINDS = new Set(["symbol", "file"]);
 const CRITICALITIES = new Set(["critical", "important", "diagnostic"]);
+const TASK_SAFETY_CONTROLS = new Set([
+    "exact_identifier",
+    "must",
+    "configuration_pin",
+    "candidate_membership",
+    "eligibility",
+    "fallback",
+    "frozen_pagination",
+]);
 const NEURAL_OVERLAP_STATUSES = new Set([
     "deferred_r3_closed",
     "no_known_overlap",
@@ -34,6 +43,7 @@ const NEURAL_OVERLAP_STATUSES = new Set([
 ]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const GIT_REVISION_PATTERN = /^[0-9a-f]{40}$/;
+const L0_ARM_STATUSES = new Set(["preregistered_unopened"]);
 
 function isRecord(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -238,6 +248,14 @@ function normalizeTask(value, index, repositoriesById) {
     if (disclosureLimit > limit) {
         throw new Error(`${label}.search.disclosureLimit must not exceed limit.`);
     }
+    const safetyControls = task.safetyControls === undefined
+        ? undefined
+        : requireStringArray(task.safetyControls, `${label}.safetyControls`)
+            .map((control, controlIndex) => requireEnum(
+                control,
+                TASK_SAFETY_CONTROLS,
+                `${label}.safetyControls[${controlIndex}]`,
+            ));
     return {
         id: requireString(task.id, `${label}.id`),
         split,
@@ -265,11 +283,44 @@ function normalizeTask(value, index, repositoriesById) {
             disclosureLimit,
         },
         criticality: requireEnum(task.criticality, CRITICALITIES, `${label}.criticality`),
+        ...(safetyControls ? { safetyControls } : {}),
         oracle: normalizeOracle(task.oracle, `${label}.oracle`, repository),
     };
 }
 
-function normalizeLeakage(value) {
+function normalizePriorDecisionEvidence(value) {
+    const evidence = requireRecord(value, "leakage.priorDecisionEvidence");
+    return {
+        categories: requireStringArray(
+            evidence.categories,
+            "leakage.priorDecisionEvidence.categories",
+        ),
+        repositoryFamilies: requireStringArray(
+            evidence.repositoryFamilies,
+            "leakage.priorDecisionEvidence.repositoryFamilies",
+        ),
+        revisions: requireStringArray(
+            evidence.revisions,
+            "leakage.priorDecisionEvidence.revisions",
+        ).map((revision, index) => requireRevision(
+            revision,
+            `leakage.priorDecisionEvidence.revisions[${index}]`,
+        )),
+        taskIds: requireStringArray(
+            evidence.taskIds,
+            "leakage.priorDecisionEvidence.taskIds",
+        ),
+        querySha256: requireStringArray(
+            evidence.querySha256,
+            "leakage.priorDecisionEvidence.querySha256",
+        ).map((digest, index) => requireSha256(
+            digest,
+            `leakage.priorDecisionEvidence.querySha256[${index}]`,
+        )),
+    };
+}
+
+function normalizeLeakage(value, manifestVersion) {
     const leakage = requireRecord(value, "leakage");
     return {
         tuningOnlyRepositoryFamilies: requireStringArray(
@@ -298,6 +349,11 @@ function normalizeLeakage(value) {
             digest,
             `leakage.tuningOnlyQuerySha256[${index}]`,
         )),
+        ...(manifestVersion === 3
+            ? { priorDecisionEvidence: normalizePriorDecisionEvidence(
+                leakage.priorDecisionEvidence,
+            ) }
+            : {}),
     };
 }
 
@@ -319,8 +375,18 @@ function normalizeStatisticalContract(value) {
         contract.deterministicPerformance,
         "statisticalContract.deterministicPerformance",
     );
+    const version = requirePositiveInteger(contract.version, "statisticalContract.version");
+    if (version !== 1 && version !== 2) {
+        throw new Error("statisticalContract.version is unsupported.");
+    }
+    const metricApplicability = version === 2
+        ? requireRecord(
+            contract.metricApplicability,
+            "statisticalContract.metricApplicability",
+        )
+        : undefined;
     return {
-        version: requirePositiveInteger(contract.version, "statisticalContract.version"),
+        version,
         independentRepositoryFamiliesPerSplit: requirePositiveInteger(
             contract.independentRepositoryFamiliesPerSplit,
             "statisticalContract.independentRepositoryFamiliesPerSplit",
@@ -333,6 +399,16 @@ function normalizeStatisticalContract(value) {
             contract.negativeTasksPerRepository,
             "statisticalContract.negativeTasksPerRepository",
         ),
+        ...(version === 2 ? {
+            minimumTasksPerSplit: requirePositiveInteger(
+                contract.minimumTasksPerSplit,
+                "statisticalContract.minimumTasksPerSplit",
+            ),
+            newContenderCount: requirePositiveInteger(
+                contract.newContenderCount,
+                "statisticalContract.newContenderCount",
+            ),
+        } : {}),
         decisionStratumMinimumTasks: requirePositiveInteger(
             contract.decisionStratumMinimumTasks,
             "statisticalContract.decisionStratumMinimumTasks",
@@ -366,6 +442,12 @@ function normalizeStatisticalContract(value) {
                 confidence.neural,
                 "statisticalContract.multiplicityAdjustedConfidence.neural",
             ),
+            ...(version === 2 ? {
+                newContenders: requireFiniteNumber(
+                    confidence.newContenders,
+                    "statisticalContract.multiplicityAdjustedConfidence.newContenders",
+                ),
+            } : {}),
         },
         minimumEffects: {
             ownerAt3: requireFiniteNumber(
@@ -407,6 +489,18 @@ function normalizeStatisticalContract(value) {
                 "statisticalContract.nonInferiorityMargins.unacceptableOwnerExposureAt3",
             ),
         },
+        ...(metricApplicability ? {
+            metricApplicability: {
+                requiredRoleCoverage: requireString(
+                    metricApplicability.requiredRoleCoverage,
+                    "statisticalContract.metricApplicability.requiredRoleCoverage",
+                ),
+                ownerAt10: requireString(
+                    metricApplicability.ownerAt10,
+                    "statisticalContract.metricApplicability.ownerAt10",
+                ),
+            },
+        } : {}),
         deterministicPerformance: {
             p95Multiplier: requireFiniteNumber(
                 performance.p95Multiplier,
@@ -429,6 +523,392 @@ function normalizeStatisticalContract(value) {
             contract.contenderSelection,
             "statisticalContract.contenderSelection",
         ),
+    };
+}
+
+function normalizeArtifact(value, label) {
+    const artifact = requireRecord(value, label);
+    return {
+        role: requireString(artifact.role, `${label}.role`),
+        path: requireString(artifact.path, `${label}.path`),
+        sha256: requireSha256(artifact.sha256, `${label}.sha256`),
+    };
+}
+
+function normalizeKnownCandidateCapture(value, index) {
+    const label = `lateOnL0Authority.knownEvidence.candidateCaptures[${index}]`;
+    const capture = requireRecord(value, label);
+    return {
+        repositoryId: requireString(capture.repositoryId, `${label}.repositoryId`),
+        suite: requireEnum(capture.suite, new Set(["positive", "negative"]), `${label}.suite`),
+        fileSha256: requireSha256(capture.fileSha256, `${label}.fileSha256`),
+        captureSha256: requireSha256(capture.captureSha256, `${label}.captureSha256`),
+        baselineReplaySha256: requireSha256(
+            capture.baselineReplaySha256,
+            `${label}.baselineReplaySha256`,
+        ),
+    };
+}
+
+function normalizeProjectionPolicy(value, index) {
+    const label = `lateOnL0Authority.projectionPolicies[${index}]`;
+    const policy = requireRecord(value, label);
+    const sourceOwner = normalizeArtifact(policy.sourceOwner, `${label}.sourceOwner`);
+    if (policy.id === "search_rerank_document_v1") {
+        return {
+            id: policy.id,
+            status: requireString(policy.status, `${label}.status`),
+            serialization: requireString(policy.serialization, `${label}.serialization`),
+            maximumLines: requirePositiveInteger(policy.maximumLines, `${label}.maximumLines`),
+            maximumCharacters: requirePositiveInteger(
+                policy.maximumCharacters,
+                `${label}.maximumCharacters`,
+            ),
+            fieldOrder: requireStringArray(policy.fieldOrder, `${label}.fieldOrder`),
+            sourceOwner,
+        };
+    }
+    if (policy.id !== "search_rerank_document_v2") {
+        throw new Error(`${label}.id is unsupported.`);
+    }
+    const selector = requireRecord(policy.selector, `${label}.selector`);
+    const queryFormatting = requireRecord(
+        policy.queryFormatting,
+        `${label}.queryFormatting`,
+    );
+    return {
+        id: policy.id,
+        status: requireString(policy.status, `${label}.status`),
+        serialization: requireString(policy.serialization, `${label}.serialization`),
+        maximumUtf8Bytes: requirePositiveInteger(
+            policy.maximumUtf8Bytes,
+            `${label}.maximumUtf8Bytes`,
+        ),
+        maximumLines: requirePositiveInteger(policy.maximumLines, `${label}.maximumLines`),
+        serializedKeyOrder: requireString(
+            policy.serializedKeyOrder,
+            `${label}.serializedKeyOrder`,
+        ),
+        fieldOrder: requireStringArray(policy.fieldOrder, `${label}.fieldOrder`),
+        selector: {
+            version: requireString(selector.version, `${label}.selector.version`),
+            queryTokens: requireString(selector.queryTokens, `${label}.selector.queryTokens`),
+            maxExcerpts: requirePositiveInteger(
+                selector.maxExcerpts,
+                `${label}.selector.maxExcerpts`,
+            ),
+            maxExcerptLines: requirePositiveInteger(
+                selector.maxExcerptLines,
+                `${label}.selector.maxExcerptLines`,
+            ),
+            contextLines: requirePositiveInteger(
+                selector.contextLines,
+                `${label}.selector.contextLines`,
+            ),
+            evidenceSpans: requireString(
+                selector.evidenceSpans,
+                `${label}.selector.evidenceSpans`,
+            ),
+            stableTieOrder: requireString(
+                selector.stableTieOrder,
+                `${label}.selector.stableTieOrder`,
+            ),
+            declarationRetention: requireString(
+                selector.declarationRetention,
+                `${label}.selector.declarationRetention`,
+            ),
+            serializedSourceBudget: requireString(
+                selector.serializedSourceBudget,
+                `${label}.selector.serializedSourceBudget`,
+            ),
+            maximumSelectionAttempts: requirePositiveInteger(
+                selector.maximumSelectionAttempts,
+                `${label}.selector.maximumSelectionAttempts`,
+            ),
+        },
+        declarationSelection: requireString(
+            policy.declarationSelection,
+            `${label}.declarationSelection`,
+        ),
+        declarationMaximumUtf8Bytes: requirePositiveInteger(
+            policy.declarationMaximumUtf8Bytes,
+            `${label}.declarationMaximumUtf8Bytes`,
+        ),
+        documentationSelection: requireString(
+            policy.documentationSelection,
+            `${label}.documentationSelection`,
+        ),
+        documentationMaximumUtf8Bytes: requirePositiveInteger(
+            policy.documentationMaximumUtf8Bytes,
+            `${label}.documentationMaximumUtf8Bytes`,
+        ),
+        documentationMaximumLines: requirePositiveInteger(
+            policy.documentationMaximumLines,
+            `${label}.documentationMaximumLines`,
+        ),
+        documentationMaximumLineUtf8Bytes: requirePositiveInteger(
+            policy.documentationMaximumLineUtf8Bytes,
+            `${label}.documentationMaximumLineUtf8Bytes`,
+        ),
+        requiredOwnerSiblingOrder: requireString(
+            policy.requiredOwnerSiblingOrder,
+            `${label}.requiredOwnerSiblingOrder`,
+        ),
+        fileLevelProjection: requireString(
+            policy.fileLevelProjection,
+            `${label}.fileLevelProjection`,
+        ),
+        queryFormatting: {
+            semanticQuery: requireString(
+                queryFormatting.semanticQuery,
+                `${label}.queryFormatting.semanticQuery`,
+            ),
+            runtimePrefix: requireString(
+                queryFormatting.runtimePrefix,
+                `${label}.queryFormatting.runtimePrefix`,
+            ),
+            normalization: requireString(
+                queryFormatting.normalization,
+                `${label}.queryFormatting.normalization`,
+            ),
+        },
+        sourceOwner,
+    };
+}
+
+function normalizeLateOnL0Authority(value) {
+    const authority = requireRecord(value, "lateOnL0Authority");
+    const known = requireRecord(authority.knownEvidence, "lateOnL0Authority.knownEvidence");
+    const model = requireRecord(authority.model, "lateOnL0Authority.model");
+    const runtime = requireRecord(authority.runtime, "lateOnL0Authority.runtime");
+    const queryFormatting = requireRecord(
+        authority.queryFormatting,
+        "lateOnL0Authority.queryFormatting",
+    );
+    const ownerFamilyAdmission = requireRecord(
+        authority.ownerFamilyAdmission,
+        "lateOnL0Authority.ownerFamilyAdmission",
+    );
+    const capture = requireRecord(
+        authority.candidateCaptureContract,
+        "lateOnL0Authority.candidateCaptureContract",
+    );
+    const order = requireRecord(authority.executionOrder, "lateOnL0Authority.executionOrder");
+    const resources = requireRecord(authority.resourceProfile, "lateOnL0Authority.resourceProfile");
+    const newArms = authority.newArms.map((armValue, index) => {
+        const label = `lateOnL0Authority.newArms[${index}]`;
+        const arm = requireRecord(armValue, label);
+        return {
+            id: requireString(arm.id, `${label}.id`),
+            projectionVersion: requireString(
+                arm.projectionVersion,
+                `${label}.projectionVersion`,
+            ),
+            candidateDepth: requirePositiveInteger(arm.candidateDepth, `${label}.candidateDepth`),
+            status: requireEnum(arm.status, L0_ARM_STATUSES, `${label}.status`),
+        };
+    });
+    if (typeof queryFormatting.lowercase !== "boolean") {
+        throw new TypeError("lateOnL0Authority.queryFormatting.lowercase must be a boolean.");
+    }
+    assertUnique(newArms.map(({ id }) => id), "LateOn L0 arm IDs");
+    return {
+        version: requirePositiveInteger(authority.version, "lateOnL0Authority.version"),
+        phase: requireString(authority.phase, "lateOnL0Authority.phase"),
+        status: requireString(authority.status, "lateOnL0Authority.status"),
+        heldOutState: requireString(authority.heldOutState, "lateOnL0Authority.heldOutState"),
+        knownEvidence: {
+            tuningManifestSha256: requireSha256(
+                known.tuningManifestSha256,
+                "lateOnL0Authority.knownEvidence.tuningManifestSha256",
+            ),
+            projectionVersion: requireString(
+                known.projectionVersion,
+                "lateOnL0Authority.knownEvidence.projectionVersion",
+            ),
+            originalDecision: requireString(
+                known.originalDecision,
+                "lateOnL0Authority.knownEvidence.originalDecision",
+            ),
+            resultCanonicalSha256: requireSha256(
+                known.resultCanonicalSha256,
+                "lateOnL0Authority.knownEvidence.resultCanonicalSha256",
+            ),
+            artifacts: known.artifacts.map((artifact, index) => normalizeArtifact(
+                artifact,
+                `lateOnL0Authority.knownEvidence.artifacts[${index}]`,
+            )),
+            candidateCaptures: known.candidateCaptures.map(normalizeKnownCandidateCapture),
+        },
+        model: {
+            repository: requireString(model.repository, "lateOnL0Authority.model.repository"),
+            revision: requireRevision(model.revision, "lateOnL0Authority.model.revision"),
+            license: requireString(model.license, "lateOnL0Authority.model.license"),
+            artifacts: model.artifacts.map((artifact, index) => normalizeArtifact(
+                artifact,
+                `lateOnL0Authority.model.artifacts[${index}]`,
+            )),
+        },
+        runtime: {
+            sourceRevision: requireRevision(
+                runtime.sourceRevision,
+                "lateOnL0Authority.runtime.sourceRevision",
+            ),
+            sourceTree: requireRevision(runtime.sourceTree, "lateOnL0Authority.runtime.sourceTree"),
+            node: requireString(runtime.node, "lateOnL0Authority.runtime.node"),
+            onnxruntimeNode: requireString(
+                runtime.onnxruntimeNode,
+                "lateOnL0Authority.runtime.onnxruntimeNode",
+            ),
+            transformersJs: requireString(
+                runtime.transformersJs,
+                "lateOnL0Authority.runtime.transformersJs",
+            ),
+            artifacts: runtime.artifacts.map((artifact, index) => normalizeArtifact(
+                artifact,
+                `lateOnL0Authority.runtime.artifacts[${index}]`,
+            )),
+        },
+        queryFormatting: {
+            policy: requireString(
+                queryFormatting.policy,
+                "lateOnL0Authority.queryFormatting.policy",
+            ),
+            semanticQuerySource: requireString(
+                queryFormatting.semanticQuerySource,
+                "lateOnL0Authority.queryFormatting.semanticQuerySource",
+            ),
+            sourceOwner: normalizeArtifact(
+                queryFormatting.sourceOwner,
+                "lateOnL0Authority.queryFormatting.sourceOwner",
+            ),
+            queryPrefix: requireString(
+                queryFormatting.queryPrefix,
+                "lateOnL0Authority.queryFormatting.queryPrefix",
+            ),
+            documentPrefix: requireString(
+                queryFormatting.documentPrefix,
+                "lateOnL0Authority.queryFormatting.documentPrefix",
+            ),
+            lowercase: queryFormatting.lowercase,
+            queryTokenLimit: requirePositiveInteger(
+                queryFormatting.queryTokenLimit,
+                "lateOnL0Authority.queryFormatting.queryTokenLimit",
+            ),
+            documentTokenLimit: requirePositiveInteger(
+                queryFormatting.documentTokenLimit,
+                "lateOnL0Authority.queryFormatting.documentTokenLimit",
+            ),
+        },
+        ownerFamilyAdmission: {
+            policy: requireString(
+                ownerFamilyAdmission.policy,
+                "lateOnL0Authority.ownerFamilyAdmission.policy",
+            ),
+            familyKeyPrecedence: requireStringArray(
+                ownerFamilyAdmission.familyKeyPrecedence,
+                "lateOnL0Authority.ownerFamilyAdmission.familyKeyPrecedence",
+            ),
+            representativeSelection: requireString(
+                ownerFamilyAdmission.representativeSelection,
+                "lateOnL0Authority.ownerFamilyAdmission.representativeSelection",
+            ),
+            supplementalSelection: requireString(
+                ownerFamilyAdmission.supplementalSelection,
+                "lateOnL0Authority.ownerFamilyAdmission.supplementalSelection",
+            ),
+            sourceOwner: normalizeArtifact(
+                ownerFamilyAdmission.sourceOwner,
+                "lateOnL0Authority.ownerFamilyAdmission.sourceOwner",
+            ),
+        },
+        projectionPolicies: authority.projectionPolicies.map(normalizeProjectionPolicy),
+        candidateCaptureContract: {
+            state: requireString(capture.state, "lateOnL0Authority.candidateCaptureContract.state"),
+            heldOutState: requireString(
+                capture.heldOutState,
+                "lateOnL0Authority.candidateCaptureContract.heldOutState",
+            ),
+            candidateCaptureSha256: capture.candidateCaptureSha256 === null
+                ? null
+                : requireSha256(
+                    capture.candidateCaptureSha256,
+                    "lateOnL0Authority.candidateCaptureContract.candidateCaptureSha256",
+                ),
+            contenderOutputSha256: capture.contenderOutputSha256 === null
+                ? null
+                : requireSha256(
+                    capture.contenderOutputSha256,
+                    "lateOnL0Authority.candidateCaptureContract.contenderOutputSha256",
+                ),
+            digestBinding: requireString(
+                capture.digestBinding,
+                "lateOnL0Authority.candidateCaptureContract.digestBinding",
+            ),
+        },
+        newArms,
+        executionOrder: {
+            qualityArms: requireStringArray(
+                order.qualityArms,
+                "lateOnL0Authority.executionOrder.qualityArms",
+            ),
+            resourceDepthOrders: order.resourceDepthOrders.map((depths, index) => {
+                if (!Array.isArray(depths) || depths.length === 0) {
+                    throw new Error(`lateOnL0Authority.executionOrder.resourceDepthOrders[${index}] must be a non-empty array.`);
+                }
+                return depths.map((depth, depthIndex) => requirePositiveInteger(
+                    depth,
+                    `lateOnL0Authority.executionOrder.resourceDepthOrders[${index}][${depthIndex}]`,
+                ));
+            }),
+            processIsolation: requireString(
+                order.processIsolation,
+                "lateOnL0Authority.executionOrder.processIsolation",
+            ),
+            warmupRuns: requirePositiveInteger(
+                order.warmupRuns,
+                "lateOnL0Authority.executionOrder.warmupRuns",
+            ),
+        },
+        resourceProfile: {
+            profile: requireString(resources.profile, "lateOnL0Authority.resourceProfile.profile"),
+            maximumModelLoadMilliseconds: requirePositiveInteger(
+                resources.maximumModelLoadMilliseconds,
+                "lateOnL0Authority.resourceProfile.maximumModelLoadMilliseconds",
+            ),
+            maximumWarmP95Milliseconds: requirePositiveInteger(
+                resources.maximumWarmP95Milliseconds,
+                "lateOnL0Authority.resourceProfile.maximumWarmP95Milliseconds",
+            ),
+            requestDeadlineMilliseconds: requirePositiveInteger(
+                resources.requestDeadlineMilliseconds,
+                "lateOnL0Authority.resourceProfile.requestDeadlineMilliseconds",
+            ),
+            maximumProcessPeakRssBytes: requirePositiveInteger(
+                resources.maximumProcessPeakRssBytes,
+                "lateOnL0Authority.resourceProfile.maximumProcessPeakRssBytes",
+            ),
+            maximumProcessRetainedRssBytes: requirePositiveInteger(
+                resources.maximumProcessRetainedRssBytes,
+                "lateOnL0Authority.resourceProfile.maximumProcessRetainedRssBytes",
+            ),
+            documentBatchSize: requirePositiveInteger(
+                resources.documentBatchSize,
+                "lateOnL0Authority.resourceProfile.documentBatchSize",
+            ),
+            intraOpThreads: requirePositiveInteger(
+                resources.intraOpThreads,
+                "lateOnL0Authority.resourceProfile.intraOpThreads",
+            ),
+            interOpThreads: requirePositiveInteger(
+                resources.interOpThreads,
+                "lateOnL0Authority.resourceProfile.interOpThreads",
+            ),
+            executionProvider: requireString(
+                resources.executionProvider,
+                "lateOnL0Authority.resourceProfile.executionProvider",
+            ),
+        },
     };
 }
 
@@ -485,6 +965,27 @@ function assertHeldOutLeakage(repositories, tasks, leakage) {
     }
 }
 
+function assertPriorDecisionIsolation(repositories, tasks, leakage) {
+    if (!leakage.priorDecisionEvidence) return;
+    const prior = leakage.priorDecisionEvidence;
+    const families = new Set(prior.repositoryFamilies);
+    const revisions = new Set(prior.revisions);
+    const taskIds = new Set(prior.taskIds);
+    const queries = new Set(prior.querySha256);
+    for (const repository of repositories) {
+        if (families.has(repository.family) || revisions.has(repository.revision)) {
+            throw new Error(
+                `Decision-bearing repository '${repository.id}' overlaps prior decision evidence.`,
+            );
+        }
+    }
+    for (const task of tasks) {
+        if (taskIds.has(task.id) || queries.has(task.querySha256)) {
+            throw new Error(`Decision-bearing task '${task.id}' overlaps prior decision evidence.`);
+        }
+    }
+}
+
 function assertStatisticalSampleAuthority(repositories, tasks, contract) {
     for (const split of SPLITS) {
         const splitRepositories = repositories.filter((repository) => (
@@ -513,6 +1014,12 @@ function assertStatisticalSampleAuthority(repositories, tasks, contract) {
                 );
             }
         }
+        if (contract.version === 2) {
+            const splitTaskCount = tasks.filter((task) => task.split === split).length;
+            if (splitTaskCount < contract.minimumTasksPerSplit) {
+                throw new Error(`Split '${split}' does not meet the task-count minimum.`);
+            }
+        }
     }
     const missingClasses = [...QUERY_CLASSES].filter((queryClass) => (
         !tasks.some((task) => task.queryClass === queryClass)
@@ -524,9 +1031,122 @@ function assertStatisticalSampleAuthority(repositories, tasks, contract) {
     }
 }
 
+function assertVersion3L0Contract(tasks, contract, authority) {
+    const requiredNumbers = [
+        [contract.independentRepositoryFamiliesPerSplit, 6, "repository-family minimum"],
+        [contract.positiveTasksPerRepository, 6, "positive-task minimum"],
+        [contract.negativeTasksPerRepository, 2, "negative-task minimum"],
+        [contract.minimumTasksPerSplit, 48, "split task minimum"],
+        [contract.newContenderCount, 4, "new contender count"],
+        [contract.clusterBootstrapResamples, 10000, "bootstrap resamples"],
+        [contract.multiplicityAdjustedConfidence.newContenders, 0.9875, "new contender confidence"],
+        [contract.minimumEffects.ownerAt3, 0.05, "owner-at-three minimum effect"],
+        [contract.minimumEffects.macroReciprocalRank, 0.03, "MRR minimum effect"],
+        [contract.minimumEffects.lateOn32Over16MacroReciprocalRank, 0.01, "depth effect"],
+        [contract.nonInferiorityMargins.ownerAt1, -0.02, "owner-at-one margin"],
+        [contract.nonInferiorityMargins.ownerAt10, -0.01, "owner-at-ten margin"],
+        [contract.nonInferiorityMargins.requiredRoleCoverage, -0.01, "role coverage margin"],
+        [contract.nonInferiorityMargins.hardNegativeExposureAt3, 0.02, "hard-negative margin"],
+        [contract.nonInferiorityMargins.unacceptableOwnerExposureAt3, 0.02, "unacceptable-owner margin"],
+    ];
+    for (const [actual, expected, label] of requiredNumbers) {
+        if (actual !== expected) throw new Error(`Version 3 ${label} is not the frozen L0 value.`);
+    }
+    if (contract.metricApplicability.requiredRoleCoverage
+        !== "not_applicable_no_required_role_oracle"
+        || contract.metricApplicability.ownerAt10
+        !== "applicable_protected_retrieval_depth_metric") {
+        throw new Error("Version 3 metric applicability does not match the frozen L0 contract.");
+    }
+    const requiredZeroFailureControls = new Set([
+        "exact_identifier",
+        "must",
+        "configuration_pin",
+        "candidate_membership",
+        "eligibility",
+        "fallback",
+        "frozen_pagination",
+    ]);
+    if (contract.zeroFailureControls.length !== requiredZeroFailureControls.size
+        || !contract.zeroFailureControls.every((control) => requiredZeroFailureControls.has(control))) {
+        throw new Error("Version 3 zero-failure controls do not match the frozen L0 contract.");
+    }
+    for (const split of SPLITS) {
+        for (const control of ["exact_identifier", "must", "configuration_pin"]) {
+            if (!tasks.some((task) => (
+                task.split === split && task.safetyControls?.includes(control)
+            ))) {
+                throw new Error(
+                    `Version 3 split '${split}' has no '${control}' safety-control denominator.`,
+                );
+            }
+        }
+    }
+    if (authority.version !== 1
+        || authority.phase !== "L0"
+        || authority.status !== "authority_frozen_outputs_unopened"
+        || authority.heldOutState !== "unopened_no_index_or_capture") {
+        throw new Error("Version 3 LateOn authority state is not frozen at unopened L0.");
+    }
+    const expectedArms = [
+        ["projection-v1-d-l50", "search_rerank_document_v1", 50],
+        ["projection-v2-d-l16", "search_rerank_document_v2", 16],
+        ["projection-v2-d-l32", "search_rerank_document_v2", 32],
+        ["projection-v2-d-l50", "search_rerank_document_v2", 50],
+    ];
+    if (canonicalJson(authority.newArms.map((arm) => [
+        arm.id,
+        arm.projectionVersion,
+        arm.candidateDepth,
+    ])) !== canonicalJson(expectedArms)
+        || authority.newArms.some(({ status }) => status !== "preregistered_unopened")) {
+        throw new Error("Version 3 new arms do not match the frozen L0 factorial family.");
+    }
+    if (canonicalJson(authority.executionOrder.qualityArms)
+        !== canonicalJson(expectedArms.map(([id]) => id))) {
+        throw new Error("Version 3 quality execution order does not bind every frozen arm.");
+    }
+    if (canonicalJson(authority.executionOrder.resourceDepthOrders)
+        !== canonicalJson([[16, 32, 50], [32, 50, 16], [50, 16, 32]])) {
+        throw new Error("Version 3 resource execution order is not counterbalanced as frozen.");
+    }
+    if (new Set(authority.projectionPolicies.map(({ id }) => id)).size !== 2
+        || !authority.projectionPolicies.some(({ id }) => id === "search_rerank_document_v1")
+        || !authority.projectionPolicies.some(({ id }) => id === "search_rerank_document_v2")) {
+        throw new Error("Version 3 does not bind both projection policies.");
+    }
+    if (authority.candidateCaptureContract.state !== "prospective_not_created"
+        || authority.candidateCaptureContract.heldOutState !== "unopened_no_index_or_capture"
+        || authority.candidateCaptureContract.candidateCaptureSha256 !== null
+        || authority.candidateCaptureContract.contenderOutputSha256 !== null) {
+        throw new Error("Version 3 prospective capture authority claims output that does not exist at L0.");
+    }
+    if (authority.knownEvidence.candidateCaptures.length !== 6) {
+        throw new Error("Version 3 known D-L16/D-L32 candidate-capture authority is incomplete.");
+    }
+    if (authority.knownEvidence.projectionVersion !== "search_rerank_document_v1"
+        || authority.knownEvidence.originalDecision
+        !== "retain_baseline_b_lateon_quality_directional_but_not_qualified_or_deployable") {
+        throw new Error("Version 3 known LateOn evidence does not match the frozen L0 authority.");
+    }
+    const resources = authority.resourceProfile;
+    if (resources.maximumModelLoadMilliseconds !== 1000
+        || resources.maximumWarmP95Milliseconds !== 900
+        || resources.requestDeadlineMilliseconds !== 2000
+        || resources.maximumProcessPeakRssBytes !== 872415232
+        || resources.maximumProcessRetainedRssBytes !== 671088640
+        || resources.documentBatchSize !== 1
+        || resources.intraOpThreads !== 8
+        || resources.interOpThreads !== 1
+        || resources.executionProvider !== "cpu") {
+        throw new Error("Version 3 resource profile does not match the frozen measured L0 limits.");
+    }
+}
+
 export function validateRankingBenchmarkManifest(value, options = {}) {
     const manifest = requireRecord(value, "Ranking benchmark manifest");
-    if (manifest.version !== 2 || manifest.kind !== "satori_cross_repository_ranking_manifest") {
+    if (![2, 3].includes(manifest.version)
+        || manifest.kind !== "satori_cross_repository_ranking_manifest") {
         throw new Error("Ranking benchmark manifest version or kind is unsupported.");
     }
     if (!Array.isArray(manifest.repositories) || manifest.repositories.length === 0) {
@@ -552,16 +1172,23 @@ export function validateRankingBenchmarkManifest(value, options = {}) {
         repositoriesById,
     ));
     assertUnique(tasks.map(({ id }) => id), "Task IDs");
-    const leakage = normalizeLeakage(manifest.leakage);
+    const leakage = normalizeLeakage(manifest.leakage, manifest.version);
     assertHeldOutLeakage(repositories, tasks, leakage);
+    assertPriorDecisionIsolation(repositories, tasks, leakage);
     const statisticalContract = normalizeStatisticalContract(
         manifest.statisticalContract,
     );
     if (options.requireCompleteBenchmark === true) {
         assertStatisticalSampleAuthority(repositories, tasks, statisticalContract);
     }
+    const lateOnL0Authority = manifest.version === 3
+        ? normalizeLateOnL0Authority(manifest.lateOnL0Authority)
+        : undefined;
+    if (manifest.version === 3) {
+        assertVersion3L0Contract(tasks, statisticalContract, lateOnL0Authority);
+    }
     const normalized = {
-        version: 2,
+        version: manifest.version,
         kind: "satori_cross_repository_ranking_manifest",
         repositories,
         leakage,
@@ -569,6 +1196,9 @@ export function validateRankingBenchmarkManifest(value, options = {}) {
         neuralTrainingOverlapReview: normalizeNeuralOverlapReview(
             manifest.neuralTrainingOverlapReview,
         ),
+        ...(manifest.version === 3
+            ? { lateOnL0Authority }
+            : {}),
         tasks,
     };
     const sha256 = crypto.createHash("sha256").update(canonicalJson(normalized), "utf8").digest("hex");
@@ -642,6 +1272,9 @@ export function buildRankingCandidateTaskSuites(manifestValue) {
                     queryClass: task.queryClass === "exact_identifier"
                         ? "exact_identifier"
                         : "owner_discovery",
+                    ...(task.safetyControls
+                        ? { safetyControls: [...task.safetyControls] }
+                        : {}),
                     language: repository.primaryLanguage,
                     expected: {
                         ownerFile: task.oracle.requiredOwner.file,
@@ -660,6 +1293,9 @@ export function buildRankingCandidateTaskSuites(manifestValue) {
                 id: task.id,
                 split: task.split,
                 queryClass: "negative_exposure",
+                ...(task.safetyControls
+                    ? { safetyControls: [...task.safetyControls] }
+                    : {}),
                 language: repository.primaryLanguage,
                 expected: {
                     hardNegativeOwners: task.oracle.hardNegativeOwners,

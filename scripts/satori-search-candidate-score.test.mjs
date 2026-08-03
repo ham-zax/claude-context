@@ -256,3 +256,24 @@ test("candidate scoring rejects a replay from another capture", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
 });
+
+test("candidate score CLI rejects mixed-split material without an opening record", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-heldout-score-gate-"));
+    try {
+        const captureFile = path.join(tempDir, "capture.json");
+        fs.writeFileSync(captureFile, JSON.stringify({
+            taskSuiteVersion: 2,
+            captures: [
+                { taskId: "opaque-tuning", split: "tuning" },
+                { taskId: "opaque-held-out", split: "held_out" },
+            ],
+        }));
+
+        assert.throws(
+            () => main(["--capture", captureFile]),
+            /requires --held-out-opening/,
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});

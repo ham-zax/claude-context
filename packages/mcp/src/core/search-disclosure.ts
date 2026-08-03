@@ -1,14 +1,50 @@
 import type {
     SearchDisclosureReason,
     SearchDisclosureSummary,
+    SearchGroupedResultCounts,
     SearchGroupedResponseEnvelope,
 } from "./search-types.js";
+import { SEARCH_MAX_FROZEN_RESULTS } from "./search-constants.js";
+
+export const SEARCH_DISCLOSURE_POLICY_VERSION = "search_disclosure_v1" as const;
 
 type DisclosureProjection<T> = Readonly<{
+    status: "ok" | "page_too_large";
     envelope: SearchGroupedResponseEnvelope;
     results: readonly T[];
     responseBytes: number;
 }>;
+
+export function resolveSearchGroupedResultCounts(input: {
+    requestedTotal: number;
+    availableGroupCount: number;
+    returnedGroupCount: number;
+}): SearchGroupedResultCounts {
+    if (!Number.isSafeInteger(input.requestedTotal) || input.requestedTotal <= 0) {
+        throw new Error("Search requested total must be a positive safe integer.");
+    }
+    if (!Number.isSafeInteger(input.availableGroupCount) || input.availableGroupCount < 0) {
+        throw new Error("Search available group count must be a non-negative safe integer.");
+    }
+    if (!Number.isSafeInteger(input.returnedGroupCount) || input.returnedGroupCount < 0) {
+        throw new Error("Search returned group count must be a non-negative safe integer.");
+    }
+    const effectiveFrozenTotal = Math.min(
+        input.requestedTotal,
+        input.availableGroupCount,
+        SEARCH_MAX_FROZEN_RESULTS,
+    );
+    if (input.returnedGroupCount > effectiveFrozenTotal) {
+        throw new Error("Search returned group count cannot exceed the frozen total.");
+    }
+    return {
+        requestedTotal: input.requestedTotal,
+        effectiveFrozenTotal,
+        availableGroupCount: input.availableGroupCount,
+        returnedGroupCount: input.returnedGroupCount,
+        remainingGroupCount: effectiveFrozenTotal - input.returnedGroupCount,
+    };
+}
 
 function responseByteLength(value: unknown): number {
     return Buffer.byteLength(JSON.stringify(value), "utf8");
@@ -41,7 +77,7 @@ function buildSummary(input: {
 }): SearchDisclosureSummary {
     const reasons = orderedReasons(input.reasons);
     return {
-        policyVersion: "search_disclosure_v1",
+        policyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
         availableGroupCount: input.availableGroupCount,
         returnedGroupCount: input.returnedGroupCount,
         omittedGroupCount: input.availableGroupCount - input.returnedGroupCount,
@@ -73,6 +109,7 @@ export function projectGroupedDisclosure<T extends { preview: string }>(input: {
     const unannotatedBytes = responseByteLength(unannotated);
     if (!input.includeSummary && unannotatedBytes <= input.maxResponseBytes) {
         return {
+            status: "ok",
             envelope: unannotated,
             results: desiredResults,
             responseBytes: unannotatedBytes,
@@ -95,7 +132,7 @@ export function projectGroupedDisclosure<T extends { preview: string }>(input: {
         const envelope = input.buildEnvelope(results, disclosure);
         const responseBytes = responseByteLength(envelope);
         if (responseBytes <= input.maxResponseBytes) {
-            return { envelope, results, responseBytes };
+            return { status: "ok", envelope, results, responseBytes };
         }
     }
 
@@ -114,6 +151,7 @@ export function projectGroupedDisclosure<T extends { preview: string }>(input: {
     const firstResult = desiredResults[0];
     if (!firstResult) {
         return {
+            status: "ok",
             envelope: emptyEnvelope,
             results: [],
             responseBytes: responseByteLength(emptyEnvelope),
@@ -139,7 +177,7 @@ export function projectGroupedDisclosure<T extends { preview: string }>(input: {
         const envelope = input.buildEnvelope([truncatedResult], disclosure);
         const responseBytes = responseByteLength(envelope);
         if (responseBytes <= input.maxResponseBytes) {
-            best = { envelope, results: [truncatedResult], responseBytes };
+            best = { status: "ok", envelope, results: [truncatedResult], responseBytes };
             low = previewBytes + 1;
         } else {
             high = previewBytes - 1;
@@ -147,6 +185,7 @@ export function projectGroupedDisclosure<T extends { preview: string }>(input: {
     }
 
     return best ?? {
+        status: "page_too_large",
         envelope: emptyEnvelope,
         results: [],
         responseBytes: responseByteLength(emptyEnvelope),

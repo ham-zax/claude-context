@@ -12,6 +12,7 @@ import type {
     SearchPassFailureDebugHint,
     SearchGroupedDebugV2,
     SearchGroupedResultV2,
+    SearchGroupedResponseEnvelope,
     SearchResponseEnvelope,
 } from "./search-types.js";
 import { SEARCH_RESPONSE_FORMAT_VERSION } from "./search-types.js";
@@ -186,6 +187,7 @@ export function projectGroupedResultV2(result: SearchGroupResult): SearchGrouped
 
 export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
     results: SearchGroupResult[];
+    resultCounts?: SearchGroupedResponseEnvelope["resultCounts"];
     disclosure?: SearchDisclosureSummary;
 }): SearchResponseEnvelope {
     const recommendedNextAction = buildTopRecommendedSearchAction(input.codebaseRoot, input.results);
@@ -206,6 +208,7 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
             freshnessDecision: input.freshnessDecision,
             freshnessSummary: input.freshnessSummary,
         } : {}),
+        ...(input.resultCounts ? { resultCounts: input.resultCounts } : {}),
         ...(input.disclosure ? { disclosure: input.disclosure } : {}),
         ...buildWarnings(input.warnings),
         ...(recommendedNextAction ? { recommendedNextAction } : {}),

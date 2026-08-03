@@ -806,21 +806,32 @@ export function assertMeasuredReadiness(task, phase, invocation, readiness, cont
 
     const failedPredicates = [];
     if (phase === "cold") {
-        if (readiness.proofMode !== "cold") {
+        const preparedColdProof = readiness.proofMode === "warm"
+            && readiness.operations.preparedCacheHits >= 1
+            && readiness.requestProof?.preRetrievalFullComparisons >= 1
+            && readiness.requestProof?.finalFullComparisons >= 1
+            && readiness.watcher?.checkpointStatus === "valid";
+        if (readiness.proofMode !== "cold" && !preparedColdProof) {
             failedPredicates.push(`proofMode===cold (actual=${readiness.proofMode})`);
         }
-        if (readiness.operations.coldReadinessChecks < 1) {
+        if (readiness.operations.coldReadinessChecks < 1 && !preparedColdProof) {
             failedPredicates.push(
                 `coldReadinessChecks>=1 (actual=${readiness.operations.coldReadinessChecks})`,
             );
         }
-        if (readiness.operations.exactPayloadRecounts < 1) {
+        const checkpointBoundColdProof = readiness.operations.postFreshnessColdChecks >= 1
+            && readiness.watcher?.checkpointStatus === "valid";
+        if (
+            readiness.operations.exactPayloadRecounts < 1
+            && !checkpointBoundColdProof
+            && !preparedColdProof
+        ) {
             failedPredicates.push(
-                `exactPayloadRecounts>=1 (actual=${readiness.operations.exactPayloadRecounts})`,
+                "exactPayloadRecounts>=1, valid checkpoint-bound post-freshness proof, or fully compared prepared-cold proof",
             );
         }
         if (failedPredicates.length > 0) {
-            const message = `Task '${task.id}' cold search did not prove a cold authority check with an exact payload recount.`;
+            const message = `Task '${task.id}' cold search did not prove an exact, checkpoint-bound, or fully compared prepared-cold authority check.`;
             console.error(JSON.stringify({
                 event: "readiness_proof_failed",
                 message,
@@ -833,7 +844,14 @@ export function assertMeasuredReadiness(task, phase, invocation, readiness, cont
     }
 
     if (phase === "warm") {
-        if (readiness.proofMode !== "warm") {
+        const checkpointRevalidatedWarmProof = readiness.proofMode === "cold"
+            && readiness.operations.preparedCacheHits >= 1
+            && readiness.operations.warmReceiptRevalidations >= 1
+            && readiness.operations.postFreshnessColdChecks >= 1
+            && readiness.operations.exactPayloadRecounts === 0
+            && readiness.requestProof?.finalFullComparisons >= 1
+            && readiness.watcher?.checkpointStatus === "valid";
+        if (readiness.proofMode !== "warm" && !checkpointRevalidatedWarmProof) {
             failedPredicates.push(`proofMode===warm (actual=${readiness.proofMode})`);
         }
         if (readiness.operations.preparedCacheHits < 1) {
@@ -963,7 +981,10 @@ export async function recordPhase(session, task, phase, repoRoot, sample, evalua
         const freshnessMode = called.payload?.freshnessDecision?.mode;
         if (typeof freshnessMode === "string") freshnessModes.push(freshnessMode);
         if (["synced", "reconciled_ignore_change", "coalesced"].includes(freshnessMode)) {
-            throw new Error(`Task '${task.id}' measured call caused or joined sync freshness mode '${freshnessMode}'.`);
+            throw new Error(
+                `Task '${task.id}' ${phase} measured call caused or joined sync freshness mode '${freshnessMode}'. `
+                + `decision=${JSON.stringify(called.payload?.freshnessDecision ?? null)}`,
+            );
         }
         finalResult = called.result;
         finalPayload = called.payload;

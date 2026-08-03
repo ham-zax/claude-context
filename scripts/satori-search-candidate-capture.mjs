@@ -9,6 +9,10 @@ import {
     validateObservationSet,
     validateTaskSuite,
 } from "./satori-useful-context.mjs";
+import {
+    bindTrackOHeldOutOpening,
+    readTrackOHeldOutOpeningRecord,
+} from "./satori-track-o-heldout-opening.mjs";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const TRACE_SCHEMA_V1 = "search_candidate_survival_v1";
@@ -627,6 +631,7 @@ function assertEntrypointOwnerScoringAuthority(trace, evidence, label) {
 }
 
 function assertMeasurementIsolation(metadata, observationSetValue, taskIds) {
+    const noSyncFreshnessModes = new Set(["skipped_recent", "skipped_source_unchanged"]);
     if (!Array.isArray(metadata.taskRuns)) {
         throw new Error("Observation metadata taskRuns must prove frozen measurement isolation.");
     }
@@ -658,9 +663,9 @@ function assertMeasurementIsolation(metadata, observationSetValue, taskIds) {
     for (const observation of observationSetValue.observations) {
         if (!Array.isArray(observation.freshnessModes)
             || observation.freshnessModes.length === 0
-            || observation.freshnessModes.some((mode) => mode !== "skipped_recent")) {
+            || observation.freshnessModes.some((mode) => !noSyncFreshnessModes.has(mode))) {
             throw new Error(
-                `Task '${observation.taskId}' candidate capture requires skipped_recent no-sync evidence for every measured call.`,
+                `Task '${observation.taskId}' candidate capture requires authoritative no-sync freshness evidence for every measured call.`,
             );
         }
     }
@@ -783,6 +788,12 @@ function buildObservationCapture(task, observation, armPublication) {
     );
     const { passConfiguration, passConfigurationDigest } = buildPassConfiguration(debugSearch);
     const candidateTraceDigest = sha256Canonical(trace);
+    const rankedSetDigest = observation.response?.rankedSetDigest === undefined
+        ? undefined
+        : requireSha256(
+            observation.response.rankedSetDigest,
+            `Task '${task.id}' rankedSetDigest`,
+        );
     return {
         queryPlan,
         queryPlanDigest,
@@ -796,6 +807,7 @@ function buildObservationCapture(task, observation, armPublication) {
         } : {}),
         rankedResults: jsonClone(observation.results),
         rankedResultIdentityDigest: sha256Canonical(observation.results),
+        ...(rankedSetDigest ? { rankedSetDigest } : {}),
     };
 }
 
@@ -1105,6 +1117,7 @@ export function buildSearchCandidateCapture(taskSuiteValue, observationSetValue,
         const taskCapture = {
             taskId: task.id,
             ...(task.split ? { split: task.split } : {}),
+            ...(task.safetyControls ? { safetyControls: [...task.safetyControls] } : {}),
             queryClass: task.queryClass,
             language: task.language,
             expected: jsonClone(task.expected),
@@ -1209,6 +1222,7 @@ function parseArgs(argv) {
         tasksFile: null,
         observationsFile: null,
         outFile: null,
+        heldOutOpeningFile: null,
         policyId: "baseline",
         requireReplayReady: false,
         requireGroupingReady: false,
@@ -1224,6 +1238,9 @@ function parseArgs(argv) {
         if (arg === "--tasks") options.tasksFile = path.resolve(next());
         else if (arg === "--observations") options.observationsFile = path.resolve(next());
         else if (arg === "--out") options.outFile = path.resolve(next());
+        else if (arg === "--held-out-opening") {
+            options.heldOutOpeningFile = path.resolve(next());
+        }
         else if (arg === "--policy") options.policyId = next();
         else if (arg === "--require-replay-ready") options.requireReplayReady = true;
         else if (arg === "--require-grouping-ready") options.requireGroupingReady = true;
@@ -1242,6 +1259,7 @@ function usage() {
         "Usage: node scripts/satori-search-candidate-capture.mjs --tasks <tasks.json> --observations <observations.json> [options]",
         "Options:",
         "  --out <capture.json>",
+        "  --held-out-opening <opening.json>  Required for held-out or mixed-split work",
         "  --policy <id>                 Policy selector recorded in the capture (default: baseline)",
         "  --require-replay-ready        Reject traces that lack top-160/lexical-fallback authority",
         "  --require-grouping-ready      Reject traces that cannot reproduce grouped/disclosed order",
@@ -1273,6 +1291,15 @@ export function main(argv = process.argv.slice(2)) {
         return null;
     }
     const taskSuite = JSON.parse(fs.readFileSync(options.tasksFile, "utf8"));
+    const requiresHeldOutOpening = taskSuite.version === 2
+        && Array.isArray(taskSuite.tasks)
+        && taskSuite.tasks.some((task) => task?.split === "held_out");
+    if (requiresHeldOutOpening && !options.heldOutOpeningFile) {
+        throw new Error("Held-out or mixed-split capture requires --held-out-opening.");
+    }
+    const heldOutOpening = requiresHeldOutOpening
+        ? readTrackOHeldOutOpeningRecord(options.heldOutOpeningFile)
+        : null;
     const observations = JSON.parse(fs.readFileSync(options.observationsFile, "utf8"));
     const repositoryRoot = requireString(
         requireRecord(observations.metadata, "Observation metadata").repoRoot,
@@ -1283,7 +1310,10 @@ export function main(argv = process.argv.slice(2)) {
     if (options.outFile) {
         assertArtifactOutsideRepository(options.outFile, repositoryRoot, "Candidate capture output", true);
     }
-    const capture = buildSearchCandidateCapture(taskSuite, observations, options);
+    const builtCapture = buildSearchCandidateCapture(taskSuite, observations, options);
+    const capture = heldOutOpening
+        ? bindTrackOHeldOutOpening(builtCapture, heldOutOpening)
+        : builtCapture;
     const serialized = `${JSON.stringify(capture, null, 2)}\n`;
     if (options.outFile) fs.writeFileSync(options.outFile, serialized);
     else process.stdout.write(serialized);

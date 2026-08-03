@@ -10,13 +10,16 @@ import {
     SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
 } from "../packages/mcp/src/core/search-ranking-policy.ts";
-import { buildSearchCandidateCapture } from "./satori-search-candidate-capture.mjs";
+import {
+    buildSearchCandidateCapture,
+    main as captureMain,
+} from "./satori-search-candidate-capture.mjs";
 import {
     orderCapturedCoreArm,
     replayBaselineCandidateCapture,
     replayCandidateCapture,
 } from "./satori-search-candidate-replay.mjs";
-import { canonicalJson } from "./satori-useful-context.mjs";
+import { canonicalJson, validateTaskSuite } from "./satori-useful-context.mjs";
 
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
@@ -47,7 +50,10 @@ test("captured Core arms slice adapter order before normalized score ranking", (
         occurrence("raw_dense", 1, 0.4),
         occurrence("raw_dense", 2, 0.9),
         occurrence("raw_dense", 3, 1.0),
-    ];
+    ].map((candidate) => ({
+        ...candidate,
+        ownerId: JSON.stringify(["symbol", candidate.relativePath, candidate.candidateId]),
+    }));
     const stage = {
         stage: "raw_dense",
         totalOccurrences: candidates.length,
@@ -543,7 +549,7 @@ function observationSet(suite = taskSuite()) {
         metadata: {
             repoRoot: "/repo",
             gitRevision: "d".repeat(40),
-            taskSuiteSha256: sha256Canonical(suite),
+            taskSuiteSha256: sha256Canonical(validateTaskSuite(suite)),
             qualificationRuntime: { sha256: DIGEST_C },
             armIndexProof: {
                 canonicalRoot: "/repo",
@@ -668,6 +674,7 @@ test("candidate capture binds stable query, runtime, publication, and trace auth
     assert.deepEqual(capture.captures[0].expected, {
         ownerFile: "src/sync.ts",
         ownerSymbol: "reconcileIgnoreRules",
+        ownerMatch: "symbol",
     });
     assert.equal(
         capture.captures[0].queryPlan.queryUtf8Sha256,
@@ -694,6 +701,50 @@ test("candidate capture binds stable query, runtime, publication, and trace auth
         "mcp_replay_signals_not_recorded",
     ]);
     assert.match(capture.sha256, /^[0-9a-f]{64}$/);
+});
+
+test("candidate capture and replay preserve explicit safety-control authority", () => {
+    const suite = taskSuite();
+    suite.version = 2;
+    suite.tasks[0].split = "tuning";
+    suite.tasks[0].safetyControls = ["exact_identifier", "must"];
+    suite.tasks[0].expected.ownerMatch = "symbol";
+
+    const capture = buildSearchCandidateCapture(suite, observationSet(suite));
+    const replay = replayBaselineCandidateCapture(capture);
+
+    assert.deepEqual(capture.captures[0].safetyControls, ["exact_identifier", "must"]);
+    assert.deepEqual(replay.tasks[0].safetyControls, ["exact_identifier", "must"]);
+});
+
+test("candidate capture retains the production ranked-set digest for pagination controls", () => {
+    const suite = taskSuite();
+    suite.tasks[0].expected.ownerMatch = "symbol";
+    const observations = groupingReadyObservationSet(suite);
+    for (const observation of observations.observations) {
+        observation.response.rankedSetDigest = DIGEST_C;
+        observation.responseBytes = Buffer.byteLength(JSON.stringify(observation.response), "utf8");
+    }
+
+    const capture = buildSearchCandidateCapture(suite, observations);
+
+    assert.equal(capture.captures[0].rankedSetDigest, DIGEST_C);
+});
+
+test("candidate capture permits distinct frozen-set digests across equivalent search requests", () => {
+    const suite = taskSuite();
+    suite.tasks[0].expected.ownerMatch = "symbol";
+    const observations = groupingReadyObservationSet(suite);
+    observations.observations[0].response.rankedSetDigest = DIGEST_C;
+    observations.observations[1].response.rankedSetDigest = DIGEST_A;
+    for (const observation of observations.observations) {
+        observation.responseBytes = Buffer.byteLength(JSON.stringify(observation.response), "utf8");
+    }
+
+    const capture = buildSearchCandidateCapture(suite, observations);
+
+    assert.equal(capture.captures[0].rankedSetDigest, DIGEST_C);
+    assert.equal(capture.captures[0].stableSampleCount, 2);
 });
 
 test("candidate capture accepts status-only preparation and rejects mixed sync evidence", () => {
@@ -1408,6 +1459,26 @@ test("task-suite v2 replay selects explicit splits independently of task IDs", (
     );
 });
 
+test("candidate capture CLI rejects held-out material without an opening record", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-heldout-capture-gate-"));
+    try {
+        const tasksFile = path.join(tempDir, "tasks.json");
+        const observationsFile = path.join(tempDir, "observations.json");
+        fs.writeFileSync(tasksFile, JSON.stringify({
+            version: 2,
+            tasks: [{ id: "opaque-task", split: "held_out" }],
+        }));
+        fs.writeFileSync(observationsFile, "{}");
+
+        assert.throws(
+            () => captureMain(["--tasks", tasksFile, "--observations", observationsFile]),
+            /requires --held-out-opening/,
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
 test("contender replay excludes a fallback candidate with a recorded diagnostic removal", () => {
     const suite = taskSuite();
     suite.tasks[0].workload.invocations[0].args.debugCandidateLimit = 160;
@@ -1556,13 +1627,21 @@ test("candidate capture rejects drift between cold and warm traces", () => {
     );
 });
 
+test("candidate capture accepts complete source-unchanged no-sync evidence", () => {
+    const suite = taskSuite();
+    const observations = observationSet(suite);
+    observations.observations[1].freshnessModes = ["skipped_source_unchanged"];
+
+    assert.doesNotThrow(() => buildSearchCandidateCapture(suite, observations));
+});
+
 test("candidate capture rejects missing no-sync evidence or a changed final index proof", () => {
     const suite = taskSuite();
     const mutatingObservation = observationSet(suite);
     mutatingObservation.observations[0].freshnessModes = ["synced"];
     assert.throws(
         () => buildSearchCandidateCapture(suite, mutatingObservation),
-        /requires skipped_recent no-sync evidence/,
+        /requires authoritative no-sync freshness evidence/,
     );
 
     const driftedProof = observationSet(suite);

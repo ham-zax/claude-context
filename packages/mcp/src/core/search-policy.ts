@@ -1,6 +1,8 @@
 import {
     SEARCH_MAX_DIAGNOSTIC_CANDIDATES,
     SEARCH_MAX_CANDIDATES,
+    SEARCH_MAX_FROZEN_RESULTS,
+    SEARCH_MAX_PAGE_SIZE,
     SEARCH_DEFAULT_DISCLOSURE_LIMIT,
     SEARCH_MUST_RETRY_MULTIPLIER,
     SEARCH_MUST_RETRY_ROUNDS,
@@ -19,6 +21,13 @@ export type ResolvedSearchPolicy = Readonly<{
     diagnosticCandidateLimit?: number;
 }>;
 
+export function resolveFrozenSearchResultLimit(requestedTotal: number): number {
+    return Math.max(
+        1,
+        Math.min(SEARCH_MAX_FROZEN_RESULTS, Math.floor(requestedTotal)),
+    );
+}
+
 export function resolveSearchPolicy(input: {
     resultLimit: number;
     retrievalResultLimit?: number;
@@ -27,19 +36,28 @@ export function resolveSearchPolicy(input: {
     hasMustOperators: boolean;
     diagnosticCandidateLimit?: number;
 }): ResolvedSearchPolicy {
-    const normalizedResultLimit = Math.max(1, Math.floor(input.resultLimit));
+    const normalizedResultLimit = resolveFrozenSearchResultLimit(input.resultLimit);
     const retrievalResultLimit = Math.max(
         1,
-        Math.floor(input.retrievalResultLimit ?? normalizedResultLimit),
+        Math.min(
+            SEARCH_MAX_FROZEN_RESULTS,
+            Math.floor(input.retrievalResultLimit ?? normalizedResultLimit),
+        ),
     );
     const rerankerResultLimit = Math.max(
         1,
-        Math.floor(input.rerankerResultLimit ?? retrievalResultLimit),
+        Math.min(
+            SEARCH_MAX_FROZEN_RESULTS,
+            Math.floor(input.rerankerResultLimit ?? retrievalResultLimit),
+        ),
     );
     const disclosureResultLimit = Math.max(
         1,
-        Math.floor(input.disclosureResultLimit
-            ?? Math.min(normalizedResultLimit, SEARCH_DEFAULT_DISCLOSURE_LIMIT)),
+        Math.min(
+            SEARCH_MAX_PAGE_SIZE,
+            Math.floor(input.disclosureResultLimit
+                ?? Math.min(normalizedResultLimit, SEARCH_DEFAULT_DISCLOSURE_LIMIT)),
+        ),
     );
     const maxCandidateLimit = SEARCH_MAX_CANDIDATES;
     const candidateLimit = Math.max(

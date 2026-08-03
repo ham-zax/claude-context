@@ -1,4 +1,9 @@
-export type { Reranker, RerankOptions, RerankResult } from "./reranker";
+export type {
+    Reranker,
+    RerankerIdentity,
+    RerankOptions,
+    RerankResult,
+} from "./reranker";
 export {
     VoyageAIReranker,
     type VoyageAIRerankerConfig,

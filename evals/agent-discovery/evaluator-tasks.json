@@ -24,13 +24,13 @@
         "ownerFile": "packages/mcp/src/core/search-exact-fast-path.ts",
         "ownerSymbol": "runExactRegistryFastPath",
         "ownerSpan": {
-          "startLine": 183,
-          "endLine": 572
+          "startLine": 189,
+          "endLine": 604
         },
         "requiredRelations": [
           {
             "relation": "caller",
-            "symbol": "handleSearchCode",
+            "symbol": "handleSearchCodeAttempt",
             "file": "packages/mcp/src/core/handlers.ts"
           },
           {
@@ -68,13 +68,13 @@
         "ownerFile": "packages/mcp/src/core/search-frontdoor.ts",
         "ownerSymbol": "runSearchFrontDoor",
         "ownerSpan": {
-          "startLine": 231,
-          "endLine": 394
+          "startLine": 229,
+          "endLine": 392
         },
         "requiredRelations": [
           {
             "relation": "caller",
-            "symbol": "handleSearchCode",
+            "symbol": "handleSearchCodeAttempt",
             "file": "packages/mcp/src/core/handlers.ts"
           },
           {

@@ -604,7 +604,8 @@ export interface SearchDebugHint {
         inputBytes: number;
         byteBudgetOmittedCandidates: number;
         errorCode?: "RERANKER_FAILED";
-        failurePhase?: "api_call" | "parse_results";
+        failurePhase?: "document_projection" | "api_call" | "parse_results";
+        operationalReason?: SearchRerankerOperationalReason;
         topK: number;
         rankK: number;
         weight: number;
@@ -619,6 +620,16 @@ export interface SearchDebugHint {
         };
     };
 }
+
+export type SearchRerankerOperationalReason =
+    | "lateon_applied"
+    | "lateon_not_ready"
+    | "lateon_capacity_fallback"
+    | "lateon_queue_timeout"
+    | "lateon_execution_timeout"
+    | "lateon_cancelled"
+    | "lateon_invalid_output"
+    | "lateon_worker_failure";
 
 export type SearchRankingDebugHint = Pick<SearchDebugHint,
     | "route"
@@ -715,7 +726,10 @@ interface SearchBaseResponseEnvelope {
     formatVersion: typeof SEARCH_RESPONSE_FORMAT_VERSION;
     status: "ok" | "requires_reindex" | "not_indexed" | "not_ready";
     reason?: NonOkReason;
-    code?: "MISSING_PROVIDER_CONFIG" | VectorBackendResponseCode | EmbeddingProviderResponseCode;
+    code?: "MISSING_PROVIDER_CONFIG"
+        | "SEARCH_RESULT_SET_PAGE_TOO_LARGE"
+        | VectorBackendResponseCode
+        | EmbeddingProviderResponseCode;
     path: string;
     codebaseRoot?: string;
     query: string;
@@ -734,6 +748,9 @@ interface SearchBaseResponseEnvelope {
 
 export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelope {
     resultMode: "grouped";
+    rankedSetDigest?: string;
+    resultIndex?: SearchCompactResultIndex;
+    resultCounts?: SearchGroupedResultCounts;
     disclosure?: SearchDisclosureSummary;
     continuation?: {
         handle: string;
@@ -741,6 +758,47 @@ export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelop
         remainingGroupCount: number;
     };
     results: SearchGroupedResultV2[];
+}
+
+export type SearchResultIndexEvidenceLabel =
+    | "high_owner_confidence"
+    | "medium_owner_confidence"
+    | "high_semantic_confidence"
+    | "medium_semantic_confidence"
+    | "ranked_candidate";
+
+export type SearchResultIndexEntry =
+    | {
+        rank: number;
+        kind: "symbol";
+        target: { file: string; symbolId: string };
+        displayLabel: string;
+        evidenceLabel: SearchResultIndexEvidenceLabel;
+    }
+    | {
+        rank: number;
+        kind: "file";
+        target: { file: string };
+        displayLabel: string;
+        evidenceLabel: SearchResultIndexEvidenceLabel;
+    };
+
+export interface SearchCompactResultIndex {
+    contractVersion: "search_result_index_v1";
+    rankedSetDigest: string;
+    disclosurePolicyVersion: "search_disclosure_v1";
+    availableEntryCount: number;
+    returnedEntryCount: number;
+    complete: boolean;
+    entries: SearchResultIndexEntry[];
+}
+
+export interface SearchGroupedResultCounts {
+    requestedTotal: number;
+    effectiveFrozenTotal: number;
+    availableGroupCount: number;
+    returnedGroupCount: number;
+    remainingGroupCount: number;
 }
 
 export type SearchDisclosureReason =
@@ -776,6 +834,7 @@ export interface SearchRequestInput {
     rankingMode: SearchRankingMode;
     limit: number;
     disclosureLimit?: number;
+    includeResultIndex?: boolean;
     debugMode?: SearchDebugMode;
     debugCandidateLimit?: number;
 }

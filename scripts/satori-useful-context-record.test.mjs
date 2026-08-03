@@ -5,9 +5,108 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertMeasuredReadiness } from "./satori-useful-context-record.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT_PATH = path.join(SCRIPT_DIR, "satori-useful-context-record.mjs");
+
+test("recorder accepts a cold proof bound to a valid post-freshness checkpoint", () => {
+    const invocation = { tool: "search_codebase", args: { debugMode: "full" } };
+    const task = { id: "checkpoint-cold", workload: { invocations: [invocation] } };
+    const readiness = {
+        proofMode: "cold",
+        invalidationReason: "observation_changed",
+        operations: {
+            preparedCacheLookups: 1,
+            preparedCacheHits: 1,
+            coldReadinessChecks: 1,
+            postFreshnessColdChecks: 1,
+            warmReceiptRevalidations: 0,
+            exactPayloadRecounts: 0,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+
+    assert.doesNotThrow(() => assertMeasuredReadiness(
+        task,
+        "cold",
+        invocation,
+        readiness,
+        { sample: 0, invocationIndex: 0 },
+    ));
+    assert.doesNotThrow(() => assertMeasuredReadiness(
+        task,
+        "cold",
+        invocation,
+        {
+            ...readiness,
+            proofMode: "warm",
+            operations: {
+                ...readiness.operations,
+                coldReadinessChecks: 0,
+                postFreshnessColdChecks: 0,
+                preparedCacheHits: 1,
+            },
+            requestProof: {
+                preRetrievalFullComparisons: 1,
+                finalFullComparisons: 1,
+            },
+        },
+        { sample: 0, invocationIndex: 0 },
+    ));
+    assert.throws(() => assertMeasuredReadiness(
+        task,
+        "cold",
+        invocation,
+        { ...readiness, watcher: { checkpointStatus: "unavailable" } },
+        { sample: 0, invocationIndex: 0 },
+    ), /checkpoint-bound/);
+});
+
+test("recorder accepts a warm receipt followed by a fully compared checkpoint revalidation", () => {
+    const task = {
+        id: "checkpoint-warm",
+        workload: {
+            invocations: [{ tool: "search_codebase", args: { debugMode: "full" } }],
+        },
+    };
+    const invocation = task.workload.invocations[0];
+    const readiness = {
+        proofMode: "cold",
+        invalidationReason: "observation_changed",
+        operations: {
+            preparedCacheLookups: 1,
+            preparedCacheHits: 1,
+            coldReadinessChecks: 1,
+            postFreshnessColdChecks: 1,
+            warmReceiptRevalidations: 1,
+            exactPayloadRecounts: 0,
+        },
+        requestProof: {
+            preRetrievalFullComparisons: 0,
+            finalFullComparisons: 1,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+
+    assert.doesNotThrow(() => assertMeasuredReadiness(
+        task,
+        "warm",
+        invocation,
+        readiness,
+        { sample: 1, invocationIndex: 0 },
+    ));
+    assert.throws(() => assertMeasuredReadiness(
+        task,
+        "warm",
+        invocation,
+        {
+            ...readiness,
+            requestProof: { ...readiness.requestProof, finalFullComparisons: 0 },
+        },
+        { sample: 1, invocationIndex: 0 },
+    ), /proofMode===warm/);
+});
 
 function writeJson(file, value) {
     fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);

@@ -2,6 +2,11 @@ import {
     ContextMcpConfig,
     resolveRerankerProvider,
 } from "../config.js";
+import {
+    SEARCH_MAX_FROZEN_RESULTS,
+    SEARCH_MAX_LOGICAL_RESULTS,
+    SEARCH_MAX_PAGE_SIZE,
+} from "./search-constants.js";
 
 export type EmbeddingLocality = 'local' | 'cloud';
 export type PerformanceProfile = 'fast' | 'standard' | 'slow';
@@ -13,6 +18,9 @@ export interface CapabilityMatrix {
     performanceProfile: PerformanceProfile;
     defaultSearchLimit: number;
     maxSearchLimit: number;
+    maxSearchResultTotal: number;
+    maxFrozenSearchResults: number;
+    maxSearchPageSize: number;
     defaultRerankEnabled: boolean;
 }
 
@@ -52,11 +60,6 @@ export class CapabilityResolver {
 
         const defaultSearchLimit = performanceProfile === 'slow' ? 10 : 20;
 
-        const maxSearchLimit =
-            performanceProfile === 'fast' ? 50 :
-                performanceProfile === 'standard' ? 30 :
-                    15;
-
         const defaultRerankEnabled = hasReranker
             && (rerankerProvider === 'lateon' || performanceProfile !== 'slow');
 
@@ -66,7 +69,10 @@ export class CapabilityResolver {
             embeddingLocality,
             performanceProfile,
             defaultSearchLimit,
-            maxSearchLimit,
+            maxSearchLimit: SEARCH_MAX_LOGICAL_RESULTS,
+            maxSearchResultTotal: SEARCH_MAX_LOGICAL_RESULTS,
+            maxFrozenSearchResults: SEARCH_MAX_FROZEN_RESULTS,
+            maxSearchPageSize: SEARCH_MAX_PAGE_SIZE,
             defaultRerankEnabled
         };
     }
@@ -96,7 +102,19 @@ export class CapabilityResolver {
     }
 
     public getMaxSearchLimit(): number {
-        return this.matrix.maxSearchLimit;
+        return this.getMaxSearchResultTotal();
+    }
+
+    public getMaxSearchResultTotal(): number {
+        return this.matrix.maxSearchResultTotal;
+    }
+
+    public getMaxFrozenSearchResults(): number {
+        return this.matrix.maxFrozenSearchResults;
+    }
+
+    public getMaxSearchPageSize(): number {
+        return this.matrix.maxSearchPageSize;
     }
 
     public getDefaultRerankEnabled(): boolean {

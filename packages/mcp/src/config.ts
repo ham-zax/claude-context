@@ -25,6 +25,10 @@ import {
     type NetworkPolicy,
     type ResolvedOllamaModelIdentity,
 } from "@zokizuan/satori-core";
+import {
+    LATEON_RUNTIME_PROFILE_IDS,
+    type LateOnRuntimeProfileId,
+} from "./server/lateon-reranker-protocol.js";
 
 export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'Potion';
 export type VectorStoreProvider = 'Milvus' | 'LanceDB';
@@ -209,7 +213,12 @@ export interface ContextMcpConfig {
     rerankerProvider?: RerankerProvider;
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
     lateOnModelPath?: string;
+    lateOnProfileId?: LateOnRuntimeProfileId;
     lateOnRequestDeadlineMs?: number;
+    lateOnMaximumQueueWaitMs?: number;
+    lateOnRerankerStageDeadlineMs?: number;
+    lateOnMaximumActiveReranks?: 0 | 1;
+    lateOnMaximumQueuedReranks?: 0 | 1;
     lateOnIntraOpThreads?: number;
     // read_file behavior
     readFileMaxLines?: number;
@@ -703,6 +712,36 @@ export function createMcpConfig(): ContextMcpConfig {
     const lateOnRequestDeadlineMs = rerankerProvider === 'lateon'
         ? parseOptionalPositiveInteger('SATORI_LATEON_REQUEST_DEADLINE_MS', 300_000)
         : undefined;
+    const lateOnProfileRaw = rerankerProvider === 'lateon'
+        ? envManager.get('SATORI_LATEON_PROFILE')
+        : undefined;
+    const knownLateOnProfiles = Object.values(LATEON_RUNTIME_PROFILE_IDS);
+    if (lateOnProfileRaw && !knownLateOnProfiles.includes(lateOnProfileRaw as LateOnRuntimeProfileId)) {
+        throw new Error(
+            `Invalid SATORI_LATEON_PROFILE '${lateOnProfileRaw}'. Expected one of: ${knownLateOnProfiles.join(', ')}.`,
+        );
+    }
+    const lateOnProfileId = lateOnProfileRaw as LateOnRuntimeProfileId | undefined;
+    const lateOnMaximumQueueWaitMs = rerankerProvider === 'lateon'
+        ? parseOptionalPositiveInteger('SATORI_LATEON_MAX_QUEUE_WAIT_MS', 300_000)
+        : undefined;
+    const lateOnRerankerStageDeadlineMs = rerankerProvider === 'lateon'
+        ? parseOptionalPositiveInteger('SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS', 300_000)
+        : undefined;
+    const parseOptionalCapacity = (variable: string): 0 | 1 | undefined => {
+        const raw = envManager.get(variable);
+        if (!raw) return undefined;
+        if (raw !== '0' && raw !== '1') {
+            throw new Error(`${variable} must be 0 or 1.`);
+        }
+        return Number(raw) as 0 | 1;
+    };
+    const lateOnMaximumActiveReranks = rerankerProvider === 'lateon'
+        ? parseOptionalCapacity('SATORI_LATEON_MAX_ACTIVE_RERANKS')
+        : undefined;
+    const lateOnMaximumQueuedReranks = rerankerProvider === 'lateon'
+        ? parseOptionalCapacity('SATORI_LATEON_MAX_QUEUED_RERANKS')
+        : undefined;
     const lateOnIntraOpThreads = rerankerProvider === 'lateon'
         ? parseOptionalPositiveInteger(
             'SATORI_LATEON_INTRA_OP_THREADS',
@@ -781,7 +820,18 @@ export function createMcpConfig(): ContextMcpConfig {
         rerankerProvider,
         rankerModel,
         ...(lateOnModelPath ? { lateOnModelPath } : {}),
+        ...(lateOnProfileId ? { lateOnProfileId } : {}),
         ...(lateOnRequestDeadlineMs !== undefined ? { lateOnRequestDeadlineMs } : {}),
+        ...(lateOnMaximumQueueWaitMs !== undefined ? { lateOnMaximumQueueWaitMs } : {}),
+        ...(lateOnRerankerStageDeadlineMs !== undefined
+            ? { lateOnRerankerStageDeadlineMs }
+            : {}),
+        ...(lateOnMaximumActiveReranks !== undefined
+            ? { lateOnMaximumActiveReranks }
+            : {}),
+        ...(lateOnMaximumQueuedReranks !== undefined
+            ? { lateOnMaximumQueuedReranks }
+            : {}),
         ...(lateOnIntraOpThreads !== undefined ? { lateOnIntraOpThreads } : {}),
         // read_file behavior
         readFileMaxLines,

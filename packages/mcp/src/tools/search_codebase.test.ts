@@ -262,6 +262,97 @@ test('search_codebase accepts a smaller grouped disclosure without lowering retr
     assert.match(rejectedRaw.content[0]?.text ?? '', /disclosureLimit.*grouped/i);
 });
 
+test('search_codebase accepts an optional compact result index only for grouped results', async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const calls: Array<Record<string, unknown>> = [];
+    const ctx = {
+        capabilities,
+        toolHandlers: {
+            handleSearchCode: async (args: Record<string, unknown>) => {
+                calls.push(args);
+                return { content: [{ type: 'text' as const, text: '{"status":"ok","results":[]}' }] };
+            },
+        },
+    } as unknown as ToolContext;
+
+    const defaultOmitted = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+    }, ctx);
+    const acceptedGrouped = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+        resultMode: 'grouped',
+        includeResultIndex: true,
+    }, ctx);
+    const rejectedRaw = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+        resultMode: 'raw',
+        includeResultIndex: true,
+    }, ctx);
+
+    assert.equal(defaultOmitted.isError, undefined);
+    assert.equal(acceptedGrouped.isError, undefined);
+    assert.equal(rejectedRaw.isError, true);
+    assert.equal(calls.length, 2);
+    assert.equal(Object.hasOwn(calls[0] ?? {}, 'includeResultIndex'), false);
+    assert.equal(calls[1]?.includeResultIndex, true);
+    assert.match(rejectedRaw.content[0]?.text ?? '', /includeResultIndex.*grouped/i);
+});
+
+test('search_codebase accepts a large logical total on Potion while independently bounding disclosure', async () => {
+    const capabilities = new CapabilityResolver(buildConfig({
+        executionProfile: 'offline',
+        networkPolicy: { kind: 'local-only' },
+        vectorStoreProvider: 'LanceDB',
+        lanceDbPath: '/tmp/satori-lancedb',
+        encoderProvider: 'Potion',
+        encoderModel: 'pinned-potion',
+    }));
+    const calls: Array<Record<string, unknown>> = [];
+    const ctx = {
+        capabilities,
+        toolHandlers: {
+            handleSearchCode: async (args: Record<string, unknown>) => {
+                calls.push(args);
+                return { content: [{ type: 'text' as const, text: '{"status":"ok","results":[]}' }] };
+            },
+        },
+    } as unknown as ToolContext;
+
+    const accepted = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+        limit: 10_000,
+        disclosureLimit: 200,
+    }, ctx);
+    const unsafe = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+        limit: Number.MAX_SAFE_INTEGER + 1,
+    }, ctx);
+    const oversizedPage = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+        limit: 10_000,
+        disclosureLimit: 201,
+    }, ctx);
+    const pageAboveDefaultTotal = await searchCodebaseTool.execute({
+        path: '/repo',
+        query: 'auth ownership',
+        disclosureLimit: 11,
+    }, ctx);
+
+    assert.equal(accepted.isError, undefined);
+    assert.equal(calls[0]?.limit, 10_000);
+    assert.equal(calls[0]?.disclosureLimit, 200);
+    assert.equal(unsafe.isError, true);
+    assert.equal(oversizedPage.isError, true);
+    assert.equal(pageAboveDefaultTotal.isError, true);
+    assert.equal(calls.length, 1);
+});
+
 test('search_codebase acquires embedding context only for routes that require dense retrieval', async () => {
     const capabilities = new CapabilityResolver(buildConfig());
     const requestedOperations: string[] = [];

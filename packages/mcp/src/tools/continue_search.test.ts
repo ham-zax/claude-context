@@ -60,17 +60,26 @@ test("continue_search delegates a normalized handle and bounded page limit", asy
     assert.deepEqual(delegated, { handle, expectedOffset: 1, limit: 3 });
 });
 
-test("continue_search rejects an offset outside the capability bound", async () => {
+test("continue_search accepts the frozen maximum and rejects offsets above it", async () => {
     let calls = 0;
+    const accepted = await continueSearchTool.execute({
+        handle: "a".repeat(48),
+        expectedOffset: 200,
+        limit: 200,
+    }, buildContext(async () => {
+        calls += 1;
+        return { content: [{ type: "text", text: "ok" }] };
+    }));
     const response = await continueSearchTool.execute({
         handle: "a".repeat(48),
-        expectedOffset: 51,
+        expectedOffset: 201,
     }, buildContext(async () => {
         calls += 1;
         return { content: [{ type: "text", text: "unexpected" }] };
     }));
 
+    assert.equal(accepted.isError, undefined);
     assert.equal(response.isError, true);
-    assert.match(response.content[0]?.text ?? "", /less than or equal to 50/);
-    assert.equal(calls, 0);
+    assert.match(response.content[0]?.text ?? "", /less than or equal to 200/);
+    assert.equal(calls, 1);
 });

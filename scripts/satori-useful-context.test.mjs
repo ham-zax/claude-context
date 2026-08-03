@@ -37,6 +37,7 @@ const QUERY_CLASSES = [
     "caller_recovery",
     "dirty_owner",
     "stale_recovery",
+    "negative_exposure",
 ];
 
 function baseTask(overrides = {}) {
@@ -174,6 +175,30 @@ test("validateTaskSuite version 2 requires explicit tuning or held-out authority
         () => validateTaskSuite(minimalSuite([baseTask({ split: "tuning" })])),
         /version 2/,
     );
+});
+
+test("validateTaskSuite preserves explicit version-2 safety controls", () => {
+    const normalized = validateTaskSuite({
+        version: 2,
+        tasks: [baseTask({
+            id: "exact-control",
+            split: "tuning",
+            safetyControls: ["must", "exact_identifier"],
+        })],
+    });
+
+    assert.deepEqual(normalized.tasks[0].safetyControls, ["must", "exact_identifier"]);
+    assert.throws(() => validateTaskSuite({
+        version: 2,
+        tasks: [baseTask({
+            id: "duplicate-control",
+            split: "tuning",
+            safetyControls: ["must", "must"],
+        })],
+    }), /duplicate.*safety control/i);
+    assert.throws(() => validateTaskSuite(minimalSuite([baseTask({
+        safetyControls: ["must"],
+    })])), /safetyControls.*version 2/i);
 });
 
 test("validateTaskSuite defaults owner matching to symbols and validates explicit file matching", () => {
@@ -730,6 +755,58 @@ test("gradeObservation uses recorder response bytes and retains readiness eviden
 
     assert.equal(graded.payloadBytes, responseBytes);
     assert.deepEqual(graded.readiness, warmReadiness);
+});
+
+test("validateObservationSet accepts fully compared prepared and checkpoint-revalidated proofs", () => {
+    const baseOperations = {
+        preparedCacheLookups: 1,
+        preparedCacheHits: 1,
+        coldReadinessChecks: 0,
+        postFreshnessColdChecks: 0,
+        warmReceiptRevalidations: 0,
+        exactPayloadRecounts: 0,
+    };
+    const preparedCold = {
+        proofMode: "warm",
+        invalidationReason: "none",
+        operations: baseOperations,
+        requestProof: {
+            preRetrievalFullComparisons: 1,
+            finalFullComparisons: 1,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+    const checkpointWarm = {
+        proofMode: "cold",
+        invalidationReason: "observation_changed",
+        operations: {
+            ...baseOperations,
+            coldReadinessChecks: 1,
+            postFreshnessColdChecks: 1,
+            warmReceiptRevalidations: 1,
+        },
+        requestProof: {
+            preRetrievalFullComparisons: 1,
+            finalFullComparisons: 1,
+        },
+        watcher: { checkpointStatus: "valid" },
+    };
+
+    assert.doesNotThrow(() => validateObservationSet(minimalObservations([
+        baseObservation({ readiness: [preparedCold] }),
+        baseObservation({ phase: "warm", readiness: [checkpointWarm] }),
+    ]), ["t-owner"]));
+    assert.throws(() => validateObservationSet(minimalObservations([
+        baseObservation({
+            readiness: [{
+                ...preparedCold,
+                requestProof: {
+                    ...preparedCold.requestProof,
+                    finalFullComparisons: 0,
+                },
+            }],
+        }),
+    ]), ["t-owner"]), /match observation phase/);
 });
 
 // ---------------------------------------------------------------------------
