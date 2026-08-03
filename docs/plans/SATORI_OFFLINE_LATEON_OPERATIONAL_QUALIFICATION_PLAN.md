@@ -254,10 +254,19 @@ oracle reviewers          local_source_oracle_review_2026_07_30
 
 The manifest binds every task ID, query digest, required owner, acceptable
 alternative, hard negative, source revision, source blob, and publication
-authority. A Track O opening authority must validate this exact manifest, a
-passing O2 receipt, the D32 profile, and the candidate-capture digest before it
-reads any held-out task payload. It must atomically consume a durable one-time
-opening record; failure consumes the opening and cannot be retried.
+authority. Before reading any held-out task payload, a Track O opening authority
+must validate the opaque manifest file and canonical seal, O0 authority, a
+passing O2 receipt, the D32 profile/artifact identities, and absence of an
+earlier opening marker. It must then atomically create and fsync a durable
+write-once opening record. Failure after that point consumes the opening and
+cannot be retried.
+
+A candidate-capture digest cannot exist before task materialization. After the
+opening is consumed, O3 may materialize the held-out tasks and capture. The O3
+receipt must bind the resulting index, publication, capture, replay, score, and
+evaluator digests before evaluating or reporting aggregate quality. Low-level
+capture, replay, and score entrypoints must reject held-out or mixed-split work
+without the exact opening record; tuning-only behavior remains unchanged.
 
 Held-out compares exactly D32 against B using the frozen manifest formulas:
 
