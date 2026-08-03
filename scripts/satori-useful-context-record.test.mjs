@@ -34,13 +34,33 @@ test("recorder accepts a cold proof bound to a valid post-freshness checkpoint",
         readiness,
         { sample: 0, invocationIndex: 0 },
     ));
+    assert.doesNotThrow(() => assertMeasuredReadiness(
+        task,
+        "cold",
+        invocation,
+        {
+            ...readiness,
+            proofMode: "warm",
+            operations: {
+                ...readiness.operations,
+                coldReadinessChecks: 0,
+                postFreshnessColdChecks: 0,
+                preparedCacheHits: 1,
+            },
+            requestProof: {
+                preRetrievalFullComparisons: 1,
+                finalFullComparisons: 1,
+            },
+        },
+        { sample: 0, invocationIndex: 0 },
+    ));
     assert.throws(() => assertMeasuredReadiness(
         task,
         "cold",
         invocation,
         { ...readiness, watcher: { checkpointStatus: "unavailable" } },
         { sample: 0, invocationIndex: 0 },
-    ), /valid freshness checkpoint/);
+    ), /checkpoint-bound/);
 });
 
 function writeJson(file, value) {

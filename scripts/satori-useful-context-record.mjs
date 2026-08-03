@@ -806,23 +806,32 @@ export function assertMeasuredReadiness(task, phase, invocation, readiness, cont
 
     const failedPredicates = [];
     if (phase === "cold") {
-        if (readiness.proofMode !== "cold") {
+        const preparedColdProof = readiness.proofMode === "warm"
+            && readiness.operations.preparedCacheHits >= 1
+            && readiness.requestProof?.preRetrievalFullComparisons >= 1
+            && readiness.requestProof?.finalFullComparisons >= 1
+            && readiness.watcher?.checkpointStatus === "valid";
+        if (readiness.proofMode !== "cold" && !preparedColdProof) {
             failedPredicates.push(`proofMode===cold (actual=${readiness.proofMode})`);
         }
-        if (readiness.operations.coldReadinessChecks < 1) {
+        if (readiness.operations.coldReadinessChecks < 1 && !preparedColdProof) {
             failedPredicates.push(
                 `coldReadinessChecks>=1 (actual=${readiness.operations.coldReadinessChecks})`,
             );
         }
         const checkpointBoundColdProof = readiness.operations.postFreshnessColdChecks >= 1
             && readiness.watcher?.checkpointStatus === "valid";
-        if (readiness.operations.exactPayloadRecounts < 1 && !checkpointBoundColdProof) {
+        if (
+            readiness.operations.exactPayloadRecounts < 1
+            && !checkpointBoundColdProof
+            && !preparedColdProof
+        ) {
             failedPredicates.push(
-                "exactPayloadRecounts>=1 or valid checkpoint-bound post-freshness proof",
+                "exactPayloadRecounts>=1, valid checkpoint-bound post-freshness proof, or fully compared prepared-cold proof",
             );
         }
         if (failedPredicates.length > 0) {
-            const message = `Task '${task.id}' cold search did not prove a cold authority check with an exact recount or valid freshness checkpoint.`;
+            const message = `Task '${task.id}' cold search did not prove an exact, checkpoint-bound, or fully compared prepared-cold authority check.`;
             console.error(JSON.stringify({
                 event: "readiness_proof_failed",
                 message,
