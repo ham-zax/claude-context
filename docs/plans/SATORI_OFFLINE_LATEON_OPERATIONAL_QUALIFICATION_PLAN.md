@@ -1,8 +1,10 @@
 # Satori Offline LateOn Operational Qualification Plan
 
-**Status:** D32-v1 O2 rejected only by its peak-RSS envelope; D32-v2 O0
-prospective authority is being frozen. Held-out evidence is sealed and the
-historical product policy remains baseline `B`.
+**Status:** D32-v2 passed O2 operational qualification. The one-time O3
+opening was consumed by a post-opening infrastructure failure, and the
+remaining split also violated the frozen six-quality-task minimum for
+PromptReady. O3 closed without a valid quality decision; baseline `B` remains
+the product policy.
 
 **Date:** 2026-08-04
 
@@ -37,10 +39,11 @@ change within a named profile during Track O. D16 and D50 are not Track O or
 held-out contenders.
 
 O1 also exposes the already-observed projection-v2 D16 shape as the separately
-identified disabled profile `lateon_projection_v2_d16_v1`. This is an operator
-selection option, not an O3 contender, and it cannot inherit D32's operational
-or held-out qualification. Selection is explicit before search; the runtime
-never changes depth adaptively and never falls back from D32 to D16.
+identified disabled profile `lateon_projection_v2_d16_v1`. It is an explicit
+unqualified developer-experiment selection, not a capability-advertised Track
+O service profile or O3 contender, and it cannot inherit D32's operational or
+held-out qualification. Selection is explicit before search; the runtime never
+changes depth adaptively and never falls back from D32 to D16.
 
 The first operational profile,
 `lateon_offline_quality_projection_v2_d32_v1`, remains closed with
@@ -266,7 +269,38 @@ complete.
 
 ## 6. O3 — one held-out opening
 
-Held-out remains sealed until O2 passes. The decision-bearing authority is:
+### Executed disposition
+
+The opening was created at `2026-08-03T20:51:47.224Z`. The first PromptReady
+capture then exposed a general result-cache serialization defect before a
+usable capture existed. Later attempts exposed watcher-disabled no-op sync and
+proof-schema defects. Those implementation corrections are valid general
+repairs, but the frozen protocol states that any failure after the write-once
+opening consumes the opening and cannot be retried. Post-fix PromptReady,
+FastContext, and Recovery Dashboard captures are therefore retained only as
+invalidated diagnostic artifacts; they have no O3 decision authority.
+
+The materialized split also confirmed that excluding
+`promptready-primary-action` left PromptReady with five decision-bearing
+quality tasks. The frozen cross-repository authority requires at least six per
+repository. The executable counts were:
+
+| Repository | Quality | Safety | Negative |
+| --- | ---: | ---: | ---: |
+| PromptReady | 5 | 0 | 2 |
+| FastContext | 6 | 0 | 2 |
+| Recovery Dashboard | 6 | 0 | 2 |
+| AI Studio Prompt Library | 6 | 1 | 2 |
+| Portfolio | 6 | 1 | 2 |
+| Supply Chain API | 6 | 1 | 2 |
+
+No D32 held-out scoring or aggregate metric was opened. O3 terminates as
+`offline_lateon_opening_consumed_without_valid_decision`; O4 does not open.
+The operational D32-v2 receipt remains valid, but it supplies no held-out
+quality or activation authority.
+
+Held-out remained sealed until O2 passed. The prospective decision-bearing
+authority was:
 
 ```text
 manifest                 evals/search-ranking/cross-repository-v3.manifest.json
@@ -295,10 +329,13 @@ Before O2 measurement, an isolated read-only implementation lane accidentally
 printed the record for `promptready-primary-action`. The lane was stopped before
 editing and did not communicate the task payload or oracle to the scorer,
 adjudicator, or primary implementation lane. No model output or ranking result
-was opened. That task is nevertheless excluded from every O3 decision metric;
-it remains only a bound protocol-incident record. The remaining 35 quality
-tasks, all 12 negative tasks, and all three safety controls retain decision
-authority. Thresholds, aggregation, and uncertainty rules are unchanged.
+was opened. That task was nevertheless excluded from every prospective O3
+decision metric and remains only a bound protocol-incident record. The
+remaining 35 quality tasks, all 12 negative tasks, and all three safety controls
+were intended to retain decision authority. Materialization later proved that
+this exclusion left PromptReady below the frozen per-repository minimum, so
+that intended authority never became valid. Thresholds, aggregation, and
+uncertainty rules were not changed after that discovery.
 
 After that exclusion was sealed, one synthetic tooling test process parsed the
 manifest before failing on an unrelated historical capture-artifact digest, and
@@ -376,6 +413,7 @@ Successive evidence is recorded separately:
 ```text
 O2_OPERATIONAL_QUALIFICATION_RECEIPT
 O3_HELD_OUT_ADJUDICATION_RECEIPT
+O3_PROTOCOL_FAILURE_RECEIPT
 O4_ACTIVATION_DECISION_RECEIPT
 ```
 
@@ -390,6 +428,8 @@ offline_lateon_rejected_for_safety
 offline_lateon_rejected_for_resources
 offline_lateon_rejected_by_held_out
 offline_lateon_insufficient_held_out_evidence
+offline_lateon_rejected_for_protocol
+offline_lateon_opening_consumed_without_valid_decision
 ```
 
 Track O is complete when it has a terminal receipt. Historical Track L remains
