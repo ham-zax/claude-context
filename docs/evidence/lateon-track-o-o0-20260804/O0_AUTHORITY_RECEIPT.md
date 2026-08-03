@@ -8,10 +8,10 @@
 
 ```text
 authority revision
-    da8ff00042bd54c2f52de2e8d87546e2198211ce
+    5d42a0d1e003f461313d9ee4e5a9de16f49e96e5
 
 authority tree
-    05094ad1b30b1824a03e396c3b5a875c2dd8190f
+    7c8c195dbc86472f541ef0a91bdd2a738b5ceb03
 
 initial Track O contract revision
     c15f09bce7ea823014c951498527bedb3781e359
