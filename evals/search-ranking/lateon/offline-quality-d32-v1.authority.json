@@ -5,7 +5,7 @@
   "status": "prospective_authority_outputs_unopened",
   "plan": {
     "path": "docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md",
-    "sha256": "7fb10379ff83132c349512b23f099e00441040cebe772619f2d356ccbdd9f166"
+    "sha256": "aef188451e9eb829f1de3111c088bcc24206e0a0f0263903e93240c9c461d8b3"
   },
   "historicalAuthority": {
     "l3Receipt": {
@@ -198,6 +198,13 @@
     "split": "held_out",
     "independentRepositoryFamilies": 6,
     "qualityOwnerTasks": 36,
+    "decisionBearingQualityOwnerTasks": 35,
+    "protocolExclusions": [
+      {
+        "taskId": "promptready-primary-action",
+        "reason": "pre_open_read_only_lane_access_before_o2_no_edits_or_results"
+      }
+    ],
     "negativeTasks": 12,
     "safetyControls": {
       "exact_identifier": "prompt-library-state-exact-control",

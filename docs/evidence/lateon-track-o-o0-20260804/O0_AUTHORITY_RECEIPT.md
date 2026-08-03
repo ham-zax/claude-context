@@ -20,13 +20,13 @@ Track O plan
     docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md
 
 Track O plan SHA-256
-    7fb10379ff83132c349512b23f099e00441040cebe772619f2d356ccbdd9f166
+    aef188451e9eb829f1de3111c088bcc24206e0a0f0263903e93240c9c461d8b3
 
 O0 executable authority
     evals/search-ranking/lateon/offline-quality-d32-v1.authority.json
 
 O0 executable authority SHA-256
-    ce8b73dc3ec05696d30ca3cb7820eabf825a18d3dbfd21ba1de256356e12bbaa
+    37bfaf2bec4b5232352f4fa813a4ae2246cf5b5adc705fcce4009e4ad88390a9
 ```
 
 No O2 measurement or held-out access occurred before this O0 revision was
@@ -119,6 +119,15 @@ quality-owner tasks, 12 negative tasks, and the exact controls
 `supply-fastapi-configuration-control`. Its oracle reviewers are
 `local_source_oracle_review_2026_07_30` and
 `local_source_oracle_review_2026_08_03`.
+
+One read-only implementation lane accidentally printed the held-out record
+`promptready-primary-action` before O2. It was stopped before editing, no task
+payload or oracle was forwarded to the scorer/adjudicator/primary lanes, and no
+model output or result was opened. The task is excluded from every O3 decision
+metric under reason
+`pre_open_read_only_lane_access_before_o2_no_edits_or_results`. The remaining
+35 quality tasks retain decision authority; thresholds and statistics are
+unchanged.
 
 Before reading a held-out task payload, O3 must validate the opaque manifest
 file/seal, this O0 authority, a passing O2 receipt, and D32's effective profile

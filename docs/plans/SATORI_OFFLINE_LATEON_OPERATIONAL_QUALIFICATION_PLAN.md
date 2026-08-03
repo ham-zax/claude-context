@@ -254,7 +254,9 @@ manifest                 evals/search-ranking/cross-repository-v3.manifest.json
 manifest canonical seal  05fb273715d6205bcdf5adc1fdec94a892d8b40fc651a386ab36ccfb9475b7bc
 manifest file SHA-256     281c5354d98c42e8d576e607de50046230e7d31ca4059a6d77d89e7454b1db09
 independent families      6
-quality-owner tasks       36
+manifest quality-owner tasks 36
+decision-bearing quality tasks 35
+protocol-excluded task    promptready-primary-action
 negative controls         12
 safety controls           3: exact_identifier, must, configuration_pin
 oracle reviewers          local_source_oracle_review_2026_07_30
@@ -269,6 +271,15 @@ passing O2 receipt, the D32 profile/artifact identities, and absence of an
 earlier opening marker. It must then atomically create and fsync a durable
 write-once opening record. Failure after that point consumes the opening and
 cannot be retried.
+
+Before O2 measurement, an isolated read-only implementation lane accidentally
+printed the record for `promptready-primary-action`. The lane was stopped before
+editing and did not communicate the task payload or oracle to the scorer,
+adjudicator, or primary implementation lane. No model output or ranking result
+was opened. That task is nevertheless excluded from every O3 decision metric;
+it remains only a bound protocol-incident record. The remaining 35 quality
+tasks, all 12 negative tasks, and all three safety controls retain decision
+authority. Thresholds, aggregation, and uncertainty rules are unchanged.
 
 A candidate-capture digest cannot exist before task materialization. After the
 opening is consumed, O3 may materialize the held-out tasks and capture. The O3
