@@ -605,6 +605,7 @@ export interface SearchDebugHint {
         byteBudgetOmittedCandidates: number;
         errorCode?: "RERANKER_FAILED";
         failurePhase?: "document_projection" | "api_call" | "parse_results";
+        operationalReason?: SearchRerankerOperationalReason;
         topK: number;
         rankK: number;
         weight: number;
@@ -619,6 +620,16 @@ export interface SearchDebugHint {
         };
     };
 }
+
+export type SearchRerankerOperationalReason =
+    | "lateon_applied"
+    | "lateon_not_ready"
+    | "lateon_capacity_fallback"
+    | "lateon_queue_timeout"
+    | "lateon_execution_timeout"
+    | "lateon_cancelled"
+    | "lateon_invalid_output"
+    | "lateon_worker_failure";
 
 export type SearchRankingDebugHint = Pick<SearchDebugHint,
     | "route"

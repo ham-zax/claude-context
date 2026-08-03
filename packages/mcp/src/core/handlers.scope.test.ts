@@ -7878,6 +7878,11 @@ test('handleSearchCode honors a provider-qualified reranker candidate limit', as
     await withTempRepo(async (repoPath) => {
         let rerankDocuments: string[] = [];
         const reranker = {
+            getIdentity: () => ({
+                provider: 'lateon',
+                model: 'test-model',
+                profile: 'test-profile',
+            }),
             getMaxDocuments: () => 3,
             rerank: async (_query: string, documents: string[]) => {
                 rerankDocuments = documents;
@@ -7976,6 +7981,7 @@ test('handleSearchCode honors a provider-qualified reranker candidate limit', as
         assert.equal(payload.hints?.debugSearch?.rerank?.candidatePoolCount, 5);
         assert.equal(payload.hints?.debugSearch?.rerank?.candidatesReranked, 3);
         assert.equal(payload.hints?.debugSearch?.rerank?.budgetReason, 'provider_limit');
+        assert.equal(payload.hints?.debugSearch?.rerank?.operationalReason, 'lateon_applied');
         assert.equal(payload.hints?.debugSearch?.candidateSurvival?.stages.find(
             (stage: { stage: string }) => stage.stage === 'reranker_input',
         )?.uniqueCandidates, 3);
@@ -8010,7 +8016,9 @@ test('handleSearchCode degrades gracefully when reranker fails', async () => {
     await withTempRepo(async (repoPath) => {
         const reranker = {
             rerank: async () => {
-                throw new Error('rerank failed');
+                throw Object.assign(new Error('rerank failed'), {
+                    reason: 'lateon_execution_timeout',
+                });
             }
         };
         const handlers = createHandlers(repoPath, [
@@ -8063,6 +8071,10 @@ test('handleSearchCode degrades gracefully when reranker fails', async () => {
         assert.equal(payload.hints?.debugSearch?.rerank?.applied, false);
         assert.equal(payload.hints?.debugSearch?.rerank?.errorCode, 'RERANKER_FAILED');
         assert.equal(payload.hints?.debugSearch?.rerank?.failurePhase, 'api_call');
+        assert.equal(
+            payload.hints?.debugSearch?.rerank?.operationalReason,
+            'lateon_execution_timeout',
+        );
     });
 });
 

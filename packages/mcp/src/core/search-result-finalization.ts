@@ -210,6 +210,7 @@ export async function finalizeSearchResults(
         rerankerApplied,
         skippedByExactPin,
         rerankerFailurePhase,
+        rerankerOperationalReason,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -344,6 +345,7 @@ export async function finalizeSearchResults(
                     maxSupplementalChunksPerFamily: SEARCH_RERANK_MAX_SUPPLEMENTAL_CHUNKS_PER_FAMILY,
                 },
                 ...(rerankerFailurePhase ? { errorCode: "RERANKER_FAILED" as const, failurePhase: rerankerFailurePhase } : {}),
+                ...(rerankerOperationalReason ? { operationalReason: rerankerOperationalReason } : {}),
             },
         });
     const changedCode = debugChangedFilesState && (input.debugMode === "freshness" || input.debugMode === "full")
