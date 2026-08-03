@@ -12,8 +12,8 @@ import {
 const REVIEWER = "local_source_oracle_review_2026_07_30";
 const L0_REVIEWER = "local_source_oracle_review_2026_08_03";
 const BUILDER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const L0_SOURCE_REVISION = "b8020e717ee1b2b37073d72fe49dbf7f6e014724";
-const L0_SOURCE_TREE = "9f8e882bf6749c348a5cd4451582027d23ea0767";
+const L0_SOURCE_REVISION = "7259bfc252f35039abef3bad90cb0ebc54443127";
+const L0_SOURCE_TREE = "93bdffddc5c1ca2baefa984995beac4c4fbf41a4";
 const SEARCH = Object.freeze({
     scope: "mixed",
     resultMode: "grouped",

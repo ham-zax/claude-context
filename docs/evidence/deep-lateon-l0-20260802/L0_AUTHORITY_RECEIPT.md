@@ -26,13 +26,14 @@ SHA-256 `23a1efa2f76991aeecbb3d1e717c3117fafd39369187afb5e258cf49a55e3bda`.
 | Task/capture authority commit | `d1b9684` |
 | Executable evaluator commit | `ca3671af8b6116b9e63fc68b143a9a97a9485ea7` |
 | Frozen-set capture correction commit | `b8020e717ee1b2b37073d72fe49dbf7f6e014724` |
+| Frozen diversity replay correction commit | `7259bfc252f35039abef3bad90cb0ebc54443127` |
 | Authority reseal commit | `2fecda3c9f7fb7dfdca75864b8a7a3e237f173a6` |
 | Authority reseal tree | `29a4eceac2bf10cf44ff3aad15a991e27dcb4db7` |
-| Pinned L0 source revision | `b8020e717ee1b2b37073d72fe49dbf7f6e014724` |
-| Pinned L0 source tree | `9f8e882bf6749c348a5cd4451582027d23ea0767` |
+| Pinned L0 source revision | `7259bfc252f35039abef3bad90cb0ebc54443127` |
+| Pinned L0 source tree | `93bdffddc5c1ca2baefa984995beac4c4fbf41a4` |
 | Version 3 authority | `evals/search-ranking/cross-repository-v3.manifest.json` |
-| Version 3 internal canonical seal | `1f0e738833d0b37fb4a533be49331a1fde344cd577fcadb60f2b92173b144265` |
-| Version 3 file SHA-256 | `457438f7ec07b3a0e8b8cb9af064013caf6df82d35222857ab5b35d5fa79dd5a` |
+| Version 3 internal canonical seal | `0c8f535e13da42e8051f5102867c0e7385adfbe556262b289787128a97cffefa` |
+| Version 3 file SHA-256 | `0b74da4ea0861886275f2ed6241372f802544e4c007bc733d98e692da35f7484` |
 | Preserved version 2 internal seal | `ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445` |
 | Preserved version 2 file SHA-256 | `79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30` |
 
@@ -49,6 +50,13 @@ corrected the capture contract: each digest remains bound to its own frozen set 
 continuations, while cross-request qualification continues to require identical
 candidate traces, ranked-result identities, and disclosure order. No contender
 output was opened before this reseal.
+
+The same canary then proved that replay was paging the pre-diversity grouped
+order instead of production's frozen post-diversity disclosure order. Commit
+`7259bfc` corrected that owner. The existing positive and negative canary
+captures then reproduced baseline membership, eligibility, grouping,
+disclosure, and pagination without reindexing or recapture. No neural score was
+opened before this final reseal.
 
 ## Decision-bearing corpus
 
