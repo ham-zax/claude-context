@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import {
     buildTrackLCaptureAuthority,
@@ -245,7 +247,7 @@ test("Track L scorer resolves only a sealed preregistered arm and its explicit p
     );
 });
 
-test("committed Track L manifest matches the executable scorer authority", () => {
+test("committed Track L manifest matches its frozen source and rejects later tooling drift", () => {
     const manifestUrl = new URL(
         "../evals/search-ranking/cross-repository-v3.manifest.json",
         import.meta.url,
@@ -264,17 +266,31 @@ test("committed Track L manifest matches the executable scorer authority", () =>
     const c0Contract = JSON.parse(contractBytes.toString("utf8"));
     const runtimeProfile = JSON.parse(profileBytes.toString("utf8"));
     const digest = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+    const repoRoot = path.resolve(import.meta.dirname, "..");
+    const frozenRuntime = manifest.lateOnL0Authority.runtime;
+
+    for (const artifact of frozenRuntime.artifacts) {
+        const frozenBytes = execFileSync(
+            "git",
+            ["-C", repoRoot, "show", `${frozenRuntime.sourceRevision}:${artifact.path}`],
+            { maxBuffer: 16 * 1024 * 1024 },
+        );
+        assert.equal(digest(frozenBytes), artifact.sha256, artifact.role);
+    }
 
     for (const arm of manifest.lateOnL0Authority.newArms) {
-        assert.doesNotThrow(() => resolveTrackLScoringAuthority({
-            manifest,
-            expectedManifestSeal: manifest.sha256,
-            armId: arm.id,
-            c0Contract,
-            c0ContractSha256: digest(contractBytes),
-            runtimeProfile,
-            runtimeProfileSha256: digest(profileBytes),
-        }));
+        assert.throws(
+            () => resolveTrackLScoringAuthority({
+                manifest,
+                expectedManifestSeal: manifest.sha256,
+                armId: arm.id,
+                c0Contract,
+                c0ContractSha256: digest(contractBytes),
+                runtimeProfile,
+                runtimeProfileSha256: digest(profileBytes),
+            }),
+            /does not match the frozen Track L authority/,
+        );
     }
 });
 
