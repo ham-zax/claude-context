@@ -350,7 +350,8 @@ function removeCacheAdmissionWarning(
     const warnings = envelope.warnings?.filter(
         (warning) => warning.code !== WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
     );
-    const { warnings: _warnings, ...withoutWarnings } = envelope;
+    const withoutWarnings = { ...envelope };
+    delete withoutWarnings.warnings;
     return {
         ...withoutWarnings,
         ...(warnings && warnings.length > 0 ? { warnings } : {}),
@@ -4508,12 +4509,10 @@ export class ToolHandlers {
                         nowMs: this.now(),
                     });
                     if (stored.status === "not_admissible") {
-                        const {
-                            continuation: _continuation,
-                            rankedSetDigest: _rankedSetDigest,
-                            resultIndex: _resultIndex,
-                            ...initialEnvelope
-                        } = envelope;
+                        const initialEnvelope = { ...envelope };
+                        delete initialEnvelope.continuation;
+                        delete initialEnvelope.rankedSetDigest;
+                        delete initialEnvelope.resultIndex;
                         return {
                             ...initialEnvelope,
                             warnings: buildSearchWarningDetails([
@@ -4698,12 +4697,10 @@ export class ToolHandlers {
                             false,
                         );
                     } else if (exactFastPath.finalized.resultSet) {
-                        const {
-                            continuation: _continuation,
-                            rankedSetDigest: _rankedSetDigest,
-                            resultIndex: _resultIndex,
-                            ...unboundEnvelope
-                        } = exactEnvelope;
+                        const unboundEnvelope = { ...exactEnvelope };
+                        delete unboundEnvelope.continuation;
+                        delete unboundEnvelope.rankedSetDigest;
+                        delete unboundEnvelope.resultIndex;
                         exactEnvelope = {
                             ...unboundEnvelope,
                             warnings: buildSearchWarningDetails([

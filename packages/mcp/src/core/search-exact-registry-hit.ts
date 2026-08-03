@@ -220,7 +220,8 @@ export function buildExactRegistryHitEnvelope(
         },
     });
     if (projection.status === "page_too_large") {
-        const { continuation: _continuation, ...authorityEnvelope } = projection.envelope;
+        const authorityEnvelope = { ...projection.envelope };
+        delete authorityEnvelope.continuation;
         return {
             kind: "page_too_large",
             envelope: {
