@@ -200,15 +200,21 @@ test("frozen pagination preserves complete grouped order without another reranke
             candidateIds: [`candidate-${ownerId}`],
             score: 5 - index,
         })),
+        disclosureOrder: ["a", "c", "e", "b", "d"].map((ownerId, index) => ({
+            rank: index + 1,
+            ownerId,
+            candidateIds: [`candidate-${ownerId}`],
+            score: 5 - index,
+        })),
         disclosedResults: [
             { rank: 1, ownerId: "a" },
-            { rank: 2, ownerId: "b" },
+            { rank: 2, ownerId: "c" },
         ],
     }, 2);
 
     assert.deepEqual(
         pagination.pages.flatMap((page) => page.ownerIds),
-        ["a", "b", "c", "d", "e"],
+        ["a", "c", "e", "b", "d"],
     );
     assert.equal(pagination.additionalRerankerCalls, 0);
     assert.match(pagination.orderedGroupDigest, /^[a-f0-9]{64}$/);

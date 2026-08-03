@@ -1836,16 +1836,16 @@ export function applyFrozenNeuralOrder(localScoring, neuralRanking, {
 }
 
 export function buildFrozenPaginationReplay(groupingDisclosure, pageSize) {
-    const groupedResults = requireArray(
-        groupingDisclosure?.groupedResults,
-        "Frozen pagination grouped results",
+    const disclosureOrder = requireArray(
+        groupingDisclosure?.disclosureOrder,
+        "Frozen pagination disclosure order",
     );
     const disclosedResults = requireArray(
         groupingDisclosure?.disclosedResults,
         "Frozen pagination disclosed results",
     );
     const normalizedPageSize = requirePositiveInteger(pageSize, "Frozen pagination page size");
-    const orderedGroups = groupedResults.map((group, index) => {
+    const orderedGroups = disclosureOrder.map((group, index) => {
         const record = requireRecord(group, `Frozen pagination group ${index + 1}`);
         return {
             rank: record.rank,
