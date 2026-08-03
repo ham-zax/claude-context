@@ -404,17 +404,21 @@ function qualityTasks(replay, positiveScore) {
         });
 }
 
-function negativeTasks(replay, capture) {
-    const expectedByTaskId = new Map(capture.captures.map((task) => [
+export function trackLNegativeTasks(replay, capture) {
+    const capturesByTaskId = new Map(capture.captures.map((task) => [
         task.taskId,
-        task.expected,
+        task,
     ]));
     return replay.tasks.map((task) => {
+        const taskCapture = capturesByTaskId.get(task.taskId);
+        if (!taskCapture) {
+            throw new Error(`Capture lacks negative task '${task.taskId}'.`);
+        }
         const owners = requireArray(
-            expectedByTaskId.get(task.taskId)?.hardNegativeOwners,
+            taskCapture.expected?.hardNegativeOwners,
             `Task '${task.taskId}' hard-negative owners`,
         );
-        const ranks = owners.map((owner) => ownerRank(task, owner));
+        const ranks = owners.map((owner) => trackLOwnerRank(task, owner, taskCapture));
         return {
             taskId: task.taskId,
             ranks,
@@ -1037,7 +1041,7 @@ export function evaluateR3({
         repositoryResults[repository.id] = {
             B: {
                 quality: qualityTasks(baselinePositive, positiveScore),
-                negative: negativeTasks(baselineNegative, negativeCapture),
+                negative: trackLNegativeTasks(baselineNegative, negativeCapture),
                 exact: baselinePositive.tasks
                     .filter((task) => task.route.kind === "exact_registry")
                     .map((task) => task.rankedResults),
@@ -1073,7 +1077,7 @@ export function evaluateR3({
             );
             repositoryResults[repository.id][contenderId] = {
                 quality: qualityTasks(positiveReplay, positiveScore),
-                negative: negativeTasks(negativeReplay, negativeCapture),
+                negative: trackLNegativeTasks(negativeReplay, negativeCapture),
                 exact: positiveReplay.tasks
                     .filter((task) => task.route.kind === "exact_registry")
                     .map((task) => task.rankedResults),
@@ -1242,7 +1246,7 @@ function evaluateTrackLInto({ manifest, r1Dir, scoreDir, replayDir }) {
         repositoryResults[repositoryId] = {
             B: {
                 quality: baselineQuality,
-                negative: negativeTasks(baselineNegative, negativeCapture),
+                negative: trackLNegativeTasks(baselineNegative, negativeCapture),
             },
         };
         scoreArtifacts[repositoryId] = {};
@@ -1309,7 +1313,7 @@ function evaluateTrackLInto({ manifest, r1Dir, scoreDir, replayDir }) {
             );
             repositoryResults[repositoryId][contender.contenderId] = {
                 quality: trackLQualityTasks(positiveReplay, positiveCapture),
-                negative: negativeTasks(negativeReplay, negativeCapture),
+                negative: trackLNegativeTasks(negativeReplay, negativeCapture),
                 safety: trackLSafetyEvidence({
                     baseline: { positive: baselinePositive, negative: baselineNegative },
                     contender: { positive: positiveReplay, negative: negativeReplay },

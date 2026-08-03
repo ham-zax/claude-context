@@ -7,6 +7,7 @@ import {
     buildTrackLDecision,
     evaluateTrackL,
     resolveTrackLEvaluationAuthority,
+    trackLNegativeTasks,
     trackLOwnerRank,
 } from "./satori-search-ranking-r3.mjs";
 
@@ -131,6 +132,39 @@ test("Track L owner rank uses captured disclosure for compact baseline replay", 
     };
 
     assert.equal(trackLOwnerRank(compactBaselineTask, owner, capture), 2);
+});
+
+test("Track L negative exposure uses captured disclosure for compact baseline replay", () => {
+    const compactBaselineReplay = {
+        tasks: [{
+            taskId: "negative-task",
+            route: { kind: "fusion", fusionReplay: "exact" },
+            mcpAttempts: [{ attemptId: "attempt:1", candidateCount: 20 }],
+        }],
+    };
+    const capture = {
+        captures: [{
+            taskId: "negative-task",
+            expected: {
+                hardNegativeOwners: [{
+                    file: "src/negative.ts",
+                    symbol: "unsafeOwner",
+                    match: "symbol",
+                }],
+            },
+            rankedResults: [
+                { kind: "symbol", file: "src/decoy.ts", symbol: "decoy" },
+                { kind: "symbol", file: "src/negative.ts", symbol: "unsafeOwner" },
+            ],
+        }],
+    };
+
+    assert.deepEqual(trackLNegativeTasks(compactBaselineReplay, capture), [{
+        taskId: "negative-task",
+        ranks: [2],
+        exposureAt3: 1,
+        task: compactBaselineReplay.tasks[0],
+    }]);
 });
 
 test("Track L evaluator refuses to mix replay output with an existing directory", () => {
