@@ -559,8 +559,8 @@
       ]
     },
     "runtime": {
-      "sourceRevision": "1209de56723671eaabbc041a40a95df761760860",
-      "sourceTree": "7edd68e8a1ee2589b8b54b297c577315e3e8d5c0",
+      "sourceRevision": "ca3671af8b6116b9e63fc68b143a9a97a9485ea7",
+      "sourceTree": "b239bfb7c13e1824fa2abf53efcb5ded30779cdd",
       "node": "24.13.0",
       "onnxruntimeNode": "1.19.2",
       "transformersJs": "3.0.2",
@@ -568,12 +568,12 @@
         {
           "role": "candidate_capture",
           "path": "scripts/satori-search-candidate-capture.mjs",
-          "sha256": "91d1591c0f0ac9e5c6c237e4dfe189551ceb73ed4ef087106057cfef3545d98d"
+          "sha256": "3b3605d2fa76598f404d5820b5b538fb2be382762d45c504ba320d446a5f0902"
         },
         {
           "role": "candidate_replay",
           "path": "scripts/satori-search-candidate-replay.mjs",
-          "sha256": "598ab0f939e2cfb29d8ef15361ad18ac3bc85a70321dbcb6f8e6eb76dabcac55"
+          "sha256": "83c498d47d9dc380c72f40c6678477a03b3b81b68bc0ed37296718b42118a142"
         },
         {
           "role": "lateon_loader",
@@ -583,12 +583,12 @@
         {
           "role": "lateon_score",
           "path": "scripts/satori-search-ranking-r3-score.mjs",
-          "sha256": "79fca89c9b38ad955037fb54c852a821db55662a2f840b92b72aaa6128619fe6"
+          "sha256": "eb06c31decefcbbac7af418b37e7af917feca5544fb073b3c51f864f30c522d2"
         },
         {
           "role": "quality_decision",
           "path": "scripts/satori-search-ranking-r3.mjs",
-          "sha256": "69c75bb4d72d5843463c508fb7617be6b891d3193dfe1e819d54ceedb60a37f5"
+          "sha256": "8465a88258345a54ae1555d0eec7b06536a0042f98f8240f8bf7778772831c83"
         },
         {
           "role": "bounded_source_selector",
@@ -4233,5 +4233,5 @@
       }
     }
   ],
-  "sha256": "7d1ebfc551c58bf1251521b201a523f8517d1be9bd92a84773d3ef3612792c08"
+  "sha256": "241ba375149b592fab7b60ce14ab52b0cf6b511f00bd5bd13b7bd8e97a711222"
 }
