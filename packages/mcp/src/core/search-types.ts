@@ -604,7 +604,7 @@ export interface SearchDebugHint {
         inputBytes: number;
         byteBudgetOmittedCandidates: number;
         errorCode?: "RERANKER_FAILED";
-        failurePhase?: "api_call" | "parse_results";
+        failurePhase?: "document_projection" | "api_call" | "parse_results";
         topK: number;
         rankK: number;
         weight: number;

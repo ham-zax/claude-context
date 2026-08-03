@@ -217,6 +217,8 @@ import {
     type SearchRerankerBindingIdentity,
 } from "./search-result-set-identity.js";
 import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
+import { buildPublicationBoundSearchRerankDocumentV2 } from "./search-rerank-projection.js";
+import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
     SearchQueryPlan,
@@ -374,6 +376,19 @@ function resolveSearchRerankerBindingIdentity(
     };
 }
 
+function resolveSearchRerankerProjectionIdentity(
+    reranker: Reranker | null,
+    rerankerApplied: boolean,
+): string {
+    if (!rerankerApplied) return "not_applicable";
+    const projection = reranker?.getDocumentProjectionVersion?.()
+        ?? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
+    if (!projection.trim()) {
+        throw new Error("Applied search reranking requires a stable projection identity.");
+    }
+    return projection;
+}
+
 function buildFrozenSearchRankedSetBindingInput(input: {
     vectorReceipt: ProvenVectorGenerationReceipt;
     generationReceipt?: ProvenGenerationReceipt;
@@ -381,6 +396,7 @@ function buildFrozenSearchRankedSetBindingInput(input: {
     sourceObservation: string | null;
     queryPolicyDigest: string;
     rerankerIdentity: SearchRerankerBindingIdentity;
+    rerankerProjectionIdentity: string;
     orderedResults: readonly SearchGroupedResultV2[];
     recommendedActions: readonly (SearchRecommendedNextAction | null)[];
 }): SearchRankedSetBindingInput {
@@ -399,9 +415,7 @@ function buildFrozenSearchRankedSetBindingInput(input: {
         preparedObservation: input.preparedObservation,
         sourceObservation: input.sourceObservation,
         rerankerIdentity: input.rerankerIdentity,
-        rerankerProjectionIdentity: input.rerankerIdentity.kind === "provider"
-            ? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION
-            : "not_applicable",
+        rerankerProjectionIdentity: input.rerankerProjectionIdentity,
         orderedResults: input.orderedResults,
         recommendedActions: input.recommendedActions,
     };
@@ -4437,6 +4451,10 @@ export class ToolHandlers {
                     this.reranker,
                     rerankerApplied,
                 );
+                const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
+                    this.reranker,
+                    rerankerApplied,
+                );
                 const bindingInput = buildFrozenSearchRankedSetBindingInput({
                     vectorReceipt,
                     ...(generationReceipt ? { generationReceipt } : {}),
@@ -4444,6 +4462,7 @@ export class ToolHandlers {
                     sourceObservation: finalSourceObservation.sourceObservation,
                     queryPolicyDigest,
                     rerankerIdentity,
+                    rerankerProjectionIdentity,
                     orderedResults: resultSet.orderedResults,
                     recommendedActions: resultSet.recommendedActions,
                 });
@@ -4830,6 +4849,44 @@ export class ToolHandlers {
                         : this.context.semanticSearch(request);
                 },
                 reranker: this.reranker,
+                ...(this.reranker?.getDocumentProjectionVersion?.()
+                    === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
+                    ? {
+                        buildRerankDocument: async (
+                            rerankQuery: string,
+                            result: SearchResultLike,
+                        ): Promise<string | undefined> => {
+                            if (!generationReceipt || navigationStatus !== "valid") {
+                                return undefined;
+                            }
+                            if (
+                                !searchSymbolRegistry
+                                || searchSymbolRegistryManifestHash
+                                    !== generationReceipt.navigation.symbolRegistryManifestHash
+                            ) {
+                                const registryState = await this.loadPreparedNavigationManifest(
+                                    preparedReadState,
+                                    readinessDebug.operations,
+                                );
+                                if (
+                                    registryState.status !== "ok"
+                                    || registryState.manifestHash
+                                        !== generationReceipt.navigation.symbolRegistryManifestHash
+                                ) {
+                                    return undefined;
+                                }
+                                searchSymbolRegistry = registryState.registry;
+                                searchSymbolRegistryManifestHash = registryState.manifestHash;
+                            }
+                            return buildPublicationBoundSearchRerankDocumentV2({
+                                codebaseRoot: effectiveRoot,
+                                semanticQuery: rerankQuery,
+                                result,
+                                registry: searchSymbolRegistry,
+                            });
+                        },
+                    }
+                    : {}),
                 shouldForceSearchPassFailure: (passId) => this.shouldForceSearchPassFailure(passId),
                 classifyEmbeddingProviderError,
                 classifyVectorBackendError,
@@ -5164,6 +5221,10 @@ export class ToolHandlers {
                 this.reranker,
                 entry.rankedSetBinding.rerankerIdentity.kind === "provider",
             );
+            const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
             bindingValid = entry.baseEnvelope.rankedSetDigest
                 === entry.rankedSetBinding.rankedSetDigest
                 && verifySearchRankedSetBinding(
@@ -5177,6 +5238,7 @@ export class ToolHandlers {
                         sourceObservation: entry.sourceObservation,
                         queryPolicyDigest: entry.queryPolicyDigest,
                         rerankerIdentity,
+                        rerankerProjectionIdentity,
                         orderedResults: entry.orderedResults,
                         recommendedActions: entry.recommendedActions,
                     }),
