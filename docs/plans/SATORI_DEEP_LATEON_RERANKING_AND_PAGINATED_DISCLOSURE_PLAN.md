@@ -59,11 +59,13 @@ Current execution state:
 | P — pagination | `pagination_complete_frozen_set_qualified` | `docs/evidence/deep-pagination-p2-20260802/P2_QUALIFICATION_RECEIPT.md` |
 | L — LateOn | `baseline_b_retained` | `docs/evidence/deep-lateon-l3-20260804/L3_QUALIFICATION_RECEIPT.md` |
 | I — compact result index | `compact_result_index_qualified` | `docs/evidence/deep-result-index-i2-20260804/I2_QUALIFICATION_RECEIPT.md` |
-| O — offline operationalization | `D32 operationally qualified; held-out opening consumed without decision; disabled` | `docs/evidence/lateon-track-o-portable-20260804/PORTABLE_EVIDENCE_RECEIPT.md` and `docs/evidence/lateon-track-o-finalization-20260804/TRACK_O_CORRECTION_FINALIZATION_RECEIPT.md` |
+| O — offline operationalization | `D32 operationally qualified; held-out opening consumed without decision; disabled` | `docs/evidence/lateon-track-o-merge-qualification-20260804/MERGE_QUALIFICATION_RECEIPT.md`, `docs/evidence/lateon-track-o-portable-20260804/PORTABLE_EVIDENCE_RECEIPT.md`, and `docs/evidence/lateon-track-o-finalization-20260804/TRACK_O_CORRECTION_FINALIZATION_RECEIPT.md` |
 
-The Track O portable-evidence receipt is the latest closure portability
-authority. The earlier O2 carry-forward and Track O closure receipts remain
-historical inputs to the evidence-correction finalization.
+The Track O merge-qualification receipt is the latest pre-merge integration
+authority. The portable-evidence receipt is the latest portability authority,
+and the evidence-correction finalization remains the decision authority. The
+earlier O2 carry-forward and Track O closure receipts remain historical inputs
+to that finalization.
 
 “No limit on how much the agent can request” does not mean an unbounded response
 or unbounded retrieval work. A caller may request the complete available frozen
