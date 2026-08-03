@@ -1627,13 +1627,21 @@ test("candidate capture rejects drift between cold and warm traces", () => {
     );
 });
 
+test("candidate capture accepts complete source-unchanged no-sync evidence", () => {
+    const suite = taskSuite();
+    const observations = observationSet(suite);
+    observations.observations[1].freshnessModes = ["skipped_source_unchanged"];
+
+    assert.doesNotThrow(() => buildSearchCandidateCapture(suite, observations));
+});
+
 test("candidate capture rejects missing no-sync evidence or a changed final index proof", () => {
     const suite = taskSuite();
     const mutatingObservation = observationSet(suite);
     mutatingObservation.observations[0].freshnessModes = ["synced"];
     assert.throws(
         () => buildSearchCandidateCapture(suite, mutatingObservation),
-        /requires skipped_recent no-sync evidence/,
+        /requires authoritative no-sync freshness evidence/,
     );
 
     const driftedProof = observationSet(suite);

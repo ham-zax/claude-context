@@ -631,6 +631,7 @@ function assertEntrypointOwnerScoringAuthority(trace, evidence, label) {
 }
 
 function assertMeasurementIsolation(metadata, observationSetValue, taskIds) {
+    const noSyncFreshnessModes = new Set(["skipped_recent", "skipped_source_unchanged"]);
     if (!Array.isArray(metadata.taskRuns)) {
         throw new Error("Observation metadata taskRuns must prove frozen measurement isolation.");
     }
@@ -662,9 +663,9 @@ function assertMeasurementIsolation(metadata, observationSetValue, taskIds) {
     for (const observation of observationSetValue.observations) {
         if (!Array.isArray(observation.freshnessModes)
             || observation.freshnessModes.length === 0
-            || observation.freshnessModes.some((mode) => mode !== "skipped_recent")) {
+            || observation.freshnessModes.some((mode) => !noSyncFreshnessModes.has(mode))) {
             throw new Error(
-                `Task '${observation.taskId}' candidate capture requires skipped_recent no-sync evidence for every measured call.`,
+                `Task '${observation.taskId}' candidate capture requires authoritative no-sync freshness evidence for every measured call.`,
             );
         }
     }
