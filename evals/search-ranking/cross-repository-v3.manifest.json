@@ -571,6 +571,11 @@
           "sha256": "d19ff4f062b4685cecded77567e8725ac5e948e5fe86c6028a7c02e037c45111"
         },
         {
+          "role": "task_suite_contract",
+          "path": "scripts/satori-useful-context.mjs",
+          "sha256": "6d17be24ca0831a86890cc12b81bb99599d963b8cd6c030e017ada07bbc2845e"
+        },
+        {
           "role": "candidate_replay",
           "path": "scripts/satori-search-candidate-replay.mjs",
           "sha256": "5a05bb8fa25fef55f0374ddf1964ab481824526f2f8df06d6fd15e6ff0e40d29"
@@ -601,6 +606,21 @@
           "sha256": "eac182988956fe1dc62e08695f2e52f6961fe3def7b8ee374349a02fefcd5af4"
         },
         {
+          "role": "rerank_document_v2",
+          "path": "scripts/satori-search-rerank-document-v2.mjs",
+          "sha256": "4d343975168a636195d18ebd3bd3d6a1e2c4e8f9b8d48897f6383dcc50b2e499"
+        },
+        {
+          "role": "owner_family_admission",
+          "path": "packages/mcp/src/core/search-rerank-policy.ts",
+          "sha256": "fe8fd56e4d50eedf2bbec9edf5a80b94b32cfc9778c121584bd9667b0931d6b5"
+        },
+        {
+          "role": "search_constants",
+          "path": "packages/mcp/src/core/search-constants.ts",
+          "sha256": "63009a473267948bc8f561aaf6c1941290ef751f18a226dedce9c9669c044690"
+        },
+        {
           "role": "runtime_profile_loader",
           "path": "packages/mcp/src/server/lateon-reranker.ts",
           "sha256": "e687cd36978a97e1ba485559d57da4f06a592f627ad3ab4f2b232215a444ac9f"
@@ -614,6 +634,11 @@
           "role": "runtime_profile",
           "path": "packages/mcp/assets/lateon/runtime-profile-v1.json",
           "sha256": "9d1c6e9b8e76e243541c1bb9291ed6985cf4a848226c1e0190db0764b7a8528e"
+        },
+        {
+          "role": "dependency_lockfile",
+          "path": "pnpm-lock.yaml",
+          "sha256": "35293d291cab8f0529329ae40fba1807f7604b835142dfdfd52c01a506d2a51a"
         }
       ]
     },
@@ -4233,5 +4258,5 @@
       }
     }
   ],
-  "sha256": "0c8f535e13da42e8051f5102867c0e7385adfbe556262b289787128a97cffefa"
+  "sha256": "bccbcb3887d2c7411f0d5d202f7110498161a5cf4b2f38871b75a76b4d1e573e"
 }

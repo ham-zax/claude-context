@@ -32,8 +32,8 @@ SHA-256 `23a1efa2f76991aeecbb3d1e717c3117fafd39369187afb5e258cf49a55e3bda`.
 | Pinned L0 source revision | `7259bfc252f35039abef3bad90cb0ebc54443127` |
 | Pinned L0 source tree | `93bdffddc5c1ca2baefa984995beac4c4fbf41a4` |
 | Version 3 authority | `evals/search-ranking/cross-repository-v3.manifest.json` |
-| Version 3 internal canonical seal | `0c8f535e13da42e8051f5102867c0e7385adfbe556262b289787128a97cffefa` |
-| Version 3 file SHA-256 | `0b74da4ea0861886275f2ed6241372f802544e4c007bc733d98e692da35f7484` |
+| Version 3 internal canonical seal | `bccbcb3887d2c7411f0d5d202f7110498161a5cf4b2f38871b75a76b4d1e573e` |
+| Version 3 file SHA-256 | `7d84fa50da8f287818ab84876e0a35a788b86980e5e6d17939a003c0cb576df1` |
 | Preserved version 2 internal seal | `ca85f0f0142c64ef7e2a6fca615ba897aa8776475f113303f1c0981b87128445` |
 | Preserved version 2 file SHA-256 | `79ef96256f6af0300fb84edc76b75bd28596e0a36284e78fe8d4f10edff03d30` |
 
@@ -57,6 +57,14 @@ order instead of production's frozen post-diversity disclosure order. Commit
 captures then reproduced baseline membership, eligibility, grouping,
 disclosure, and pagination without reindexing or recapture. No neural score was
 opened before this final reseal.
+
+The first scorer invocation then failed closed before model loading because the
+manifest omitted five tooling identities already required by the scorer:
+task-suite parsing, projection v2, owner-family admission, search constants, and
+the dependency lockfile. The builder now freezes all 15 scoring artifacts. The
+existing captures remain valid because this correction changed neither tasks,
+queries, publications, candidate traces, nor the pinned runtime source tree; a
+new post-capture authority binds their exact bytes to the corrected seal.
 
 ## Decision-bearing corpus
 

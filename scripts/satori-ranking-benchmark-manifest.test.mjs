@@ -697,6 +697,26 @@ test("version 3 seals four unopened arms, prospective captures, statistics, and 
         interOpThreads: 1,
         executionProvider: "cpu",
     });
+    assert.deepEqual(
+        normalized.lateOnL0Authority.runtime.artifacts.map(({ role }) => role),
+        [
+            "candidate_capture",
+            "task_suite_contract",
+            "candidate_replay",
+            "lateon_loader",
+            "lateon_score",
+            "quality_decision",
+            "bounded_source_selector",
+            "rerank_document_v1",
+            "rerank_document_v2",
+            "owner_family_admission",
+            "search_constants",
+            "runtime_profile_loader",
+            "worker_protocol",
+            "runtime_profile",
+            "dependency_lockfile",
+        ],
+    );
     const suites = buildRankingCandidateTaskSuites(normalized);
     assert.equal(suites.length, 12);
     assert.ok(suites.every(({ candidateTaskSuite, negativeExposureSuite }) => (

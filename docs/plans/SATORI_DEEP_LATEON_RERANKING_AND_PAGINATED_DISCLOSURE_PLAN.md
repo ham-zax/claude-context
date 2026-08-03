@@ -464,7 +464,7 @@ projection experiment. Do not attribute the change to candidate depth.
 ### L0 — freeze authority
 
 Current executable authority: the version 3 manifest is sealed at
-`0c8f535e13da42e8051f5102867c0e7385adfbe556262b289787128a97cffefa`
+`bccbcb3887d2c7411f0d5d202f7110498161a5cf4b2f38871b75a76b4d1e573e`
 and binds the committed scorer/evaluator boundary. New tuning and held-out model
 outputs remain unopened. The earlier descriptive seal is superseded and has no
 execution authority.
