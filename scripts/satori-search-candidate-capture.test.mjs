@@ -10,7 +10,10 @@ import {
     SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
 } from "../packages/mcp/src/core/search-ranking-policy.ts";
-import { buildSearchCandidateCapture } from "./satori-search-candidate-capture.mjs";
+import {
+    buildSearchCandidateCapture,
+    main as captureMain,
+} from "./satori-search-candidate-capture.mjs";
 import {
     orderCapturedCoreArm,
     replayBaselineCandidateCapture,
@@ -1454,6 +1457,26 @@ test("task-suite v2 replay selects explicit splits independently of task IDs", (
         }),
         /do not accept legacy taskPrefix/,
     );
+});
+
+test("candidate capture CLI rejects held-out material without an opening record", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-heldout-capture-gate-"));
+    try {
+        const tasksFile = path.join(tempDir, "tasks.json");
+        const observationsFile = path.join(tempDir, "observations.json");
+        fs.writeFileSync(tasksFile, JSON.stringify({
+            version: 2,
+            tasks: [{ id: "opaque-task", split: "held_out" }],
+        }));
+        fs.writeFileSync(observationsFile, "{}");
+
+        assert.throws(
+            () => captureMain(["--tasks", tasksFile, "--observations", observationsFile]),
+            /requires --held-out-opening/,
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
 });
 
 test("contender replay excludes a fallback candidate with a recorded diagnostic removal", () => {

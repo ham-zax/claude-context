@@ -20,6 +20,10 @@ import {
 } from "../packages/mcp/src/core/search-group-results.ts";
 import { projectGroupedDisclosure } from "../packages/mcp/src/core/search-disclosure.ts";
 import { canonicalJson } from "./satori-useful-context.mjs";
+import {
+    bindTrackOHeldOutOpening,
+    readTrackOHeldOutOpeningRecord,
+} from "./satori-track-o-heldout-opening.mjs";
 
 const CORE_RRF_K = 100;
 const SCORE_TOLERANCE = 1e-12;
@@ -2362,7 +2366,7 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
 }
 
 function usage() {
-    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
+    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--held-out-opening <opening.json>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -2370,6 +2374,7 @@ export function main(argv = process.argv.slice(2)) {
     let policyFile;
     let split;
     let taskPrefix;
+    let heldOutOpeningFile;
     let outFile;
     let requireGroupingReady = false;
     let requireNeuralDisabled = false;
@@ -2378,6 +2383,9 @@ export function main(argv = process.argv.slice(2)) {
         else if (argv[index] === "--policy-file") policyFile = path.resolve(argv[++index]);
         else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--task-prefix") taskPrefix = argv[++index];
+        else if (argv[index] === "--held-out-opening") {
+            heldOutOpeningFile = path.resolve(argv[++index]);
+        }
         else if (argv[index] === "--require-grouping-ready") requireGroupingReady = true;
         else if (argv[index] === "--require-neural-disabled") requireNeuralDisabled = true;
         else if (argv[index] === "--out") outFile = path.resolve(argv[++index]);
@@ -2388,11 +2396,25 @@ export function main(argv = process.argv.slice(2)) {
     }
     if (!captureFile) throw new Error("--capture is required.");
     const capture = JSON.parse(fs.readFileSync(captureFile, "utf8"));
+    const selectedSplit = split ?? "all";
+    const requiresHeldOutOpening = capture.taskSuiteVersion === 2
+        && selectedSplit !== "tuning"
+        && Array.isArray(capture.captures)
+        && capture.captures.some((taskCapture) => taskCapture?.split === "held_out");
+    if (requiresHeldOutOpening && !heldOutOpeningFile) {
+        throw new Error("Held-out or mixed-split replay requires --held-out-opening.");
+    }
+    const heldOutOpening = requiresHeldOutOpening
+        ? readTrackOHeldOutOpeningRecord(heldOutOpeningFile)
+        : null;
+    if (heldOutOpening && capture.heldOutOpeningSha256 !== heldOutOpening.sha256) {
+        throw new Error("Held-out capture is not bound to the supplied opening record.");
+    }
     const policySourceBytes = policyFile ? fs.readFileSync(policyFile) : undefined;
     const policy = policySourceBytes
         ? JSON.parse(policySourceBytes.toString("utf8"))
         : "baseline";
-    const replay = replayCandidateCapture(capture, policy, {
+    const builtReplay = replayCandidateCapture(capture, policy, {
         ...(split !== undefined ? { split } : {}),
         ...(taskPrefix !== undefined ? { taskPrefix } : {}),
         requireGroupingReady,
@@ -2400,6 +2422,9 @@ export function main(argv = process.argv.slice(2)) {
         ...(policySourceBytes ? { policySourceBytes } : {}),
         ...(policyFile ? { policySourceFileName: policyFile } : {}),
     });
+    const replay = heldOutOpening
+        ? bindTrackOHeldOutOpening(builtReplay, heldOutOpening)
+        : builtReplay;
     const serialized = `${JSON.stringify(replay, null, 2)}\n`;
     if (outFile) fs.writeFileSync(outFile, serialized);
     else process.stdout.write(serialized);

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
     applyFrozenNeuralOrder,
     assertTrackLNeuralAuthority,
     buildFrozenPaginationReplay,
+    main as replayMain,
     replayCoreFusion,
     validateNeuralScoreArtifact,
 } from "./satori-search-candidate-replay.mjs";
@@ -218,4 +222,22 @@ test("frozen pagination preserves complete grouped order without another reranke
     );
     assert.equal(pagination.additionalRerankerCalls, 0);
     assert.match(pagination.orderedGroupDigest, /^[a-f0-9]{64}$/);
+});
+
+test("candidate replay CLI rejects held-out material without an opening record", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-heldout-replay-gate-"));
+    try {
+        const captureFile = path.join(tempDir, "capture.json");
+        fs.writeFileSync(captureFile, JSON.stringify({
+            taskSuiteVersion: 2,
+            captures: [{ taskId: "opaque-task", split: "held_out" }],
+        }));
+
+        assert.throws(
+            () => replayMain(["--capture", captureFile, "--split", "held_out"]),
+            /requires --held-out-opening/,
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
 });
