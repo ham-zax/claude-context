@@ -47,6 +47,7 @@ function buildFixture(tempDir) {
     const implementationArtifacts = {};
     for (const [role, relativePath, contents] of [
         ["projectionSource", "projection.mjs", "projection source"],
+        ["capturedProjectionOwner", "captured-projection.mjs", "captured projection owner"],
         ["runtimeSource", "runtime.mjs", "runtime source"],
         ["measurementScript", "measurement.mjs", "measurement source"],
         ["scenarioWorker", "scenario-worker.cjs", "scenario worker source"],

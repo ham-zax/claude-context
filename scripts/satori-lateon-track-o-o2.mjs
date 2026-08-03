@@ -8,14 +8,12 @@ import process from "node:process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLanguageAnalysisService } from "../packages/core/src/language-analysis/service.ts";
-import { buildIndexedChunkId } from "../packages/core/src/core/indexed-chunk-identity.ts";
-import { buildRerankCandidatePool } from "../packages/mcp/src/core/search-rerank-policy.ts";
 import {
     LATEON_RUNTIME_PROFILE_IDS,
     LateOnOperationalError,
     LateOnReranker,
 } from "../packages/mcp/src/server/lateon-reranker.ts";
-import { buildR3DocumentProjection } from "./satori-search-ranking-r3-score.mjs";
+import { buildCapturedRerankProjectionV2 } from "./satori-captured-rerank-projection-v2.mjs";
 import { canonicalJson } from "./satori-useful-context.mjs";
 import { replayBaselineCandidateCapture } from "./satori-search-candidate-replay.mjs";
 import {
@@ -43,6 +41,7 @@ const PRODUCTION_RUNTIME_WORKER = path.join(
 );
 const IMPLEMENTATION_PATHS = Object.freeze({
     projectionSource: "packages/mcp/src/core/search-rerank-document-v2.ts",
+    capturedProjectionOwner: "scripts/satori-captured-rerank-projection-v2.mjs",
     runtimeSource: "packages/mcp/src/server/lateon-reranker.ts",
     measurementScript: "scripts/satori-lateon-track-o-o2.mjs",
     scenarioWorker: "scripts/satori-lateon-track-o-o2-fixture-worker.cjs",
@@ -254,116 +253,6 @@ export function validateTrackOAuthority({
     };
 }
 
-function finalFilteredStage(capture) {
-    const stages = capture.candidateTrace?.stages?.filter(({ stage }) => stage === "mcp_filtered") ?? [];
-    if (stages.length === 0) throw new Error(`Task '${capture.taskId}' has no filtered stage.`);
-    return stages.at(-1);
-}
-
-function replaySignals(capture, passId) {
-    const signals = new Map();
-    const prefix = `${passId}/replay:`;
-    for (const stage of capture.candidateTrace.stages) {
-        if (
-            stage.stage !== "mcp_replay_signals"
-            || (stage.passId !== passId && !stage.passId?.startsWith(prefix))
-        ) continue;
-        for (const candidate of stage.candidates) {
-            if (signals.has(candidate.candidateId)) {
-                throw new Error(`Task '${capture.taskId}' has duplicate replay signals.`);
-            }
-            signals.set(candidate.candidateId, candidate);
-        }
-    }
-    return signals;
-}
-
-function ownerIdentity(ownerId) {
-    let parsed;
-    try {
-        parsed = JSON.parse(ownerId);
-    } catch {
-        throw new Error("Captured candidate owner identity is invalid JSON.");
-    }
-    if (parsed?.[0] === "symbol" && parsed.length === 3) {
-        return { ownerSymbolInstanceId: requireString(parsed[2], "Captured owner symbol") };
-    }
-    if (parsed?.[0] === "file" && parsed.length === 2) return {};
-    throw new Error("Captured candidate owner identity has an unsupported shape.");
-}
-
-function selectCandidates(capture, depth) {
-    const filtered = finalFilteredStage(capture);
-    const signals = replaySignals(capture, filtered.passId);
-    const candidates = filtered.candidates.map((candidate) => {
-        const signal = signals.get(candidate.candidateId);
-        if (!signal) throw new Error(`Candidate '${candidate.candidateId}' has no replay signal.`);
-        return {
-            candidateId: candidate.candidateId,
-            result: {
-                relativePath: candidate.relativePath,
-                startLine: candidate.startLine,
-                endLine: candidate.endLine,
-                language: candidate.language,
-                symbolLabel: signal.replay?.symbolLabel ?? undefined,
-                ...ownerIdentity(candidate.ownerId),
-            },
-        };
-    });
-    return buildRerankCandidatePool(candidates).candidates.slice(0, depth);
-}
-
-async function reconstructDocuments(sourceRoot, capture, candidates, analysisService) {
-    const byFile = new Map();
-    for (const candidate of candidates) {
-        const current = byFile.get(candidate.result.relativePath) ?? [];
-        current.push(candidate);
-        byFile.set(candidate.result.relativePath, current);
-    }
-    const documents = new Map();
-    const query = requireString(
-        capture.queryPlan?.queryIntent?.semanticQuery,
-        `Task '${capture.taskId}' semantic query`,
-    );
-    for (const [relativePath, fileCandidates] of byFile) {
-        if (relativePath.startsWith("/") || relativePath.split(/[\\/]/).includes("..")) {
-            throw new Error(`Unsafe captured path '${relativePath}'.`);
-        }
-        const source = fs.readFileSync(path.join(sourceRoot, relativePath), "utf8");
-        const languages = new Set(fileCandidates.map(({ result }) => result.language));
-        if (languages.size !== 1) throw new Error(`Inconsistent language for '${relativePath}'.`);
-        const analysis = await analysisService.analyze({
-            content: source,
-            relativePath,
-            language: [...languages][0],
-        });
-        const chunks = new Map();
-        analysis.chunks.forEach((chunk, index) => {
-            chunks.set(buildIndexedChunkId(relativePath, chunk, index), chunk);
-        });
-        for (const candidate of fileCandidates) {
-            const chunk = chunks.get(candidate.candidateId);
-            if (!chunk
-                || candidate.result.startLine !== chunk.metadata.startLine
-                || candidate.result.endLine !== chunk.metadata.endLine) {
-                throw new Error(`Captured chunk '${candidate.candidateId}' cannot be reconstructed.`);
-            }
-            const projection = buildR3DocumentProjection({
-                candidate,
-                chunk,
-                projectionVersion: "search_rerank_document_v2",
-                query,
-                sourceContent: source,
-            });
-            documents.set(candidate.candidateId, projection.text);
-        }
-    }
-    return candidates.map(({ candidateId }) => ({
-        candidateId,
-        text: requireString(documents.get(candidateId), `Projection '${candidateId}'`),
-    }));
-}
-
 export async function reconstructTrackOTuningRequests({
     captureRoot,
     sourceRootParent,
@@ -410,16 +299,20 @@ export async function reconstructTrackOTuningRequests({
             const neuralEligible = taskCapture.readiness?.route === "fusion";
             let documents = [];
             if (neuralEligible) {
-                const candidates = selectCandidates(taskCapture, 32);
-                if (candidates.length !== 32) {
+                const projection = await buildCapturedRerankProjectionV2({
+                    taskCapture,
+                    candidateDepth: 32,
+                    sourceRoot: sourceIdentity.canonicalRoot,
+                    analysisService,
+                });
+                if (projection.selectedCandidateIds.length !== 32) {
                     throw new Error(`Task '${taskCapture.taskId}' does not reconstruct D32.`);
                 }
-                documents = await reconstructDocuments(
-                    sourceIdentity.canonicalRoot,
-                    taskCapture,
-                    candidates,
-                    analysisService,
-                );
+                documents = projection.selectedCandidateIds.map((candidateId, index) => ({
+                    candidateId,
+                    text: projection.documents[index],
+                    sha256: projection.projections[index].sha256,
+                }));
             } else if (
                 taskCapture.readiness?.route !== "exact_registry"
                 || taskCapture.readiness?.policyInvariant !== true
@@ -437,9 +330,9 @@ export async function reconstructTrackOTuningRequests({
                 query: taskCapture.queryPlan.queryIntent.semanticQuery,
                 identities: documents.map(({ candidateId }) => candidateId),
                 documents: documents.map(({ text }) => text),
-                projectionSha256s: documents.map(({ candidateId, text }) => ({
+                projectionSha256s: documents.map(({ candidateId, sha256 }) => ({
                     candidateId,
-                    sha256: sha256Bytes(Buffer.from(text, "utf8")),
+                    sha256,
                 })),
                 safetyControls: [...taskAuthority.safetyControls],
                 neuralEligible,
@@ -1146,6 +1039,7 @@ export function buildO2Receipt({ evidence, evidenceFileBytes, sourceIdentity, au
     const receiptArtifacts = Object.fromEntries(
         [
             "projectionSource",
+            "capturedProjectionOwner",
             "runtimeSource",
             "runtimeWorker",
             "measurementScript",
@@ -1304,18 +1198,32 @@ function parseArguments(argv) {
     return options;
 }
 
-function assertOutputOutsideRepository(file, repoRoot) {
-    const relative = path.relative(repoRoot, path.resolve(file));
-    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-        throw new Error("O2 outputs must be outside the clean source repository.");
+export function validateO2OutputPaths(files, repoRoot) {
+    const canonicalRepoRoot = fs.realpathSync(repoRoot);
+    const targets = files.map((file) => {
+        const requested = path.resolve(requireString(file, "O2 output path"));
+        const parent = fs.realpathSync(path.dirname(requested));
+        const target = path.join(parent, path.basename(requested));
+        const relative = path.relative(canonicalRepoRoot, target);
+        if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+            throw new Error("O2 outputs must be outside the clean source repository.");
+        }
+        if (fs.existsSync(target)) throw new Error(`O2 output '${target}' already exists.`);
+        return target;
+    });
+    if (new Set(targets).size !== targets.length) {
+        throw new Error("O2 evidence and receipt outputs must be distinct.");
     }
+    return targets;
 }
 
 export async function main(argv = process.argv.slice(2)) {
     const options = parseArguments(argv);
     const sourceIdentity = resolveCleanGitIdentity(REPOSITORY_ROOT);
-    assertOutputOutsideRepository(options["evidence-output"], REPOSITORY_ROOT);
-    assertOutputOutsideRepository(options["receipt-output"], REPOSITORY_ROOT);
+    const [evidenceOutput, receiptOutput] = validateO2OutputPaths([
+        options["evidence-output"],
+        options["receipt-output"],
+    ], REPOSITORY_ROOT);
     const authorityBinding = validateTrackOAuthority({
         authorityFile: options["o0-authority"],
         expectedAuthorityFileSha256: options["o0-authority-sha256"],
@@ -1381,7 +1289,7 @@ export async function main(argv = process.argv.slice(2)) {
         productFallbackProof,
     });
     const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`, "utf8");
-    fs.writeFileSync(options["evidence-output"], evidenceBytes, { flag: "wx" });
+    fs.writeFileSync(evidenceOutput, evidenceBytes, { flag: "wx" });
     if (evidence.status !== "passed") {
         process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
         process.exitCode = 1;
@@ -1394,7 +1302,7 @@ export async function main(argv = process.argv.slice(2)) {
         authorityBinding,
         implementationArtifacts,
     });
-    fs.writeFileSync(options["receipt-output"], `${JSON.stringify(receipt, null, 2)}\n`, {
+    fs.writeFileSync(receiptOutput, `${JSON.stringify(receipt, null, 2)}\n`, {
         flag: "wx",
     });
     process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);

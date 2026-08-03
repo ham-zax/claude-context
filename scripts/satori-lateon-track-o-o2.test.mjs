@@ -19,6 +19,7 @@ import {
     runFailureScenarios,
     selectWorstTrackORequest,
     sha256Canonical,
+    validateO2OutputPaths,
 } from "./satori-lateon-track-o-o2.mjs";
 import {
     PAGINATION_CONTROL_TEST_NAME,
@@ -265,6 +266,7 @@ function evidenceFixture() {
         scenarioMeasurements,
         implementationArtifacts: {
             projectionSource: { path: "projection.ts", sha256: "1".repeat(64) },
+            capturedProjectionOwner: { path: "captured-projection.mjs", sha256: "9".repeat(64) },
             runtimeSource: { path: "runtime.ts", sha256: "2".repeat(64) },
             runtimeWorker: { path: "worker.js", sha256: "5".repeat(64) },
             measurementScript: { path: "measurement.mjs", sha256: "3".repeat(64) },
@@ -374,6 +376,7 @@ test("Track O evidence and receipt bind the complete passing qualification", () 
         [
             "measurementScript",
             "projectionSource",
+            "capturedProjectionOwner",
             "runtimeSource",
             "runtimeWorker",
             "scenarioWorker",
@@ -500,4 +503,44 @@ test("Track O synthetic worker proves every frozen failure outcome without a mod
     });
     assert.equal(scenarios.malformedOutput[0].operationalReason, "lateon_invalid_output");
     assert.equal(scenarios.workerFailure[0].operationalReason, "lateon_worker_failure");
+});
+
+test("Track O validates distinct exclusive output paths before measurement", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-track-o-o2-output-"));
+    const repositoryRoot = new URL("..", import.meta.url).pathname;
+    try {
+        const evidence = path.join(directory, "evidence.json");
+        const receipt = path.join(directory, "receipt.json");
+        assert.deepEqual(
+            validateO2OutputPaths([evidence, receipt], repositoryRoot),
+            [evidence, receipt],
+        );
+        assert.throws(
+            () => validateO2OutputPaths([evidence, evidence], repositoryRoot),
+            /must be distinct/,
+        );
+        fs.writeFileSync(evidence, "occupied", "utf8");
+        assert.throws(
+            () => validateO2OutputPaths([evidence, receipt], repositoryRoot),
+            /already exists/,
+        );
+        assert.throws(
+            () => validateO2OutputPaths([
+                path.join(directory, "missing", "evidence.json"),
+                receipt,
+            ], repositoryRoot),
+            /ENOENT/,
+        );
+        const repositoryLink = path.join(directory, "repository-link");
+        fs.symlinkSync(repositoryRoot, repositoryLink, "dir");
+        assert.throws(
+            () => validateO2OutputPaths([
+                path.join(repositoryLink, "evidence.json"),
+                receipt,
+            ], repositoryRoot),
+            /outside the clean source repository/,
+        );
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
 });

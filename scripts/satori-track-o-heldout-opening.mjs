@@ -535,6 +535,7 @@ function validateO2Receipt(receipt, inputs) {
     const implementation = requireRecord(receipt.implementationArtifacts, "O2 implementationArtifacts");
     const requiredRoles = [
         "projectionSource",
+        "capturedProjectionOwner",
         "runtimeSource",
         "measurementScript",
         "scenarioWorker",
