@@ -16,6 +16,11 @@ function writeJson(file, value) {
     return bytes;
 }
 
+function observationRow(ordinal) {
+    const row = { ordinal, outcome: "passed" };
+    return { ...row, observationSha256: sha256Canonical(row) };
+}
+
 function buildFixture(tempDir) {
     const repoRoot = path.join(tempDir, "repository");
     const modelRoot = path.join(tempDir, "model");
@@ -60,6 +65,29 @@ function buildFixture(tempDir) {
         artifacts,
     };
     const targetHost = { cpu: "fixture", logicalCores: 1 };
+    const observationCounts = {
+        processColdWorkerStarts: 1,
+        coldFirstScoreRequests: 1,
+        warmRequests: 1,
+        queueSaturationRepetitions: 1,
+        queuedCancellationRepetitions: 1,
+        executingCancellationRepetitions: 1,
+        activeAndQueuedShutdownRepetitions: 1,
+        malformedOutputRepetitions: 1,
+        workerFailureRepetitions: 1,
+    };
+    const operationalBounds = {
+        maximumReadinessP95Milliseconds: 1300,
+        maximumReadinessMilliseconds: 2000,
+        maximumColdFirstScoreMilliseconds: 2000,
+        maximumWarmScoreP95Milliseconds: 1750,
+        maximumScoreMilliseconds: 2000,
+        maximumRerankerStageMilliseconds: 2500,
+        maximumProcessPeakRssBytes: 872415232,
+        maximumProcessRetainedRssBytes: 671088640,
+        maximumInvalidOrIncompleteOrders: 0,
+        maximumSafetyOrIdentityFailures: 0,
+    };
     const manifestUnsigned = {
         version: 3,
         kind: "satori_cross_repository_ranking_manifest",
@@ -79,7 +107,9 @@ function buildFixture(tempDir) {
         },
         qualifiedServiceProfile: {
             id: "lateon_offline_quality_projection_v2_d32_v1",
+            operationalBounds,
         },
+        operationalQualification: { observationCounts },
         heldOutDecision: {
             manifest: {
                 version: 3,
@@ -126,7 +156,16 @@ function buildFixture(tempDir) {
             profileIntraOpThreads: 8,
             interOpThreads: 1,
         },
-        operationalBounds: { maximumScoreMilliseconds: 2000 },
+        operationalBounds: {
+            maximumActiveReranks: 1,
+            maximumQueuedReranks: 1,
+            maximumQueueWaitMilliseconds: 250,
+            maximumReadinessMilliseconds: 2000,
+            maximumScoreMilliseconds: 2000,
+            maximumRerankerStageMilliseconds: 2500,
+            maximumProcessPeakRssBytes: 872415232,
+            maximumProcessRetainedRssBytes: 671088640,
+        },
     };
     const profileFile = path.join(tempDir, "profile.json");
     const profileBytes = writeJson(profileFile, profile);
@@ -149,14 +188,78 @@ function buildFixture(tempDir) {
         }),
     };
     const o0AuthoritySha256 = sha256Bytes(o0Bytes);
+    const sourceIdentity = {
+        revision: "2".repeat(40),
+        tree: "3".repeat(40),
+    };
+    const evidenceAuthority = {
+        o0AuthoritySha256,
+        manifestFileSha256: sha256Bytes(manifestBytes),
+        manifestCanonicalSealSha256: manifest.sha256,
+    };
+    const observations = Object.fromEntries([
+        "processColdReadiness",
+        "coldFirstScore",
+        "warmScore",
+        "queueSaturation",
+        "queuedCancellation",
+        "executingCancellation",
+        "activeAndQueuedShutdown",
+        "malformedOutput",
+        "workerFailure",
+    ].map((key) => [key, [observationRow(1)]]));
+    const zeroGate = (limit = 0) => ({ passed: true, actual: 0, limit });
+    const gates = {
+        authorityIdentity: zeroGate(null),
+        modelArtifactIdentity: zeroGate(null),
+        sourceIdentity: zeroGate(null),
+        tuningRequestReconstruction: zeroGate(null),
+        processColdFailures: zeroGate(0),
+        processColdReadinessP95: zeroGate(operationalBounds.maximumReadinessP95Milliseconds),
+        processColdReadinessMaximum: zeroGate(operationalBounds.maximumReadinessMilliseconds),
+        coldFirstScoreMaximum: zeroGate(operationalBounds.maximumColdFirstScoreMilliseconds),
+        warmScoreP95: zeroGate(operationalBounds.maximumWarmScoreP95Milliseconds),
+        warmScoreMaximum: zeroGate(operationalBounds.maximumScoreMilliseconds),
+        rerankerStageMaximum: zeroGate(operationalBounds.maximumRerankerStageMilliseconds),
+        peakRss: zeroGate(operationalBounds.maximumProcessPeakRssBytes),
+        retainedRss: zeroGate(operationalBounds.maximumProcessRetainedRssBytes),
+        invalidOrIncompleteOrders: zeroGate(0),
+        candidateMembership: zeroGate(0),
+        eligibility: zeroGate(0),
+        groupIdentity: zeroGate(0),
+        paginationExactMustControls: zeroGate(0),
+        fallbackResultState: zeroGate(0),
+        lifecycleLeaks: zeroGate(0),
+        scenarioCounts: { passed: true, actual: observationCounts, limit: observationCounts },
+    };
+    const evidenceUnsigned = {
+        schemaVersion: "satori_lateon_track_o_o2_evidence_v1",
+        status: "passed",
+        result: "passed",
+        sourceRevision: sourceIdentity.revision,
+        sourceTree: sourceIdentity.tree,
+        targetHostIdentitySha256: sha256Canonical(targetHost),
+        authority: evidenceAuthority,
+        profile: profileBinding,
+        candidate,
+        tuningRequestSet: { requestSetSha256: "4".repeat(64) },
+        methodology: { observationCounts },
+        observations,
+        resources: {},
+        gates,
+        implementationArtifacts,
+    };
+    const evidence = { ...evidenceUnsigned, sha256: sha256Canonical(evidenceUnsigned) };
+    const o2EvidenceFile = path.join(tempDir, "o2-evidence.json");
+    const evidenceBytes = writeJson(o2EvidenceFile, evidence);
     const o2Unsigned = {
         version: 1,
         kind: "satori_lateon_track_o_operational_qualification_receipt",
         stage: "O2",
         status: "passed",
         operationalQualificationResult: "passed",
-        sourceRevision: "2".repeat(40),
-        sourceTree: "3".repeat(40),
+        sourceRevision: sourceIdentity.revision,
+        sourceTree: sourceIdentity.tree,
         targetHostIdentitySha256: sha256Canonical(targetHost),
         authority: {
             o0AuthoritySha256,
@@ -166,6 +269,11 @@ function buildFixture(tempDir) {
         profile: profileBinding,
         candidate,
         implementationArtifacts,
+        qualificationEvidence: {
+            schemaVersion: evidence.schemaVersion,
+            fileSha256: sha256Bytes(evidenceBytes),
+            resultSha256: evidence.sha256,
+        },
     };
     const o2Receipt = { ...o2Unsigned, sha256: sha256Canonical(o2Unsigned) };
     const o2ReceiptFile = path.join(tempDir, "o2.json");
@@ -177,16 +285,14 @@ function buildFixture(tempDir) {
             expectedManifestFileSha256: sha256Bytes(manifestBytes),
             expectedManifestSealSha256: manifest.sha256,
             expectedCandidate: candidate,
-            sourceIdentity: {
-                revision: o2Receipt.sourceRevision,
-                tree: o2Receipt.sourceTree,
-            },
+            sourceIdentity,
         },
         input: {
             repoRoot,
             manifestFile,
             o0AuthorityFile,
             o2ReceiptFile,
+            o2EvidenceFile,
             profileFile,
             modelRoot,
             markerFile: path.join(tempDir, "opening.json"),
@@ -232,9 +338,21 @@ test("Track O opening treats the held-out manifest as opaque before the marker e
         const o0Bytes = writeJson(fixture.input.o0AuthorityFile, o0);
         const o0Sha256 = sha256Bytes(o0Bytes);
 
+        const evidence = JSON.parse(fs.readFileSync(fixture.input.o2EvidenceFile, "utf8"));
+        evidence.authority.o0AuthoritySha256 = o0Sha256;
+        evidence.authority.manifestFileSha256 = sha256Bytes(opaqueBytes);
+        const { sha256: _ignoredEvidence, ...unsignedEvidence } = evidence;
+        const updatedEvidence = {
+            ...unsignedEvidence,
+            sha256: sha256Canonical(unsignedEvidence),
+        };
+        const evidenceBytes = writeJson(fixture.input.o2EvidenceFile, updatedEvidence);
+
         const receipt = JSON.parse(fs.readFileSync(fixture.input.o2ReceiptFile, "utf8"));
         receipt.authority.o0AuthoritySha256 = o0Sha256;
         receipt.authority.manifestFileSha256 = sha256Bytes(opaqueBytes);
+        receipt.qualificationEvidence.fileSha256 = sha256Bytes(evidenceBytes);
+        receipt.qualificationEvidence.resultSha256 = updatedEvidence.sha256;
         const { sha256: _ignored, ...unsignedReceipt } = receipt;
         writeJson(fixture.input.o2ReceiptFile, {
             ...unsignedReceipt,
@@ -267,6 +385,40 @@ test("Track O opening fails before creating a marker when O2 is not passing", ()
                 sourceIdentity: fixture.expected.sourceIdentity,
             }),
             /not a passing/,
+        );
+        assert.equal(fs.existsSync(fixture.input.markerFile), false);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("Track O opening rejects a passing receipt without complete measured evidence", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-track-o-opening-"));
+    try {
+        const fixture = buildFixture(tempDir);
+        const evidence = JSON.parse(fs.readFileSync(fixture.input.o2EvidenceFile, "utf8"));
+        evidence.observations.warmScore = [];
+        const { sha256: _ignored, ...unsignedEvidence } = evidence;
+        const changedEvidence = {
+            ...unsignedEvidence,
+            sha256: sha256Canonical(unsignedEvidence),
+        };
+        const evidenceBytes = writeJson(fixture.input.o2EvidenceFile, changedEvidence);
+        const receipt = JSON.parse(fs.readFileSync(fixture.input.o2ReceiptFile, "utf8"));
+        receipt.qualificationEvidence.fileSha256 = sha256Bytes(evidenceBytes);
+        receipt.qualificationEvidence.resultSha256 = changedEvidence.sha256;
+        const { sha256: _ignoredReceipt, ...unsignedReceipt } = receipt;
+        writeJson(fixture.input.o2ReceiptFile, {
+            ...unsignedReceipt,
+            sha256: sha256Canonical(unsignedReceipt),
+        });
+
+        assert.throws(
+            () => openTrackOHeldOut(fixture.input, {
+                expectedO0AuthoritySha256: fixture.expected.expectedO0AuthoritySha256,
+                sourceIdentity: fixture.expected.sourceIdentity,
+            }),
+            /warmScore.*count is incomplete/,
         );
         assert.equal(fs.existsSync(fixture.input.markerFile), false);
     } finally {

@@ -247,6 +247,165 @@ function validateFilesAgainstBindings(root, bindings, label) {
     }
 }
 
+const O2_OBSERVATION_KEYS = Object.freeze([
+    "processColdReadiness",
+    "coldFirstScore",
+    "warmScore",
+    "queueSaturation",
+    "queuedCancellation",
+    "executingCancellation",
+    "activeAndQueuedShutdown",
+    "malformedOutput",
+    "workerFailure",
+]);
+
+const O2_OBSERVATION_COUNT_FIELDS = Object.freeze({
+    processColdReadiness: "processColdWorkerStarts",
+    coldFirstScore: "coldFirstScoreRequests",
+    warmScore: "warmRequests",
+    queueSaturation: "queueSaturationRepetitions",
+    queuedCancellation: "queuedCancellationRepetitions",
+    executingCancellation: "executingCancellationRepetitions",
+    activeAndQueuedShutdown: "activeAndQueuedShutdownRepetitions",
+    malformedOutput: "malformedOutputRepetitions",
+    workerFailure: "workerFailureRepetitions",
+});
+
+const O2_GATE_KEYS = Object.freeze([
+    "authorityIdentity",
+    "modelArtifactIdentity",
+    "sourceIdentity",
+    "tuningRequestReconstruction",
+    "processColdFailures",
+    "processColdReadinessP95",
+    "processColdReadinessMaximum",
+    "coldFirstScoreMaximum",
+    "warmScoreP95",
+    "warmScoreMaximum",
+    "rerankerStageMaximum",
+    "peakRss",
+    "retainedRss",
+    "invalidOrIncompleteOrders",
+    "candidateMembership",
+    "eligibility",
+    "groupIdentity",
+    "paginationExactMustControls",
+    "fallbackResultState",
+    "lifecycleLeaks",
+    "scenarioCounts",
+]);
+
+function validateO2QualificationEvidence(evidence, evidenceBytes, inputs) {
+    requireExactKeys(evidence, [
+        "schemaVersion",
+        "status",
+        "result",
+        "sourceRevision",
+        "sourceTree",
+        "targetHostIdentitySha256",
+        "authority",
+        "profile",
+        "candidate",
+        "tuningRequestSet",
+        "methodology",
+        "observations",
+        "resources",
+        "gates",
+        "implementationArtifacts",
+        "sha256",
+    ], "O2 qualification evidence");
+    const resultSha256 = unsignedDigest(evidence, "O2 qualification evidence");
+    if (evidence.schemaVersion !== "satori_lateon_track_o_o2_evidence_v1"
+        || evidence.status !== "passed"
+        || evidence.result !== "passed") {
+        throw new Error("O2 qualification evidence is not passing.");
+    }
+    requireEqual(evidence.sourceRevision, inputs.sourceIdentity.revision, "O2 evidence source revision");
+    requireEqual(evidence.sourceTree, inputs.sourceIdentity.tree, "O2 evidence source tree");
+    requireEqual(
+        evidence.targetHostIdentitySha256,
+        sha256Canonical(inputs.o0Authority.targetHost),
+        "O2 evidence target host",
+    );
+    requireEqual(evidence.authority, {
+        o0AuthoritySha256: inputs.o0AuthoritySha256,
+        manifestFileSha256: inputs.manifest.fileSha256,
+        manifestCanonicalSealSha256: inputs.manifest.canonicalSealSha256,
+    }, "O2 evidence authority");
+    requireEqual(evidence.profile, inputs.profile, "O2 evidence profile");
+    requireEqual(evidence.candidate, inputs.candidate, "O2 evidence candidate");
+
+    const frozenCounts = requireRecord(
+        inputs.o0Authority.operationalQualification?.observationCounts,
+        "O0 observation counts",
+    );
+    const methodology = requireRecord(evidence.methodology, "O2 evidence methodology");
+    requireEqual(methodology.observationCounts, frozenCounts, "O2 evidence observation counts");
+    const observations = requireRecord(evidence.observations, "O2 evidence observations");
+    requireExactKeys(observations, O2_OBSERVATION_KEYS, "O2 evidence observations");
+    for (const observationKey of O2_OBSERVATION_KEYS) {
+        const rows = observations[observationKey];
+        if (!Array.isArray(rows)) {
+            throw new Error(`O2 evidence observation '${observationKey}' must be an array.`);
+        }
+        const countField = O2_OBSERVATION_COUNT_FIELDS[observationKey];
+        if (rows.length !== frozenCounts[countField]) {
+            throw new Error(`O2 evidence observation '${observationKey}' count is incomplete.`);
+        }
+        rows.forEach((row, index) => {
+            const record = requireRecord(row, `O2 ${observationKey} observation ${index + 1}`);
+            const supplied = requireSha256(
+                record.observationSha256,
+                `O2 ${observationKey} observation ${index + 1} digest`,
+            );
+            const { observationSha256: _ignored, ...unsigned } = record;
+            if (supplied !== sha256Canonical(unsigned)) {
+                throw new Error(`O2 ${observationKey} observation ${index + 1} digest mismatch.`);
+            }
+        });
+    }
+
+    const gates = requireRecord(evidence.gates, "O2 evidence gates");
+    requireExactKeys(gates, O2_GATE_KEYS, "O2 evidence gates");
+    for (const gateName of O2_GATE_KEYS) {
+        const gate = requireRecord(gates[gateName], `O2 evidence gate '${gateName}'`);
+        requireExactKeys(gate, ["passed", "actual", "limit"], `O2 evidence gate '${gateName}'`);
+        if (gate.passed !== true) throw new Error(`O2 evidence gate '${gateName}' did not pass.`);
+    }
+    const bounds = inputs.o0Authority.qualifiedServiceProfile.operationalBounds;
+    const expectedLimits = {
+        processColdFailures: 0,
+        processColdReadinessP95: bounds.maximumReadinessP95Milliseconds,
+        processColdReadinessMaximum: bounds.maximumReadinessMilliseconds,
+        coldFirstScoreMaximum: bounds.maximumColdFirstScoreMilliseconds,
+        warmScoreP95: bounds.maximumWarmScoreP95Milliseconds,
+        warmScoreMaximum: bounds.maximumScoreMilliseconds,
+        rerankerStageMaximum: bounds.maximumRerankerStageMilliseconds,
+        peakRss: bounds.maximumProcessPeakRssBytes,
+        retainedRss: bounds.maximumProcessRetainedRssBytes,
+        invalidOrIncompleteOrders: bounds.maximumInvalidOrIncompleteOrders,
+        candidateMembership: 0,
+        eligibility: 0,
+        groupIdentity: 0,
+        paginationExactMustControls: 0,
+        fallbackResultState: 0,
+        lifecycleLeaks: 0,
+        scenarioCounts: frozenCounts,
+    };
+    for (const [gateName, limit] of Object.entries(expectedLimits)) {
+        requireEqual(gates[gateName].limit, limit, `O2 evidence gate '${gateName}' limit`);
+    }
+    requireEqual(
+        evidence.implementationArtifacts,
+        inputs.implementationArtifacts,
+        "O2 evidence implementation artifacts",
+    );
+    return {
+        fileSha256: sha256Bytes(evidenceBytes),
+        resultSha256,
+    };
+}
+
 function validateO2Receipt(receipt, inputs) {
     requireExactKeys(receipt, [
         "version",
@@ -261,6 +420,7 @@ function validateO2Receipt(receipt, inputs) {
         "profile",
         "candidate",
         "implementationArtifacts",
+        "qualificationEvidence",
         "sha256",
     ], "O2 operational qualification receipt");
     const receiptSha256 = unsignedDigest(receipt, "O2 operational qualification receipt");
@@ -314,8 +474,35 @@ function validateO2Receipt(receipt, inputs) {
         path: requireString(implementation[role]?.path, `O2 ${role} path`),
         sha256: requireSha256(implementation[role]?.sha256, `O2 ${role} sha256`),
     }));
+    requireEqual(
+        implementation,
+        inputs.qualificationEvidenceImplementationArtifacts,
+        "O2 receipt and evidence implementation artifacts",
+    );
     validateFilesAgainstBindings(inputs.repoRoot, implementationBindings, "O2 implementation artifact");
-    return { receiptSha256, implementationBindings };
+    const evidenceBinding = requireRecord(
+        receipt.qualificationEvidence,
+        "O2 qualification evidence binding",
+    );
+    requireExactKeys(evidenceBinding, [
+        "schemaVersion",
+        "fileSha256",
+        "resultSha256",
+    ], "O2 qualification evidence binding");
+    if (evidenceBinding.schemaVersion !== "satori_lateon_track_o_o2_evidence_v1") {
+        throw new Error("O2 qualification evidence schema is unsupported.");
+    }
+    requireEqual(
+        requireSha256(evidenceBinding.fileSha256, "O2 qualification evidence file digest"),
+        inputs.qualificationEvidence.fileSha256,
+        "O2 qualification evidence file binding",
+    );
+    requireEqual(
+        requireSha256(evidenceBinding.resultSha256, "O2 qualification evidence result digest"),
+        inputs.qualificationEvidence.resultSha256,
+        "O2 qualification evidence result binding",
+    );
+    return { receiptSha256, implementationBindings, evidenceBinding };
 }
 
 function assertMarkerOutsideRepository(markerFile, repoRoot) {
@@ -458,6 +645,38 @@ export function openTrackOHeldOut(input, options = {}) {
     const profileSource = readJsonFile(input.profileFile, "Track O D32 runtime profile");
     const profile = validateProfile(profileSource.value, profileSource.bytes, o0.value);
     validateFilesAgainstBindings(input.modelRoot, o0Bindings.artifacts, "Track O model artifact");
+    const sourceIdentity = options.sourceIdentity ?? resolveGitSourceIdentity(repoRoot);
+    const qualificationEvidenceSource = readJsonFile(
+        input.o2EvidenceFile,
+        "O2 operational qualification evidence",
+    );
+    const candidate = {
+        id: TRACK_O_CANDIDATE_ID,
+        candidateDepth: 32,
+        projection: {
+            id: o0.value.candidate.projection.id,
+            sha256: o0.value.candidate.projection.sha256,
+        },
+        model: {
+            repository: o0.value.candidate.model.repository,
+            revision: o0.value.candidate.model.revision,
+        },
+        artifacts: o0Bindings.artifacts,
+    };
+    const qualificationEvidence = validateO2QualificationEvidence(
+        qualificationEvidenceSource.value,
+        qualificationEvidenceSource.bytes,
+        {
+            sourceIdentity,
+            o0Authority: o0.value,
+            o0AuthoritySha256,
+            manifest,
+            profile,
+            candidate,
+            implementationArtifacts:
+                qualificationEvidenceSource.value.implementationArtifacts,
+        },
+    );
     const o2 = readJsonFile(input.o2ReceiptFile, "O2 operational qualification receipt");
     const o2Binding = validateO2Receipt(o2.value, {
         repoRoot,
@@ -466,7 +685,10 @@ export function openTrackOHeldOut(input, options = {}) {
         o0Artifacts: o0Bindings.artifacts,
         manifest,
         profile,
-        sourceIdentity: options.sourceIdentity ?? resolveGitSourceIdentity(repoRoot),
+        sourceIdentity,
+        qualificationEvidence,
+        qualificationEvidenceImplementationArtifacts:
+            qualificationEvidenceSource.value.implementationArtifacts,
     });
     const opening = createTrackOHeldOutOpeningRecord({
         o0AuthoritySha256,
@@ -494,7 +716,7 @@ export function openTrackOHeldOut(input, options = {}) {
 }
 
 function usage() {
-    return "Usage: node scripts/satori-track-o-heldout-opening.mjs --repo-root <repository> --manifest <manifest.json> --o0-authority <authority.json> --o2-receipt <receipt.json> --profile <profile.json> --model-root <model-directory> --marker <external-opening.json>";
+    return "Usage: node scripts/satori-track-o-heldout-opening.mjs --repo-root <repository> --manifest <manifest.json> --o0-authority <authority.json> --o2-receipt <receipt.json> --o2-evidence <evidence.json> --profile <profile.json> --model-root <model-directory> --marker <external-opening.json>";
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -511,6 +733,7 @@ export function main(argv = process.argv.slice(2)) {
         else if (arg === "--manifest") input.manifestFile = path.resolve(value);
         else if (arg === "--o0-authority") input.o0AuthorityFile = path.resolve(value);
         else if (arg === "--o2-receipt") input.o2ReceiptFile = path.resolve(value);
+        else if (arg === "--o2-evidence") input.o2EvidenceFile = path.resolve(value);
         else if (arg === "--profile") input.profileFile = path.resolve(value);
         else if (arg === "--model-root") input.modelRoot = path.resolve(value);
         else if (arg === "--marker") input.markerFile = path.resolve(value);
@@ -521,6 +744,7 @@ export function main(argv = process.argv.slice(2)) {
         "manifestFile",
         "o0AuthorityFile",
         "o2ReceiptFile",
+        "o2EvidenceFile",
         "profileFile",
         "modelRoot",
         "markerFile",
