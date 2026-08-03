@@ -185,10 +185,19 @@ creation, and a validated ready identity. Cold first-score measures the first
 D32 inference after readiness. Warm inference begins only after the two frozen
 warmup requests.
 
-The process-cold request is selected from the 36 L3 tuning quality tasks using
+The frozen L3 tuning authority contains 36 quality/control tasks. Thirty-four
+produce a projection-v2 candidate set and are neural-eligible. The two
+exact-registry controls `edge-tts-app-r0/edge-voice-options` and
+`rpc-r0/rpc-strictness-config`
+intentionally terminate before reranker admission; they remain required policy
+controls but must not be given fabricated projections or neural calls.
+
+The process-cold request is selected from the 34 neural-eligible requests using
 the frozen tokenizer and truncation policy: highest aggregate retained token
 count, then highest aggregate input-tensor bytes, then canonical request identity.
-Projected UTF-8 size is not a selection criterion.
+Projected UTF-8 size is not a selection criterion. The 200 warm observations
+also schedule only these 34 requests, while O2 reconstruction and control
+authority continues to cover all 36 tasks.
 
 The 200 warm observations use a deterministic counterbalanced schedule:
 

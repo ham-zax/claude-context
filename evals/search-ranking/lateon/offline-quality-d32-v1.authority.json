@@ -5,7 +5,7 @@
   "status": "prospective_authority_outputs_unopened",
   "plan": {
     "path": "docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md",
-    "sha256": "dd900296a02f80a58f921121e9e93b55139d9c2f12fa635f452a1e2c34711569"
+    "sha256": "7fb10379ff83132c349512b23f099e00441040cebe772619f2d356ccbdd9f166"
   },
   "historicalAuthority": {
     "l3Receipt": {
@@ -154,6 +154,16 @@
     }
   },
   "operationalQualification": {
+    "tuningRequestSet": {
+      "totalQualityAndControlTasks": 36,
+      "neuralEligibleRequests": 34,
+      "policyInvariantControls": [
+        "edge-tts-app-r0/edge-voice-options",
+        "rpc-r0/rpc-strictness-config"
+      ],
+      "selectionAndWarmScheduleScope": "neural_eligible_requests_only",
+      "reconstructionAndControlScope": "all_quality_and_control_tasks"
+    },
     "observationCounts": {
       "processColdWorkerStarts": 30,
       "coldFirstScoreRequests": 30,

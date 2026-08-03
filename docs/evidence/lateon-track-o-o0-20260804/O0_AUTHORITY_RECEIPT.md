@@ -20,13 +20,13 @@ Track O plan
     docs/plans/SATORI_OFFLINE_LATEON_OPERATIONAL_QUALIFICATION_PLAN.md
 
 Track O plan SHA-256
-    dd900296a02f80a58f921121e9e93b55139d9c2f12fa635f452a1e2c34711569
+    7fb10379ff83132c349512b23f099e00441040cebe772619f2d356ccbdd9f166
 
 O0 executable authority
     evals/search-ranking/lateon/offline-quality-d32-v1.authority.json
 
 O0 executable authority SHA-256
-    b1db9ac92597ce625746b2812f294afa99b0d4f6d00a2b2e321e3a976c0d30b2
+    ce8b73dc3ec05696d30ca3cb7820eabf825a18d3dbfd21ba1de256356e12bbaa
 ```
 
 No O2 measurement or held-out access occurred before this O0 revision was
@@ -186,6 +186,14 @@ power mode                  not observable from WSL; not decision-bearing
 the OS page cache is not forcibly cleared.
 
 ## Frozen O2 method
+
+The tuning request authority contains 36 quality/control tasks: 34
+neural-eligible D32 requests and two policy-invariant exact-registry controls,
+`edge-tts-app-r0/edge-voice-options` and `rpc-r0/rpc-strictness-config`.
+Request selection and warm
+measurement use only the 34 neural-eligible requests. Reconstruction and policy
+control checks cover all 36; the two exact controls must produce no fabricated
+projection or LateOn call.
 
 ```text
 process-cold worker starts                    30
