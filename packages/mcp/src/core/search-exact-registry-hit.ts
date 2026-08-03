@@ -48,6 +48,7 @@ export type BuildExactRegistryHitEnvelopeInput = {
     groupBy: SearchResponseEnvelope["groupBy"];
     limit: number;
     disclosureLimit: number;
+    includeResultIndex: boolean;
     maxResponseBytes: number;
     freshnessDecision: FreshnessDecision;
     freshnessSummary: SearchFreshnessSummary;
@@ -231,7 +232,7 @@ export function buildExactRegistryHitEnvelope(
             },
         };
     }
-    const resultSet = projection.envelope.continuation
+    const resultSet = projection.envelope.continuation || input.includeResultIndex
         ? {
             orderedResults: eligibleResults.map(projectGroupedResultV2),
             recommendedActions: eligibleResults.map((result) => (

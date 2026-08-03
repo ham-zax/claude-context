@@ -104,6 +104,7 @@ type FinalizeSearchResultsInput = {
     resultMode: SearchResultMode;
     limit: number;
     disclosureLimit: number;
+    includeResultIndex: boolean;
     rerankerResultLimit: number;
     debugMode: "none" | "summary" | "ranking" | "freshness" | "full";
     rankingMode: "default" | "auto_changed_first";
@@ -694,7 +695,7 @@ export async function finalizeSearchResults(
             },
         };
     }
-    const resultSet = disclosureProjection.envelope.continuation
+    const resultSet = disclosureProjection.envelope.continuation || input.includeResultIndex
         ? {
             orderedResults: eligibleResults.map(projectGroupedResultV2),
             recommendedActions: eligibleResults.map((result) => (

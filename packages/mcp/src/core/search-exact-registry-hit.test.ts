@@ -30,7 +30,7 @@ function symbol(index: number): SymbolRecord {
 }
 
 test("exact registry retains the complete frozen order behind a compact first page", () => {
-    const built = buildExactRegistryHitEnvelope({
+    const input: Parameters<typeof buildExactRegistryHitEnvelope>[0] = {
         codebaseRoot: "/repo",
         absolutePath: "/repo",
         query: "who calls owner0",
@@ -38,6 +38,7 @@ test("exact registry retains the complete frozen order behind a compact first pa
         groupBy: "symbol",
         limit: 16,
         disclosureLimit: 10,
+        includeResultIndex: false,
         maxResponseBytes: 128 * 1024,
         freshnessDecision: {
             mode: "skipped_recent",
@@ -67,7 +68,8 @@ test("exact registry retains the complete frozen order behind a compact first pa
         changedFilesBoostSkippedForLargeChangeSet: false,
         buildNoiseMitigationHint: () => undefined,
         buildGeneratedArtifactsVerificationHint: () => undefined,
-    });
+    };
+    const built = buildExactRegistryHitEnvelope(input);
 
     assert.ok(built);
     assert.equal(built.kind, "ok");
@@ -86,4 +88,17 @@ test("exact registry retains the complete frozen order behind a compact first pa
     assert.equal(built.envelope.rankedSetDigest, SEARCH_RESULT_SET_DIGEST_PLACEHOLDER);
     assert.equal(built.resultSet?.orderedResults.length, 16);
     assert.equal(built.resultSet?.initialReturnedCount, 10);
+
+    const completeIndexed = buildExactRegistryHitEnvelope({
+        ...input,
+        limit: 5,
+        disclosureLimit: 5,
+        includeResultIndex: true,
+        matches: input.matches.slice(0, 1),
+    });
+    assert.ok(completeIndexed);
+    assert.equal(completeIndexed.kind, "ok");
+    if (completeIndexed.kind !== "ok") return;
+    assert.equal(completeIndexed.envelope.continuation, undefined);
+    assert.equal(completeIndexed.resultSet?.orderedResults.length, 1);
 });

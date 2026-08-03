@@ -86,6 +86,7 @@ type SearchExactFastPathInput = {
     resultMode: SearchResultMode;
     limit: number;
     disclosureLimit: number;
+    includeResultIndex: boolean;
     debugMode: "none" | "summary" | "ranking" | "freshness" | "full";
     rankingMode: "default" | "auto_changed_first";
     semanticQuery: string;
@@ -549,6 +550,7 @@ export async function runExactRegistryFastPath(
         groupBy: input.groupBy,
         limit: input.limit,
         disclosureLimit: input.disclosureLimit,
+        includeResultIndex: input.includeResultIndex,
         maxResponseBytes: input.debugMode === "full"
             ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
             : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,

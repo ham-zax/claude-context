@@ -70,6 +70,14 @@ test("unverified source freshness warning preserves proven vector usability", ()
     assert.match(warning?.action ?? "", /manage_index sync/i);
 });
 
+test("compact result-index admission warning preserves the full search result", () => {
+    const [warning] = buildSearchWarningDetails(["SEARCH_RESULT_INDEX_NOT_ADMISSIBLE"]);
+    assert.equal(warning?.blocksUse, false);
+    assert.equal(warning?.severity, "caution");
+    assert.match(warning?.message ?? "", /full search results are valid/i);
+    assert.match(warning?.action ?? "", /no result order or group was removed/i);
+});
+
 function baseGroup(partial: Partial<SearchGroupResult> = {}): SearchGroupResult {
     return {
         target: {

@@ -738,6 +738,7 @@ interface SearchBaseResponseEnvelope {
 export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelope {
     resultMode: "grouped";
     rankedSetDigest?: string;
+    resultIndex?: SearchCompactResultIndex;
     resultCounts?: SearchGroupedResultCounts;
     disclosure?: SearchDisclosureSummary;
     continuation?: {
@@ -746,6 +747,39 @@ export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelop
         remainingGroupCount: number;
     };
     results: SearchGroupedResultV2[];
+}
+
+export type SearchResultIndexEvidenceLabel =
+    | "high_owner_confidence"
+    | "medium_owner_confidence"
+    | "high_semantic_confidence"
+    | "medium_semantic_confidence"
+    | "ranked_candidate";
+
+export type SearchResultIndexEntry =
+    | {
+        rank: number;
+        kind: "symbol";
+        target: { file: string; symbolId: string };
+        displayLabel: string;
+        evidenceLabel: SearchResultIndexEvidenceLabel;
+    }
+    | {
+        rank: number;
+        kind: "file";
+        target: { file: string };
+        displayLabel: string;
+        evidenceLabel: SearchResultIndexEvidenceLabel;
+    };
+
+export interface SearchCompactResultIndex {
+    contractVersion: "search_result_index_v1";
+    rankedSetDigest: string;
+    disclosurePolicyVersion: "search_disclosure_v1";
+    availableEntryCount: number;
+    returnedEntryCount: number;
+    complete: boolean;
+    entries: SearchResultIndexEntry[];
 }
 
 export interface SearchGroupedResultCounts {
@@ -789,6 +823,7 @@ export interface SearchRequestInput {
     rankingMode: SearchRankingMode;
     limit: number;
     disclosureLimit?: number;
+    includeResultIndex?: boolean;
     debugMode?: SearchDebugMode;
     debugCandidateLimit?: number;
 }

@@ -1708,6 +1708,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
         const baselinePayload = JSON.parse(baselineResponse.content[0]?.text || '{}');
         const baselineFiles = baselinePayload.results.map((result: { target: { file: string } }) => result.target.file);
         assert.equal(baselineFiles.length, 20, JSON.stringify(baselinePayload));
+        assert.equal(baselinePayload.resultIndex, undefined);
 
         const largerThanAvailable = await baseline.handlers.handleSearchCode({
             path: repoPath,
@@ -1762,6 +1763,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
         });
         assert.match(initialPayload.continuation.handle, /^[a-f0-9]{48}$/);
         assert.match(initialPayload.rankedSetDigest, /^[a-f0-9]{64}$/);
+        assert.equal(initialPayload.resultIndex, undefined);
         assert.ok(Buffer.byteLength(initialResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
 
         const freshnessProbe = prepareHandlers();
@@ -1965,6 +1967,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             groupBy: 'file',
             rankingMode: 'default',
             limit: 20,
+            includeResultIndex: true,
         });
         const inadmissiblePayload = JSON.parse(
             inadmissibleResponse.content[0]?.text || '{}',
@@ -1974,6 +1977,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
         assert.equal(inadmissiblePayload.results.length, 10);
         assert.equal(inadmissiblePayload.continuation, undefined);
         assert.equal(inadmissiblePayload.rankedSetDigest, undefined);
+        assert.equal(inadmissiblePayload.resultIndex, undefined);
         assert.deepEqual(inadmissiblePayload.resultCounts, {
             requestedTotal: 20,
             effectiveFrozenTotal: 20,
@@ -2236,6 +2240,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             rankingMode: 'default',
             limit: 12,
             disclosureLimit: 3,
+            includeResultIndex: true,
             debugMode: 'full',
         });
         assert.equal(
@@ -2244,6 +2249,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             lateOnInitialResponse.content[0]?.text,
         );
         let lateOnPayload = JSON.parse(lateOnInitialResponse.content[0]?.text || '{}');
+        const lateOnRankedSetDigest = lateOnPayload.rankedSetDigest;
         const neuralWorkAfterInitial = {
             calls: lateOnCalls,
             candidates: lateOnCandidates,
@@ -2265,6 +2271,16 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             candidatesWithLexicalEvidence: 0,
             candidatesWithCurrentSourceEvidence: 0,
         });
+        assert.equal(lateOnPayload.resultIndex.rankedSetDigest, lateOnRankedSetDigest);
+        assert.equal(lateOnPayload.resultIndex.availableEntryCount, 12);
+        assert.equal(lateOnPayload.resultIndex.returnedEntryCount, 12);
+        assert.equal(lateOnPayload.resultIndex.complete, true);
+        assert.deepEqual(
+            lateOnPayload.resultIndex.entries.map(
+                (entry: { target: { file: string } }) => entry.target.file,
+            ),
+            expectedLateOnOrder,
+        );
         const lateOnFiles = lateOnPayload.results.map(
             (result: { target: { file: string } }) => result.target.file,
         );
@@ -2279,6 +2295,8 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             const retry = await lateOnRanked.handlers.handleContinueSearch(request);
             assert.equal(retry.content[0]?.text, page.content[0]?.text);
             lateOnPayload = JSON.parse(page.content[0]?.text || '{}');
+            assert.equal(lateOnPayload.rankedSetDigest, lateOnRankedSetDigest);
+            assert.equal(lateOnPayload.resultIndex, undefined);
             lateOnFiles.push(...lateOnPayload.results.map(
                 (result: { target: { file: string } }) => result.target.file,
             ));
@@ -3778,17 +3796,28 @@ test('handleSearchCode exact registry fast path returns a grouped symbol despite
                 resultMode: 'grouped',
                 groupBy: 'symbol',
                 limit: 5,
+                includeResultIndex: true,
                 debugMode: 'full',
             });
 
             const rawText = response.content[0]?.text || '{}';
             const payload = JSON.parse(rawText);
-            assert.equal(payload.status, 'ok');
+            assert.equal(payload.status, 'ok', rawText);
             assert.doesNotMatch(rawText, /\n\s+"/);
             assert.equal(semanticSearchCalls, 0);
             assert.equal(rerankCalls, 0);
             assert.equal(payload.results.length, 1);
             assert.equal(payload.results[0].target.symbolId, owner.symbolInstanceId);
+            assert.equal(payload.resultIndex, undefined);
+            assert.equal(payload.rankedSetDigest, undefined);
+            assert.equal(
+                payload.warnings.some(
+                    (warning: { code: string }) => (
+                        warning.code === 'SEARCH_RESULT_INDEX_NOT_ADMISSIBLE'
+                    ),
+                ),
+                true,
+            );
             assert.match(payload.results[0].preview, /return path/);
             assert.doesNotMatch(payload.results[0].preview, /export class ToolHandlers/);
             assert.equal(typeof payload.results[0].navigation?.graph, 'string');
