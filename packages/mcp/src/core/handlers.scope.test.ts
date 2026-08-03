@@ -1223,25 +1223,36 @@ test('manage status prepares one reusable proof and genuine authority drift stil
         let mutationGeneration = 1;
         let completionProofReads = 0;
         let freshnessCalls = 0;
+        let sourceObservationAvailable = false;
         let semanticReceipt: unknown;
         const internals = handlers as unknown as {
             context: HandlerContext & {
                 getIndexAuthorityObservations: () => { vector: string; navigation: string };
                 isPreparedVectorReceiptBoundToCurrentAuthority: () => boolean;
                 revalidatePreparedGeneration: () => Promise<never>;
+                compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                compareSourceObservationToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
                 semanticSearchInProvenGeneration: (
                     receipt: unknown,
                     request: { topK: number },
                 ) => Promise<SearchFixtureResult[]>;
             };
             syncManager: HandlerSyncManager & {
-                ensureFreshness: () => Promise<never>;
+                ensureFreshness: () => Promise<never> | Promise<{
+                    mode: 'skipped_recent';
+                    checkedAt: string;
+                    thresholdMs: number;
+                }>;
                 getPreparedReadObservation: () => {
                     available: true;
                     observation: {
                         freshnessEpoch: number;
                         watcherState: 'ready';
                     };
+                } | {
+                    available: false;
+                    reason: 'watcher_disabled';
+                    freshnessEpoch: number;
                 };
             };
             mutationLeaseCoordinator: {
@@ -1267,17 +1278,25 @@ test('manage status prepares one reusable proof and genuine authority drift stil
         internals.context.revalidatePreparedGeneration = async () => {
             throw new Error('status-prepared reuse must not reread the completion proof');
         };
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
+        internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
         internals.context.semanticSearchInProvenGeneration = async (receipt, request) => {
             semanticReceipt = receipt;
             return semanticSearch(receipt, request);
         };
-        internals.syncManager.getPreparedReadObservation = () => ({
-            available: true,
-            observation: {
+        internals.syncManager.getPreparedReadObservation = () => sourceObservationAvailable
+            ? {
+                available: true,
+                observation: {
+                    freshnessEpoch: 1,
+                    watcherState: 'ready',
+                },
+            }
+            : {
+                available: false,
+                reason: 'watcher_disabled',
                 freshnessEpoch: 1,
-                watcherState: 'ready',
-            },
-        });
+            };
         internals.syncManager.ensureFreshness = async () => {
             freshnessCalls += 1;
             throw new Error('status-prepared reuse must not synchronize');
@@ -1325,9 +1344,17 @@ test('manage status prepares one reusable proof and genuine authority drift stil
                 registryLoads: 0,
                 navigationValidationRuns: 0,
             },
+            requestProof: {
+                freshnessComparisonMode: 'full',
+                exactPathCount: 0,
+                checkpointBindings: 0,
+                preRetrievalFullComparisons: 1,
+                finalFullComparisons: 1,
+            },
         });
         assert.equal(firstPayload.freshnessDecision.operation, undefined);
 
+        sourceObservationAvailable = true;
         await handlers.handleGetIndexingStatus({ path: repoPath, detail: 'summary' });
         assert.equal(completionProofReads, 2);
         mutationGeneration += 1;

@@ -3999,10 +3999,13 @@ export class ToolHandlers {
                         // Status proves the publication, not current source. Preserve the
                         // one-use shortcut only with a valid source observation or the
                         // established watcher-disabled fallback.
+                        const statusPreparedSourceIsBound =
+                            typeof statusPreparedSourceObservation?.sourceObservation === 'string'
+                            || statusPreparedSourceObservation?.unavailableReason === 'watcher_disabled';
                         if (
                             preparedRead?.statusPrepared === true
                             && !exactSourceComparisonRequired
-                            && typeof statusPreparedSourceObservation?.sourceObservation === 'string'
+                            && statusPreparedSourceIsBound
                         ) {
                             return Promise.resolve({
                                 mode: 'skipped_recent' as const,
