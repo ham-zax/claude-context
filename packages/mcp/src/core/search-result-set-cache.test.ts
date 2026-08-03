@@ -71,6 +71,29 @@ test("search result-set cache reserves replay bytes and evicts least-recently-us
     assert.equal(cache.lookup(third.handle, 2).status, "hit");
 });
 
+test("search result-set cache measures optional fields with response JSON semantics", () => {
+    const expectedBytes = valueBytes({ value: "result" });
+    const cache = new SearchResultSetCache<{ value: string; optional?: string }>({
+        maxEntries: 1,
+        maxEntryBytes: expectedBytes,
+        maxCacheBytes: expectedBytes,
+        ttlMs: 1_000,
+    });
+    const stored = requireStored(cache.store({
+        value: { value: "result", optional: undefined },
+        nextOffset: 1,
+        reservedReplayBytes: 0,
+        nowMs: 0,
+    }));
+
+    assert.equal(stored.reservationBytes, expectedBytes);
+    const lookup = cache.lookup(stored.handle, 1);
+    assert.equal(lookup.status, "hit");
+    if (lookup.status === "hit") {
+        assert.deepEqual(JSON.parse(JSON.stringify(lookup.entry)), { value: "result" });
+    }
+});
+
 test("search result-set cache distinguishes expiry and concurrent offset conflicts", () => {
     const cache = new SearchResultSetCache<{ value: string }>({
         maxEntries: 2,

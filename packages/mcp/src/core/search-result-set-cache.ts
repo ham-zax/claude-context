@@ -98,7 +98,11 @@ function resolveOptions(
 }
 
 function canonicalByteLength(value: unknown): number {
-    return Buffer.byteLength(serializeCanonicalJson(value), "utf8");
+    const json = JSON.stringify(value);
+    if (json === undefined) {
+        throw new TypeError("Search result-set cache values must be JSON-serializable.");
+    }
+    return Buffer.byteLength(serializeCanonicalJson(JSON.parse(json)), "utf8");
 }
 
 export class SearchResultSetCache<T> {
