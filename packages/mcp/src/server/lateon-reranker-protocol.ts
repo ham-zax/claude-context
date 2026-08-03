@@ -3,13 +3,13 @@ export type LateOnArtifactContract = Readonly<{
     sha256: string;
 }>;
 
-export type LateOnRuntimeProfile = Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v1";
+type LateOnRuntimeProfileBase = Readonly<{
     identity: Readonly<{
         repository: string;
         revision: string;
         license: "Apache-2.0";
-        projectionVersion: "search_rerank_document_v1";
+        projectionVersion: "search_rerank_document_v1" | "search_rerank_document_v2";
+        projectionSha256?: string;
     }>;
     artifacts: readonly LateOnArtifactContract[];
     runtime: Readonly<{
@@ -35,6 +35,13 @@ export type LateOnRuntimeProfile = Readonly<{
         profileIntraOpThreads: number;
         interOpThreads: number;
     }>;
+}>;
+
+export type LateOnRuntimeProfileV1 = LateOnRuntimeProfileBase & Readonly<{
+    schemaVersion: "satori_lateon_runtime_profile_v1";
+    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
+        projectionVersion: "search_rerank_document_v1";
+    }>;
     measuredProfile: Readonly<{
         requestDeadlineMilliseconds: number;
         maximumModelLoadMilliseconds: number;
@@ -44,11 +51,60 @@ export type LateOnRuntimeProfile = Readonly<{
     }>;
 }>;
 
+export type LateOnRuntimeProfileV2 = LateOnRuntimeProfileBase & Readonly<{
+    schemaVersion: "satori_lateon_runtime_profile_v2";
+    profileId:
+        | "lateon_projection_v2_d16_v1"
+        | "lateon_offline_quality_projection_v2_d32_v1";
+    qualificationStatus:
+        | "disabled_optional_not_track_o_or_held_out_candidate"
+        | "disabled_track_o_candidate";
+    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
+        projectionVersion: "search_rerank_document_v2";
+        projectionSha256: string;
+    }>;
+    execution: Readonly<{
+        workerProcesses: 1;
+        activeModelSessions: 1;
+        executionMode: "sequential";
+        graphOptimizationLevel: "all";
+        queryBatchSize: 1;
+        documentEncoding: "serial";
+        tokenizerParallelism: false;
+        aggregateRequestTokenLimit: number;
+        padding: "none_single_sequence";
+        truncationSide: "right";
+        truncationStrategy: "longest_suffix_discarded";
+        warmupRequests: number;
+    }>;
+    operationalBounds: Readonly<{
+        maximumActiveReranks: 1;
+        maximumQueuedReranks: 1;
+        maximumQueueWaitMilliseconds: number;
+        maximumReadinessMilliseconds: number;
+        maximumScoreMilliseconds: number;
+        maximumRerankerStageMilliseconds: number;
+        maximumProcessPeakRssBytes: number;
+        maximumProcessRetainedRssBytes: number;
+    }>;
+}>;
+
+export type LateOnRuntimeProfile = LateOnRuntimeProfileV1 | LateOnRuntimeProfileV2;
+
+export type LateOnEffectiveOperationalBounds = Readonly<{
+    maximumActiveReranks: 0 | 1;
+    maximumQueuedReranks: 0 | 1;
+    maximumQueueWaitMilliseconds: number;
+    maximumScoreMilliseconds: number;
+    maximumRerankerStageMilliseconds: number;
+}>;
+
 export type LateOnWorkerRequest =
     | Readonly<{
         type: "initialize";
         modelDirectory: string;
         profile: LateOnRuntimeProfile;
+        profileDigest: string;
         intraOpThreads: number;
     }>
     | Readonly<{
@@ -63,6 +119,9 @@ export type LateOnWorkerResponse =
     | Readonly<{
         type: "ready";
         modelRevision: string;
+        profileDigest: string;
+        projectionVersion: LateOnRuntimeProfile["identity"]["projectionVersion"];
+        candidateDepth: number;
     }>
     | Readonly<{
         type: "result";
