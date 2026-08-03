@@ -8078,6 +8078,69 @@ test('handleSearchCode degrades gracefully when reranker fails', async () => {
     });
 });
 
+test('handleSearchCode restores the exact product result state for every LateOn failure', async () => {
+    await withTempRepo(async (repoPath) => {
+        const searchResults = [
+            {
+                content: 'primary runtime path',
+                relativePath: 'src/one.ts',
+                startLine: 1,
+                endLine: 3,
+                language: 'typescript',
+                score: 0.99,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_one',
+                symbolLabel: 'one'
+            },
+            {
+                content: 'secondary runtime path',
+                relativePath: 'src/two.ts',
+                startLine: 1,
+                endLine: 3,
+                language: 'typescript',
+                score: 0.98,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_two',
+                symbolLabel: 'two'
+            }
+        ];
+        const search = async (reranker?: HandlerReranker) => {
+            const response = await createHandlers(repoPath, searchResults, reranker)
+                .handleSearchCode({
+                    path: repoPath,
+                    query: 'runtime path',
+                    scope: 'runtime',
+                    resultMode: 'grouped',
+                    groupBy: 'symbol',
+                    limit: 2,
+                    debugMode: 'full'
+                });
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            return {
+                status: payload.status,
+                results: payload.results,
+            };
+        };
+        const baselineProductState = await search();
+        for (const reason of [
+            'lateon_not_ready',
+            'lateon_capacity_fallback',
+            'lateon_queue_timeout',
+            'lateon_execution_timeout',
+            'lateon_cancelled',
+            'lateon_invalid_output',
+            'lateon_worker_failure',
+        ]) {
+            const failedProductState = await search({
+                rerank: async () => {
+                    throw Object.assign(new Error(reason), { reason });
+                }
+            });
+            assert.deepEqual(failedProductState, baselineProductState, reason);
+        }
+    });
+});
+
 test('handleSearchCode marks rerank.enabled=false when reranker instance is missing', async () => {
     await withTempRepo(async (repoPath) => {
         const context = {
