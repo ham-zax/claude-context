@@ -4672,7 +4672,10 @@ export class ToolHandlers {
                     };
                 }
                 let exactEnvelope = exactFastPath.finalized.envelope;
-                if (exactEnvelope.hints?.debugSearch) {
+                if (
+                    (debugMode === 'freshness' || debugMode === 'full')
+                    && exactEnvelope.hints?.debugSearch
+                ) {
                     exactEnvelope = {
                         ...exactEnvelope,
                         hints: {
