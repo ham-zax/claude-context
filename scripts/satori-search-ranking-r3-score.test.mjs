@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import test from "node:test";
 import {
     buildTrackLCaptureAuthority,
@@ -242,6 +243,39 @@ test("Track L scorer resolves only a sealed preregistered arm and its explicit p
         authority.ownerFamilyAdmission,
         fixture.manifest.lateOnL0Authority.ownerFamilyAdmission,
     );
+});
+
+test("committed Track L manifest matches the executable scorer authority", () => {
+    const manifestUrl = new URL(
+        "../evals/search-ranking/cross-repository-v3.manifest.json",
+        import.meta.url,
+    );
+    const contractUrl = new URL(
+        "../evals/search-ranking/lateon/c0-contract.json",
+        import.meta.url,
+    );
+    const profileUrl = new URL(
+        "../evals/search-ranking/lateon/local-wsl-runtime-profile-v1.json",
+        import.meta.url,
+    );
+    const manifest = JSON.parse(fs.readFileSync(manifestUrl, "utf8"));
+    const contractBytes = fs.readFileSync(contractUrl);
+    const profileBytes = fs.readFileSync(profileUrl);
+    const c0Contract = JSON.parse(contractBytes.toString("utf8"));
+    const runtimeProfile = JSON.parse(profileBytes.toString("utf8"));
+    const digest = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+
+    for (const arm of manifest.lateOnL0Authority.newArms) {
+        assert.doesNotThrow(() => resolveTrackLScoringAuthority({
+            manifest,
+            expectedManifestSeal: manifest.sha256,
+            armId: arm.id,
+            c0Contract,
+            c0ContractSha256: digest(contractBytes),
+            runtimeProfile,
+            runtimeProfileSha256: digest(profileBytes),
+        }));
+    }
 });
 
 test("Track L scorer fails closed on arm, projection, query-format, admission, or profile drift", () => {

@@ -572,6 +572,10 @@ function normalizeProjectionPolicy(value, index) {
         throw new Error(`${label}.id is unsupported.`);
     }
     const selector = requireRecord(policy.selector, `${label}.selector`);
+    const queryFormatting = requireRecord(
+        policy.queryFormatting,
+        `${label}.queryFormatting`,
+    );
     return {
         id: policy.id,
         status: requireString(policy.status, `${label}.status`),
@@ -581,6 +585,10 @@ function normalizeProjectionPolicy(value, index) {
             `${label}.maximumUtf8Bytes`,
         ),
         maximumLines: requirePositiveInteger(policy.maximumLines, `${label}.maximumLines`),
+        serializedKeyOrder: requireString(
+            policy.serializedKeyOrder,
+            `${label}.serializedKeyOrder`,
+        ),
         fieldOrder: requireStringArray(policy.fieldOrder, `${label}.fieldOrder`),
         selector: {
             version: requireString(selector.version, `${label}.selector.version`),
@@ -597,7 +605,6 @@ function normalizeProjectionPolicy(value, index) {
                 selector.contextLines,
                 `${label}.selector.contextLines`,
             ),
-            byteBudgets: requireString(selector.byteBudgets, `${label}.selector.byteBudgets`),
             evidenceSpans: requireString(
                 selector.evidenceSpans,
                 `${label}.selector.evidenceSpans`,
@@ -610,11 +617,61 @@ function normalizeProjectionPolicy(value, index) {
                 selector.declarationRetention,
                 `${label}.selector.declarationRetention`,
             ),
+            serializedSourceBudget: requireString(
+                selector.serializedSourceBudget,
+                `${label}.selector.serializedSourceBudget`,
+            ),
+            maximumSelectionAttempts: requirePositiveInteger(
+                selector.maximumSelectionAttempts,
+                `${label}.selector.maximumSelectionAttempts`,
+            ),
         },
+        declarationSelection: requireString(
+            policy.declarationSelection,
+            `${label}.declarationSelection`,
+        ),
+        declarationMaximumUtf8Bytes: requirePositiveInteger(
+            policy.declarationMaximumUtf8Bytes,
+            `${label}.declarationMaximumUtf8Bytes`,
+        ),
+        documentationSelection: requireString(
+            policy.documentationSelection,
+            `${label}.documentationSelection`,
+        ),
+        documentationMaximumUtf8Bytes: requirePositiveInteger(
+            policy.documentationMaximumUtf8Bytes,
+            `${label}.documentationMaximumUtf8Bytes`,
+        ),
+        documentationMaximumLines: requirePositiveInteger(
+            policy.documentationMaximumLines,
+            `${label}.documentationMaximumLines`,
+        ),
+        documentationMaximumLineUtf8Bytes: requirePositiveInteger(
+            policy.documentationMaximumLineUtf8Bytes,
+            `${label}.documentationMaximumLineUtf8Bytes`,
+        ),
+        requiredOwnerSiblingOrder: requireString(
+            policy.requiredOwnerSiblingOrder,
+            `${label}.requiredOwnerSiblingOrder`,
+        ),
         fileLevelProjection: requireString(
             policy.fileLevelProjection,
             `${label}.fileLevelProjection`,
         ),
+        queryFormatting: {
+            semanticQuery: requireString(
+                queryFormatting.semanticQuery,
+                `${label}.queryFormatting.semanticQuery`,
+            ),
+            runtimePrefix: requireString(
+                queryFormatting.runtimePrefix,
+                `${label}.queryFormatting.runtimePrefix`,
+            ),
+            normalization: requireString(
+                queryFormatting.normalization,
+                `${label}.queryFormatting.normalization`,
+            ),
+        },
         sourceOwner,
     };
 }
@@ -624,6 +681,14 @@ function normalizeLateOnL0Authority(value) {
     const known = requireRecord(authority.knownEvidence, "lateOnL0Authority.knownEvidence");
     const model = requireRecord(authority.model, "lateOnL0Authority.model");
     const runtime = requireRecord(authority.runtime, "lateOnL0Authority.runtime");
+    const queryFormatting = requireRecord(
+        authority.queryFormatting,
+        "lateOnL0Authority.queryFormatting",
+    );
+    const ownerFamilyAdmission = requireRecord(
+        authority.ownerFamilyAdmission,
+        "lateOnL0Authority.ownerFamilyAdmission",
+    );
     const capture = requireRecord(
         authority.candidateCaptureContract,
         "lateOnL0Authority.candidateCaptureContract",
@@ -643,6 +708,9 @@ function normalizeLateOnL0Authority(value) {
             status: requireEnum(arm.status, L0_ARM_STATUSES, `${label}.status`),
         };
     });
+    if (typeof queryFormatting.lowercase !== "boolean") {
+        throw new TypeError("lateOnL0Authority.queryFormatting.lowercase must be a boolean.");
+    }
     assertUnique(newArms.map(({ id }) => id), "LateOn L0 arm IDs");
     return {
         version: requirePositiveInteger(authority.version, "lateOnL0Authority.version"),
@@ -700,6 +768,59 @@ function normalizeLateOnL0Authority(value) {
                 artifact,
                 `lateOnL0Authority.runtime.artifacts[${index}]`,
             )),
+        },
+        queryFormatting: {
+            policy: requireString(
+                queryFormatting.policy,
+                "lateOnL0Authority.queryFormatting.policy",
+            ),
+            semanticQuerySource: requireString(
+                queryFormatting.semanticQuerySource,
+                "lateOnL0Authority.queryFormatting.semanticQuerySource",
+            ),
+            sourceOwner: normalizeArtifact(
+                queryFormatting.sourceOwner,
+                "lateOnL0Authority.queryFormatting.sourceOwner",
+            ),
+            queryPrefix: requireString(
+                queryFormatting.queryPrefix,
+                "lateOnL0Authority.queryFormatting.queryPrefix",
+            ),
+            documentPrefix: requireString(
+                queryFormatting.documentPrefix,
+                "lateOnL0Authority.queryFormatting.documentPrefix",
+            ),
+            lowercase: queryFormatting.lowercase,
+            queryTokenLimit: requirePositiveInteger(
+                queryFormatting.queryTokenLimit,
+                "lateOnL0Authority.queryFormatting.queryTokenLimit",
+            ),
+            documentTokenLimit: requirePositiveInteger(
+                queryFormatting.documentTokenLimit,
+                "lateOnL0Authority.queryFormatting.documentTokenLimit",
+            ),
+        },
+        ownerFamilyAdmission: {
+            policy: requireString(
+                ownerFamilyAdmission.policy,
+                "lateOnL0Authority.ownerFamilyAdmission.policy",
+            ),
+            familyKeyPrecedence: requireStringArray(
+                ownerFamilyAdmission.familyKeyPrecedence,
+                "lateOnL0Authority.ownerFamilyAdmission.familyKeyPrecedence",
+            ),
+            representativeSelection: requireString(
+                ownerFamilyAdmission.representativeSelection,
+                "lateOnL0Authority.ownerFamilyAdmission.representativeSelection",
+            ),
+            supplementalSelection: requireString(
+                ownerFamilyAdmission.supplementalSelection,
+                "lateOnL0Authority.ownerFamilyAdmission.supplementalSelection",
+            ),
+            sourceOwner: normalizeArtifact(
+                ownerFamilyAdmission.sourceOwner,
+                "lateOnL0Authority.ownerFamilyAdmission.sourceOwner",
+            ),
         },
         projectionPolicies: authority.projectionPolicies.map(normalizeProjectionPolicy),
         candidateCaptureContract: {

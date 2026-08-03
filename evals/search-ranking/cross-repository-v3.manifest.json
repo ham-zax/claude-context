@@ -642,6 +642,35 @@
         }
       ]
     },
+    "queryFormatting": {
+      "policy": "captured_semantic_query_plus_c0_prefix_v1",
+      "semanticQuerySource": "candidate_capture.queryPlan.queryIntent.semanticQuery",
+      "sourceOwner": {
+        "role": "lateon_query_formatting",
+        "path": "scripts/satori-lateon-c0-native.mjs",
+        "sha256": "9f1195d5c67b5c19e01cee079508c2affde4e23c5d0a4388243af5641a5d1fdc"
+      },
+      "queryPrefix": "[Q] ",
+      "documentPrefix": "[D] ",
+      "lowercase": true,
+      "queryTokenLimit": 256,
+      "documentTokenLimit": 2048
+    },
+    "ownerFamilyAdmission": {
+      "policy": "owner_representative_then_bounded_supplemental_rounds_v1",
+      "familyKeyPrecedence": [
+        "ownerSymbolInstanceId",
+        "ownerSymbolKey",
+        "exactChunkIdentity"
+      ],
+      "representativeSelection": "first_candidate_in_frozen_order_v1",
+      "supplementalSelection": "fair_rounds_in_frozen_family_order_v1",
+      "sourceOwner": {
+        "role": "owner_family_admission",
+        "path": "packages/mcp/src/core/search-rerank-policy.ts",
+        "sha256": "fe8fd56e4d50eedf2bbec9edf5a80b94b32cfc9778c121584bd9667b0931d6b5"
+      }
+    },
     "projectionPolicies": [
       {
         "id": "search_rerank_document_v1",
@@ -667,6 +696,7 @@
         "serialization": "canonical_json_utf8",
         "maximumUtf8Bytes": 4000,
         "maximumLines": 200,
+        "serializedKeyOrder": "lexicographic_recursive_canonical_json_v1",
         "fieldOrder": [
           "repository_relative_path",
           "language",
@@ -683,16 +713,29 @@
           "maxExcerpts": 5,
           "maxExcerptLines": 40,
           "contextLines": 2,
-          "byteBudgets": "all_source_excerpt_budgets_equal_remaining_projection_utf8_bytes",
           "evidenceSpans": "validated_only",
           "stableTieOrder": "bounded_source_selection_v1",
-          "declarationRetention": "mandatory_or_minimum_projection_exceeds_budget"
+          "declarationRetention": "mandatory_or_minimum_projection_exceeds_budget",
+          "serializedSourceBudget": "remaining_projection_utf8_bytes",
+          "maximumSelectionAttempts": 14
         },
-        "fileLevelProjection": "path_heading_or_declaration_and_bounded_relevant_text",
+        "declarationSelection": "authoritative_symbol_span_declaration_or_file_heading_or_config_declaration_v2",
+        "declarationMaximumUtf8Bytes": 1000,
+        "documentationSelection": "authoritative_caller_physical_lines_or_empty_v2",
+        "documentationMaximumUtf8Bytes": 1000,
+        "documentationMaximumLines": 8,
+        "documentationMaximumLineUtf8Bytes": 512,
+        "requiredOwnerSiblingOrder": "repository_relative_path_then_canonical_symbol_label_contract_string_v1",
+        "fileLevelProjection": "first_heading_or_structural_declaration_plus_bounded_query_relevant_text_v2",
+        "queryFormatting": {
+          "semanticQuery": "captured_query_plan_semantic_query_utf8",
+          "runtimePrefix": "c0_contract_inference_query_prefix",
+          "normalization": "c0_contract_inference_lowercase"
+        },
         "sourceOwner": {
-          "role": "bounded_source_selector",
-          "path": "packages/mcp/src/core/bounded-source-selector.ts",
-          "sha256": "4f8958c2c60064c72b2d06748197d01b9534b6373080f365824de525d42bc8fb"
+          "role": "rerank_document_v2",
+          "path": "scripts/satori-search-rerank-document-v2.mjs",
+          "sha256": "4d343975168a636195d18ebd3bd3d6a1e2c4e8f9b8d48897f6383dcc50b2e499"
         }
       }
     ],
@@ -4258,5 +4301,5 @@
       }
     }
   ],
-  "sha256": "bccbcb3887d2c7411f0d5d202f7110498161a5cf4b2f38871b75a76b4d1e573e"
+  "sha256": "e67881c7f39bf5ce3afe81c7b91fe8fb0df7831417f37e5b6e7d70ab21b793c6"
 }

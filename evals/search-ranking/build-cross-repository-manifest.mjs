@@ -1031,6 +1031,33 @@ function buildLateOnL0Authority() {
                 pinnedSatoriArtifact("dependency_lockfile", "pnpm-lock.yaml"),
             ],
         },
+        queryFormatting: {
+            policy: "captured_semantic_query_plus_c0_prefix_v1",
+            semanticQuerySource: "candidate_capture.queryPlan.queryIntent.semanticQuery",
+            sourceOwner: pinnedSatoriArtifact(
+                "lateon_query_formatting",
+                "scripts/satori-lateon-c0-native.mjs",
+            ),
+            queryPrefix: "[Q] ",
+            documentPrefix: "[D] ",
+            lowercase: true,
+            queryTokenLimit: 256,
+            documentTokenLimit: 2048,
+        },
+        ownerFamilyAdmission: {
+            policy: "owner_representative_then_bounded_supplemental_rounds_v1",
+            familyKeyPrecedence: [
+                "ownerSymbolInstanceId",
+                "ownerSymbolKey",
+                "exactChunkIdentity",
+            ],
+            representativeSelection: "first_candidate_in_frozen_order_v1",
+            supplementalSelection: "fair_rounds_in_frozen_family_order_v1",
+            sourceOwner: pinnedSatoriArtifact(
+                "owner_family_admission",
+                "packages/mcp/src/core/search-rerank-policy.ts",
+            ),
+        },
         projectionPolicies: [
             {
                 id: "search_rerank_document_v1",
@@ -1050,6 +1077,7 @@ function buildLateOnL0Authority() {
                 serialization: "canonical_json_utf8",
                 maximumUtf8Bytes: 4000,
                 maximumLines: 200,
+                serializedKeyOrder: "lexicographic_recursive_canonical_json_v1",
                 fieldOrder: [
                     "repository_relative_path",
                     "language",
@@ -1066,15 +1094,31 @@ function buildLateOnL0Authority() {
                     maxExcerpts: 5,
                     maxExcerptLines: 40,
                     contextLines: 2,
-                    byteBudgets: "all_source_excerpt_budgets_equal_remaining_projection_utf8_bytes",
                     evidenceSpans: "validated_only",
                     stableTieOrder: "bounded_source_selection_v1",
                     declarationRetention: "mandatory_or_minimum_projection_exceeds_budget",
+                    serializedSourceBudget: "remaining_projection_utf8_bytes",
+                    maximumSelectionAttempts: 14,
                 },
-                fileLevelProjection: "path_heading_or_declaration_and_bounded_relevant_text",
+                declarationSelection:
+                    "authoritative_symbol_span_declaration_or_file_heading_or_config_declaration_v2",
+                declarationMaximumUtf8Bytes: 1000,
+                documentationSelection: "authoritative_caller_physical_lines_or_empty_v2",
+                documentationMaximumUtf8Bytes: 1000,
+                documentationMaximumLines: 8,
+                documentationMaximumLineUtf8Bytes: 512,
+                requiredOwnerSiblingOrder:
+                    "repository_relative_path_then_canonical_symbol_label_contract_string_v1",
+                fileLevelProjection:
+                    "first_heading_or_structural_declaration_plus_bounded_query_relevant_text_v2",
+                queryFormatting: {
+                    semanticQuery: "captured_query_plan_semantic_query_utf8",
+                    runtimePrefix: "c0_contract_inference_query_prefix",
+                    normalization: "c0_contract_inference_lowercase",
+                },
                 sourceOwner: pinnedSatoriArtifact(
-                    "bounded_source_selector",
-                    "packages/mcp/src/core/bounded-source-selector.ts",
+                    "rerank_document_v2",
+                    "scripts/satori-search-rerank-document-v2.mjs",
                 ),
             },
         ],
