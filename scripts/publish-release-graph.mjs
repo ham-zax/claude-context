@@ -2,6 +2,7 @@ import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 import { RELEASE_ORDER, RELEASE_PACKAGES } from './release-graph.mjs';
 import { checkReleaseGraph } from './check-release-graph.mjs';
+import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 
 const REGISTRY_POLL_ATTEMPTS = 12;
 const REGISTRY_POLL_INTERVAL_MS = 5000;
@@ -44,14 +45,14 @@ export async function publishReleaseGraph(options = {}) {
     || ((packageName) => execFileSyncImpl(
       'pnpm',
       ['--filter', packageName, 'publish', '--access', 'public', '--no-git-checks'],
-      { cwd, encoding: 'utf8' }
+      { cwd, env: createNpmChildEnvironment(process.env), stdio: 'inherit' }
     ));
   const viewVersionImpl = options.viewVersionImpl
     || ((packageName, version) => {
       const output = execFileSyncImpl(
         'npm',
         ['view', `${packageName}@${version}`, 'version', '--json'],
-        { cwd, encoding: 'utf8' }
+        { cwd, env: createNpmChildEnvironment(process.env), stdio: REGISTRY_PROBE_STDIO, encoding: 'utf8' }
       );
       return parseJsonOutput(output, `npm view output for ${packageName}@${version}`);
     });
@@ -60,7 +61,7 @@ export async function publishReleaseGraph(options = {}) {
       const output = execFileSyncImpl(
         'npm',
         ['view', `${packageName}@${version}`, 'dependencies', '--json'],
-        { cwd, encoding: 'utf8' }
+        { cwd, env: createNpmChildEnvironment(process.env), stdio: REGISTRY_PROBE_STDIO, encoding: 'utf8' }
       );
       return parseJsonOutput(output, `npm view dependencies for ${packageName}@${version}`);
     });

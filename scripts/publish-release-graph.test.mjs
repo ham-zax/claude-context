@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { publishReleaseGraph } from './publish-release-graph.mjs';
+import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 
 const NAMES = {
   core: '@zokizuan/satori-core',
@@ -40,29 +41,32 @@ function runnerOptions(extra = {}) {
     smokeMcpImpl: extra.smokeMcpImpl || (() => ''),
     smokeCliImpl: extra.smokeCliImpl || (() => ''),
     checkGraphImpl: extra.checkGraphImpl || (() => fakeReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' })),
-    publishImpl: extra.publishImpl || ((packageName) => {
+    sleepImpl: (milliseconds) => {
+      sleepCalls.push(milliseconds);
+      return Promise.resolve();
+    },
+    ...(extra.execFileSyncImpl ? { execFileSyncImpl: extra.execFileSyncImpl } : {}),
+  };
+  if (!extra.useDefaultExecImpls) {
+    options.publishImpl = extra.publishImpl || ((packageName) => {
       publishCalls.push(packageName);
       published.push(packageName);
-    }),
-    viewVersionImpl: extra.viewVersionImpl || ((packageName, version) => {
+    });
+    options.viewVersionImpl = extra.viewVersionImpl || ((packageName, version) => {
       viewCalls.push(`version:${packageName}@${version}`);
       if (packageName === '@zokizuan/satori-core' && viewCalls.length > coreVisibleAfter) {
         return version;
       }
       return version;
-    }),
-    viewDependenciesImpl: extra.viewDependenciesImpl || ((packageName, version) => {
+    });
+    options.viewDependenciesImpl = extra.viewDependenciesImpl || ((packageName, version) => {
       viewCalls.push(`deps:${packageName}@${version}`);
       if (packageName === '@zokizuan/satori-mcp') {
         return mcpDependencies;
       }
       return cliDependencies;
-    }),
-    sleepImpl: (milliseconds) => {
-      sleepCalls.push(milliseconds);
-      return Promise.resolve();
-    },
-  };
+    });
+  }
   options.records = { publishCalls, viewCalls, sleepCalls };
   return options;
 }
@@ -210,4 +214,81 @@ test('publish itself is never automatically retried', async () => {
   });
   await assert.rejects(publishReleaseGraph(options), /Publish command failed/);
   assert.equal(mcpAttempts, 1);
+});
+
+test('default publish uses inherited stdio and the sanitized child environment', async () => {
+  const calls = [];
+  const execFileSyncImpl = (command, args, callOptions) => {
+    calls.push({ command, args, callOptions });
+    if (command === 'npm' && args[0] === 'view') {
+      if (args.includes('dependencies')) {
+        return JSON.stringify({ '@zokizuan/satori-core': VERSIONS.core, '@zokizuan/satori-mcp': VERSIONS.mcp });
+      }
+      return JSON.stringify(args[1].slice(args[1].lastIndexOf('@') + 1));
+    }
+    return '';
+  };
+  const options = runnerOptions({ useDefaultExecImpls: true, execFileSyncImpl });
+  const result = await publishReleaseGraph(options);
+  assert.equal(result.published.length, 3);
+  const expectedEnv = createNpmChildEnvironment(process.env);
+  const publishCalls = calls.filter((call) => call.args[0] === '--filter');
+  assert.deepEqual(
+    publishCalls.map((call) => call.args[1]),
+    ['@zokizuan/satori-core', '@zokizuan/satori-mcp', '@zokizuan/satori-cli']
+  );
+  for (const call of publishCalls) {
+    assert.equal(call.callOptions.stdio, 'inherit');
+    assert.deepEqual(call.callOptions.env, expectedEnv);
+    assert.equal('encoding' in call.callOptions, false);
+    assert.equal(call.callOptions.cwd, process.cwd());
+  }
+  const probeCalls = calls.filter((call) => call.command === 'npm' && call.args[0] === 'view');
+  assert.equal(probeCalls.length, 5);
+  for (const call of probeCalls) {
+    assert.deepEqual(call.callOptions.stdio, REGISTRY_PROBE_STDIO);
+    assert.deepEqual(call.callOptions.env, expectedEnv);
+  }
+});
+
+test('EOTP failure reports no verified publication and runs no verification', async () => {
+  const options = runnerOptions({
+    publishImpl: () => {
+      const error = new Error('Command failed: pnpm publish');
+      error.status = 1;
+      error.stderr = 'npm error code EOTP\nThis operation requires a one-time password.';
+      throw error;
+    },
+  });
+  await assert.rejects(
+    publishReleaseGraph(options),
+    /Publish command failed for @zokizuan\/satori-core@3\.6\.0\. Already published: none\./
+  );
+  assert.deepEqual(options.records.viewCalls, []);
+  assert.deepEqual(options.records.sleepCalls, []);
+});
+
+test('EOTP failure on a later package keeps verified names and stops verification', async () => {
+  const publishAttempts = [];
+  const options = runnerOptions({
+    publishImpl: (packageName) => {
+      publishAttempts.push(packageName);
+      if (packageName === '@zokizuan/satori-mcp') {
+        const error = new Error('Command failed: pnpm publish');
+        error.status = 1;
+        error.stderr = 'npm error code EOTP\nThis operation requires a one-time password.';
+        throw error;
+      }
+    },
+  });
+  await assert.rejects(
+    publishReleaseGraph(options),
+    /Publish command failed for @zokizuan\/satori-mcp@6\.8\.0\. Already published: @zokizuan\/satori-core@3\.6\.0\./
+  );
+  assert.deepEqual(publishAttempts, ['@zokizuan/satori-core', '@zokizuan/satori-mcp']);
+  const coreVerifications = options.records.viewCalls.filter(
+    (call) => call.startsWith('version:') && call.includes('satori-core')
+  );
+  assert.equal(coreVerifications.length, 1);
+  assert.equal(options.records.viewCalls.filter((call) => call.includes('satori-mcp')).length, 0);
 });

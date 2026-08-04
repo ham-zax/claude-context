@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createFileTreeSnapshot } from './release-graph.mjs';
+import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 
 const REGISTRY_NOT_FOUND_PATTERN = /E404|404\s+Not\s+Found|version\s+not\s+found/i;
 
@@ -75,7 +76,12 @@ export function packLocalPackage(input) {
     execFileSyncImpl(
       'pnpm',
       ['--filter', packageName, 'pack', '--pack-destination', packOutputDirectory],
-      { cwd, encoding: 'utf8' }
+      {
+        cwd,
+        env: createNpmChildEnvironment(process.env),
+        stdio: REGISTRY_PROBE_STDIO,
+        encoding: 'utf8',
+      }
     );
   } catch (error) {
     throw new Error(`pnpm pack failed for ${packageName}: ${error.message}`);
@@ -114,7 +120,12 @@ export function fetchPublishedPackage(input) {
     viewOutput = execFileSyncImpl(
       'npm',
       ['view', `${packageName}@${version}`, 'version', '--json'],
-      { cwd: workDirectory, encoding: 'utf8' }
+      {
+        cwd: workDirectory,
+        env: createNpmChildEnvironment(process.env),
+        stdio: REGISTRY_PROBE_STDIO,
+        encoding: 'utf8',
+      }
     );
   } catch (error) {
     if (isRegistryNotFoundError(error)) {
@@ -147,7 +158,12 @@ export function fetchPublishedPackage(input) {
     packOutput = execFileSyncImpl(
       'npm',
       ['pack', `${packageName}@${version}`, '--pack-destination', packOutputDirectory],
-      { cwd: workDirectory, encoding: 'utf8' }
+      {
+        cwd: workDirectory,
+        env: createNpmChildEnvironment(process.env),
+        stdio: REGISTRY_PROBE_STDIO,
+        encoding: 'utf8',
+      }
     );
   } catch (error) {
     throw new Error(`npm pack failed for ${packageName}@${version}: ${error.message}`);
