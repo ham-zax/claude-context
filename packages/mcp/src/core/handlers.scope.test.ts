@@ -28,6 +28,7 @@ import {
     writeSymbolRegistrySidecar,
     COLLECTION_LIMIT_MESSAGE,
     EmbeddingProviderError,
+    RerankerRequestError,
 } from '@zokizuan/satori-core';
 import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
 
@@ -2318,6 +2319,9 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             rerankerCalls: 1,
             rerankerCandidates: 12,
             rerankerInputBytes: neuralWorkAfterInitial.inputBytes,
+            rerankerFailures: 0,
+            rerankerRetries: 0,
+            rerankerTimeouts: 0,
             candidatesWithSemanticEvidence: 12,
             candidatesWithLexicalEvidence: 0,
             candidatesWithCurrentSourceEvidence: 0,
@@ -3802,6 +3806,9 @@ test('handleSearchCode supplements quoted exact literal retrieval from tracked l
             rerankerCalls: 0,
             rerankerCandidates: 0,
             rerankerInputBytes: 0,
+            rerankerFailures: 0,
+            rerankerRetries: 0,
+            rerankerTimeouts: 0,
             candidatesWithSemanticEvidence: 0,
             candidatesWithLexicalEvidence: 2,
             candidatesWithCurrentSourceEvidence: 0,
@@ -3920,6 +3927,9 @@ test('handleSearchCode exact registry fast path returns a grouped symbol despite
                 rerankerCalls: 0,
                 rerankerCandidates: 0,
                 rerankerInputBytes: 0,
+                rerankerFailures: 0,
+                rerankerRetries: 0,
+                rerankerTimeouts: 0,
                 candidatesWithSemanticEvidence: 0,
                 candidatesWithLexicalEvidence: 0,
                 candidatesWithCurrentSourceEvidence: 0,
@@ -4004,6 +4014,9 @@ test('handleSearchCode resolves explicit ownership through the registry without 
                 rerankerCalls: 0,
                 rerankerCandidates: 0,
                 rerankerInputBytes: 0,
+                rerankerFailures: 0,
+                rerankerRetries: 0,
+                rerankerTimeouts: 0,
                 candidatesWithSemanticEvidence: 0,
                 candidatesWithLexicalEvidence: 0,
                 candidatesWithCurrentSourceEvidence: 0,
@@ -4058,6 +4071,9 @@ test('handleSearchCode resolves exact caller relationships before provider-backe
                 rerankerCalls: 0,
                 rerankerCandidates: 0,
                 rerankerInputBytes: 0,
+                rerankerFailures: 0,
+                rerankerRetries: 0,
+                rerankerTimeouts: 0,
                 candidatesWithSemanticEvidence: 0,
                 candidatesWithLexicalEvidence: 0,
                 candidatesWithCurrentSourceEvidence: 0,
@@ -8080,6 +8096,9 @@ test('handleSearchCode honors a provider-qualified reranker candidate limit', as
                 (total, document) => total + Buffer.byteLength(document, 'utf8'),
                 0,
             ),
+            rerankerFailures: 0,
+            rerankerRetries: 0,
+            rerankerTimeouts: 0,
             candidatesWithSemanticEvidence: 5,
             candidatesWithLexicalEvidence: 0,
             candidatesWithCurrentSourceEvidence: 0,
@@ -8156,6 +8175,117 @@ test('handleSearchCode degrades gracefully when reranker fails', async () => {
             payload.hints?.debugSearch?.rerank?.operationalReason,
             'lateon_execution_timeout',
         );
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerFailures, 1);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerRetries, 0);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerTimeouts, 0);
+        assert.equal(payload.hints?.debugSearch?.rerank?.failureKind, undefined);
+    });
+});
+
+test('handleSearchCode records classified reranker failure counters', async () => {
+    await withTempRepo(async (repoPath) => {
+        const reranker = {
+            rerank: async () => {
+                throw new RerankerRequestError('transient_http', 503, 2, 'VoyageAI Rerank API error (503): unavailable');
+            }
+        };
+        const handlers = createHandlers(repoPath, [
+            {
+                content: 'runtime one',
+                relativePath: 'src/one.ts',
+                startLine: 1,
+                endLine: 2,
+                language: 'typescript',
+                score: 0.99,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_one',
+                symbolLabel: 'one'
+            },
+            {
+                content: 'runtime two',
+                relativePath: 'src/two.ts',
+                startLine: 1,
+                endLine: 2,
+                language: 'typescript',
+                score: 0.98,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_two',
+                symbolLabel: 'two'
+            }
+        ], reranker);
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 2,
+            debugMode: 'full'
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(warningCodes(payload).includes('RERANKER_FAILED'), true);
+        assert.equal(payload.hints?.debugSearch?.rerank?.failureKind, 'transient_http');
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerFailures, 1);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerRetries, 1);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerTimeouts, 0);
+        assert.equal(
+            payload.results.every(
+                (result: { ranking?: { rerankAdjusted?: boolean } }) => result.ranking?.rerankAdjusted !== true,
+            ),
+            true,
+        );
+    });
+});
+
+test('handleSearchCode records timeout reranker failures', async () => {
+    await withTempRepo(async (repoPath) => {
+        const reranker = {
+            rerank: async () => {
+                throw new RerankerRequestError('timeout', null, 2, 'VoyageAI Rerank request failed (timeout)');
+            }
+        };
+        const handlers = createHandlers(repoPath, [
+            {
+                content: 'runtime one',
+                relativePath: 'src/one.ts',
+                startLine: 1,
+                endLine: 2,
+                language: 'typescript',
+                score: 0.99,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_one',
+                symbolLabel: 'one'
+            },
+            {
+                content: 'runtime two',
+                relativePath: 'src/two.ts',
+                startLine: 1,
+                endLine: 2,
+                language: 'typescript',
+                score: 0.98,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_two',
+                symbolLabel: 'two'
+            }
+        ], reranker);
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 2,
+            debugMode: 'full'
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.hints?.debugSearch?.rerank?.failureKind, 'timeout');
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerFailures, 1);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerRetries, 1);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerTimeouts, 1);
     });
 });
 
@@ -11435,6 +11565,9 @@ test('handleSearchCode runs evidence-triggered expansion after the primary pass 
             rerankerCalls: 0,
             rerankerCandidates: 0,
             rerankerInputBytes: 0,
+            rerankerFailures: 0,
+            rerankerRetries: 0,
+            rerankerTimeouts: 0,
             candidatesWithSemanticEvidence: 1,
             candidatesWithLexicalEvidence: 0,
             candidatesWithCurrentSourceEvidence: 0,

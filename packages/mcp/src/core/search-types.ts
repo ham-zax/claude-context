@@ -404,6 +404,9 @@ export interface SearchProviderWorkDebugHint {
     rerankerCalls: number;
     rerankerCandidates: number;
     rerankerInputBytes: number;
+    rerankerFailures: number;
+    rerankerRetries: number;
+    rerankerTimeouts: number;
     candidatesWithSemanticEvidence: number;
     candidatesWithLexicalEvidence: number;
     candidatesWithCurrentSourceEvidence: number;

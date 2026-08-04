@@ -211,6 +211,7 @@ export async function finalizeSearchResults(
         skippedByExactPin,
         rerankerFailurePhase,
         rerankerOperationalReason,
+        rerankerFailureKind,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -276,6 +277,9 @@ export async function finalizeSearchResults(
                 rerankerCalls: providerWork.rerankerCalls,
                 rerankerCandidates: providerWork.rerankerCandidates,
                 rerankerInputBytes: providerWork.rerankerInputBytes,
+                rerankerFailures: providerWork.rerankerFailures,
+                rerankerRetries: providerWork.rerankerRetries,
+                rerankerTimeouts: providerWork.rerankerTimeouts,
                 candidatesWithSemanticEvidence: providerWork.candidatesWithSemanticEvidence,
                 candidatesWithLexicalEvidence: providerWork.candidatesWithLexicalEvidence,
                 candidatesWithCurrentSourceEvidence: providerWork.candidatesWithCurrentSourceEvidence,
@@ -346,6 +350,7 @@ export async function finalizeSearchResults(
                 },
                 ...(rerankerFailurePhase ? { errorCode: "RERANKER_FAILED" as const, failurePhase: rerankerFailurePhase } : {}),
                 ...(rerankerOperationalReason ? { operationalReason: rerankerOperationalReason } : {}),
+                ...(rerankerFailureKind ? { failureKind: rerankerFailureKind } : {}),
             },
         });
     const changedCode = debugChangedFilesState && (input.debugMode === "freshness" || input.debugMode === "full")

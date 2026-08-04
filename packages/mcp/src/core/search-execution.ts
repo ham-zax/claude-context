@@ -4,6 +4,10 @@ import type {
     SemanticSearchResult,
 } from "@zokizuan/satori-core";
 import {
+    RerankerRequestError,
+    type RerankerFailureKind,
+} from "@zokizuan/satori-core";
+import {
     SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
     SEARCH_CHANGED_FIRST_MULTIPLIER,
     SEARCH_RERANK_INPUT_MAX_UTF8_BYTES,
@@ -133,6 +137,8 @@ export type SearchDiagnostics = SearchProviderWorkDiagnostics & {
     semanticPassFailures?: SemanticPassFailureDiagnostic[];
     rerankerAttempted: boolean;
     rerankerUsed: boolean;
+    /** Bounded classification metadata for the last terminal reranker failure. */
+    rerankerFailureKind?: RerankerFailureKind;
 };
 
 export type SearchCandidate = {
@@ -331,6 +337,7 @@ export type SearchExecutionOutcome =
         skippedByExactPin: boolean;
         rerankerFailurePhase?: "document_projection" | "api_call" | "parse_results";
         rerankerOperationalReason?: SearchRerankerOperationalReason;
+        rerankerFailureKind?: RerankerFailureKind;
         rerankerCandidatesIn: number;
         rerankerCandidatesReranked: number;
         rerankerFamilyCount: number;
@@ -424,6 +431,7 @@ type RerankPhaseResult = {
     rerankerBudgetReason?: RerankBudgetReason;
     rerankerByteBudgetOmittedCandidates: number;
     warning?: 'RERANKER_FAILED';
+    rerankerFailureKind?: RerankerFailureKind;
 };
 
 async function rerankSearchCandidates(
@@ -556,6 +564,16 @@ async function rerankSearchCandidates(
             } catch (error) {
                 rerankerFailurePhase = 'api_call';
                 rerankerOperationalReason = resolveLateOnOperationalReason(error);
+                searchDiagnostics.rerankerFailures += 1;
+                if (error instanceof RerankerRequestError) {
+                    if (error.kind === 'timeout') {
+                        searchDiagnostics.rerankerTimeouts += 1;
+                    }
+                    if (error.attempts > 1) {
+                        searchDiagnostics.rerankerRetries += error.attempts - 1;
+                    }
+                    searchDiagnostics.rerankerFailureKind = error.kind;
+                }
                 throw new Error('reranker_api_call_failed');
             }
 
@@ -632,6 +650,7 @@ async function rerankSearchCandidates(
         rerankerCandidateBudget,
         rerankerBudgetReason,
         rerankerByteBudgetOmittedCandidates,
+        rerankerFailureKind: searchDiagnostics.rerankerFailureKind,
         ...(rerankerFailurePhase ? { warning: 'RERANKER_FAILED' as const } : {}),
     };
 }
@@ -1408,6 +1427,7 @@ export async function runSearchExecution(
         skippedByExactPin,
         rerankerFailurePhase,
         rerankerOperationalReason,
+        rerankerFailureKind,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -1489,6 +1509,7 @@ export async function runSearchExecution(
         skippedByExactPin,
         rerankerFailurePhase,
         rerankerOperationalReason,
+        rerankerFailureKind,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -1511,6 +1532,9 @@ export async function runSearchExecution(
             rerankerCalls: searchDiagnostics.rerankerCalls,
             rerankerCandidates: searchDiagnostics.rerankerCandidates,
             rerankerInputBytes: searchDiagnostics.rerankerInputBytes,
+            rerankerFailures: searchDiagnostics.rerankerFailures,
+            rerankerRetries: searchDiagnostics.rerankerRetries,
+            rerankerTimeouts: searchDiagnostics.rerankerTimeouts,
             candidatesWithSemanticEvidence: searchDiagnostics.candidatesWithSemanticEvidence,
             candidatesWithLexicalEvidence: searchDiagnostics.candidatesWithLexicalEvidence,
             candidatesWithCurrentSourceEvidence: searchDiagnostics.candidatesWithCurrentSourceEvidence,
