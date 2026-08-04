@@ -315,10 +315,16 @@ export class ToolResponseBuilders {
         codebasePath: string,
         searchContext: SearchContext,
     ): SearchResponseEnvelope {
+        const indexing = this.host.buildIndexingMetadata(codebasePath);
+        // The payload is complete when progress reaches 100%; the completion
+        // marker control record is written after the payload, so this window
+        // is "finalizing" rather than "indexing" — and never ready.
+        const finalizing = indexing.progressPct === 100;
         return {
             formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
             status: "not_ready",
-            reason: "indexing",
+            reason: finalizing ? "finalizing" : "indexing",
+            ...(finalizing ? { retryAfterMs: 1000 } : {}),
             codebasePath,
             path: searchContext.path,
             query: searchContext.query,
@@ -326,7 +332,9 @@ export class ToolResponseBuilders {
             groupBy: searchContext.groupBy,
             resultMode: searchContext.resultMode,
             limit: searchContext.limit,
-            message: `Codebase '${codebasePath}' is currently indexing. Wait for indexing to complete, then retry.`,
+            message: finalizing
+                ? `Codebase '${codebasePath}' finished indexing its payload and is finalizing (completion marker pending). Wait briefly, then retry.`
+                : `Codebase '${codebasePath}' is currently indexing. Wait for indexing to complete, then retry.`,
             recommendedNextAction: this.host.buildManageIndexRecommendedAction(
                 "status",
                 codebasePath,
@@ -338,7 +346,7 @@ export class ToolResponseBuilders {
                     completionProof: "marker_doc",
                 },
             },
-            indexing: this.host.buildIndexingMetadata(codebasePath),
+            indexing,
             results: [],
         } as SearchResponseEnvelope;
     }
