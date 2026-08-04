@@ -46,7 +46,7 @@ Give agents narrow, non-overlapping missions. Prefer parallel read-only work. Pe
 
 Require concise, verifiable results: conclusion, supporting evidence, uncertainty, and any recommended action. Do not request raw context dumps or broad project summaries when a bounded answer is sufficient.
 
-Use Luna for delegated lanes by default, with the highest supported reasoning effort : xhigh( lower effort is clearly sufficient for routine mechanical work) or max (use this mostly). Verify the effective model and effort when creating or resuming each child.
+Use the host's subagent/delegation mechanism for delegated lanes by default (Luna for codex), at the highest supported reasoning effort: max (use this mostly), with lower effort only when clearly sufficient for routine mechanical work. The delegated-lane model is owned by host/global configuration, not this file (pi: `subagents.defaultModel` in `~/.pi/agent/settings.json`; Codex: its configured delegation model). Verify the effective model and effort when creating or resuming each child.
 
 The primary agent owns synthesis, conflict resolution, final edits, integration, diff inspection, and final verification. Treat subagent output as evidence, not authority. Verify consequential findings against the repository or an independent check before relying on them.
 
