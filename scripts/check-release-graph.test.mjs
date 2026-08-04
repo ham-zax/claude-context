@@ -305,6 +305,15 @@ test('kept verification directory retains the exact verified tarballs', async ()
   assert.equal(remainingTempChildren(tempRoot).length, 0);
 });
 
+test('ordinary verification does not return deleted temporary paths', async () => {
+  const cwd = standardWorkspace();
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+  const { result } = await runCheck({ cwd, tempRoot });
+  assert.equal(Object.hasOwn(result, 'tarballs'), false);
+  assert.equal(Object.hasOwn(result, 'tempDirectory'), false);
+  assert.equal(remainingTempChildren(tempRoot).length, 0);
+});
+
 test('failed verification removes its temp directory even when keeping was requested', async () => {
   const cwd = standardWorkspace();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));

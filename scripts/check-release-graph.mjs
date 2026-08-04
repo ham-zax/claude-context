@@ -117,6 +117,8 @@ export async function checkReleaseGraph(options = {}) {
         ? { version: acquired.version, packedSnapshot: acquired.snapshot, packedManifest: acquired.manifest }
         : null;
       packages[key] = {
+        key,
+        name: RELEASE_PACKAGES[key].name,
         localVersion: localVersions[key],
         localPackedSnapshot: packed[key].snapshot,
         published,
@@ -127,18 +129,22 @@ export async function checkReleaseGraph(options = {}) {
     const fullReport = Object.freeze({
       ...report,
       graphEdges: graphValidation.edges,
-      tarballs: Object.freeze({
-        core: packed.core.tarballPath,
-        mcp: packed.mcp.tarballPath,
-        cli: packed.cli.tarballPath,
-      }),
-      tempDirectory,
+      ...(options.keepTempDirectory === true
+        ? {
+            tarballs: Object.freeze({
+              core: packed.core.tarballPath,
+              mcp: packed.mcp.tarballPath,
+              cli: packed.cli.tarballPath,
+            }),
+            tempDirectory,
+          }
+        : {}),
     });
     printReleaseGraphReport(fullReport, output);
     if (!fullReport.valid) {
       throw new Error('Release graph invalid.');
     }
-    kept = true;
+    kept = options.keepTempDirectory === true;
     return fullReport;
   } finally {
     if (!kept || !options.keepTempDirectory) {
