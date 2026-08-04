@@ -75,7 +75,7 @@ export async function publishReleaseGraph(options = {}) {
     throw new Error(`Refusing to publish from branch ${JSON.stringify(branch)}; expected master`);
   }
   versionsCheckImpl();
-  const report = checkGraphImpl(cwd);
+  const report = await checkGraphImpl(cwd);
   if (!report || !report.valid) {
     throw new Error('Release graph is invalid; refusing to publish.');
   }

@@ -103,6 +103,15 @@ test('stale graph publishes nothing', async () => {
   assert.deepEqual(options.records.publishCalls, []);
 });
 
+test('async check graph results are awaited', async () => {
+  const options = runnerOptions({
+    checkGraphImpl: () => Promise.resolve(fakeReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' })),
+  });
+  const result = await publishReleaseGraph(options);
+  assert.deepEqual(options.records.publishCalls, ['@zokizuan/satori-core', '@zokizuan/satori-mcp', '@zokizuan/satori-cli']);
+  assert.deepEqual(result.published.map((entry) => entry.key), ['core', 'mcp', 'cli']);
+});
+
 for (const mode of ['ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN', 'E401', 'malformed npm output']) {
   test(`publisher publishes nothing when the registry cannot be verified (${mode})`, async () => {
     const options = runnerOptions({
