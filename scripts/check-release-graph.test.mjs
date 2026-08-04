@@ -96,6 +96,36 @@ async function runCheck(options = {}) {
   return { result, lines, tempRoot };
 }
 
+async function captureInvalidCheck(options = {}) {
+  const lines = [];
+  const tempRoot = options.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+  const base = {
+    cwd: options.cwd,
+    tempRoot,
+    output: (line) => lines.push(line),
+    packLocalImpl: options.packLocalImpl || defaultPackLocal(),
+    fetchPublishedImpl: options.fetchPublishedImpl || stubFetch(options.publishedByName || {}),
+  };
+  let error = null;
+  try {
+    await checkReleaseGraph(base);
+  } catch (caught) {
+    error = caught;
+  }
+  return { error, lines, tempRoot };
+}
+
+function packLocalFrom(manifestsByName) {
+  return ({ packageName }) => ({
+    manifest: manifestsByName[packageName],
+    snapshot: snapshotFor(manifestsByName[packageName]),
+  });
+}
+
+function rowFor(lines, name) {
+  return lines.find((line) => line.startsWith(name));
+}
+
 function remainingTempChildren(tempRoot) {
   return fs.readdirSync(tempRoot).filter((name) => name.startsWith('satori-release-check-'));
 }
@@ -256,3 +286,141 @@ test('temporary directories are removed on failure', async () => {
   );
   assert.equal(remainingTempChildren(tempRoot).length, 0);
 });
+
+test('Core change cannot silently reuse already-published downstream versions', async () => {
+  const cwd = createWorkspace({
+    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
+    'packages/mcp/package.json': {
+      name: '@zokizuan/satori-mcp',
+      version: '6.7.0',
+      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
+    },
+    'packages/cli/package.json': {
+      name: '@zokizuan/satori-cli',
+      version: '1.8.0',
+      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
+    },
+    'server.json': { version: '6.7.0' },
+  });
+  const localByName = {
+    '@zokizuan/satori-core': { name: '@zokizuan/satori-core', version: '3.6.0', dependencies: {} },
+    '@zokizuan/satori-mcp': {
+      name: '@zokizuan/satori-mcp',
+      version: '6.7.0',
+      dependencies: { '@zokizuan/satori-core': '3.6.0' },
+    },
+    '@zokizuan/satori-cli': {
+      name: '@zokizuan/satori-cli',
+      version: '1.8.0',
+      dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' },
+    },
+  };
+  const publishedMcp = { ...localByName['@zokizuan/satori-mcp'], dependencies: { '@zokizuan/satori-core': '3.5.0' } };
+  const publishedCli = {
+    ...localByName['@zokizuan/satori-cli'],
+    dependencies: { '@zokizuan/satori-core': '3.5.0', '@zokizuan/satori-mcp': '6.7.0' },
+  };
+  const { error, lines, tempRoot } = await captureInvalidCheck({
+    cwd,
+    packLocalImpl: packLocalFrom(localByName),
+    publishedByName: {
+      '@zokizuan/satori-mcp': { packedSnapshot: snapshotFor(publishedMcp), packedManifest: publishedMcp },
+      '@zokizuan/satori-cli': { packedSnapshot: snapshotFor(publishedCli), packedManifest: publishedCli },
+    },
+  });
+  assert.match(error.message, /Release graph invalid\./);
+  assert.match(rowFor(lines, '@zokizuan/satori-core'), /unpublished/);
+  assert.match(rowFor(lines, '@zokizuan/satori-mcp'), /stale-version/);
+  assert.match(rowFor(lines, '@zokizuan/satori-cli'), /stale-version/);
+  assert.equal(remainingTempChildren(tempRoot).length, 0);
+});
+
+test('MCP change cannot silently reuse an already-published CLI version', async () => {
+  const cwd = createWorkspace({
+    'packages/core/package.json': { name: '@zokizuan/satori-core', version: '3.6.0' },
+    'packages/mcp/package.json': {
+      name: '@zokizuan/satori-mcp',
+      version: '6.8.0',
+      dependencies: { '@zokizuan/satori-core': 'workspace:*' },
+    },
+    'packages/cli/package.json': {
+      name: '@zokizuan/satori-cli',
+      version: '1.8.0',
+      dependencies: { '@zokizuan/satori-core': 'workspace:*', '@zokizuan/satori-mcp': 'workspace:*' },
+    },
+    'server.json': { version: '6.8.0' },
+  });
+  const localByName = {
+    '@zokizuan/satori-core': { name: '@zokizuan/satori-core', version: '3.6.0', dependencies: {} },
+    '@zokizuan/satori-mcp': {
+      name: '@zokizuan/satori-mcp',
+      version: '6.8.0',
+      dependencies: { '@zokizuan/satori-core': '3.6.0' },
+    },
+    '@zokizuan/satori-cli': {
+      name: '@zokizuan/satori-cli',
+      version: '1.8.0',
+      dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.8.0' },
+    },
+  };
+  const publishedCli = {
+    ...localByName['@zokizuan/satori-cli'],
+    dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' },
+  };
+  const { error, lines, tempRoot } = await captureInvalidCheck({
+    cwd,
+    packLocalImpl: packLocalFrom(localByName),
+    publishedByName: {
+      '@zokizuan/satori-core': {
+        packedSnapshot: snapshotFor(localByName['@zokizuan/satori-core']),
+        packedManifest: localByName['@zokizuan/satori-core'],
+      },
+      '@zokizuan/satori-cli': { packedSnapshot: snapshotFor(publishedCli), packedManifest: publishedCli },
+    },
+  });
+  assert.match(error.message, /Release graph invalid\./);
+  assert.match(rowFor(lines, '@zokizuan/satori-core'), /published-identical/);
+  assert.match(rowFor(lines, '@zokizuan/satori-mcp'), /unpublished/);
+  assert.match(rowFor(lines, '@zokizuan/satori-cli'), /stale-version/);
+  assert.equal(remainingTempChildren(tempRoot).length, 0);
+});
+
+test('CLI-only change skips unchanged upstream packages', async () => {
+  const cwd = standardWorkspace();
+  const manifests = localManifests();
+  const { result, lines, tempRoot } = await runCheck({
+    cwd,
+    publishedByName: {
+      '@zokizuan/satori-core': { packedSnapshot: snapshotFor(manifests.core), packedManifest: manifests.core },
+      '@zokizuan/satori-mcp': { packedSnapshot: snapshotFor(manifests.mcp), packedManifest: manifests.mcp },
+    },
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.packages.core.status, 'published-identical');
+  assert.equal(result.packages.mcp.status, 'published-identical');
+  assert.equal(result.packages.cli.status, 'unpublished');
+  assert.match(rowFor(lines, '@zokizuan/satori-core'), /skip/);
+  assert.match(rowFor(lines, '@zokizuan/satori-mcp'), /skip/);
+  assert.match(rowFor(lines, '@zokizuan/satori-cli'), /publish/);
+  assert.equal(lines[lines.length - 1], 'Release graph valid.');
+  assert.equal(remainingTempChildren(tempRoot).length, 0);
+});
+
+for (const mode of ['ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN', 'E401', 'malformed npm output']) {
+  test(`registry failure ${mode} fails closed`, async () => {
+    const cwd = standardWorkspace();
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+    const { error, lines, tempRoot: usedRoot } = await captureInvalidCheck({
+      cwd,
+      tempRoot,
+      fetchPublishedImpl: () => {
+        throw new Error(`registry unavailable: ${mode}`);
+      },
+    });
+    assert.equal(usedRoot, tempRoot);
+    assert.match(error.message, new RegExp(mode));
+    assert.equal(error.message.includes('unpublished'), false);
+    assert.equal(remainingTempChildren(tempRoot).length, 0);
+    assert.ok(lines.length === 0);
+  });
+}

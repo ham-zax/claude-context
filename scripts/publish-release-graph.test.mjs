@@ -103,6 +103,18 @@ test('stale graph publishes nothing', async () => {
   assert.deepEqual(options.records.publishCalls, []);
 });
 
+for (const mode of ['ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN', 'E401', 'malformed npm output']) {
+  test(`publisher publishes nothing when the registry cannot be verified (${mode})`, async () => {
+    const options = runnerOptions({
+      checkGraphImpl: () => {
+        throw new Error(`registry unavailable: ${mode}`);
+      },
+    });
+    await assert.rejects(publishReleaseGraph(options), new RegExp(mode));
+    assert.deepEqual(options.records.publishCalls, []);
+  });
+}
+
 test('dirty tree publishes nothing', async () => {
   const options = runnerOptions({ gitStatusImpl: () => ' M packages/core/package.json' });
   await assert.rejects(publishReleaseGraph(options), /Working tree is not clean/);

@@ -316,6 +316,22 @@ test('rerun is idempotent', async () => {
   assert.deepEqual(readJson(cwd, 'packages/cli/package.json').version, '1.9.1');
 });
 
+test('prepared unpublished coordinated versions are not repeatedly bumped', async () => {
+  const cwd = standardWorkspace();
+  const runner = recordedRunner();
+  const result = await runReleaseBump(bumpOptions(cwd, {
+    argv: ['core', 'minor', '--apply'],
+    execFileSyncImpl: runner,
+    isVersionPublishedImpl: () => false,
+  }));
+  assert.equal(result.changed.length, 0);
+  assert.deepEqual(readJson(cwd, 'packages/core/package.json').version, '3.6.0');
+  assert.deepEqual(readJson(cwd, 'packages/mcp/package.json').version, '6.8.0');
+  assert.deepEqual(readJson(cwd, 'packages/cli/package.json').version, '1.9.0');
+  assert.deepEqual(readJson(cwd, 'server.json').version, '6.8.0');
+  assert.equal(runner.calls.length, 0);
+});
+
 test('dirty worktree rejects apply', async () => {
   const cwd = standardWorkspace();
   const runner = recordedRunner();
