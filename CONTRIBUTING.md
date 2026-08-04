@@ -61,6 +61,22 @@ Integration tests should continue validating:
 
 Do not include secrets, provider tokens, private repository code, or sensitive logs in public issues or PRs. See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
 
+## Releasing
+
+Version reference drift and stale packed artifacts are release errors, enforced
+in CI and locally. Before any version bump or coordinates change, read
+[RELEASING.md](./docs/RELEASING.md) and run `pnpm run release:check`.
+
+Coordinated version changes use the bump planner; preview before applying:
+
+```bash
+pnpm release:bump -- core minor
+pnpm release:bump -- core minor --apply
+```
+
+Publication happens only through `pnpm run release:all`. Do not hand-publish
+MCP or CLI out of order or against a stale Core version.
+
 ## License
 
 By contributing, you agree your changes are released under the MIT License.
