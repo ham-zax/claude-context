@@ -7,6 +7,13 @@ export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
 export type LateOnRuntimeProfileId =
     typeof LATEON_RUNTIME_PROFILE_IDS[keyof typeof LATEON_RUNTIME_PROFILE_IDS];
 
+export const LATEON_ACTIVATION_POLICY_IDS = Object.freeze({
+    ownerDefaultD32: "lateon_d32_owner_default_v1",
+} as const);
+
+export type LateOnActivationPolicyId =
+    typeof LATEON_ACTIVATION_POLICY_IDS[keyof typeof LATEON_ACTIVATION_POLICY_IDS];
+
 export type LateOnArtifactContract = Readonly<{
     path: string;
     sha256: string;

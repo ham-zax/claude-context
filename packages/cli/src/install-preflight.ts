@@ -14,7 +14,11 @@ import {
     type VectorDatabase,
 } from "@zokizuan/satori-core";
 import { connectCliMcpSession } from "./client.js";
-import type { InstallRuntime, InstallVectorStore } from "./args.js";
+import type {
+    InstallOfflineReranker,
+    InstallRuntime,
+    InstallVectorStore,
+} from "./args.js";
 
 const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
 const DEFAULT_POTION_REQUEST_TIMEOUT_MS = "5000";
@@ -27,6 +31,10 @@ export interface InstallPreflightInput {
     env: NodeJS.ProcessEnv;
     vectorStore?: InstallVectorStore;
     ollamaModel?: string;
+    reranker?: InstallOfflineReranker;
+    lateOnModelPath?: string;
+    lateOnProfileId?: string;
+    lateOnActivationPolicy?: string;
     potionAssetsRoot?: string;
     platform?: NodeJS.Platform;
     architecture?: string;
@@ -397,6 +405,32 @@ export function planInstallRuntimeEnvironment(
         });
     }
 
+    if (input.lateOnModelPath && !path.isAbsolute(input.lateOnModelPath)) {
+        throw new Error("LateOn model path must be absolute.");
+    }
+    let lateOnEnvironment: Readonly<Record<string, string>> = {};
+    if (input.reranker === "lateon") {
+        const modelDirectory = input.lateOnModelPath;
+        const profileId = input.lateOnProfileId;
+        const activationPolicy = input.lateOnActivationPolicy;
+        if (!modelDirectory) {
+            throw new Error("LateOn reranking requires a verified model path.");
+        }
+        if (!profileId) {
+            throw new Error("LateOn reranking requires the target MCP package profile ID.");
+        }
+        if (!activationPolicy) {
+            throw new Error("Managed LateOn D32 reranking requires an activation policy identity.");
+        }
+        lateOnEnvironment = {
+            SATORI_RERANKER_PROVIDER: "lateon",
+            SATORI_LATEON_MODEL_PATH: modelDirectory,
+            SATORI_LATEON_PROFILE: profileId,
+            SATORI_LATEON_ACTIVATION_POLICY: activationPolicy,
+        };
+    } else if (input.reranker === "none") {
+        lateOnEnvironment = { SATORI_RERANKER_PROVIDER: "none" };
+    }
     const model = input.ollamaModel?.trim();
     if (!model) {
         assertSupportedPotionPlatform(input);
@@ -414,6 +448,7 @@ export function planInstallRuntimeEnvironment(
             POTION_HELPER_PATH: helperPath,
             POTION_MODEL_PATH: modelPath,
             POTION_REQUEST_TIMEOUT_MS: DEFAULT_POTION_REQUEST_TIMEOUT_MS,
+            ...lateOnEnvironment,
         });
     }
     const host = input.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
@@ -425,6 +460,7 @@ export function planInstallRuntimeEnvironment(
         EMBEDDING_PROVIDER: "Ollama",
         OLLAMA_MODEL: model,
         OLLAMA_HOST: host,
+        ...lateOnEnvironment,
     });
 }
 
@@ -463,14 +499,10 @@ export async function runInstallPreflight(
     });
     return {
         runtimeEnvironment: Object.freeze({
-            SATORI_RUNTIME_PROFILE: "offline",
-            VECTOR_STORE_PROVIDER: "LanceDB",
-            LANCEDB_PATH: databasePath,
-            EMBEDDING_PROVIDER: "Ollama",
+            ...proposedEnvironment,
             OLLAMA_MODEL: identity.resolvedModel,
             OLLAMA_MODEL_DIGEST: identity.artifactDigest,
             EMBEDDING_OUTPUT_DIMENSION: String(identity.dimension),
-            OLLAMA_HOST: host,
         }),
         ollamaIdentity: identity,
     };

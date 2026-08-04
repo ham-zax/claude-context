@@ -18,6 +18,12 @@ import {
     buildLauncherScript,
     parseManagedLauncherDescriptor,
 } from "./managed-launcher-script.mjs";
+import {
+    LATEON_FIXTURE_ARTIFACTS,
+    writeLateOnAcquisitionFixture,
+    writeLateOnModelDirectory,
+} from "./test-fixtures/lateon-fixture.js";
+import { loadAcquisitionAuthority } from "./lateon-model-store.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const POSTFLIGHT_MCP_RUNTIME_FIXTURE = path.resolve(
@@ -44,6 +50,7 @@ function executeInstallCommand(
         preflightDependencies: {
             probeCandidateRuntime: async () => {},
         },
+        lateOnAuthorityLoader: loadAcquisitionAuthority,
         ...options,
     });
 }
@@ -261,6 +268,7 @@ function installRuntimePackageStub(
                 },
             }, null, 2), "utf8");
         }
+        writeLateOnAcquisitionFixture(packageRoot);
         return "";
     };
 }
@@ -1060,6 +1068,7 @@ test("managed runtime upgrade preserves each supported runtime selection and rej
     for (const fixture of cases) {
         await withTempHome(async (homeDir) => {
             await installUpgradeSourceRuntime(homeDir, fixture.managedEnvironment);
+            writeLateOnModelDirectory(path.join(homeDir, "lateon-model"), LATEON_FIXTURE_ARTIFACTS);
             let observedSelection: {
                 runtime: string;
                 vectorStore?: string;
@@ -1070,8 +1079,10 @@ test("managed runtime upgrade preserves each supported runtime selection and rej
             await executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
                 homeDir,
                 env: fixture.inheritedEnvironment,
+                lateOnModelPath: path.join(homeDir, "lateon-model"),
                 platform: "linux",
                 architecture: "x64",
+                lateOnAuthorityLoader: loadAcquisitionAuthority,
                 execFileSyncImpl: installRuntimePackageStub(
                     "dist/target-runtime.mjs",
                     UPGRADE_TARGET.mcpPackageSpecifier,
@@ -1117,6 +1128,125 @@ test("managed runtime upgrade preserves each supported runtime selection and rej
             /unsupported SATORI_RUNTIME_PROFILE=experimental/,
         );
         assert.equal(readFile(launcherPath(homeDir)), originalLauncher);
+    });
+});
+
+test("managed runtime upgrade acquisition failure leaves the managed installation byte-identical", async () => {
+    await withTempHome(async (homeDir) => {
+        await installUpgradeSourceRuntime(homeDir, {
+            SATORI_RUNTIME_PROFILE: "offline",
+            VECTOR_STORE_PROVIDER: "LanceDB",
+            LANCEDB_PATH: path.join(homeDir, "lancedb"),
+            EMBEDDING_PROVIDER: "Potion",
+            SATORI_RERANKER_PROVIDER: "lateon",
+            SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v2_d32_v2",
+        });
+        const originalLauncher = readFile(launcherPath(homeDir));
+        const originalConfig = readFile(path.join(homeDir, ".codex", "config.toml"));
+
+        await assert.rejects(
+            executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+                homeDir,
+                env: {},
+                platform: "linux",
+                architecture: "x64",
+                lateOnAuthorityLoader: loadAcquisitionAuthority,
+                fetchImpl: (async () => {
+                    throw new Error("network down");
+                }) as typeof fetch,
+                execFileSyncImpl: installRuntimePackageStub(
+                    "dist/target-runtime.mjs",
+                    UPGRADE_TARGET.mcpPackageSpecifier,
+                    UPGRADE_TARGET.mcpVersion,
+                    UPGRADE_TARGET.coreVersion,
+                ) as never,
+                preflightRunner: async () => ({
+                    runtimeEnvironment: Object.freeze({}),
+                }),
+            }),
+            /LateOn D32 model preflight failed: network down/,
+        );
+
+        assert.equal(readFile(launcherPath(homeDir)), originalLauncher);
+        assert.equal(readFile(path.join(homeDir, ".codex", "config.toml")), originalConfig);
+        const modelsLateonDir = path.join(homeDir, ".satori", "models", "lateon");
+        if (fs.existsSync(modelsLateonDir)) {
+            assert.deepEqual(
+                fs.readdirSync(modelsLateonDir).filter((name) => name.startsWith(".lateon-install-")),
+                [],
+            );
+        }
+    });
+});
+
+test("legacy no-provider upgrade defaults to LateOn D32", async () => {
+    await withTempHome(async (homeDir) => {
+        await installUpgradeSourceRuntime(homeDir, {
+            SATORI_RUNTIME_PROFILE: "offline",
+            VECTOR_STORE_PROVIDER: "LanceDB",
+            LANCEDB_PATH: path.join(homeDir, "lancedb"),
+            EMBEDDING_PROVIDER: "Potion",
+        });
+        let observedReranker: string | undefined;
+        let observedProfile: string | undefined;
+        let observedPolicy: string | undefined;
+        const fetchImpl = (async (input: string | URL | Request) => {
+            const name = String(input).slice(String(input).lastIndexOf("/") + 1);
+            return new Response(
+                name === "model.onnx"
+                    ? LATEON_FIXTURE_ARTIFACTS["model.onnx"]
+                    : LATEON_FIXTURE_ARTIFACTS["tokenizer.json"],
+                { status: 200 },
+            );
+        }) as typeof fetch;
+
+        await executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+            homeDir,
+            env: {},
+            platform: "linux",
+            architecture: "x64",
+            lateOnAuthorityLoader: loadAcquisitionAuthority,
+            fetchImpl,
+            execFileSyncImpl: installRuntimePackageStub(
+                "dist/target-runtime.mjs",
+                UPGRADE_TARGET.mcpPackageSpecifier,
+                UPGRADE_TARGET.mcpVersion,
+                UPGRADE_TARGET.coreVersion,
+            ) as never,
+            preflightDependencies: {
+                probeCandidateRuntime: async () => {},
+            },
+            preflightRunner: async (input) => {
+                observedReranker = input.reranker;
+                observedProfile = input.lateOnProfileId;
+                observedPolicy = input.lateOnActivationPolicy;
+                return {
+                    runtimeEnvironment: Object.freeze({
+                        SATORI_RUNTIME_PROFILE: "offline",
+                        VECTOR_STORE_PROVIDER: "LanceDB",
+                        EMBEDDING_PROVIDER: "Potion",
+                        SATORI_RERANKER_PROVIDER: input.reranker,
+                        SATORI_LATEON_MODEL_PATH: input.lateOnModelPath,
+                        SATORI_LATEON_PROFILE: input.lateOnProfileId,
+                        SATORI_LATEON_ACTIVATION_POLICY: input.lateOnActivationPolicy,
+                    }),
+                };
+            },
+        });
+
+        assert.equal(observedReranker, "lateon");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v2_d32_v2");
+        assert.equal(observedPolicy, "lateon_d32_owner_default_v1");
+        const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
+        assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_PROFILE,
+            "lateon_offline_quality_projection_v2_d32_v2",
+        );
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
+            "lateon_d32_owner_default_v1",
+        );
     });
 });
 

@@ -17,6 +17,7 @@ import {
     type ManagedRuntimeUpgradePhase,
     type ManagedRuntimeUpgradeResult,
 } from "./install.js";
+import type { LateOnAuthorityLoader } from "./lateon-model-store.js";
 import type {
     InstallPreflightDependencies,
     InstallPreflightInput,
@@ -72,6 +73,8 @@ interface RunCliOptions {
         input: InstallPreflightInput,
         dependencies?: InstallPreflightDependencies,
     ) => Promise<InstallPreflightResult>;
+    /** Structural test seam for LateOn acquisition; the production default binds the frozen digest. */
+    installLateOnAuthorityLoader?: LateOnAuthorityLoader;
     doctorRunner?: (options: { env: NodeJS.ProcessEnv }) => DoctorResult | Promise<DoctorResult>;
     versionResolver?: () => DoctorPackageVersion[];
     nowMs?: () => number;
@@ -259,7 +262,7 @@ function buildHelpPayload() {
     return {
         usage: "satori <command>",
         commands: [
-            "install [--client all|codex|claude|opencode] [--runtime offline|voyage] [--vector-store lancedb|milvus] [--ollama-model <model>] [--profile default|minimal|all-text] [--dry-run] [--install-guidance-hook] (default: offline Potion on Linux x64; --ollama-model selects Ollama)",
+            "install [--client all|codex|claude|opencode] [--runtime offline|voyage] [--vector-store lancedb|milvus] [--ollama-model <model>] [--reranker lateon|none] [--profile default|minimal|all-text] [--dry-run] [--install-guidance-hook] (default: offline Potion embeddings with LateOn D32 reranking on Linux x64; --ollama-model selects Ollama; --reranker none disables reranking)",
             "version (-v, --version)",
             "upgrade (alias: update)",
             "terminate",
@@ -584,6 +587,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
                 env: effectiveEnv,
                 preflightDependencies: options.installPreflightDependencies,
                 preflightRunner: options.installPreflightRunner,
+                lateOnAuthorityLoader: options.installLateOnAuthorityLoader,
             });
             if (parsed.command.kind === "install" && !parsed.command.dryRun) {
                 const postflight = await (options.installPostflightRunner || runInstallPostflight)({

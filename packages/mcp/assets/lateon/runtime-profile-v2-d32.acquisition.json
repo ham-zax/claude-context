@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "satori_lateon_acquisition_v1",
+  "runtimeProfileSha256": "5987f5fe649cb69d1d6a4bdd91c8dfc5c01ee08507ce1cbe5194fe72fc13ec84",
+  "artifacts": [
+    {
+      "path": "model.onnx",
+      "sizeBytes": 67970609,
+      "sha256": "ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef"
+    },
+    {
+      "path": "tokenizer.json",
+      "sizeBytes": 3583847,
+      "sha256": "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "sizeBytes": 21373,
+      "sha256": "1621afee1f3dbc2c42901841ca46016c83102a8e070d32b90f80f80b214172a4"
+    },
+    {
+      "path": "onnx_config.json",
+      "sizeBytes": 792,
+      "sha256": "fa4fef89820dcdc33c5504c62c1d5efc19603cfbfebf02368a70d51a4dbe6651"
+    },
+    {
+      "path": "special_tokens_map.json",
+      "sizeBytes": 581,
+      "sha256": "6edfb9d64c0d7e5cbaa53516e90280fe1f42ba5ea7923d005a5f9b6e082142cf"
+    }
+  ],
+  "totalExpectedArtifactBytes": 71577202,
+  "policy": {
+    "downloadDeadlineMilliseconds": 600000,
+    "maximumRedirects": 5,
+    "diskHeadroomFraction": 0.1,
+    "diskHeadroomFormula": "totalExpectedArtifactBytes + ceil(totalExpectedArtifactBytes * diskHeadroomFraction)"
+  }
+}

@@ -40,6 +40,7 @@ export type ParsedCommand =
         runtime: "offline";
         vectorStore?: "LanceDB";
         ollamaModel?: string;
+        reranker?: InstallOfflineReranker;
     }
     | { kind: "uninstall"; client: InstallClient; dryRun: boolean }
     | { kind: "tools-list" }
@@ -60,6 +61,7 @@ export type InstallClient = "all" | "claude" | "codex" | "opencode";
 export type InstallProfile = "default" | "minimal" | "all-text";
 export type InstallRuntime = "voyage" | "offline";
 export type InstallVectorStore = "LanceDB" | "Milvus";
+export type InstallOfflineReranker = "lateon" | "none";
 
 const RESERVED_SUBCOMMANDS = new Set([
     "tools",
@@ -219,6 +221,7 @@ function parseInstallCommand(kind: "install" | "uninstall", args: string[]): Par
     let runtime: InstallRuntime = "offline";
     let vectorStore: InstallVectorStore | undefined;
     let ollamaModel: string | undefined;
+    let reranker: InstallOfflineReranker | undefined;
 
     for (let i = 0; i < args.length; i += 1) {
         const token = args[i];
@@ -275,12 +278,24 @@ function parseInstallCommand(kind: "install" | "uninstall", args: string[]): Par
             i += 1;
             continue;
         }
+        if (kind === "install" && token === "--reranker") {
+            const next = args[i + 1]?.trim().toLowerCase();
+            if (next !== "lateon" && next !== "none") {
+                throw new CliError("E_USAGE", "--reranker must be one of: lateon, none.", 2);
+            }
+            reranker = next;
+            i += 1;
+            continue;
+        }
         throw new CliError("E_USAGE", `Unknown arguments for ${kind}: ${args.slice(i).join(" ")}`, 2);
     }
 
     if (kind === "install") {
         if (runtime !== "offline" && ollamaModel) {
             throw new CliError("E_USAGE", "--ollama-model is only valid with --runtime offline.", 2);
+        }
+        if (runtime !== "offline" && reranker) {
+            throw new CliError("E_USAGE", "--reranker is only valid with --runtime offline.", 2);
         }
         if (runtime === "offline" && vectorStore === "Milvus") {
             throw new CliError("E_USAGE", "--runtime offline requires --vector-store lancedb.", 2);
@@ -300,6 +315,7 @@ function parseInstallCommand(kind: "install" | "uninstall", args: string[]): Par
             runtime,
             vectorStore: vectorStore === "LanceDB" ? "LanceDB" : undefined,
             ...(ollamaModel ? { ollamaModel } : {}),
+            ...(reranker ? { reranker } : {}),
         };
     }
     return { kind, client, dryRun, installGuidanceHook, profile, runtime, vectorStore };

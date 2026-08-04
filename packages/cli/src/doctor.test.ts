@@ -301,6 +301,106 @@ test("runDoctor uses installer-owned launcher settings over stale ambient provid
     }
 });
 
+test("runDoctor surfaces the installer-bound LateOn activation policy", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-lateon-policy-"));
+    const packageRoot = path.join(tempDir, "node_modules", "@zokizuan", "satori-mcp");
+    const target = path.join(packageRoot, "dist", "index.js");
+    const launcherPath = path.join(tempDir, "satori-mcp.js");
+    try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, "// runtime");
+        fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-mcp",
+            version: "4.11.17",
+        }));
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: process.execPath,
+            args: [target],
+            managedEnv: {
+                SATORI_RUNTIME_PROFILE: "offline",
+                VECTOR_STORE_PROVIDER: "LanceDB",
+                LANCEDB_PATH: path.join(tempDir, "lancedb"),
+                EMBEDDING_PROVIDER: "Potion",
+                POTION_HELPER_PATH: path.join(tempDir, "potion", "satori-potion"),
+                POTION_MODEL_PATH: path.join(tempDir, "potion", "model"),
+                SATORI_RERANKER_PROVIDER: "lateon",
+                SATORI_LATEON_MODEL_PATH: path.join(tempDir, "lateon-model"),
+                SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v2_d32_v2",
+                SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+            },
+        }));
+
+        const result = await runDoctor(baseDoctorOptions({
+            env: {
+                HOME: tempDir,
+                VOYAGEAI_API_KEY: "retained-but-disabled",
+            },
+            managedLauncherPath: launcherPath,
+            loadManagedLanceDb: async () => undefined,
+        }));
+
+        assert.equal(result.status, "ok");
+        const policy = result.checks.find((check) => check.name === "lateon_activation_policy");
+        assert.equal(policy?.status, "ok");
+        assert.equal(policy?.message, "LateOn activation policy: lateon_d32_owner_default_v1.");
+        assert.equal(
+            result.checks.find((check) => check.name === "reranker_provider")?.status,
+            "ok",
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor flags a managed launcher whose LateOn activation policy contradicts its profile", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-lateon-policy-mismatch-"));
+    const packageRoot = path.join(tempDir, "node_modules", "@zokizuan", "satori-mcp");
+    const target = path.join(packageRoot, "dist", "index.js");
+    const launcherPath = path.join(tempDir, "satori-mcp.js");
+    try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, "// runtime");
+        fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-mcp",
+            version: "4.11.17",
+        }));
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: process.execPath,
+            args: [target],
+            managedEnv: {
+                SATORI_RUNTIME_PROFILE: "offline",
+                VECTOR_STORE_PROVIDER: "LanceDB",
+                LANCEDB_PATH: path.join(tempDir, "lancedb"),
+                EMBEDDING_PROVIDER: "Potion",
+                POTION_HELPER_PATH: path.join(tempDir, "potion", "satori-potion"),
+                POTION_MODEL_PATH: path.join(tempDir, "potion", "model"),
+                SATORI_RERANKER_PROVIDER: "lateon",
+                SATORI_LATEON_MODEL_PATH: path.join(tempDir, "lateon-model"),
+                SATORI_LATEON_PROFILE: "lateon_projection_v2_d16_v1",
+                SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+            },
+        }));
+
+        const result = await runDoctor(baseDoctorOptions({
+            env: {
+                HOME: tempDir,
+                VOYAGEAI_API_KEY: "retained-but-disabled",
+            },
+            managedLauncherPath: launcherPath,
+            loadManagedLanceDb: async () => undefined,
+        }));
+
+        const policy = result.checks.find((check) => check.name === "lateon_activation_policy");
+        assert.equal(policy?.status, "error");
+        assert.match(
+            policy?.message || "",
+            /requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2; received lateon_projection_v2_d16_v1/,
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
 test("runDoctor rejects unsupported embedding providers", async () => {
     const result = await runDoctor(baseDoctorOptions({
         nodeVersion: "v22.0.0",

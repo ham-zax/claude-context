@@ -1,5 +1,9 @@
 import path from "node:path";
 import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
+import {
+    DEFAULT_LATEON_PROFILE_ID,
+    LATEON_D32_ACTIVATION_POLICY,
+} from "./lateon-model-store.js";
 
 export type RuntimeConfigCheckStatus = "ok" | "error";
 
@@ -155,6 +159,35 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
                 message: "LateOn requires an absolute SATORI_LATEON_MODEL_PATH.",
                 nextStep: "Set SATORI_LATEON_MODEL_PATH to the pinned shared model directory.",
             });
+        const activationPolicy = env.SATORI_LATEON_ACTIVATION_POLICY?.trim();
+        if (activationPolicy && activationPolicy !== LATEON_D32_ACTIVATION_POLICY) {
+            checks.push({
+                name: "lateon_activation_policy",
+                status: "error",
+                message: `Invalid LateOn activation policy: ${activationPolicy}.`,
+                nextStep: `Set SATORI_LATEON_ACTIVATION_POLICY to ${LATEON_D32_ACTIVATION_POLICY} or remove it.`,
+            });
+        } else if (activationPolicy) {
+            const lateOnProfileId = env.SATORI_LATEON_PROFILE?.trim() ?? DEFAULT_LATEON_PROFILE_ID;
+            checks.push(lateOnProfileId === DEFAULT_LATEON_PROFILE_ID
+                ? {
+                    name: "lateon_activation_policy",
+                    status: "ok",
+                    message: `LateOn activation policy: ${activationPolicy}.`,
+                }
+                : {
+                    name: "lateon_activation_policy",
+                    status: "error",
+                    message: `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_D32_ACTIVATION_POLICY} requires SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID}; received ${lateOnProfileId}.`,
+                    nextStep: "Re-run satori install --reranker lateon to migrate to D32.",
+                });
+        } else {
+            checks.push({
+                name: "lateon_activation_policy",
+                status: "ok",
+                message: "No LateOn activation policy is bound.",
+            });
+        }
     } else if (rerankerProvider === "voyage" && executionProfile === "offline") {
         checks.push({
             name: "reranker_provider",
@@ -167,6 +200,20 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
             name: "reranker_provider",
             status: "ok",
             message: `Reranker provider: ${rerankerProvider}.`,
+        });
+    }
+
+    const activationPolicy = env.SATORI_LATEON_ACTIVATION_POLICY?.trim();
+    if (activationPolicy && rerankerProvider !== "lateon") {
+        checks.push({
+            name: "lateon_activation_policy",
+            status: "error",
+            message: activationPolicy === LATEON_D32_ACTIVATION_POLICY
+                ? `SATORI_LATEON_ACTIVATION_POLICY requires SATORI_RERANKER_PROVIDER=lateon; received ${rerankerProvider}.`
+                : `Invalid LateOn activation policy: ${activationPolicy}.`,
+            nextStep: activationPolicy === LATEON_D32_ACTIVATION_POLICY
+                ? "Set SATORI_RERANKER_PROVIDER=lateon or remove SATORI_LATEON_ACTIVATION_POLICY."
+                : `Set SATORI_LATEON_ACTIVATION_POLICY to ${LATEON_D32_ACTIVATION_POLICY} or remove it.`,
         });
     }
 

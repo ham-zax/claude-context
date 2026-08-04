@@ -7,7 +7,13 @@ import { pathToFileURL } from "node:url";
 import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
 import { applyEdits, modify, parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { CliError } from "./errors.js";
-import type { InstallClient, InstallProfile, InstallRuntime, InstallVectorStore } from "./args.js";
+import type {
+    InstallClient,
+    InstallOfflineReranker,
+    InstallProfile,
+    InstallRuntime,
+    InstallVectorStore,
+} from "./args.js";
 import {
     assertSupportedPotionPlatform,
     planInstallRuntimeEnvironment,
@@ -41,6 +47,15 @@ import {
     type ManagedRuntimeClosure,
     writeManagedRuntimeClosureManifest,
 } from "./managed-runtime-closure.js";
+import {
+    DEFAULT_LATEON_PROFILE_ID,
+    LATEON_D32_ACTIVATION_POLICY,
+    ensureDefaultLateOnModel,
+    resolveDefaultLateOnModelDirectory,
+    verifyLateOnModelDirectory,
+    type LateOnAuthorityLoader,
+    type VerifiedLateOnModel,
+} from "./lateon-model-store.js";
 
 const MANAGED_BLOCK_START = "# >>> satori-cli managed satori start >>>";
 const MANAGED_BLOCK_END = "# <<< satori-cli managed satori end <<<";
@@ -67,7 +82,13 @@ const SATORI_RUNTIME_ENV_VARS = [
     "VOYAGEAI_RERANKER_MODEL",
     "SATORI_RERANKER_PROVIDER",
     "SATORI_LATEON_MODEL_PATH",
+    "SATORI_LATEON_PROFILE",
+    "SATORI_LATEON_ACTIVATION_POLICY",
     "SATORI_LATEON_REQUEST_DEADLINE_MS",
+    "SATORI_LATEON_MAX_QUEUE_WAIT_MS",
+    "SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS",
+    "SATORI_LATEON_MAX_ACTIVE_RERANKS",
+    "SATORI_LATEON_MAX_QUEUED_RERANKS",
     "SATORI_LATEON_INTRA_OP_THREADS",
     "GEMINI_API_KEY",
     "GEMINI_BASE_URL",
@@ -149,6 +170,7 @@ export type InstallCommandInput =
         runtime: "offline";
         vectorStore?: "LanceDB";
         ollamaModel?: string;
+        reranker?: InstallOfflineReranker;
     })
     | {
         kind: "uninstall";
@@ -165,6 +187,12 @@ export interface InstallCommandOptions {
     env?: NodeJS.ProcessEnv;
     preflightDependencies?: InstallPreflightDependencies;
     potionAssetsRoot?: string;
+    lateOnModelPath?: string;
+    fetchImpl?: typeof fetch;
+    /** Structural test seam for LateOn acquisition; the production default binds the frozen digest. */
+    lateOnAuthorityLoader?: LateOnAuthorityLoader;
+    /** Test seam for proving LateOn acquisition deadline handling without waiting ten minutes. */
+    lateOnNowImpl?: () => number;
     platform?: NodeJS.Platform;
     architecture?: string;
     libc?: "gnu" | "musl";
@@ -1711,6 +1739,166 @@ function runtimeEnvironmentWithManagedFallbacks(
     return fallbacks;
 }
 
+function historicalManagedLateOnProfile(
+    managedEnvironment: Readonly<Record<string, string>>,
+): string | null {
+    const managed = managedEnvironment.SATORI_RERANKER_PROVIDER;
+    const profile = managedEnvironment.SATORI_LATEON_PROFILE?.trim();
+    if (managed === "lateon" && profile !== DEFAULT_LATEON_PROFILE_ID) {
+        return profile || "(missing)";
+    }
+    if (!managed && profile && profile !== DEFAULT_LATEON_PROFILE_ID) {
+        return profile;
+    }
+    return null;
+}
+
+function migrationGuidance(profile: string): CliError {
+    return new CliError(
+        "E_USAGE",
+        `Existing managed LateOn installation uses profile ${profile}, which is treated as historical D16. Rerun with --reranker lateon to migrate to D32 or --reranker none to disable LateOn.`,
+        2,
+    );
+}
+
+function resolveOfflineReranker(
+    command: Extract<InstallCommandInput, { kind: "install"; runtime: "offline" }>,
+    managedEnvironment: Readonly<Record<string, string>>,
+    env: NodeJS.ProcessEnv,
+    platform: NodeJS.Platform | undefined,
+    architecture: string | undefined,
+): InstallOfflineReranker {
+    const isQualifiedPlatform = (platform ?? process.platform) === "linux"
+        && (architecture ?? process.arch) === "x64";
+    const rejectUnsupportedLateOn = (): never => {
+        throw new CliError(
+            "E_USAGE",
+            `LateOn D32 is supported only on Linux x64/WSL2; received ${platform ?? process.platform} ${architecture ?? process.arch}. Use --reranker none or an offline Ollama installation.`,
+            2,
+        );
+    };
+    if (command.reranker === "none") return "none";
+    if (command.reranker === "lateon") {
+        if (!isQualifiedPlatform) rejectUnsupportedLateOn();
+        return "lateon";
+    }
+
+    const managedOffline = managedEnvironment.SATORI_RUNTIME_PROFILE === "offline";
+    const configured = env.SATORI_RERANKER_PROVIDER?.trim();
+    if (configured) {
+        if (configured !== "lateon" && configured !== "none") {
+            throw new CliError(
+                "E_USAGE",
+                `Offline installation supports SATORI_RERANKER_PROVIDER=lateon or none; received ${configured}.`,
+                2,
+            );
+        }
+        const historicalProfile = managedOffline
+            ? historicalManagedLateOnProfile(managedEnvironment)
+            : null;
+        if (historicalProfile) {
+            throw migrationGuidance(historicalProfile);
+        }
+        if (configured === "lateon" && !isQualifiedPlatform) rejectUnsupportedLateOn();
+        return configured;
+    }
+
+    if (managedOffline) {
+        const managed = managedEnvironment.SATORI_RERANKER_PROVIDER;
+        if (managed === "none") return "none";
+        if (managed === "lateon") {
+            const profile = managedEnvironment.SATORI_LATEON_PROFILE?.trim();
+            if (profile !== DEFAULT_LATEON_PROFILE_ID) {
+                throw migrationGuidance(profile || "(missing)");
+            }
+            if (!isQualifiedPlatform) rejectUnsupportedLateOn();
+            return "lateon";
+        }
+        if (managed) {
+            throw new CliError(
+                "E_USAGE",
+                `Existing offline installation uses unsupported SATORI_RERANKER_PROVIDER=${managed}.`,
+                2,
+            );
+        }
+        const historicalProfile = historicalManagedLateOnProfile(managedEnvironment);
+        if (historicalProfile) {
+            throw migrationGuidance(historicalProfile);
+        }
+        return isQualifiedPlatform ? "lateon" : "none";
+    }
+
+    return isQualifiedPlatform ? "lateon" : "none";
+}
+
+function configuredLateOnModelPath(
+    reranker: InstallOfflineReranker,
+    managedEnvironment: Readonly<Record<string, string>>,
+    env: NodeJS.ProcessEnv,
+): string | undefined {
+    if (reranker === "none") return undefined;
+    const configured = env.SATORI_LATEON_MODEL_PATH?.trim()
+        || managedEnvironment.SATORI_LATEON_MODEL_PATH?.trim();
+    if (!configured) return undefined;
+    if (!path.isAbsolute(configured)) {
+        throw new CliError("E_USAGE", "SATORI_LATEON_MODEL_PATH must be absolute.", 2);
+    }
+    return path.resolve(configured);
+}
+
+function assertDefaultLateOnProfile(
+    reranker: InstallOfflineReranker,
+    env: NodeJS.ProcessEnv,
+    explicitSelection = false,
+): void {
+    if (reranker === "none" || explicitSelection) return;
+    const configured = env.SATORI_LATEON_PROFILE?.trim();
+    if (configured && configured !== DEFAULT_LATEON_PROFILE_ID) {
+        throw new CliError(
+            "E_USAGE",
+            `Offline installation defaults to SATORI_LATEON_PROFILE=${DEFAULT_LATEON_PROFILE_ID}; received ${configured}.`,
+            2,
+        );
+    }
+}
+
+async function resolveVerifiedLateOnModel(
+    homeDir: string,
+    runtimePackageRoot: string | undefined,
+    requestedModelDirectory: string | undefined,
+    fetchImpl: typeof fetch | undefined,
+    authorityLoader: LateOnAuthorityLoader | undefined,
+    nowImpl: (() => number) | undefined,
+): Promise<VerifiedLateOnModel> {
+    if (!runtimePackageRoot) {
+        throw new CliError(
+            "E_INSTALL_PREFLIGHT",
+            "Managed LateOn D32 activation requires a resolvable @zokizuan/satori-mcp package root containing the frozen profile and acquisition manifest; refusing to use a predicted model path.",
+            1,
+        );
+    }
+    try {
+        if (requestedModelDirectory) {
+            return verifyLateOnModelDirectory({
+                modelDirectory: requestedModelDirectory,
+                runtimePackageRoot,
+                authorityLoader,
+            });
+        }
+        return await ensureDefaultLateOnModel({
+            homeDir,
+            runtimePackageRoot,
+            fetchImpl,
+            authorityLoader,
+            nowImpl,
+        });
+    } catch (error) {
+        if (error instanceof CliError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new CliError("E_INSTALL_PREFLIGHT", `LateOn D32 model preflight failed: ${message}`, 1);
+    }
+}
+
 function resolveOfflineOllamaModel(
     command: Extract<InstallCommandInput, { kind: "install"; runtime: "offline" }>,
     managedEnvironment: Readonly<Record<string, string>>,
@@ -2098,10 +2286,14 @@ function upgradeRuntimeSelection(
     homeDir: string,
     managedEnvironment: Readonly<Record<string, string>>,
     env: NodeJS.ProcessEnv,
+    platform: NodeJS.Platform | undefined,
+    architecture: string | undefined,
 ): {
     runtime: InstallRuntime;
     vectorStore: InstallVectorStore;
     ollamaModel?: string;
+    reranker?: InstallOfflineReranker;
+    lateOnModelPath?: string;
     effectiveEnv: NodeJS.ProcessEnv;
 } {
     const effectiveEnv = runtimeEnvironmentWithManagedFallbacks(managedEnvironment, env);
@@ -2114,10 +2306,15 @@ function upgradeRuntimeSelection(
             runtime: "offline",
         };
         const ollamaModel = resolveOfflineOllamaModel(command, managedEnvironment, env);
+        const reranker = resolveOfflineReranker(command, managedEnvironment, env, platform, architecture);
+        assertDefaultLateOnProfile(reranker, env);
+        const lateOnModelPath = configuredLateOnModelPath(reranker, managedEnvironment, env);
         return {
             runtime: "offline",
             vectorStore: "LanceDB",
             ...(ollamaModel ? { ollamaModel } : {}),
+            reranker,
+            ...(lateOnModelPath ? { lateOnModelPath } : {}),
             effectiveEnv,
         };
     }
@@ -2242,7 +2439,13 @@ export async function executeManagedRuntimeUpgrade(
             2,
         );
     }
-    const selection = upgradeRuntimeSelection(homeDir, descriptor.managedEnv, env);
+    const selection = upgradeRuntimeSelection(
+        homeDir,
+        descriptor.managedEnv,
+        env,
+        options.platform,
+        options.architecture,
+    );
     const runtimeClosure: ManagedRuntimeClosure = {
         vectorStore: selection.vectorStore,
         platform: options.platform,
@@ -2296,6 +2499,16 @@ export async function executeManagedRuntimeUpgrade(
         options.onUpgradeProgress?.("verifying");
         const potionAssetsRoot = options.potionAssetsRoot
             ?? resolvePotionAssetsRoot(candidate.packageRoot);
+        const lateOnModel = selection.runtime === "offline" && selection.reranker === "lateon"
+            ? await resolveVerifiedLateOnModel(
+                homeDir,
+                candidate.packageRoot,
+                options.lateOnModelPath ?? selection.lateOnModelPath,
+                options.fetchImpl,
+                options.lateOnAuthorityLoader,
+                options.lateOnNowImpl,
+            )
+            : undefined;
         const preflightDependencies: InstallPreflightDependencies = {
             ...options.preflightDependencies,
             probeLanceDb: options.preflightDependencies?.probeLanceDb
@@ -2307,6 +2520,14 @@ export async function executeManagedRuntimeUpgrade(
             env: selection.effectiveEnv,
             vectorStore: selection.vectorStore,
             ollamaModel: selection.ollamaModel,
+            reranker: selection.reranker,
+            ...(lateOnModel
+                ? {
+                    lateOnModelPath: lateOnModel.modelDirectory,
+                    lateOnProfileId: lateOnModel.profileId,
+                    lateOnActivationPolicy: LATEON_D32_ACTIVATION_POLICY,
+                }
+                : {}),
             potionAssetsRoot,
             platform: options.platform,
             architecture: options.architecture,
@@ -2385,6 +2606,24 @@ export async function executeInstallCommand(
             const preservedOllamaModel = command.runtime === "offline"
                 ? resolveOfflineOllamaModel(command, managedRuntimeEnvironment, env)
                 : undefined;
+            const reranker = command.runtime === "offline"
+                ? resolveOfflineReranker(
+                    command,
+                    managedRuntimeEnvironment,
+                    env,
+                    options.platform,
+                    options.architecture,
+                )
+                : undefined;
+            const explicitRerankerSelection = command.runtime === "offline" && command.reranker !== undefined;
+            if (reranker) assertDefaultLateOnProfile(reranker, env, explicitRerankerSelection);
+            const requestedLateOnModelPath = command.runtime === "offline" && reranker
+                ? options.lateOnModelPath
+                    ?? configuredLateOnModelPath(reranker, managedRuntimeEnvironment, env)
+                : undefined;
+            if (requestedLateOnModelPath && !path.isAbsolute(requestedLateOnModelPath)) {
+                throw new CliError("E_USAGE", "LateOn model path must be absolute.", 2);
+            }
             if (command.runtime === "offline" && !preservedOllamaModel) {
                 assertSupportedPotionPlatform({
                     platform: options.platform,
@@ -2394,13 +2633,26 @@ export async function executeInstallCommand(
             const packageSpecifier = options.packageSpecifier ?? resolveDefaultPackageSpecifier();
             let potionAssetsRoot = options.potionAssetsRoot
                 ?? resolvePotionAssetsRoot(resolveRuntimePackageRoot(homeDir, packageSpecifier));
+            let lateOnModel: VerifiedLateOnModel | undefined;
+            let lateOnModelPath = requestedLateOnModelPath;
             if (command.dryRun) {
+                if (reranker === "lateon" && !lateOnModelPath) {
+                    lateOnModelPath = resolveDefaultLateOnModelDirectory(homeDir);
+                }
                 preflight = { runtimeEnvironment: planInstallRuntimeEnvironment({
                     runtime: command.runtime,
                     homeDir,
                     env: effectiveEnv,
                     vectorStore,
                     ollamaModel: preservedOllamaModel,
+                    reranker,
+                    lateOnModelPath,
+                    ...(reranker === "lateon"
+                        ? {
+                            lateOnProfileId: DEFAULT_LATEON_PROFILE_ID,
+                            lateOnActivationPolicy: LATEON_D32_ACTIVATION_POLICY,
+                        }
+                        : {}),
                     potionAssetsRoot,
                     platform: options.platform,
                     architecture: options.architecture,
@@ -2422,6 +2674,23 @@ export async function executeInstallCommand(
                     installedRuntimeCommand = managedRuntimeCandidate.command;
                     potionAssetsRoot = resolvePotionAssetsRoot(managedRuntimeCandidate.packageRoot);
                 }
+                if (reranker === "lateon") {
+                    const runtimePackageRoot = managedRuntimeCandidate?.packageRoot
+                        ?? (installedRuntimeCommand.args.length === 1
+                            ? readContainingPackageIdentity(
+                                installedRuntimeCommand.args[0],
+                                "@zokizuan/satori-mcp",
+                            )?.packageRoot
+                            : undefined);
+                    lateOnModel = await resolveVerifiedLateOnModel(
+                        homeDir,
+                        runtimePackageRoot,
+                        requestedLateOnModelPath,
+                        options.fetchImpl,
+                        options.lateOnAuthorityLoader,
+                        options.lateOnNowImpl,
+                    );
+                }
                 const preflightDependencies: InstallPreflightDependencies = {
                     ...options.preflightDependencies,
                     probeLanceDb: options.preflightDependencies?.probeLanceDb
@@ -2435,6 +2704,14 @@ export async function executeInstallCommand(
                             env: effectiveEnv,
                             vectorStore,
                             ollamaModel: preservedOllamaModel,
+                            reranker,
+                            ...(lateOnModel
+                                ? {
+                                    lateOnModelPath: lateOnModel.modelDirectory,
+                                    lateOnProfileId: lateOnModel.profileId,
+                                    lateOnActivationPolicy: LATEON_D32_ACTIVATION_POLICY,
+                                }
+                                : {}),
                             potionAssetsRoot,
                             platform: options.platform,
                             architecture: options.architecture,
@@ -2476,7 +2753,16 @@ export async function executeInstallCommand(
                 );
             }
             const currentManagedRuntimeEnvironment = readManagedRuntimeEnvironment(homeDir);
-            for (const key of ["LANCEDB_PATH", "OLLAMA_HOST", "EMBEDDING_PROVIDER", "OLLAMA_MODEL"] as const) {
+            for (const key of [
+                "LANCEDB_PATH",
+                "OLLAMA_HOST",
+                "EMBEDDING_PROVIDER",
+                "OLLAMA_MODEL",
+                "SATORI_RERANKER_PROVIDER",
+                "SATORI_LATEON_MODEL_PATH",
+                "SATORI_LATEON_PROFILE",
+                "SATORI_LATEON_ACTIVATION_POLICY",
+            ] as const) {
                 if (currentManagedRuntimeEnvironment[key] !== managedRuntimeEnvironment[key]) {
                     throw new CliError(
                         "E_INSTALL_PLAN_STALE",

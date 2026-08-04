@@ -82,6 +82,99 @@ test("static runtime config rejects an unbound LateOn selection", () => {
     assert.match(reranker?.message || "", /absolute SATORI_LATEON_MODEL_PATH/);
 });
 
+test("static runtime config exposes the bound LateOn activation policy", () => {
+    const bound = evaluateStaticRuntimeConfig({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: "/opt/satori/potion/satori-potion",
+        POTION_MODEL_PATH: "/opt/satori/potion/model",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+    });
+    const boundCheck = bound.find((check) => check.name === "lateon_activation_policy");
+    assert.equal(boundCheck?.status, "ok");
+    assert.match(boundCheck?.message || "", /LateOn activation policy: lateon_d32_owner_default_v1\./);
+
+    const unbound = evaluateStaticRuntimeConfig({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: "/opt/satori/potion/satori-potion",
+        POTION_MODEL_PATH: "/opt/satori/potion/model",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
+    });
+    const unboundCheck = unbound.find((check) => check.name === "lateon_activation_policy");
+    assert.equal(unboundCheck?.status, "ok");
+    assert.match(unboundCheck?.message || "", /No LateOn activation policy is bound\./);
+});
+
+test("static runtime config rejects an invalid LateOn activation policy", () => {
+    const checks = evaluateStaticRuntimeConfig({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: "/opt/satori/potion/satori-potion",
+        POTION_MODEL_PATH: "/opt/satori/potion/model",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
+        SATORI_LATEON_ACTIVATION_POLICY: "untrusted_policy_v1",
+    });
+    const policy = checks.find((check) => check.name === "lateon_activation_policy");
+    assert.equal(policy?.status, "error");
+    assert.match(policy?.message || "", /Invalid LateOn activation policy: untrusted_policy_v1\./);
+});
+
+test("static runtime config rejects a LateOn activation policy without the lateon provider", () => {
+    const checks = evaluateStaticRuntimeConfig({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: "/opt/satori/potion/satori-potion",
+        POTION_MODEL_PATH: "/opt/satori/potion/model",
+        SATORI_RERANKER_PROVIDER: "none",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+    });
+    const policy = checks.find((check) => check.name === "lateon_activation_policy");
+    assert.equal(policy?.status, "error");
+    assert.match(
+        policy?.message || "",
+        /SATORI_LATEON_ACTIVATION_POLICY requires SATORI_RERANKER_PROVIDER=lateon; received none\./,
+    );
+});
+
+test("static runtime config rejects the owner policy with a D16 profile", () => {
+    const checks = evaluateStaticRuntimeConfig({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        EMBEDDING_PROVIDER: "Potion",
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+        EMBEDDING_OUTPUT_DIMENSION: "256",
+        POTION_HELPER_PATH: "/opt/satori/potion/satori-potion",
+        POTION_MODEL_PATH: "/opt/satori/potion/model",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
+        SATORI_LATEON_PROFILE: "lateon_projection_v2_d16_v1",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+    });
+    const policy = checks.find((check) => check.name === "lateon_activation_policy");
+    assert.equal(policy?.status, "error");
+    assert.match(
+        policy?.message || "",
+        /SATORI_LATEON_ACTIVATION_POLICY=lateon_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2; received lateon_projection_v2_d16_v1\./,
+    );
+});
+
 test("static runtime config rejects a changed Potion model identity", () => {
     const checks = evaluateStaticRuntimeConfig({
         SATORI_RUNTIME_PROFILE: "offline",

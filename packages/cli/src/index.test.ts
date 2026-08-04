@@ -10,6 +10,11 @@ import type { DoctorResult } from "./doctor.js";
 import { CliError } from "./errors.js";
 import { isExecutedDirectlyForPaths, runCli } from "./index.js";
 import { CliUpgradeDelegationStartError } from "./upgrade.js";
+import {
+    writeLateOnAcquisitionFixture,
+    writeLateOnModelDirectory,
+} from "./test-fixtures/lateon-fixture.js";
+import { loadAcquisitionAuthority } from "./lateon-model-store.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_PACKAGE_VERSION = (
@@ -146,9 +151,18 @@ function createMockSession(mode: "normal" | "envelope" | "timeout_error" | "mana
 }
 
 function fakeInstallRuntimeCommand(homeDir: string) {
+    const packageRoot = path.join(homeDir, ".satori", "mcp-runtime", "fake", "node_modules", "@zokizuan", "satori-mcp");
+    fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
+        name: "@zokizuan/satori-mcp",
+        version: "0.0.0-test",
+        bin: { satori: "dist/index.js" },
+    }), "utf8");
+    fs.writeFileSync(path.join(packageRoot, "dist", "index.js"), "", "utf8");
+    writeLateOnAcquisitionFixture(packageRoot);
     return {
         command: process.execPath,
-        args: [path.join(homeDir, ".satori", "mcp-runtime", "fake", "node_modules", "@zokizuan", "satori-mcp", "dist", "index.js")],
+        args: [path.join(packageRoot, "dist", "index.js")],
     };
 }
 
@@ -381,15 +395,18 @@ test("runCli install updates config and emits a quiet human summary", async () =
     const io = captureIo();
 
     try {
+        const lateOnModelPath = path.join(homeDir, "lateon-model");
+        writeLateOnModelDirectory(lateOnModelPath);
         const exitCode = await runCli(["install", "--client", "codex"], {
             writeStdout: io.writeStdout,
             writeStderr: io.writeStderr,
-            env: { ...process.env, HOME: homeDir },
+            env: { ...process.env, HOME: homeDir, SATORI_LATEON_MODEL_PATH: lateOnModelPath },
             installabilityVerifier: () => "@zokizuan/satori-mcp@4.4.1",
             installPreflightRunner: async () => ({
                 runtimeEnvironment: Object.freeze({ SATORI_RUNTIME_PROFILE: "connected" }),
             }),
             installRuntimeCommand: fakeInstallRuntimeCommand(homeDir),
+            installLateOnAuthorityLoader: loadAcquisitionAuthority,
             installPostflightRunner: async ({ homeDir: verifiedHome, writeStderr }) => {
                 assert.equal(verifiedHome, homeDir);
                 writeStderr("[MCP] noisy startup detail\n");
@@ -631,15 +648,18 @@ test("runCli install preserves the structured receipt when JSON is requested", a
     const io = captureIo();
 
     try {
+        const lateOnModelPath = path.join(homeDir, "lateon-model");
+        writeLateOnModelDirectory(lateOnModelPath);
         const exitCode = await runCli(["--format", "json", "install", "--client", "codex"], {
             writeStdout: io.writeStdout,
             writeStderr: io.writeStderr,
-            env: { ...process.env, HOME: homeDir },
+            env: { ...process.env, HOME: homeDir, SATORI_LATEON_MODEL_PATH: lateOnModelPath },
             installabilityVerifier: () => "@zokizuan/satori-mcp@4.4.1",
             installPreflightRunner: async () => ({
                 runtimeEnvironment: Object.freeze({ SATORI_RUNTIME_PROFILE: "offline" }),
             }),
             installRuntimeCommand: fakeInstallRuntimeCommand(homeDir),
+            installLateOnAuthorityLoader: loadAcquisitionAuthority,
             installPostflightRunner: async () => ({
                 status: "ok",
                 checks: [{ name: "launcher", status: "ok", message: "verified" }],

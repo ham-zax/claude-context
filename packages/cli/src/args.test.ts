@@ -86,6 +86,20 @@ test("parseCliArgs defaults offline installation to bundled Potion", () => {
     if (parsed.command.kind !== "install") assert.fail("Expected install command parsing");
     assert.equal(parsed.command.runtime, "offline");
     assert.equal(parsed.command.ollamaModel, undefined);
+    assert.equal(parsed.command.reranker, undefined);
+});
+
+test("parseCliArgs supports the offline LateOn reranker opt-out", () => {
+    const parsed = parseCliArgs(["install", "--runtime", "offline", "--reranker", "none"]);
+    assert.equal(parsed.command.kind, "install");
+    if (parsed.command.kind !== "install") assert.fail("Expected install command parsing");
+    assert.equal(parsed.command.runtime, "offline");
+    assert.equal(parsed.command.reranker, "none");
+
+    assert.throws(
+        () => parseCliArgs(["install", "--runtime", "voyage", "--reranker", "lateon"]),
+        /only valid with --runtime offline/,
+    );
 });
 
 test("parseCliArgs accepts an explicit connected Milvus backend", () => {

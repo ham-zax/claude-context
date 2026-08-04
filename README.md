@@ -40,7 +40,8 @@ Index /absolute/path/to/repo with Satori, then find where auth refresh is handle
 
 That is the complete local path. Satori installs a stable launcher under `~/.satori/`; your agent does not download the server again on every startup.
 
-On Linux x64 and WSL2, the default offline Potion + LanceDB runtime is shared
+On Linux x64 and WSL2, the default offline Potion + LanceDB runtime uses LateOn
+D32 as its query-time reranker and is shared
 behind that launcher. Multiple compatible Codex, Claude Code, OpenCode, or
 subagent sessions attach as independent MCP sessions to one private local host,
 shared provider/LanceDB state, and one Potion worker. The host uses a user-only
@@ -277,24 +278,47 @@ the existing graph-only activation path. V3, missing, corrupt, changed, or
 ambiguous source authority requires a reindex instead of fabricating a
 compatible publication.
 
-## Optional Local Reranking
+## Offline Local Reranking
 
-Offline search can optionally rerank eligible candidates with the Apache-2.0
-`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint. Model weights are not
-bundled. Put the pinned model files in one shared directory outside the
-versioned MCP runtime, then configure:
+Offline install defaults to reranking eligible candidates with the Apache-2.0
+`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint at projection-v2 depth 32.
+D32 is operationally qualified but not held-out qualified; it became the
+managed offline default through an explicit owner activation decision scoped to
+Linux x64/WSL2 managed offline installations. Model weights are not bundled in
+each versioned MCP runtime. The CLI downloads the roughly 72 MB pinned closure
+once into `~/.satori/models/`, verifies every artifact, and reuses it across
+upgrades. Disable neural reranking explicitly with:
+
+```bash
+satori install --runtime offline --reranker none
+```
+
+`--reranker none` is the explicit opt-out: it keeps the selected embedding
+provider plus baseline ordering (exact + BM25 + single vector). With Ollama
+embeddings that is the Ollama model plus baseline ordering, not "Potion +
+BM25". The runtime also falls back to that baseline automatically on any LateOn
+failure; automatic failure fallback and explicit opt-out are different
+concepts.
+
+Direct MCP runtimes can select the same reranker with:
 
 ```text
 SATORI_RERANKER_PROVIDER=lateon
 SATORI_LATEON_MODEL_PATH=/absolute/path/to/LateOn-Code-edge
 ```
 
-The compatibility default remains the projection-v1 depth-16 profile. Two
-explicit projection-v2 choices are also available:
+The default profile is:
 
 ```text
+SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2
+```
+
+Explicit D16 choices remain available for compatible developer
+configurations:
+
+```text
+SATORI_LATEON_PROFILE=lateon_projection_v1_d16_legacy
 SATORI_LATEON_PROFILE=lateon_projection_v2_d16_v1
-SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v1
 ```
 
 D16 and D32 are distinct identity-bearing profiles. Satori never switches

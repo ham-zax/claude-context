@@ -26,7 +26,9 @@ import {
     type ResolvedOllamaModelIdentity,
 } from "@zokizuan/satori-core";
 import {
+    LATEON_ACTIVATION_POLICY_IDS,
     LATEON_RUNTIME_PROFILE_IDS,
+    type LateOnActivationPolicyId,
     type LateOnRuntimeProfileId,
 } from "./server/lateon-reranker-protocol.js";
 
@@ -214,6 +216,7 @@ export interface ContextMcpConfig {
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
     lateOnModelPath?: string;
     lateOnProfileId?: LateOnRuntimeProfileId;
+    lateOnActivationPolicy?: LateOnActivationPolicyId;
     lateOnRequestDeadlineMs?: number;
     lateOnMaximumQueueWaitMs?: number;
     lateOnRerankerStageDeadlineMs?: number;
@@ -721,7 +724,40 @@ export function createMcpConfig(): ContextMcpConfig {
             `Invalid SATORI_LATEON_PROFILE '${lateOnProfileRaw}'. Expected one of: ${knownLateOnProfiles.join(', ')}.`,
         );
     }
-    const lateOnProfileId = lateOnProfileRaw as LateOnRuntimeProfileId | undefined;
+    const lateOnProfileId = rerankerProvider === 'lateon'
+        ? (lateOnProfileRaw as LateOnRuntimeProfileId | undefined)
+            ?? LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32
+        : undefined;
+    const lateOnActivationPolicyRaw = envManager.get('SATORI_LATEON_ACTIVATION_POLICY');
+    const knownLateOnActivationPolicies = Object.values(LATEON_ACTIVATION_POLICY_IDS);
+    if (
+        lateOnActivationPolicyRaw
+        && !knownLateOnActivationPolicies.includes(
+            lateOnActivationPolicyRaw as LateOnActivationPolicyId,
+        )
+    ) {
+        throw new Error(
+            `Invalid SATORI_LATEON_ACTIVATION_POLICY '${lateOnActivationPolicyRaw}'. `
+            + `Expected one of: ${knownLateOnActivationPolicies.join(', ')}.`,
+        );
+    }
+    if (lateOnActivationPolicyRaw && rerankerProvider !== 'lateon') {
+        throw new Error(
+            `SATORI_LATEON_ACTIVATION_POLICY requires SATORI_RERANKER_PROVIDER=lateon; `
+            + `received ${rerankerProvider}.`,
+        );
+    }
+    if (
+        lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32
+        && lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32
+    ) {
+        throw new Error(
+            `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32} `
+            + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32}; `
+            + `received ${lateOnProfileId}.`,
+        );
+    }
+    const lateOnActivationPolicy = lateOnActivationPolicyRaw as LateOnActivationPolicyId | undefined;
     const lateOnMaximumQueueWaitMs = rerankerProvider === 'lateon'
         ? parseOptionalPositiveInteger('SATORI_LATEON_MAX_QUEUE_WAIT_MS', 300_000)
         : undefined;
@@ -821,6 +857,7 @@ export function createMcpConfig(): ContextMcpConfig {
         rankerModel,
         ...(lateOnModelPath ? { lateOnModelPath } : {}),
         ...(lateOnProfileId ? { lateOnProfileId } : {}),
+        ...(lateOnActivationPolicy ? { lateOnActivationPolicy } : {}),
         ...(lateOnRequestDeadlineMs !== undefined ? { lateOnRequestDeadlineMs } : {}),
         ...(lateOnMaximumQueueWaitMs !== undefined ? { lateOnMaximumQueueWaitMs } : {}),
         ...(lateOnRerankerStageDeadlineMs !== undefined

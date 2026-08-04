@@ -30,6 +30,7 @@ export type SharedRuntimeIdentity = Readonly<{
     voyageRerankerModel: string;
     lateOnModelPath: string;
     lateOnProfile: string;
+    lateOnActivationPolicy: string;
     lateOnRequestDeadlineMs: string;
     lateOnMaximumQueueWaitMs: string;
     lateOnRerankerStageDeadlineMs: string;
@@ -164,6 +165,7 @@ export function buildSharedRuntimeIdentity(
             ? canonicalizePath(env.SATORI_LATEON_MODEL_PATH)
             : "",
         lateOnProfile: env.SATORI_LATEON_PROFILE ?? "",
+        lateOnActivationPolicy: env.SATORI_LATEON_ACTIVATION_POLICY ?? "",
         lateOnRequestDeadlineMs: env.SATORI_LATEON_REQUEST_DEADLINE_MS ?? "",
         lateOnMaximumQueueWaitMs: env.SATORI_LATEON_MAX_QUEUE_WAIT_MS ?? "",
         lateOnRerankerStageDeadlineMs:

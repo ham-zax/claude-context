@@ -17,7 +17,18 @@ satori doctor
 The package installs the `satori` command. Run `satori` without arguments for
 human-readable help.
 
-For the default offline Potion + LanceDB runtime on Linux x64/WSL2, compatible
+For the default offline Potion + LanceDB runtime on Linux x64/WSL2, LateOn D32
+reranks the bounded query-time candidate set. D32 is operationally qualified but
+not held-out qualified; it became the managed offline default through an
+explicit owner activation decision scoped to Linux x64/WSL2 managed offline
+installations. The installer downloads its pinned Apache-2.0 model closure once
+into `~/.satori/models/`, verifies every artifact, and reuses it across MCP
+upgrades. `--reranker none` is the explicit opt-out: it keeps the selected
+embedding provider plus baseline ordering (exact + BM25 + single vector) — with
+Ollama embeddings that is the Ollama model plus baseline ordering, not "Potion +
+BM25". The runtime also falls back to that baseline automatically on any LateOn
+failure; automatic failure fallback and explicit opt-out are different
+concepts. Compatible
 clients attach through one private local host instead of each starting a full
 MCP runtime. Each client still has its own MCP session and continuations. The
 shared host idles out after disconnect and is not used for Voyage, Milvus, or
@@ -47,7 +58,11 @@ The latest CLI manifest is the release authority: it names one exact MCP/Core cl
 
 For a no-install invocation, replace `satori` with `npx -y @zokizuan/satori-cli@latest`.
 
-The offline package carries a checksum-pinned 36.0 MiB Potion model/helper closure. A representative Satori publication indexed 10,830 chunks in 34.46 seconds on CPU, with 154.543 ms warm-search p95 after publication.
+The offline package carries a checksum-pinned 36.0 MiB Potion model/helper
+closure. The default LateOn reranker adds one shared download of about 72 MB,
+not one copy per MCP runtime version. A representative Satori publication
+indexed 10,830 chunks in 34.46 seconds on CPU, with 154.543 ms warm-search p95
+after publication.
 
 The qualified native deployment contract requires at least 2 GiB of available
 runtime capacity. This is a deployment allowance, not measured steady
@@ -59,9 +74,10 @@ capacity, not a proven plateau or multi-day guarantee.
 
 ```text
 install [--client all|codex|claude|opencode]
-        [--runtime offline|voyage] # defaults to offline Potion
+        [--runtime offline|voyage] # defaults to offline Potion + LateOn D32
         [--vector-store lancedb|milvus]
         [--ollama-model <model>]
+        [--reranker lateon|none]
         [--profile default|minimal|all-text]
         [--dry-run]
         [--install-guidance-hook]

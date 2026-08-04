@@ -79,13 +79,15 @@ async function assertOperationalReason(
     ));
 }
 
-test("LateOn runtime profiles expose immutable v1, projection-v2 D16, and D32 contracts", () => {
-    const legacy = loadLateOnRuntimeProfile();
+test("LateOn runtime profiles default to D32 while retaining explicit legacy and D16 contracts", () => {
+    const defaultProfile = loadLateOnRuntimeProfile();
+    const legacy = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.legacyD16);
     const d16 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.projectionV2D16);
     const d32 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32);
 
+    assert.equal(defaultProfile.identity.projectionVersion, "search_rerank_document_v2");
+    assert.equal(defaultProfile.inference.candidateDepth, 32);
     assert.equal(legacy.identity.projectionVersion, "search_rerank_document_v1");
-    assert.equal(legacy.inference.candidateDepth, 16);
     assert.equal(d16.identity.projectionVersion, "search_rerank_document_v2");
     assert.equal(d16.inference.candidateDepth, 16);
     assert.equal(d32.identity.projectionVersion, "search_rerank_document_v2");
@@ -145,9 +147,10 @@ test("LateOn identity binds named profile selection and effective operational bo
     }), /thread policy is immutable/);
 });
 
-test("LateOn preserves the unmodified legacy v1 profile identity and startup behavior", async (t) => {
+test("LateOn preserves the explicitly selected legacy v1 profile identity and startup behavior", async (t) => {
     const reranker = new LateOnReranker({
         modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.legacyD16,
         workerPath: createFakeWorker(t, { readyDelayMilliseconds: 50 }),
     });
     t.after(() => reranker.close());

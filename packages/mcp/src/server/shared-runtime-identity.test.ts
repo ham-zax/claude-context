@@ -79,8 +79,18 @@ test("shared runtime identity is exact, non-secret, and bounded to eligible Linu
         SATORI_RERANKER_PROVIDER: "lateon",
         SATORI_LATEON_MODEL_PATH: path.join(root, "lateon"),
         SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v2_d32_v2",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
     });
     assert.notEqual(lateOnD16Identity.hash, lateOnD32Identity.hash);
+    assert.notEqual(
+        buildSharedRuntimeIdentity(runtimeEntry, {
+            ...env,
+            SATORI_RERANKER_PROVIDER: "lateon",
+            SATORI_LATEON_MODEL_PATH: path.join(root, "lateon"),
+            SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v2_d32_v2",
+        }).hash,
+        lateOnD32Identity.hash,
+    );
     assert.notEqual(
         buildSharedRuntimeIdentity(runtimeEntry, {
             ...env,

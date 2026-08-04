@@ -7,9 +7,15 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { resolveLanceDbNativePackage } from "../src/managed-runtime-closure.js";
+import {
+    DEFAULT_LATEON_PROFILE_ID,
+    readLateOnAcquisitionAuthority,
+} from "../src/lateon-model-store.js";
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 500 * 1024 * 1024;
+// The D32-capable closure measured 666,589,703 bytes after optional native
+// packages were omitted and exactly one LanceDB native package was selected.
+const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 700 * 1024 * 1024;
 
 interface PackageManifest {
     name?: unknown;
@@ -131,6 +137,7 @@ function installAndVerifyPackedReleaseClosure(
     env: NodeJS.ProcessEnv,
 ): {
     cliEntry: string;
+    packedCliRoot: string;
     packedMcpRoot: string;
 } {
     const sourceCli = readManifest(path.join(sourceRoots.cli, "package.json"));
@@ -226,6 +233,7 @@ function installAndVerifyPackedReleaseClosure(
 
     return {
         cliEntry,
+        packedCliRoot: cliRoot,
         packedMcpRoot: mcpRoot,
     };
 }
@@ -245,10 +253,78 @@ function assertManagedRuntimeSizeBudget(installRoot: string): void {
         return;
     }
     const installedBytes = directorySize(installRoot);
+    console.log(`[release:smoke] Packed managed runtime is ${installedBytes} bytes; budget is ${MAX_LINUX_X64_MANAGED_RUNTIME_BYTES} bytes.`);
     if (installedBytes > MAX_LINUX_X64_MANAGED_RUNTIME_BYTES) {
         throw new Error(
             `Packed Linux x64 managed runtime is ${installedBytes} bytes; `
             + `budget is ${MAX_LINUX_X64_MANAGED_RUNTIME_BYTES} bytes.`,
+        );
+    }
+}
+
+function listFilesRecursive(directory: string): string[] {
+    const entries = fs.readdirSync(directory, { withFileTypes: true });
+    return entries.flatMap((entry) => {
+        const entryPath = path.join(directory, entry.name);
+        return entry.isDirectory()
+            ? listFilesRecursive(entryPath)
+            : [entryPath];
+    });
+}
+
+function assertPackedLateOnAcquisitionAuthority(packedMcpRoot: string, packedCliRoot: string): void {
+    const assetsRoot = path.join(packedMcpRoot, "assets", "lateon");
+    const shippedFiles = fs.existsSync(assetsRoot)
+        ? fs.readdirSync(assetsRoot).sort()
+        : [];
+    for (const requiredFile of [
+        "runtime-profile-v2-d32.json",
+        "runtime-profile-v2-d32.acquisition.json",
+    ]) {
+        if (!shippedFiles.includes(requiredFile)) {
+            throw new Error(
+                `Packed LateOn assets must ship '${requiredFile}'; received ${JSON.stringify(shippedFiles)}.`,
+            );
+        }
+    }
+    const authority = readLateOnAcquisitionAuthority(packedMcpRoot);
+    if (authority.profileId !== DEFAULT_LATEON_PROFILE_ID) {
+        throw new Error(
+            `Packed LateOn acquisition authority must be ${DEFAULT_LATEON_PROFILE_ID}; received ${authority.profileId}.`,
+        );
+    }
+    for (const artifact of authority.artifacts) {
+        const artifactPath = path.join(assetsRoot, artifact.path);
+        if (fs.existsSync(artifactPath)) {
+            throw new Error(`Packed MCP must not ship LateOn weights; found '${artifact.path}'.`);
+        }
+    }
+    for (const packedRoot of [packedMcpRoot, packedCliRoot]) {
+        const onnxArtifacts = listFilesRecursive(packedRoot)
+            .filter((entry) => entry.toLowerCase().endsWith(".onnx"));
+        if (onnxArtifacts.length > 0) {
+            throw new Error(
+                `Packed release closure must not ship ONNX weights: ${onnxArtifacts.join(", ")}.`,
+            );
+        }
+    }
+}
+
+function assertPackedCliLateOnAcquisition(packedCliRoot: string): void {
+    const storePath = path.join(packedCliRoot, "dist", "lateon-model-store.js");
+    const installPath = path.join(packedCliRoot, "dist", "install.js");
+    if (!fs.existsSync(storePath) || !fs.existsSync(installPath)) {
+        throw new Error("Packed CLI must ship the LateOn acquisition module.");
+    }
+    const storeSource = fs.readFileSync(storePath, "utf8");
+    const policyMissing = !storeSource.includes("lateon_d32_owner_default_v1");
+    const frozenDigestMissing = !storeSource.includes("5987f5fe649cb69d1d6a4bdd91c8dfc5c01ee08507ce1cbe5194fe72fc13ec84");
+    const installSource = fs.readFileSync(installPath, "utf8");
+    const resolutionMissing = !installSource.includes("resolveVerifiedLateOnModel");
+    if (policyMissing || frozenDigestMissing || resolutionMissing) {
+        throw new Error(
+            "Packed CLI acquisition flow must carry the frozen D32 identity "
+            + `(policy=${!policyMissing}, frozenDigest=${!frozenDigestMissing}, resolver=${!resolutionMissing}).`,
         );
     }
 }
@@ -344,10 +420,12 @@ function main(): void {
             baseEnv,
         );
         assertManagedRuntimeSizeBudget(smokeExecDir);
+        assertPackedLateOnAcquisitionAuthority(packed.packedMcpRoot, packed.packedCliRoot);
+        assertPackedCliLateOnAcquisition(packed.packedCliRoot);
         assertPackedCliHelp(runCliSmoke(["--format", "json", "--help"], packed.cliEntry, smokeExecDir, baseEnv));
         const doctorEnv = packedPotionSmokeEnv(baseEnv, packed.packedMcpRoot, smokeHomeDir);
         runCliSmoke(["doctor"], packed.cliEntry, smokeExecDir, doctorEnv);
-        console.log("[release:smoke] Packed CLI→MCP→Core closure and offline Potion runtime passed.");
+        console.log("[release:smoke] Packed CLI→MCP→Core closure, offline Potion runtime, and LateOn D32 acquisition authority passed.");
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const detail = error instanceof Error ? npmOutput(error) : "";
