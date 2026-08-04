@@ -13,8 +13,9 @@ import {
 } from "../src/lateon-model-store.js";
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-// The D32-capable closure measured 666,589,703 bytes after optional native
-// packages were omitted and exactly one LanceDB native package was selected.
+// The D32-capable closure measured approximately 666.6 MB after optional
+// native packages were omitted and exactly one LanceDB native package was
+// selected.
 const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 700 * 1024 * 1024;
 
 interface PackageManifest {
@@ -425,7 +426,7 @@ function main(): void {
         assertPackedCliHelp(runCliSmoke(["--format", "json", "--help"], packed.cliEntry, smokeExecDir, baseEnv));
         const doctorEnv = packedPotionSmokeEnv(baseEnv, packed.packedMcpRoot, smokeHomeDir);
         runCliSmoke(["doctor"], packed.cliEntry, smokeExecDir, doctorEnv);
-        console.log("[release:smoke] Packed CLI→MCP→Core closure, offline Potion runtime, and LateOn D32 acquisition authority passed.");
+        console.log("[release:smoke] Packed CLI->MCP->Core closure, offline Potion runtime, and LateOn D32 acquisition authority passed.");
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const detail = error instanceof Error ? npmOutput(error) : "";

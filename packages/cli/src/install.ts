@@ -1756,7 +1756,7 @@ function historicalManagedLateOnProfile(
 function migrationGuidance(profile: string): CliError {
     return new CliError(
         "E_USAGE",
-        `Existing managed LateOn installation uses profile ${profile}, which is treated as historical D16. Rerun with --reranker lateon to migrate to D32 or --reranker none to disable LateOn.`,
+        `Existing managed LateOn installation uses profile ${profile}, which is treated as historical D16. Run \`satori install --runtime offline --reranker lateon\` to migrate to D32, or \`satori install --runtime offline --reranker none\` to disable LateOn.`,
         2,
     );
 }

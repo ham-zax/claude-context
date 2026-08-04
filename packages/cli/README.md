@@ -24,7 +24,7 @@ explicit owner activation decision scoped to Linux x64/WSL2 managed offline
 installations. The installer downloads its pinned Apache-2.0 model closure once
 into `~/.satori/models/`, verifies every artifact, and reuses it across MCP
 upgrades. `--reranker none` is the explicit opt-out: it keeps the selected
-embedding provider plus baseline ordering (exact + BM25 + single vector) — with
+embedding provider plus baseline ordering (exact + BM25 + single vector) - with
 Ollama embeddings that is the Ollama model plus baseline ordering, not "Potion +
 BM25". The runtime also falls back to that baseline automatically on any LateOn
 failure; automatic failure fallback and explicit opt-out are different

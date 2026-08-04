@@ -50,7 +50,7 @@ This decision therefore rests on:
 | Risk | Evidence it applies | Accepted because |
 | --- | --- | --- |
 | D32 quality is unproven on held-out tasks | O3 protocol terminal; no quality metrics exist | Sole user; operational gates passed; fallback is one flag away |
-| Default activation widens blast radius of a D32 defect | Managed default on every new Linux x64 offline install | Owner is the only user; `--reranker none` restores baseline B; profile and acquisition manifest pin one immutable closure |
+| Default activation widens blast radius of a D32 defect | Managed default on every new supported offline install and the explicitly authorized legacy no-provider upgrade | Owner is the only user; `--reranker none` restores baseline B; profile and acquisition manifest pin one immutable closure |
 
 ## Installer semantics
 

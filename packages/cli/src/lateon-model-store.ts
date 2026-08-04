@@ -2,7 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-/** Display-only fallback used when a dry-run has no target MCP package yet. */
+/**
+ * Managed D32 profile identity used for planning and migration checks.
+ * Real installation still binds the target MCP package's frozen authority.
+ */
 export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v2_d32_v2";
 export const LATEON_D32_ACTIVATION_POLICY = "lateon_d32_owner_default_v1";
 

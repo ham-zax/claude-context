@@ -875,7 +875,7 @@ test("managed D16 + env provider lateon without a CLI flag rejects with migratio
             env: { SATORI_RERANKER_PROVIDER: "lateon" },
             platform: "linux",
             architecture: "x64",
-        }), /Existing managed LateOn installation uses profile lateon_projection_v2_d16_v1, which is treated as historical D16\. Rerun with --reranker lateon to migrate to D32 or --reranker none to disable LateOn\./);
+        }), /Existing managed LateOn installation uses profile lateon_projection_v2_d16_v1, which is treated as historical D16\. Run `satori install --runtime offline --reranker lateon` to migrate to D32, or `satori install --runtime offline --reranker none` to disable LateOn\./);
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
     }
@@ -895,7 +895,7 @@ test("managed D16 + env provider none without a CLI flag rejects with migration 
             env: { SATORI_RERANKER_PROVIDER: "none" },
             platform: "linux",
             architecture: "x64",
-        }), /Existing managed LateOn installation uses profile lateon_projection_v2_d16_v1, which is treated as historical D16\. Rerun with --reranker lateon to migrate to D32 or --reranker none to disable LateOn\./);
+        }), /Existing managed LateOn installation uses profile lateon_projection_v2_d16_v1, which is treated as historical D16\. Run `satori install --runtime offline --reranker lateon` to migrate to D32, or `satori install --runtime offline --reranker none` to disable LateOn\./);
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
     }
