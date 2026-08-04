@@ -33,33 +33,88 @@ export function normalizeCandidateStderr(text: string): string {
     return normalized;
 }
 
-function dropToNewestTail(text: string): string {
-    if (Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES) {
-        return text;
+const TRUNCATION_MARKER = "[stderr line truncated]\n";
+
+function retainCompleteLines(text: string): string {
+    let retained = text;
+    while (Buffer.byteLength(retained, "utf8") > CANDIDATE_STDERR_LIMIT_BYTES) {
+        const newline = retained.indexOf("\n");
+        if (newline === -1) {
+            return TRUNCATION_MARKER;
+        }
+        retained = retained.slice(newline + 1);
     }
-    let low = 0;
-    let high = text.length;
-    while (low < high) {
-        const mid = (low + high) >> 1;
-        if (Buffer.byteLength(text.slice(mid), "utf8") > CANDIDATE_STDERR_LIMIT_BYTES) {
-            low = mid + 1;
-        } else {
-            high = mid;
+    return retained;
+}
+
+function normalizedLineOrMarker(rawLine: string): string {
+    if (Buffer.byteLength(rawLine, "utf8") > CANDIDATE_STDERR_LIMIT_BYTES) {
+        return TRUNCATION_MARKER;
+    }
+    const normalized = normalizeCandidateStderr(rawLine);
+    return Buffer.byteLength(normalized, "utf8") > CANDIDATE_STDERR_LIMIT_BYTES
+        ? TRUNCATION_MARKER
+        : normalized;
+}
+
+function splitCompleteLines(input: string): { lines: string[]; remainder: string } {
+    const lines: string[] = [];
+    let start = 0;
+    for (let index = 0; index < input.length; index += 1) {
+        const character = input[index];
+        if (character === "\n") {
+            lines.push(input.slice(start, index + 1));
+            start = index + 1;
+        } else if (character === "\r") {
+            if (index + 1 === input.length) {
+                break;
+            }
+            const end = input[index + 1] === "\n" ? index + 2 : index + 1;
+            lines.push(input.slice(start, end));
+            start = end;
+            index = end - 1;
         }
     }
-    return text.slice(low);
+    return { lines, remainder: input.slice(start) };
 }
 
 export function createCandidateStderrCollector(): CandidateStderrCollector {
     let rawBuffer = "";
     let normalizedBuffer = "";
+    let discardingOversizedLine = false;
     return {
         write(chunk: string): void {
-            rawBuffer = dropToNewestTail(rawBuffer + chunk);
-            normalizedBuffer = dropToNewestTail(normalizeCandidateStderr(rawBuffer));
+            let input = rawBuffer + chunk;
+            if (discardingOversizedLine) {
+                const firstNewline = input.indexOf("\n");
+                if (firstNewline === -1) {
+                    rawBuffer = "";
+                    return;
+                }
+                input = input.slice(firstNewline + 1);
+                discardingOversizedLine = false;
+            }
+
+            const split = splitCompleteLines(input);
+            for (const line of split.lines) {
+                normalizedBuffer = retainCompleteLines(
+                    normalizedBuffer + normalizedLineOrMarker(line),
+                );
+            }
+            rawBuffer = split.remainder;
+            if (Buffer.byteLength(rawBuffer, "utf8") > CANDIDATE_STDERR_LIMIT_BYTES) {
+                normalizedBuffer = retainCompleteLines(normalizedBuffer + TRUNCATION_MARKER);
+                rawBuffer = "";
+                discardingOversizedLine = true;
+            }
         },
         text(): string {
-            return normalizedBuffer;
+            if (discardingOversizedLine || rawBuffer === "") {
+                return normalizedBuffer;
+            }
+            return retainCompleteLines(
+                normalizedBuffer + normalizeCandidateStderr(rawBuffer),
+            );
         },
     };
 }

@@ -110,6 +110,7 @@ export class CliMcpSession {
         if (!stderr) {
             return;
         }
+        (stderr as import("node:stream").Readable).setEncoding("utf8");
         stderr.on("data", (chunk) => {
             this.writeStderr(String(chunk));
         });

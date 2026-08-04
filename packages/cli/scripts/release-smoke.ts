@@ -16,9 +16,8 @@ import {
 } from "../src/lateon-model-store.js";
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-// The D32-capable closure measured approximately 666.6 MB after optional
-// native packages were omitted and exactly the LanceDB and oxc-parser native
-// packages were selected.
+// Optional native packages remain omitted; the host-specific LanceDB and
+// oxc-parser bindings are installed explicitly and measured by the gate below.
 const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 700 * 1024 * 1024;
 
 interface PackageManifest {
@@ -236,6 +235,32 @@ function installAndVerifyPackedReleaseClosure(
         || resolvedCore.version !== coreVersion
     ) {
         throw new Error("Packed MCP did not resolve the expected packed Core version.");
+    }
+
+    const requireFromMcp = createRequire(mcpEntry);
+    const resolvedOxcPackageJson = requireFromMcp.resolve("oxc-parser/package.json");
+    const oxcNativeSpecifier = resolveOxcParserNativePackage({ vectorStore: "LanceDB" });
+    const oxcNativePackageName = oxcNativeSpecifier.slice(0, oxcNativeSpecifier.lastIndexOf("@"));
+    const resolvedOxcBinding = requireFromMcp.resolve(oxcNativePackageName);
+    if (!isPathWithin(installRoot, resolvedOxcPackageJson)) {
+        throw new Error("Packed MCP resolved oxc-parser outside the installed release closure.");
+    }
+    if (!isPathWithin(installRoot, resolvedOxcBinding)) {
+        throw new Error("Packed MCP resolved the oxc-parser native binding outside the installed release closure.");
+    }
+    const { parseSync } = requireFromMcp("oxc-parser") as {
+        parseSync?: (
+            filePath: string,
+            sourceText: string,
+            options: { lang: string; sourceType: string },
+        ) => { program?: unknown; errors?: Array<{ severity?: string }> };
+    };
+    const parsed = parseSync?.("probe.ts", "export const value: number = 1;", {
+        lang: "ts",
+        sourceType: "module",
+    });
+    if (!parsed?.program || parsed.errors?.some((error) => error.severity === "Error")) {
+        throw new Error("Packed oxc-parser did not parse the TypeScript probe source.");
     }
 
     return {

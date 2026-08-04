@@ -177,7 +177,7 @@ export function formatDoctorText(result: DoctorResult, options: DoctorTextOption
         `${countLabel(errors.length, "problem")} · ${countLabel(warnings.length, "warning")} · ${countLabel(passed.length, "check")} passed`,
     ];
 
-    if (result.managedRuntime?.mcpVersion) {
+    if (result.managedRuntime?.status === "active" && result.managedRuntime.mcpVersion) {
         const cliVersion = result.packageVersions
             .find((pkg) => pkg.name.endsWith("-cli"))?.version;
         lines.push(

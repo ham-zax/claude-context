@@ -271,6 +271,7 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         activeManagedMcpVersion: null,
         activeManagedCoreVersion: null,
         activeLauncherPath: null,
+        managedLauncherStatus: "missing",
     });
     const textIo = captureIo();
     const textExitCode = await runCli(["-v"], {
@@ -310,9 +311,9 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         activeManagedMcpVersion: null,
         activeManagedCoreVersion: null,
         activeLauncherPath: null,
+        managedLauncherStatus: "missing",
     });
 });
-
 test("runCli version distinguishes the bundled release from the active managed runtime", async () => {
     const versions = [
         { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
@@ -332,6 +333,7 @@ test("runCli version distinguishes the bundled release from the active managed r
             activeManagedMcpVersion: "6.7.0",
             activeManagedCoreVersion: "3.5.0",
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+            managedLauncherStatus: "active",
         }),
     });
     assert.equal(exitCode, 0);
@@ -360,6 +362,7 @@ test("runCli version omits the bundle line when bundled and active runtimes matc
             activeManagedMcpVersion: MCP_PACKAGE_VERSION,
             activeManagedCoreVersion: CORE_PACKAGE_VERSION,
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+            managedLauncherStatus: "active",
         }),
     });
     assert.equal(exitCode, 0);
@@ -388,6 +391,7 @@ test("runCli version shows both runtimes when only Core differs", async () => {
             activeManagedMcpVersion: MCP_PACKAGE_VERSION,
             activeManagedCoreVersion: "3.5.0",
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+            managedLauncherStatus: "active",
         }),
     });
     assert.equal(exitCode, 0);
@@ -395,6 +399,35 @@ test("runCli version shows both runtimes when only Core differs", async () => {
     assert.match(stdout, /Bundled release: MCP 6\.8\.1 · Core 3\.6\.0/);
     assert.match(stdout, /Active managed runtime: MCP 6\.8\.1 · Core 3\.5\.0/);
     assert.match(stdout, /CLI-bundled release and active managed runtime differ\./);
+});
+
+test("runCli version JSON never combines active MCP with bundled Core", async () => {
+    const versions = [
+        { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
+    ];
+    const io = captureIo();
+    const exitCode = await runCli(["--format", "json", "--version"], {
+        writeStdout: io.writeStdout,
+        writeStderr: io.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+        runtimeStateResolver: () => ({
+            cliVersion: CLI_PACKAGE_VERSION,
+            bundledMcpVersion: MCP_PACKAGE_VERSION,
+            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            activeManagedMcpVersion: "6.8.1",
+            activeManagedCoreVersion: null,
+            activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+            managedLauncherStatus: "active",
+        }),
+    });
+    assert.equal(exitCode, 0);
+    const parsed = JSON.parse(io.read().stdout);
+    assert.equal(parsed.mcpVersion, "6.8.1");
+    assert.equal(parsed.coreVersion, null);
+    assert.equal(parsed.bundledCoreVersion, CORE_PACKAGE_VERSION);
 });
 
 test("runCli version reports a malformed launcher without claiming an active runtime", async () => {
@@ -416,6 +449,7 @@ test("runCli version reports a malformed launcher without claiming an active run
             activeManagedMcpVersion: null,
             activeManagedCoreVersion: null,
             activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+            managedLauncherStatus: "malformed",
         }),
     });
     assert.equal(exitCode, 0);

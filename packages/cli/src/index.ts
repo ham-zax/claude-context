@@ -229,18 +229,20 @@ function buildVersionPayload(packages: DoctorPackageVersion[], state: RuntimeVer
         ?? state.bundledMcpVersion;
     const bundledCoreVersion = installedPackageVersion(packages, "@zokizuan/satori-core")
         ?? state.bundledCoreVersion;
+    const hasActiveMcp = state.activeManagedMcpVersion !== null;
     return {
         name: "@zokizuan/satori-cli",
         cli: "satori",
         version: cliVersion,
         cliVersion,
-        mcpVersion: state.activeManagedMcpVersion ?? bundledMcpVersion,
-        coreVersion: state.activeManagedCoreVersion ?? bundledCoreVersion,
+        mcpVersion: hasActiveMcp ? state.activeManagedMcpVersion : bundledMcpVersion,
+        coreVersion: hasActiveMcp ? state.activeManagedCoreVersion : bundledCoreVersion,
         bundledMcpVersion,
         bundledCoreVersion,
         activeManagedMcpVersion: state.activeManagedMcpVersion,
         activeManagedCoreVersion: state.activeManagedCoreVersion,
         activeLauncherPath: state.activeLauncherPath,
+        managedLauncherStatus: state.managedLauncherStatus,
     };
 }
 
@@ -269,7 +271,7 @@ function formatVersionText(result: ReturnType<typeof buildVersionPayload>): stri
                 `Active managed runtime: MCP ${result.activeManagedMcpVersion}${result.activeManagedCoreVersion ? ` · Core ${result.activeManagedCoreVersion}` : ""}`,
                 `Managed launcher: ${result.activeLauncherPath ?? "unknown"}`,
             );
-        } else if (result.activeLauncherPath) {
+        } else if (result.activeLauncherPath && result.managedLauncherStatus !== "missing") {
             lines.push(`Managed launcher: ${result.activeLauncherPath}`);
         } else {
             lines.push("Managed launcher: not installed");

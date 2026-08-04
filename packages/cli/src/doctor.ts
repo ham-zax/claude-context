@@ -18,7 +18,7 @@ import {
     inspectManagedClientConfigurations,
     type ManagedClientConfigProof,
 } from "./install.js";
-import { parseManagedLauncherEnvironment } from "./managed-launcher-script.mjs";
+import { parseManagedLauncherDescriptor } from "./managed-launcher-script.mjs";
 import { evaluateStaticRuntimeConfig, selectedVectorStore } from "./runtime-config.js";
 import { readLocalDiagnosticsSummary, type LocalDiagnosticsSummary } from "./local-diagnostics.js";
 
@@ -44,9 +44,11 @@ export interface RuntimeVersionState {
     activeManagedMcpVersion: string | null;
     activeManagedCoreVersion: string | null;
     activeLauncherPath: string | null;
+    managedLauncherStatus: ManagedLauncherStatus;
 }
 
 export interface ManagedRuntimeSnapshot {
+    status: ManagedLauncherStatus;
     launcherPath: string | null;
     mcpVersion: string | null;
     coreVersion: string | null;
@@ -384,9 +386,19 @@ export function resolveInstalledPackageVersions(): DoctorPackageVersion[] {
     });
 }
 
+type ManagedLauncherStatus =
+    | "missing"
+    | "active"
+    | "malformed"
+    | "missing_target"
+    | "outside_store"
+    | "custom";
+
 interface ActiveManagedRuntimeResolution {
+    status: ManagedLauncherStatus;
     launcherPath: string;
     target: string;
+    managedEnvironment: Readonly<Record<string, string>>;
     mcpPackageRoot: string;
     mcpVersion: string;
     coreVersion: string | null;
@@ -406,33 +418,44 @@ function isPathWithinReal(rootPath: string, candidatePath: string): boolean {
 
 function resolveActiveManagedRuntime(homeDir: string, launcherPath: string): ActiveManagedRuntimeResolution | null {
     if (!fs.existsSync(launcherPath)) {
-        return null;
+        return { status: "missing", launcherPath: "", target: "", managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
     }
-    let target: string | null;
+    let descriptor: {
+        command: string;
+        args: readonly string[];
+        managedEnv: Readonly<Record<string, string>>;
+    };
     try {
-        target = parseManagedLauncherTarget(fs.readFileSync(launcherPath, "utf8"));
+        descriptor = parseManagedLauncherDescriptor(fs.readFileSync(launcherPath, "utf8"));
     } catch {
-        return null;
+        return { status: "malformed", launcherPath, target: "", managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
+    }
+    const managedEnvironment = descriptor.managedEnv;
+    if (descriptor.command !== process.execPath || descriptor.args.length !== 1) {
+        return { status: "custom", launcherPath, target: "", managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
+    }
+    const target = descriptor.args[0];
+    if (!target || !path.isAbsolute(target)) {
+        return { status: "malformed", launcherPath, target: "", managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
     }
     const managedRuntimeRoot = path.join(homeDir, ".satori", "mcp-runtime");
-    if (
-        !target
-        || !path.isAbsolute(target)
-        || !isRegularFile(target)
-        || !isPathWithinReal(managedRuntimeRoot, target)
-    ) {
-        return null;
+    if (!isRegularFile(target)) {
+        return { status: "missing_target", launcherPath, target, managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
+    }
+    if (!isPathWithinReal(managedRuntimeRoot, target)) {
+        return { status: "outside_store", launcherPath, target, managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
     }
     const targetRealPath = fs.realpathSync(target);
     const mcpPackage = findMcpPackage(targetRealPath);
     if (!mcpPackage || !isPathWithinReal(managedRuntimeRoot, mcpPackage.root)) {
-        return null;
+        return { status: "custom", launcherPath, target: targetRealPath, managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
     }
+    const generationRoot = path.dirname(path.dirname(mcpPackage.root));
     let coreVersion: string | null = null;
     try {
         const corePackageJsonPath = createRequire(mcpPackage.packageJsonPath)
             .resolve("@zokizuan/satori-core/package.json");
-        if (isPathWithinReal(managedRuntimeRoot, corePackageJsonPath)) {
+        if (isPathWithinReal(generationRoot, corePackageJsonPath)) {
             const coreInfo = readJsonVersion(corePackageJsonPath);
             if (coreInfo?.name === "@zokizuan/satori-core") {
                 coreVersion = coreInfo.version;
@@ -442,8 +465,10 @@ function resolveActiveManagedRuntime(homeDir: string, launcherPath: string): Act
         // Keep the active MCP identity while reporting unresolved Core explicitly.
     }
     return {
+        status: "active",
         launcherPath,
         target: targetRealPath,
+        managedEnvironment,
         mcpPackageRoot: mcpPackage.root,
         mcpVersion: mcpPackage.version,
         coreVersion,
@@ -460,9 +485,10 @@ export function resolveRuntimeVersionState(
         cliVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-cli") ?? "unknown",
         bundledMcpVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-mcp"),
         bundledCoreVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-core"),
-        activeManagedMcpVersion: active?.mcpVersion ?? null,
-        activeManagedCoreVersion: active?.coreVersion ?? null,
-        activeLauncherPath: active?.launcherPath ?? null,
+        activeManagedMcpVersion: active?.status === "active" ? active.mcpVersion : null,
+        activeManagedCoreVersion: active?.status === "active" ? active.coreVersion : null,
+        activeLauncherPath: active?.status === "missing" ? null : (active?.launcherPath ?? null),
+        managedLauncherStatus: active?.status ?? "missing",
     };
 }
 
@@ -486,31 +512,33 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
     const managedLauncherPath = options.managedLauncherPath === null
         ? null
         : options.managedLauncherPath || path.join(homeDir, ".satori", "bin", "satori-mcp.js");
-    let managedRuntimeEnvironment: Readonly<Record<string, string>> = Object.freeze({});
-    if (managedLauncherPath && fs.existsSync(managedLauncherPath)) {
-        try {
-            const launcher = fs.readFileSync(managedLauncherPath, "utf8");
-            managedRuntimeEnvironment = parseManagedLauncherEnvironment(launcher);
-        } catch (error) {
-            addCheck(
-                checks,
-                "managed_runtime_environment",
-                "error",
-                error instanceof Error ? error.message : String(error),
-            );
-            nextSteps.push("Rerun satori install to replace the malformed managed launcher.");
-        }
-    }
     const activeManagedRuntime = managedLauncherPath
         ? resolveActiveManagedRuntime(homeDir, managedLauncherPath)
         : null;
     const managedRuntime: ManagedRuntimeSnapshot | null = activeManagedRuntime
         ? {
-            launcherPath: activeManagedRuntime.launcherPath,
-            mcpVersion: activeManagedRuntime.mcpVersion,
-            coreVersion: activeManagedRuntime.coreVersion,
+            status: activeManagedRuntime.status,
+            launcherPath: activeManagedRuntime.status === "missing" ? null : activeManagedRuntime.launcherPath,
+            mcpVersion: activeManagedRuntime.status === "active"
+                ? activeManagedRuntime.mcpVersion
+                : null,
+            coreVersion: activeManagedRuntime.status === "active"
+                ? activeManagedRuntime.coreVersion
+                : null,
         }
         : null;
+    const managedRuntimeEnvironment = activeManagedRuntime?.status === "active"
+        ? activeManagedRuntime.managedEnvironment
+        : Object.freeze({});
+    if (activeManagedRuntime?.status === "malformed") {
+        addCheck(
+            checks,
+            "managed_runtime_environment",
+            "error",
+            `Managed Satori launcher is malformed at ${activeManagedRuntime.launcherPath}.`,
+        );
+        nextSteps.push("Rerun satori install to replace the malformed managed launcher.");
+    }
     const bundledMcpVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-mcp");
     const bundledCoreVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-core");
     if (
@@ -583,7 +611,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
 
     if (
         evaluatedRuntimeContexts.some((context) => selectedVectorStore(context.environment) === "LanceDB")
-        && activeManagedRuntime
+        && activeManagedRuntime?.status === "active"
     ) {
         try {
             await (options.loadManagedLanceDb ?? loadManagedLanceDbFromRuntime)(activeManagedRuntime.target);

@@ -15,6 +15,7 @@ function resultWithActiveRuntime(): DoctorResult {
         checks: [],
         nextSteps: [],
         managedRuntime: {
+            status: "active" as const,
             launcherPath: "/home/test/.satori/bin/satori-mcp.js",
             mcpVersion: "6.7.0",
             coreVersion: "3.5.0",
@@ -42,4 +43,11 @@ test("Doctor uses active runtime authority and labels bundled package sources", 
     assert.match(text, /@zokizuan\/satori-mcp@6\.8\.1 \(CLI-bundled package source\)/);
     assert.match(text, /@zokizuan\/satori-core@3\.6\.0 \(CLI-bundled package source\)/);
     assert.doesNotMatch(text, /@zokizuan\/satori-cli@1\.9\.2 \(CLI-bundled package source\)/);
+});
+
+test("Doctor falls back to the bundle when the launcher is not active", () => {
+    const result = { ...resultWithActiveRuntime(), managedRuntime: { status: "malformed" as const, launcherPath: "/home/test/.satori/bin/satori-mcp.js", mcpVersion: null, coreVersion: null } };
+    const text = formatDoctorText(result, { verbose: false });
+    assert.match(text, /Doctor bundle: CLI 1\.9\.2 · MCP 6\.8\.1 · Core 3\.6\.0/);
+    assert.doesNotMatch(text, /Doctor runtime:/);
 });

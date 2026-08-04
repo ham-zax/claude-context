@@ -290,14 +290,11 @@ input.on("line", (line) => {
 
 test("candidate stderr collector caps retained output at 16 KiB and keeps the newest tail", () => {
     const collector = createCandidateStderrCollector();
-    collector.write("HEAD-MARKER\n");
-    collector.write("A".repeat(CANDIDATE_STDERR_LIMIT_BYTES));
-    collector.write("TAIL-MARKER\n");
+    collector.write(Array.from({ length: 4000 }, (_, index) => `line-${index}\n`).join(""));
     const text = collector.text();
     assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
-    assert.equal(text.includes("TAIL-MARKER"), true);
-    assert.equal(text.includes("HEAD-MARKER"), false);
-    assert.equal(text.includes("A".repeat(4096)), true);
+    assert.equal(text.includes("line-0\n"), false);
+    assert.equal(text.includes("line-3999\n"), true);
 });
 
 test("candidate stderr normalization strips ANSI sequences", () => {
@@ -353,6 +350,104 @@ test("candidate stderr normalization handles secrets and ANSI sequences split ac
     assert.equal(text.includes("split-auth-id"), false);
     assert.equal(text.includes("\u001b"), false);
     assert.match(text, /redplain/);
+});
+
+test("candidate stderr retention does not leak a secret key crossing the byte cutoff", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`${"safe\n".repeat(Math.ceil(CANDIDATE_STDERR_LIMIT_BYTES / 5) + 1)}OPENAI_API_KEY=`);
+    collector.write("crossing-secret\n");
+    const text = collector.text();
+    assert.equal(text.includes("crossing-secret"), false);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr retention does not leak a bearer token crossing the byte cutoff", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`${"safe\n".repeat(Math.ceil(CANDIDATE_STDERR_LIMIT_BYTES / 5) + 1)}Authorization: Bear`);
+    collector.write("er crossing-bearer-secret\n");
+    const text = collector.text();
+    assert.equal(text.includes("crossing-bearer-secret"), false);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr retention does not leak an npm auth id crossing the byte cutoff", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`${"safe\n".repeat(Math.ceil(CANDIDATE_STDERR_LIMIT_BYTES / 5) + 1)}https://registry.npmjs.org/-/v1/done?authId=`);
+    collector.write("crossing-auth-id&ok=true\n");
+    const text = collector.text();
+    assert.equal(text.includes("crossing-auth-id"), false);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr retention removes an ANSI sequence crossing the byte cutoff", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`${"safe\n".repeat(Math.ceil(CANDIDATE_STDERR_LIMIT_BYTES / 5) + 1)}\u001b[`);
+    collector.write("31mred\u001b[0m\n");
+    const text = collector.text();
+    assert.equal(text.includes("\u001b"), false);
+    assert.match(text, /red/);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr retention keeps UTF-8 characters intact at the cutoff", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`${"safe\n".repeat(Math.ceil(CANDIDATE_STDERR_LIMIT_BYTES / 5) + 1)}é\n`);
+    const text = collector.text();
+    assert.equal(text.includes("é"), true);
+    assert.equal(text.includes("�"), false);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr replaces one oversized secret-bearing line with a marker", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`OPENAI_API_KEY=${"oversized-secret".repeat(2000)}\n`);
+    const text = collector.text();
+    assert.equal(text.includes("oversized-secret"), false);
+    assert.ok(/truncated/i.test(text));
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr recovers valid lines after an oversized line within one chunk", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`OPENAI_API_KEY=${"x".repeat(CANDIDATE_STDERR_LIMIT_BYTES + 1024)}\nvalid-tail-line\n`);
+    const text = collector.text();
+    assert.equal(text.includes("valid-tail-line"), true);
+    assert.equal(text.includes("OPENAI_API_KEY"), false);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate stderr recovers valid lines after an oversized line split across chunks", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(`OPENAI_API_KEY=${"x".repeat(CANDIDATE_STDERR_LIMIT_BYTES + 1024)}`);
+    collector.write("more-of-the-oversized-line\nvalid-after-split\n");
+    const text = collector.text();
+    assert.equal(text.includes("valid-after-split"), true);
+    assert.equal(text.includes("OPENAI_API_KEY"), false);
+    assert.equal(text.includes("more-of-the-oversized-line"), false);
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+});
+
+test("candidate preflight decodes a UTF-8 character split across buffer writes", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-candidate-utf8-split-"));
+    try {
+        const entryPath = path.join(homeDir, "utf8-split-candidate.mjs");
+        writeCandidateEntry(entryPath, `
+process.stderr.write(Buffer.from([0xE2]));
+process.stderr.write(Buffer.from([0x82, 0xAC]));
+process.stderr.write("\\n");
+process.exit(1);
+`);
+        await assert.rejects(
+            probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
+            (error) => {
+                assert.equal(error.message.includes("�"), false);
+                assert.equal(error.message.includes("€"), true);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
 });
 
 test("candidate stderr normalization redacts supported secret key families and npm auth URLs", () => {

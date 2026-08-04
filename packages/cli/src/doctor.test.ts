@@ -893,6 +893,27 @@ test("runtime version state consumes the already-resolved bundled package set", 
     }
 });
 
+test("runtime version state preserves managed launcher status and path", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-launcher-status-"));
+    const launcherPath = path.join(tempDir, ".satori", "bin", "satori-mcp.js");
+    const packageVersions = [
+        { name: "@zokizuan/satori-cli", version: "9.0.0", source: "test" },
+        { name: "@zokizuan/satori-mcp", version: "9.0.1", source: "test" },
+        { name: "@zokizuan/satori-core", version: "9.0.2", source: "test" },
+    ];
+    try {
+        assert.equal(resolveRuntimeVersionState(tempDir, packageVersions).managedLauncherStatus, "missing");
+        fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+        fs.writeFileSync(launcherPath, "not a managed launcher\n");
+        const state = resolveRuntimeVersionState(tempDir, packageVersions);
+        assert.equal(state.managedLauncherStatus, "malformed");
+        assert.equal(state.activeLauncherPath, launcherPath);
+        assert.equal(state.activeManagedMcpVersion, null);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
 function launcherFixtureWithRuntime(tempDir: string, versions: { mcp: string; core: string }): string {
     const runtimeRoot = path.join(tempDir, ".satori", "mcp-runtime", `@zokizuan-satori-mcp@${versions.mcp}`);
     const mcpPackageRoot = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-mcp");
@@ -973,7 +994,8 @@ test("doctor does not claim a launcher target outside the managed runtime store"
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
         }));
-        assert.equal(result.managedRuntime, null);
+        assert.equal(result.managedRuntime?.status, "outside_store");
+        assert.equal(result.managedRuntime?.mcpVersion, null);
         const check = result.checks.find((entry) => entry.name === "managed_launcher");
         assert.notEqual(check?.status, "ok");
         assert.match(check?.message || "", /outside the managed runtime store|target does not exist/);
@@ -1008,10 +1030,113 @@ test("doctor rejects a managed-store symlink that escapes the runtime root", asy
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
         }));
-        assert.equal(result.managedRuntime, null);
+        assert.equal(result.managedRuntime?.status === "outside_store" || result.managedRuntime?.status === "missing_target", true);
+        assert.equal(result.managedRuntime?.mcpVersion, null);
         const check = result.checks.find((entry) => entry.name === "managed_launcher");
         assert.notEqual(check?.status, "ok");
         assert.match(check?.message || "", /outside the managed runtime store|target does not exist/);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("doctor does not apply managed environment from a non-active launcher", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-env-trust-"));
+    const outsideRoot = path.join(tempDir, "custom", "node_modules", "@zokizuan", "satori-mcp");
+    const target = path.join(outsideRoot, "dist", "index.js");
+    const launcherPath = path.join(tempDir, ".satori", "bin", "satori-mcp.js");
+    try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+        fs.writeFileSync(target, "// custom runtime");
+        fs.writeFileSync(path.join(outsideRoot, "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-mcp",
+            version: "4.11.17",
+        }));
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: process.execPath,
+            args: [target],
+            managedEnv: {
+                VECTOR_STORE_PROVIDER: "Milvus",
+                MILVUS_ADDRESS: "milvus.example:19530",
+            },
+        }));
+        const result = await runDoctor(baseDoctorOptions({
+            env: { HOME: tempDir },
+            managedLauncherPath: launcherPath,
+        }));
+        assert.equal(result.managedRuntime?.status, "outside_store");
+        const storeCheck = result.checks.find((entry) => entry.name === "vector_store_provider");
+        assert.match(storeCheck?.message || "", /LanceDB/);
+        assert.doesNotMatch(storeCheck?.message || "", /Milvus/);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("doctor rejects a launcher that is not the expected Node form", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-launcher-form-"));
+    const runtimeRoot = path.join(tempDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@4.11.17");
+    const mcpPackageRoot = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-mcp");
+    const target = path.join(mcpPackageRoot, "dist", "index.js");
+    const launcherPath = path.join(tempDir, ".satori", "bin", "satori-mcp.js");
+    try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+        fs.writeFileSync(target, "// runtime");
+        fs.writeFileSync(path.join(mcpPackageRoot, "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-mcp",
+            version: "4.11.17",
+        }));
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: "/usr/bin/some-other-node",
+            args: [target, "--extra"],
+            managedEnv: { SATORI_RUNTIME_PROFILE: "offline" },
+        }));
+        const result = await runDoctor(baseDoctorOptions({
+            env: { HOME: tempDir },
+            managedLauncherPath: launcherPath,
+        }));
+        assert.equal(result.managedRuntime?.status, "custom");
+        assert.equal(result.managedRuntime?.mcpVersion, null);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("doctor rejects Core resolved from the store level outside the active generation", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-store-core-"));
+    const generationA = path.join(tempDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@4.11.17");
+    const mcpPackageRoot = path.join(generationA, "node_modules", "@zokizuan", "satori-mcp");
+    const storeLevelCore = path.join(tempDir, ".satori", "mcp-runtime", "node_modules", "@zokizuan", "satori-core");
+    const target = path.join(mcpPackageRoot, "dist", "index.js");
+    const launcherPath = path.join(tempDir, ".satori", "bin", "satori-mcp.js");
+    try {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.mkdirSync(storeLevelCore, { recursive: true });
+        fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+        fs.writeFileSync(target, "// runtime");
+        fs.writeFileSync(path.join(mcpPackageRoot, "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-mcp",
+            version: "4.11.17",
+            dependencies: { "@zokizuan/satori-core": "1.6.12" },
+        }));
+        fs.writeFileSync(path.join(storeLevelCore, "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-core",
+            version: "1.6.12",
+        }));
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: process.execPath,
+            args: [target],
+            managedEnv: { SATORI_RUNTIME_PROFILE: "offline" },
+        }));
+        const state = resolveRuntimeVersionState(tempDir, [
+            { name: "@zokizuan/satori-cli", version: "0.4.15", source: "test" },
+            { name: "@zokizuan/satori-mcp", version: "4.11.17", source: "test" },
+            { name: "@zokizuan/satori-core", version: "1.6.12", source: "test" },
+        ]);
+        assert.equal(state.managedLauncherStatus, "active");
+        assert.equal(state.activeManagedCoreVersion, null);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
