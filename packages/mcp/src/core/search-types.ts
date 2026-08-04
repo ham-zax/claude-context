@@ -12,6 +12,7 @@ import { SearchGroupBy, SearchNoiseCategory, SearchRankingMode, SearchResultMode
 import { FingerprintSource, IndexFingerprint } from "../config.js";
 import type { SearchRouteContract } from "./search-lexical-scoring.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
+import type { InboundCoverageEvidence } from "./relationship-backed-call-graph.js";
 import type { RerankBudgetReason } from "./search-rerank-policy.js";
 import type { SemanticPassFailureDiagnostic } from "./backend-diagnostics.js";
 
@@ -989,6 +990,7 @@ export interface CallGraphTraversalResponseEnvelope {
     edges: CallGraphEdgeResult[];
     notes: CallGraphNoteResult[];
     warnings?: string[];
+    inboundCoverageEvidence?: InboundCoverageEvidence;
     testReferences?: CallGraphTestReferenceResult[];
     notesTruncated?: boolean;
     totalNoteCount?: number;
