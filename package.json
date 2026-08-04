@@ -24,7 +24,7 @@
     "release:bump": "node scripts/bump-release-graph.mjs",
     "test:scripts": "node --import tsx --test scripts/*.test.mjs evals/agent-discovery/*.test.mjs",
     "release": "pnpm run release:all",
-    "release:all": "pnpm run versions:check && pnpm run release:core && pnpm run release:mcp && pnpm run release:cli",
+    "release:all": "node scripts/publish-release-graph.mjs",
     "release:login": "npm login --auth-type=web",
     "release:verify": "npm view @zokizuan/satori-core version && npm view @zokizuan/satori-mcp version && npm view @zokizuan/satori-cli version",
     "release:smoke:cli": "pnpm -C packages/cli release:smoke",
