@@ -661,6 +661,11 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
                 returnedGroupCount: 1,
                 remainingGroupCount: 0,
             },
+            pagination: {
+                totalGroupCount: 1,
+                returnedGroupCount: 1,
+                continuation: 'complete',
+            },
             recommendedNextAction: {
                 resultIndex: 0,
                 tool: 'read_file',

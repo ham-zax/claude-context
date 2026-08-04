@@ -4518,6 +4518,11 @@ export class ToolHandlers {
                         delete initialEnvelope.resultIndex;
                         return {
                             ...initialEnvelope,
+                            pagination: {
+                                totalGroupCount: resultSet.orderedResults.length,
+                                returnedGroupCount: resultSet.initialReturnedCount,
+                                continuation: "not_admissible" as const,
+                            },
                             warnings: buildSearchWarningDetails([
                                 ...(envelope.warnings?.map((warning) => warning.code) ?? []),
                                 WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
@@ -4527,6 +4532,11 @@ export class ToolHandlers {
                     boundEnvelope = {
                         ...successfulEnvelope,
                         rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                        pagination: {
+                            totalGroupCount: resultSet.orderedResults.length,
+                            returnedGroupCount: resultSet.initialReturnedCount,
+                            continuation: "attached" as const,
+                        },
                         continuation: {
                             ...envelope.continuation,
                             handle: stored.handle,

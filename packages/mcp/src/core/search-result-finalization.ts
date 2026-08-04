@@ -686,7 +686,14 @@ export async function finalizeSearchResults(
                         remainingGroupCount: resultCounts.remainingGroupCount,
                     },
                 }
-                : envelope;
+                : {
+                    ...envelope,
+                    pagination: {
+                        totalGroupCount: resultCounts.availableGroupCount,
+                        returnedGroupCount: resultCounts.returnedGroupCount,
+                        continuation: "complete" as const,
+                    },
+                };
         },
     });
     if (disclosureProjection.status === "page_too_large") {

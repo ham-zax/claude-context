@@ -760,6 +760,7 @@ export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelop
         nextOffset: number;
         remainingGroupCount: number;
     };
+    pagination?: SearchPaginationEvidence;
     results: SearchGroupedResultV2[];
 }
 
@@ -802,6 +803,12 @@ export interface SearchGroupedResultCounts {
     availableGroupCount: number;
     returnedGroupCount: number;
     remainingGroupCount: number;
+}
+
+export interface SearchPaginationEvidence {
+    totalGroupCount: number;
+    returnedGroupCount: number;
+    continuation: "complete" | "attached" | "not_admissible";
 }
 
 export type SearchDisclosureReason =

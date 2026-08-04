@@ -1781,6 +1781,11 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             remainingGroupCount: 0,
         });
         assert.equal(largerThanAvailablePayload.continuation, undefined);
+        assert.deepEqual(largerThanAvailablePayload.pagination, {
+            totalGroupCount: 20,
+            returnedGroupCount: 20,
+            continuation: 'complete',
+        });
 
         const coordinator = new SearchContinuationCoordinator();
         const paged = prepareHandlers(true, coordinator);
@@ -1814,6 +1819,11 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             remainingGroupCount: 10,
         });
         assert.match(initialPayload.continuation.handle, /^[a-f0-9]{48}$/);
+        assert.deepEqual(initialPayload.pagination, {
+            totalGroupCount: 20,
+            returnedGroupCount: 10,
+            continuation: 'attached',
+        });
         assert.match(initialPayload.rankedSetDigest, /^[a-f0-9]{64}$/);
         assert.equal(initialPayload.resultIndex, undefined);
         assert.ok(Buffer.byteLength(initialResponse.content[0]?.text || '', 'utf8') <= SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES);
@@ -2364,6 +2374,127 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
         }
         assert.deepEqual(lateOnFiles, expectedLateOnOrder);
         assert.equal(new Set(lateOnFiles).size, expectedLateOnOrder.length);
+    });
+});
+
+test('search continuation reports not_admissible pagination when the replay budget rejects the ranked set', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 44 }, (_, index) => ({
+            content: `chunk payload ${index} ` + 'x'.repeat(30_000),
+            relativePath: `src/big-${index}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (index * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_big_${index}`,
+            symbolLabel: `function big${index}()`,
+        }));
+        // A tight entry budget makes the 44-group frozen set inadmissible
+        // deterministically without touching the response byte budget.
+        const coordinator = new SearchContinuationCoordinator(
+            new SearchContinuationCoordinatorPool({ maxEntryBytes: 20_000 }),
+        );
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            searchContinuationCoordinator: coordinator,
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const internals = handlers as unknown as {
+            context: HandlerContext & {
+                getIndexAuthorityObservations: () => { vector: string; navigation: string };
+                revalidatePreparedGeneration: () => Promise<{
+                    vectorReceipt: never;
+                    navigationProof: { status: 'not_bound' };
+                }>;
+                compareAllSourceToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                compareSourceObservationToFreshnessCheckpoint: () => Promise<{ status: 'matches' }>;
+                inspectSourceFreshnessCheckpoint: () => Promise<{
+                    status: 'valid';
+                    observationToken: string;
+                    generationReceipt: {
+                        collectionName: string;
+                        marker: { runId: string; indexPolicyHash: string };
+                    };
+                }>;
+            };
+            syncManager: HandlerSyncManager & {
+                getPreparedReadObservation: () => {
+                    available: true;
+                    observation: { freshnessEpoch: number; watcherState: 'ready' };
+                };
+            };
+            mutationLeaseCoordinator: {
+                observe: () => { mutationActive: boolean; generation: number };
+                getActiveLease: () => null;
+            };
+            getPreparedReadCacheObservation: () => {
+                observation: string;
+                sourceObservation: string | null;
+            };
+        };
+        internals.context.getIndexAuthorityObservations = () => ({
+            vector: 'vector-stable',
+            navigation: 'navigation-stable',
+        });
+        internals.context.revalidatePreparedGeneration = async () => ({
+            vectorReceipt: { collectionName: 'committed-v3' } as never,
+            navigationProof: { status: 'not_bound' },
+        });
+        internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
+        internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
+        internals.context.inspectSourceFreshnessCheckpoint = async () => ({
+            status: 'valid',
+            observationToken: 'not-admissible-checkpoint-observation',
+            generationReceipt: {
+                collectionName: 'committed-v3',
+                marker: { runId: 'not-admissible-marker-run', indexPolicyHash: 'policy-hash' },
+            },
+        });
+        internals.syncManager.getPreparedReadObservation = () => ({
+            available: true,
+            observation: { freshnessEpoch: 0, watcherState: 'ready' },
+        });
+        internals.getPreparedReadCacheObservation = () => ({
+            observation: JSON.stringify({
+                vectorAuthority: 'vector-stable',
+                navigationAuthority: 'navigation-stable',
+                mutationGeneration: 1,
+            }),
+            sourceObservation: JSON.stringify({ freshnessEpoch: 0, watcherState: 'ready' }),
+        });
+        internals.mutationLeaseCoordinator = {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        };
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the big files',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 44,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.continuation, undefined, 'no fake handle may be exposed');
+        assert.equal(payload.rankedSetDigest, undefined);
+        assert.equal(payload.resultIndex, undefined);
+        assert.equal(
+            warningCodes(payload).includes('SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE'),
+            true,
+            'the not-admissible warning must be preserved',
+        );
+        assert.deepEqual(payload.pagination, {
+            totalGroupCount: 44,
+            returnedGroupCount: payload.results.length,
+            continuation: 'not_admissible',
+        });
+        assert.ok(
+            payload.results.length > 0 && payload.results.length < 44,
+            'the response discloses a bounded first page',
+        );
     });
 });
 
