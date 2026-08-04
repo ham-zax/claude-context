@@ -985,6 +985,41 @@ test('FileSynchronizer compares explicit paths to its owned checkpoint without a
     }
 });
 
+test('FileSynchronizer treats ignore-excluded untracked paths as unchanged (no sync churn)', async () => {
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-ignored-untracked-state-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-ignored-untracked-repo-'));
+    process.env.SATORI_STATE_ROOT = stateRoot;
+    try {
+        const sourcePath = path.join(tempRepo, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        // Mirrors a .satoriignore entry: the synchronizer's ignore patterns
+        // match the brand-new untracked path, so it must not invalidate the
+        // checkpoint even though the path has no checkpoint record.
+        const synchronizer = new FileSynchronizer(
+            tempRepo,
+            ['ignored-new.ts'],
+            ['.ts'],
+            checkpointOptions('ignored_untracked_generation'),
+        );
+        await synchronizer.initialize(undefined, undefined, { deferSnapshotPublication: true });
+        await (await synchronizer.prepareChanges({ forceFullHash: true })).commit();
+        const checkpointObservation = synchronizer.getOwnedSnapshotObservationToken();
+
+        fs.writeFileSync(path.join(tempRepo, 'ignored-new.ts'), 'export const ignored = true;\n', 'utf8');
+        assert.deepEqual(
+            await synchronizer.comparePathsToOwnedCheckpoint(['ignored-new.ts']),
+            { status: 'matches' },
+        );
+        assert.equal(synchronizer.getOwnedSnapshotObservationToken(), checkpointObservation);
+    } finally {
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+});
+
 test('FileSynchronizer exact path comparison fails closed on source or checkpoint drift', async () => {
     const previousStateRoot = process.env.SATORI_STATE_ROOT;
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-path-race-state-'));
