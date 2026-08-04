@@ -21,6 +21,7 @@
     "typecheck": "pnpm -r run typecheck",
     "versions:check": "node scripts/check-version-freshness.mjs",
     "release:check": "node scripts/check-release-graph.mjs",
+    "release:bump": "node scripts/bump-release-graph.mjs",
     "test:scripts": "node --import tsx --test scripts/*.test.mjs evals/agent-discovery/*.test.mjs",
     "release": "pnpm run release:all",
     "release:all": "pnpm run versions:check && pnpm run release:core && pnpm run release:mcp && pnpm run release:cli",
