@@ -976,8 +976,22 @@ function extractPythonModuleBindings(
         }
     }
     for (const node of root.descendantsOfType('import_statement')) {
-        for (const moduleName of node.descendantsOfType('dotted_name')) {
-            const moduleSpecifier = moduleName.text.trim();
+        for (const child of node.namedChildren) {
+            if (child.type === 'aliased_import') {
+                const moduleName = child.childForFieldName('name')?.text.trim();
+                const alias = child.childForFieldName('alias')?.text.trim();
+                if (!moduleName || !alias) continue;
+                bindings.push({
+                    kind: 'import',
+                    moduleSpecifier: moduleName,
+                    localName: alias,
+                    typeOnly: false,
+                    span: nodeSpan(node, sourceMap),
+                });
+                continue;
+            }
+            if (child.type !== 'dotted_name') continue;
+            const moduleSpecifier = child.text.trim();
             if (!moduleSpecifier) continue;
             bindings.push({
                 kind: 'import',

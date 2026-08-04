@@ -495,10 +495,15 @@ function resolvePythonDirectTarget(input: {
                 input.availableFiles,
             );
             if (!importedFile) continue;
-            for (const candidate of eligible) {
-                if (candidate.file === importedFile && candidate.name === binding.importedName) {
-                    importedTargets.set(candidate.symbolInstanceId, candidate);
+            for (const candidate of input.registry.symbolsByFile.get(importedFile) ?? []) {
+                if (
+                    candidate.name !== binding.importedName
+                    || (!isEligibleCallTarget(input.call, candidate)
+                        && !(input.call.kind === 'direct' && candidate.kind === 'class'))
+                ) {
+                    continue;
                 }
+                importedTargets.set(candidate.symbolInstanceId, candidate);
             }
         }
         const targets = [...importedTargets.values()];
@@ -510,6 +515,52 @@ function resolvePythonDirectTarget(input: {
     // A cross-file Python call without an exact import binding has no provider
     // proof. Do not turn a unique repository-wide name into an authority.
     return undefined;
+}
+
+function resolvePythonModuleQualifiedTarget(input: {
+    call: CallSite;
+    source: SymbolRecord;
+    evidence: RelationshipAnalysisEvidence;
+    registry: SymbolRegistry;
+    availableFiles: ReadonlySet<string>;
+}): SymbolRecord | undefined {
+    if (
+        input.source.language !== 'python'
+        || input.call.kind !== 'member'
+        || !input.call.receiverText
+    ) {
+        return undefined;
+    }
+    const receiver = input.call.receiverText.trim();
+    const moduleSpecifiers = new Set<string>();
+    for (const binding of input.evidence.moduleBindings) {
+        if (binding.kind !== 'import' || !binding.moduleSpecifier || binding.importedName) {
+            continue;
+        }
+        const matchesReceiver = binding.localName
+            ? binding.localName === receiver
+            : binding.moduleSpecifier === receiver;
+        if (matchesReceiver) {
+            moduleSpecifiers.add(binding.moduleSpecifier);
+        }
+    }
+    if (moduleSpecifiers.size !== 1) {
+        return undefined;
+    }
+    const importedFile = resolvePythonModulePath(
+        input.source.file,
+        [...moduleSpecifiers][0],
+        input.registry,
+        input.availableFiles,
+    );
+    if (!importedFile) {
+        return undefined;
+    }
+    const targets = (input.registry.symbolsByFile.get(importedFile) ?? []).filter((candidate) => (
+        candidate.name === input.call.calleeName
+        && (candidate.kind === 'class' || isCallableSymbolKind(candidate.kind))
+    ));
+    return targets.length === 1 ? targets[0] : undefined;
 }
 
 function resolvePythonMemberTarget(input: {
@@ -536,6 +587,16 @@ function resolvePythonMemberTarget(input: {
     }
 
     let targetClass: SymbolRecord | undefined;
+    const moduleQualifiedTarget = resolvePythonModuleQualifiedTarget({
+        call: input.call,
+        source: input.source,
+        evidence: input.evidence,
+        registry: input.registry,
+        availableFiles: input.availableFiles,
+    });
+    if (moduleQualifiedTarget) {
+        return moduleQualifiedTarget;
+    }
     if (receiver === 'self' || receiver === 'cls') {
         if (input.source.kind !== 'method') return undefined;
         targetClass = enclosingClassForSymbol(input.source, input.classesByFile);
@@ -1455,7 +1516,8 @@ function pythonFallbackProofSteps(input: {
 
         const imported = input.evidence.moduleBindings.filter((binding) => (
             (binding.kind === 'import' || binding.kind === 'reexport')
-            && binding.localName === receiver
+            && (binding.localName === receiver
+                || (!binding.localName && binding.moduleSpecifier === receiver))
         ));
         if (imported.length === 1) {
             proof.push({
@@ -1630,7 +1692,20 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
             const resolvedTarget = flowResolution
                 ? flowResolution.target
                 : !candidates || candidates.length === 0
-                    ? undefined
+                    ? source.language === 'python' && call.kind === 'direct'
+                        // An import alias can make the local callee name differ
+                        // from every indexed symbol name; the binding-aware
+                        // resolver must still run so cross-module constructor
+                        // calls resolve through importedName.
+                        ? resolvePythonDirectTarget({
+                            call,
+                            source,
+                            candidates: [],
+                            evidence,
+                            registry: input.registry,
+                            availableFiles,
+                        })
+                        : undefined
                     : call.kind === 'member'
                         ? resolvePythonMemberTarget({
                             call,

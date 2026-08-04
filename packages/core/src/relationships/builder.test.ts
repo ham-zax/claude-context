@@ -1034,6 +1034,191 @@ test('buildCallRelationshipsForRegistry resolves bounded Python constructor rece
     )), ['Runner.run', 'Runner.run', 'Runner.run']);
 });
 
+test('buildCallRelationshipsForRegistry leaves same-module constructor calls unchanged', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/runner.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+            '',
+            'def run():',
+            '    TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const constructorEdges = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.kind === 'class'
+    ));
+    // Same-module bare constructor calls keep their existing resolution
+    // behavior: no fabricated CALLS edge to the class.
+    assert.deepEqual(constructorEdges, []);
+});
+
+test('buildCallRelationshipsForRegistry resolves cross-module constructor callers via direct imports', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+        ].join('\n'),
+        'src/runner.py': [
+            'from rules import TradingEntryVetoes',
+            '',
+            'def run():',
+            '    TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edge = records.find((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.name === 'TradingEntryVetoes'
+    ));
+    assert.ok(edge, 'expected an inbound constructor CALLS edge from the direct import');
+    assert.equal(edge?.confidence, 'low');
+    assert.equal(edge?.resolutionAuthority, 'direct_binding');
+});
+
+test('buildCallRelationshipsForRegistry resolves cross-module constructor callers via import aliases', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+        ].join('\n'),
+        'src/runner.py': [
+            'from rules import TradingEntryVetoes as Vetoes',
+            '',
+            'def run():',
+            '    Vetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edge = records.find((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.name === 'TradingEntryVetoes'
+    ));
+    assert.ok(edge, 'expected an inbound constructor CALLS edge from the aliased import');
+    assert.equal(edge?.confidence, 'low');
+    assert.equal(edge?.resolutionAuthority, 'direct_binding');
+});
+
+test('buildCallRelationshipsForRegistry resolves qualified module alias constructor callers', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+        ].join('\n'),
+        'src/runner.py': [
+            'import rules as r',
+            '',
+            'def run():',
+            '    r.TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edge = records.find((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.name === 'TradingEntryVetoes'
+    ));
+    assert.ok(edge, 'expected an inbound constructor CALLS edge from the qualified module alias');
+    assert.equal(edge?.confidence, 'low');
+});
+
+test('buildCallRelationshipsForRegistry resolves plain qualified module constructor callers', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+        ].join('\n'),
+        'src/runner.py': [
+            'import rules',
+            '',
+            'def run():',
+            '    rules.TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edge = records.find((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.name === 'TradingEntryVetoes'
+    ));
+    assert.ok(edge, 'expected an inbound constructor CALLS edge from the plain qualified module');
+    assert.equal(edge?.confidence, 'low');
+});
+
+test('buildCallRelationshipsForRegistry fails closed on ambiguous constructor imports', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/a_rules.py': [
+            'class A:',
+            '    pass',
+        ].join('\n'),
+        'src/b_rules.py': [
+            'class A:',
+            '    pass',
+        ].join('\n'),
+        'src/runner.py': [
+            'from a_rules import A',
+            'from b_rules import A',
+            '',
+            'def run():',
+            '    A()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edges = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.kind === 'class'
+    ));
+    assert.deepEqual(edges, []);
+});
+
+test('buildCallRelationshipsForRegistry does not fabricate edges for unresolved constructor imports', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/runner.py': [
+            'from missing_module import A',
+            'import missing_module as m',
+            '',
+            'def run():',
+            '    A()',
+            '    m.B()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edges = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+    ));
+    assert.deepEqual(edges, []);
+});
+
+test('buildCallRelationshipsForRegistry reports method and cross-module constructor callers together', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class Handler:',
+            '    def handle(self):',
+            '        pass',
+        ].join('\n'),
+        'src/runner.py': [
+            'from rules import Handler',
+            '',
+            'def run():',
+            '    Handler()',
+            '    handler = Handler()',
+            '    handler.handle()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const targets = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+    )).map((record) => registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.qualifiedName);
+    assert.ok(targets.includes('Handler'), `expected constructor edge, got ${JSON.stringify(targets)}`);
+    assert.ok(targets.includes('Handler.handle'), `expected method edge, got ${JSON.stringify(targets)}`);
+});
+
 test('buildRelationshipsForRegistry creates conservative IMPORTS and EXPORTS file-owner records', async () => {
     const authContent = [
         'export function login(token: string) {',

@@ -739,6 +739,32 @@ test('Python nested functions inside methods remain local functions and plain im
     );
 });
 
+test('Python import statement aliases are retained as local module bindings', async () => {
+    const analyzer = createLanguageAnalysisService();
+    const result = await analyzer.analyze({
+        content: [
+            'import package.rules as rules',
+            'import package.utils',
+        ].join('\n'),
+        language: 'python',
+        relativePath: 'src/service.py',
+    });
+
+    const aliased = result.moduleBindings.find((binding) => (
+        binding.kind === 'import'
+        && binding.moduleSpecifier === 'package.rules'
+    ));
+    assert.ok(aliased);
+    assert.equal(aliased?.localName, 'rules');
+
+    const plain = result.moduleBindings.find((binding) => (
+        binding.kind === 'import'
+        && binding.moduleSpecifier === 'package.utils'
+    ));
+    assert.ok(plain);
+    assert.equal(plain?.localName, undefined);
+});
+
 test('Python methods in a class nested inside a function use the nearest declaration container', async () => {
     const analyzer = createLanguageAnalysisService();
     const result = await analyzer.analyze({
