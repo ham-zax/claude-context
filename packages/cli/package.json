@@ -1,6 +1,6 @@
 {
   "name": "@zokizuan/satori-cli",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "Installer and doctor CLI for Satori's repo-aware MCP tools.",
   "type": "module",
   "main": "dist/index.js",

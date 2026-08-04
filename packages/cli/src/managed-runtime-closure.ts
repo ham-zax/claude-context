@@ -16,6 +16,17 @@ const LANCEDB_NATIVE_PACKAGES = new Map<string, string>([
     ["win32-arm64-", "@lancedb/lancedb-win32-arm64-msvc"],
     ["win32-x64-", "@lancedb/lancedb-win32-x64-msvc"],
 ]);
+const OXC_PARSER_NATIVE_PACKAGES = new Map<string, string>([
+    ["darwin-arm64-", "@oxc-parser/binding-darwin-arm64"],
+    ["darwin-x64-", "@oxc-parser/binding-darwin-x64"],
+    ["linux-arm64-gnu", "@oxc-parser/binding-linux-arm64-gnu"],
+    ["linux-arm64-musl", "@oxc-parser/binding-linux-arm64-musl"],
+    ["linux-x64-gnu", "@oxc-parser/binding-linux-x64-gnu"],
+    ["linux-x64-musl", "@oxc-parser/binding-linux-x64-musl"],
+    ["win32-arm64-", "@oxc-parser/binding-win32-arm64-msvc"],
+    ["win32-ia32-", "@oxc-parser/binding-win32-ia32-msvc"],
+    ["win32-x64-", "@oxc-parser/binding-win32-x64-msvc"],
+]);
 const MANAGED_RUNTIME_CLOSURE_FILE = ".satori-runtime-closure.json";
 
 export interface ManagedRuntimeClosure {
@@ -26,20 +37,23 @@ export interface ManagedRuntimeClosure {
 }
 
 type ManagedRuntimeClosureIdentity = Readonly<{
-    formatVersion: 1;
+    // Format 2 makes the required host Oxc binding explicit. Older v1
+    // manifests intentionally fail closed and trigger a fresh generation.
+    formatVersion: 2;
     omitOptional: true;
     vectorStore: InstallVectorStore;
     lanceDbNativePackage: string | null;
+    oxcParserNativePackage: string;
 }>;
 
-function readManagedLanceDbVersion(): string {
+function readManagedDependencyVersion(dependencyName: string, label: string): string {
     try {
         const requireFromCli = createRequire(import.meta.url);
         const packageJsonPath = requireFromCli.resolve("@zokizuan/satori-core/package.json");
         const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
             dependencies?: Record<string, unknown>;
         };
-        const version = packageJson.dependencies?.["@lancedb/lancedb"];
+        const version = packageJson.dependencies?.[dependencyName];
         if (typeof version === "string" && EXACT_PACKAGE_VERSION_PATTERN.test(version)) {
             return version;
         }
@@ -48,9 +62,17 @@ function readManagedLanceDbVersion(): string {
     }
     throw new CliError(
         "E_USAGE",
-        "The installed Satori CLI cannot resolve its exact LanceDB runtime version.",
+        `The installed Satori CLI cannot resolve its exact ${label} runtime version.`,
         2,
     );
+}
+
+function readManagedLanceDbVersion(): string {
+    return readManagedDependencyVersion("@lancedb/lancedb", "LanceDB");
+}
+
+function readManagedOxcParserVersion(): string {
+    return readManagedDependencyVersion("oxc-parser", "oxc-parser");
 }
 
 function detectLinuxLibc(): "gnu" | "musl" {
@@ -85,16 +107,35 @@ export function resolveLanceDbNativePackage(
     return `${packageName}@${readManagedLanceDbVersion()}`;
 }
 
+export function resolveOxcParserNativePackage(
+    closure: ManagedRuntimeClosure,
+): string {
+    const platform = closure.platform ?? process.platform;
+    const architecture = closure.architecture ?? process.arch;
+    const libc = closure.libc ?? detectLinuxLibc();
+    const platformKey = `${platform}-${architecture}-${platform === "linux" ? libc : ""}`;
+    const packageName = OXC_PARSER_NATIVE_PACKAGES.get(platformKey);
+    if (!packageName) {
+        throw new CliError(
+            "E_USAGE",
+            `The Satori managed runtime is unsupported on ${platform}/${architecture}${platform === "linux" ? `/${libc}` : ""}.`,
+            2,
+        );
+    }
+    return `${packageName}@${readManagedOxcParserVersion()}`;
+}
+
 export function resolveManagedRuntimeClosureIdentity(
     closure: ManagedRuntimeClosure,
 ): ManagedRuntimeClosureIdentity {
     return {
-        formatVersion: 1,
+        formatVersion: 2,
         omitOptional: true,
         vectorStore: closure.vectorStore,
         lanceDbNativePackage: closure.vectorStore === "LanceDB"
             ? resolveLanceDbNativePackage(closure)
             : null,
+        oxcParserNativePackage: resolveOxcParserNativePackage(closure),
     };
 }
 
@@ -118,7 +159,9 @@ export function managedRuntimeClosureMatches(
             && (actual as Record<string, unknown>).omitOptional === expected.omitOptional
             && (actual as Record<string, unknown>).vectorStore === expected.vectorStore
             && (actual as Record<string, unknown>).lanceDbNativePackage
-                === expected.lanceDbNativePackage;
+                === expected.lanceDbNativePackage
+            && (actual as Record<string, unknown>).oxcParserNativePackage
+                === expected.oxcParserNativePackage;
     } catch {
         return false;
     }

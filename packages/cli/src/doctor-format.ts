@@ -16,6 +16,10 @@ function packageLabel(packageName: string): string {
     return packageName;
 }
 
+function packageSourceLabel(packageName: string): string {
+    return packageName.endsWith("-cli") ? "CLI package source" : "CLI-bundled package source";
+}
+
 function checkValue(result: DoctorResult, name: string): string | null {
     const message = result.checks.find((check) => check.name === name)?.message;
     if (!message) return null;
@@ -173,7 +177,14 @@ export function formatDoctorText(result: DoctorResult, options: DoctorTextOption
         `${countLabel(errors.length, "problem")} · ${countLabel(warnings.length, "warning")} · ${countLabel(passed.length, "check")} passed`,
     ];
 
-    if (result.packageVersions.length > 0) {
+    if (result.managedRuntime?.mcpVersion) {
+        const cliVersion = result.packageVersions
+            .find((pkg) => pkg.name.endsWith("-cli"))?.version;
+        lines.push(
+            "",
+            `Doctor runtime: CLI ${cliVersion ?? "unknown"} · MCP ${result.managedRuntime.mcpVersion}${result.managedRuntime.coreVersion ? ` · Core ${result.managedRuntime.coreVersion}` : ""}`,
+        );
+    } else if (result.packageVersions.length > 0) {
         lines.push(
             "",
             `Doctor bundle: ${result.packageVersions.map((pkg) => `${packageLabel(pkg.name)} ${pkg.version ?? "unknown"}`).join(" · ")}`,
@@ -198,7 +209,7 @@ export function formatDoctorText(result: DoctorResult, options: DoctorTextOption
         }
         lines.push("", "Package sources", "");
         for (const pkg of result.packageVersions) {
-            lines.push(`- ${pkg.name}@${pkg.version ?? "unknown"}: ${pkg.source}`);
+            lines.push(`- ${pkg.name}@${pkg.version ?? "unknown"} (${packageSourceLabel(pkg.name)}): ${pkg.source}`);
         }
         lines.push("", "Local diagnostics", "", JSON.stringify(result.localDiagnostics, null, 2));
     } else {

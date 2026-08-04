@@ -36,8 +36,9 @@ const PACKAGE_JSON = JSON.parse(
 ) as { name: string; version: string; bin?: Record<string, string> };
 const CORE_PACKAGE_JSON = JSON.parse(
     fs.readFileSync(path.resolve(PACKAGE_ROOT, "..", "core", "package.json"), "utf8")
-) as { name: string; version: string };
+) as { name: string; version: string; dependencies?: Record<string, string> };
 const EXPECTED_PACKAGE_SPECIFIER = `${PACKAGE_JSON.name}@${PACKAGE_JSON.version}`;
+const EXPECTED_OXC_BINDING_SPECIFIER = `@oxc-parser/binding-linux-x64-gnu@${CORE_PACKAGE_JSON.dependencies?.["oxc-parser"]}`;
 
 function executeInstallCommand(
     command: InstallCommandInput,
@@ -246,6 +247,7 @@ function installRuntimePackageStub(
         assert.notEqual(packageIndex, -1);
         assert.equal(args[packageIndex - 1], "--");
         assert.notEqual(args.indexOf("--omit=optional"), -1);
+        assert.notEqual(args.indexOf(EXPECTED_OXC_BINDING_SPECIFIER), -1);
         const packageRoot = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-mcp");
         const entryPath = path.join(packageRoot, relativeEntry);
         fs.mkdirSync(path.dirname(entryPath), { recursive: true });
@@ -272,6 +274,73 @@ function installRuntimePackageStub(
         return "";
     };
 }
+
+test("Oxc native target resolution failure leaves no candidate runtime directory", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-oxc-resolution-failure-"));
+    const runtimeRoot = path.join(homeDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@6.8.1");
+    let installCalls = 0;
+    try {
+        await assert.rejects(
+            executeInstallCommand({
+                kind: "install",
+                client: "codex",
+                dryRun: false,
+                runtime: "voyage",
+                vectorStore: "Milvus",
+            }, {
+                homeDir,
+                env: {
+                    VECTOR_STORE_PROVIDER: "Milvus",
+                    MILVUS_ADDRESS: "localhost:19530",
+                },
+                packageSpecifier: "@zokizuan/satori-mcp@6.8.1",
+                platform: "linux",
+                architecture: "s390x",
+                execFileSyncImpl: (() => {
+                    installCalls += 1;
+                    return "";
+                }) as never,
+            }),
+            /unsupported on linux\/s390x\/gnu/,
+        );
+        assert.equal(installCalls, 0);
+        assert.equal(fs.existsSync(runtimeRoot), false);
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("LanceDB native target resolution failure leaves no candidate runtime directory", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lancedb-resolution-failure-"));
+    const runtimeRoot = path.join(homeDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@6.8.1");
+    let installCalls = 0;
+    try {
+        await assert.rejects(
+            executeInstallCommand({
+                kind: "install",
+                client: "codex",
+                dryRun: false,
+                runtime: "voyage",
+                vectorStore: "LanceDB",
+            }, {
+                homeDir,
+                env: {},
+                packageSpecifier: "@zokizuan/satori-mcp@6.8.1",
+                platform: "linux",
+                architecture: "s390x",
+                execFileSyncImpl: (() => {
+                    installCalls += 1;
+                    return "";
+                }) as never,
+            }),
+            /LanceDB managed runtime is unsupported on linux\/s390x\/gnu/,
+        );
+        assert.equal(installCalls, 0);
+        assert.equal(fs.existsSync(runtimeRoot), false);
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
 
 function brokenRuntimePackageStub(
     expectedSpecifier: string,

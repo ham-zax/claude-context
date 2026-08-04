@@ -6,13 +6,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { executeInstallCommand as executeInstallCommandProduction, type InstallCommandInput } from "./install.js";
 import {
+    formatCandidatePreflightFailure,
     probeLanceDbRuntime,
     probeManagedRuntimeCandidate,
     planInstallRuntimeEnvironment,
     runInstallPreflight,
     verifyBundledPotionRuntime,
 } from "./install-preflight.js";
+import { CliError } from "./errors.js";
 import { buildLauncherScript, parseManagedLauncherEnvironment } from "./managed-launcher-script.mjs";
+import {
+    CANDIDATE_STDERR_LIMIT_BYTES,
+    createCandidateStderrCollector,
+    normalizeCandidateStderr,
+} from "./candidate-stderr.js";
 import {
     LATEON_ACTIVATION_POLICY,
     LATEON_PROFILE_ID,
@@ -147,6 +154,313 @@ input.on("line", (line) => {
             homeDir,
             expectedVersion: "9.8.7-test",
         });
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+function writeCandidateEntry(entryPath: string, source: string): void {
+    fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+    fs.writeFileSync(entryPath, source, "utf8");
+}
+
+function failingProbeInput(homeDir: string, entryPath: string, expectedVersion = "6.8.1") {
+    return {
+        runtimeCommand: { command: process.execPath, args: [entryPath] },
+        runtimeEnvironment: Object.freeze({ SATORI_RUNTIME_PROFILE: "connected" }),
+        inheritedEnvironment: {},
+        homeDir,
+        expectedVersion,
+    };
+}
+
+test("candidate exception written before exit is included in the preflight failure", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-candidate-stderr-"));
+    try {
+        const entryPath = path.join(homeDir, "exploding-candidate.mjs");
+        writeCandidateEntry(entryPath, `
+process.stderr.write("FATAL: unexpected startup exception\\n");
+process.exit(1);
+`);
+        await assert.rejects(
+            probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
+            (error) => {
+                assert.match(error.message, /Candidate runtime failed before completing MCP preflight\./);
+                assert.match(error.message, /Candidate command:/);
+                assert.match(error.message, /Candidate stderr:/);
+                assert.match(error.message, /FATAL: unexpected startup exception/);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("connection closed failures are accompanied by candidate stderr", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-candidate-closed-"));
+    try {
+        const entryPath = path.join(homeDir, "silent-exit-candidate.mjs");
+        writeCandidateEntry(entryPath, `
+process.stderr.write("ERR load: cannot open shared library 'libonnxruntime.so'\\n");
+process.exit(0);
+`);
+        await assert.rejects(
+            probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
+            /ERR load: cannot open shared library 'libonnxruntime\.so'/,
+        );
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("empty candidate stderr is reported explicitly", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-candidate-no-stderr-"));
+    try {
+        const entryPath = path.join(homeDir, "quiet-exit-candidate.mjs");
+        writeCandidateEntry(entryPath, "process.exit(1);\n");
+        await assert.rejects(
+            probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
+            /Candidate runtime produced no stderr\./,
+        );
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("preflight diagnostics include only safe candidate identities", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-candidate-identity-"));
+    try {
+        const runtimeRoot = path.join(homeDir, "mcp-runtime", "@zokizuan-satori-mcp@6.8.1");
+        const mcpPackageRoot = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-mcp");
+        const entryPath = path.join(mcpPackageRoot, "dist", "index.js");
+        writeCandidateEntry(entryPath, 'process.stderr.write("boom\\n"); process.exit(1);\n');
+        await assert.rejects(
+            probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
+            (error) => {
+                assert.match(error.message, /Expected MCP version: 6\.8\.1/);
+                assert.match(error.message, new RegExp(`Candidate MCP package root: ${mcpPackageRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+                assert.match(error.message, new RegExp(`Candidate runtime root: ${runtimeRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+                assert.match(error.message, /Node: v\d+\.\d+\.\d+/);
+                assert.match(error.message, /Platform: linux x64/);
+                assert.doesNotMatch(error.message, /SATORI_|NODE_AUTH_TOKEN|npm_token/i);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("successful preflight ignores benign candidate stderr chatter", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-candidate-chatter-"));
+    try {
+        const entryPath = path.join(homeDir, "chatty-candidate.mjs");
+        writeCandidateEntry(entryPath, `
+import readline from "node:readline";
+process.stderr.write("notice: embedding cache warming\\n");
+const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function reply(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+input.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    reply(message.id, {
+      protocolVersion: message.params.protocolVersion,
+      capabilities: { tools: {} },
+      serverInfo: { name: "satori", version: "9.8.7-test" },
+    });
+  } else if (message.method === "tools/list") {
+    reply(message.id, {
+      tools: ["manage_index", "search_codebase", "continue_search", "call_graph", "file_outline", "read_file", "list_codebases"]
+        .map((name) => ({ name, description: "candidate fixture", inputSchema: { type: "object", properties: {} } })),
+    });
+  }
+});
+`);
+        await probeManagedRuntimeCandidate({
+            ...failingProbeInput(homeDir, entryPath, "9.8.7-test"),
+            runtimeEnvironment: Object.freeze({ SATORI_RUNTIME_PROFILE: "connected" }),
+        });
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("candidate stderr collector caps retained output at 16 KiB and keeps the newest tail", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write("HEAD-MARKER\n");
+    collector.write("A".repeat(CANDIDATE_STDERR_LIMIT_BYTES));
+    collector.write("TAIL-MARKER\n");
+    const text = collector.text();
+    assert.ok(Buffer.byteLength(text, "utf8") <= CANDIDATE_STDERR_LIMIT_BYTES);
+    assert.equal(text.includes("TAIL-MARKER"), true);
+    assert.equal(text.includes("HEAD-MARKER"), false);
+    assert.equal(text.includes("A".repeat(4096)), true);
+});
+
+test("candidate stderr normalization strips ANSI sequences", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write("\u001b[31mred\u001b[0m\u001b]0;window-title\u0007plain\n");
+    assert.equal(collector.text(), "redplain\n");
+});
+
+test("candidate stderr normalization converts CRLF and lone CR to LF", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write("first\r\nsecond\rthird\nfourth");
+    assert.equal(collector.text(), "first\nsecond\nthird\nfourth");
+});
+
+test("candidate stderr normalization redacts authentication URLs and token assignments", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write(
+        "npm error code E401\n"
+        + "npm error Unauthorized - GET //registry.npmjs.org/:_authToken=abc123def456\n"
+        + "_authToken=topsecret\nNPM_TOKEN=anothersecret\n"
+        + "AUTH_TOKEN=thirdsecret\n",
+    );
+    const text = collector.text();
+    assert.equal(text.includes("abc123def456"), false);
+    assert.equal(text.includes("topsecret"), false);
+    assert.equal(text.includes("anothersecret"), false);
+    assert.equal(text.includes("thirdsecret"), false);
+    assert.match(text, /:_authToken=<redacted>/);
+    assert.match(text, /_authToken=<redacted>/);
+    assert.match(text, /NPM_TOKEN=<redacted>/);
+    assert.match(text, /AUTH_TOKEN=<redacted>/);
+});
+
+test("candidate stderr normalization handles secrets and ANSI sequences split across chunks", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write("NPM_");
+    collector.write("TOKEN=");
+    collector.write("split-secret\n");
+    collector.write("{\"OPENAI_API_");
+    collector.write("KEY\":\"json-secret\"}\n");
+    collector.write("Authorization: Bear");
+    collector.write("er bearer-secret\n");
+    collector.write("https://www.npmjs.com/auth/cli/");
+    collector.write("split-auth-id\n");
+    collector.write("\u001b[");
+    collector.write("31mred\u001b[");
+    collector.write("0mplain\n");
+
+    const text = collector.text();
+    assert.equal(text.includes("split-secret"), false);
+    assert.equal(text.includes("json-secret"), false);
+    assert.equal(text.includes("bearer-secret"), false);
+    assert.equal(text.includes("split-auth-id"), false);
+    assert.equal(text.includes("\u001b"), false);
+    assert.match(text, /redplain/);
+});
+
+test("candidate stderr normalization redacts supported secret key families and npm auth URLs", () => {
+    const collector = createCandidateStderrCollector();
+    collector.write([
+        "SERVICE_TOKEN=token-secret",
+        "SERVICE_AUTH_TOKEN=auth-token-secret",
+        "SERVICE_API_KEY=api-key-secret",
+        "SERVICE_SECRET=secret-value",
+        "SERVICE_PASSWORD=password-value",
+        "SERVICE_CREDENTIAL=credential-value",
+        "Authorization: Basic basic-secret",
+        "https://registry.npmjs.org/-/v1/done?authId=web-auth-id&ok=true",
+        "https://www.npmjs.com/auth/cli/web-cli-id",
+        "",
+    ].join("\n"));
+
+    const text = collector.text();
+    for (const secret of [
+        "token-secret",
+        "auth-token-secret",
+        "api-key-secret",
+        "secret-value",
+        "password-value",
+        "credential-value",
+        "basic-secret",
+        "web-auth-id",
+        "web-cli-id",
+    ]) {
+        assert.equal(text.includes(secret), false, `secret leaked: ${secret}`);
+    }
+    assert.match(text, /SERVICE_TOKEN=<redacted>/);
+    assert.match(text, /Authorization: Basic <redacted>/);
+    assert.match(text, /authId=<redacted>&ok=true/);
+    assert.match(text, /https:\/\/www\.npmjs\.com\/auth\/cli\/<redacted>/);
+});
+
+test("candidate diagnostics preserve failure tokens without exposing raw commands", () => {
+    const message = formatCandidatePreflightFailure({
+        runtimeCommand: {
+            command: process.execPath,
+            args: ["/tmp/candidate.mjs", "OPENAI_API_KEY=command-secret"],
+        },
+        stderrText: "safe startup note",
+        expectedVersion: "6.8.1",
+        failure: new CliError("E_PROTOCOL_FAILURE", "Connection closed", 3),
+    });
+
+    assert.match(message, /Candidate runtime failed before completing MCP preflight\./);
+    assert.match(message, /Executable:/);
+    assert.match(message, /Entry: \/tmp\/candidate\.mjs/);
+    assert.match(message, /Failure: E_PROTOCOL_FAILURE: Connection closed/);
+    assert.equal(message.includes("command-secret"), false);
+    assert.equal(message.includes("OPENAI_API_KEY=command-secret"), false);
+    assert.equal(message.includes("candidateCommand.join"), false);
+});
+
+test("candidate diagnostics preserve startup timeout identity", () => {
+    const message = formatCandidatePreflightFailure({
+        runtimeCommand: { command: process.execPath, args: ["/tmp/candidate.mjs"] },
+        stderrText: "",
+        expectedVersion: "6.8.1",
+        failure: new CliError("E_STARTUP_TIMEOUT", "Timed out after 10000ms while starting MCP server.", 3),
+    });
+
+    assert.match(message, /Candidate runtime failed before completing MCP preflight\./);
+    assert.match(message, /Failure: E_STARTUP_TIMEOUT: Timed out after 10000ms while starting MCP server\./);
+    assert.doesNotMatch(message, /Candidate runtime exited before/);
+    assert.match(message, /Candidate runtime produced no stderr\./);
+});
+
+test("normalizeCandidateStderr never retains NUL bytes or terminal controls", () => {
+    const text = normalizeCandidateStderr("a\u0000b\u0007\u001b[2Kc\u001b]0;t\u0007d");
+    assert.equal(text.includes("\u0000"), false);
+    assert.equal(text.includes("\u0007"), false);
+    assert.equal(text.includes("\u001b"), false);
+    assert.equal(text, "abcd");
+});
+
+test("candidate probe failure leaves the existing managed launcher unchanged", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-probe-failure-launcher-"));
+    const markerPath = path.join(homeDir, "managed-core-probe.log");
+    const runtimeRoot = path.join(homeDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@0.0.0-exact-runtime-test");
+    try {
+        const snapshot = seedManagedLateOnInstallation(homeDir);
+        await assert.rejects(
+            executeInstallCommand({
+                kind: "install",
+                client: "codex",
+                dryRun: false,
+                runtime: "offline",
+            }, {
+                homeDir,
+                env: { SATORI_RERANKER_PROVIDER: "none" },
+                packageSpecifier: "@zokizuan/satori-mcp@0.0.0-exact-runtime-test",
+                platform: "linux",
+                architecture: "x64",
+                execFileSyncImpl: installRuntimeWithProbeMarker(markerPath),
+                preflightDependencies: {
+                    verifyPotionRuntime: async () => {},
+                },
+            }),
+            /Candidate runtime preflight failed: Candidate runtime failed before completing MCP preflight\./,
+        );
+        assert.deepEqual(fs.readFileSync(snapshot.launcherPath), snapshot.launcherBytes);
+        assert.deepEqual(fs.readFileSync(snapshot.configPath), snapshot.configBytes);
+        assert.deepEqual(fs.readFileSync(snapshot.oldRuntimePath), snapshot.oldRuntimeBytes);
+        assert.equal(fs.existsSync(runtimeRoot), false);
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
     }

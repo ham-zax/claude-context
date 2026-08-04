@@ -14,6 +14,11 @@ import {
     type VectorDatabase,
 } from "@zokizuan/satori-core";
 import { connectCliMcpSession } from "./client.js";
+import { CliError } from "./errors.js";
+import {
+    createCandidateStderrCollector,
+    normalizeCandidateStderr,
+} from "./candidate-stderr.js";
 import type {
     InstallOfflineReranker,
     InstallRuntime,
@@ -190,26 +195,103 @@ const EXPECTED_TOOL_NAMES = [
     "list_codebases",
 ] as const;
 
+class CandidateRuntimeContractError extends Error {}
+
+function resolveCandidateRuntimeIdentities(entryPath: string): {
+    packageRoot: string | null;
+    runtimeRoot: string | null;
+} {
+    if (!path.isAbsolute(entryPath)) {
+        return { packageRoot: null, runtimeRoot: null };
+    }
+    const segments = entryPath.split(path.sep);
+    const packageMarker = segments.findIndex(
+        (segment, index) => segment === "@zokizuan" && segments[index + 1] === "satori-mcp",
+    );
+    if (packageMarker <= 0) {
+        return { packageRoot: null, runtimeRoot: null };
+    }
+    return {
+        packageRoot: segments.slice(0, packageMarker + 2).join(path.sep),
+        runtimeRoot: segments.slice(0, packageMarker - 1).join(path.sep),
+    };
+}
+
+function safeCandidateDiagnosticValue(value: string | undefined): string {
+    return normalizeCandidateStderr(value ?? "")
+        .replace(/[\r\n\t]/g, " ")
+        .trim();
+}
+
+function candidateFailureDescription(error: unknown): string {
+    const description = error instanceof CliError
+        ? `${error.token}: ${error.message}`
+        : error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
+    const collector = createCandidateStderrCollector();
+    collector.write(description);
+    return collector.text().replace(/[\r\n]+/g, " ").trim();
+}
+
+export function formatCandidatePreflightFailure(input: {
+    runtimeCommand: ManagedRuntimeCandidateProbeInput["runtimeCommand"];
+    stderrText: string;
+    expectedVersion: string;
+    failure: unknown;
+}): string {
+    const stderrText = input.stderrText.trim();
+    const entryPath = input.runtimeCommand.args[0];
+    const lines = [
+        "Candidate runtime failed before completing MCP preflight.",
+        "",
+        "Candidate command:",
+        `Executable: ${safeCandidateDiagnosticValue(input.runtimeCommand.command)}`,
+        `Entry: ${safeCandidateDiagnosticValue(entryPath)}`,
+        "",
+        "Candidate stderr:",
+        stderrText || "Candidate runtime produced no stderr.",
+        "",
+        `Failure: ${candidateFailureDescription(input.failure)}`,
+        "",
+        `Expected MCP version: ${input.expectedVersion}`,
+    ];
+    const identities = entryPath ? resolveCandidateRuntimeIdentities(entryPath) : null;
+    if (identities?.packageRoot) {
+        lines.push(`Candidate MCP package root: ${safeCandidateDiagnosticValue(identities.packageRoot)}`);
+    }
+    if (identities?.runtimeRoot) {
+        lines.push(`Candidate runtime root: ${safeCandidateDiagnosticValue(identities.runtimeRoot)}`);
+    }
+    lines.push(`Node: ${process.version}`);
+    lines.push(`Platform: ${process.platform} ${process.arch}`);
+    return lines.join("\n");
+}
+
 export async function probeManagedRuntimeCandidate(
     input: ManagedRuntimeCandidateProbeInput,
 ): Promise<void> {
-    const session = await connectCliMcpSession({
-        command: input.runtimeCommand.command,
-        args: [...input.runtimeCommand.args],
-        env: {
-            ...input.inheritedEnvironment,
-            ...input.runtimeEnvironment,
-            HOME: input.homeDir,
-            SATORI_RUN_MODE: "postflight",
-        },
-        startupTimeoutMs: 10_000,
-        callTimeoutMs: 45_000,
-        writeStderr: () => {},
-    });
+    const stderrCollector = createCandidateStderrCollector();
+    let session: Awaited<ReturnType<typeof connectCliMcpSession>> | null = null;
     try {
+        session = await connectCliMcpSession({
+            command: input.runtimeCommand.command,
+            args: [...input.runtimeCommand.args],
+            env: {
+                ...input.inheritedEnvironment,
+                ...input.runtimeEnvironment,
+                HOME: input.homeDir,
+                SATORI_RUN_MODE: "postflight",
+            },
+            startupTimeoutMs: 10_000,
+            callTimeoutMs: 45_000,
+            writeStderr: (chunk) => {
+                stderrCollector.write(chunk);
+            },
+        });
         const actualVersion = session.serverVersion?.version;
         if (actualVersion !== input.expectedVersion) {
-            throw new Error(
+            throw new CandidateRuntimeContractError(
                 `Candidate runtime initialized satori@${actualVersion || "unknown"}; expected satori@${input.expectedVersion}.`,
             );
         }
@@ -218,12 +300,24 @@ export async function probeManagedRuntimeCandidate(
             actualTools.length !== EXPECTED_TOOL_NAMES.length
             || !actualTools.every((name, index) => name === EXPECTED_TOOL_NAMES[index])
         ) {
-            throw new Error(
+            throw new CandidateRuntimeContractError(
                 `Candidate runtime tool surface mismatch: expected ${JSON.stringify(EXPECTED_TOOL_NAMES)}, received ${JSON.stringify(actualTools)}.`,
             );
         }
+    } catch (error) {
+        if (error instanceof CandidateRuntimeContractError) {
+            throw error;
+        }
+        throw new Error(formatCandidatePreflightFailure({
+            runtimeCommand: input.runtimeCommand,
+            stderrText: stderrCollector.text(),
+            expectedVersion: input.expectedVersion,
+            failure: error,
+        }));
     } finally {
-        await session.close();
+        if (session) {
+            await session.close();
+        }
     }
 }
 

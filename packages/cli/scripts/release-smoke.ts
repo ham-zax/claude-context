@@ -6,7 +6,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { resolveLanceDbNativePackage } from "../src/managed-runtime-closure.js";
+import {
+    resolveLanceDbNativePackage,
+    resolveOxcParserNativePackage,
+} from "../src/managed-runtime-closure.js";
 import {
     DEFAULT_LATEON_PROFILE_ID,
     readLateOnAcquisitionAuthority,
@@ -14,8 +17,8 @@ import {
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 // The D32-capable closure measured approximately 666.6 MB after optional
-// native packages were omitted and exactly one LanceDB native package was
-// selected.
+// native packages were omitted and exactly the LanceDB and oxc-parser native
+// packages were selected.
 const MAX_LINUX_X64_MANAGED_RUNTIME_BYTES = 700 * 1024 * 1024;
 
 interface PackageManifest {
@@ -163,6 +166,9 @@ function installAndVerifyPackedReleaseClosure(
         tarballs.mcp,
         tarballs.cli,
         lanceDbNativePackage,
+        resolveOxcParserNativePackage({
+            vectorStore: "LanceDB",
+        }),
     ], {
         cwd: installRoot,
         encoding: "utf8",

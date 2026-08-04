@@ -264,18 +264,27 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
         { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
     ];
+    const noLauncherState = () => ({
+        cliVersion: CLI_PACKAGE_VERSION,
+        bundledMcpVersion: MCP_PACKAGE_VERSION,
+        bundledCoreVersion: CORE_PACKAGE_VERSION,
+        activeManagedMcpVersion: null,
+        activeManagedCoreVersion: null,
+        activeLauncherPath: null,
+    });
     const textIo = captureIo();
     const textExitCode = await runCli(["-v"], {
         writeStdout: textIo.writeStdout,
         writeStderr: textIo.writeStderr,
         diagnosticsPath: null,
         versionResolver: () => versions,
+        runtimeStateResolver: noLauncherState,
     });
 
     assert.equal(textExitCode, 0);
     assert.equal(
         textIo.read().stdout,
-        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nMCP runtime: ${MCP_PACKAGE_VERSION}\nCore: ${CORE_PACKAGE_VERSION}\n`,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nBundled release: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nManaged launcher: not installed\n`,
     );
     assert.equal(textIo.read().stderr, "");
 
@@ -285,6 +294,7 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         writeStderr: jsonIo.writeStderr,
         diagnosticsPath: null,
         versionResolver: () => versions,
+        runtimeStateResolver: noLauncherState,
     });
 
     assert.equal(jsonExitCode, 0);
@@ -295,7 +305,124 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         cliVersion: CLI_PACKAGE_VERSION,
         mcpVersion: MCP_PACKAGE_VERSION,
         coreVersion: CORE_PACKAGE_VERSION,
+        bundledMcpVersion: MCP_PACKAGE_VERSION,
+        bundledCoreVersion: CORE_PACKAGE_VERSION,
+        activeManagedMcpVersion: null,
+        activeManagedCoreVersion: null,
+        activeLauncherPath: null,
     });
+});
+
+test("runCli version distinguishes the bundled release from the active managed runtime", async () => {
+    const versions = [
+        { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
+    ];
+    const io = captureIo();
+    const exitCode = await runCli(["-v"], {
+        writeStdout: io.writeStdout,
+        writeStderr: io.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+        runtimeStateResolver: () => ({
+            cliVersion: CLI_PACKAGE_VERSION,
+            bundledMcpVersion: MCP_PACKAGE_VERSION,
+            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            activeManagedMcpVersion: "6.7.0",
+            activeManagedCoreVersion: "3.5.0",
+            activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+        }),
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(
+        io.read().stdout,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nBundled release: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nActive managed runtime: MCP 6.7.0 · Core 3.5.0\nManaged launcher: /home/test/.satori/bin/satori-mcp.js\n\nCLI-bundled release and active managed runtime differ.\n`,
+    );
+});
+
+test("runCli version omits the bundle line when bundled and active runtimes match", async () => {
+    const versions = [
+        { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
+    ];
+    const io = captureIo();
+    const exitCode = await runCli(["-v"], {
+        writeStdout: io.writeStdout,
+        writeStderr: io.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+        runtimeStateResolver: () => ({
+            cliVersion: CLI_PACKAGE_VERSION,
+            bundledMcpVersion: MCP_PACKAGE_VERSION,
+            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            activeManagedMcpVersion: MCP_PACKAGE_VERSION,
+            activeManagedCoreVersion: CORE_PACKAGE_VERSION,
+            activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+        }),
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(
+        io.read().stdout,
+        `Satori\n\nCLI: ${CLI_PACKAGE_VERSION}\nActive managed runtime: MCP ${MCP_PACKAGE_VERSION} · Core ${CORE_PACKAGE_VERSION}\nManaged launcher: /home/test/.satori/bin/satori-mcp.js\n`,
+    );
+});
+
+test("runCli version shows both runtimes when only Core differs", async () => {
+    const versions = [
+        { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
+    ];
+    const io = captureIo();
+    const exitCode = await runCli(["-v"], {
+        writeStdout: io.writeStdout,
+        writeStderr: io.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+        runtimeStateResolver: () => ({
+            cliVersion: CLI_PACKAGE_VERSION,
+            bundledMcpVersion: MCP_PACKAGE_VERSION,
+            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            activeManagedMcpVersion: MCP_PACKAGE_VERSION,
+            activeManagedCoreVersion: "3.5.0",
+            activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+        }),
+    });
+    assert.equal(exitCode, 0);
+    const stdout = io.read().stdout;
+    assert.match(stdout, /Bundled release: MCP 6\.8\.1 · Core 3\.6\.0/);
+    assert.match(stdout, /Active managed runtime: MCP 6\.8\.1 · Core 3\.5\.0/);
+    assert.match(stdout, /CLI-bundled release and active managed runtime differ\./);
+});
+
+test("runCli version reports a malformed launcher without claiming an active runtime", async () => {
+    const versions = [
+        { name: "@zokizuan/satori-cli", version: CLI_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
+        { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
+    ];
+    const io = captureIo();
+    const exitCode = await runCli(["-v"], {
+        writeStdout: io.writeStdout,
+        writeStderr: io.writeStderr,
+        diagnosticsPath: null,
+        versionResolver: () => versions,
+        runtimeStateResolver: () => ({
+            cliVersion: CLI_PACKAGE_VERSION,
+            bundledMcpVersion: MCP_PACKAGE_VERSION,
+            bundledCoreVersion: CORE_PACKAGE_VERSION,
+            activeManagedMcpVersion: null,
+            activeManagedCoreVersion: null,
+            activeLauncherPath: "/home/test/.satori/bin/satori-mcp.js",
+        }),
+    });
+    assert.equal(exitCode, 0);
+    const stdout = io.read().stdout;
+    assert.equal(stdout.includes("Active managed runtime"), false);
+    assert.equal(stdout.includes("A newer candidate"), false);
+    assert.match(stdout, /Managed launcher: \/home\/test\/\.satori\/bin\/satori-mcp\.js/);
 });
 
 test("runCli tools list succeeds and emits JSON to stdout", async () => {
@@ -918,6 +1045,7 @@ test("runCli doctor reports stale MCP clients independently without changing JSO
             "Rerun satori install for each stale configured MCP client, then restart it.",
             "Restart your MCP client after changing Satori environment variables.",
         ],
+        managedRuntime: null,
         localDiagnostics: {
             schemaVersion: "v1", storage: "local_only",
             privacy: "No source, query text, path, symbol name, or repository identifier is stored.",

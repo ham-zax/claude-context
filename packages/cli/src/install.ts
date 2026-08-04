@@ -44,6 +44,7 @@ import {
 import {
     managedRuntimeClosureMatches,
     resolveLanceDbNativePackage,
+    resolveOxcParserNativePackage,
     type ManagedRuntimeClosure,
     writeManagedRuntimeClosureManifest,
 } from "./managed-runtime-closure.js";
@@ -678,6 +679,13 @@ function installManagedRuntimeCandidate(
             newlyInstalled: false,
         };
     }
+    const installTargets = [
+        packageSpecifier,
+        ...(closure.vectorStore === "LanceDB"
+            ? [resolveLanceDbNativePackage(closure)]
+            : []),
+        resolveOxcParserNativePackage(closure),
+    ];
     // Never reinstall into a directory that may still be the target of the
     // active launcher. A failed or stale reinstall must leave the old runtime
     // bytes untouched.
@@ -685,12 +693,6 @@ function installManagedRuntimeCandidate(
         ? fs.mkdtempSync(`${stableRuntimeRoot}.generation-`)
         : stableRuntimeRoot;
     ensureDir(runtimeRoot);
-    const installTargets = [
-        packageSpecifier,
-        ...(closure.vectorStore === "LanceDB"
-            ? [resolveLanceDbNativePackage(closure)]
-            : []),
-    ];
     try {
         execImpl("npm", [
             "install",

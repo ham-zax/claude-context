@@ -37,6 +37,21 @@ export interface DoctorPackageVersion {
     source: string;
 }
 
+export interface RuntimeVersionState {
+    cliVersion: string;
+    bundledMcpVersion: string | null;
+    bundledCoreVersion: string | null;
+    activeManagedMcpVersion: string | null;
+    activeManagedCoreVersion: string | null;
+    activeLauncherPath: string | null;
+}
+
+export interface ManagedRuntimeSnapshot {
+    launcherPath: string | null;
+    mcpVersion: string | null;
+    coreVersion: string | null;
+}
+
 export interface DoctorResult {
     status: CheckStatus;
     /** Installed Satori package set (independent versions are expected). */
@@ -45,6 +60,8 @@ export interface DoctorResult {
     packageVersionNote: string;
     checks: DoctorCheck[];
     nextSteps: string[];
+    /** Active managed launcher identity; null when no launcher is present. */
+    managedRuntime: ManagedRuntimeSnapshot | null;
     /** Aggregated CLI activity stored only on this machine; contains no repository or request identity. */
     localDiagnostics: LocalDiagnosticsSummary;
 }
@@ -367,6 +384,95 @@ export function resolveInstalledPackageVersions(): DoctorPackageVersion[] {
     });
 }
 
+interface ActiveManagedRuntimeResolution {
+    launcherPath: string;
+    target: string;
+    mcpPackageRoot: string;
+    mcpVersion: string;
+    coreVersion: string | null;
+}
+
+function isPathWithinReal(rootPath: string, candidatePath: string): boolean {
+    try {
+        const relative = path.relative(fs.realpathSync(rootPath), fs.realpathSync(candidatePath));
+        return relative.length > 0
+            && relative !== ".."
+            && !relative.startsWith(`..${path.sep}`)
+            && !path.isAbsolute(relative);
+    } catch {
+        return false;
+    }
+}
+
+function resolveActiveManagedRuntime(homeDir: string, launcherPath: string): ActiveManagedRuntimeResolution | null {
+    if (!fs.existsSync(launcherPath)) {
+        return null;
+    }
+    let target: string | null;
+    try {
+        target = parseManagedLauncherTarget(fs.readFileSync(launcherPath, "utf8"));
+    } catch {
+        return null;
+    }
+    const managedRuntimeRoot = path.join(homeDir, ".satori", "mcp-runtime");
+    if (
+        !target
+        || !path.isAbsolute(target)
+        || !isRegularFile(target)
+        || !isPathWithinReal(managedRuntimeRoot, target)
+    ) {
+        return null;
+    }
+    const targetRealPath = fs.realpathSync(target);
+    const mcpPackage = findMcpPackage(targetRealPath);
+    if (!mcpPackage || !isPathWithinReal(managedRuntimeRoot, mcpPackage.root)) {
+        return null;
+    }
+    let coreVersion: string | null = null;
+    try {
+        const corePackageJsonPath = createRequire(mcpPackage.packageJsonPath)
+            .resolve("@zokizuan/satori-core/package.json");
+        if (isPathWithinReal(managedRuntimeRoot, corePackageJsonPath)) {
+            const coreInfo = readJsonVersion(corePackageJsonPath);
+            if (coreInfo?.name === "@zokizuan/satori-core") {
+                coreVersion = coreInfo.version;
+            }
+        }
+    } catch {
+        // Keep the active MCP identity while reporting unresolved Core explicitly.
+    }
+    return {
+        launcherPath,
+        target: targetRealPath,
+        mcpPackageRoot: mcpPackage.root,
+        mcpVersion: mcpPackage.version,
+        coreVersion,
+    };
+}
+
+export function resolveRuntimeVersionState(
+    homeDir: string,
+    packageVersions: readonly DoctorPackageVersion[],
+): RuntimeVersionState {
+    const launcherPath = path.join(homeDir, ".satori", "bin", "satori-mcp.js");
+    const active = resolveActiveManagedRuntime(homeDir, launcherPath);
+    return {
+        cliVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-cli") ?? "unknown",
+        bundledMcpVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-mcp"),
+        bundledCoreVersion: installedPackageVersion(packageVersions, "@zokizuan/satori-core"),
+        activeManagedMcpVersion: active?.mcpVersion ?? null,
+        activeManagedCoreVersion: active?.coreVersion ?? null,
+        activeLauncherPath: active?.launcherPath ?? null,
+    };
+}
+
+function installedPackageVersion(
+    packages: readonly DoctorPackageVersion[],
+    packageName: string,
+): string | null {
+    return packages.find((entry) => entry.name === packageName)?.version ?? null;
+}
+
 export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResult> {
     const env = options.env || process.env;
     const homeDir = env.HOME || os.homedir();
@@ -381,12 +487,10 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         ? null
         : options.managedLauncherPath || path.join(homeDir, ".satori", "bin", "satori-mcp.js");
     let managedRuntimeEnvironment: Readonly<Record<string, string>> = Object.freeze({});
-    let managedRuntimeTarget: string | null = null;
     if (managedLauncherPath && fs.existsSync(managedLauncherPath)) {
         try {
             const launcher = fs.readFileSync(managedLauncherPath, "utf8");
             managedRuntimeEnvironment = parseManagedLauncherEnvironment(launcher);
-            managedRuntimeTarget = parseManagedLauncherTarget(launcher);
         } catch (error) {
             addCheck(
                 checks,
@@ -396,6 +500,27 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
             );
             nextSteps.push("Rerun satori install to replace the malformed managed launcher.");
         }
+    }
+    const activeManagedRuntime = managedLauncherPath
+        ? resolveActiveManagedRuntime(homeDir, managedLauncherPath)
+        : null;
+    const managedRuntime: ManagedRuntimeSnapshot | null = activeManagedRuntime
+        ? {
+            launcherPath: activeManagedRuntime.launcherPath,
+            mcpVersion: activeManagedRuntime.mcpVersion,
+            coreVersion: activeManagedRuntime.coreVersion,
+        }
+        : null;
+    const bundledMcpVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-mcp");
+    const bundledCoreVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-core");
+    if (
+        managedRuntime?.mcpVersion
+        && bundledMcpVersion
+        && (managedRuntime.mcpVersion !== bundledMcpVersion || managedRuntime.coreVersion !== bundledCoreVersion)
+    ) {
+        nextSteps.push(
+            "The CLI-bundled runtime differs from the active managed runtime.\nThe active launcher has not been changed.",
+        );
     }
     const runtimeEnv: NodeJS.ProcessEnv = { ...env, ...managedRuntimeEnvironment };
     const managedClientProofs = options.inspectManagedClients
@@ -458,12 +583,10 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
 
     if (
         evaluatedRuntimeContexts.some((context) => selectedVectorStore(context.environment) === "LanceDB")
-        && managedRuntimeTarget
-        && path.isAbsolute(managedRuntimeTarget)
-        && isRegularFile(managedRuntimeTarget)
+        && activeManagedRuntime
     ) {
         try {
-            await (options.loadManagedLanceDb ?? loadManagedLanceDbFromRuntime)(managedRuntimeTarget);
+            await (options.loadManagedLanceDb ?? loadManagedLanceDbFromRuntime)(activeManagedRuntime.target);
             addCheck(
                 checks,
                 "lancedb_native_load",
@@ -550,6 +673,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         appendManagedLauncherCheck(
             checks,
             nextSteps,
+            homeDir,
             managedLauncherPath,
         );
     }
@@ -570,6 +694,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         packageVersionNote: PACKAGE_VERSION_NOTE,
         checks,
         nextSteps: [...new Set(nextSteps)],
+        managedRuntime,
         localDiagnostics: readLocalDiagnosticsSummary(
             options.diagnosticsPath || path.join(homeDir, ".satori", "diagnostics", "events.jsonl"),
         ),
@@ -851,13 +976,17 @@ function isRegularFile(filePath: string): boolean {
     }
 }
 
-function findMcpPackageMetadata(runtimeTarget: string): { version: string } | null {
+function findMcpPackage(runtimeTarget: string): {
+    root: string;
+    packageJsonPath: string;
+    version: string;
+} | null {
     let current = path.dirname(runtimeTarget);
     while (true) {
         const packageJsonPath = path.join(current, "package.json");
         const info = readJsonVersion(packageJsonPath);
         if (info?.name === "@zokizuan/satori-mcp") {
-            return { version: info.version };
+            return { root: current, packageJsonPath, version: info.version };
         }
         const parent = path.dirname(current);
         if (parent === current) {
@@ -867,9 +996,15 @@ function findMcpPackageMetadata(runtimeTarget: string): { version: string } | nu
     }
 }
 
+function findMcpPackageMetadata(runtimeTarget: string): { version: string } | null {
+    const packageInfo = findMcpPackage(runtimeTarget);
+    return packageInfo ? { version: packageInfo.version } : null;
+}
+
 function appendManagedLauncherCheck(
     checks: DoctorCheck[],
     nextSteps: string[],
+    homeDir: string,
     launcherPath: string,
 ): void {
     if (!fs.existsSync(launcherPath)) {
@@ -891,6 +1026,16 @@ function appendManagedLauncherCheck(
     if (!path.isAbsolute(target) || !isRegularFile(target)) {
         addCheck(checks, "managed_launcher", "error", `Managed Satori launcher target does not exist: ${target}.`);
         nextSteps.push("Rerun satori install to install the resident MCP runtime and refresh its launcher target.");
+        return;
+    }
+    if (!isPathWithinReal(path.join(homeDir, ".satori", "mcp-runtime"), target)) {
+        addCheck(
+            checks,
+            "managed_launcher",
+            "warning",
+            `Managed Satori launcher target is outside the managed runtime store: ${target}.`,
+        );
+        nextSteps.push("Inspect the custom launcher target, then rerun satori install to restore the managed runtime.");
         return;
     }
     const metadata = findMcpPackageMetadata(target);
