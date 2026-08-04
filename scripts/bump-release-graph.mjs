@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
+import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 import {
   RELEASE_ORDER,
   RELEASE_PACKAGES,
@@ -28,7 +29,7 @@ export function defaultIsVersionPublishedImpl(execFileSyncImpl = execFileSync) {
       output = execFileSyncImpl(
         'npm',
         ['view', `${packageName}@${version}`, 'version', '--json'],
-        { encoding: 'utf8' }
+        { encoding: 'utf8', env: createNpmChildEnvironment(process.env), stdio: REGISTRY_PROBE_STDIO }
       );
     } catch (error) {
       if (isRegistryNotFoundError(error)) {

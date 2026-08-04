@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 import { RELEASE_ORDER, RELEASE_PACKAGES } from './release-graph.mjs';
@@ -6,6 +7,10 @@ import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-pro
 
 const REGISTRY_POLL_ATTEMPTS = 12;
 const REGISTRY_POLL_INTERVAL_MS = 5000;
+
+const KEY_BY_PACKAGE_NAME = Object.freeze(
+  Object.fromEntries(Object.entries(RELEASE_PACKAGES).map(([key, packageInfo]) => [packageInfo.name, key]))
+);
 
 function parseJsonOutput(output, description) {
   try {
@@ -40,13 +45,22 @@ export async function publishReleaseGraph(options = {}) {
     || (() => execFileSyncImpl('pnpm', ['-C', 'packages/mcp', 'release:smoke'], { cwd, encoding: 'utf8' }));
   const smokeCliImpl = options.smokeCliImpl
     || (() => execFileSyncImpl('pnpm', ['-C', 'packages/cli', 'release:smoke'], { cwd, encoding: 'utf8' }));
-  const checkGraphImpl = options.checkGraphImpl || ((checkCwd) => checkReleaseGraph({ cwd: checkCwd }));
+  const checkGraphImpl = options.checkGraphImpl
+    || ((checkCwd) => checkReleaseGraph({ cwd: checkCwd, keepTempDirectory: true }));
+  let verifiedTarballs = null;
   const publishImpl = options.publishImpl
-    || ((packageName) => execFileSyncImpl(
-      'pnpm',
-      ['--filter', packageName, 'publish', '--access', 'public', '--no-git-checks'],
-      { cwd, env: createNpmChildEnvironment(process.env), stdio: 'inherit' }
-    ));
+    || ((packageName) => {
+      const key = KEY_BY_PACKAGE_NAME[packageName];
+      const tarball = verifiedTarballs && key ? verifiedTarballs[key] : null;
+      if (!tarball) {
+        throw new Error(`No verified tarball for ${packageName}; publish is refused`);
+      }
+      return execFileSyncImpl(
+        'npm',
+        ['publish', tarball, '--access', 'public'],
+        { cwd, env: createNpmChildEnvironment(process.env), stdio: 'inherit' }
+      );
+    });
   const viewVersionImpl = options.viewVersionImpl
     || ((packageName, version) => {
       const output = execFileSyncImpl(
@@ -76,13 +90,18 @@ export async function publishReleaseGraph(options = {}) {
     throw new Error(`Refusing to publish from branch ${JSON.stringify(branch)}; expected master`);
   }
   versionsCheckImpl();
+  buildImpl();
+  smokeMcpImpl();
+  smokeCliImpl();
+  const postBuildStatus = String(gitStatusImpl()).trim();
+  if (postBuildStatus !== '') {
+    throw new Error(`Working tree became dirty during build or smokes; refusing to publish:\n${postBuildStatus}`);
+  }
   const report = await checkGraphImpl(cwd);
   if (!report || !report.valid) {
     throw new Error('Release graph is invalid; refusing to publish.');
   }
-  buildImpl();
-  smokeMcpImpl();
-  smokeCliImpl();
+  verifiedTarballs = report.tarballs || null;
 
   const localVersions = Object.freeze(
     Object.fromEntries(RELEASE_ORDER.map((key) => [key, report.packages[key].localVersion]))
@@ -90,34 +109,40 @@ export async function publishReleaseGraph(options = {}) {
   const toPublish = RELEASE_ORDER.filter((key) => report.packages[key].status === 'unpublished');
   const toSkip = RELEASE_ORDER.filter((key) => report.packages[key].status === 'published-identical');
 
-  if (toPublish.length === 0) {
-    log('All packages are published-identical; nothing to publish.');
-    return { published: [], skipped: Object.freeze(toSkip) };
-  }
-
-  log(`Publishing in order: ${toPublish.map((key) => RELEASE_PACKAGES[key].name).join(' -> ')}`);
-  const published = [];
-  for (const key of toPublish) {
-    const packageName = RELEASE_PACKAGES[key].name;
-    const version = localVersions[key];
-    log(`Publishing ${packageName}@${version}...`);
-    try {
-      publishImpl(packageName, version);
-    } catch (error) {
-      throw new Error(
-        `Publish command failed for ${packageName}@${version}. Already published: ${published.map((entry) => `${entry.name}@${entry.version}`).join(', ') || 'none'}. ${error.message}`
-      );
+  try {
+    if (toPublish.length === 0) {
+      log('All packages are published-identical; nothing to publish.');
+      return { published: [], skipped: Object.freeze(toSkip) };
     }
-    await verifyPublished(key, version, localVersions, {
-      viewVersionImpl,
-      viewDependenciesImpl,
-      sleepImpl,
-      log,
-    });
-    published.push({ key, name: packageName, version });
+
+    log(`Publishing in order: ${toPublish.map((key) => RELEASE_PACKAGES[key].name).join(' -> ')}`);
+    const published = [];
+    for (const key of toPublish) {
+      const packageName = RELEASE_PACKAGES[key].name;
+      const version = localVersions[key];
+      log(`Publishing ${packageName}@${version}...`);
+      try {
+        publishImpl(packageName, version, verifiedTarballs[key]);
+      } catch (error) {
+        throw new Error(
+          `Publish command failed for ${packageName}@${version}. Already published: ${published.map((entry) => `${entry.name}@${entry.version}`).join(', ') || 'none'}. ${error.message}`
+        );
+      }
+      await verifyPublished(key, version, localVersions, {
+        viewVersionImpl,
+        viewDependenciesImpl,
+        sleepImpl,
+        log,
+      });
+      published.push({ key, name: packageName, version });
+    }
+    log('Release graph published.');
+    return { published: Object.freeze(published), skipped: Object.freeze(toSkip) };
+  } finally {
+    if (report.tempDirectory) {
+      fs.rmSync(report.tempDirectory, { recursive: true, force: true });
+    }
   }
-  log('Release graph published.');
-  return { published: Object.freeze(published), skipped: Object.freeze(toSkip) };
 }
 
 async function verifyPublished(key, version, localVersions, impls) {

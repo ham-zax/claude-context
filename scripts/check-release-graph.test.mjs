@@ -59,9 +59,12 @@ function localManifests() {
 
 function defaultPackLocal() {
   const manifests = localManifests();
-  return ({ packageName }) => {
+  return ({ packageName, workDirectory }) => {
     const key = { '@zokizuan/satori-core': 'core', '@zokizuan/satori-mcp': 'mcp', '@zokizuan/satori-cli': 'cli' }[packageName];
-    return { manifest: manifests[key], snapshot: snapshotFor(manifests[key]) };
+    fs.mkdirSync(workDirectory, { recursive: true });
+    const tarballPath = path.join(workDirectory, `${key}.tgz`);
+    fs.writeFileSync(tarballPath, JSON.stringify(manifests[key]));
+    return { manifest: manifests[key], snapshot: snapshotFor(manifests[key]), tarballPath };
   };
 }
 
@@ -92,6 +95,7 @@ async function runCheck(options = {}) {
     output: (line) => lines.push(line),
     packLocalImpl: options.packLocalImpl || defaultPackLocal(),
     fetchPublishedImpl: options.fetchPublishedImpl || stubFetch(options.publishedByName || {}),
+    keepTempDirectory: options.keepTempDirectory,
   });
   return { result, lines, tempRoot };
 }
@@ -276,6 +280,41 @@ test('temporary directories are removed on failure', async () => {
     runCheck({
       cwd,
       tempRoot,
+      publishedByName: {
+        '@zokizuan/satori-core': { packedSnapshot: snapshotFor(manifests.core), packedManifest: manifests.core },
+        '@zokizuan/satori-mcp': { packedSnapshot: snapshotFor(manifests.mcp), packedManifest: manifests.mcp },
+        '@zokizuan/satori-cli': { packedSnapshot: snapshotFor(publishedCli), packedManifest: publishedCli },
+      },
+    }),
+    /Release graph invalid\./
+  );
+  assert.equal(remainingTempChildren(tempRoot).length, 0);
+});
+
+test('kept verification directory retains the exact verified tarballs', async () => {
+  const cwd = standardWorkspace();
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+  const { result } = await runCheck({ cwd, tempRoot, keepTempDirectory: true });
+  assert.equal(result.valid, true);
+  assert.ok(remainingTempChildren(tempRoot).length > 0);
+  for (const key of ['core', 'mcp', 'cli']) {
+    assert.ok(fs.existsSync(result.tarballs[key]), `${key} tarball must exist on disk`);
+    assert.ok(result.tarballs[key].startsWith(result.tempDirectory), `${key} tarball must live in the verification temp directory`);
+  }
+  fs.rmSync(result.tempDirectory, { recursive: true, force: true });
+  assert.equal(remainingTempChildren(tempRoot).length, 0);
+});
+
+test('failed verification removes its temp directory even when keeping was requested', async () => {
+  const cwd = standardWorkspace();
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+  const manifests = localManifests();
+  const publishedCli = { ...manifests.cli, dependencies: { '@zokizuan/satori-core': '3.6.0', '@zokizuan/satori-mcp': '6.7.0' } };
+  await assert.rejects(
+    runCheck({
+      cwd,
+      tempRoot,
+      keepTempDirectory: true,
       publishedByName: {
         '@zokizuan/satori-core': { packedSnapshot: snapshotFor(manifests.core), packedManifest: manifests.core },
         '@zokizuan/satori-mcp': { packedSnapshot: snapshotFor(manifests.mcp), packedManifest: manifests.mcp },

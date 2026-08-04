@@ -1,20 +1,28 @@
 import process from 'node:process';
 
-const PNPM_ONLY_NPM_CONFIG_KEYS = Object.freeze([
-  '_jsr-registry',
-  'auto-install-peers',
-  'cache-dir',
-  'child-concurrency',
-  'dedupe-peer-dependents',
-  'ignore-workspace-root-check',
-  'npm-globalconfig',
-  'prefer-frozen-lockfile',
-  'shell-emulator',
-  'store-dir',
-  'verify-deps-before-run',
-]);
-
 export const REGISTRY_PROBE_STDIO = Object.freeze(['ignore', 'pipe', 'pipe']);
+
+const NPM_COMPATIBLE_CONFIG_KEYS = Object.freeze([
+  'registry',
+  'userconfig',
+  'globalconfig',
+  'cache',
+  'proxy',
+  'http-proxy',
+  'https-proxy',
+  'noproxy',
+  'ca',
+  'cafile',
+  'strict-ssl',
+  'cert',
+  'key',
+  'otp',
+  'provenance',
+  'access',
+  'tag',
+  'loglevel',
+  'user-agent',
+]);
 
 function configKeyFromEnvironmentName(environmentName) {
   const rest = environmentName.slice('npm_config_'.length).toLowerCase();
@@ -27,10 +35,10 @@ function configKeyFromEnvironmentName(environmentName) {
 export function createNpmChildEnvironment(parentEnvironment = process.env) {
   const childEnvironment = { ...parentEnvironment };
   for (const name of Object.keys(childEnvironment)) {
-    if (
-      name.startsWith('npm_config_')
-      && PNPM_ONLY_NPM_CONFIG_KEYS.includes(configKeyFromEnvironmentName(name))
-    ) {
+    if (!/^npm_config_/i.test(name)) {
+      continue;
+    }
+    if (!NPM_COMPATIBLE_CONFIG_KEYS.includes(configKeyFromEnvironmentName(name))) {
       delete childEnvironment[name];
     }
   }

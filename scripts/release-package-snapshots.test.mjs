@@ -9,6 +9,7 @@ import {
   extractPackageTarball,
   loadPackedPackageSnapshot,
 } from './release-package-snapshots.mjs';
+import { createNpmChildEnvironment } from './npm-child-process.mjs';
 
 function makeFixture(files, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-pkg-fixture-'));
@@ -25,8 +26,8 @@ function makeFixture(files, options = {}) {
 
 function createRunner({ fixtures = {}, viewVersion, viewRaw, viewError } = {}) {
   const calls = [];
-  const runner = (command, args) => {
-    calls.push({ command, args });
+  const runner = (command, args, options) => {
+    calls.push({ command, args, options });
     if (command === 'pnpm' && args.includes('pack')) {
       const destination = args[args.length - 1];
       const filterIndex = args.indexOf('--filter');
@@ -318,4 +319,40 @@ test('loadPackedPackageSnapshot reads manifest and snapshot together', () => {
   assert.equal(manifest.version, '3.6.0');
   assert.ok(snapshot.length >= 2);
   assert.ok(snapshot.some((entry) => entry.path === 'dist/index.js'));
+});
+
+test('pnpm pack keeps the original environment while npm probes are sanitized', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-pkg-cwd-'));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-pkg-work-'));
+  const fixture = localFixture('3.6.0');
+  const runner = createRunner({
+    viewVersion: '3.6.0',
+    fixtures: {
+      'zokizuan-satori-core-1.0.0.tgz': fixture,
+      'zokizuan-satori-core-3.6.0.tgz': fixture,
+    },
+  });
+  packLocalPackage({
+    packageName: '@zokizuan/satori-core',
+    cwd,
+    workDirectory: work,
+    execFileSyncImpl: runner,
+  });
+  fetchPublishedPackage({
+    packageName: '@zokizuan/satori-core',
+    version: '3.6.0',
+    workDirectory: work,
+    execFileSyncImpl: runner,
+  });
+  const expectedSanitized = createNpmChildEnvironment(process.env);
+  const packCall = runner.calls.find((call) => call.command === 'pnpm' && call.args.includes('pack'));
+  assert.equal('env' in packCall.options, false);
+  assert.equal(packCall.options.cwd, cwd);
+  assert.deepEqual(packCall.options.stdio, ['ignore', 'pipe', 'pipe']);
+  const viewCall = runner.calls.find((call) => call.command === 'npm' && call.args.includes('view'));
+  assert.deepEqual(viewCall.options.env, expectedSanitized);
+  assert.deepEqual(viewCall.options.stdio, ['ignore', 'pipe', 'pipe']);
+  const npmPackCall = runner.calls.find((call) => call.command === 'npm' && call.args.includes('pack'));
+  assert.deepEqual(npmPackCall.options.env, expectedSanitized);
+  assert.deepEqual(npmPackCall.options.stdio, ['ignore', 'pipe', 'pipe']);
 });

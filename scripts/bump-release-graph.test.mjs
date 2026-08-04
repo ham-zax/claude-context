@@ -9,6 +9,7 @@ import {
   runReleaseBump,
   defaultIsVersionPublishedImpl,
 } from './bump-release-graph.mjs';
+import { createNpmChildEnvironment } from './npm-child-process.mjs';
 
 function createWorkspace(files) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-bump-'));
@@ -363,6 +364,20 @@ test('defaultIsVersionPublishedImpl interprets 404 as unpublished and failures a
   assert.equal(isPublished('@zokizuan/satori-core', '3.6.0'), false);
   assert.equal(isPublished('@zokizuan/satori-cli', '1.9.0'), true);
   assert.throws(() => isPublished('@zokizuan/satori-mcp', '6.8.0'), /Cannot verify/);
+});
+
+test('defaultIsVersionPublishedImpl uses a quiet sanitized npm probe', () => {
+  const recordedOptions = [];
+  const runner = (command, args, options) => {
+    recordedOptions.push(options);
+    throw { status: 1, stderr: 'npm error code E404\nversion not found' };
+  };
+  const isPublished = defaultIsVersionPublishedImpl(runner);
+  assert.equal(isPublished('@zokizuan/satori-core', '3.6.0'), false);
+  assert.equal(recordedOptions.length, 1);
+  assert.deepEqual(recordedOptions[0].stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(recordedOptions[0].env, createNpmChildEnvironment(process.env));
+  assert.equal(recordedOptions[0].encoding, 'utf8');
 });
 
 test('usage errors exit with usage message', async () => {

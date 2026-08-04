@@ -78,7 +78,6 @@ export function packLocalPackage(input) {
       ['--filter', packageName, 'pack', '--pack-destination', packOutputDirectory],
       {
         cwd,
-        env: createNpmChildEnvironment(process.env),
         stdio: REGISTRY_PROBE_STDIO,
         encoding: 'utf8',
       }

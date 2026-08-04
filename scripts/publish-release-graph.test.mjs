@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { publishReleaseGraph } from './publish-release-graph.mjs';
 import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 
@@ -11,7 +14,7 @@ const NAMES = {
 
 const VERSIONS = Object.freeze({ core: '3.6.0', mcp: '6.8.0', cli: '1.9.0' });
 
-function fakeReport(statuses) {
+function fakeReport(statuses, extra = {}) {
   return {
     valid: Object.values(statuses).every((status) => status === 'unpublished' || status === 'published-identical'),
     packages: Object.fromEntries(
@@ -20,7 +23,26 @@ function fakeReport(statuses) {
         { key, name: NAMES[key], localVersion: VERSIONS[key], status },
       ])
     ),
+    tarballs: extra.tarballs || {
+      core: 'verified/@zokizuan/satori-core-3.6.0.tgz',
+      mcp: 'verified/@zokizuan/satori-mcp-6.8.0.tgz',
+      cli: 'verified/@zokizuan/satori-cli-1.9.0.tgz',
+    },
+    ...(extra.tempDirectory ? { tempDirectory: extra.tempDirectory } : {}),
   };
+}
+
+function verifiedTarballFixture(statuses = { core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' }) {
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-verified-'));
+  const tarballs = {
+    core: path.join(tempDirectory, '@zokizuan-satori-core-3.6.0.tgz'),
+    mcp: path.join(tempDirectory, '@zokizuan-satori-mcp-6.8.0.tgz'),
+    cli: path.join(tempDirectory, '@zokizuan-satori-cli-1.9.0.tgz'),
+  };
+  for (const file of Object.values(tarballs)) {
+    fs.writeFileSync(file, 'verified tarball');
+  }
+  return { tempDirectory, tarballs, report: fakeReport(statuses, { tarballs, tempDirectory }) };
 }
 
 function runnerOptions(extra = {}) {
@@ -45,6 +67,7 @@ function runnerOptions(extra = {}) {
       sleepCalls.push(milliseconds);
       return Promise.resolve();
     },
+    ...(extra.cwd ? { cwd: extra.cwd } : {}),
     ...(extra.execFileSyncImpl ? { execFileSyncImpl: extra.execFileSyncImpl } : {}),
   };
   if (!extra.useDefaultExecImpls) {
@@ -216,7 +239,7 @@ test('publish itself is never automatically retried', async () => {
   assert.equal(mcpAttempts, 1);
 });
 
-test('default publish uses inherited stdio and the sanitized child environment', async () => {
+test('default publish uses the exact verified tarballs in graph order', async () => {
   const calls = [];
   const execFileSyncImpl = (command, args, callOptions) => {
     calls.push({ command, args, callOptions });
@@ -228,14 +251,32 @@ test('default publish uses inherited stdio and the sanitized child environment',
     }
     return '';
   };
-  const options = runnerOptions({ useDefaultExecImpls: true, execFileSyncImpl });
+  const tarballs = {
+    core: '/tmp/verified/@zokizuan-satori-core-3.6.0.tgz',
+    mcp: '/tmp/verified/@zokizuan-satori-mcp-6.8.0.tgz',
+    cli: '/tmp/verified/@zokizuan-satori-cli-1.9.0.tgz',
+  };
+  const options = runnerOptions({
+    useDefaultExecImpls: true,
+    execFileSyncImpl,
+    versionsCheckImpl: () => execFileSyncImpl('pnpm', ['run', 'versions:check'], {}),
+    buildImpl: () => execFileSyncImpl('pnpm', ['run', 'build'], {}),
+    smokeMcpImpl: () => execFileSyncImpl('pnpm', ['-C', 'packages/mcp', 'release:smoke'], {}),
+    smokeCliImpl: () => execFileSyncImpl('pnpm', ['-C', 'packages/cli', 'release:smoke'], {}),
+    checkGraphImpl: () => fakeReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' }, { tarballs }),
+  });
   const result = await publishReleaseGraph(options);
   assert.equal(result.published.length, 3);
   const expectedEnv = createNpmChildEnvironment(process.env);
-  const publishCalls = calls.filter((call) => call.args[0] === '--filter');
+  const publishCalls = calls.filter((call) => call.command === 'npm' && call.args[0] === 'publish');
+  assert.equal(publishCalls.length, 3);
   assert.deepEqual(
-    publishCalls.map((call) => call.args[1]),
-    ['@zokizuan/satori-core', '@zokizuan/satori-mcp', '@zokizuan/satori-cli']
+    publishCalls.map((call) => call.args),
+    [
+      ['publish', tarballs.core, '--access', 'public'],
+      ['publish', tarballs.mcp, '--access', 'public'],
+      ['publish', tarballs.cli, '--access', 'public'],
+    ]
   );
   for (const call of publishCalls) {
     assert.equal(call.callOptions.stdio, 'inherit');
@@ -248,6 +289,13 @@ test('default publish uses inherited stdio and the sanitized child environment',
   for (const call of probeCalls) {
     assert.deepEqual(call.callOptions.stdio, REGISTRY_PROBE_STDIO);
     assert.deepEqual(call.callOptions.env, expectedEnv);
+  }
+  const pnpmCalls = calls.filter((call) => call.command === 'pnpm');
+  assert.equal(pnpmCalls.length, 4);
+  for (const call of pnpmCalls) {
+    assert.equal('env' in call.callOptions, false);
+    assert.equal(call.args.includes('publish'), false);
+    assert.equal(call.args.includes('pack'), false);
   }
 });
 
@@ -291,4 +339,101 @@ test('EOTP failure on a later package keeps verified names and stops verificatio
   );
   assert.equal(coreVerifications.length, 1);
   assert.equal(options.records.viewCalls.filter((call) => call.includes('satori-mcp')).length, 0);
+});
+
+test('build and release smokes run before graph validation', async () => {
+  const order = [];
+  const options = runnerOptions({
+    versionsCheckImpl: () => order.push('versionsCheck'),
+    buildImpl: () => order.push('build'),
+    smokeMcpImpl: () => order.push('smokeMcp'),
+    smokeCliImpl: () => order.push('smokeCli'),
+    checkGraphImpl: () => {
+      order.push('checkGraph');
+      return fakeReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' });
+    },
+    publishImpl: () => order.push('publish'),
+  });
+  await publishReleaseGraph(options);
+  const checkIndex = order.indexOf('checkGraph');
+  assert.ok(order.indexOf('versionsCheck') < checkIndex);
+  assert.ok(order.indexOf('build') < checkIndex);
+  assert.ok(order.indexOf('smokeMcp') < checkIndex);
+  assert.ok(order.indexOf('smokeCli') < checkIndex);
+  assert.ok(order.indexOf('publish') > checkIndex);
+});
+
+test('graph validation sees the post-build state', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-publish-cwd-'));
+  const builtMarker = path.join(cwd, 'built.marker');
+  try {
+    const options = runnerOptions({
+      cwd,
+      buildImpl: () => fs.writeFileSync(builtMarker, 'final artifacts'),
+      checkGraphImpl: () => {
+        if (!fs.existsSync(builtMarker)) {
+          throw new Error('graph validated before build completed');
+        }
+        return fakeReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' });
+      },
+    });
+    const result = await publishReleaseGraph(options);
+    assert.equal(result.published.length, 3);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('dirty tree after build or smokes prevents every publish call', async () => {
+  let statusCalls = 0;
+  let graphChecked = false;
+  const options = runnerOptions({
+    gitStatusImpl: () => {
+      statusCalls += 1;
+      return statusCalls === 1 ? '' : ' M server.json';
+    },
+    checkGraphImpl: () => {
+      graphChecked = true;
+      return fakeReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' });
+    },
+  });
+  await assert.rejects(
+    publishReleaseGraph(options),
+    /Working tree became dirty during build or smokes; refusing to publish/
+  );
+  assert.equal(statusCalls, 2);
+  assert.equal(graphChecked, false);
+  assert.deepEqual(options.records.publishCalls, []);
+});
+
+test('verified tarballs exist during publishing and are cleaned after success', async () => {
+  const fixture = verifiedTarballFixture();
+  const seen = [];
+  const options = runnerOptions({
+    checkGraphImpl: () => fixture.report,
+    publishImpl: (packageName, version, tarballPath) => {
+      seen.push({ packageName, exists: fs.existsSync(tarballPath) });
+    },
+  });
+  const result = await publishReleaseGraph(options);
+  assert.equal(result.published.length, 3);
+  assert.deepEqual(
+    seen.map((entry) => entry.exists),
+    [true, true, true]
+  );
+  assert.equal(fs.existsSync(fixture.tempDirectory), false);
+});
+
+test('temporary tarballs are cleaned after a publish failure', async () => {
+  const fixture = verifiedTarballFixture();
+  const options = runnerOptions({
+    checkGraphImpl: () => fixture.report,
+    publishImpl: (packageName) => {
+      if (packageName === '@zokizuan/satori-mcp') {
+        throw new Error('EPUBLISHCONFLICT');
+      }
+    },
+  });
+  await assert.rejects(publishReleaseGraph(options), /Publish command failed/);
+  assert.equal(fs.existsSync(fixture.tempDirectory), false);
 });

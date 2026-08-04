@@ -88,6 +88,7 @@ export async function checkReleaseGraph(options = {}) {
   const localVersions = localVersionsFromGraph(graph);
 
   const tempDirectory = fs.mkdtempSync(path.join(tempRoot, 'satori-release-check-'));
+  let kept = false;
   try {
     const packed = {};
     for (const key of RELEASE_ORDER) {
@@ -126,14 +127,23 @@ export async function checkReleaseGraph(options = {}) {
     const fullReport = Object.freeze({
       ...report,
       graphEdges: graphValidation.edges,
+      tarballs: Object.freeze({
+        core: packed.core.tarballPath,
+        mcp: packed.mcp.tarballPath,
+        cli: packed.cli.tarballPath,
+      }),
+      tempDirectory,
     });
     printReleaseGraphReport(fullReport, output);
     if (!fullReport.valid) {
       throw new Error('Release graph invalid.');
     }
+    kept = true;
     return fullReport;
   } finally {
-    fs.rmSync(tempDirectory, { recursive: true, force: true });
+    if (!kept || !options.keepTempDirectory) {
+      fs.rmSync(tempDirectory, { recursive: true, force: true });
+    }
   }
 }
 
