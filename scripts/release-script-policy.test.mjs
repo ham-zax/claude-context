@@ -28,6 +28,7 @@ test('no root script directly invokes a package publication command', () => {
 
 test('public release checking prepares final artifacts before graph inspection', () => {
   assert.equal(packageJson.scripts['release:check:packed'], 'node scripts/check-release-graph.mjs');
+  assert.match(packageJson.scripts['release:check'], /versions:check/);
   assert.match(packageJson.scripts['release:check'], /build/);
   assert.match(packageJson.scripts['release:check'], /release:smoke:mcp/);
   assert.match(packageJson.scripts['release:check'], /release:smoke:cli/);

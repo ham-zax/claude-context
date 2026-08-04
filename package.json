@@ -20,7 +20,7 @@
     "lint:fix": "pnpm -r run lint:fix",
     "typecheck": "pnpm -r run typecheck",
     "versions:check": "node scripts/check-version-freshness.mjs",
-    "release:check": "pnpm run build && pnpm run release:smoke:mcp && pnpm run release:smoke:cli && pnpm run release:check:packed",
+    "release:check": "pnpm run versions:check && pnpm run build && pnpm run release:smoke:mcp && pnpm run release:smoke:cli && pnpm run release:check:packed",
     "release:check:packed": "node scripts/check-release-graph.mjs",
     "release:bump": "node scripts/bump-release-graph.mjs",
     "test:scripts": "node --import tsx --test scripts/*.test.mjs evals/agent-discovery/*.test.mjs",

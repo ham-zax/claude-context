@@ -269,6 +269,11 @@ test("runDoctor uses installer-owned launcher settings over stale ambient provid
             name: "@zokizuan/satori-mcp",
             version: "4.11.17",
         }));
+        fs.mkdirSync(path.join(tempDir, ".satori", "mcp-runtime", "node_modules", "@zokizuan", "satori-core"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, ".satori", "mcp-runtime", "node_modules", "@zokizuan", "satori-core", "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-core",
+            version: "1.6.12",
+        }));
         fs.writeFileSync(launcherPath, buildLauncherScript({
             command: process.execPath,
             args: [target],
@@ -314,6 +319,11 @@ test("runDoctor surfaces the installer-bound LateOn activation policy", async ()
         fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
             name: "@zokizuan/satori-mcp",
             version: "4.11.17",
+        }));
+        fs.mkdirSync(path.join(tempDir, ".satori", "mcp-runtime", "node_modules", "@zokizuan", "satori-core"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, ".satori", "mcp-runtime", "node_modules", "@zokizuan", "satori-core", "package.json"), JSON.stringify({
+            name: "@zokizuan/satori-core",
+            version: "1.6.12",
         }));
         fs.writeFileSync(launcherPath, buildLauncherScript({
             command: process.execPath,
@@ -460,9 +470,9 @@ test("runDoctor reports Satori package version set and independent-version polic
         ],
     );
     assert.match(result.packageVersionNote, /independent package versions/i);
-    assert.equal(result.checks.find((check) => check.name === "package_version_cli")?.message, "@zokizuan/satori-cli@0.4.15");
-    assert.equal(result.checks.find((check) => check.name === "package_version_mcp")?.message, "@zokizuan/satori-mcp@4.11.17");
-    assert.equal(result.checks.find((check) => check.name === "package_version_core")?.message, "@zokizuan/satori-core@1.6.12");
+    assert.equal(result.checks.find((check) => check.name === "package_version_cli")?.message, "CLI package: @zokizuan/satori-cli@0.4.15");
+    assert.equal(result.checks.find((check) => check.name === "package_version_mcp")?.message, "CLI-bundled MCP package: @zokizuan/satori-mcp@4.11.17");
+    assert.equal(result.checks.find((check) => check.name === "package_version_core")?.message, "CLI-bundled Core package: @zokizuan/satori-core@1.6.12");
     assert.equal(result.checks.find((check) => check.name === "package_version_policy")?.status, "ok");
 });
 
@@ -540,7 +550,7 @@ test("runDoctor errors when multiple live Satori MCP package versions are regist
     }
 });
 
-test("runDoctor errors when a live runtime version differs from the installed MCP version", async () => {
+test("runDoctor errors when a live runtime version differs from the expected MCP version", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-stale-owner-"));
     const ownersPath = path.join(tempDir, "owners.json");
     try {
@@ -557,7 +567,7 @@ test("runDoctor errors when a live runtime version differs from the installed MC
 
         const check = result.checks.find((entry) => entry.name === "runtime_owners");
         assert.equal(check?.status, "error");
-        assert.match(check?.message || "", /installed MCP version 4\.11\.17/);
+        assert.match(check?.message || "", /expected MCP version 4\.11\.17/);
         assert.match(check?.message || "", /pid=111.*4\.11\.15/);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1099,6 +1109,9 @@ test("doctor rejects a launcher that is not the expected Node form", async () =>
         }));
         assert.equal(result.managedRuntime?.status, "custom");
         assert.equal(result.managedRuntime?.mcpVersion, null);
+        const launcherCheck = result.checks.find((entry) => entry.name === "managed_launcher");
+        assert.equal(launcherCheck?.status, "warning");
+        assert.match(launcherCheck?.message || "", /does not use the expected Node launcher form/);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -1235,6 +1248,117 @@ test("doctor keeps the independent-version policy note with an active runtime pr
         const policy = result.checks.find((check) => check.name === "package_version_policy");
         assert.equal(policy?.status, "ok");
         assert.match(policy?.message || "", /independent package versions/i);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor compares live runtime owners against the active launcher version", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-owner-active-authority-"));
+    const ownersPath = path.join(tempDir, "owners.json");
+    try {
+        const launcherPath = launcherFixtureWithRuntime(tempDir, { mcp: "6.7.0", core: "3.6.0" });
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: process.execPath,
+            args: [path.join(tempDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@6.7.0", "node_modules", "@zokizuan", "satori-mcp", "dist", "index.js")],
+            managedEnv: { SATORI_RUNTIME_PROFILE: "offline" },
+        }));
+        fs.writeFileSync(ownersPath, JSON.stringify({
+            formatVersion: "v1",
+            owners: [runtimeOwner({ satoriVersion: "6.7.0" })],
+        }));
+        const result = await runDoctor(baseDoctorOptions({
+            env: { HOME: tempDir },
+            managedLauncherPath: launcherPath,
+            runtimeOwnersPath: ownersPath,
+            inspectProcess: (pid) => ({ pid, processStartTime: "start-111" }),
+            resolvePackageVersions: () => [
+                { name: "@zokizuan/satori-cli", version: "1.9.2", source: "test" },
+                { name: "@zokizuan/satori-mcp", version: "6.8.1", source: "test" },
+                { name: "@zokizuan/satori-core", version: "3.6.0", source: "test" },
+            ],
+        }));
+        const check = result.checks.find((entry) => entry.name === "runtime_owners");
+        assert.equal(check?.status, "ok");
+        assert.match(check?.message || "", /6\.7\.0/);
+        assert.doesNotMatch(check?.message || "", /stale resident runtime/);
+        assert.equal(
+            result.checks.find((entry) => entry.name === "active_runtime_mcp")?.message,
+            "Active managed MCP runtime: @zokizuan/satori-mcp@6.7.0",
+        );
+        assert.equal(
+            result.checks.find((entry) => entry.name === "active_runtime_core")?.message,
+            "Active managed Core runtime: @zokizuan/satori-core@3.6.0",
+        );
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor reports a missing managed launcher as a warning", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-launcher-absent-"));
+    try {
+        const launcherPath = path.join(tempDir, ".satori", "bin", "satori-mcp.js");
+        const result = await runDoctor(baseDoctorOptions({
+            env: { HOME: tempDir },
+            managedLauncherPath: launcherPath,
+        }));
+        assert.equal(result.managedRuntime?.status, "missing");
+        assert.equal(result.managedRuntime?.launcherPath, null);
+        const check = result.checks.find((entry) => entry.name === "managed_launcher");
+        assert.equal(check?.status, "warning");
+        assert.match(check?.message || "", /missing/);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor reports a malformed managed launcher as an error", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-launcher-malformed-"));
+    try {
+        const launcherPath = path.join(tempDir, ".satori", "bin", "satori-mcp.js");
+        fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+        fs.writeFileSync(launcherPath, "not a managed launcher\n");
+        const result = await runDoctor(baseDoctorOptions({
+            env: { HOME: tempDir },
+            managedLauncherPath: launcherPath,
+        }));
+        assert.equal(result.managedRuntime?.status, "malformed");
+        assert.equal(result.managedRuntime?.mcpVersion, null);
+        const check = result.checks.find((entry) => entry.name === "managed_launcher");
+        assert.equal(check?.status, "error");
+        assert.match(check?.message || "", /malformed/);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+});
+
+test("runDoctor errors when the active managed MCP cannot resolve Core", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-unresolved-core-"));
+    try {
+        const launcherPath = launcherFixtureWithRuntime(tempDir, { mcp: "4.11.17", core: "3.6.0" });
+        fs.rmSync(
+            path.join(tempDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@4.11.17", "node_modules", "@zokizuan", "satori-core"),
+            { recursive: true, force: true },
+        );
+        fs.writeFileSync(launcherPath, buildLauncherScript({
+            command: process.execPath,
+            args: [path.join(tempDir, ".satori", "mcp-runtime", "@zokizuan-satori-mcp@4.11.17", "node_modules", "@zokizuan", "satori-mcp", "dist", "index.js")],
+            managedEnv: { SATORI_RUNTIME_PROFILE: "offline" },
+        }));
+        const result = await runDoctor(baseDoctorOptions({
+            env: { HOME: tempDir },
+            managedLauncherPath: launcherPath,
+            loadManagedLanceDb: async () => undefined,
+        }));
+        assert.equal(result.managedRuntime?.status, "active");
+        assert.equal(result.managedRuntime?.coreVersion, null);
+        const check = result.checks.find((entry) => entry.name === "active_managed_core_version");
+        assert.equal(check?.status, "error");
+        assert.match(
+            check?.message || "",
+            /Active managed MCP 4\.11\.17 could not resolve @zokizuan\/satori-core inside its managed generation\./,
+        );
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
