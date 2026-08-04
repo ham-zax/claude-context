@@ -41,7 +41,7 @@ export const readFileInputSchema = z.object({
     end_line: z.number().int().positive().optional().describe("Optional end line (1-based, inclusive)."),
     mode: z.enum(["plain", "annotated"]).optional().describe("Output mode. Required for exact-symbol context requests. Other reads default to plain."),
     presentation: z.enum(["compact", "full"]).optional().describe("Ordinary-read presentation. Omit to wrap explicit ranges longer than 40 lines in a one-line compact envelope; use full for raw multiline source."),
-    open_symbol: openSymbolRequestSchema.optional().describe("Strict exact-symbol context or direct-span request. Exact symbols require contractVersion 2 and exactly one context or continuation operation; direct spans use one-based inclusive startLine/endLine.")
+    open_symbol: openSymbolRequestSchema.optional().describe("Strict exact-symbol context or direct-span request returning bounded symbol source with continuation-aware excerpts. Exact symbols require contractVersion 2 and exactly one context or continuation operation; direct spans use one-based inclusive startLine/endLine.")
 }).strict().superRefine((input, ctx) => {
     if (!input.open_symbol) return;
     if (input.start_line !== undefined || input.end_line !== undefined) {
@@ -444,7 +444,7 @@ function resolveIndexingBlockForFile(absolutePath: string, ctx: ToolContext): Re
 export const readFileTool: McpTool = {
     name: "read_file",
     description: () =>
-        "Read source only under an indexed/searchable Satori root. Ordinary explicit ranges longer than 40 lines return a compact one-line envelope with a declaration preview and the complete exact source; pass presentation='full' for raw multiline source. Unversioned open_symbol startLine/endLine requests always return exact source text. Exact symbolId/symbolLabel requests require mode plus open_symbol contractVersion 2 and exactly one context or continuation operation; they return one bounded structured symbol_context package in both modes. The canonical real path must remain inside a tracked indexed or sync_completed root.",
+        "Read source only under an indexed/searchable Satori root. open_symbol / symbol_context requests return bounded symbol source with continuation-aware excerpts: exact symbolId/symbolLabel requests require mode plus open_symbol contractVersion 2 and exactly one context or continuation operation, while unversioned open_symbol startLine/endLine requests return exact source text. Ordinary explicit start_line/end_line ranges return the exact requested source range; ranges longer than 40 lines return a compact one-line envelope with a declaration preview and the complete exact source. presentation='full' returns raw multiline source, subject to the read_file byte/range limits. The canonical real path must remain inside a tracked indexed or sync_completed root.",
     inputSchemaZod: () => readFileInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = readFileInputSchema.safeParse(args || {});

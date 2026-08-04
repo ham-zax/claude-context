@@ -147,6 +147,22 @@ test('read_file schema includes optional start_line and end_line parameters', ()
     assert.equal(Object.prototype.hasOwnProperty.call(properties.end_line, 'default'), false);
 });
 
+test('read_file description documents bounded symbol reads and exact full-source reads', () => {
+    const tools = getMcpToolList(buildContext());
+    const readFileTool = tools.find((tool) => tool.name === 'read_file');
+    assert.ok(readFileTool);
+
+    assert.match(readFileTool!.description, /open_symbol \/ symbol_context/);
+    assert.match(readFileTool!.description, /bounded symbol source/);
+    assert.match(readFileTool!.description, /continuation-aware excerpts/);
+    assert.match(readFileTool!.description, /exact requested source range/);
+    assert.match(readFileTool!.description, /raw multiline source/);
+
+    const properties = readFileTool!.inputSchema.properties as Record<string, SchemaProperty>;
+    assert.match(properties.open_symbol?.description ?? '', /bounded symbol source/);
+    assert.match(properties.open_symbol?.description ?? '', /continuation-aware excerpts/);
+});
+
 test('manage_index schema does not expose deprecated splitter knob', () => {
     const tools = getMcpToolList(buildContext());
     const manageIndexTool = tools.find((tool) => tool.name === 'manage_index');
