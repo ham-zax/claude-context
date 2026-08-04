@@ -15,6 +15,7 @@ import {
 } from '@zokizuan/satori-core';
 import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
 import { ToolHandlers } from './handlers.js';
+import { resolveInboundCoverageReason } from './relationship-backed-call-graph.js';
 import { CapabilityResolver } from './capabilities.js';
 import { IndexFingerprint } from '../config.js';
 
@@ -677,6 +678,14 @@ test('handleCallGraph discloses partial inbound coverage and verification for ze
             }
             assert.deepEqual(payload.notes, []);
             assert.ok(payload.warnings.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+            assert.deepEqual(payload.inboundCoverageEvidence, {
+                reason: 'no_relationships_extracted',
+                retrievedRelationshipCount: 0,
+                suppressedRelationshipCount: 0,
+                fallbackAttempted: false,
+                fallbackRecoveredCount: 0,
+                constructorResolutionAttempted: false,
+            });
             const nextStep = payload.hints?.nextSteps?.[0];
             assert.equal(nextStep?.tool, 'search_codebase');
             assert.deepEqual(nextStep?.args, {
@@ -703,6 +712,7 @@ test('handleCallGraph discloses partial inbound coverage and verification for ze
         assert.equal(calleesPayload.edges.length, 1);
         assert.ok(!calleesPayload.warnings?.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
         assert.equal(calleesPayload.hints?.nextSteps, undefined);
+        assert.equal(calleesPayload.inboundCoverageEvidence, undefined);
     }));
 });
 
@@ -1073,6 +1083,7 @@ test('handleCallGraph surfaces suppressed low-confidence Python candidates and r
         assert.ok(callersPayload.warnings.includes('RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:1'));
         assert.ok(callersPayload.warnings.includes('SOURCE_BACKED_DYNAMIC_CALLERS:1'));
         assert.ok(!callersPayload.warnings.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+        assert.equal(callersPayload.inboundCoverageEvidence, undefined);
         assert.equal(callersPayload.hints?.nextSteps, undefined);
         assert.deepEqual(
             callersPayload.nodes.map((node: CallGraphNodeView) => node.symbolId).sort(),
@@ -2658,4 +2669,219 @@ test('handleCallGraph failed-index payload preserves failure diagnostics', async
         assert.equal(payload.indexingFailure?.errorMessage, failedInfo.errorMessage);
         assert.deepEqual(payload.hints?.create?.args, { action: 'create', path: repoPath });
     });
+});
+
+test('resolveInboundCoverageReason follows deterministic precedence', () => {
+    assert.equal(
+        resolveInboundCoverageReason({ suppressedRelationshipCount: 0, fallbackAttempted: false, fallbackRecoveredCount: 0 }),
+        'no_relationships_extracted',
+    );
+    assert.equal(
+        resolveInboundCoverageReason({ suppressedRelationshipCount: 2, fallbackAttempted: false, fallbackRecoveredCount: 0 }),
+        'suppressed_low_confidence',
+    );
+    assert.equal(
+        resolveInboundCoverageReason({ suppressedRelationshipCount: 2, fallbackAttempted: true, fallbackRecoveredCount: 0 }),
+        'fallback_failed',
+    );
+    assert.equal(
+        resolveInboundCoverageReason({ suppressedRelationshipCount: 2, fallbackAttempted: true, fallbackRecoveredCount: 1 }),
+        'no_relationships_extracted',
+    );
+    assert.equal(
+        resolveInboundCoverageReason({ suppressedRelationshipCount: 0, fallbackAttempted: true, fallbackRecoveredCount: 3 }),
+        'no_relationships_extracted',
+    );
+});
+
+test('handleCallGraph records constructor resolution as the applicable inbound path for class targets', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const source = [
+            'export class TradingEntryVetoes { apply() { return true; } }',
+            'export function normalize() { return true; }',
+            '',
+        ].join('\n');
+        fs.writeFileSync(path.join(repoPath, 'src', 'runtime.ts'), source);
+        const fileHash = sha256Content(source);
+        const target = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'TradingEntryVetoes',
+            label: 'class TradingEntryVetoes',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+            kind: 'class',
+        });
+        const normalize = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'normalize',
+            label: 'function normalize()',
+            startLine: 2,
+            endLine: 2,
+            fileHash,
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [target, normalize],
+            records: [{
+                sourceKey: target.symbolKey,
+                sourceInstanceId: target.symbolInstanceId,
+                targetKey: normalize.symbolKey,
+                targetInstanceId: normalize.symbolInstanceId,
+                type: 'CALLS',
+                file: 'src/runtime.ts',
+                span: { startLine: 1, endLine: 1 },
+                confidence: 'high',
+            }],
+        });
+
+        const handlers = new ToolHandlers(
+            {
+                getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+                getVectorStore: () => ({ listCollections: async () => [] }),
+            } as unknown as HandlerContext,
+            {
+                getIndexedCodebases: () => [repoPath],
+                getCodebaseInfo: () => undefined,
+                getCodebaseCallGraphSidecar: () => undefined,
+                ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+                saveCodebaseSnapshot: () => undefined,
+                getAllCodebases: () => [],
+            } as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: target.symbolInstanceId,
+                symbolLabel: target.label,
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 20,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.edges.length, 0);
+        assert.ok(payload.warnings.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+        assert.equal(payload.inboundCoverageEvidence?.reason, 'no_relationships_extracted');
+        assert.equal(payload.inboundCoverageEvidence?.retrievedRelationshipCount, 0);
+        assert.equal(payload.inboundCoverageEvidence?.suppressedRelationshipCount, 0);
+        assert.equal(payload.inboundCoverageEvidence?.fallbackAttempted, false);
+        assert.equal(payload.inboundCoverageEvidence?.fallbackRecoveredCount, 0);
+        assert.equal(payload.inboundCoverageEvidence?.constructorResolutionAttempted, true);
+        assert.equal(payload.hints?.nextSteps?.[0]?.tool, 'search_codebase');
+    }));
+});
+
+test('handleCallGraph reports fallback_failed evidence when suppressed callers cannot be source-verified', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const source = [
+            'def previous_phase():',
+            '    return _rename_outputs(signal)',
+            '',
+            'def _attach_entry_telemetry(',
+            '    *,',
+            '    signal=None,',
+            '    entry_decision=None,',
+            '    pending=None,',
+            ') -> None:',
+            '    telemetry = build_entry_telemetry(',
+            '        signal=signal,',
+            '        entry_decision=entry_decision,',
+            '        pending=pending,',
+            '    )',
+            '    return telemetry',
+            '',
+            'def build_entry_telemetry(*, signal=None, entry_decision=None, pending=None):',
+            '    return (signal, entry_decision, pending)',
+            '',
+        ].join('\n');
+        fs.writeFileSync(path.join(repoPath, 'src', 'phases.py'), source);
+        const fileHash = sha256Content(source);
+        const attach = createFunctionSymbol({
+            file: 'src/phases.py',
+            name: '_attach_entry_telemetry',
+            label: 'function _attach_entry_telemetry(',
+            startLine: 4,
+            endLine: 15,
+            fileHash,
+            language: 'python',
+        });
+        const build = createFunctionSymbol({
+            file: 'src/phases.py',
+            name: 'build_entry_telemetry',
+            label: 'function build_entry_telemetry(',
+            startLine: 17,
+            endLine: 18,
+            fileHash,
+            language: 'python',
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [attach, build],
+            records: [{
+                sourceKey: attach.symbolKey,
+                sourceInstanceId: attach.symbolInstanceId,
+                targetKey: build.symbolKey,
+                targetInstanceId: build.symbolInstanceId,
+                type: 'CALLS',
+                file: 'src/phases.py',
+                span: undefined,
+                confidence: 'low',
+            }],
+        });
+
+        const handlers = new ToolHandlers(
+            {
+                getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+                getVectorStore: () => ({ listCollections: async () => [] }),
+            } as unknown as HandlerContext,
+            {
+                getIndexedCodebases: () => [repoPath],
+                getCodebaseInfo: () => undefined,
+                getCodebaseCallGraphSidecar: () => undefined,
+                ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+                saveCodebaseSnapshot: () => undefined,
+                getAllCodebases: () => [],
+            } as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+
+        const callersResponse = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/phases.py',
+                symbolId: build.symbolInstanceId,
+                symbolLabel: build.label,
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 20,
+        });
+        const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
+        assert.equal(callersPayload.status, 'ok');
+        assert.equal(callersPayload.edges.length, 0);
+        assert.ok(callersPayload.warnings.includes('RELATIONSHIP_LOW_CONFIDENCE_SKIPPED:1'));
+        assert.ok(callersPayload.warnings.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
+        assert.deepEqual(callersPayload.inboundCoverageEvidence, {
+            reason: 'fallback_failed',
+            retrievedRelationshipCount: 0,
+            suppressedRelationshipCount: 1,
+            fallbackAttempted: true,
+            fallbackRecoveredCount: 0,
+            constructorResolutionAttempted: false,
+        });
+        const nextStep = callersPayload.hints?.nextSteps?.[0];
+        assert.equal(nextStep?.tool, 'search_codebase');
+        assert.match(String(nextStep?.reason || ''), /coverage is partial/i);
+    }));
 });

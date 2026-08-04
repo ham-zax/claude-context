@@ -64,7 +64,44 @@ export type RelationshipBackedCallGraphResult = {
         edgeCount: number;
     };
     hints?: Record<string, unknown>;
+    inboundCoverageEvidence?: InboundCoverageEvidence;
 };
+
+export type InboundCoverageReason =
+    | "no_relationships_extracted"
+    | "suppressed_low_confidence"
+    | "fallback_failed";
+
+/**
+ * Structured evidence attached to empty-inbound call-graph traversals.
+ * `no_relationships_extracted` means no extracted relationship evidence was
+ * found — never that the symbol definitely has no callers.
+ */
+export interface InboundCoverageEvidence {
+    reason: InboundCoverageReason;
+    retrievedRelationshipCount: number;
+    suppressedRelationshipCount: number;
+    fallbackAttempted: boolean;
+    fallbackRecoveredCount: number;
+    constructorResolutionAttempted: boolean;
+}
+
+/**
+ * Deterministic precedence for the empty-inbound coverage reason. Kept as a
+ * pure function so every branch is testable independently of the traversal.
+ */
+export function resolveInboundCoverageReason(input: {
+    suppressedRelationshipCount: number;
+    fallbackAttempted: boolean;
+    fallbackRecoveredCount: number;
+}): InboundCoverageReason {
+    if (input.suppressedRelationshipCount > 0 && input.fallbackRecoveredCount === 0) {
+        return input.fallbackAttempted
+            ? "fallback_failed"
+            : "suppressed_low_confidence";
+    }
+    return "no_relationships_extracted";
+}
 
 function compareNullableNumbersAsc(a?: number | null, b?: number | null): number {
     const left = typeof a === "number" ? a : Number.POSITIVE_INFINITY;
@@ -519,6 +556,31 @@ export class RelationshipBackedCallGraph {
         ) && !combinedEdges.some((edge) => (
             edge.dstSymbolId === input.resolvedSymbol.symbolInstanceId
         ));
+
+        const retrievedInboundCount = neighbors.records.filter((record) => (
+            record.targetInstanceId === input.resolvedSymbol.symbolInstanceId
+        )).length;
+        const suppressedInboundCount = suppressedLowConfidenceRecords.filter((record) => (
+            record.targetInstanceId === input.resolvedSymbol.symbolInstanceId
+        )).length;
+        const inboundCoverageEvidence: InboundCoverageEvidence | undefined = hasNoInboundEdges
+            ? {
+                reason: resolveInboundCoverageReason({
+                    suppressedRelationshipCount: suppressedInboundCount,
+                    fallbackAttempted: shouldAttemptDynamicCallerFallback,
+                    fallbackRecoveredCount: addedDynamicCallerEdges.length,
+                }),
+                retrievedRelationshipCount: retrievedInboundCount,
+                suppressedRelationshipCount: suppressedInboundCount,
+                fallbackAttempted: shouldAttemptDynamicCallerFallback,
+                fallbackRecoveredCount: addedDynamicCallerEdges.length,
+                // Constructor-receiver resolution is the index-time extraction
+                // path that produces inbound CALLS for class symbols. Record
+                // that it applies so empty-inbound evidence on a class is not
+                // misread as proof the class is never constructed.
+                constructorResolutionAttempted: input.resolvedSymbol.kind === "class",
+            }
+            : undefined;
         const warnings = [...new Set([
             ...neighbors.warnings,
             ...(droppedEdgesOutsideSourceSpan > 0 ? [`CALL_GRAPH_EDGE_OUTSIDE_SOURCE_SPAN:${droppedEdgesOutsideSourceSpan}`] : []),
@@ -581,6 +643,7 @@ export class RelationshipBackedCallGraph {
             },
             ...(testReferences.length > 0 ? { testReferences } : {}),
             ...(hints ? { hints } : {}),
+            ...(inboundCoverageEvidence ? { inboundCoverageEvidence } : {}),
         };
     }
 
