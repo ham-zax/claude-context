@@ -87,6 +87,42 @@ export function parseGitStatusChangedPaths(
     return files;
 }
 
+export function parseGitStatusChangedPathsZ(
+    stdout: string,
+    options: { includeUntracked?: boolean } = {},
+): Set<string> {
+    const includeUntracked = options.includeUntracked === true;
+    const files = new Set<string>();
+    const records = stdout.split("\0");
+    for (let index = 0; index < records.length; index += 1) {
+        const record = records[index];
+        if (record.length < 4) {
+            continue;
+        }
+        const status = record.slice(0, 2);
+        if (status === "!!") {
+            continue;
+        }
+        if (status === "??" && !includeUntracked) {
+            continue;
+        }
+        if ((status[0] === "R" || status[0] === "C") && index + 1 < records.length) {
+            // With -z, rename/copy entries carry the origin path as the next record.
+            index += 1;
+        }
+        const rawPath = record.slice(3);
+        if (rawPath.length === 0) {
+            continue;
+        }
+        const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
+        if (normalizedPath.length === 0 || normalizedPath.startsWith("..")) {
+            continue;
+        }
+        files.add(normalizedPath);
+    }
+    return files;
+}
+
 export function getChangedFilesForCodebase(input: GetChangedFilesForCodebaseInput): ChangedFilesState {
     const cacheKey = path.resolve(input.codebasePath);
     const cached = input.changedFilesCache.get(cacheKey);
@@ -97,10 +133,10 @@ export function getChangedFilesForCodebase(input: GetChangedFilesForCodebaseInpu
     try {
         const stdout = execFileSync(
             "git",
-            ["-C", cacheKey, "status", "--porcelain", "--untracked-files=no"],
+            ["-C", cacheKey, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
         );
-        const files = parseGitStatusChangedPaths(stdout, { includeUntracked: false });
+        const files = parseGitStatusChangedPathsZ(stdout, { includeUntracked: true });
         input.changedFilesCache.set(cacheKey, {
             expiresAtMs: input.nowMs + input.ttlMs,
             available: true,

@@ -7767,7 +7767,7 @@ test('handleSearchCode auto_changed_first skips boost when changed file set exce
     });
 });
 
-test('getChangedFilesForCodebase ignores untracked git status entries for deterministic boost input', async () => {
+test('handlers newline git-status parser ignores untracked entries by default (preflight parser)', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, []);
         const parsed = (handlers as unknown as ToolHandlersTestOverrides).parseGitStatusChangedPaths([
