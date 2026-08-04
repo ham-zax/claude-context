@@ -585,6 +585,7 @@ function createHandlers(
         sidecarNodes?: SidecarNodeFixture[];
         sidecarBuiltAt?: string;
         respectSemanticTopK?: boolean;
+        mustLaneBlockedQueries?: string[];
         diagnosticCandidateArms?: {
             dense?: SearchFixtureResult[];
             preciseLexical?: SearchFixtureResult[];
@@ -605,14 +606,37 @@ function createHandlers(
         compareSourcePathsToFreshnessCheckpoint: async () => ({
             status: options?.sourcePathComparisonStatus ?? 'matches',
         }),
-        semanticSearch: async () => searchResults,
-        semanticSearchInProvenGeneration: async (_receipt: unknown, request: { topK: number }) => (
-            options?.respectSemanticTopK ? searchResults.slice(0, request.topK) : searchResults
+        semanticSearch: async (request: { query: string }) => (
+            options?.mustLaneBlockedQueries?.includes(request.query) ? [] : searchResults
         ),
+        semanticSearchInProvenGeneration: async (
+            _receipt: unknown,
+            request: { query: string; topK: number },
+        ) => {
+            if (options?.mustLaneBlockedQueries?.includes(request.query)) {
+                return [];
+            }
+            return options?.respectSemanticTopK ? searchResults.slice(0, request.topK) : searchResults;
+        },
         semanticSearchWithCandidateTraceInProvenGeneration: async (
             _receipt: unknown,
             request: { topK: number },
         ) => {
+            if (options?.mustLaneBlockedQueries?.includes(request.query)) {
+                return {
+                    results: [],
+                    candidateTrace: {
+                        schemaVersion: 'semantic_search_candidate_trace_v1',
+                        maxEntriesPerStage: 160,
+                        productCandidateLimit: request.topK,
+                        queryEmbeddingSha256: 'a'.repeat(64),
+                        lexicalRequests: [],
+                        stages: [],
+                        removals: [],
+                        omittedRemovals: 0,
+                    },
+                };
+            }
             const selectedResults = options?.respectSemanticTopK
                 ? tracedSearchResults.slice(0, request.topK)
                 : tracedSearchResults;
@@ -6548,7 +6572,11 @@ test('handleSearchCode does not emit FILTER_MUST_UNSATISFIED when must succeeds 
         assert.equal(payload.results.length, 1);
         assert.equal(payload.results[0].target.file, 'src/retry-40.ts');
         assert.equal(warningCodes(payload).includes('FILTER_MUST_UNSATISFIED'), false);
-        assert.equal(payload.hints?.debugSearch?.mustRetry?.attempts, 2);
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            false,
+        );
+        assert.equal(payload.hints?.debugSearch?.mustRetry?.attempts, 1);
         assert.equal(payload.hints?.debugSearch?.mustRetry?.satisfied, true);
         assert.equal(payload.hints?.debugSearch?.mustRetry?.finalCount, 1);
     });
@@ -6570,6 +6598,9 @@ test('full diagnostics preserve the product depth of every three-attempt must re
         const handlers = createHandlers(repoPath, results, undefined, {
             respectSemanticTopK: true,
             enableVectorReceipt: true,
+            // The dedicated must: lane returns nothing for the needle query, so
+            // recovery still requires the full three-attempt retry expansion.
+            mustLaneBlockedQueries: ['OMEGAQUASAR77'],
         });
 
         const response = await handlers.handleSearchCode({

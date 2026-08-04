@@ -344,6 +344,8 @@ export type SearchExecutionOutcome =
         entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
         candidateSurvival?: SearchCandidateSurvivalDebug;
         semanticPassFailures: SemanticPassFailureDiagnostic[];
+        mustConstraintRetrievalOutcome: MustConstraintRetrievalOutcome | null;
+        mustConstraintMustTokens: readonly string[];
     }
     | {
         kind: "vector_backend_unavailable";
@@ -357,6 +359,13 @@ export type SearchExecutionOutcome =
         kind: "all_semantic_passes_failed";
         semanticPassFailures: SemanticPassFailureDiagnostic[];
     };
+
+export interface MustConstraintRetrievalOutcome {
+    attempted: boolean;
+    candidatesExamined: number;
+    candidateBudget: number;
+    budgetExhausted: boolean;
+}
 
 export type SearchExecutionHost = {
     searchQuerySupport: SearchQuerySupport;
@@ -698,6 +707,7 @@ export async function runSearchExecution(
     const passesUsed = new Set<string>();
     const backendScoreKinds = new Set<BackendScoreKind>();
     let scored: SearchCandidate[] = [];
+    let mustConstraintRetrievalOutcome: MustConstraintRetrievalOutcome | null = null;
     let exactMatchPinningApplied = false;
     const rankingProvenance: SearchExecutionRankingProvenance = {
         semanticPassesUsed: [],
@@ -877,7 +887,7 @@ export async function runSearchExecution(
         }
 
         const byChunkKey = new Map<string, SearchCandidate>();
-        const attemptFilterSummary = buildEmptyFilterSummary();
+        let attemptFilterSummary = buildEmptyFilterSummary();
         const createCandidate = (
             result: SearchResultLike,
             fusionScore: number,
@@ -1067,8 +1077,7 @@ export async function runSearchExecution(
             );
         }
 
-        const beforeFilter = byChunkKey.size;
-        const scoredAttempt: SearchCandidate[] = [];
+        let scoredAttempt: SearchCandidate[] = [];
         const evaluateCandidate = (
             candidate: SearchCandidate,
             summary: SearchFilterSummary,
@@ -1171,12 +1180,73 @@ export async function runSearchExecution(
                 passId: `attempt:${attempt + 1}`,
             });
         };
-        for (const candidate of byChunkKey.values()) {
-            if (evaluateCandidate(candidate, attemptFilterSummary, recordFilterRemoval, true)) {
-                scoredAttempt.push(candidate);
+        const evaluateAllCandidates = (): void => {
+            scoredAttempt = [];
+            for (const candidate of byChunkKey.values()) {
+                if (evaluateCandidate(candidate, attemptFilterSummary, recordFilterRemoval, true)) {
+                    scoredAttempt.push(candidate);
+                }
             }
+        };
+        evaluateAllCandidates();
+
+        // Bounded must: retrieval lane. The primary semantic/lexical lanes are
+        // unchanged; this lane only adds a dedicated lexical-projection query
+        // whose terms are the literal must: values, merged by stable candidate
+        // identity and re-evaluated through the normal filters (path, language,
+        // scope, exclusions, must/exclude matching). It never scans the
+        // repository directly and is capped by the operator-constraint
+        // candidate maximum.
+        const mustTokens = input.parsedOperators.must;
+        if (
+            mustTokens.length > 0
+            && scoredAttempt.length < input.retrievalPolicy.retrievalResultLimit
+        ) {
+            const mustLaneBudget = retrievalPolicy.maxCandidateLimit;
+            let laneResults: SearchResultLike[] = [];
+            let laneFailed = false;
+            try {
+                const laneResponse = await host.measureSearchPhase(
+                    "semanticSearch",
+                    () => host.semanticSearch({
+                        codebasePath: input.effectiveRoot,
+                        query: mustTokens.join(" "),
+                        topK: mustLaneBudget,
+                        retrievalMode: "lexical",
+                        scorePolicy: { kind: "topk_only" },
+                    }),
+                );
+                laneResults = Array.isArray(laneResponse)
+                    ? laneResponse
+                    : laneResponse.results;
+            } catch {
+                // A lane failure is bounded: keep the primary results and
+                // report that the budget could not be fully examined.
+                laneFailed = true;
+            }
+            if (laneResults.length > 0) {
+                if (candidateSurvival) {
+                    appendSearchCandidatePass(
+                        candidateSurvival,
+                        laneResults,
+                        `attempt:${attempt + 1}/must_lane`,
+                        1,
+                    );
+                }
+                addPass(laneResults, "must_lane", 1);
+                passesUsed.add("must_lane");
+                attemptFilterSummary = buildEmptyFilterSummary();
+                evaluateAllCandidates();
+            }
+            mustConstraintRetrievalOutcome = {
+                attempted: true,
+                candidatesExamined: laneResults.length,
+                candidateBudget: mustLaneBudget,
+                budgetExhausted: laneFailed || laneResults.length >= mustLaneBudget,
+            };
         }
 
+        const beforeFilter = byChunkKey.size;
         searchDiagnostics.resultsBeforeFilter = beforeFilter;
         searchDiagnostics.resultsAfterFilter = scoredAttempt.length;
         filterSummary = attemptFilterSummary;
@@ -1357,6 +1427,7 @@ export async function runSearchExecution(
         : scored.filter((candidate) => candidate.retrievalPasses.some((pass) => remotePassIds.has(pass))).length;
     searchDiagnostics.candidatesWithLexicalEvidence = scored.filter((candidate) => (
         candidate.retrievalPasses.includes("lexical_files")
+        || candidate.retrievalPasses.includes("must_lane")
         || (input.queryPlan.retrievalMode === "lexical"
             && candidate.retrievalPasses.some((pass) => remotePassIds.has(pass)))
     )).length;
@@ -1365,7 +1436,7 @@ export async function runSearchExecution(
         || candidate.retrievalPasses.includes("live_path")
     )).length;
     rankingProvenance.semanticPassesUsed = Array.from(passesUsed).filter((passId) => passId === "primary" || passId === "expanded").sort();
-    rankingProvenance.lexicalPassesUsed = Array.from(passesUsed).filter((passId) => passId === "lexical_files" || passId === "live_path" || passId === "dirty_overlay").sort();
+    rankingProvenance.lexicalPassesUsed = Array.from(passesUsed).filter((passId) => passId === "lexical_files" || passId === "live_path" || passId === "dirty_overlay" || passId === "must_lane").sort();
     rankingProvenance.livePathSupplementUsed = passesUsed.has("live_path");
     rankingProvenance.lexicalFileScanUsed = passesUsed.has("lexical_files");
     rankingProvenance.rerankApplied = rerankerApplied;
@@ -1374,6 +1445,16 @@ export async function runSearchExecution(
     const mustSatisfied = !mustApplied || scored.length > 0;
     if (mustApplied && !mustSatisfied) {
         searchWarnings.push("FILTER_MUST_UNSATISFIED");
+    }
+    if (mustApplied && mustConstraintRetrievalOutcome?.attempted) {
+        if (!mustSatisfied) {
+            searchWarnings.push(WARNING_CODES.MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET);
+        } else if (
+            mustConstraintRetrievalOutcome.budgetExhausted
+            && scored.length < input.retrievalPolicy.retrievalResultLimit
+        ) {
+            searchWarnings.push(WARNING_CODES.MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET);
+        }
     }
     if (candidateSurvival) {
         appendSearchCandidateStage(candidateSurvival, "mcp_ranked", scored);
@@ -1438,5 +1519,7 @@ export async function runSearchExecution(
         },
         semanticPassFailures,
         ...(candidateSurvival ? { candidateSurvival } : {}),
+        mustConstraintRetrievalOutcome,
+        mustConstraintMustTokens: [...input.parsedOperators.must],
     };
 }

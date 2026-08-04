@@ -258,3 +258,21 @@ test("buildInboundVerificationSearchQuery uses exact symbol names and rejects un
         { query: "", pathFilterIncluded: false },
     );
 });
+
+test("buildSearchWarningDetails renders the must: retrieval-budget notes with bounded guidance", () => {
+    const details = buildSearchWarningDetails([
+        "MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET",
+        "MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET",
+    ]);
+    const byCode = new Map(details.map((detail) => [detail.code, detail]));
+    const unsatisfied = byCode.get("MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET");
+    assert.equal(unsatisfied?.severity, "degraded");
+    assert.equal(unsatisfied?.blocksUse, false);
+    assert.match(unsatisfied?.message ?? "", /no candidate satisfied every must: value within the bounded retrieval budget/);
+    assert.match(unsatisfied?.action ?? "", /other matching files may exist beyond the retrieval budget/);
+    const incomplete = byCode.get("MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET");
+    assert.equal(incomplete?.severity, "caution");
+    assert.equal(incomplete?.blocksUse, false);
+    assert.match(incomplete?.message ?? "", /exhausted its candidate budget/);
+    assert.doesNotMatch(incomplete?.message ?? "", /no other matching files exist/);
+});

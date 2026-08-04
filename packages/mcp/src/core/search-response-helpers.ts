@@ -117,6 +117,24 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Check the identifier spelling or remove must: to allow semantic discovery.",
         };
     }
+    if (code === WARNING_CODES.MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET) {
+        return {
+            code,
+            severity: "degraded",
+            blocksUse: false,
+            message: "The must: values were used as mandatory retrieval terms, but no candidate satisfied every must: value within the bounded retrieval budget.",
+            action: "Check the identifier spelling, remove must:, or narrow the query; other matching files may exist beyond the retrieval budget.",
+        };
+    }
+    if (code === WARNING_CODES.MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET) {
+        return {
+            code,
+            severity: "caution",
+            blocksUse: false,
+            message: "must: results may be incomplete: the dedicated must: retrieval lane exhausted its candidate budget before the requested result count was reached.",
+            action: "Narrow the query or add path:/lang: constraints to reach more matching candidates.",
+        };
+    }
     if (code === WARNING_CODES.RERANKER_FAILED) {
         return {
             code,
