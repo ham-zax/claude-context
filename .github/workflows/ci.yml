@@ -84,6 +84,14 @@ jobs:
       - name: Build packages
         run: pnpm build
 
+      - name: Verify package version references
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13.0'
+        run: pnpm run versions:check
+
+      - name: Verify packed release graph
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13.0'
+        run: pnpm run release:check
+
       - name: Verify MCP docs are in sync
         run: pnpm -C packages/mcp docs:check
 
