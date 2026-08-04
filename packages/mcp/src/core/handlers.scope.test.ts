@@ -6729,6 +6729,48 @@ test('handleSearchCode does not emit FILTER_MUST_UNSATISFIED when must succeeds 
     });
 });
 
+test('handleSearchCode attaches must-constraint budget metadata when the dedicated lane cannot satisfy the phrase', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+            content: `candidate ${idx}`,
+            relativePath: `src/absent-${idx}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_absent_${idx}`,
+            symbolLabel: `function absent${idx}()`,
+        }));
+
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 1,
+            debugMode: 'full',
+        });
+
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 0);
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            true,
+            'an unsatisfiable must: phrase must produce the explicit budget note in the response',
+        );
+        assert.deepEqual(payload.hints?.mustConstraint?.mustTokens, ['NO_SUCH_PHRASE_XYZ']);
+        assert.equal(payload.hints?.mustConstraint?.candidateBudget, 80);
+        assert.equal(typeof payload.hints?.mustConstraint?.candidatesExamined, 'number');
+    });
+});
+
 test('full diagnostics preserve the product depth of every three-attempt must retry pass', async () => {
     await withTempRepo(async (repoPath) => {
         const results = Array.from({ length: 80 }, (_, index) => ({

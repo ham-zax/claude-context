@@ -220,6 +220,8 @@ export async function finalizeSearchResults(
         rerankerCandidateBudget,
         rerankerBudgetReason,
         rerankerByteBudgetOmittedCandidates,
+        mustConstraintRetrievalOutcome,
+        mustConstraintMustTokens,
         semanticExpansion,
         providerWork,
         candidateSurvival,
@@ -652,6 +654,13 @@ export async function finalizeSearchResults(
                     span: result.target.span,
                 })),
             );
+            const mustConstraintHint = mustConstraintRetrievalOutcome?.attempted
+                ? {
+                    mustTokens: [...mustConstraintMustTokens],
+                    candidateBudget: mustConstraintRetrievalOutcome.candidateBudget,
+                    candidatesExamined: mustConstraintRetrievalOutcome.candidatesExamined,
+                }
+                : undefined;
             const envelope = buildGroupedSearchEnvelopeHelper({
                 codebaseRoot: input.effectiveRoot,
                 absolutePath: input.absolutePath,
@@ -672,6 +681,7 @@ export async function finalizeSearchResults(
                 proofDebugHint: input.proofDebugHint,
                 noiseMitigationHint,
                 generatedArtifactsHint,
+                mustConstraintHint,
                 resultCounts,
                 ...(disclosure ? { disclosure } : {}),
                 results: [...results],

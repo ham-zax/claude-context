@@ -40,6 +40,11 @@ type SearchResponseCommonInput = {
     proofDebugHint?: CompletionProbeDebugHint;
     noiseMitigationHint?: unknown;
     generatedArtifactsHint?: unknown;
+    mustConstraintHint?: {
+        mustTokens: readonly string[];
+        candidateBudget: number;
+        candidatesExamined: number;
+    };
 };
 
 function buildSearchResponseHints(input: SearchResponseCommonInput): { hints?: Record<string, unknown> } {
@@ -52,6 +57,9 @@ function buildSearchResponseHints(input: SearchResponseCommonInput): { hints?: R
         responseHints.verification = {
             generatedArtifacts: input.generatedArtifactsHint,
         };
+    }
+    if (input.mustConstraintHint) {
+        responseHints.mustConstraint = input.mustConstraintHint;
     }
     if (input.debugSummary) {
         responseHints.debugSummary = input.debugSummary;
