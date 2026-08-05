@@ -1,10 +1,41 @@
 import { envManager } from '../utils/env-manager';
+import { BoundedHttpError, fetchWithDeadline } from '../net/fetch-with-deadline';
 
 type JsonRecord = Record<string, unknown>;
+
+/**
+ * Per-request HTTP policy applied to every Zilliz management API call.
+ * Reads use the bounded retry policy; creation calls pass `maxAttempts: 1`
+ * because a duplicated create request is not idempotent.
+ */
+export interface ZillizHttpPolicy {
+    attemptTimeoutMs: number;
+    maxAttempts: number;
+    retryDelayMs: number;
+    maxResponseBytes: number;
+    retryableStatuses: ReadonlySet<number>;
+    retryableNetworkCodes: ReadonlySet<string>;
+}
+
+export const ZILLIZ_DEFAULT_HTTP_POLICY: ZillizHttpPolicy = {
+    attemptTimeoutMs: 30_000,
+    maxAttempts: 2,
+    retryDelayMs: 250,
+    maxResponseBytes: 8 * 1024 * 1024,
+    retryableStatuses: new Set([
+        408,
+        425,
+        429,
+        ...Array.from({ length: 100 }, (_, index) => 500 + index),
+    ]),
+    retryableNetworkCodes: new Set(['ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']),
+};
 
 export interface ZillizConfig {
     baseUrl?: string;
     token?: string;
+    /** Per-request HTTP policy override; unspecified fields keep the default policy. */
+    httpPolicy?: Partial<ZillizHttpPolicy>;
 }
 
 export interface Project {
@@ -122,11 +153,13 @@ function errorMessage(error: unknown): string {
 export class ClusterManager {
     private baseUrl: string;
     private token: string;
+    private httpPolicy: ZillizHttpPolicy;
 
     constructor(config?: ZillizConfig) {
         // Get from environment variables first, otherwise use passed configuration
         this.baseUrl = envManager.get('ZILLIZ_BASE_URL') || config?.baseUrl || 'https://api.cloud.zilliz.com';
         this.token = envManager.get('MILVUS_TOKEN') || config?.token || '';
+        this.httpPolicy = { ...ZILLIZ_DEFAULT_HTTP_POLICY, ...config?.httpPolicy };
 
         if (!this.token) {
             throw new Error('Zilliz API token is required. Please provide it via MILVUS_TOKEN environment variable or config parameter.');
@@ -134,9 +167,17 @@ export class ClusterManager {
     }
 
     /**
-     * Generic method for sending HTTP requests
+     * Generic method for sending HTTP requests through the bounded request
+     * utility: every attempt has a deadline, retries are bounded and
+     * classified, caller cancellation is never retried, and response bodies
+     * are byte-limited during consumption.
      */
-    private async makeRequest<T>(endpoint: string, method: 'GET' | 'POST' = 'GET', data?: unknown): Promise<T> {
+    private async makeRequest<T>(
+        endpoint: string,
+        method: 'GET' | 'POST' = 'GET',
+        data?: unknown,
+        options?: { signal?: AbortSignal; maxAttempts?: number },
+    ): Promise<T> {
         const url = `${this.baseUrl}${endpoint}`;
 
         const headers: Record<string, string> = {
@@ -145,17 +186,27 @@ export class ClusterManager {
             'Content-Type': 'application/json',
         };
 
-        const options: RequestInit = {
+        const init: RequestInit = {
             method,
             headers,
         };
 
         if (data && method === 'POST') {
-            options.body = JSON.stringify(data);
+            init.body = JSON.stringify(data);
         }
 
         try {
-            const response = await fetch(url, options);
+            const response = await fetchWithDeadline({
+                url,
+                init,
+                signal: options?.signal,
+                attemptTimeoutMs: this.httpPolicy.attemptTimeoutMs,
+                maxAttempts: options?.maxAttempts ?? this.httpPolicy.maxAttempts,
+                retryDelayMs: this.httpPolicy.retryDelayMs,
+                maxResponseBytes: this.httpPolicy.maxResponseBytes,
+                retryableStatuses: this.httpPolicy.retryableStatuses,
+                retryableNetworkCodes: this.httpPolicy.retryableNetworkCodes,
+            });
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -176,10 +227,31 @@ export class ClusterManager {
             const result = await response.json();
             return result as T;
         } catch (error: unknown) {
-            // Log the original error for more details, especially for fetch errors
+            // Caller cancellation propagates unchanged and is never retried.
+            if (options?.signal?.aborted) {
+                throw options.signal.reason ?? error;
+            }
+            // Log the original error for more details, especially for fetch errors.
+            // BoundedHttpError messages carry kind/status/attempts without the token.
             console.error('[ZillizUtils] ❌ Original error in makeRequest:', error);
             throw new Error(`Zilliz API request failed: ${errorMessage(error)}`);
         }
+    }
+
+    /**
+     * Delay that aborts immediately when the caller's signal fires.
+     */
+    private async abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted) {
+            throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+        }
+        await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                clearTimeout(timer);
+                reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+            }, { once: true });
+        });
     }
 
     /**
@@ -228,8 +300,13 @@ export class ClusterManager {
  * @param clusterId Cluster ID to describe
  * @returns Cluster details
  */
-    async describeCluster(clusterId: string): Promise<DescribeClusterResponse> {
-        const response = await this.makeRequest<DescribeClusterApiResponse>(`/v2/clusters/${clusterId}`);
+    async describeCluster(clusterId: string, signal?: AbortSignal): Promise<DescribeClusterResponse> {
+        const response = await this.makeRequest<DescribeClusterApiResponse>(
+            `/v2/clusters/${clusterId}`,
+            'GET',
+            undefined,
+            { signal },
+        );
 
         if (response.code !== 0) {
             throw new Error(`Failed to describe cluster: ${JSON.stringify(response)}`);
@@ -248,10 +325,17 @@ export class ClusterManager {
     async createFreeCluster(
         request: CreateFreeClusterRequest,
         timeoutMs: number = 5 * 60 * 1000, // 5 minutes default
-        pollIntervalMs: number = 5 * 1000 // 5 seconds default
+        pollIntervalMs: number = 5 * 1000, // 5 seconds default
+        signal?: AbortSignal
     ): Promise<CreateFreeClusterWithDetailsResponse> {
-        // Create the cluster
-        const response = await this.makeRequest<CreateFreeClusterApiResponse>('/v2/clusters/createFree', 'POST', request);
+        // Create the cluster. Creation is not retried: a duplicated create
+        // request is not idempotent, so an ambiguous failure surfaces instead.
+        const response = await this.makeRequest<CreateFreeClusterApiResponse>(
+            '/v2/clusters/createFree',
+            'POST',
+            request,
+            { signal, maxAttempts: 1 },
+        );
 
         if (response.code !== 0) {
             throw new Error(`Failed to create free cluster: ${JSON.stringify(response)}`);
@@ -260,10 +344,15 @@ export class ClusterManager {
         const { clusterId } = response.data;
         const startTime = Date.now();
 
-        // Poll cluster status until it's ready or timeout
+        // Poll cluster status until it's ready, the caller cancels, or the outer
+        // deadline expires. Each describe call carries its own bounded deadline,
+        // so one call cannot consume the whole outer timeout.
         while (Date.now() - startTime < timeoutMs) {
+            if (signal?.aborted) {
+                throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+            }
             try {
-                const clusterInfo = await this.describeCluster(clusterId);
+                const clusterInfo = await this.describeCluster(clusterId, signal);
 
                 if (clusterInfo.status === 'RUNNING') {
                     // Cluster is ready, return creation data with cluster details
@@ -277,12 +366,15 @@ export class ClusterManager {
                 }
 
                 // Wait before next poll
-                await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+                await this.abortableDelay(pollIntervalMs, signal);
             } catch (error: unknown) {
+                if (signal?.aborted) {
+                    throw signal.reason ?? error;
+                }
                 // If it's a describe cluster error, continue polling
                 // The cluster might not be immediately available for describe
                 if (errorMessage(error).includes('Failed to describe cluster')) {
-                    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+                    await this.abortableDelay(pollIntervalMs, signal);
                     continue;
                 }
                 throw error;
