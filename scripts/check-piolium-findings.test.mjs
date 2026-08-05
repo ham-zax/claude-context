@@ -400,6 +400,28 @@ test('M1/M2 drafts absent passes via registry', () => {
   assert.deepEqual(result.errors, []);
 });
 
+test('entirely absent findings root passes via registry', () => {
+  // Master untracked all piolium drafts (2026-08-06); the findings root may not
+  // exist at all. The registry alone must be a pass condition.
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: 'documented trust boundary' },
+    ]),
+  });
+  const absentRoot = path.join(cwd, 'does-not-exist');
+  const result = checkFindings({ head: 'HEAD', root: absentRoot, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.deepEqual(result.errors, []);
+});
+
+test('absent findings root without registry fails', () => {
+  // Without a registry there is nothing to validate; the absence must be
+  // reported rather than silently passing.
+  const cwd = writeRegistry({});
+  const absentRoot = path.join(cwd, 'does-not-exist');
+  const result = checkFindings({ head: 'HEAD', root: absentRoot, repoRoot: REPO_ROOT, registry: null });
+  assert.ok(result.errors.some((message) => /no draft\.md files found/.test(message)));
+});
+
 test('missing registry file fails', () => {
   const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
   const result = checkFindings({

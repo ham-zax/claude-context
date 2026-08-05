@@ -117,6 +117,11 @@ export function parseFrontMatter(text) {
 
 export function collectDraftPaths(root) {
   const draftPaths = [];
+  if (!fs.existsSync(root)) {
+    // The findings root may be entirely absent (master untracked piolium drafts
+    // on 2026-08-06); the registry carries the authoritative status in that case.
+    return draftPaths;
+  }
   const visit = (directory) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const absolute = path.join(directory, entry.name);
@@ -445,8 +450,12 @@ export function checkFindings({ head, root, repoRoot = process.cwd(), registry =
     }
   }
 
-  if (draftPaths.length === 0) {
+  if (draftPaths.length === 0 && registry === null) {
     errors.push(`no draft.md files found under '${root}'`);
+  } else if (draftPaths.length === 0 && registry !== null) {
+    // Registry-only mode: master untracked all piolium drafts (2026-08-06); the
+    // tracked findings registry is now the sole authoritative status record.
+    // An empty draft root with a valid registry is a pass condition.
   }
 
   return { headSha, findings, errors };
