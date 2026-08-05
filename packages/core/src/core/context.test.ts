@@ -1048,33 +1048,49 @@ test('Context semantic search diagnostics omit query text and vector samples', a
 });
 
 test('Context active collection resolution requires exact completion-marker payload counts', async (t) => {
+    // Each case starts from a genuinely indexed, policy-bound v3 generation
+    // and mutates only the marker's declared payload count (or adds payload
+    // rows), so rejection is causally the exact-payload-count mismatch. A
+    // limit_reached marker with sealed navigation is an envelope contradiction
+    // rather than a payload-count case, so it is intentionally absent here.
     const cases = [
-        { label: 'missing payload row', markerChunks: 2, payloadChunks: 1, indexStatus: 'completed' as const },
-        { label: 'unexpected payload row', markerChunks: 1, payloadChunks: 2, indexStatus: 'completed' as const },
-        { label: 'partial marker mismatch', markerChunks: 2, payloadChunks: 1, indexStatus: 'limit_reached' as const },
-        { label: 'zero marker with stale payload', markerChunks: 0, payloadChunks: 1, indexStatus: 'completed' as const },
+        { label: 'missing payload row', mutateMarkerChunks: 2 },
+        { label: 'unexpected payload row', extraChunks: 1, mutateMarkerChunks: 1 },
+        { label: 'zero marker with stale payload', mutateMarkerChunks: 0 },
     ];
 
     for (const input of cases) {
         await t.test(input.label, async () => {
-            const vectorDatabase = new InMemoryVectorDatabase();
-            const context = new Context({ embedding: new TestEmbedding(), vectorDatabase });
-            const codebasePath = `/repo/payload-count/${input.label.replace(/ /g, '-')}`;
-            const collectionName = context.resolveCollectionName(codebasePath);
-            await vectorDatabase.createHybridCollection(collectionName);
-            await vectorDatabase.writeDocuments(collectionName, [
-                ...Array.from({ length: input.payloadChunks }, (_, index) => buildChunkDoc(`payload-${index}`)),
-                buildCurrentV3CompletionMarkerDoc({
-                    codebasePath,
-                    runId: `run-${input.label}`,
-                    totalChunks: input.markerChunks,
-                    indexStatus: input.indexStatus,
-                }),
-            ]);
+            await withBoundIndexedCodebase(`payload-count-${input.label}`, async ({
+                codebasePath,
+                context,
+                vectorDatabase,
+                collectionName,
+            }) => {
+                const marker = vectorDatabase.collections.get(collectionName)?.get(INDEX_COMPLETION_MARKER_DOC_ID);
+                assert.ok(marker && typeof marker.metadata === 'object');
+                if ((input.extraChunks ?? 0) > 0) {
+                    await vectorDatabase.writeDocuments(collectionName, [buildChunkDoc('extra_chunk')]);
+                }
+                marker.metadata = {
+                    ...(marker.metadata as Record<string, unknown>),
+                    totalChunks: input.mutateMarkerChunks,
+                };
 
-            assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+                assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+            });
         });
     }
+
+    await t.test('matching payload count is admitted', async () => {
+        await withBoundIndexedCodebase('payload-count-control', async ({
+            codebasePath,
+            context,
+            collectionName,
+        }) => {
+            assert.equal(await context.getActiveIndexedCollectionName(codebasePath), collectionName);
+        });
+    });
 });
 
 test('Context active collection resolution rejects runtime fingerprint mismatches', async (t) => {
@@ -1180,41 +1196,39 @@ test('Context classifies a legacy projection fingerprint as requires_reindex and
 });
 
 test('Context rejects a completion control whose routing kind disagrees with its marker metadata', async () => {
-    const vectorDatabase = new InMemoryVectorDatabase();
-    const context = new Context({ embedding: new TestEmbedding(), vectorDatabase });
-    const codebasePath = '/repo/fingerprint/control-kind-mismatch';
-    const collectionName = context.resolveCollectionName(codebasePath);
-    await vectorDatabase.createHybridCollection(collectionName);
-    await context.writeIndexCompletionMarker(codebasePath, {
-        id: INDEX_COMPLETION_MARKER_DOC_ID,
-        vector: [0, 0, 0, 0],
-        content: 'marker',
-        relativePath: '.__satori__/index_completion_marker.json',
-        startLine: 0,
-        endLine: 0,
-        fileExtension: COMPLETION_MARKER_EXTENSION,
-        kind: 'satori_index_completion_v3',
+    await withBoundIndexedCodebase('control-kind-mismatch', async ({
         codebasePath,
-        fingerprint: testIndexFingerprint(),
-        indexedFiles: 1,
-        totalChunks: 0,
-        completedAt: '2026-07-12T00:00:00.000Z',
-        runId: 'control-kind-mismatch',
-        indexPolicyHash: 'a'.repeat(64),
-        indexStatus: 'completed',
-        navigation: { status: 'not_bound' as const },
-    }, collectionName);
-    const readControl = vectorDatabase.getControl.bind(vectorDatabase);
-    vectorDatabase.getControl = async (name, id) => {
-        const record = await readControl(name, id);
-        return record ? { ...record, kind: 'unexpected_control' } : null;
-    };
+        context,
+        vectorDatabase,
+    }) => {
+        // The bound v3 marker is valid before the routing mutation, so any
+        // rejection below is causally the routing-kind disagreement.
+        assert.equal(
+            (await context.getIndexCompletionMarkerForValidation(codebasePath)).status,
+            'valid_v3',
+        );
 
-    assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
-    assert.deepEqual(
-        await context.getIndexCompletionMarkerForValidation(codebasePath),
-        { status: 'invalid_v3' },
-    );
+        const readControl = vectorDatabase.getControl.bind(vectorDatabase);
+        vectorDatabase.getControl = async (name, id) => {
+            const record = await readControl(name, id);
+            return record ? { ...record, kind: 'unexpected_control' } : null;
+        };
+        // The in-memory adapter derives the routing kind from the marker
+        // metadata, so the disagreement is only observable through reads.
+        // Rotate the publication observation to defeat the proof cache;
+        // otherwise the cached generation proof would mask the mutation.
+        const observePublication = vectorDatabase.getPublicationObservation.bind(vectorDatabase);
+        vectorDatabase.getPublicationObservation = async (collectionName) => {
+            const observation = await observePublication(collectionName);
+            return observation ? `${observation}:routing-mutated` : observation;
+        };
+
+        assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
+        assert.deepEqual(
+            await context.getIndexCompletionMarkerForValidation(codebasePath),
+            { status: 'invalid_v3' },
+        );
+    });
 });
 
 async function withBoundIndexedCodebase(
