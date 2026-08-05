@@ -323,3 +323,49 @@ test("cannot add authority after construction", () => {
         fs.rmSync(stateRoot, { recursive: true, force: true });
     }
 });
+
+test("rejects a root that is a dangling symlink deterministically", (t) => {
+    const base = makeTempDir("satori-workspace-policy-base-");
+    const missingTarget = path.join(base, "missing-target");
+    const dangling = path.join(base, "dangling");
+    if (!createDirectorySymlinkOrSkip(t, missingTarget, dangling)) return;
+    const home = makeTempDir("satori-workspace-policy-home-");
+    const stateRoot = makeTempDir("satori-workspace-policy-state-");
+    try {
+        // A root whose real target does not exist must fail closed with a
+        // deterministic authorization error, not an uncaught fs exception
+        // and not a lexical authorization of the symlink path.
+        expectCode(
+            () => createSessionWorkspacePolicy({ roots: [dangling], homeDirectory: home, stateRoot }),
+            "INVALID_WORKSPACE_ROOT",
+        );
+    } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+        fs.rmSync(home, { recursive: true, force: true });
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+});
+
+test("denies paths through a dangling symlink inside an authorized root", (t) => {
+    const base = makeTempDir("satori-workspace-policy-base-");
+    const root = path.join(base, "root");
+    fs.mkdirSync(root, { recursive: true });
+    const missingTarget = path.join(base, "missing-target");
+    const dangling = path.join(root, "dangling");
+    if (!createDirectorySymlinkOrSkip(t, missingTarget, dangling)) return;
+    const home = makeTempDir("satori-workspace-policy-home-");
+    const stateRoot = makeTempDir("satori-workspace-policy-state-");
+    try {
+        const policy = createSessionWorkspacePolicy({ roots: [root], homeDirectory: home, stateRoot });
+        // The dangling symlink itself is denied.
+        expectCode(() => policy.authorizePath(dangling), "INVALID_WORKSPACE_ROOT");
+        // A path that passes through the dangling symlink is denied even
+        // though its lexical form is under the authorized root.
+        expectCode(() => policy.authorizePath(path.join(dangling, "src", "a.ts")), "INVALID_WORKSPACE_ROOT");
+        expectCode(() => policy.authorizeRoot(path.join(dangling, "src")), "INVALID_WORKSPACE_ROOT");
+    } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+        fs.rmSync(home, { recursive: true, force: true });
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+});

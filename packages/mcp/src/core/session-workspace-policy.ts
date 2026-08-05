@@ -44,12 +44,23 @@ export interface SessionWorkspacePolicy {
  * smuggle a not-yet-existing path outside the root. Non-existent paths with
  * no resolvable ancestor keep path.resolve output so `..` segments are still
  * collapsed.
+ *
+ * A path that passes through a dangling symlink (a symlink whose target
+ * cannot be resolved) never falls back to its lexical form: the real target
+ * cannot be established, so the path is denied with
+ * `INVALID_WORKSPACE_ROOT` rather than authorized lexically.
  */
 function canonicalizePath(inputPath: string): string {
     const resolved = path.resolve(inputPath);
     try {
         return fs.realpathSync.native(resolved);
     } catch {
+        if (containsDanglingSymlink(resolved)) {
+            throw new WorkspaceAuthorizationError(
+                "INVALID_WORKSPACE_ROOT",
+                `Path resolves through a dangling symlink and cannot be authorized: ${resolved}`,
+            );
+        }
         const missingParts: string[] = [];
         let current = resolved;
         for (;;) {
@@ -69,6 +80,41 @@ function canonicalizePath(inputPath: string): string {
             }
         }
     }
+}
+
+/**
+ * True when any component of the resolved absolute path is a symlink whose
+ * target cannot be resolved (a dangling symlink). Walks components with
+ * `lstat` so intermediate symlinks are inspected without following them;
+ * a component that does not exist ends the walk (nothing beyond it can be
+ * a symlink).
+ */
+function containsDanglingSymlink(resolvedPath: string): boolean {
+    const root = path.parse(resolvedPath).root;
+    let current = root;
+    const components = resolvedPath.slice(root.length).split(path.sep);
+    for (const component of components) {
+        if (component.length === 0) {
+            continue;
+        }
+        current = path.join(current, component);
+        let stats: fs.Stats;
+        try {
+            stats = fs.lstatSync(current);
+        } catch {
+            // Component does not exist; nothing beyond it can be a symlink.
+            return false;
+        }
+        if (stats.isSymbolicLink()) {
+            try {
+                fs.realpathSync.native(current);
+            } catch {
+                // Symlink whose target cannot be resolved: dangling.
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 /**
