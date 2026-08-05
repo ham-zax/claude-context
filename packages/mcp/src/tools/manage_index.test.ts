@@ -1,15 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { manageIndexTool, MANAGE_INDEX_ACTIONS } from "./manage_index.js";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { ContextMcpConfig } from "../config.js";
 import { ToolContext } from "./types.js";
+import { createSessionWorkspacePolicy } from "../core/session-workspace-policy.js";
 
 const TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TOOLS_DIR, "../../../..");
+
+/** Session policy authorizing the canonical test repo for existing fixtures. */
+const TEST_WORKSPACE_POLICY = createSessionWorkspacePolicy({
+    roots: ["/repo"],
+    homeDirectory: os.homedir(),
+    stateRoot: path.join(os.homedir(), ".satori"),
+});
+
+function buildWorkspacePolicy(roots: readonly string[]) {
+    return createSessionWorkspacePolicy({
+        roots,
+        homeDirectory: os.homedir(),
+        stateRoot: path.join(os.homedir(), ".satori"),
+    });
+}
 
 function buildConfig(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig {
     return {
@@ -33,6 +50,7 @@ test("manage_index rejects relative path without CWD resolve", async () => {
     const capabilities = new CapabilityResolver(buildConfig());
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         toolHandlers: {
             handleGetIndexingStatus: async () => {
                 throw new Error("handler must not run for relative path");
@@ -94,6 +112,7 @@ test("manage_index status defaults detail to summary and forwards explicit detai
     };
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         toolHandlers: statusHandlers,
     } as unknown as ToolContext;
 
@@ -165,6 +184,7 @@ test("manage_index status envelope includes symbolQuality observed registry fiel
     };
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => ({
                 capabilities,
@@ -238,6 +258,7 @@ test("manage_index status envelope preserves additive languageCapabilities evide
     };
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => ({
                 capabilities,
@@ -266,6 +287,7 @@ test("manage_index response shape is a JSON envelope in MCP text content", async
     const capabilities = new CapabilityResolver(buildConfig());
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => {
                 throw new Error("Connection closed");
@@ -325,6 +347,7 @@ test("manage_index returns structured backend diagnostics when provider runtime 
     const capabilities = new CapabilityResolver(buildConfig());
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => {
                 throw new Error("Connection closed");
@@ -366,6 +389,7 @@ test("manage_index status prefers the embedding-capable provider context", async
     } as unknown as ToolContext;
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async (operation: string) => {
                 requestedOperations.push(operation);
@@ -413,6 +437,7 @@ test("manage_index status falls back to the vector-only context without embeddin
     };
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async (operation: string) => {
                 requestedOperations.push(operation);
@@ -457,6 +482,7 @@ test("manage_index status prefers missing_provider_config over fingerprint requi
     };
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => missingIssue,
         },
@@ -515,6 +541,7 @@ test("manage_index status still reports not_indexed without provider when path i
     };
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async () => missingIssue,
         },
@@ -553,6 +580,7 @@ test("manage_index returns structured backend diagnostics when handler backend c
     const capabilities = new CapabilityResolver(buildConfig());
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         toolHandlers: {
             handleSyncCodebase: async () => {
                 throw new Error("deadline exceeded");
@@ -583,6 +611,7 @@ test("manage_index repair uses provider embedding/vector context when available"
     } as unknown as ToolContext;
     const ctx = {
         capabilities,
+        workspacePolicy: TEST_WORKSPACE_POLICY,
         providerRuntime: {
             requireToolContext: async (operation: string) => {
                 requestedOperation = operation;
@@ -603,4 +632,168 @@ test("manage_index repair uses provider embedding/vector context when available"
 
     assert.equal(requestedOperation, "embedding_vector");
     assert.equal(response.content[0].text, "provider-backed repair");
+});
+
+test("manage_index rejects an unauthorized path before provider resolution", async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    let providerResolved = false;
+    let handlerCalled = false;
+    const ctx = {
+        capabilities,
+        workspacePolicy: buildWorkspacePolicy(["/repo"]),
+        providerRuntime: {
+            requireToolContext: async () => {
+                providerResolved = true;
+                throw new Error("provider must not resolve for an unauthorized path");
+            },
+        },
+        toolHandlers: {
+            handleIndexCodebase: async () => {
+                handlerCalled = true;
+                throw new Error("handler must not run for an unauthorized path");
+            },
+        },
+    } as unknown as ToolContext;
+
+    const response = await manageIndexTool.execute({
+        action: "create",
+        path: "/other-workspace/repo",
+    }, ctx);
+    const payload = JSON.parse(response.content[0].text);
+
+    assert.equal(response.isError, true);
+    assert.equal(payload.status, "error");
+    assert.equal(payload.reason, "root_not_authorized");
+    assert.equal(payload.code, "ROOT_NOT_AUTHORIZED");
+    assert.equal(payload.path, "/other-workspace/repo");
+    assert.equal(typeof payload.message, "string");
+    assert.equal(providerResolved, false);
+    assert.equal(handlerCalled, false);
+});
+
+test("manage_index allows a repository below an authorized workspace", async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const received: string[] = [];
+    const ctx = {
+        capabilities,
+        workspacePolicy: buildWorkspacePolicy(["/workspace"]),
+        toolHandlers: {
+            handleIndexCodebase: async (args: Record<string, unknown>) => {
+                received.push(String(args.path));
+                return {
+                    content: [{
+                        type: "text" as const,
+                        text: JSON.stringify({
+                            tool: "manage_index",
+                            version: 1,
+                            action: "create",
+                            path: args.path,
+                            status: "indexing",
+                            message: "indexing started",
+                        }),
+                    }],
+                };
+            },
+        },
+    } as unknown as ToolContext;
+
+    const response = await manageIndexTool.execute({
+        action: "create",
+        path: "/workspace/sub-repo",
+    }, ctx);
+    const payload = JSON.parse(response.content[0].text);
+
+    assert.equal(payload.status, "indexing");
+    assert.deepEqual(received, ["/workspace/sub-repo"]);
+});
+
+test("manage_index status cannot probe an unauthorized path", async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    let handlerCalled = false;
+    const ctx = {
+        capabilities,
+        workspacePolicy: buildWorkspacePolicy(["/repo"]),
+        toolHandlers: {
+            handleGetIndexingStatus: async () => {
+                handlerCalled = true;
+                throw new Error("status must not run for an unauthorized path");
+            },
+        },
+    } as unknown as ToolContext;
+
+    const response = await manageIndexTool.execute({
+        action: "status",
+        path: "/sibling-workspace",
+    }, ctx);
+    const payload = JSON.parse(response.content[0].text);
+
+    assert.equal(response.isError, true);
+    assert.equal(payload.status, "error");
+    assert.equal(payload.reason, "root_not_authorized");
+    assert.equal(payload.code, "ROOT_NOT_AUTHORIZED");
+    assert.equal(payload.path, "/sibling-workspace");
+    assert.equal(handlerCalled, false);
+});
+
+test("manage_index denies broad roots like the filesystem root and home", async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    for (const broad of ["/", os.homedir()]) {
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy(["/repo"]),
+            toolHandlers: {
+                handleIndexCodebase: async () => {
+                    throw new Error("handler must not run for a broad root");
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await manageIndexTool.execute({
+            action: "create",
+            path: broad,
+        }, ctx);
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, "error");
+        assert.equal(payload.code, "BROAD_ROOT_NOT_ALLOWED");
+        assert.equal(payload.path, broad);
+    }
+});
+
+test("symlinked root escape is denied", async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "satori-manage-escape-"));
+    const workspace = path.join(base, "workspace");
+    const outside = path.join(base, "outside");
+    fs.mkdirSync(workspace);
+    fs.mkdirSync(outside);
+    const escapeLink = path.join(workspace, "escape");
+    fs.symlinkSync(outside, escapeLink);
+    try {
+        let handlerCalled = false;
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([workspace]),
+            toolHandlers: {
+                handleIndexCodebase: async () => {
+                    handlerCalled = true;
+                    throw new Error("handler must not run for a symlink escape");
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await manageIndexTool.execute({
+            action: "create",
+            path: escapeLink,
+        }, ctx);
+        const payload = JSON.parse(response.content[0].text);
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.status, "error");
+        assert.equal(payload.reason, "root_not_authorized");
+        assert.equal(payload.code, "ROOT_NOT_AUTHORIZED");
+        assert.equal(payload.path, escapeLink);
+        assert.equal(handlerCalled, false);
+    } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+    }
 });

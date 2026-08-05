@@ -9,6 +9,7 @@ import {
 } from '@zokizuan/satori-core';
 import { listCodebasesTool } from './list_codebases.js';
 import { ToolContext } from './types.js';
+import { createSessionWorkspacePolicy } from '../core/session-workspace-policy.js';
 
 type SectionMap = Map<string, string[]>;
 type MarkerMap = Record<string, unknown>;
@@ -38,9 +39,14 @@ const POLICY_HASH = 'a'.repeat(64);
 function buildContext(
     entries: Array<{ path: string; info: Record<string, unknown> }>,
     markers: MarkerMap = {},
-    options?: { throwOnProbe?: boolean; readLeaseEvents?: string[] }
+    options?: { throwOnProbe?: boolean; readLeaseEvents?: string[]; workspaceRoots?: readonly string[] }
 ): ToolContext {
     return {
+        workspacePolicy: createSessionWorkspacePolicy({
+            roots: options?.workspaceRoots ?? ['/repo'],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.homedir(), '.satori'),
+        }),
         context: {
             getIndexCompletionMarker: async (codebasePath: string) => {
                 if (options?.throwOnProbe) {
@@ -656,4 +662,38 @@ test('list_codebases omits Runtime owners line when summary is unavailable (null
     const text = response.content[0]?.text || '';
     assert.doesNotMatch(text, /Runtime owners:/);
     assert.doesNotMatch(text, /none live/);
+});
+
+test('list_codebases filters roots outside session authority', async () => {
+    const authorized = path.join('/workspace', 'repo-a');
+    const outside = path.join('/sibling-workspace', 'repo-b');
+    const ctx = buildContext([
+        { path: authorized, info: { status: 'indexed' } },
+        { path: outside, info: { status: 'indexed' } },
+    ], {
+        [authorized]: createMarker(authorized),
+        [outside]: createMarker(outside),
+    }, { workspaceRoots: ['/workspace'] });
+
+    const response = await listCodebasesTool.execute({}, ctx);
+    const text = response.content[0]?.text || '';
+
+    assert.match(text, new RegExp(authorized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(text, /sibling-workspace/);
+    assert.match(text, /Total tracked: 1/);
+});
+
+test('list_codebases fail-closes to an empty listing without a session policy', async () => {
+    const ctx = buildContext([
+        { path: '/repo/a', info: { status: 'indexed' } },
+    ], {
+        '/repo/a': createMarker('/repo/a'),
+    });
+    delete (ctx as unknown as Record<string, unknown>).workspacePolicy;
+
+    const response = await listCodebasesTool.execute({}, ctx);
+    const text = response.content[0]?.text || '';
+
+    assert.match(text, /No codebases are currently tracked/);
+    assert.doesNotMatch(text, /repo\/a/);
 });

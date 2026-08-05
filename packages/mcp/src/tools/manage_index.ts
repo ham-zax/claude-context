@@ -3,6 +3,7 @@ import {
     MANAGE_INDEX_ACTIONS,
     MANAGE_INDEX_STATUS_DETAILS,
 } from "../core/manage-types.js";
+import { WorkspaceAuthorizationError } from "../core/session-workspace-policy.js";
 import { requireAbsoluteFilesystemPath } from "../utils.js";
 import {
     McpTool,
@@ -69,6 +70,31 @@ export const manageIndexTool: McpTool = {
                 }],
                 isError: true,
             };
+        }
+
+        // Session workspace gate: every action (including status) must be
+        // authorized before provider resolution, filesystem existence checks,
+        // vector operations, mutation leases, or snapshot mutation. An
+        // unbound policy fails closed with WORKSPACE_POLICY_NOT_BOUND.
+        const workspacePolicy = ctx.workspacePolicy;
+        if (!workspacePolicy) {
+            return manageIndexWorkspaceDenial({
+                path: absolutePathResult.absolutePath,
+                code: "WORKSPACE_POLICY_NOT_BOUND",
+                message: "Tool context has not been bound to an MCP session workspace policy.",
+            });
+        }
+        try {
+            workspacePolicy.authorizeRoot(absolutePathResult.absolutePath);
+        } catch (error) {
+            if (error instanceof WorkspaceAuthorizationError) {
+                return manageIndexWorkspaceDenial({
+                    path: absolutePathResult.absolutePath,
+                    code: error.code,
+                    message: error.message,
+                });
+            }
+            throw error;
         }
 
         const statusDetail = parsed.data.detail ?? "summary";
@@ -170,6 +196,33 @@ export const manageIndexTool: McpTool = {
         }
     }
 };
+
+/**
+ * Structured workspace denial per the security hardening contract. The
+ * `reason` is the snake_case form of the policy's authorization code, so the
+ * common rejection (ROOT_NOT_AUTHORIZED) renders exactly as documented while
+ * BROAD_ROOT_NOT_ALLOWED / INVALID_WORKSPACE_ROOT / WORKSPACE_POLICY_NOT_BOUND
+ * stay distinguishable to callers.
+ */
+function manageIndexWorkspaceDenial(input: {
+    path: string;
+    code: "ROOT_NOT_AUTHORIZED" | "BROAD_ROOT_NOT_ALLOWED" | "INVALID_WORKSPACE_ROOT" | "WORKSPACE_POLICY_NOT_BOUND";
+    message: string;
+}): ToolResponse {
+    return {
+        content: [{
+            type: "text",
+            text: JSON.stringify({
+                status: "error",
+                reason: input.code.toLowerCase(),
+                code: input.code,
+                path: input.path,
+                message: input.message,
+            }),
+        }],
+        isError: true,
+    };
+}
 
 function withStatusDetail(
     response: ToolResponse,
