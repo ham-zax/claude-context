@@ -223,6 +223,21 @@ test("Python source repair does not absorb an unrelated decorator or comment", (
 });
 
 test("caller fallback skips records whose authorized source is denied and leaks no call names", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-python-caller-deny-"));
+    const outsideSecret = path.join(os.tmpdir(), `satori-python-outside-secret-${process.pid}-${Date.now()}.py`);
+    // The caller file on disk is a symlink to an outside secret. The
+    // vulnerable base reads it through the symlink by pathname for span
+    // repair; the authorized reader denies it (returns undefined), so the
+    // fallback must produce no edges and no symbols derived from unreadable
+    // source.
+    fs.writeFileSync(outsideSecret, [
+        "def caller():",
+        "    target()",
+        "    return True",
+        "",
+    ].join("\n"), "utf8");
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    fs.symlinkSync(outsideSecret, path.join(root, "src", "caller.py"));
     const target: SymbolRecord = {
         symbolKey: "python:function:target",
         symbolInstanceId: "syminst_target",
@@ -269,19 +284,98 @@ test("caller fallback skips records whose authorized source is denied and leaks 
         confidence: 'low',
     }];
 
-    // The authorized reader denies every file (symlink escape / unpublished /
-    // workspace-denied all surface as `undefined`). The fallback must produce
-    // no edges and no symbols derived from unreadable source.
-    const result = await buildSourceBackedPythonCallerFallback({
-        codebaseRoot: "/repo",
-        registry,
-        resolvedTarget: target,
-        suppressedRecords,
-        sortEdges: (edges) => edges,
-        sortNotes: (notes) => notes,
-        readSourceLines: async () => undefined,
+    try {
+        // The authorized reader denies every file (symlink escape / unpublished /
+        // workspace-denied all surface as `undefined`). The fallback must produce
+        // no edges and no symbols derived from unreadable source.
+        const result = await buildSourceBackedPythonCallerFallback({
+            codebaseRoot: root,
+            registry,
+            resolvedTarget: target,
+            suppressedRecords,
+            sortEdges: (edges) => edges,
+            sortNotes: (notes) => notes,
+            readSourceLines: async () => undefined,
+        });
+        assert.deepEqual(result.edges, []);
+        assert.deepEqual(result.symbols, []);
+        assert.deepEqual(result.notes, []);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(outsideSecret, { force: true });
+    }
+});
+
+test("caller fallback never opens a denied source by pathname (directory target fails closed)", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-python-caller-deny-dir-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), `satori-python-outside-dir-${process.pid}-${Date.now()}`));
+    // The caller file on disk is a symlink to an outside directory. A
+    // pathname read of it throws EISDIR; the vulnerable base reaches that
+    // read (rejecting the whole fallback), while the fix skips the record
+    // before any filesystem access because the authorized reader denies it.
+    fs.mkdirSync(path.join(root, "src"), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(root, "src", "caller.py"));
+    const target: SymbolRecord = {
+        symbolKey: "python:function:target",
+        symbolInstanceId: "syminst_target",
+        language: "python",
+        kind: "function",
+        name: "target",
+        qualifiedName: "target",
+        label: "function target()",
+        file: "src/target.py",
+        span: { startLine: 1, endLine: 2 },
+        parentQualifiedNamePath: [],
+        fileHash: "indexed_hash",
+        extractorVersion: "test",
+    };
+    const caller: SymbolRecord = {
+        symbolKey: "python:function:caller",
+        symbolInstanceId: "syminst_caller",
+        language: "python",
+        kind: "function",
+        name: "caller",
+        qualifiedName: "caller",
+        label: "function caller()",
+        file: "src/caller.py",
+        span: { startLine: 1, endLine: 2 },
+        parentQualifiedNamePath: [],
+        fileHash: "indexed_hash",
+        extractorVersion: "test",
+    };
+    const registry = buildSymbolRegistry({
+        manifest: testManifest([
+            { path: 'src/target.py', hash: 'indexed_hash', language: 'python', symbolCount: 1, definitionStatus: 'definitions_present' },
+            { path: 'src/caller.py', hash: 'indexed_hash', language: 'python', symbolCount: 1, definitionStatus: 'definitions_present' },
+        ]),
+        symbols: [target, caller],
     });
-    assert.deepEqual(result.edges, []);
-    assert.deepEqual(result.symbols, []);
-    assert.deepEqual(result.notes, []);
+    const suppressedRecords: RelationshipRecord[] = [{
+        sourceKey: caller.symbolKey,
+        sourceInstanceId: caller.symbolInstanceId,
+        targetKey: target.symbolKey,
+        targetInstanceId: target.symbolInstanceId,
+        type: 'CALLS',
+        file: 'src/caller.py',
+        span: { startLine: 2, endLine: 2 },
+        confidence: 'low',
+    }];
+
+    try {
+        const result = await buildSourceBackedPythonCallerFallback({
+            codebaseRoot: root,
+            registry,
+            resolvedTarget: target,
+            suppressedRecords,
+            sortEdges: (edges) => edges,
+            sortNotes: (notes) => notes,
+            readSourceLines: async () => undefined,
+        });
+        assert.deepEqual(result.edges, []);
+        assert.deepEqual(result.symbols, []);
+        assert.deepEqual(result.notes, []);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
 });
