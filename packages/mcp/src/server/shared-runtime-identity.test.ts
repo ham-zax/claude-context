@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+    SHARED_RUNTIME_PROTOCOL_VERSION,
     buildSharedRuntimeIdentity,
     isSharedOfflineRuntimeEligible,
     resolveSharedRuntimePaths,
@@ -223,7 +224,7 @@ test("lifecycle cleanup removes only the socket and metadata owned by the exitin
     const socketStat = fs.lstatSync(paths.socketPath);
     const original = {
         formatVersion: 1 as const,
-        protocolVersion: 1,
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
         hostPid: current.pid,
         bootId: current.bootId,
         processStartTime: current.startTime,

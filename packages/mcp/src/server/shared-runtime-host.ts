@@ -32,24 +32,41 @@ type AttachRequest = Readonly<{
     sharedRuntimeIdentityHash: string;
     installedRuntimeRoot: string;
     mcpVersion: string;
-    launcherNonce: string;
+    challengeNonce: string;
 }>;
 
 function parseAttachRequest(line: string): AttachRequest | null {
     try {
-        const value = JSON.parse(line) as Partial<AttachRequest>;
+        const value = JSON.parse(line) as Partial<AttachRequest> & {
+            launcherNonce?: unknown;
+        };
+        // Protocol v1 launchers send the legacy `launcherNonce` field. The host
+        // accepts it during parsing so the protocol-version gate below can
+        // reject v1 handshakes with the incompatible-runtime response instead
+        // of a malformed-message error. Protocol v2 requires `challengeNonce`.
+        const challengeNonce = typeof value.challengeNonce === "string"
+            ? value.challengeNonce
+            : value.protocolVersion === 1 && typeof value.launcherNonce === "string"
+                ? value.launcherNonce
+                : "";
         if (
             value.type !== "satori-shared-runtime-attach"
             || typeof value.protocolVersion !== "number"
             || typeof value.sharedRuntimeIdentityHash !== "string"
             || typeof value.installedRuntimeRoot !== "string"
             || typeof value.mcpVersion !== "string"
-            || typeof value.launcherNonce !== "string"
-            || !/^[a-f0-9]{48}$/.test(value.launcherNonce)
+            || !/^[a-f0-9]{48}$/.test(challengeNonce)
         ) {
             return null;
         }
-        return Object.freeze(value as AttachRequest);
+        return Object.freeze({
+            type: "satori-shared-runtime-attach",
+            protocolVersion: value.protocolVersion,
+            sharedRuntimeIdentityHash: value.sharedRuntimeIdentityHash,
+            installedRuntimeRoot: value.installedRuntimeRoot,
+            mcpVersion: value.mcpVersion,
+            challengeNonce,
+        } as AttachRequest);
     } catch {
         return null;
     }
@@ -58,6 +75,14 @@ function parseAttachRequest(line: string): AttachRequest | null {
 export class SharedRuntimeSocketHost {
     private readonly server: net.Server;
     private readonly sessions = new Set<McpSession>();
+    /**
+     * Lifecycle-state ownership marker only. Written to host.json (mode 0600)
+     * so the owning host can prove it may remove stale socket/metadata state.
+     * It is never transmitted over the socket and never used to authenticate
+     * launcher attach sessions: same-UID processes are inside the shared
+     * runtime trust boundary, so a metadata-readable token cannot serve as
+     * an authentication secret.
+     */
     private readonly ownershipToken = crypto.randomUUID();
     private metadata: SharedRuntimeHostMetadata | null = null;
     private idleTimer: NodeJS.Timeout | null = null;
@@ -193,7 +218,7 @@ export class SharedRuntimeSocketHost {
                 hostPid: process.pid,
                 bootId: this.metadata?.bootId ?? "",
                 processStartTime: this.metadata?.processStartTime ?? "",
-                launcherNonce: "",
+                challengeNonce: "",
                 error: message,
             };
             socket.once("error", () => {
@@ -245,7 +270,11 @@ export class SharedRuntimeSocketHost {
                 hostPid: this.metadata.hostPid,
                 bootId: this.metadata.bootId,
                 processStartTime: this.metadata.processStartTime,
-                launcherNonce: request.launcherNonce,
+                // The challenge is echoed as a freshness/correlation value only.
+                // The socket's 0600 mode and owned directories enforce an
+                // OS-user boundary; within the same UID, every process is
+                // trusted by this release's shared-runtime model.
+                challengeNonce: request.challengeNonce,
             };
             socket.write(`${JSON.stringify(response)}\n`);
             void this.attachSession(socket, trailing).catch(() => {

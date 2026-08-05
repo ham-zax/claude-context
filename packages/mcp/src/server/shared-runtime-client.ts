@@ -26,7 +26,7 @@ type AttachRequest = Readonly<{
     sharedRuntimeIdentityHash: string;
     installedRuntimeRoot: string;
     mcpVersion: string;
-    launcherNonce: string;
+    challengeNonce: string;
 }>;
 
 type AttachResponse = Readonly<{
@@ -39,7 +39,7 @@ type AttachResponse = Readonly<{
     hostPid: number;
     bootId: string;
     processStartTime: string;
-    launcherNonce: string;
+    challengeNonce: string;
     error?: string;
 }>;
 
@@ -92,14 +92,19 @@ async function attach(
 ): Promise<net.Socket> {
     const socket = await connectSocket(socketPath, timeoutMs);
     socket.pause();
-    const launcherNonce = crypto.randomBytes(24).toString("hex");
+    // Client-generated freshness/correlation challenge. The host echoes it
+    // verbatim; the echo proves the live host answered this exact attach, not
+    // that the launcher holds a secret. Same-UID processes are inside the
+    // shared-runtime trust boundary, so no metadata-readable token could
+    // authenticate against them anyway.
+    const challengeNonce = crypto.randomBytes(24).toString("hex");
     const request: AttachRequest = Object.freeze({
         type: "satori-shared-runtime-attach",
         protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
         sharedRuntimeIdentityHash: identity.hash,
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
-        launcherNonce,
+        challengeNonce,
     });
     socket.write(`${JSON.stringify(request)}\n`);
 
@@ -181,7 +186,7 @@ async function attach(
         );
     }
     if (
-        response.launcherNonce !== launcherNonce
+        response.challengeNonce !== challengeNonce
         || (expectedHost !== undefined && (
             response.hostPid !== expectedHost.hostPid
             || response.bootId !== expectedHost.bootId
