@@ -1,0 +1,23 @@
+# Satori security-hardening findings registry
+#
+# Tracked status record for findings whose piolium drafts are git-ignored
+# (piolium/** at .gitignore:103) and therefore cannot carry the ancestry/status
+# gate in CI. The validator (scripts/check-piolium-findings.mjs --registry)
+# enforces the same consistency rules on this registry as on tracked drafts:
+#   - status enum, non-empty verified_at resolving to a commit
+#   - fixed_in (when non-empty) resolving to a commit
+#   - accepted/fixed require non-empty fixed_in; open requires empty fixed_in
+#   - verified_at must be an ancestor of the audited head
+#   - IDs must not duplicate tracked draft IDs or each other
+
+findings:
+  - id: M1
+    status: accepted
+    verified_at: "b7da4e6190340d172d6e30df521959fec5f0b73d"
+    fixed_in: "b7da4e6190340d172d6e30df521959fec5f0b73d"
+    resolution: "same-UID processes are inside the documented trust boundary; protocol v2 states this honestly (challengeNonce is a freshness challenge, ownershipToken is lifecycle-only)"
+  - id: M2
+    status: open
+    verified_at: "3a0dfd70fc7ead7a9fc7ae4a883802d1cb0e05c7"
+    fixed_in: ""
+    resolution: "arbitrary root registration and root-wide read authorization; remediation Tasks 4-7 in flight; status flips to fixed after the security-scenario gate verifies denial on the shipped tool surface"

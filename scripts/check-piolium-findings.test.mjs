@@ -295,6 +295,130 @@ test('invalid --head produces a stable validation error, not a stack trace', () 
   });
 });
 
+function registryYaml(entries) {
+  return `findings:\n${entries
+    .map((entry) => `  - id: ${entry.id}\n    status: ${entry.status}\n    verified_at: "${entry.verified_at}"\n    fixed_in: "${entry.fixed_in ?? ''}"\n    resolution: "${entry.resolution ?? ''}"`)
+    .join('\n')}\n`;
+}
+
+const REGISTRY_SHA = '94a3dc659d3edce892f6f7f859a6c70597343751';
+
+function writeRegistry(files) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-registry-'));
+  for (const [relative, content] of Object.entries(files)) {
+    const absolute = path.join(cwd, relative);
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, content);
+  }
+  return cwd;
+}
+
+test('valid registry passes alongside drafts', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: 'documented trust boundary' },
+      { id: 'M2', status: 'open', verified_at: REGISTRY_SHA, fixed_in: '', resolution: 'tasks 4-7 in flight' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.deepEqual(result.errors, []);
+});
+
+test('registry entry with unknown status fails', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M1', status: 'banana', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /unknown status/);
+});
+
+test('accepted registry entry without fixed_in fails', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: '', resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /accepted.*requires non-empty fixed_in/);
+});
+
+test('open registry entry with non-empty fixed_in fails', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M2', status: 'open', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /open.*requires empty fixed_in/);
+});
+
+test('duplicate registry ID fails', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: '' },
+      { id: 'M1', status: 'open', verified_at: REGISTRY_SHA, fixed_in: '', resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /duplicate finding id/);
+});
+
+test('registry ID duplicating a draft ID fails', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'W9', status: 'open', verified_at: REGISTRY_SHA, fixed_in: '', resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /duplicate finding id/);
+});
+
+test('M1/M2 drafts absent passes via registry', () => {
+  // Simulates a fresh CI checkout: no M1/M2 draft dirs under the root, only the
+  // tracked registry carries their status. Must not fail on their absence.
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: 'documented trust boundary' },
+      { id: 'M2', status: 'open', verified_at: REGISTRY_SHA, fixed_in: '', resolution: 'tasks 4-7 in flight' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W7/draft.md': FIXED_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.deepEqual(result.errors, []);
+});
+
+test('missing registry file fails', () => {
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({
+    head: 'HEAD',
+    root,
+    repoRoot: REPO_ROOT,
+    registry: path.join('does-not-exist', 'registry.yml'),
+  });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /registry file .* not found/);
+});
+
+test('parseCheckArgs resolves the registry default and override', () => {
+  const defaults = parseCheckArgs([]);
+  assert.equal(defaults.registry, 'docs/evidence/security-hardening-20260805/findings-registry.yml');
+  const overridden = parseCheckArgs(['--registry', 'tmp/reg.yml']);
+  assert.equal(overridden.registry, 'tmp/reg.yml');
+});
+
 test('CLI exits nonzero on invalid findings and zero on valid', () => {
   const badRoot = createFindingWorkspace({
     'W9/draft.md': draft(
