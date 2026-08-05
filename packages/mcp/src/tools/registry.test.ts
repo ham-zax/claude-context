@@ -159,8 +159,8 @@ test('read_file description documents bounded symbol reads and exact full-source
     assert.match(readFileTool!.description, /raw multiline source/);
 
     const properties = readFileTool!.inputSchema.properties as Record<string, SchemaProperty>;
-    assert.match(properties.open_symbol?.description ?? '', /bounded symbol source/);
-    assert.match(properties.open_symbol?.description ?? '', /continuation-aware excerpts/);
+    assert.match(String(properties.open_symbol?.description ?? ''), /bounded symbol source/);
+    assert.match(String(properties.open_symbol?.description ?? ''), /continuation-aware excerpts/);
 });
 
 test('manage_index schema does not expose deprecated splitter knob', () => {

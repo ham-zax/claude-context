@@ -6,7 +6,7 @@ import { WritableStdoutLike } from "./stdio-safety.js";
 test("installBootstrapStdioSafety guards mcp stdout without blocking captured protocol writer", () => {
     const stdoutWrites: string[] = [];
     const stderrWrites: string[] = [];
-    const fakeStdout: WritableStdoutLike = {
+    const fakeStdout: WritableStdoutLike & { write(...args: unknown[]): boolean } = {
         write(chunk: unknown) {
             stdoutWrites.push(String(chunk));
             return true;

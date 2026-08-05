@@ -271,7 +271,7 @@ function parseToolPayload(response: JsonRpcResponse): ToolPayload {
     assert.equal(response.error, undefined);
     const text = response.result?.content?.find((item) => item?.type === "text")?.text;
     assert.equal(typeof text, "string");
-    return JSON.parse(text) as ToolPayload;
+    return JSON.parse(text!) as ToolPayload;
 }
 
 function toolNames(response: JsonRpcResponse): string[] {

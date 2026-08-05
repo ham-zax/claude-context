@@ -58,8 +58,11 @@ test("installCliStdoutRedirect blocks writes quietly in drop mode", () => {
     const privateWrites: string[] = [];
 
     const fakeStdout: WritableStdoutLike & {
-        _write(chunk: unknown): void;
-        _writev(chunks: unknown): void;
+        write(chunk: unknown, encoding?: unknown): boolean;
+        end(chunk?: unknown): boolean;
+        writev(chunks: unknown): boolean;
+        _write(chunk: unknown, encoding?: unknown, callback?: () => void): void;
+        _writev(chunks: unknown, callback?: () => void): void;
     } = {
         write(chunk: unknown, encoding?: unknown) {
             writes.push({ chunk, encoding });
@@ -110,7 +113,7 @@ test("installCliStdoutRedirect blocks writes quietly in drop mode", () => {
 
 test("installCliStdoutRedirect emits deterministic markers in redirect mode", () => {
     const stderrWrites: string[] = [];
-    const fakeStdout: WritableStdoutLike = {
+    const fakeStdout: WritableStdoutLike & { write(...args: unknown[]): boolean } = {
         write() {
             return true;
         }

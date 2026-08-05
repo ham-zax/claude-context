@@ -38,7 +38,7 @@ interface ToolDescriptor {
     input_schema?: unknown;
 }
 
-interface CliSession {
+export interface CliSession {
     listTools(): Promise<ListToolsResult>;
     callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult>;
     close(): Promise<void>;

@@ -290,7 +290,7 @@ test("disconnecting one session does not cancel shared provider bootstrap", asyn
     toolRegistry.search_codebase = {
         ...originalSearch,
         execute: async (_args, context) => {
-            const providerContext = await context.providerRuntime.requireToolContext(
+            const providerContext = await context.providerRuntime!.requireToolContext(
                 "embedding_vector",
             );
             if ("code" in providerContext) {

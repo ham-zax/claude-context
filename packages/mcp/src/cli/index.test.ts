@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CliError } from "./errors.js";
-import { isExecutedDirectlyForPaths, runCli } from "./index.js";
+import { isExecutedDirectlyForPaths, runCli, type CliSession } from "./index.js";
+import type { ListToolsResult } from "./client.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SOURCE_SERVER_ENTRY = path.join(PACKAGE_ROOT, "src", "index.ts");
@@ -24,7 +25,7 @@ function captureIo() {
     };
 }
 
-function createMockSession(mode: "normal" | "envelope" | "timeout_error" | "manage_wait" | "manage_initial_error" | "manage_initial_blocked" = "normal") {
+function createMockSession(mode: "normal" | "envelope" | "timeout_error" | "manage_wait" | "manage_initial_error" | "manage_initial_blocked" = "normal"): CliSession {
     let statusPolls = 0;
     return {
         async listTools() {
@@ -55,7 +56,7 @@ function createMockSession(mode: "normal" | "envelope" | "timeout_error" | "mana
                             required: ["path", "query"]
                         }
                     }
-                ]
+                ] as unknown as ListToolsResult["tools"],
             };
         },
         async callTool(name: string, args: Record<string, unknown>) {

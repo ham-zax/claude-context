@@ -12,6 +12,7 @@ import {
     parseIndexFingerprint,
     resolveMcpRuntimeBootstrap,
     type ContextMcpConfig,
+    type IndexFingerprint,
 } from '../config.js';
 
 const DIGEST = 'a'.repeat(64);
@@ -111,7 +112,7 @@ test('Potion bootstrap seals the frozen L1 inference identity', async () => {
     const missingContractDigest = Object.fromEntries(
         Object.entries(resolved.runtimeFingerprint)
             .filter(([field]) => field !== 'embeddingArtifactDigest'),
-    );
+    ) as unknown as IndexFingerprint;
     assert.equal(
         indexFingerprintsEqual(missingContractDigest, resolved.runtimeFingerprint),
         false,

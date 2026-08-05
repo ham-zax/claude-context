@@ -16,7 +16,7 @@ type FakeWorkerOptions = Readonly<{
     pidLogPath?: string;
 }>;
 
-function createFakeWorker(t: test.TestContext, options: FakeWorkerOptions = {}): string {
+function createFakeWorker(t: { after(fn: () => void): void }, options: FakeWorkerOptions = {}): string {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-worker-"));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const workerPath = path.join(directory, "worker.cjs");
