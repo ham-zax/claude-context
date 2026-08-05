@@ -39,6 +39,7 @@ import {
 import { ClusterManager } from './zilliz-utils';
 import { deleteCollectionWithVerification } from './remote-delete';
 import { buildMilvusIdInFilter } from './filters';
+import { BoundedHttpError, fetchWithDeadline } from '../net/fetch-with-deadline';
 
 type MilvusRestResponse<T = unknown> = {
     code?: number;
@@ -84,6 +85,36 @@ function isSuccessCode(code: unknown): boolean {
     return code === 0 || code === 200;
 }
 
+/**
+ * Bounded HTTP policy for every REST call made by this adapter.
+ *
+ * Reads (search/query/load-state/describe) may retry within the bounded
+ * policy; create/drop/insert/delete/load/index mutations are never retried
+ * because they are not proven idempotent. An ambiguous network failure on a
+ * mutation must surface to the caller instead of duplicating the mutation.
+ */
+const MILVUS_REST_HTTP_POLICY = {
+    attemptTimeoutMs: 30_000,
+    maxAttemptsRead: 2,
+    maxAttemptsMutation: 1,
+    retryDelayMs: 250,
+    maxResponseBytes: 8 * 1024 * 1024,
+    retryableStatuses: new Set([
+        408, 425, 429,
+        ...Array.from({ length: 100 }, (_, index) => 500 + index),
+    ]),
+    retryableNetworkCodes: new Set(['ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN']),
+} as const;
+
+/** Endpoints that may use the bounded retry policy (reads only). */
+const MILVUS_REST_READ_ENDPOINTS = new Set<string>([
+    '/entities/search',
+    '/entities/query',
+    '/collections/get_load_state',
+    '/collections/has',
+    '/collections/list',
+]);
+
 export interface MilvusRestfulConfig {
     address?: string;
     token?: string;
@@ -92,6 +123,12 @@ export interface MilvusRestfulConfig {
     database?: string;
     /** Dimension used only for placeholder vectors required by the legacy Milvus control-row schema. */
     vectorDimension: number;
+    /** Per-attempt HTTP timeout in milliseconds (default 30000). */
+    requestTimeoutMs?: number;
+    /** Delay between bounded retry attempts in milliseconds (default 250). */
+    retryDelayMs?: number;
+    /** Maximum accepted response body bytes (default 8 MiB). */
+    maxResponseBytes?: number;
 }
 
 function normalizeHost(address: string): string {
@@ -249,8 +286,22 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
             requestOptions.body = JSON.stringify(data);
         }
 
+        const isRead = MILVUS_REST_READ_ENDPOINTS.has(endpoint);
+        const maxAttempts = isRead
+            ? MILVUS_REST_HTTP_POLICY.maxAttemptsRead
+            : MILVUS_REST_HTTP_POLICY.maxAttemptsMutation;
+
         try {
-            const response = await fetch(url, requestOptions);
+            const response = await fetchWithDeadline({
+                url,
+                init: requestOptions,
+                attemptTimeoutMs: this.config.requestTimeoutMs ?? MILVUS_REST_HTTP_POLICY.attemptTimeoutMs,
+                maxAttempts,
+                retryDelayMs: this.config.retryDelayMs ?? MILVUS_REST_HTTP_POLICY.retryDelayMs,
+                maxResponseBytes: this.config.maxResponseBytes ?? MILVUS_REST_HTTP_POLICY.maxResponseBytes,
+                retryableStatuses: MILVUS_REST_HTTP_POLICY.retryableStatuses,
+                retryableNetworkCodes: MILVUS_REST_HTTP_POLICY.retryableNetworkCodes,
+            });
 
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -269,7 +320,15 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
 
             return result as MilvusRestResponse<T>;
         } catch (error) {
-            console.error(`[MilvusRestfulDB] Milvus REST API request failed:`, error);
+            if (error instanceof BoundedHttpError) {
+                const statusPart = error.status === null ? '' : ` HTTP ${error.status}`;
+                console.error(
+                    `[MilvusRestfulDB] Milvus REST API request failed (${error.kind}${statusPart}, attempts=${error.attempts}):`,
+                    error.message,
+                );
+            } else {
+                console.error(`[MilvusRestfulDB] Milvus REST API request failed:`, error);
+            }
             throw error;
         }
     }
