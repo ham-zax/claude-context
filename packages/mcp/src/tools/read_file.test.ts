@@ -566,6 +566,94 @@ test('read_file returns not_ready envelope when parent codebase is indexing', as
     });
 });
 
+test('read_file does not leak an out-of-workspace indexing root in the not_ready envelope', async () => {
+    await withTempDir(async (dir) => {
+        const workspaceRoot = path.join(dir, 'workspace');
+        const outsideRepo = path.join(dir, 'outside-repo');
+        const outsideSrc = path.join(outsideRepo, 'src');
+        fs.mkdirSync(workspaceRoot, { recursive: true });
+        fs.mkdirSync(outsideSrc, { recursive: true });
+        const filePath = path.join(outsideSrc, 'runtime.ts');
+        fs.writeFileSync(filePath, 'export const value = true;\n', 'utf8');
+
+        const sessionPolicy = createSessionWorkspacePolicy({
+            roots: [workspaceRoot],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.tmpdir(), 'read-file-test-state'),
+        });
+
+        const response = await runReadFile({
+            path: filePath
+        }, 1000, {
+            workspacePolicy: sessionPolicy,
+            snapshotManager: {
+                getAllCodebases: () => [{
+                    path: outsideRepo,
+                    info: {
+                        status: 'indexing',
+                        indexingPercentage: 42,
+                        lastUpdated: '2026-02-27T23:57:03.000Z'
+                    }
+                }]
+            } as unknown as SnapshotManagerLike
+        });
+
+        assert.equal(response.isError, true);
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, 'outside_indexed_root');
+        assert.equal(payload.reason, 'outside_indexed_root');
+        // The leak fields from the not_ready envelope must be absent entirely:
+        // no root-path disclosure, no progress, no freshness metadata.
+        assert.equal(payload.codebaseRoot, undefined);
+        assert.equal(payload.indexing, undefined);
+        assert.equal(payload.content, undefined);
+        assert.equal(response.content[0].text.includes('2026-02-27T23:57:03.000Z'), false);
+        assert.equal(response.content[0].text.includes('indexingPercentage'), false);
+    });
+});
+
+test('read_file keeps the not_ready envelope for an in-workspace indexing root', async () => {
+    await withTempDir(async (dir) => {
+        const workspaceRoot = path.join(dir, 'workspace');
+        const repoPath = path.join(workspaceRoot, 'repo');
+        const srcPath = path.join(repoPath, 'src');
+        fs.mkdirSync(srcPath, { recursive: true });
+        const filePath = path.join(srcPath, 'runtime.ts');
+        fs.writeFileSync(filePath, 'export const value = true;\n', 'utf8');
+
+        const sessionPolicy = createSessionWorkspacePolicy({
+            roots: [workspaceRoot],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.tmpdir(), 'read-file-test-state'),
+        });
+
+        const response = await runReadFile({
+            path: filePath
+        }, 1000, {
+            workspacePolicy: sessionPolicy,
+            snapshotManager: {
+                getAllCodebases: () => [{
+                    path: repoPath,
+                    info: {
+                        status: 'indexing',
+                        indexingPercentage: 42,
+                        lastUpdated: '2026-02-27T23:57:03.000Z'
+                    }
+                }]
+            } as unknown as SnapshotManagerLike
+        });
+
+        assert.equal(response.isError, undefined);
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'indexing');
+        assert.equal(payload.codebaseRoot, repoPath);
+        assert.equal(payload.indexing.progressPct, 42);
+        assert.equal(payload.indexing.lastUpdated, '2026-02-27T23:57:03.000Z');
+        assert.equal(payload.indexing.phase, null);
+    });
+});
+
 test('read_file annotated mode returns content and outline metadata when outline is available', async () => {
     await withTempDir(async (dir) => {
         const repoPath = path.join(dir, 'repo');
