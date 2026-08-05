@@ -7,7 +7,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { LexicalRetrievalModeUnsupportedError } from './semantic-search-service';
 import { Context, createGenerationProofCoordinator, IndexPolicyPublicationError } from './context';
-import type { IndexCompletionMarkerDocument } from '@zokizuan/satori-core';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
     type CanonicalIndexPolicyDocument,
@@ -961,7 +960,7 @@ function verifiedSnapshotEvidence(fingerprint: IndexCompletionFingerprint) {
     };
 }
 
-function buildCompletionMarkerDoc(input: {
+function buildCurrentV3CompletionMarkerDoc(input: {
     codebasePath: string;
     runId: string;
     totalChunks?: number;
@@ -976,14 +975,16 @@ function buildCompletionMarkerDoc(input: {
         endLine: 0,
         fileExtension: COMPLETION_MARKER_EXTENSION,
         metadata: {
-            kind: 'satori_index_completion_v2',
+            kind: 'satori_index_completion_v3',
             codebasePath: input.codebasePath,
             fingerprint: testIndexFingerprint(),
             indexedFiles: 1,
             totalChunks: input.totalChunks ?? 1,
             completedAt: '2026-02-27T23:57:10.000Z',
             runId: input.runId,
+            indexPolicyHash: 'a'.repeat(64),
             indexStatus: input.indexStatus ?? 'completed',
+            navigation: { status: 'not_bound' as const },
         },
     };
 }
@@ -1063,7 +1064,7 @@ test('Context active collection resolution requires exact completion-marker payl
             await vectorDatabase.createHybridCollection(collectionName);
             await vectorDatabase.writeDocuments(collectionName, [
                 ...Array.from({ length: input.payloadChunks }, (_, index) => buildChunkDoc(`payload-${index}`)),
-                buildCompletionMarkerDoc({
+                buildCurrentV3CompletionMarkerDoc({
                     codebasePath,
                     runId: `run-${input.label}`,
                     totalChunks: input.markerChunks,
@@ -1081,81 +1082,101 @@ test('Context active collection resolution rejects runtime fingerprint mismatche
         ['embedding dimension', { embeddingDimension: 8 }],
         ['schema version', { schemaVersion: 'dense_v3' }],
         ['parser version', { parserVersion: 'parser-mismatch' }],
-        ['relationship version', { relationshipVersion: 'relationship-mismatch' }],
         ['embedding projection version', { embeddingProjectionVersion: 'embedding_projection_mismatch' }],
         ['lexical projection version', { lexicalProjectionVersion: 'lexical_projection_mismatch' }],
     ];
+    // A lone relationshipVersion difference is the relationship-only upgrade
+    // path rather than a rejection, so it is intentionally absent here.
 
     for (const [label, fingerprintOverride] of mismatches) {
         await t.test(label, async () => {
-            const vectorDatabase = new InMemoryVectorDatabase();
-            const context = new Context({ embedding: new TestEmbedding(), vectorDatabase });
-            const codebasePath = `/repo/fingerprint/${label.replace(/ /g, '-')}`;
-            const collectionName = context.resolveCollectionName(codebasePath);
-            await vectorDatabase.createHybridCollection(collectionName);
-            await vectorDatabase.writeDocuments(collectionName, [buildChunkDoc('payload')]);
-            await context.writeIndexCompletionMarker(codebasePath, {
-                id: INDEX_COMPLETION_MARKER_DOC_ID,
-                vector: [0, 0, 0, 0],
-                content: 'marker',
-                relativePath: '.__satori__/index_completion_marker.json',
-                startLine: 0,
-                endLine: 0,
-                fileExtension: COMPLETION_MARKER_EXTENSION,
-                kind: 'satori_index_completion_v2',
+            await withBoundIndexedCodebase(`mismatch-${label}`, async ({
                 codebasePath,
-                fingerprint: testIndexFingerprint(fingerprintOverride),
-                indexedFiles: 1,
-                totalChunks: 1,
-                completedAt: '2026-07-12T00:00:00.000Z',
-                runId: `mismatch-${label}`,
-                indexStatus: 'completed',
-            } as unknown as IndexCompletionMarkerDocument, collectionName);
+                context,
+                vectorDatabase,
+                collectionName,
+                trustedFingerprint,
+            }) => {
+                const marker = vectorDatabase.collections.get(collectionName)?.get(INDEX_COMPLETION_MARKER_DOC_ID);
+                assert.ok(marker && typeof marker.metadata === 'object');
+                // The complete v3 marker stays intact except for the single
+                // fingerprint dimension under test, so the rejection below is
+                // causally the fingerprint mismatch.
+                marker.metadata = {
+                    ...(marker.metadata as Record<string, unknown>),
+                    fingerprint: { ...trustedFingerprint, ...fingerprintOverride },
+                };
 
-            assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+                assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+                const repair = await context.repairIndex(codebasePath, {
+                    snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
+                });
+                assert.equal(repair.status, 'requires_reindex');
+                assert.deepEqual(
+                    repair.proof.fingerprint,
+                    { status: 'failed', basis: 'completion_marker_fingerprint_mismatch' },
+                );
+            });
         });
     }
+
+    await t.test('unmutated complete v3 marker is admitted', async () => {
+        await withBoundIndexedCodebase('mismatch-control', async ({
+            codebasePath,
+            context,
+            collectionName,
+        }) => {
+            assert.equal(await context.getActiveIndexedCollectionName(codebasePath), collectionName);
+            assert.equal(
+                (await context.getIndexCompletionMarkerForValidation(codebasePath)).status,
+                'valid_v3',
+            );
+        });
+    });
 });
 
 test('Context classifies a legacy projection fingerprint as requires_reindex and never admits it', async () => {
-    const vectorDatabase = new InMemoryVectorDatabase();
-    const context = new Context({ embedding: new TestEmbedding(), vectorDatabase });
-    const codebasePath = '/repo/fingerprint/legacy-projections';
-    const collectionName = context.resolveCollectionName(codebasePath);
-    await vectorDatabase.createHybridCollection(collectionName);
-    await vectorDatabase.writeDocuments(collectionName, [buildChunkDoc('payload')]);
-    await context.writeIndexCompletionMarker(codebasePath, {
-        id: INDEX_COMPLETION_MARKER_DOC_ID,
-        vector: [0, 0, 0, 0],
-        content: 'marker',
-        relativePath: '.__satori__/index_completion_marker.json',
-        startLine: 0,
-        endLine: 0,
-        fileExtension: COMPLETION_MARKER_EXTENSION,
-        kind: 'satori_index_completion_v2',
+    await withBoundIndexedCodebase('legacy-projections', async ({
         codebasePath,
-        fingerprint: testIndexFingerprint(),
-        indexedFiles: 1,
-        totalChunks: 1,
-        completedAt: '2026-07-12T00:00:00.000Z',
-        runId: 'legacy-projection-fingerprint',
-        indexStatus: 'completed',
-    } as unknown as IndexCompletionMarkerDocument, collectionName);
-    const markerDocument = vectorDatabase.collections
-        .get(collectionName)
-        ?.get(INDEX_COMPLETION_MARKER_DOC_ID);
-    assert.ok(markerDocument);
-    const fingerprint = (markerDocument.metadata as { fingerprint: IndexCompletionFingerprint }).fingerprint;
-    delete (fingerprint as Partial<IndexCompletionFingerprint>).embeddingProjectionVersion;
-    delete (fingerprint as Partial<IndexCompletionFingerprint>).lexicalProjectionVersion;
+        context,
+        vectorDatabase,
+        collectionName,
+        trustedFingerprint,
+    }) => {
+        const marker = vectorDatabase.collections.get(collectionName)?.get(INDEX_COMPLETION_MARKER_DOC_ID);
+        assert.ok(marker && typeof marker.metadata === 'object');
+        // Rewrite the marker's fingerprint into the pre-projection-era shape:
+        // that era recorded no embedding artifact digest, no normalization
+        // policy, and no projection versions. The v3 envelope stays otherwise
+        // intact, so only the fingerprint differs from the runtime fingerprint.
+        const legacyFingerprint: Record<string, unknown> = { ...trustedFingerprint };
+        delete legacyFingerprint.embeddingArtifactDigest;
+        delete legacyFingerprint.embeddingNormalizationPolicy;
+        delete legacyFingerprint.embeddingProjectionVersion;
+        delete legacyFingerprint.lexicalProjectionVersion;
+        marker.metadata = {
+            ...(marker.metadata as Record<string, unknown>),
+            fingerprint: legacyFingerprint,
+        };
 
-    const validationProbe = await context.getIndexCompletionMarkerForValidation(codebasePath);
-    console.error('PROBE_VALIDATION', JSON.stringify(validationProbe).slice(0, 400), 'collections', [...vectorDatabase.collections.keys()]);
-    assert.deepEqual(
-        validationProbe,
-        { status: 'requires_reindex' },
-    );
-    assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+        // The v3 envelope remains structurally valid, so validation reports the
+        // marker as invalid (fingerprint-incompatible) rather than retired...
+        assert.deepEqual(
+            await context.getIndexCompletionMarkerForValidation(codebasePath),
+            { status: 'invalid_v3' },
+        );
+        // ...while repair classifies the legacy fingerprint as requires_reindex
+        // on the fingerprint-mismatch basis, and the collection is never admitted.
+        const repair = await context.repairIndex(codebasePath, {
+            snapshotEvidence: verifiedSnapshotEvidence(trustedFingerprint),
+        });
+        assert.equal(repair.status, 'requires_reindex');
+        assert.deepEqual(
+            repair.proof.fingerprint,
+            { status: 'failed', basis: 'completion_marker_fingerprint_mismatch' },
+        );
+        assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
+    });
 });
 
 test('Context rejects a completion control whose routing kind disagrees with its marker metadata', async () => {
@@ -1172,15 +1193,17 @@ test('Context rejects a completion control whose routing kind disagrees with its
         startLine: 0,
         endLine: 0,
         fileExtension: COMPLETION_MARKER_EXTENSION,
-        kind: 'satori_index_completion_v2',
+        kind: 'satori_index_completion_v3',
         codebasePath,
         fingerprint: testIndexFingerprint(),
         indexedFiles: 1,
         totalChunks: 0,
         completedAt: '2026-07-12T00:00:00.000Z',
         runId: 'control-kind-mismatch',
+        indexPolicyHash: 'a'.repeat(64),
         indexStatus: 'completed',
-    } as unknown as IndexCompletionMarkerDocument, collectionName);
+        navigation: { status: 'not_bound' as const },
+    }, collectionName);
     const readControl = vectorDatabase.getControl.bind(vectorDatabase);
     vectorDatabase.getControl = async (name, id) => {
         const record = await readControl(name, id);
@@ -1188,11 +1211,46 @@ test('Context rejects a completion control whose routing kind disagrees with its
     };
 
     assert.equal(await context.getIndexCompletionMarker(codebasePath), null);
-    assert.notEqual(
-        (await context.getIndexCompletionMarkerForValidation(codebasePath)).status,
-        'valid_v3',
+    assert.deepEqual(
+        await context.getIndexCompletionMarkerForValidation(codebasePath),
+        { status: 'invalid_v3' },
     );
 });
+
+async function withBoundIndexedCodebase(
+    label: string,
+    work: (fixture: {
+        codebasePath: string;
+        context: Context;
+        vectorDatabase: InMemoryVectorDatabase;
+        collectionName: string;
+        trustedFingerprint: IndexCompletionFingerprint;
+    }) => Promise<void>,
+): Promise<void> {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `satori-context-bound-${label}-`));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const value = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+            symbolRegistryStateRoot: path.join(tempRoot, 'navigation'),
+        });
+        await context.indexCodebase(codebasePath);
+        const collectionName = context.resolveCollectionName(codebasePath);
+        const marker = vectorDatabase.collections.get(collectionName)?.get(INDEX_COMPLETION_MARKER_DOC_ID);
+        assert.ok(marker && typeof marker.metadata === 'object');
+        const trustedFingerprint = structuredClone(
+            (marker.metadata as { fingerprint: IndexCompletionFingerprint }).fingerprint,
+        );
+        await work({ codebasePath, context, vectorDatabase, collectionName, trustedFingerprint });
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
 
 async function withPreparedCollectionContext(
     label: string,
@@ -2967,7 +3025,7 @@ test('Context.pruneUnprovenStagedCollectionFamily removes failed staged generati
     await vectorDatabase.createHybridCollection(failedStagedCollectionName);
     await vectorDatabase.createHybridCollection(markerOnlyCollectionName);
     await vectorDatabase.writeDocuments(markerOnlyCollectionName, [
-        buildCompletionMarkerDoc({ codebasePath, runId: 'run_marker_only', totalChunks: 5 }),
+        buildCurrentV3CompletionMarkerDoc({ codebasePath, runId: 'run_marker_only', totalChunks: 5 }),
     ]);
     await vectorDatabase.createHybridCollection(inProgressStagedCollectionName);
     await vectorDatabase.writeDocuments(inProgressStagedCollectionName, [
@@ -2976,7 +3034,7 @@ test('Context.pruneUnprovenStagedCollectionFamily removes failed staged generati
     await vectorDatabase.createHybridCollection(provenStagedCollectionName);
     await vectorDatabase.writeDocuments(provenStagedCollectionName, [
         buildChunkDoc('ready_chunk'),
-        buildCompletionMarkerDoc({ codebasePath, runId: 'run_ready' }),
+        buildCurrentV3CompletionMarkerDoc({ codebasePath, runId: 'run_ready' }),
     ]);
 
     const dropped = await context.pruneUnprovenStagedCollectionFamily(codebasePath);
