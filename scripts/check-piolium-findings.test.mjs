@@ -205,6 +205,96 @@ test('missing required field fails', () => {
   assert.match(result.errors[0], /introduced_at/);
 });
 
+test('nonexistent SHA fails validation', () => {
+  const root = createFindingWorkspace({
+    'W9/draft.md': draft(
+      ['id: W9', 'slug: fixture-sha-nonexistent', 'status: open', 'poc_kind: theoretical',
+       'introduced_at: "1111111111111111111111111111111111111111"',
+       'verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
+       'fixed_in: ""', 'fix_verified_at: ""'].join('\n'),
+    ),
+  });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /introduced_at/);
+  assert.match(result.errors[0], /unknown commit/);
+});
+
+test('malformed SHA fails validation', () => {
+  const root = createFindingWorkspace({
+    'W9/draft.md': draft(
+      ['id: W9', 'slug: fixture-sha-malformed', 'status: open', 'poc_kind: theoretical',
+       'introduced_at: "not-a-sha"',
+       'verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
+       'fixed_in: ""', 'fix_verified_at: ""'].join('\n'),
+    ),
+  });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /introduced_at/);
+});
+
+test('abbreviated ambiguous SHA fails validation', () => {
+  const root = createFindingWorkspace({
+    'W9/draft.md': draft(
+      ['id: W9', 'slug: fixture-sha-ambiguous', 'status: open', 'poc_kind: theoretical',
+       'introduced_at: "39c28"',
+       'verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
+       'fixed_in: ""', 'fix_verified_at: ""'].join('\n'),
+    ),
+  });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /introduced_at/);
+  assert.match(result.errors[0], /unknown commit/);
+});
+
+test('valid full commit SHA passes', () => {
+  const root = createFindingWorkspace({
+    'W8/draft.md': draft(
+      ['id: W8', 'slug: fixture-sha-valid', 'status: fixed', 'poc_kind: theoretical',
+       'introduced_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
+       'verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
+       'fixed_in: "e3c9a6988813e8f4b76a213c5133e7a8bac9820f"',
+       'fix_verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"'].join('\n'),
+    ),
+  });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT });
+  assert.deepEqual(result.errors, []);
+});
+
+test('empty introduced_at fails as non-empty required field', () => {
+  const root = createFindingWorkspace({
+    'W9/draft.md': draft(
+      ['id: W9', 'slug: fixture-sha-empty', 'status: open', 'poc_kind: theoretical',
+       'introduced_at: ""',
+       'verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
+       'fixed_in: ""', 'fix_verified_at: ""'].join('\n'),
+    ),
+  });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /introduced_at/);
+  assert.match(result.errors[0], /non-empty/);
+});
+
+test('invalid --head produces a stable validation error, not a stack trace', () => {
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const script = path.join(REPO_ROOT, 'scripts', 'check-piolium-findings.mjs');
+  assert.throws(() => {
+    execFileSync(process.execPath, [script, '--head', 'not-a-sha', '--root', root], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+  }, (error) => {
+    const output = String(error.stdout || '');
+    assert.match(output, /does not resolve to a commit/);
+    assert.doesNotMatch(output, /at checkFindings|at main|Error:/);
+    return true;
+  });
+});
+
 test('CLI exits nonzero on invalid findings and zero on valid', () => {
   const badRoot = createFindingWorkspace({
     'W9/draft.md': draft(
