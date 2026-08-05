@@ -41,6 +41,7 @@ export type SharedRuntimeIdentity = Readonly<{
     lanceDbPath: string;
     watcherEnabled: string;
     readFileMaxLines: string;
+    readFileMaxBytes: string;
     customExtensions: string;
     customIgnorePatterns: string;
     navigationBackend: string;
@@ -179,6 +180,7 @@ export function buildSharedRuntimeIdentity(
             : "",
         watcherEnabled: env.MCP_ENABLE_WATCHER ?? "",
         readFileMaxLines: env.READ_FILE_MAX_LINES ?? "",
+        readFileMaxBytes: env.READ_FILE_MAX_BYTES ?? "",
         customExtensions: env.CUSTOM_EXTENSIONS ?? "",
         customIgnorePatterns: env.CUSTOM_IGNORE_PATTERNS ?? "",
         navigationBackend: env.SATORI_NAVIGATION_BACKEND ?? "",
