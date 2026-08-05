@@ -246,11 +246,18 @@ export class ClusterManager {
             throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
         }
         await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(resolve, ms);
-            signal?.addEventListener('abort', () => {
+            const onAbort = () => {
                 clearTimeout(timer);
-                reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
-            }, { once: true });
+                reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+            };
+            const timer = setTimeout(() => {
+                // The delay completed normally: drop the abort listener so a
+                // long-lived caller signal does not accumulate one closure per
+                // poll cycle. `{ once: true }` alone only removes it on abort.
+                signal?.removeEventListener('abort', onAbort);
+                resolve();
+            }, ms);
+            signal?.addEventListener('abort', onAbort, { once: true });
         });
     }
 

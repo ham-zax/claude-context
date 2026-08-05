@@ -66,11 +66,18 @@ function delayBeforeRetry(retryDelayMs: number, signal?: AbortSignal): Promise<v
         return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
     }
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, retryDelayMs);
-        signal?.addEventListener("abort", () => {
+        const onAbort = () => {
             clearTimeout(timer);
-            reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
-        }, { once: true });
+            reject(signal?.reason ?? new DOMException("The operation was aborted", "AbortError"));
+        };
+        const timer = setTimeout(() => {
+            // The delay completed normally: drop the abort listener so a
+            // long-lived caller signal does not accumulate one closure per
+            // retry. `{ once: true }` alone only removes it when abort fires.
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, retryDelayMs);
+        signal?.addEventListener("abort", onAbort, { once: true });
     });
 }
 
@@ -222,6 +229,12 @@ export async function fetchWithDeadline(input: {
                     await delayBeforeRetry(input.retryDelayMs, input.signal);
                     continue;
                 }
+                // Same socket release on the exhausted path: without a reader
+                // there is nothing to leak, but releasing the body makes large
+                // unconsumed responses return their socket immediately instead
+                // of waiting for GC finalization. No observable contract
+                // change: the caller still receives the transient_http error.
+                await response.body?.cancel().catch(() => undefined);
                 throw new BoundedHttpError(
                     "transient_http",
                     response.status,

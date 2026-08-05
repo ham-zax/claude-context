@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { getEventListeners } from "node:events";
 import { BoundedHttpError, fetchWithDeadline } from "./fetch-with-deadline";
 
 type Handler = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void;
@@ -297,4 +298,41 @@ test("does not retry an unlisted network error", async (_t) => {
             return true;
         },
     );
+});
+
+test("releases retry-delay abort listeners from a shared caller signal", async (t) => {
+    const server = await startServer((_req, res) => {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("unavailable");
+    });
+    t.after(() => server.close());
+
+    const controller = new AbortController();
+    const baseline = getEventListeners(controller.signal, "abort").length;
+
+    // maxAttempts=2 with an always-503 server: every call runs one retry
+    // delay on the shared caller signal, which is exactly the leak scenario.
+    for (let i = 0; i < 5; i += 1) {
+        await assert.rejects(
+            fetchWithDeadline({
+                url: `${server.url}/always-503`,
+                init: { method: "GET" },
+                signal: controller.signal,
+                attemptTimeoutMs: 1000,
+                maxAttempts: 2,
+                ...basePolicy,
+            }),
+            (error: unknown) => {
+                assert.ok(error instanceof BoundedHttpError);
+                assert.equal(error.kind, "transient_http");
+                assert.equal(error.status, 503);
+                return true;
+            },
+        );
+    }
+
+    // No delay listener may survive completion: the shared signal must be
+    // back at its baseline instead of accumulating one closure per retry.
+    assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
+    assert.equal(server.requestCount(), 10);
 });
