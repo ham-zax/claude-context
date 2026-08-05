@@ -135,6 +135,47 @@ test("shared runtime identity canonicalizes filesystem aliases", (t) => {
     );
 });
 
+test("shared runtime identity binds the read byte limit into the env set", (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-bytes-identity-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const env = offlineEnv(root);
+
+    const unsetIdentity = buildSharedRuntimeIdentity(runtimeEntry, env);
+    assert.equal(unsetIdentity.readFileMaxBytes, "");
+
+    const sameValueIdentity = buildSharedRuntimeIdentity(runtimeEntry, {
+        ...env,
+        READ_FILE_MAX_BYTES: "1048576",
+    });
+    assert.equal(sameValueIdentity.readFileMaxBytes, "1048576");
+    assert.equal(
+        buildSharedRuntimeIdentity(runtimeEntry, {
+            ...env,
+            READ_FILE_MAX_BYTES: "1048576",
+        }).hash,
+        sameValueIdentity.hash,
+    );
+
+    // A session configured with a different byte limit must never share an
+    // identity with this one: the attach handshake rejects on identity
+    // mismatch, so a client expecting a stricter limit cannot silently attach
+    // to a host running with a larger limit (or vice versa).
+    assert.notEqual(
+        buildSharedRuntimeIdentity(runtimeEntry, {
+            ...env,
+            READ_FILE_MAX_BYTES: "2097152",
+        }).hash,
+        sameValueIdentity.hash,
+    );
+    assert.notEqual(
+        buildSharedRuntimeIdentity(runtimeEntry, {
+            ...env,
+            READ_FILE_MAX_BYTES: "8388608",
+        }).hash,
+        unsetIdentity.hash,
+    );
+});
+
 test("lifecycle lock recovers a stale process owner and preserves a live owner", async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-lock-"));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
