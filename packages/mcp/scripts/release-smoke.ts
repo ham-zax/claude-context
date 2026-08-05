@@ -52,11 +52,17 @@ function runInitializeSmoke(
     }) + "\n";
 
     return new Promise((resolve, reject) => {
+        // The spawned server's default workspace root is [process.cwd()]. The
+        // session-workspace policy rejects a root equal to the home directory
+        // as broad, so run the server with an explicit non-home workspace root.
+        const workspaceDir = path.join(smokeExecDir, "workspace");
+        fs.mkdirSync(workspaceDir, { recursive: true });
         const child = spawn(command, args, {
             cwd: smokeExecDir,
             env: {
                 PATH: process.env.PATH || "",
                 HOME: smokeExecDir,
+                SATORI_SESSION_ROOTS_JSON: JSON.stringify([workspaceDir]),
                 EMBEDDING_PROVIDER: "",
                 OPENAI_API_KEY: "",
                 VOYAGEAI_API_KEY: "",
