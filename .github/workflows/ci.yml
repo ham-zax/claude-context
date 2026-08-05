@@ -78,8 +78,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # - name: Lint code
-      #   run: pnpm lint
+      - name: Lint code
+        run: pnpm lint
+
+      - name: Validate finding status against commit ancestry
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13.0'
+        run: pnpm run findings:check
 
       - name: Build packages
         run: pnpm build

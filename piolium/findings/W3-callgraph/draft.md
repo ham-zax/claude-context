@@ -10,6 +10,11 @@ satori_priority: P2
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 3,4
 fix_commit: "fix(call-graph): expose inbound coverage reasons"
+status: open
+introduced_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+verified_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+fixed_in: ""
+fix_verified_at: ""
 ---
 
 # W3 — Call-graph coverage is per-symbol and silently incomplete
