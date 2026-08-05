@@ -95,7 +95,7 @@ docs/product/SATORI_MONETIZATION_AND_LICENSING_STRATEGY.md
 # Local example runtime configs (use config.example.json)
 examples/**/config.json
 .pi-subagents/**
-# Piolium generated artifacts (piolium/findings/ stays tracked as evidence)
+# Piolium generated artifacts (fully git-ignored; untracked 2026-08-06)
 piolium/audit-state.json
 piolium/tmp/
 piolium/confirm-workspace/
