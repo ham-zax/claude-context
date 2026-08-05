@@ -62,6 +62,25 @@ simplification); **H5 diagnostic-only with no escape clause**; and the **hardeni
 receipt bound to the frozen integration HEAD**. Revision 5 remains binding except where
 this revision explicitly amends it.
 
+**Revision 7 (2026-08-06):** execution-readiness amendments per the fifth review (5
+remaining blockers + 7 corrections, §3.5). Adopts: the **artifact execution-mode
+union** (`NeuralReorderPolicy = mode "disabled" | mode "provider_derived"` — E4
+serializes only the E3-selected mode; H9 qualifies that exact mode; F5/G2 cannot invoke
+the permutation under `disabled`); the **A11 qualification-receipt schemas** task
+(parsers + issuer-authority rules; F9 accepts only parsed receipt objects); the **G7
+executable manifest** covering the complete H/I evaluation and adjudication chain (not
+only runtime components); **provider/model-bound qualification**
+(`qualifiedRerankers` in the activation receipt; F5/F6/G4 reject learned mode for
+unlisted reranker identities); the **D5 split** (preregistered resource contract + **G6A**
+sealed implementation resource harness after G2); the **I1→I4 registry freeze**
+(activation requires `expectedRegistrySha256 ===` the exact H10 digest verified at I1);
+explicit **registry cardinality** and **platform capability/fail-closed** rules; the
+clarified **post-opening allowed-transition set**; removal of the hardening `--grep`
+requirement; explicit **G7 dependencies on every H card**; and exact **trace
+terminology** (Core `semantic_search_candidate_trace_v2` vs capture
+`search_candidate_survival_v3`). Revision 6 remains binding except where this revision
+explicitly amends it.
+
 **Status:** investigation complete; planning gate. No implementation authorized by this
 document. Each gate/wave requires its own authorization before execution.
 **Date:** 2026-08-06
@@ -120,8 +139,11 @@ Repo discipline that binds every task:
   contract are sealed **before** any tuning or held-out result is opened (R1 wave).
 - **Sealed artifacts**: manifests, contracts, and policies are frozen with SHA-256 before
   contender replay (`r2-policy-seal.json` pattern).
-- **No post-opening changes**: nothing may be tuned, deleted, or rewritten after held-out
-  opens.
+- **No post-opening changes**: after held-out opening — no source-code changes; no
+  model/artifact changes; no threshold, contract, feature, or evaluator changes; no
+  deletion or rewriting of evidence. **Only preregistered adjudication and append-only
+  registry transitions may occur** (I4 is a declared allowed transition, fifth review,
+  correction C1).
 - **Focused test commands**: run exact files directly — `node --import tsx --test <file>`.
   Do **not** use `pnpm --filter <pkg> test -- <name>`: package test scripts expand broad
   globs before the extra argument and do not narrow the run. MCP tests that construct the
@@ -236,7 +258,8 @@ rerankFamilyId?, rerankDocumentUtf8Bytes?`.
 
 | V3 feature group | Available today? | Revision-2 disposition |
 |---|---|---|
-| Dense/lexical per-arm rank+score at scoring time | ✗ discarded in both fusions (only summed RRF + max survive) | retained as explicit stage ranks via the existing **candidate-survival trace v3** (Wave A/B), not a parallel arm-evidence system |
+| Dense/lexical per-arm rank+score at scoring time | ✗ discarded in both fusions (only summed RRF + max survive) | retained as explicit stage ranks via the existing **capture survival schema v3**
+(`search_candidate_survival_v3`, Wave A/B), not a parallel arm-evidence system |
 | Number of arms containing candidate | ◑ derivable from `retrievalPasses.length` | ✓ feature (mcp layer) |
 | Primary/expanded/exact/must/live membership | ✓ `retrievalPasses` | ✓ feature |
 | Candidate depth | ✗ no such concept | **deferred to V3.1**; V3.0 records explicit `rawDenseRank?/rawLexicalRank?/rawFallbackLexicalRank?/coreFusionRank?/mcpUnionRank?/postEligibilityRank?/rerankerAdmissionRank?` |
@@ -295,7 +318,7 @@ these binding corrections:
 | Revision-1 claim/design | Review correction |
 |---|---|
 | "Identity learned policy reproduces baseline" | **Mathematically invalid as stated**: baseline B is multiplicative; a linear model over raw inputs cannot generally reproduce it. V3.0 learns a **residual** on the exact baseline score — zero residual is the real identity policy. |
-| New per-arm evidence output (`retainArmEvidence`) | **Duplicate authority**: the existing candidate-survival trace already records raw dense/lexical/fallback/core-fusion/MCP/removal stages. Extend the trace to v3; derive runtime evidence from the same authority. |
+| New per-arm evidence output (`retainArmEvidence`) | **Duplicate authority**: the existing candidate-survival trace already records raw dense/lexical/fallback/core-fusion/MCP/removal stages. Extend the existing capture survival schema to v3; derive runtime evidence from the same authority. |
 | New `scripts/ranking-metrics.mjs` | **Duplicate metric authority**: extend the existing search-quality evaluator. `score.mjs` gains only a backward-compatibility adapter. |
 | Learned fusion weights / candidate depth as V3 features | **Recall/ranking conflation**: they change candidate membership and cannot be score features. Deferred to a separate V3.1 recall-policy project. |
 | `ownerFamilyIdentity` / `providerModelIdentity` hashes as features | **Identity leakage**: high-cardinality identities are gating keys, never numeric features. |
@@ -412,6 +435,27 @@ I1: verify the H10 version, G7 seal, artifact, thresholds, held-out manifest
 I2–I3: execute and adjudicate held-out exactly once
 I4: the same G7-sealed F9 writer performs pending_heldout → activation_qualified
 ```
+
+### 3.5 Fifth-review dispositions (2026-08-06 — artifact-mode and qualification-chain completeness; 5 blockers + 7 corrections)
+
+**Prior status:** the three Revision-5 blockers are resolved (G7 seal, transition-specific
+writer, single exact-control policy). Items below are the remaining execution-readiness
+gaps.
+
+| # | Finding | Disposition |
+|---|---|---|
+| B1 | The selected contender is not unambiguous in the E4 artifact: E3 can select deterministic-only, but later text implies E4 always produces residual-plus-neural; H3/H4/H9 treat one artifact two ways | **Artifact execution-mode union** (§5.3.16): `NeuralReorderPolicy = { mode: "disabled" } \| { mode: "provider_derived", providers: { [providerKey]: { minimumCandidates, minimumNormalizedTopToSecondMargin } } }`. **E4 serializes only the E3-selected mode.** H9 qualifies the **selected artifact mode**: if `disabled`, H3 is the qualification replay and H4 is ablation/diagnostic-only; if `provider_derived`, H4 is the qualification replay and H3 is the deterministic ablation. F5/G2: a `disabled` artifact cannot invoke the provider-derived permutation |
+| B2 | Receipt validation has no schema/parser/owner: F9 "validates receipt contents" but no task defines receipt schemas or issuer authority | **A11 — Qualification transition receipt schemas** (new Wave A task): `OfflineQualificationReceiptV1`, `HeldoutAcceptanceReceiptV1`, `RevocationAuthorizationReceiptV1`, `RegistryTransitionReceiptV1` — each binding artifactSha256, serviceClass, selectedArtifactMode, G7 seal digest, contract-seal digest, training/evaluation manifest digests, provider/reranker qualification scope, held-out manifest digest where applicable, decision/verdict, receipt type + schema version. **F9 depends on A11 and accepts only parsed receipt objects.** Issuer authority: **the same-UID trust boundary is accepted** (file ownership + mode bits are the authority — consistent with the M1 trust-model default); if same-UID processes are later considered adversarial, receipts require signatures or a separate OS identity (recorded as a decision point, not silent) |
+| B3 | G7 does not seal the full evaluation chain: a modified evaluator after G7 could change H9/I3 decisions without changing runtime/writer code | **G7 executable manifest** covers every program/module run during H and I: B6 capture schema, B7 replay, C6 metric/scoring, D3 artifact verifier, D4 counterfactual harness, D5 resource contract (+G6A harness), H1–H9 orchestration/adjudication scripts, I1–I3 verifier/execution/adjudication scripts, A11 receipt parsers, F9 writer + transitive trusted-storage deps. Binds source digests, built-output digests where built JS executes, package-lock digest, Node/runtime version, exact commands, test digests + results, contract and manifest digests. **I1 verifies the executable manifest, not only one aggregate digest** |
+| B4 | Qualification too coarse for multiple providers/models: `artifactSha256 + serviceClass` does not prove every accepted provider/model was evaluated | **Provider/model-bound qualification**: H9 tests every provider/model that will be activatable and records `qualifiedRerankers: readonly { providerKey, rerankerIdentity, rerankerProjectionIdentity }[]` in the offline-qualification receipt; activation qualification binds those exact identities. **F5/F6/G4 reject learned mode when the active reranker identity is not in the activation-qualified receipt.** The provider-key contract states that **model name and revision are part of the key** (a generic `"voyage"` is insufficient) |
+| B5 | D5 (Wave D, deps A4/A5) claims to measure implementations (F1/F3/F4/G1/G2) that do not exist yet | **D5 split**: `D5 — Resource contract and benchmark corpus` (preregisters workloads, warmup, p95/RSS thresholds, environment controls, measurement method, frozen inputs) + **`G6A — Sealed implementation resource harness`** after G2 (deps F1, F3, F4, G1, G2, D5) measuring the actual production path. G7 seals G6A + its results; **H8 reruns or verifies that exact harness against the selected E4 artifact** |
+| C1 | "No post-opening changes" rule textually conflicts with I4 writing a new registry version | §1 rule made explicit: after held-out opening — no source-code changes; no model/artifact changes; no threshold/contract/feature/evaluator changes; no deletion or rewriting of evidence; **only preregistered adjudication and append-only registry transitions may occur** (I4 is a declared allowed transition) |
+| C2 | Registry state between I1 and I4 undefined: `current` could change after I1 | **I1→I4 freeze**: I4 requires `expectedRegistrySha256 ===` the exact H10 registry digest verified by I1; any intervening transition aborts activation (retain baseline; no post-opening repair or reconstructed pending version). Emergency revocation may still terminate the attempt |
+| C3 | Registry cardinality per service class undefined | **Invariant** (§5.3.8, F9-enforced): multiple historically `activation_qualified` artifacts may remain recorded; configuration selects exactly one artifact hash; **at most one pending candidate per serviceClass/provider qualification scope**; H10 does not revoke or replace the currently active artifact; activation of the pending candidate does not automatically change product config; rollback is a config selection or a new revocation transition |
+| C4 | F0/F9 mechanisms (O_NOFOLLOW, inode checks, boot IDs, process identity, dir replacement, atomic rename+fsync, liveness) are Unix-centric; Windows/macOS behavior undefined | **R1.4 platform capability matrix**: Linux (exact required guarantees/APIs), macOS (exact equivalents or fail-closed unsupported), Windows (reparse-point handling, file-identity checks, replacement semantics, lock ownership, directory flush). Where guarantees cannot be implemented: **external learned-policy loading and registry mutation are disabled — baseline + truthful diagnostic**. Never silently weaken checks |
+| C5 | R0.1 step 1 still requires `git log --grep=security-hardening` (messages are not evidence) | **Removed**: R0.1 uses exact commit IDs + merge-base ancestry + rerun of the acceptance suite only |
+| C6 | G7 dependency not encoded on individual H cards | Explicit per-card deps: H1: G7; H2: G7; H3: G7, E4, D3; H4: G7, E4, D3; H5: G7; H6–H9: G7 (explicit); H10: G7, H9, F9 |
+| C7 | Trace terminology drift: "candidate-survival trace v3", "Included: trace v3", "trace v3…" remain in normative sections | Exact names everywhere: Core **`semantic_search_candidate_trace_v2`**; capture **`search_candidate_survival_v3`** (A1/B1 and B6 have different owners/compatibility responsibilities) |
 
 ---
 
@@ -574,8 +618,9 @@ trained or selected).
    `providerKey` are metadata/gating values only. Feature extraction happens **after
    eligibility and baseline-B scoring, before residual scoring**; `baselineScore` is an
    anchor feature. No feature may change deterministic eligibility.
-3. **One evidence authority**: extend the existing candidate-survival trace to version 3
-   (raw arm rank/score, core fusion rank). The runtime evidence object is derived from
+3. **One evidence authority**: extend the existing capture survival schema to **v3**
+   (`search_candidate_survival_v3`; raw arm rank/score, core fusion rank), translated
+   from Core **`semantic_search_candidate_trace_v2`** (fifth review, correction C7). The runtime evidence object is derived from
    the same normalized stage evidence used by capture/replay. No parallel
    `retainArmEvidence` output; no feature-vector field in the public response
    (internal bounded evaluation hook only).
@@ -656,6 +701,13 @@ trained or selected).
    fixed byte ceiling; created as a temporary regular file; atomically replaced; read
    back and validated through F0. `current` means the current **registry version** —
    after H10 it may point at a version whose candidate is still `pending_heldout`.
+   **Cardinality invariant per service class (fifth review, correction C3,
+   F9-enforced):** multiple historically `activation_qualified` artifacts may remain
+   recorded; configuration selects exactly one artifact hash; **at most one pending
+   candidate per serviceClass/provider qualification scope**; H10 does not revoke or
+   replace the currently active artifact; activation of the pending candidate does not
+   automatically change product configuration; rollback is a config selection or a new
+   revocation transition.
    Old versions are
    never mutated; rollback and revocation are **new transitions**, never deletion or
    mutation. **The F9 writer is implemented in Wave F and sealed by G7 (runtime
@@ -728,7 +780,25 @@ trained or selected).
     `(topScore - secondScore) / max(ε, topScore - bottomScore)` (or a percentile/rank-gap
     rule — chosen and sealed in R1.2; never a raw cross-provider or cross-query
     difference), and `acceptedProviderKeys ⊆ supportedProviderKeys` is enforced by the
-    artifact parser (violation = rejection). Parameters are sealed in R1.2, never
+    artifact parser (violation = rejection). **Execution-mode union (fifth review,
+    blocker B1)** — the artifact's neural behavior is an explicit tagged union, and only
+    the E3-selected mode is serialized by E4:
+
+    ```ts
+    type NeuralReorderPolicy =
+        | { mode: "disabled" }
+        | { mode: "provider_derived"; providers: Readonly<Record<string, {
+            minimumCandidates: number;
+            minimumNormalizedTopToSecondMargin: number;
+        }>> };
+    ```
+
+    If E3 selects the deterministic residual, E4 serializes `mode: "disabled"` and the
+    artifact **cannot** invoke the provider-derived permutation (F5/G2 enforce this); if
+    E3 selects residual + provider reorder, E4 serializes `mode: "provider_derived"`.
+    H9 qualifies the **selected artifact mode** — H3/H4 are not two deployable
+    interpretations of one artifact (their roles swap per mode, §6 Wave H).
+    Parameters are sealed in R1.2, never
     trained and never selected from tuning results.
     D2/E4 train only the deterministic residual; the artifact's `neuralEvidencePolicy`
     section serializes the preregistered constants, and E4's refit reproduces the full
@@ -760,7 +830,7 @@ trained or selected).
 
 ### 5.4 V3.0 scope
 
-**Included:** trace v3; raw reranker score retention; explicit pre-policy ranking
+**Included:** capture survival schema v3 (`search_candidate_survival_v3`); raw reranker score retention; explicit pre-policy ranking
 evidence; tuning-only graded judgments with unjudged handling; end-to-end + conditional
 graded metrics in the existing evaluator; LOFO cross-validation; eight-knob grouped
 retuning contender; bounded residual linear contender; provider-local within-query
@@ -858,10 +928,12 @@ C2 — behavioral proof, not ancestry alone), revision-1 claim list (§10), W-fi
 (`docs/evidence/search-integrity-baseline-20260805/BASELINE.md`).
 
 **Steps:**
-1. Verify the prerequisite base: hardening integration **is** an ancestor of HEAD
-   (merge-base = the integration commit; `git log --oneline --all --grep=security-hardening`
-   present in HEAD's history). If not merged, **Gate 0 is blocked** — record the blocker;
-   do not baseline on unhardened master.
+1. Verify the prerequisite base with **exact commit IDs and merge-base ancestry only**
+   (fifth review, correction C5 — `git log --grep` is removed: commit messages and
+   branch names are not security evidence and may disappear after squash or cleanup):
+   the hardening integration commit ID is an ancestor of HEAD
+   (`git merge-base --is-ancestor <integration-commit> HEAD`). If not merged, **Gate 0
+   is blocked** — record the blocker; do not baseline on unhardened master.
 2. **Verify the hardening acceptance receipt is green and bound to the frozen HEAD —
    behavior, not branch name** (third review, correction C2; fourth review, correction
    C7 — ancestry plus a previously green receipt is insufficient if code changed
@@ -1056,8 +1128,24 @@ temp-file creation, ownership and permissions, fsync, atomic pointer replacement
 read-back through the trusted loader, final-digest verification, update receipt binding
 previous-registry-digest + artifact-digest + status-specific receipt + service class
 + new-registry-digest) — **the F9 writer is sealed by G7 (not "before Gate 1"); the G7
-seal digest is included in the I1 opening record** (fourth review, blocker B1); baseline
-fallback; composite
+seal digest is included in the I1 opening record** (fourth review, blocker B1);
+**receipt schemas and issuer authority (fifth review, blocker B2)** — the four A11
+receipt types with exact-key parsers, and the authority rule: same-UID trust boundary
+accepted (file ownership/mode bits; M1 default), signatures/separate OS identity only
+if that boundary is later rejected; **provider/model-bound qualification (fifth review,
+blocker B4)** — `qualifiedRerankers` identities (providerKey + rerankerIdentity +
+rerankerProjectionIdentity, model name and revision part of the key) bound in
+offline-qualification and activation receipts; **platform capability matrix (fifth
+review, correction C4)** — Linux/macOS/Windows guarantees for O_NOFOLLOW, inode/device
+checks, boot/process identities, directory-replacement detection, atomic rename +
+directory fsync, process liveness; where unimplementable, external learned-policy
+loading and registry mutation are disabled (baseline + truthful diagnostic), never
+silently weakened; **registry cardinality invariant (fifth review, correction C3)** —
+multiple historically activation-qualified artifacts may remain; configuration selects
+exactly one artifact hash; at most one pending candidate per serviceClass/provider
+qualification scope; H10 does not revoke or replace the active artifact; activation
+does not auto-change product config; rollback = config selection or new revocation
+transition; baseline fallback; composite
 policy identity `search_ranking_policy_v3:<artifact-sha256>`; rollback = new transition,
 never mutation; startup validation (exact schema, coefficient ranges,
 unknown-field rejection, fallback diagnostic).
@@ -1120,6 +1208,21 @@ None of these tasks touches `search-execution.ts`.
   `evals/search-quality/search-quality-evaluation.ts` + focused tests in that directory.
   Stage survival, conditional graded pair accuracy, judged-pool nDCG@10 with coverage,
   end-to-end miss accounting; existing owner metrics byte-compatible.
+- **A11 — Qualification transition receipt schemas** (fifth review, blocker B2): create
+  `packages/mcp/src/core/ranking-qualification-receipts.ts` +
+  `packages/mcp/src/core/ranking-qualification-receipts.test.ts`. Defines and parses
+  distinct exact-key schemas: `OfflineQualificationReceiptV1`,
+  `HeldoutAcceptanceReceiptV1`, `RevocationAuthorizationReceiptV1`,
+  `RegistryTransitionReceiptV1`. Each binds: artifactSha256, serviceClass,
+  selectedArtifactMode, G7 implementation-seal digest, contract-seal digest,
+  training/evaluation manifest digests, provider/reranker qualification scope
+  (`qualifiedRerankers` where applicable), held-out manifest digest where applicable,
+  decision/verdict, receipt type + schema version. **Issuer authority is explicit: the
+  same-UID trust boundary is accepted** — file ownership and mode bits are the
+  authority (consistent with the M1 trust-model default); if same-UID processes are
+  later treated as adversarial, receipts require signatures or a separate OS identity
+  (a recorded decision point, never silent). F9 depends on A11 and accepts **only
+  parsed receipt objects** — no loosely shaped JSON, no internal re-parsing.
 
 **Wave A gate:** all pure modules green on exact-file test commands; no central-file
 edits.
@@ -1225,9 +1328,12 @@ explicitly unjudged; no held-out inputs read; grading receipts recorded per task
   shift, V3 residual shift, V3-vs-baseline rank transition, protected-control outcome.
   A synthetic shortcut policy (e.g. positive tests-path coefficient on neutral queries)
   must fail.
-- **D5 — Resource harness** (deps: A4, A5): create/extend the useful-context performance
-  evaluator + tests. Feature extraction, artifact load, deterministic scoring, neural
-  evidence overhead under the frozen p95/RSS contract.
+- **D5 — Resource contract and benchmark corpus** (deps: A4, A5; fifth review, blocker
+  B5 — **preregisters the contract only; it does not measure implementations that do
+  not exist yet**): create the resource contract + benchmark corpus — workloads;
+  warmup procedure; p95/RSS thresholds; environment controls; measurement method;
+  frozen benchmark inputs. No measurement of F1/F3/F4/G1/G2 code here (those do not
+  exist until Waves F/G); the actual measurement is **G6A**.
 - **D6 — LOFO orchestrator** (deps: A9, D1–D3): create `scripts/run-ranking-lofo.mjs` +
   test. One immutable job descriptor per repository-family fold; does not itself train
   in-process.
@@ -1242,17 +1348,21 @@ explicitly unjudged; no held-out inputs read; grading receipts recorded per task
   End-to-end metrics, conditional graded metrics, slices, counterfactuals, resources for
   the excluded family only.
 - **E3 — Out-of-fold adjudicator (the single selection point** — second review, finding
-  #4; dep: all E2.*): tuning decision receipt only. Selects the **model family and
-  hyperparameters** from out-of-fold results: deterministic residual, residual+neural, or
-  `insufficient_evidence` (grouped tuning is a diagnostic comparator, never a selection).
-  May not change training or metric code.
+  #4; dep: all E2.*): tuning decision receipt only. Selects the **model family,
+  hyperparameters, and the artifact execution mode** (`disabled` or `provider_derived`,
+  §5.3.16) from out-of-fold results: deterministic residual, residual+provider-reorder,
+  or `insufficient_evidence` (grouped tuning is a diagnostic comparator, never a
+  selection). May not change training or metric code.
 - **E4 — Final tuning refit** (dep: E3 selects a V3 contender): generated artifact +
   receipt only. One refit of the **exact selected residual artifact** on all tuning
-  families under the already sealed contract; no additional hyperparameter choice. This
-  sealed artifact is the single object Wave H qualifies or rejects. **Acceptance
+  families under the already sealed contract; no additional hyperparameter choice.
+  **Serializes only the E3-selected execution mode** (`mode: "disabled"` or
+  `mode: "provider_derived"` with its provider constants — fifth review, blocker B1); a
+  deterministic-only selection must not silently retain provider-reorder capability.
+  This sealed artifact is the single object Wave H qualifies or rejects. **Acceptance
   includes D3's final-verification invocation over the refit artifact** (independent
-  digest + constraint reproduction; third review, correction C1) — H3/H4 depend on the
-  verified E4 digest.
+  digest + constraint reproduction + mode check; third review, correction C1) — H3/H4
+  depend on the verified E4 digest.
 
 ---
 
@@ -1296,14 +1406,21 @@ qualification.
   fallback_deterministic`, stable reason codes, complete identity checks, exact-pin
   skip, provider-policy match, admitted-slot permutation only; gate parameters come
   **exclusively from the artifact's preregistered `neuralEvidencePolicy` constants**
-  (Design A, §5.3.16 — never tuning-selected).
+  (Design A, §5.3.16 — never tuning-selected); **`mode: "disabled"` artifacts return
+  `skip` unconditionally — the provider-derived permutation is non-invokable**
+  (fifth review, blocker B1); **provider-bound** (fifth review, blocker B4) — the
+  active reranker identity (providerKey + rerankerIdentity + rerankerProjectionIdentity;
+  model name and revision are part of the key) must appear in the
+  activation-qualified receipt's `qualifiedRerankers`, otherwise `skip`/fallback.
 - **F6 — Policy selector** (deps: F1, F2, A7): modify `packages/mcp/src/config.ts`; create
   `packages/mcp/src/core/ranking-policy-selector.ts` + tests. Values `baseline |
   learned_v3` (**no production shadow selector** — second review, finding #12); default
   baseline; explicit opt-in; `learned_v3` is returned **only when the registry entry for
   the exact artifact hash and active service class has `status ===
   activation_qualified`** (fourth review, correction C1 — `pending_heldout` is never
-  selectable); truthful fallback reason. This task alone owns config changes.
+  selectable) **and the active reranker identity is explicitly included in that
+  entry's `qualifiedRerankers`** (fifth review, blocker B4); truthful fallback reason.
+  This task alone owns config changes.
 - **F7 — Ranked-set policy identity — test-first** (dep: A7; second review, finding
   #10): write the test first — the existing binding already accepts
   `rankingPolicyIdentity` as an opaque non-empty string incorporated into the canonical
@@ -1315,9 +1432,10 @@ qualification.
   `packages/mcp/src/core/ranking-shadow.ts` + test. Bounded in-memory/event-callback
   records containing hashes, scores, ranks, latency, reason codes only. No source text,
   no full query, no persistent disk writes, no public response field.
-- **F9 — Qualification registry writer** (deps: F0, F2, R1.4; third review, blockers
-  B1/B3/B4; fourth review, blocker B2 — **transition-specific operations, not a generic
-  status setter**): create
+- **F9 — Qualification registry writer** (deps: F0, F2, **A11**, R1.4; third review,
+  blockers B1/B3/B4; fourth review, blocker B2 — **transition-specific operations, not a
+  generic status setter**; fifth review, blocker B2 — **accepts only parsed A11 receipt
+  objects**): create
   `packages/mcp/src/core/ranking-policy-qualification-writer.ts` + test (exact
   path/command fixed at dispatch). Implements the append-only transition procedure of
   §5.3.8: acquire the registry-directory lock (mechanism per R1.4); validate the digest
@@ -1383,11 +1501,18 @@ G1–G6 execute in order; each owns its central seam.
 - **G2 — Neural slot-reordering integration owner** (deps: G1, F4, F5; splits:
   provider-evidence validation; slot permutation; transactional failure path): same
   central file, only after G1 merges. Transactional complete-evidence neural application
-  **per the provider-derived reorder design (§5.3.16)** — the complete validated
-  provider order permutes identities only within the baseline-admitted positions
+  **per the provider-derived reorder design (§5.3.16), gated on the artifact's
+  execution mode** — `mode: "disabled"` never invokes the permutation; only
+  `provider_derived` may reorder identities within the baseline-admitted positions
   (positions mapped from the frozen admission set, §5.1), stable-tie-broken by the
   deterministic V3 order; any error discards detached state and keeps
   `rerankAdjusted === false`; the exact-pin gate rule (§5.3.7) preserved.
+- **G6A — Sealed implementation resource harness** (deps: F1, F3, F4, G1, G2, D5;
+  fifth review, blocker B5): measures the **actual production path** — feature
+  extraction, artifact load, deterministic scoring, neural-evidence overhead — using
+  the D5 contract and corpus against the real implementations. **G7 seals G6A and its
+  results; H8 reruns or verifies this exact harness against the selected E4
+  artifact.**
 - **G3 — Diagnostics projection** (dep: G2): **exclusively modifies
   `search-types.ts`** + finalization/projection tests. Bounded policy ID/hash, fallback
   reason, neural gate decision; **no feature-vector dump**; normal non-debug projection
@@ -1397,7 +1522,9 @@ G1–G6 execute in order; each owns its central seam.
   provider runtime construction sites (exact paths from the R0.1 test-command map, not
   discovery during dispatch) + tests. One immutable loaded policy per runtime/service
   class; no per-query file loading; no repo-controlled override; loaded once at
-  startup through the trusted-file reader.
+  startup through the trusted-file reader; **startup rejects learned mode when the
+  active reranker identity is not in the activation-qualified receipt's
+  `qualifiedRerankers`** (fifth review, blocker B4).
 - **G5 — Continuation integration** (deps: F7, G2): continuation call sites + tests.
   Stale handle on any policy artifact change; continuation never re-ranks.
 - **G6 — Runtime identity and failure matrix** (deps: G1–G5): integration tests +
@@ -1407,14 +1534,22 @@ G1–G6 execute in order; each owns its central seam.
   invalidation; **distinct cases for `pending_heldout`, `activation_qualified`, and
   `revoked` registry states, wrong service class, wrong artifact hash, and a registry
   version carrying invalid transition evidence** (fourth review, correction C1).
-- **G7 — Runtime implementation seal** (deps: F0–F9, G1–G6; fourth review, blocker B1):
-  create `docs/evidence/ranking-v3-runtime-seal-<date>/IMPLEMENTATION_SEAL.json`.
-  Binds: F0/F1/F2/F9 trusted-storage code; artifact + registry parsers (A5/A6); F3–F6
-  ranking and selection code; G1–G6 integration code; exact tests and build inputs;
-  package-lock digest; and the compiled/source-tree digest used by H1–H10 and I1. **A
-  hash of the F9 source alone does not prove the executable** — F9 depends on F0, F2,
-  parsers, and runtime libraries, so the seal covers the whole implementation. **H1–H10
-  depend on G7; I1 verifies G7.** Nothing in Wave H or Wave I runs on unsealed code.
+- **G7 — Runtime implementation seal** (deps: F0–F9, G1–G6, G6A; fourth review, blocker
+  B1; fifth review, blocker B3 — **the complete H/I evaluation and adjudication
+  executable chain, not only runtime components**): create
+  `docs/evidence/ranking-v3-runtime-seal-<date>/IMPLEMENTATION_SEAL.json` containing a
+  **canonical executable manifest** covering every program or module run during Wave H
+  and Wave I, at minimum: B6 capture-schema implementation; B7 replay implementation;
+  C6 metric/scoring implementation; D3 artifact verifier; D4 counterfactual harness;
+  D5 resource contract + G6A resource harness; H1–H9 orchestration and adjudication
+  scripts; I1–I3 verifier/execution/adjudication scripts; A11 receipt parsers; F9
+  writer and all transitive trusted-storage dependencies; plus F0/F1/F2, A5/A6, F3–F6,
+  G1–G6. The seal binds: canonical source digests; **built-output digests where built
+  JavaScript is executed**; package-lock digest; Node/runtime version; exact commands;
+  test digests and results; contract and manifest digests. **A modified evaluator after
+  G7 must not be able to change an H9/I3 decision without changing the seal.**
+  **H1–H10 depend on G7; I1 verifies the executable manifest itself, not only one
+  aggregate digest.** Nothing in Wave H or Wave I runs on unsealed code.
 
 **Wave G gate (runtime gate):** default baseline; missing/invalid/unqualified/revoked →
 baseline; no repo-local artifact; no per-query artifact read; exact and must controls
@@ -1428,14 +1563,19 @@ slots only; policy hash in ranked-set identity; continuation never re-ranks.
 select a contender a second time. **All of H1–H10 depend on G7** — Wave H runs only on
 the sealed runtime/evaluation/writer implementation, fourth review blocker B1.)
 
-- **H1 — Baseline replay.** (dep: G6)
-- **H2 — Grouped diagnostic replay.** (dep: G6)
-- **H3 — Deterministic residual replay.** (deps: **G6, E4, D3** — third review,
-  correction C1; H3 replays the **exact E4 artifact**, verified by D3's final
-  verification invocation per E4 acceptance)
-- **H4 — Residual+neural replay.** (deps: **G6, E4, D3** — same verified-E4-digest
-  requirement as H3; provider-derived reorder per §5.3.16)
-- **H5 — Neural-only diagnostic replay.** (dep: G6; third review, correction C6 —
+- **H1 — Baseline replay.** (dep: G7)
+- **H2 — Grouped diagnostic replay.** (dep: G7)
+- **H3 — Deterministic residual replay.** (deps: **G7, E4, D3** — third review,
+  correction C1; fifth review, blocker B1 — **mode-dependent role**: if the E4 artifact
+  is `mode: "disabled"`, H3 is the **qualification replay**; if `provider_derived`,
+  H3 is the **deterministic ablation/diagnostic only**. H3 replays the **exact E4
+  artifact**, verified by D3's final verification invocation per E4 acceptance)
+- **H4 — Residual+neural replay.** (deps: **G7, E4, D3** — same verified-E4-digest
+  requirement as H3; fifth review, blocker B1 — **mode-dependent role**: if the E4
+  artifact is `mode: "provider_derived"`, H4 is the **qualification replay**; if
+  `disabled`, H4 is **ablation/diagnostic only** and the provider permutation must be
+  proven non-invokable (F5/G2); provider-derived reorder per §5.3.16)
+- **H5 — Neural-only diagnostic replay.** (dep: G7; third review, correction C6 —
   explicitly defined as: **baseline-B deterministic positions + frozen baseline
   admission + zero residual + provider-derived permutation within admitted positions**;
   fourth review, correction C6 — **"H5 is diagnostic-only and is not selectable or
@@ -1446,23 +1586,31 @@ the sealed runtime/evaluation/writer implementation, fourth review blocker B1.)
   artifact parity checks from G1/G2; all evaluation runs through **offline/evaluation
   authority only** — no unqualified artifact is loadable by product configuration.
   H6–H9 depend transitively on the verified E4 digest.
-- **H6 — Slice gate** (deps: H1–H5): repository-family, language, query class, path
+- **H6 — Slice gate** (deps: **G7**, H1–H5): repository-family, language, query class, path
   category, role, negative, exact, must, freshness, missing-evidence slices.
-- **H7 — Counterfactual gate** (deps: H1–H5, D4).
-- **H8 — Resource gate** (deps: H1–H5, D5).
-- **H9 — Terminal qualification verdict** (deps: H6–H8; disposition #12):
-  `offline_qualified | rejected | insufficient_evidence` for the **exact E4 artifact** —
-  not another contender selection. `offline_qualified` means the artifact passed every
-  offline gate (end-to-end, conditional graded, slice, counterfactual, resource); it
-  does **not** make `learned_v3` selectable — that requires the registry transition at
-  I4. If the artifact fails any conjunctive gate, retain baseline B and stop (held-out
-  stays closed); grouped-tuning material victory follows the D1 diagnostic path (§6 D1),
-  never silent deployment.
-- **H10 — Create pending-held-out registry version** (deps: H9 (`offline_qualified`),
-  F9 writer; third review, blocker B2 — the concrete `pending_heldout` transition that
-  I1 verifies): execute the frozen F9 writer to create a **new registry version** with
-  status `pending_heldout` for the exact E4 artifact (receipt binds previous-registry
-  digest + artifact digest + H9 receipt + service class + new-registry digest). This is
+- **H7 — Counterfactual gate** (deps: **G7**, H1–H5, D4).
+- **H8 — Resource gate** (deps: **G7**, H1–H5, G6A, D5): reruns or verifies the **G6A sealed
+  implementation resource harness** against the selected E4 artifact under the D5
+  contract (p95/RSS thresholds, warmup, environment controls) — not a placeholder
+  measurement.
+- **H9 — Terminal qualification verdict** (deps: **G7**, H6–H8; disposition #12;
+  fifth review, blocker B1 — qualifies the **selected artifact mode**):
+  `offline_qualified | rejected | insufficient_evidence` for the **exact E4 artifact**
+  in its E3-selected mode — not another contender selection and not two deployable
+  interpretations of one artifact. `offline_qualified` means the artifact passed every
+  offline gate (end-to-end, conditional graded, slice, counterfactual, resource) **in
+  that mode**, with every activatable provider/model recorded in
+  `qualifiedRerankers` (fifth review, blocker B4); it does **not** make `learned_v3`
+  selectable — that requires the registry transition at I4. If the artifact fails any
+  conjunctive gate, retain baseline B and stop (held-out stays closed); grouped-tuning
+  material victory follows the D1 diagnostic path (§6 D1), never silent deployment.
+- **H10 — Create pending-held-out registry version** (deps: **G7**, H9
+  (`offline_qualified`), F9 writer; third review, blocker B2 — the concrete
+  `pending_heldout` transition that I1 verifies): execute the frozen F9 writer to
+  create a **new registry version** with status
+  `pending_heldout` for the exact E4 artifact (receipt binds previous-registry
+  digest + artifact digest + selected mode + H9 receipt + service class +
+  new-registry digest). This is
   the **single normative pre-opening mechanism** — the alternative
   manifest/current-registry routes are removed. H10 runs after H9 and before I1; it
   touches no evaluation data.
@@ -1480,10 +1628,12 @@ residual gate passes; resource gate passes; the exact E4 artifact is `offline_qu
 - **I0 — Owner authorization record:** no code task. Without an explicit authorization
   artifact, no held-out command may run.
 - **I1 — Opening-record verifier** (third review, blocker B2 — single normative
-  mechanism; fourth review, blocker B1): verifies that the H10 **`pending_heldout`
-  registry version** exists for the exact E4 artifact and that every pre-opening seal is
-  present and consistent: policy artifact digest, **the G7 implementation seal** (covers
-  the F9 writer and its full dependency closure), code digests, preregistered
+  mechanism; fourth review, blocker B1; fifth review, blocker B3 — **verifies the G7
+  executable manifest itself, not only one aggregate digest**): verifies that the H10
+  **`pending_heldout` registry version** exists for the exact E4 artifact and that
+  every pre-opening seal is present and consistent: policy artifact digest (with its
+  selected execution mode), **the G7 executable manifest** (covering the F9 writer and
+  the complete H/I evaluation/adjudication chain), code digests, preregistered
   thresholds, and the held-out manifest digest. It does **not** claim the final
   post-acceptance entry was sealed in advance.
 - **I2 — Single held-out execution:** one custodial agent, no code-edit permission,
@@ -1494,11 +1644,16 @@ residual gate passes; resource gate passes; the exact E4 artifact is `offline_qu
   again"); a failure retains baseline B.
 - **I4 — Activation-qualified registry transition** (dep: F9 writer, I3; third review,
   blocker B1 — I4 executes the **pre-existing, frozen F9 writer**, it does not create
-  it): execute the writer to transition the H10 `pending_heldout` version to a **new
-  immutable registry version** with status `activation_qualified`, binding
-  previous-registry-digest + artifact-digest + held-out acceptance receipt + service
-  class + new-registry-digest. **This is the first point at which the product selector
-  may return `learned_v3`** (second review, blocking #2; disposition #12).
+  it; fifth review, correction C2 — **registry freeze between I1 and I4**): execute the
+  writer with `expectedRegistrySha256 ===` the **exact H10 registry digest verified by
+  I1**; any intervening registry transition **aborts activation** — retain baseline, no
+  post-opening repair or reconstructed pending version (emergency revocation may still
+  terminate that activation attempt). The writer transitions the H10 `pending_heldout`
+  version to a **new immutable registry version** with status `activation_qualified`,
+  binding previous-registry-digest + artifact-digest + held-out acceptance receipt +
+  `qualifiedRerankers` + service class + new-registry-digest. **This is the first point
+  at which the product selector may return `learned_v3`** (second review, blocking #2;
+  disposition #12).
 - **I5 — Rollback drill:** activate V3, create continuation, switch to baseline/revoke
   artifact, prove new searches use baseline and the old continuation is stale, no
   reindex/rebuild.
@@ -1544,7 +1699,8 @@ residual gate passes; resource gate passes; the exact E4 artifact is `offline_qu
     owner-family, and provider identities are gating keys only.
 17. **No feature-vector dump in public responses**; no `shadowApplied` public field
     during the byte-identity phase; no persistent production shadow log.
-18. **No duplicate evidence or metric authorities** — trace v3 and the existing
+18. **No duplicate evidence or metric authorities** — capture survival v3
+    (`search_candidate_survival_v3`) and the existing
     search-quality evaluator are the single authorities.
 19. **No quality receipt inside the model artifact** — qualification lives in the
     registry.
@@ -1668,12 +1824,13 @@ controlled activation; `learned_v3` becomes selectable no earlier than I4.
 
 ---
 
-*End of plan revision 6 (2026-08-06: fourth-review dispositions §3.4 — G7 runtime
-implementation seal, transition-enforcing F9 writer with status-specific receipts,
-single exact-control policy, `pending_heldout` nonselectable everywhere, O_EXCL
-immutability + precise `current` pointer + safe stale-lock recovery, trusted-directory
-validation, complete normalized-margin contract, H5 diagnostic-only, hardening receipt
-bound to the frozen HEAD). Gates and waves are independently shippable and gated;
+*End of plan revision 7 (2026-08-06: fifth-review dispositions §3.5 — artifact
+execution-mode union (`disabled | provider_derived`), A11 qualification-receipt
+schemas with issuer authority, G7 executable manifest covering the full H/I chain,
+provider/model-bound qualification (`qualifiedRerankers`), D5/G6A resource split,
+I1→I4 registry freeze, registry cardinality, platform capability matrix, clarified
+post-opening rule, exact-commit hardening verification, per-card G7 dependencies,
+exact trace terminology). Gates and waves are independently shippable and gated;
 nothing in this document authorizes implementation or the opening of held-out evidence.
 Gate 0 requires the security-hardening integration merge with a green behavioral
 acceptance receipt bound to the frozen HEAD (locked conclusion #11 + §6 Gate 0) and
