@@ -20,6 +20,10 @@ import {
     parseSearchOperators,
 } from "../core/search-query-planning.js";
 import { SEARCH_MAX_DIAGNOSTIC_CANDIDATES } from "../core/search-constants.js";
+import {
+    WorkspaceAuthorizationError,
+    type AuthorizedWorkspacePath,
+} from "../core/session-workspace-policy.js";
 
 interface SearchDiagnostics {
     resultsBeforeFilter: number;
@@ -219,6 +223,40 @@ function emitSearchBackendErrorTelemetry(args: {
     });
 }
 
+/**
+ * Structured workspace denial per the security hardening contract. The
+ * `reason` is the snake_case form of the policy's authorization code, so the
+ * common rejection (ROOT_NOT_AUTHORIZED) renders exactly as documented while
+ * BROAD_ROOT_NOT_ALLOWED / INVALID_WORKSPACE_ROOT / WORKSPACE_POLICY_NOT_BOUND
+ * stay distinguishable to callers. The envelope never carries continuation
+ * handles or frozen result sets from an unauthorized request.
+ */
+function formatWorkspaceAuthorizationError(
+    toolName: string,
+    path: string,
+    error: unknown,
+): ToolResponse {
+    const code = error instanceof WorkspaceAuthorizationError
+        ? error.code
+        : "WORKSPACE_POLICY_NOT_BOUND";
+    const message = error instanceof Error
+        ? error.message
+        : `${toolName}: ${String(error)}`;
+    return {
+        content: [{
+            type: "text",
+            text: JSON.stringify({
+                status: "error",
+                reason: code.toLowerCase(),
+                code,
+                path,
+                message,
+            }),
+        }],
+        isError: true,
+    };
+}
+
 const buildSearchSchema = (ctx: ToolContext) => z.object({
     path: absoluteFilesystemPathSchema("ABSOLUTE filesystem path to an indexed codebase or subdirectory (relative paths are rejected)."),
     query: z.string().min(1).describe("Natural-language query."),
@@ -310,12 +348,42 @@ export const searchCodebaseTool: McpTool = {
             };
         }
 
+        // Session workspace gate: the requested path must be authorized before
+        // input normalization, query planning, provider resolution, telemetry,
+        // or the search pipeline can run. An unbound policy fails closed with
+        // WORKSPACE_POLICY_NOT_BOUND. The authorized canonical path is the only
+        // path that reaches the downstream request.
+        const workspacePolicy = ctx.workspacePolicy;
+        if (!workspacePolicy) {
+            return formatWorkspaceAuthorizationError(
+                "search_codebase",
+                absolutePathResult.absolutePath,
+                new WorkspaceAuthorizationError(
+                    "WORKSPACE_POLICY_NOT_BOUND",
+                    "Tool context has not been bound to an MCP session workspace policy.",
+                ),
+            );
+        }
+        let authorized: AuthorizedWorkspacePath;
+        try {
+            authorized = workspacePolicy.authorizePath(absolutePathResult.absolutePath);
+        } catch (error) {
+            if (error instanceof WorkspaceAuthorizationError) {
+                return formatWorkspaceAuthorizationError(
+                    "search_codebase",
+                    absolutePathResult.absolutePath,
+                    error,
+                );
+            }
+            throw error;
+        }
+
         const { debug: publicDebug, ...normalizedInput } = parsed.data;
         const normalizedDebugMode: PublicSearchDebugMode = normalizedInput.debugMode
             ?? (publicDebug === true ? "full" : "none");
         const input = {
             ...normalizedInput,
-            path: absolutePathResult.absolutePath,
+            path: authorized.canonicalPath,
             scope: normalizedInput.scope ?? "runtime",
             resultMode: normalizedInput.resultMode ?? "grouped",
             groupBy: normalizedInput.groupBy ?? "symbol",

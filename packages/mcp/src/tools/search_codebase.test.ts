@@ -1,9 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { searchCodebaseTool } from './search_codebase.js';
 import { CapabilityResolver } from '../core/capabilities.js';
 import { ContextMcpConfig } from '../config.js';
 import { ToolContext } from './types.js';
+import {
+    createSessionWorkspacePolicy,
+    type SessionWorkspacePolicy,
+} from '../core/session-workspace-policy.js';
+
+function buildWorkspacePolicy(roots: readonly string[]): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots,
+        homeDirectory: os.homedir(),
+        stateRoot: path.join(os.tmpdir(), 'search-codebase-test-state'),
+    });
+}
+
+/** Session policy authorizing the synthetic '/repo' fixture used by existing tests. */
+const REPO_WORKSPACE_POLICY = buildWorkspacePolicy(['/repo']);
 
 function buildConfig(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig {
     return {
@@ -89,6 +107,7 @@ test('search_codebase normalizes public debug selectors to the internal debugMod
     const calls: Array<Record<string, unknown>> = [];
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         toolHandlers: {
             handleSearchCode: async (args: Record<string, unknown>) => {
                 calls.push(args);
@@ -155,6 +174,7 @@ test('search_codebase accepts bounded diagnostic candidate depth only with full 
     const calls: Array<Record<string, unknown>> = [];
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         toolHandlers: {
             handleSearchCode: async (args: Record<string, unknown>) => {
                 calls.push(args);
@@ -220,6 +240,7 @@ test('search_codebase accepts a smaller grouped disclosure without lowering retr
     const calls: Array<Record<string, unknown>> = [];
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         toolHandlers: {
             handleSearchCode: async (args: Record<string, unknown>) => {
                 calls.push(args);
@@ -267,6 +288,7 @@ test('search_codebase accepts an optional compact result index only for grouped 
     const calls: Array<Record<string, unknown>> = [];
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         toolHandlers: {
             handleSearchCode: async (args: Record<string, unknown>) => {
                 calls.push(args);
@@ -313,6 +335,7 @@ test('search_codebase accepts a large logical total on Potion while independentl
     const calls: Array<Record<string, unknown>> = [];
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         toolHandlers: {
             handleSearchCode: async (args: Record<string, unknown>) => {
                 calls.push(args);
@@ -366,6 +389,7 @@ test('search_codebase acquires embedding context only for routes that require de
     };
     const providerContext = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         runtimeFingerprint: {
             embeddingProvider: 'VoyageAI',
             embeddingModel: 'voyage-4-large',
@@ -401,6 +425,7 @@ test('search_codebase delegates debug projection to the handler without reparsin
     const capabilities = new CapabilityResolver(buildConfig());
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         toolHandlers: {
             handleSearchCode: async () => ({
                 content: [{
@@ -449,6 +474,7 @@ test('search_codebase emits telemetry with diagnostics from handler meta', async
 
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         reranker: null,
         toolHandlers: {
             handleSearchCode: async () => ({
@@ -530,6 +556,7 @@ test('search_codebase telemetry reports reranker_used when handler diagnostics i
 
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         reranker: null,
         toolHandlers: {
             handleSearchCode: async () => ({
@@ -585,6 +612,7 @@ test('search_codebase falls back to parsed JSON response for telemetry diagnosti
 
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         reranker: null,
         toolHandlers: {
             handleSearchCode: async () => ({
@@ -658,6 +686,7 @@ test('search_codebase returns structured backend diagnostics when provider runti
 
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         reranker: null,
         providerRuntime: {
             requireToolContext: async () => {
@@ -702,6 +731,7 @@ test('search_codebase returns structured backend diagnostics when handler backen
 
     const ctx = {
         capabilities,
+        workspacePolicy: REPO_WORKSPACE_POLICY,
         reranker: null,
         toolHandlers: {
             handleSearchCode: async () => {
@@ -724,4 +754,262 @@ test('search_codebase returns structured backend diagnostics when handler backen
     assert.equal(payload.reason, 'vector_backend_unavailable');
     assert.equal(payload.code, 'VECTOR_BACKEND_CONNECTION_CLOSED');
     assert.deepEqual(payload.results, []);
+});
+
+test('search_codebase denies an unauthorized root in grouped mode without running the handler', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-b-'));
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        let handlerRan = false;
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            toolHandlers: {
+                handleSearchCode: async () => {
+                    handlerRan = true;
+                    throw new Error('handler must not run for an unauthorized path');
+                },
+            },
+        } as unknown as ToolContext;
+
+        const telemetry = await captureTelemetry(async () => {
+            const response = await searchCodebaseTool.execute({
+                path: rootB,
+                query: 'auth',
+                resultMode: 'grouped',
+            }, ctx);
+            const payload = JSON.parse(response.content[0].text);
+
+            assert.equal(response.isError, true);
+            assert.equal(payload.status, 'error');
+            assert.equal(payload.code, 'ROOT_NOT_AUTHORIZED');
+            assert.equal(payload.reason, 'root_not_authorized');
+            assert.equal(payload.path, rootB);
+            assert.equal(typeof payload.message, 'string');
+        });
+
+        assert.equal(handlerRan, false);
+        // The gate precedes telemetry: a denied search emits no [TELEMETRY] line.
+        assert.equal(telemetry.length, 0);
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
+});
+
+test('search_codebase denies an unauthorized root in raw mode', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-b-'));
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        let handlerRan = false;
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            toolHandlers: {
+                handleSearchCode: async () => {
+                    handlerRan = true;
+                    throw new Error('handler must not run for an unauthorized path');
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await searchCodebaseTool.execute({
+            path: rootB,
+            query: 'auth',
+            resultMode: 'raw',
+        }, ctx);
+        const payload = JSON.parse(response.content[0].text);
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.status, 'error');
+        assert.equal(payload.code, 'ROOT_NOT_AUTHORIZED');
+        assert.equal(payload.reason, 'root_not_authorized');
+        assert.equal(payload.path, rootB);
+        assert.equal(handlerRan, false);
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
+});
+
+test('search_codebase denies a live out-of-workspace path even when it exists on disk', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-b-'));
+    fs.writeFileSync(path.join(rootB, 'dirty.txt'), 'dirty working tree marker');
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        let handlerRan = false;
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            toolHandlers: {
+                handleSearchCode: async () => {
+                    handlerRan = true;
+                    throw new Error('handler must not run for an unauthorized path');
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await searchCodebaseTool.execute({
+            path: rootB,
+            query: 'auth',
+        }, ctx);
+        const payload = JSON.parse(response.content[0].text);
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.code, 'ROOT_NOT_AUTHORIZED');
+        assert.equal(payload.path, rootB);
+        assert.equal(handlerRan, false);
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
+});
+
+test('search_codebase does not resolve a provider context for a denied path', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-b-'));
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        let providerResolved = false;
+        let handlerRan = false;
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            providerRuntime: {
+                requireToolContext: async () => {
+                    providerResolved = true;
+                    throw new Error('provider resolution must not run for a denied path');
+                },
+            },
+            toolHandlers: {
+                handleSearchCode: async () => {
+                    handlerRan = true;
+                    throw new Error('handler must not run for an unauthorized path');
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await searchCodebaseTool.execute({
+            path: rootB,
+            query: 'auth',
+        }, ctx);
+        const payload = JSON.parse(response.content[0].text);
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.code, 'ROOT_NOT_AUTHORIZED');
+        assert.equal(providerResolved, false);
+        assert.equal(handlerRan, false);
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
+});
+
+test("search_codebase isolates sessions: session B cannot search session A's root", async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-b-'));
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        const receivedPaths: string[] = [];
+        const ctxA = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            toolHandlers: {
+                handleSearchCode: async (args: Record<string, unknown>) => {
+                    receivedPaths.push(String(args.path));
+                    return { content: [{ type: 'text' as const, text: '{"status":"ok","results":[]}' }] };
+                },
+            },
+        } as unknown as ToolContext;
+        const ctxB = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootB]),
+            toolHandlers: {
+                handleSearchCode: async (args: Record<string, unknown>) => {
+                    receivedPaths.push(String(args.path));
+                    return { content: [{ type: 'text' as const, text: '{"status":"ok","results":[]}' }] };
+                },
+            },
+        } as unknown as ToolContext;
+
+        const denied = await searchCodebaseTool.execute({ path: rootB, query: 'auth' }, ctxA);
+        const deniedPayload = JSON.parse(denied.content[0].text);
+
+        assert.equal(denied.isError, true);
+        assert.equal(deniedPayload.code, 'ROOT_NOT_AUTHORIZED');
+        assert.equal(receivedPaths.length, 0);
+
+        const authorized = await searchCodebaseTool.execute({ path: rootB, query: 'auth' }, ctxB);
+
+        assert.equal(authorized.isError, undefined);
+        // The handler receives the authorized canonical path (real path of B).
+        assert.deepEqual(receivedPaths, [fs.realpathSync(rootB)]);
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
+});
+
+test('search_codebase authorizes a nested subdirectory of an authorized root with its canonical path', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const subdir = path.join(rootA, 'nested', 'repo');
+    fs.mkdirSync(subdir, { recursive: true });
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        const receivedPaths: string[] = [];
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            toolHandlers: {
+                handleSearchCode: async (args: Record<string, unknown>) => {
+                    receivedPaths.push(String(args.path));
+                    return { content: [{ type: 'text' as const, text: '{"status":"ok","results":[]}' }] };
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await searchCodebaseTool.execute({ path: subdir, query: 'auth' }, ctx);
+
+        assert.equal(response.isError, undefined);
+        assert.deepEqual(receivedPaths, [fs.realpathSync(subdir)]);
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+    }
+});
+
+test('search_codebase denial envelope never carries a continuation handle', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'search-codebase-auth-b-'));
+    try {
+        const capabilities = new CapabilityResolver(buildConfig());
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([rootA]),
+            toolHandlers: {
+                handleSearchCode: async () => {
+                    throw new Error('handler must not run for an unauthorized path');
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await searchCodebaseTool.execute({
+            path: rootB,
+            query: 'auth',
+            limit: 3,
+            disclosureLimit: 2,
+        }, ctx);
+        const payload = JSON.parse(response.content[0].text);
+
+        assert.equal(response.isError, true);
+        assert.equal(payload.code, 'ROOT_NOT_AUTHORIZED');
+        for (const leakedField of ['handle', 'nextOffset', 'continuation', 'results']) {
+            assert.equal(Object.prototype.hasOwnProperty.call(payload, leakedField), false);
+        }
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
 });
