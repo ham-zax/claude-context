@@ -949,7 +949,7 @@ async function publishCurrentGenerationPointer(
 
 export async function writeNavigationSidecarGeneration(
     input: WriteNavigationSidecarGenerationInput,
-): Promise<WriteNavigationSidecarGenerationResult> {
+): Promise<StagedNavigationSidecarGeneration> {
     const staged = await stageNavigationSidecarGeneration(input);
     await publishNavigationSidecarGeneration(staged, {
         beforePublish: input.beforePublish,

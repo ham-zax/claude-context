@@ -8,7 +8,13 @@ import {
     createSymbolKey,
     createSynthesizedFileSymbol,
 } from '../symbols';
-import { buildCallRelationshipsForRegistry, buildRelationshipDelta, buildRelationshipsForRegistry } from './builder';
+import {
+    buildCallRelationshipsForRegistry,
+    buildRelationshipDelta,
+    buildRelationshipsForRegistry,
+    type RelationshipAnalysisEvidence,
+} from './builder';
+import type { ResolutionClaim } from './resolution';
 import type { SymbolKind, SymbolRecord, SymbolRegistryManifest } from '../symbols';
 import { createLanguageAnalysisService } from '../language-analysis';
 import { getLanguageIdFromFilename } from '../language';
@@ -63,7 +69,7 @@ async function buildAnalyzedPythonRegistry(
     }
 
     return {
-        analysisByFile,
+        analysisByFile: analysisByFile as Map<string, RelationshipAnalysisEvidence>,
         registry: buildSymbolRegistry({
             manifest: {
                 ...manifest(),
@@ -301,9 +307,9 @@ test('buildCallRelationshipsForRegistry adds TESTS only for resolved test-to-pro
         manifest: {
             ...manifest(),
             files: [
-                { path: 'src/runtime.ts', hash: 'hash-runtime', language: 'typescript', symbolCount: 3 },
-                { path: 'tests/runtime.test.ts', hash: 'hash-test', language: 'typescript', symbolCount: 2 },
-                { path: 'tests/unresolved.test.ts', hash: 'hash-unresolved', language: 'typescript', symbolCount: 2 },
+                { path: 'src/runtime.ts', hash: 'hash-runtime', language: 'typescript', symbolCount: 3, definitionStatus: 'definitions_present' },
+                { path: 'tests/runtime.test.ts', hash: 'hash-test', language: 'typescript', symbolCount: 2, definitionStatus: 'definitions_present' },
+                { path: 'tests/unresolved.test.ts', hash: 'hash-unresolved', language: 'typescript', symbolCount: 2, definitionStatus: 'definitions_present' },
             ],
         },
         symbols: [
@@ -437,7 +443,7 @@ test('buildCallRelationshipsForRegistry resolves exact same-class Python self an
 });
 
 test('buildCallRelationshipsForRegistry resolves exact Python aliases and parameter types without leaking receiver authority', async () => {
-    const sources = {
+    const sources: Record<string, string> = {
         'src/factory.py': [
             'class SpreadModelFactory:',
             '    @classmethod',
@@ -531,7 +537,7 @@ test('buildCallRelationshipsForRegistry resolves exact Python aliases and parame
 });
 
 test('buildCallRelationshipsForRegistry records exact Python parameter proof and abstains without it', async () => {
-    const sources = {
+    const sources: Record<string, string> = {
         'src/ledger.py': [
             'class SignalLedger:',
             '    def record(self): pass',
@@ -562,7 +568,9 @@ test('buildCallRelationshipsForRegistry records exact Python parameter proof and
         ['typed'],
     );
 
-    const claims = analysisByFile.get('src/caller.py')?.resolutionClaims ?? [];
+    const claims = (analysisByFile.get('src/caller.py') as {
+        resolutionClaims?: readonly ResolutionClaim[];
+    } | undefined)?.resolutionClaims ?? [];
     const typedClaim = claims.find((claim) => claim.callSpan.startLine === 4);
     const untypedClaim = claims.find((claim) => claim.callSpan.startLine === 7);
     assert.equal(typedClaim?.decision, 'resolved');
@@ -615,7 +623,7 @@ test('buildCallRelationshipsForRegistry assigns same-line calls by byte containm
     const registry = buildSymbolRegistry({
         manifest: {
             ...manifest(),
-            files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: symbols.length + 1 }],
+            files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: symbols.length + 1, definitionStatus: 'definitions_present' }],
         },
         symbols: [fileOwner, ...symbols],
     });
@@ -648,7 +656,7 @@ test('buildCallRelationshipsForRegistry preserves distinct same-line call spans'
     const target = createSymbol({ file, kind: 'function', name: 'target', qualifiedName: 'target', label: 'function target', startLine: 1, endLine: 1, startByte: 0, endByte: 20, fileHash });
     const run = createSymbol({ file, kind: 'function', name: 'run', qualifiedName: 'run', label: 'function run', startLine: 2, endLine: 2, startByte: 21, endByte: 58, fileHash });
     const registry = buildSymbolRegistry({
-        manifest: { ...manifest(), files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: 3 }] },
+        manifest: { ...manifest(), files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: 3, definitionStatus: 'definitions_present' }] },
         symbols: [fileOwner, target, run],
     });
 
@@ -690,7 +698,7 @@ test('buildCallRelationshipsForRegistry skips definitions, unresolved calls, and
     const registry = buildSymbolRegistry({
         manifest: {
             ...manifest(),
-            files: [{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 2 }],
+            files: [{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 2, definitionStatus: 'definitions_present' }],
         },
         symbols: [fileOwner, login],
     });
@@ -757,7 +765,7 @@ test('buildCallRelationshipsForRegistry does not emit duplicate container-owned 
     const registry = buildSymbolRegistry({
         manifest: {
             ...manifest(),
-            files: [{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 4 }],
+            files: [{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 4, definitionStatus: 'definitions_present' }],
         },
         symbols: [fileOwner, normalize, authService, login],
     });
@@ -863,7 +871,7 @@ test('buildCallRelationshipsForRegistry skips ambiguous same-name targets until 
     const registry = buildSymbolRegistry({
         manifest: {
             ...manifest(),
-            files: [{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 6 }],
+            files: [{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 6, definitionStatus: 'definitions_present' }],
         },
         symbols: [fileOwner, authService, login, authAudit, userService, userAudit],
     });
@@ -900,7 +908,7 @@ test('buildCallRelationshipsForRegistry is case-sensitive and refuses receiver-u
         createSymbol({ file, kind: 'function', name: 'run', qualifiedName: 'run', label: 'function run', startLine: 3, endLine: 6, fileHash }),
     ];
     const registry = buildSymbolRegistry({
-        manifest: { ...manifest(), files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: symbols.length + 1 }] },
+        manifest: { ...manifest(), files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: symbols.length + 1, definitionStatus: 'definitions_present' }] },
         symbols: [fileOwner, ...symbols],
     });
 
@@ -943,16 +951,17 @@ test('buildCallRelationshipsForRegistry constrains targets by call kind', () => 
     const registry = buildSymbolRegistry({
         manifest: {
             ...manifest(),
-            files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: symbols.length }],
+            files: [{ path: file, hash: fileHash, language: 'typescript', symbolCount: symbols.length, definitionStatus: 'definitions_present' }],
         },
         symbols,
     });
 
     const records = buildCallRelationshipsForRegistry({
         registry,
-        analysisByFile: new Map([[
-            file,
-            {
+        analysisByFile: new Map<string, RelationshipAnalysisEvidence>([
+            [
+                file,
+                {
                 moduleBindings: [],
                 callSites: [
                     { calleeName: 'helper', kind: 'direct', span: { startLine: 1, endLine: 1 } },
@@ -961,7 +970,7 @@ test('buildCallRelationshipsForRegistry constrains targets by call kind', () => 
                     { calleeName: 'directProperty', kind: 'direct', span: { startLine: 1, endLine: 1 } },
                     { calleeName: 'factory', kind: 'constructor', span: { startLine: 1, endLine: 1 } },
                 ],
-            },
+            } as unknown as RelationshipAnalysisEvidence,
         ]]),
     });
     const targetNameById = new Map(symbols.map((entry) => [entry.symbolInstanceId, entry.name]));
@@ -981,7 +990,7 @@ test('buildCallRelationshipsForRegistry treats components and hooks as callable 
     const widget = createSymbol({ file, kind: 'component', name: 'Widget', qualifiedName: 'Widget', label: 'component Widget', startLine: 2, endLine: 2, fileHash, language: 'tsx' });
     const hook = createSymbol({ file, kind: 'hook', name: 'useThing', qualifiedName: 'useThing', label: 'hook useThing', startLine: 3, endLine: 3, fileHash, language: 'tsx' });
     const registry = buildSymbolRegistry({
-        manifest: { ...manifest(), files: [{ path: file, hash: fileHash, language: 'tsx', symbolCount: 4 }] },
+        manifest: { ...manifest(), files: [{ path: file, hash: fileHash, language: 'tsx', symbolCount: 4, definitionStatus: 'definitions_present' }] },
         symbols: [fileOwner, target, widget, hook],
     });
 
@@ -1394,8 +1403,8 @@ test('buildRelationshipsForRegistry creates Python IMPORTS and top-level EXPORTS
             relationshipVersion: 'relationship-v1',
             builtAt: '2026-06-17T00:00:00.000Z',
             files: [
-                { path: 'src/phases.py', hash: 'hash-phases', language: 'python', symbolCount: 2 },
-                { path: 'src/telemetry.py', hash: 'hash-telemetry', language: 'python', symbolCount: 2 },
+                { path: 'src/phases.py', hash: 'hash-phases', language: 'python', symbolCount: 2, definitionStatus: 'definitions_present' },
+                { path: 'src/telemetry.py', hash: 'hash-telemetry', language: 'python', symbolCount: 2, definitionStatus: 'definitions_present' },
             ],
         },
         symbols: [phasesFile, attachEntryTelemetry, telemetryFile, buildEntryTelemetry],
@@ -1493,7 +1502,7 @@ test('buildRelationshipsForRegistry skips unresolved package imports and ambiguo
     const registry = buildSymbolRegistry({
         manifest: {
             ...manifest(),
-            files: [{ path: 'src/routes.ts', hash: 'hash-routes', language: 'typescript', symbolCount: 3 }],
+            files: [{ path: 'src/routes.ts', hash: 'hash-routes', language: 'typescript', symbolCount: 3, definitionStatus: 'definitions_present' }],
         },
         symbols: [fileOwner, knownOne, knownTwo],
     });
@@ -1529,6 +1538,7 @@ test('buildRelationshipsForRegistry resolves NodeNext source extensions and reje
                 hash: file.hash,
                 language: file.language,
                 symbolCount: 1,
+                definitionStatus: 'definitions_present',
             })),
         },
         symbols: owners,
@@ -1579,7 +1589,7 @@ test('buildRelationshipDelta matches a full rebuild when a call target becomes a
     const callerPath = 'src/caller.ts';
     const targetAPath = 'src/target-a.ts';
     const targetBPath = 'src/target-b.ts';
-    const sources = {
+    const sources: Record<string, string> = {
         [callerPath]: 'export function run() { return target(); }\n',
         [targetAPath]: 'export function target() { return 1; }\n',
         [targetBPath]: 'export function target() { return 2; }\n',
@@ -1625,6 +1635,7 @@ test('buildRelationshipDelta matches a full rebuild when a call target becomes a
                     hash: `hash-${file}`,
                     language: 'typescript',
                     symbolCount: 2,
+                    definitionStatus: 'definitions_present',
                 })),
             },
             symbols,
@@ -1699,7 +1710,7 @@ test('buildRelationshipDelta matches a full rebuild when a Python class receiver
     const callerPath = 'src/caller.py';
     const targetAPath = 'src/factory_a.py';
     const targetBPath = 'src/factory_b.py';
-    const sources = {
+    const sources: Record<string, string> = {
         [callerPath]: [
             'from .factory_a import SpreadModelFactory',
             'from .factory_b import SpreadModelFactory',
@@ -1779,7 +1790,7 @@ test('buildRelationshipDelta invalidates absolute Python import dependents when 
 test('buildRelationshipDelta revisits an unresolved relative import when its target file appears', async () => {
     const callerPath = 'src/caller.ts';
     const targetPath = 'src/target.ts';
-    const sources = {
+    const sources: Record<string, string> = {
         [callerPath]: 'import { target } from "./target";\nexport function run() { return target(); }\n',
         [targetPath]: 'export function target() { return 1; }\n',
     };
@@ -1822,6 +1833,7 @@ test('buildRelationshipDelta revisits an unresolved relative import when its tar
                     hash: `hash-${file}`,
                     language: 'typescript',
                     symbolCount: 2,
+                    definitionStatus: 'definitions_present',
                 })),
             },
             symbols,

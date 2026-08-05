@@ -10,9 +10,9 @@ import {
     createSynthesizedFileSymbol,
     resolveOwnerSymbolForChunk,
 } from './registry';
-import type { SymbolRecord, SymbolRegistryManifest } from './contracts';
+import type { SymbolRecord, SymbolRegistryManifest, SymbolRegistryManifestFile } from './contracts';
 
-function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifest {
+function manifest(files: Array<Omit<SymbolRegistryManifestFile, 'definitionStatus'>>): SymbolRegistryManifest {
     return {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
         normalizedRootPath: '/repo',

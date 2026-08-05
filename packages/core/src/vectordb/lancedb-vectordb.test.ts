@@ -456,7 +456,10 @@ test('LanceDB acknowledged writes and controls survive forced process terminatio
     ]);
     await database.finalizeCollectionForSearch(collectionName);
 
-    const adapterUrl = new URL('./lancedb-vectordb.ts', import.meta.url).href;
+    // tsx executes these tests as ESM; the CJS build typing does not apply.
+    // @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
+    const moduleUrl = import.meta.url;
+    const adapterUrl = new URL('./lancedb-vectordb.ts', moduleUrl).href;
     const childScript = `
         import fs from 'node:fs';
         import { LanceDbVectorDatabase } from ${JSON.stringify(adapterUrl)};
@@ -491,6 +494,7 @@ test('LanceDB acknowledged writes and controls survive forced process terminatio
                 "process.kill(process.pid, 'SIGKILL');",
             ),
         ], {
+            // @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
             cwd: path.resolve(import.meta.dirname, '../..'),
             env: {
                 ...process.env,
@@ -564,6 +568,7 @@ test('LanceDB rejects malformed dimensions, duplicate payloads, and inconsistent
 test('LanceDB publication finalization creates FTS and does not call optimize', async (t) => {
     // Freeze the publication contract: search readiness is FTS only. Compaction
     // must not run on this path (epoch optimize corrupted real multi-file payloads).
+    // @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
     const sourcePath = path.resolve(import.meta.dirname, 'lancedb-vectordb.ts');
     const source = fs.readFileSync(sourcePath, 'utf8');
     const finalizeMatch = source.match(

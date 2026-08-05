@@ -15,11 +15,11 @@ import {
 import type {
     RelationshipRecord,
     SymbolRecord,
-    SymbolRegistryManifest,
+    SymbolRegistryManifest, SymbolRegistryManifestFile,
 } from '../symbols';
 import { JsonNavigationStore } from './store';
 
-function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifest {
+function manifest(files: Array<Omit<SymbolRegistryManifestFile, 'definitionStatus'>>): SymbolRegistryManifest {
     return {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
         normalizedRootPath: '/repo',

@@ -16,7 +16,7 @@ import {
 import type {
     RelationshipRecord,
     SymbolRecord,
-    SymbolRegistryManifest,
+    SymbolRegistryManifest, SymbolRegistryManifestFile,
 } from '../symbols';
 import { importNavigationToSqlite, resolveNavigationSqlitePath } from './sqlite';
 import { JsonNavigationStore } from './store';
@@ -27,7 +27,7 @@ import {
     resetSharedRuntimeNavigationStoreForTests,
 } from './runtime';
 
-function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifest {
+function manifest(files: Array<Omit<SymbolRegistryManifestFile, 'definitionStatus'>>): SymbolRegistryManifest {
     return {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
         normalizedRootPath: '/repo',

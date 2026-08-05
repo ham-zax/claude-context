@@ -60,8 +60,8 @@ test('Python structural v1 reports deterministic callable syntax and complexity'
         content,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     });
@@ -114,8 +114,8 @@ test('Python structural v1 distinguishes zero and absent return syntax', async (
         content,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     });
@@ -138,8 +138,8 @@ test('Python structural v1 fails closed for unsupported symbols and stale identi
         content,
         symbol: {
             kind: 'class',
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     }), {
@@ -151,8 +151,8 @@ test('Python structural v1 fails closed for unsupported symbols and stale identi
         content,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: {
                 ...symbol.span,
                 startByte: (symbol.span.startByte ?? 0) + 1,
@@ -183,8 +183,8 @@ test('Python structural v1 resolves decorated duplicate method names by canonica
         content,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     });
@@ -211,8 +211,8 @@ test('Python structural v1 keeps Unicode byte spans and signature text coherent'
         content,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     });
@@ -306,8 +306,8 @@ test('Python structural v1 freezes isolated decision and loop counting rules', a
             content,
             symbol: {
                 kind: symbol.kind,
-                name: symbol.name,
-                qualifiedName: symbol.qualifiedName,
+                name: symbol.name ?? '',
+                qualifiedName: symbol.qualifiedName ?? '',
                 span: symbol.span,
             },
         });
@@ -342,8 +342,8 @@ test('Python structural v1 excludes every nested scope and fails closed on unrel
         content,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     });
@@ -360,8 +360,8 @@ test('Python structural v1 excludes every nested scope and fails closed on unrel
         content: invalidContent,
         symbol: {
             kind: symbol.kind,
-            name: symbol.name,
-            qualifiedName: symbol.qualifiedName,
+            name: symbol.name ?? '',
+            qualifiedName: symbol.qualifiedName ?? '',
             span: symbol.span,
         },
     }), {

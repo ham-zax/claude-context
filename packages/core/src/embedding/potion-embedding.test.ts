@@ -24,8 +24,11 @@ type TestPotionEmbeddingConstructor = new (config: {
 const TestPotionEmbedding = PotionEmbedding as unknown as TestPotionEmbeddingConstructor;
 
 test('committed L1 inference manifest matches the provider identity digest', () => {
+    // tsx executes these tests as ESM; the CJS build typing does not apply.
+    // @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
+    const moduleUrl = import.meta.url;
     const manifestPath = path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
+        path.dirname(fileURLToPath(moduleUrl)),
         '../../../../experiments/potion-l0-l1/fixtures/inference-contract.canonical.json',
     );
     const digest = crypto.createHash('sha256').update(fs.readFileSync(manifestPath)).digest('hex');

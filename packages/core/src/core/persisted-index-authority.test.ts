@@ -61,14 +61,18 @@ test('completion marker inspector admits only complete canonical v3 shapes', () 
     const notBound = inspectCompletionMarker(canonicalMarker());
     assert.equal(notBound.status, 'current');
 
-    const legacyProjectionFingerprint = structuredClone(canonicalMarker());
+    const legacyProjectionFingerprint = structuredClone(canonicalMarker()) as unknown as {
+        fingerprint: Record<string, unknown>;
+    };
     delete legacyProjectionFingerprint.fingerprint.embeddingArtifactDigest;
     delete legacyProjectionFingerprint.fingerprint.embeddingNormalizationPolicy;
     delete legacyProjectionFingerprint.fingerprint.embeddingProjectionVersion;
     delete legacyProjectionFingerprint.fingerprint.lexicalProjectionVersion;
-    assert.equal(inspectCompletionMarker(legacyProjectionFingerprint).status, 'current');
+    assert.equal(inspectCompletionMarker(legacyProjectionFingerprint as never).status, 'current');
 
-    const partialProjectionFingerprint = structuredClone(canonicalMarker());
+    const partialProjectionFingerprint = structuredClone(canonicalMarker()) as unknown as {
+        fingerprint: Record<string, unknown>;
+    };
     delete partialProjectionFingerprint.fingerprint.lexicalProjectionVersion;
     assert.equal(inspectCompletionMarker(partialProjectionFingerprint).status, 'corrupt');
 
@@ -81,7 +85,7 @@ test('completion marker inspector admits only complete canonical v3 shapes', () 
     }));
     assert.equal(sealed.status, 'current');
 
-    const partial = structuredClone(canonicalMarker()) as Record<string, unknown>;
+    const partial = structuredClone(canonicalMarker()) as unknown as Record<string, unknown>;
     partial.navigation = { status: 'sealed', generationId: 'generation-1' };
     assert.deepEqual(inspectCompletionMarker(partial), {
         status: 'corrupt',
@@ -348,7 +352,9 @@ test('policy inspector binds one canonical v4 publication tuple', () => {
     });
     assert.equal(inspectIndexPolicyDocument(document, '/repo').status, 'current');
 
-    const tampered = structuredClone(document);
+    const tampered = structuredClone(document) as CanonicalIndexPolicyPayload & {
+        publication: { sourceCheckpoint: { merkleRoot: string } };
+    };
     tampered.publication.sourceCheckpoint.merkleRoot = SHA_C;
     assert.deepEqual(inspectIndexPolicyDocument(tampered, '/repo'), {
         status: 'corrupt',

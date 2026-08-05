@@ -116,11 +116,16 @@ test('source measurement records duplicate emissions and genuine rereads distinc
             'source_observation_outcome',
             'source_processing',
         ]);
+        const ioRecords = records.filter(
+            (record): record is Extract<SourceMeasurementLedgerRecord, { kind: 'source_io' }> => (
+                record.kind === 'source_io'
+            ),
+        );
         assert.equal(records[0].relativeFile, 'src/owner.ts');
         assert.equal(records[0].owner, 'outline');
-        assert.equal(records[1].observationId, records[2].observationId);
-        assert.equal(records[1].readId, records[2].readId);
-        assert.notEqual(records[2].readId, records[3].readId);
+        assert.equal(ioRecords[0].observationId, ioRecords[1].observationId);
+        assert.equal(ioRecords[0].readId, ioRecords[1].readId);
+        assert.notEqual(ioRecords[1].readId, ioRecords[2].readId);
     } finally {
         fs.rmSync(directory, { recursive: true, force: true });
     }

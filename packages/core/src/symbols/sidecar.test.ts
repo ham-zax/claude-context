@@ -26,9 +26,9 @@ import {
     writeSymbolRegistrySidecar,
     verifyNavigationGenerationSealArtifacts,
 } from './sidecar';
-import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest } from './contracts';
+import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest, SymbolRegistryManifestFile } from './contracts';
 
-function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifest {
+function manifest(files: Array<Omit<SymbolRegistryManifestFile, 'definitionStatus'>>): SymbolRegistryManifest {
     return {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
         normalizedRootPath: '/repo',
@@ -800,7 +800,7 @@ test('writeRelationshipSidecar filters evidence to supplied manifest files', asy
             relationshipVersion: 'relationship-v1',
             builtAt: '2026-06-17T00:00:00.000Z',
             records: [],
-            files: [{ path: 'src/tracked.ts', hash: 'file-hash', language: 'typescript', symbolCount: 0 }],
+            files: [{ path: 'src/tracked.ts', hash: 'file-hash', language: 'typescript', symbolCount: 0, definitionStatus: 'definitions_present' }],
             analysisByFile: new Map([
                 ['src/tracked.ts', { moduleBindings: [], callSites: [] }],
                 ['src/untracked.ts', { moduleBindings: [], callSites: [] }],
@@ -827,7 +827,7 @@ test('readRelationshipSidecar rejects duplicate shard paths', async () => {
             relationshipVersion: 'relationship-v1',
             builtAt: '2026-06-17T00:00:00.000Z',
             records: [],
-            files: [{ path: 'src/unrelated.ts', hash: 'file-hash', language: 'typescript', symbolCount: 0 }],
+            files: [{ path: 'src/unrelated.ts', hash: 'file-hash', language: 'typescript', symbolCount: 0, definitionStatus: 'definitions_present' }],
             analysisByFile: new Map([['src/unrelated.ts', { moduleBindings: [], callSites: [] }]]),
         });
         const byFileDir = path.join(result.rootPath, 'relationships', 'by-file');
@@ -1619,7 +1619,7 @@ test('writeRelationshipSidecar rejects records outside the supplied registry man
                 symbolRegistryManifestHash: 'manifest-hash',
                 relationshipVersion: 'relationship-v1',
                 builtAt: '2026-06-17T00:00:00.000Z',
-                files: [{ path: 'src/tracked.ts', hash: 'tracked-hash', language: 'typescript', symbolCount: 0 }],
+                files: [{ path: 'src/tracked.ts', hash: 'tracked-hash', language: 'typescript', symbolCount: 0, definitionStatus: 'definitions_present' }],
                 records: [{
                     sourceKey: 'source',
                     targetPath: 'src/target.ts',

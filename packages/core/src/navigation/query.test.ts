@@ -12,7 +12,7 @@ import {
     writeRelationshipSidecar,
     writeSymbolRegistrySidecar,
 } from '../symbols';
-import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest } from '../symbols';
+import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest, SymbolRegistryManifestFile } from '../symbols';
 import { getGraphNeighbors, getRelationshipsForSymbol } from './query';
 import type {
     NavigationCompatibilityState,
@@ -21,7 +21,7 @@ import type {
     NavigationStore,
 } from './store';
 
-function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifest {
+function manifest(files: Array<Omit<SymbolRegistryManifestFile, 'definitionStatus'>>): SymbolRegistryManifest {
     return {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
         normalizedRootPath: '/repo',
@@ -31,7 +31,7 @@ function manifest(files: SymbolRegistryManifest['files']): SymbolRegistryManifes
         extractorVersion: 'extractor-v1',
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
-        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
+        files: files.map((file) => ({ ...file, definitionStatus: 'definitions_present' as const })),
     };
 }
 
@@ -1038,11 +1038,13 @@ test('getGraphNeighbors does not load symbol registry when only high CALLS edges
             return {
                 status: 'ok',
                 rootPath: '/virtual/navigation',
+                manifestHash: 'manifest-hash',
                 manifest: {
-                    schemaVersion: 'relationship_v1',
+                    schemaVersion: 'relationship_v2',
                     symbolRegistryManifestHash: 'manifest-hash',
-                    relationshipVersion: 'relationship-v1',
+                    relationshipVersion: 'relationship-v2',
                     builtAt: '2026-06-17T00:00:00.000Z',
+                    files: [],
                 },
                 records,
                 warnings: [],
@@ -1255,11 +1257,13 @@ test('relationship query helpers honor an injected navigation store', async () =
             return {
                 status: 'ok',
                 rootPath: '/virtual/navigation',
+                manifestHash: 'manifest-hash',
                 manifest: {
-                    schemaVersion: 'relationship_v1',
+                    schemaVersion: 'relationship_v2',
                     symbolRegistryManifestHash: 'manifest-hash',
-                    relationshipVersion: 'relationship-v1',
+                    relationshipVersion: 'relationship-v2',
                     builtAt: '2026-06-17T00:00:00.000Z',
+                    files: [],
                 },
                 records,
                 warnings: [],
