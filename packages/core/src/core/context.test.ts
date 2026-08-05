@@ -1053,10 +1053,12 @@ test('Context active collection resolution requires exact completion-marker payl
     // rows), so rejection is causally the exact-payload-count mismatch. A
     // limit_reached marker with sealed navigation is an envelope contradiction
     // rather than a payload-count case, so it is intentionally absent here.
+    // The baseline count is read from the real marker rather than assumed, so
+    // the cases stay valid if chunking of the tiny fixture ever changes.
     const cases = [
-        { label: 'missing payload row', mutateMarkerChunks: 2 },
-        { label: 'unexpected payload row', extraChunks: 1, mutateMarkerChunks: 1 },
-        { label: 'zero marker with stale payload', mutateMarkerChunks: 0 },
+        { label: 'missing payload row', kind: 'claim_extra' as const },
+        { label: 'unexpected payload row', kind: 'add_extra_row' as const },
+        { label: 'zero marker with stale payload', kind: 'claim_zero' as const },
     ];
 
     for (const input of cases) {
@@ -1069,13 +1071,16 @@ test('Context active collection resolution requires exact completion-marker payl
             }) => {
                 const marker = vectorDatabase.collections.get(collectionName)?.get(INDEX_COMPLETION_MARKER_DOC_ID);
                 assert.ok(marker && typeof marker.metadata === 'object');
-                if ((input.extraChunks ?? 0) > 0) {
+                const metadata = marker.metadata as Record<string, unknown>;
+                const originalTotalChunks = metadata.totalChunks;
+                assert.equal(typeof originalTotalChunks, 'number');
+                if (input.kind === 'add_extra_row') {
                     await vectorDatabase.writeDocuments(collectionName, [buildChunkDoc('extra_chunk')]);
+                } else if (input.kind === 'claim_extra') {
+                    metadata.totalChunks = (originalTotalChunks as number) + 1;
+                } else {
+                    metadata.totalChunks = 0;
                 }
-                marker.metadata = {
-                    ...(marker.metadata as Record<string, unknown>),
-                    totalChunks: input.mutateMarkerChunks,
-                };
 
                 assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
             });
