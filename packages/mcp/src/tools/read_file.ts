@@ -595,6 +595,14 @@ function resolveIndexingBlockForFile(absolutePath: string, ctx: ToolContext): Re
             continue;
         }
         const codebaseRoot = canonicalizeFilesystemPath(rootResult.absolutePath);
+        // Only roots visible to this session may contribute indexing-status
+        // disclosure; a missing policy fails closed (authorizeRoot throws)
+        // rather than leaking an out-of-workspace root's path or progress.
+        try {
+            ctx.workspacePolicy.authorizeRoot(codebaseRoot);
+        } catch {
+            continue;
+        }
         candidates.push({
             codebaseRoot,
             info: item.info,
