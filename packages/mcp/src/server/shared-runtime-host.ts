@@ -64,6 +64,15 @@ function parseAttachRequest(line: string): AttachRequest | null {
             : value.protocolVersion === 1 && typeof value.launcherNonce === "string"
                 ? value.launcherNonce
                 : "";
+        // Strict parsing: the legacy `launcherNonce` field is unknown in the
+        // current protocol version. A v2 request carrying it (with or without
+        // challengeNonce) is malformed, never ambiguously parsed.
+        if (
+            value.protocolVersion === SHARED_RUNTIME_PROTOCOL_VERSION
+            && value.launcherNonce !== undefined
+        ) {
+            return null;
+        }
         if (
             value.type !== "satori-shared-runtime-attach"
             || typeof value.protocolVersion !== "number"

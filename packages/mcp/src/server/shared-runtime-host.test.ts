@@ -459,6 +459,88 @@ test("protocol v1 is rejected", async (t) => {
     assert.match(response.error, /identity does not match/);
 });
 
+test("protocol v2 rejects a legacy-only launcherNonce attach request", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-v2-legacy-only-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    // A v2 request carrying only the removed legacy field cannot derive a
+    // challengeNonce, so parsing fails: malformed rejection, no session, no
+    // compatibility fallback, no tool context.
+    const response = JSON.parse(await sendHandshakeLine(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        launcherNonce: "0".repeat(48),
+        workspaceRoots: [path.join(root, "workspace")],
+    })}\n`)) as { accepted: boolean; error: string };
+    assert.equal(response.accepted, false);
+    assert.match(response.error, /malformed/);
+    assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
+});
+
+test("protocol v2 rejects a request carrying the legacy launcherNonce alongside challengeNonce", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-v2-ambiguous-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    // Strict parsing: the legacy field is unknown in protocol v2, so a request
+    // mixing both fields must be malformed rather than ambiguously parsed.
+    const response = JSON.parse(await sendHandshakeLine(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        challengeNonce: "c".repeat(48),
+        launcherNonce: "0".repeat(48),
+        workspaceRoots: [path.join(root, "workspace")],
+    })}\n`)) as { accepted: boolean; error: string };
+    assert.equal(response.accepted, false);
+    assert.match(response.error, /malformed/);
+    assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
+});
+
 test("ownershipToken is not described as launcher authentication", async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-token-role-"));
     fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
