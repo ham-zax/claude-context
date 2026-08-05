@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { LexicalRetrievalModeUnsupportedError } from './semantic-search-service';
 import { Context, createGenerationProofCoordinator, IndexPolicyPublicationError } from './context';
+import type { IndexCompletionMarkerDocument } from '@zokizuan/satori-core';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
     type CanonicalIndexPolicyDocument,
@@ -975,14 +976,13 @@ function buildCompletionMarkerDoc(input: {
         endLine: 0,
         fileExtension: COMPLETION_MARKER_EXTENSION,
         metadata: {
-            kind: 'satori_index_completion_v3',
+            kind: 'satori_index_completion_v2',
             codebasePath: input.codebasePath,
             fingerprint: testIndexFingerprint(),
             indexedFiles: 1,
             totalChunks: input.totalChunks ?? 1,
             completedAt: '2026-02-27T23:57:10.000Z',
             runId: input.runId,
-            indexPolicyHash: 'test-policy',
             indexStatus: input.indexStatus ?? 'completed',
         },
     };
@@ -1102,17 +1102,15 @@ test('Context active collection resolution rejects runtime fingerprint mismatche
                 startLine: 0,
                 endLine: 0,
                 fileExtension: COMPLETION_MARKER_EXTENSION,
-                kind: 'satori_index_completion_v3',
+                kind: 'satori_index_completion_v2',
                 codebasePath,
                 fingerprint: testIndexFingerprint(fingerprintOverride),
                 indexedFiles: 1,
                 totalChunks: 1,
                 completedAt: '2026-07-12T00:00:00.000Z',
                 runId: `mismatch-${label}`,
-                indexPolicyHash: 'test-policy-hash',
                 indexStatus: 'completed',
-                navigation: { status: 'not_bound' as const },
-            }, collectionName);
+            } as unknown as IndexCompletionMarkerDocument, collectionName);
 
             assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
         });
@@ -1134,17 +1132,15 @@ test('Context classifies a legacy projection fingerprint as requires_reindex and
         startLine: 0,
         endLine: 0,
         fileExtension: COMPLETION_MARKER_EXTENSION,
-        kind: 'satori_index_completion_v3',
+        kind: 'satori_index_completion_v2',
         codebasePath,
         fingerprint: testIndexFingerprint(),
         indexedFiles: 1,
         totalChunks: 1,
         completedAt: '2026-07-12T00:00:00.000Z',
         runId: 'legacy-projection-fingerprint',
-        indexPolicyHash: 'test-policy-hash',
         indexStatus: 'completed',
-        navigation: { status: 'not_bound' as const },
-    }, collectionName);
+    } as unknown as IndexCompletionMarkerDocument, collectionName);
     const markerDocument = vectorDatabase.collections
         .get(collectionName)
         ?.get(INDEX_COMPLETION_MARKER_DOC_ID);
@@ -1153,8 +1149,10 @@ test('Context classifies a legacy projection fingerprint as requires_reindex and
     delete (fingerprint as Partial<IndexCompletionFingerprint>).embeddingProjectionVersion;
     delete (fingerprint as Partial<IndexCompletionFingerprint>).lexicalProjectionVersion;
 
+    const validationProbe = await context.getIndexCompletionMarkerForValidation(codebasePath);
+    console.error('PROBE_VALIDATION', JSON.stringify(validationProbe).slice(0, 400), 'collections', [...vectorDatabase.collections.keys()]);
     assert.deepEqual(
-        await context.getIndexCompletionMarkerForValidation(codebasePath),
+        validationProbe,
         { status: 'requires_reindex' },
     );
     assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
@@ -1174,17 +1172,15 @@ test('Context rejects a completion control whose routing kind disagrees with its
         startLine: 0,
         endLine: 0,
         fileExtension: COMPLETION_MARKER_EXTENSION,
-        kind: 'satori_index_completion_v3',
+        kind: 'satori_index_completion_v2',
         codebasePath,
         fingerprint: testIndexFingerprint(),
         indexedFiles: 1,
         totalChunks: 0,
         completedAt: '2026-07-12T00:00:00.000Z',
         runId: 'control-kind-mismatch',
-        indexPolicyHash: 'test-policy-hash',
         indexStatus: 'completed',
-        navigation: { status: 'not_bound' as const },
-    }, collectionName);
+    } as unknown as IndexCompletionMarkerDocument, collectionName);
     const readControl = vectorDatabase.getControl.bind(vectorDatabase);
     vectorDatabase.getControl = async (name, id) => {
         const record = await readControl(name, id);
@@ -5155,7 +5151,7 @@ test('Context refuses a retired v2 marker under durable v3 authority without mut
         );
         marker.metadata = {
             ...(marker.metadata as Record<string, unknown>),
-            kind: 'satori_index_completion_v3',
+            kind: 'satori_index_completion_v2',
         };
         const policyPath = path.join(
             policyRoot,
