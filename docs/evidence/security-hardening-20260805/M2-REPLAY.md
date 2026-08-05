@@ -44,3 +44,35 @@
 - A12 FIFO denial is the tool's pre-helper "is not a file" check (structured `not_found` in annotated mode) — no content read attempted.
 - A11 used the same-size in-place swap; detection is mtime/ctime-based (inherent to the Core primitive design, Task 5 scope). Cross-process racing beyond this is covered by descriptor-bound identity + post-open fstat.
 - Replay artifacts (`replay.mjs`, evidence/) live under the git-ignored `piolium/` tree; the durable record is this document.
+
+---
+
+# M2 Search-Inclusive Replay — Finding 1 (search_codebase session workspace authorization)
+
+**Date:** 2026-08-06
+**Build under test:** commit `ea9099de400fdc2e26e57b0d7e6b908d07763fee` (integration `master`, cherry-pick of worker commit `22a6a52`; `pnpm run build` clean rebuild)
+**Harness:** `piolium/findings/M2-symlink-escape-file-read-tools/replay-search.mjs` (git-ignored; imports the real shipped tools from `packages/mcp/dist` and the real `createSessionWorkspacePolicy` from `dist/core/session-workspace-policy.js`; the only substitutions are the shared-ToolHandlers search spy and a session providerRuntime stub — the exact surfaces the gate must sit in front of)
+**Scope:** the review's open item — M2 replay previously covered manage_index/read_file/file_outline/call_graph but not `search_codebase`. This replay adds the search scenarios against the rebuilt shipped surface.
+
+## Attack results (7 scenarios, 22 checks, 0 leaked secret bytes)
+
+| ID | Scenario | Expected | Actual | Result |
+| --- | --- | --- | --- | --- |
+| S1 | search_codebase on unauthorized globally indexed root, grouped mode (secret file planted in target root) | ROOT_NOT_AUTHORIZED denial before provider/telemetry/handler; no continuation handle; zero secret bytes | denial envelope `{status:error, reason:root_not_authorized, code:ROOT_NOT_AUTHORIZED, path, message}`; handler not invoked; provider not resolved; 0 `[TELEMETRY]` lines; envelope keys = status,reason,code,path,message | PASS |
+| S2 | unauthorized root, raw mode | denial | ROOT_NOT_AUTHORIZED; handler not invoked | PASS |
+| S3 | live-path root outside the session (exists on disk with content) | denial | ROOT_NOT_AUTHORIZED; handler not invoked | PASS |
+| S4 | cross-session: session B searches session A's root; session B searches its own root | A's root denied for B; own root authorized with canonical path | denied for A's root; own-root search reached handler with `fs.realpathSync` canonical path | PASS |
+| S5 | authorized nested subdirectory of an authorized root | authorized; canonical path | handler received canonical subdir path | PASS |
+| S6 | denial envelope continuation surface | no handle/nextOffset/continuation/results fields | keys bounded to status,reason,code,path,message | PASS |
+| S7 | rebuilt-surface spot checks of earlier M2 protections (manage_index sibling-root denial; read_file inside-root symlink escape) | denials, zero secret bytes | manage_index ROOT_NOT_AUTHORIZED; read_file outside_indexed_root; 0 secret bytes | PASS |
+
+## Positive controls
+
+| ID | Control | Expected | Actual | Result |
+| --- | --- | --- | --- | --- |
+| P5 | session B search on its own authorized root | pipeline reached | handler invoked once with canonical path | PASS |
+| P6 | authorized nested subdirectory search | pipeline reached | handler invoked once with canonical subdir path | PASS |
+
+## Disposition update
+
+The search surface now satisfies the same session-workspace invariant as the rest of the readable surface: denial occurs immediately after path validation, before provider resolution, telemetry, snapshot/freshness state, or any search pass; the canonical authorized path is the only path that reaches the pipeline; the denial envelope carries no continuation handle. M2 replay now includes search; registry `verified_at` updated to this evidence commit.

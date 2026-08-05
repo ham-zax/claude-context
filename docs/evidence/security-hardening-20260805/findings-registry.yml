@@ -18,6 +18,6 @@ findings:
     resolution: "same-UID processes are inside the documented trust boundary; protocol v2 states this honestly (challengeNonce is a freshness challenge, ownershipToken is lifecycle-only)"
   - id: M2
     status: fixed
-    verified_at: "17831852e97b91c4c70b2c393c5a6c6202095ee0"
+    verified_at: "<EVIDENCE_COMMIT>"
     fixed_in: "17831852e97b91c4c70b2c393c5a6c6202095ee0"
-    resolution: "arbitrary root registration and root-wide read authorization remediated by Tasks 4-7; M2 replay against the rebuilt shipped surface (commit cc98366, dist/index.js sha256 56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823) denied all 14 attacks with zero secret bytes and passed all 4 positive controls; evidence: docs/evidence/security-hardening-20260805/M2-REPLAY.md"
+    resolution: "arbitrary root registration and root-wide read authorization remediated by Tasks 4-7; M2 replay against the rebuilt shipped surface (commit cc98366, dist/index.js sha256 56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823) denied all 14 attacks with zero secret bytes and passed all 4 positive controls; search-inclusive replay at commit ea9099d (Finding 1: search_codebase session workspace gate) added 7 scenarios / 22 checks — unauthorized grouped+raw+live-path roots denied before provider/telemetry/handler, cross-session isolation with canonical-path substitution, no continuation handle on denial, 0 secret bytes, and rebuilt-surface spot checks of the earlier protections still pass; evidence: docs/evidence/security-hardening-20260805/M2-REPLAY.md"
