@@ -26,7 +26,6 @@ import type {
 } from '@zokizuan/satori-core';
 import { readFileTool } from '../tools/read_file.js';
 import type { ToolContext } from '../tools/types.js';
-import { createSessionWorkspacePolicy } from './session-workspace-policy.js';
 import { CapabilityResolver } from './capabilities.js';
 import { parseIndexFingerprint, type IndexFingerprint } from '../config.js';
 import { ToolHandlers } from './handlers.js';
