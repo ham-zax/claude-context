@@ -19,7 +19,6 @@ import type { ToolContext } from "../tools/types.js";
 import {
     WorkspaceAuthorizationError,
     createSessionWorkspacePolicy,
-    type SessionWorkspacePolicy,
 } from "../core/session-workspace-policy.js";
 import {
     SharedRuntimeHost,
