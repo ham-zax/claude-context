@@ -257,7 +257,7 @@ test("times out a stalled response body after the headers", async (t) => {
     );
 });
 
-test("retries a listed retryable network error up to maxAttempts", async (t) => {
+test("retries a listed retryable network error up to maxAttempts", async (_t) => {
     const port = await closedPort();
 
     await assert.rejects(
@@ -278,7 +278,7 @@ test("retries a listed retryable network error up to maxAttempts", async (t) => 
     );
 });
 
-test("does not retry an unlisted network error", async (t) => {
+test("does not retry an unlisted network error", async (_t) => {
     const port = await closedPort();
 
     await assert.rejects(
