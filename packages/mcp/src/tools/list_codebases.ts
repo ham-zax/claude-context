@@ -49,7 +49,22 @@ export const listCodebasesTool: McpTool = {
             };
         }
 
-        const all = ctx.snapshotManager.getAllCodebases();
+        const all = ctx.snapshotManager.getAllCodebases()
+            .filter((entry) => {
+                // Session workspace gate: only roots authorized for this
+                // session are visible. Unbound or missing policies fail
+                // closed to an empty listing (never a leakage of sibling
+                // workspaces or an exception mid-listing).
+                if (!ctx.workspacePolicy) {
+                    return false;
+                }
+                try {
+                    ctx.workspacePolicy.authorizeRoot(entry.path);
+                    return true;
+                } catch {
+                    return false;
+                }
+            });
         const rawSnapshotWarning = typeof ctx.snapshotManager.getSnapshotCorruptionWarning === "function"
             ? ctx.snapshotManager.getSnapshotCorruptionWarning()
             : undefined;
