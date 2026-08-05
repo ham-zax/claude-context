@@ -548,6 +548,14 @@ git commit -am "fix(freshness): include untracked files in live search"
 
 ## Task 6: Report marker finalization without weakening readiness
 
+**REMOVED 2026-08-04 during implementation review.** The response builder cannot
+prove that the exact indexed payload count equals the expected chunk count while
+only the completion marker is missing; `progressPct === 100` alone is not exact
+proof, and the `finalizing` reason was not part of `NonOkReason`. Per the review
+disposition, the feature was reverted to the honest `reason: "indexing"` state.
+Revisit only with an exact count proof (e.g. `countIndexedPayloadExactly`
+plumbed through the readiness layer) and a versioned `NonOkReason` extension.
+
 This is an optional UX task and should not return results before marker proof.
 
 **Files:**

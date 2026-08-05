@@ -699,7 +699,10 @@ export async function finalizeSearchResults(
                 : {
                     ...envelope,
                     pagination: {
-                        totalGroupCount: resultCounts.availableGroupCount,
+                        // `totalGroupCount` is the bounded frozen set in every
+                        // branch (complete, attached, not_admissible); the
+                        // larger available count stays in the disclosure object.
+                        totalGroupCount: resultCounts.effectiveFrozenTotal,
                         returnedGroupCount: resultCounts.returnedGroupCount,
                         continuation: "complete" as const,
                     },

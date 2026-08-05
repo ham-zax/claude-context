@@ -12928,3 +12928,123 @@ test('handleSearchCode indexing payload recommends manage_index status', async (
         assert.equal(payload.indexing?.progressPct, 42);
     });
 });
+test('pagination totalGroupCount reports the frozen set, not the full available set', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 100 }, (_, idx) => ({
+            content: `export const candidate${idx} = ${idx};`,
+            relativePath: `src/candidate-${idx}.ts`,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_candidate_${idx}`,
+            symbolLabel: `function candidate${idx}()`,
+        }));
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const vectorReceipt = { collectionName: 'committed-v3' } as never;
+        let nowMs = 0;
+        const observation = JSON.stringify({
+            vectorAuthority: 'vector-1',
+            navigationAuthority: 'navigation-1',
+            mutationGeneration: 1,
+        });
+        const internals = handlers as unknown as {
+            now: () => number;
+            context: HandlerContext & {
+                getIndexAuthorityObservations: () => { vector: string; navigation: string } | null;
+                revalidatePreparedGeneration: () => Promise<{
+                    vectorReceipt: never;
+                    navigationProof: { status: 'not_bound' };
+                }>;
+            };
+            syncManager: HandlerSyncManager & {
+                getPreparedReadObservation: () => {
+                    available: true;
+                    observation: { freshnessEpoch: number; watcherState: 'ready' };
+                };
+            };
+            mutationLeaseCoordinator: {
+                observe: () => { mutationActive: boolean; generation: number };
+                getActiveLease: () => null;
+            };
+            preparedReadCache: {
+                seed: (root: string, state: unknown, authority: string, now: number) => void;
+            };
+            validateCompletionProof: () => Promise<{
+                outcome: 'valid';
+                navigationStatus: 'not_bound';
+                vectorReceipt: never;
+            }>;
+            getPreparedReadCacheObservation: () => {
+                observation: string;
+                sourceObservation: string | null;
+            };
+        };
+        internals.now = () => nowMs;
+        internals.context.getIndexAuthorityObservations = () => ({
+            vector: 'vector-1',
+            navigation: 'navigation-1',
+        });
+        internals.context.revalidatePreparedGeneration = async () => ({
+            vectorReceipt,
+            navigationProof: { status: 'not_bound' },
+        });
+        internals.syncManager.getPreparedReadObservation = () => ({
+            available: true,
+            observation: { freshnessEpoch: 1, watcherState: 'ready' },
+        });
+        internals.mutationLeaseCoordinator = {
+            observe: () => ({ mutationActive: false, generation: 1 }),
+            getActiveLease: () => null,
+        };
+        internals.validateCompletionProof = async () => ({
+            outcome: 'valid',
+            navigationStatus: 'not_bound',
+            vectorReceipt,
+        });
+        internals.preparedReadCache.seed(repoPath, {
+            state: 'ready',
+            root: { path: repoPath, info: { status: 'indexed' } },
+            vectorReceipt,
+            navigationStatus: 'not_bound',
+            preparedObservation: observation,
+        }, observation, nowMs);
+        internals.getPreparedReadCacheObservation = () => ({
+            observation,
+            sourceObservation: 'warm-proof-source-observation',
+        });
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the candidates',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            rankingMode: 'default',
+            limit: 20,
+            disclosureLimit: 20,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 20);
+        assert.deepEqual(payload.resultCounts, {
+            requestedTotal: 20,
+            effectiveFrozenTotal: 20,
+            availableGroupCount: 80,
+            returnedGroupCount: 20,
+            remainingGroupCount: 0,
+        });
+        // `totalGroupCount` is the bounded frozen set in every branch; the
+        // larger available count stays in resultCounts/disclosure.
+        assert.deepEqual(payload.pagination, {
+            totalGroupCount: 20,
+            returnedGroupCount: 20,
+            continuation: 'complete',
+        });
+        assert.notEqual(payload.pagination?.totalGroupCount, payload.resultCounts?.availableGroupCount);
+    });
+});
