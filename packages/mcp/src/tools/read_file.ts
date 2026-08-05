@@ -1,12 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import ignore from "ignore";
 import {
+    RootBoundFileError,
     beginSourceMeasurementObservation,
     finishSourceMeasurementObservation,
     isLanguageCapabilitySupportedForExtension,
+    isLanguageCapabilitySupportedForFilename,
     recordSourceIo,
     recordSourceProcessing,
+    verifyStableFileObservation,
 } from "@zokizuan/satori-core";
 import {
     McpTool,
@@ -16,6 +20,17 @@ import {
 } from "./types.js";
 import { resolveVectorBackedToolContext } from "./provider-context.js";
 import { requireAbsoluteFilesystemPath } from "../utils.js";
+import {
+    openAuthorizedPublishedFile,
+    PublishedFileAuthorizationError,
+    type AuthorizedPublishedFile,
+} from "../core/published-file-authorization.js";
+import { WorkspaceAuthorizationError } from "../core/session-workspace-policy.js";
+import {
+    getChangedFilesForCodebase,
+    type ChangedFilesCacheEntry,
+} from "../core/working-tree-state.js";
+import { SEARCH_CHANGED_FILES_CACHE_TTL_MS } from "../core/search-constants.js";
 import type {
     ReadFileAnnotatedOutlineStatus,
     ReadFileAnnotatedResponseEnvelope,
@@ -148,6 +163,55 @@ function readFileErrorResponse(payload: ReadFileStructuredErrorResponseEnvelope)
         }],
         isError: true
     };
+}
+
+function readFileAuthorizationDenial(input: {
+    reason: string;
+    code: string;
+    path: string;
+    message: string;
+    maxBytes?: number;
+}): ToolTextResponse {
+    const payload = {
+        status: "error" as const,
+        reason: input.reason,
+        code: input.code,
+        path: input.path,
+        ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+        message: input.message,
+    };
+    return {
+        content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+        isError: true,
+    };
+}
+
+function publishedFileAuthorizationDenial(error: PublishedFileAuthorizationError, pathValue: string): ToolTextResponse {
+    switch (error.code) {
+        case "FILE_NOT_PUBLISHED":
+            return readFileAuthorizationDenial({
+                reason: "file_not_published",
+                code: "FILE_NOT_PUBLISHED",
+                path: pathValue,
+                message: error.message,
+            });
+        case "FINAL_SYMLINK_REJECTED":
+            return readFileAuthorizationDenial({
+                reason: "symlink_rejected",
+                code: "FINAL_SYMLINK_REJECTED",
+                path: pathValue,
+                message: error.message,
+            });
+        case "NOT_A_REGULAR_FILE":
+            return readFileAuthorizationDenial({
+                reason: "not_a_regular_file",
+                code: "NOT_A_REGULAR_FILE",
+                path: pathValue,
+                message: error.message,
+            });
+        case "OUTSIDE_CODEBASE_ROOT":
+            return outsideIndexedRootResponse(pathValue);
+    }
 }
 
 type SymbolContextErrorCode =
@@ -292,6 +356,114 @@ function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
     return targetPath === rootPath || targetPath.startsWith(`${rootPath}${path.sep}`);
 }
 
+/**
+ * Module-level changed-files cache for live-path read admission. Mirrors the
+ * search lane's cache discipline (same TTL) so read_file does not run `git
+ * status` per request while still reusing the authoritative git-status parser.
+ */
+const READ_FILE_CHANGED_FILES_CACHE = new Map<string, ChangedFilesCacheEntry>();
+
+/**
+ * The published searchable-file manifest for a resolved root: the persisted
+ * snapshot manifest (set on every index completion) plus the synchronizer's
+ * live tracked paths when the session context exposes them. Membership is
+ * decided on forward-slash relative paths, matching the authorization helper.
+ */
+function resolvePublishedRelativePaths(codebaseRoot: string, ctx: ToolContext): Set<string> {
+    const published = new Set<string>();
+    refreshSnapshotState(ctx);
+    const allCodebases = typeof ctx.snapshotManager?.getAllCodebases === "function"
+        ? ctx.snapshotManager.getAllCodebases()
+        : [];
+    if (Array.isArray(allCodebases)) {
+        for (const item of allCodebases) {
+            if (!item || typeof item.path !== "string") {
+                continue;
+            }
+            const rootResult = requireAbsoluteFilesystemPath(item.path, "codebase.path");
+            if (!rootResult.ok) {
+                continue;
+            }
+            if (canonicalizeFilesystemPath(rootResult.absolutePath) !== codebaseRoot) {
+                continue;
+            }
+            const manifest = (item.info as { indexManifest?: { indexedPaths?: unknown } } | undefined)?.indexManifest;
+            if (manifest && Array.isArray(manifest.indexedPaths)) {
+                for (const entry of manifest.indexedPaths) {
+                    if (typeof entry === "string" && entry.length > 0) {
+                        published.add(normalizeRelativePath(entry));
+                    }
+                }
+            }
+            break;
+        }
+    }
+    const tracked = (ctx.context as { getTrackedRelativePaths?: (root: string) => string[] } | undefined)
+        ?.getTrackedRelativePaths?.(codebaseRoot);
+    if (Array.isArray(tracked)) {
+        for (const entry of tracked) {
+            if (typeof entry === "string" && entry.length > 0) {
+                published.add(normalizeRelativePath(entry));
+            }
+        }
+    }
+    return published;
+}
+
+/**
+ * Active ignore matcher for live-path admission, mirroring the search lane's
+ * policy (active patterns from the session context; a matcher failure denies).
+ */
+function buildReadFileIgnoreMatcher(codebaseRoot: string, ctx: ToolContext): ((relativePath: string) => boolean) | undefined {
+    const patterns = (ctx.context as { getActiveIgnorePatterns?: (root: string) => string[] } | undefined)
+        ?.getActiveIgnorePatterns?.(codebaseRoot);
+    if (!Array.isArray(patterns) || patterns.length === 0) {
+        return undefined;
+    }
+    try {
+        const matcher = ignore();
+        matcher.add(patterns.filter((pattern): pattern is string => typeof pattern === "string"));
+        return (relativePath: string) => {
+            const normalized = relativePath.replace(/\\/g, "/");
+            if (!normalized) {
+                return true;
+            }
+            if (matcher.ignores(normalized)) {
+                return true;
+            }
+            const withSlash = normalized.endsWith("/") ? normalized : `${normalized}/`;
+            return matcher.ignores(withSlash);
+        };
+    } catch {
+        return () => true;
+    }
+}
+
+/**
+ * Live-path admission for one requested file, mirroring the search freshness
+ * policy: the path must be changed/untracked per git status, language-capable
+ * for search, and not excluded by the active ignore rules.
+ */
+function isLivePathAdmittedForRead(codebaseRoot: string, relativePath: string, ctx: ToolContext): boolean {
+    const changed = getChangedFilesForCodebase({
+        codebasePath: codebaseRoot,
+        nowMs: Date.now(),
+        changedFilesCache: READ_FILE_CHANGED_FILES_CACHE,
+        ttlMs: SEARCH_CHANGED_FILES_CACHE_TTL_MS,
+    });
+    if (!changed.available || !changed.files.has(relativePath)) {
+        return false;
+    }
+    if (!isLanguageCapabilitySupportedForFilename(relativePath, "search")) {
+        return false;
+    }
+    const matcher = buildReadFileIgnoreMatcher(codebaseRoot, ctx);
+    if (matcher?.(relativePath)) {
+        return false;
+    }
+    return true;
+}
+
 function collectCodebaseCandidatesForFile(
     absolutePath: string,
     ctx: ToolContext,
@@ -317,6 +489,13 @@ function collectCodebaseCandidatesForFile(
             continue;
         }
         const candidatePath = canonicalizeFilesystemPath(rootResult.absolutePath);
+        // Only roots visible to this session may serve reads; a missing policy
+        // fails closed (authorizeRoot throws) rather than authorizing anything.
+        try {
+            ctx.workspacePolicy.authorizeRoot(candidatePath);
+        } catch {
+            continue;
+        }
         if (!isPathInsideRoot(canonicalTarget, candidatePath)) {
             continue;
         }
@@ -677,110 +856,189 @@ export const readFileTool: McpTool = {
                 };
             }
 
-            await touchResolvedCodebaseRoot(absolutePath, ctx);
+            // Publication-bound authorization: the file must be in the current
+            // published searchable-file manifest OR admitted by the live-path
+            // source policy (changed/untracked, in-scope, non-ignored). Both
+            // paths open through the shared descriptor-bound helper.
+            const publishedRelativePaths = resolvePublishedRelativePaths(allowedRoot, ctx);
+            const requestedRelativePath = normalizeRelativePath(path.relative(allowedRoot, absolutePath));
+            if (
+                requestedRelativePath.length > 0
+                && !publishedRelativePaths.has(requestedRelativePath)
+                && isLivePathAdmittedForRead(allowedRoot, requestedRelativePath, ctx)
+            ) {
+                publishedRelativePaths.add(requestedRelativePath);
+            }
 
-            const sourceObservation = beginSourceMeasurementObservation({
-                owner: "validation",
-                filePath: absolutePath,
-                logicalBytesRequested: stat.size,
-                scanKind: "complete",
-            });
-            let sourceBytes: Buffer;
+            let authorized: AuthorizedPublishedFile;
             try {
-                sourceBytes = fs.readFileSync(absolutePath);
-                recordSourceIo({
-                    observation: sourceObservation,
-                    startByte: 0,
-                    endByte: sourceBytes.length,
-                    basis: "path_read",
-                });
-                finishSourceMeasurementObservation({
-                    observation: sourceObservation,
-                    status: sourceBytes.length === stat.size ? "completed" : "partial",
+                authorized = await openAuthorizedPublishedFile({
+                    workspacePolicy: ctx.workspacePolicy,
+                    codebaseRoot: allowedRoot,
+                    requestedPath: absolutePath,
+                    publishedRelativePaths,
                 });
             } catch (error) {
-                finishSourceMeasurementObservation({
-                    observation: sourceObservation,
-                    status: "failed",
-                });
+                if (error instanceof PublishedFileAuthorizationError) {
+                    return publishedFileAuthorizationDenial(error, absolutePath);
+                }
+                if (error instanceof WorkspaceAuthorizationError) {
+                    return readFileAuthorizationDenial({
+                        reason: error.code === "WORKSPACE_POLICY_NOT_BOUND"
+                            ? "workspace_policy_not_bound"
+                            : "root_not_authorized",
+                        code: error.code === "WORKSPACE_POLICY_NOT_BOUND"
+                            ? "WORKSPACE_POLICY_NOT_BOUND"
+                            : "ROOT_NOT_AUTHORIZED",
+                        path: absolutePath,
+                        message: error.message,
+                    });
+                }
                 throw error;
             }
-            const selectorStartedAt = performance.now();
-            let selectorOutcome: "success" | "failed" = "failed";
-            let content: string;
-            let lines: string[];
+
+            const { handle, codebaseRoot, observedStat } = authorized;
+            const maxBytes = Math.max(1, ctx.readFileMaxBytes ?? 8 * 1024 * 1024);
             try {
-                content = sourceBytes.toString("utf8");
-                lines = splitIntoLines(content);
-                selectorOutcome = "success";
-            } finally {
-                recordSourceProcessing({
-                    observation: sourceObservation,
-                    owner: "selector",
-                    inputBytesProcessed: sourceBytes.length,
-                    basis: "shared_buffer",
-                    outcome: selectorOutcome,
-                    durationMs: performance.now() - selectorStartedAt,
-                });
-            }
-            const totalLines = lines.length;
-
-            const maxLines = Math.max(1, ctx.readFileMaxLines);
-            const hasStart = input.start_line !== undefined;
-            const hasEnd = input.end_line !== undefined;
-            let startLine = 1;
-            let endLine = totalLines > 0 ? totalLines : 0;
-            let addContinuationHint = false;
-
-            if (totalLines === 0) {
-                startLine = 1;
-                endLine = 0;
-            } else if (!hasStart && !hasEnd) {
-                if (totalLines > maxLines) {
-                    endLine = maxLines;
-                    addContinuationHint = true;
+                // Hard pre-read byte ceiling: deny before allocating a
+                // whole-file buffer or reading any content.
+                if (observedStat.size > maxBytes) {
+                    return readFileAuthorizationDenial({
+                        reason: "file_too_large",
+                        code: "FILE_TOO_LARGE",
+                        path: absolutePath,
+                        maxBytes,
+                        message: `File size ${observedStat.size} exceeds READ_FILE_MAX_BYTES (${maxBytes}).`,
+                    });
                 }
-            } else if (hasStart && !hasEnd) {
-                startLine = clamp(input.start_line as number, 1, totalLines);
-                endLine = Math.min(startLine + maxLines - 1, totalLines);
-                addContinuationHint = endLine < totalLines;
-            } else if (!hasStart && hasEnd) {
-                endLine = clamp(input.end_line as number, 1, totalLines);
-            } else {
-                startLine = clamp(input.start_line as number, 1, totalLines);
-                endLine = clamp(input.end_line as number, startLine, totalLines);
-            }
 
-            if (input.open_symbol && !isExactSymbolRequest(input.open_symbol) && totalLines > 0) {
-                const openSymbol = input.open_symbol;
-                startLine = clamp(openSymbol.startLine, 1, totalLines);
-                endLine = clamp(openSymbol.endLine, startLine, totalLines);
-                addContinuationHint = false;
-            }
+                // Touch the resolved codebase only after the authorized open, so
+                // a watcher callback that observes the working tree cannot be
+                // used to influence the authorization decision.
+                await touchResolvedCodebaseRoot(absolutePath, ctx);
 
-            const selectedLines = totalLines === 0 ? [] : lines.slice(startLine - 1, endLine);
-            const shouldCompact = !input.open_symbol && (
-                input.presentation === "compact"
-                || (
-                    input.presentation !== "full"
-                    && hasStart
-                    && hasEnd
-                    && selectedLines.length >= READ_FILE_AUTO_COMPACT_MIN_LINES
-                )
-            );
-            const compactEnvelope = shouldCompact
-                ? compactSourceRange(selectedLines, startLine, endLine, absolutePath)
-                : undefined;
-            const selected = totalLines === 0
-                ? content
-                : compactEnvelope
-                    ? JSON.stringify(compactEnvelope)
-                    : selectedLines.join("\n");
-            const nextStartLine = addContinuationHint ? endLine + 1 : undefined;
-            const hint = addContinuationHint
-                ? `\n\n(File truncated at line ${endLine}. To read more, call read_file with path="${absolutePath}" and start_line=${nextStartLine}.)`
-                : "";
-            const contentWithHint = `${selected}${hint}`;
+                const sourceObservation = beginSourceMeasurementObservation({
+                    owner: "validation",
+                    filePath: absolutePath,
+                    logicalBytesRequested: observedStat.size,
+                    scanKind: "complete",
+                });
+                let sourceBytes: Buffer;
+                try {
+                    // Read through the authorized descriptor, never by reopening
+                    // the pathname; the handle is bound to the verified file.
+                    sourceBytes = await handle.readFile();
+                    recordSourceIo({
+                        observation: sourceObservation,
+                        startByte: 0,
+                        endByte: sourceBytes.length,
+                        basis: "descriptor_read",
+                    });
+                    finishSourceMeasurementObservation({
+                        observation: sourceObservation,
+                        status: sourceBytes.length === observedStat.size ? "completed" : "partial",
+                    });
+                } catch (error) {
+                    finishSourceMeasurementObservation({
+                        observation: sourceObservation,
+                        status: "failed",
+                    });
+                    throw error;
+                }
+
+                // Verify the stable descriptor/path observation after the read
+                // and before returning content: replacement or truncation during
+                // the read fails closed instead of serving mixed content.
+                try {
+                    await verifyStableFileObservation(handle, absolutePath, codebaseRoot, observedStat);
+                } catch (error) {
+                    if (error instanceof RootBoundFileError) {
+                        return readFileAuthorizationDenial({
+                            reason: "file_replaced",
+                            code: "FILE_REPLACED",
+                            path: absolutePath,
+                            message: error.message,
+                        });
+                    }
+                    throw error;
+                }
+
+                const selectorStartedAt = performance.now();
+                let selectorOutcome: "success" | "failed" = "failed";
+                let content: string;
+                let lines: string[];
+                try {
+                    content = sourceBytes.toString("utf8");
+                    lines = splitIntoLines(content);
+                    selectorOutcome = "success";
+                } finally {
+                    recordSourceProcessing({
+                        observation: sourceObservation,
+                        owner: "selector",
+                        inputBytesProcessed: sourceBytes.length,
+                        basis: "shared_buffer",
+                        outcome: selectorOutcome,
+                        durationMs: performance.now() - selectorStartedAt,
+                    });
+                }
+                const totalLines = lines.length;
+
+                const maxLines = Math.max(1, ctx.readFileMaxLines);
+                const hasStart = input.start_line !== undefined;
+                const hasEnd = input.end_line !== undefined;
+                let startLine = 1;
+                let endLine = totalLines > 0 ? totalLines : 0;
+                let addContinuationHint = false;
+
+                if (totalLines === 0) {
+                    startLine = 1;
+                    endLine = 0;
+                } else if (!hasStart && !hasEnd) {
+                    if (totalLines > maxLines) {
+                        endLine = maxLines;
+                        addContinuationHint = true;
+                    }
+                } else if (hasStart && !hasEnd) {
+                    startLine = clamp(input.start_line as number, 1, totalLines);
+                    endLine = Math.min(startLine + maxLines - 1, totalLines);
+                    addContinuationHint = endLine < totalLines;
+                } else if (!hasStart && hasEnd) {
+                    endLine = clamp(input.end_line as number, 1, totalLines);
+                } else {
+                    startLine = clamp(input.start_line as number, 1, totalLines);
+                    endLine = clamp(input.end_line as number, startLine, totalLines);
+                }
+
+                if (input.open_symbol && !isExactSymbolRequest(input.open_symbol) && totalLines > 0) {
+                    const openSymbol = input.open_symbol;
+                    startLine = clamp(openSymbol.startLine, 1, totalLines);
+                    endLine = clamp(openSymbol.endLine, startLine, totalLines);
+                    addContinuationHint = false;
+                }
+
+                const selectedLines = totalLines === 0 ? [] : lines.slice(startLine - 1, endLine);
+                const shouldCompact = !input.open_symbol && (
+                    input.presentation === "compact"
+                    || (
+                        input.presentation !== "full"
+                        && hasStart
+                        && hasEnd
+                        && selectedLines.length >= READ_FILE_AUTO_COMPACT_MIN_LINES
+                    )
+                );
+                const compactEnvelope = shouldCompact
+                    ? compactSourceRange(selectedLines, startLine, endLine, absolutePath)
+                    : undefined;
+                const selected = totalLines === 0
+                    ? content
+                    : compactEnvelope
+                        ? JSON.stringify(compactEnvelope)
+                        : selectedLines.join("\n");
+                const nextStartLine = addContinuationHint ? endLine + 1 : undefined;
+                const hint = addContinuationHint
+                    ? `\n\n(File truncated at line ${endLine}. To read more, call read_file with path="${absolutePath}" and start_line=${nextStartLine}.)`
+                    : "";
+                const contentWithHint = `${selected}${hint}`;
 
             if (mode === "plain") {
                 return {
@@ -869,6 +1127,11 @@ export const readFileTool: McpTool = {
                     text: JSON.stringify(payload, null, 2)
                 }]
             };
+            } finally {
+                // The authorized descriptor is caller-owned; every path after a
+                // successful open must release it (success, denial, and error).
+                await handle.close().catch(() => undefined);
+            }
         } catch (error) {
             if (exactRequest) {
                 return symbolContextErrorResponse({

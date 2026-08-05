@@ -225,6 +225,7 @@ export interface ContextMcpConfig {
     lateOnIntraOpThreads?: number;
     // read_file behavior
     readFileMaxLines?: number;
+    readFileMaxBytes?: number;
     // Filesystem observation behavior
     watchSyncEnabled?: boolean;
     /** @deprecated Accepted for compatibility but ignored by observation-only watching. */
@@ -588,6 +589,9 @@ export function createMcpConfig(): ContextMcpConfig {
     const executionPolicy = resolveExecutionPolicy(envManager.get('SATORI_RUNTIME_PROFILE'));
     const defaultProvider = (envManager.get('EMBEDDING_PROVIDER') as EmbeddingProvider) || 'VoyageAI';
     const defaultReadFileMaxLines = 1000;
+    const defaultReadFileMaxBytes = 8 * 1024 * 1024;
+    const readFileMaxBytesMin = 65_536;
+    const readFileMaxBytesMax = 67_108_864;
     const vectorStore = resolveVectorStoreConfig({
         provider: envManager.get('VECTOR_STORE_PROVIDER')
             || (envManager.get('MILVUS_ADDRESS') ? 'Milvus' : 'LanceDB'),
@@ -805,6 +809,17 @@ export function createMcpConfig(): ContextMcpConfig {
         }
     }
 
+    let readFileMaxBytes = defaultReadFileMaxBytes;
+    const readFileMaxBytesRaw = envManager.get('READ_FILE_MAX_BYTES');
+    if (readFileMaxBytesRaw) {
+        const parsedBytes = Number.parseInt(readFileMaxBytesRaw, 10);
+        if (Number.isFinite(parsedBytes) && parsedBytes >= readFileMaxBytesMin && parsedBytes <= readFileMaxBytesMax) {
+            readFileMaxBytes = parsedBytes;
+        } else {
+            console.warn(`[WARN] Invalid READ_FILE_MAX_BYTES value: ${readFileMaxBytesRaw}. Using default ${defaultReadFileMaxBytes}.`);
+        }
+    }
+
     const watchSyncEnabledRaw = envManager.get('MCP_ENABLE_WATCHER');
     const watchSyncEnabled = watchSyncEnabledRaw
         ? watchSyncEnabledRaw.toLowerCase() === 'true'
@@ -872,6 +887,7 @@ export function createMcpConfig(): ContextMcpConfig {
         ...(lateOnIntraOpThreads !== undefined ? { lateOnIntraOpThreads } : {}),
         // read_file behavior
         readFileMaxLines,
+        readFileMaxBytes,
         // filesystem observation behavior
         watchSyncEnabled,
         watchDebounceMs,
@@ -965,6 +981,7 @@ Environment Variables:
 
   Read File Configuration:
   READ_FILE_MAX_LINES     Max lines returned by read_file when no explicit range is provided (default: 1000)
+  READ_FILE_MAX_BYTES     Max whole-file bytes read_file may read before range selection (default: 8388608, min 65536, max 67108864)
 
   Filesystem Observation:
   MCP_ENABLE_WATCHER      Observe source changes for freshness-aware reads (default: true)

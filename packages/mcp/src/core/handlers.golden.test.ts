@@ -536,6 +536,7 @@ function createReadFileToolContext(input: {
     snapshotManager: ToolContext['snapshotManager'];
     syncManager: ToolContext['syncManager'];
     readFileMaxLines?: number;
+    repoPath: string;
 }): ToolContext {
     return {
         context: {} as ToolContext['context'],
@@ -547,7 +548,7 @@ function createReadFileToolContext(input: {
         toolHandlers: input.handlers,
         readFileMaxLines: input.readFileMaxLines ?? 1000,
         workspacePolicy: createSessionWorkspacePolicy({
-            roots: [path.join(os.tmpdir(), 'satori-golden-workspace')],
+            roots: [input.repoPath],
             homeDirectory: os.homedir(),
             stateRoot: path.join(os.homedir(), '.satori'),
         }),
@@ -1351,6 +1352,7 @@ test('golden historical read_file exact-open request is rejected by the canonica
             handlers,
             snapshotManager,
             syncManager,
+            repoPath,
         }));
 
         assert.equal(response.isError, true);
@@ -1402,6 +1404,7 @@ test('golden MCP read_file open_symbol current id returns bounded symbol_context
             handlers,
             snapshotManager,
             syncManager,
+            repoPath,
         }));
 
         assert.equal(response.isError, undefined);
@@ -1451,6 +1454,7 @@ test('golden MCP read_file open_symbol stale id shape', async () => {
             handlers,
             snapshotManager,
             syncManager,
+            repoPath,
         }));
 
         assert.equal(response.isError, true);
@@ -1494,6 +1498,7 @@ test('golden MCP read_file open_symbol unavailable authority shape', async () =>
             handlers,
             snapshotManager,
             syncManager,
+            repoPath,
         }));
 
         assert.equal(response.isError, true);

@@ -181,6 +181,7 @@ export class SharedRuntimeHost {
     private readonly recoveryHandlers: ToolHandlers;
     private readonly providerRuntime: ProviderRuntime;
     private readonly readFileMaxLines: number;
+    private readonly readFileMaxBytes: number;
     private readonly watchSyncEnabled: boolean;
     private readonly watchDebounceMs: number;
     private activeSessions = 0;
@@ -195,6 +196,7 @@ export class SharedRuntimeHost {
     ) {
         this.capabilities = new CapabilityResolver(config);
         this.readFileMaxLines = Math.max(1, config.readFileMaxLines ?? 1000);
+        this.readFileMaxBytes = Math.max(1, config.readFileMaxBytes ?? 8 * 1024 * 1024);
         this.watchSyncEnabled = config.watchSyncEnabled === true;
         this.watchDebounceMs = Math.max(1, config.watchDebounceMs ?? 5000);
         console.log(`[FINGERPRINT] Runtime index fingerprint: ${JSON.stringify(runtimeFingerprint)}`);
@@ -244,6 +246,7 @@ export class SharedRuntimeHost {
             runtimeFingerprint,
             capabilities: this.capabilities,
             readFileMaxLines: this.readFileMaxLines,
+            readFileMaxBytes: this.readFileMaxBytes,
             watchSyncEnabled: this.watchSyncEnabled,
             watchDebounceMs: this.watchDebounceMs,
             startSyncLifecycle: runMode === "mcp" || runMode === "host",
@@ -308,6 +311,7 @@ export class SharedRuntimeHost {
                 runtimeFingerprint: this.runtimeFingerprint,
                 toolHandlers: localHandlers,
                 readFileMaxLines: this.readFileMaxLines,
+                readFileMaxBytes: this.readFileMaxBytes,
                 runtimeOwnerGate: this.runtimeOwnerRegistry,
                 providerRuntime,
                 workspacePolicy,

@@ -40,6 +40,8 @@ export interface ToolContext {
     runtimeFingerprint: IndexFingerprint;
     toolHandlers: ToolHandlers;
     readFileMaxLines: number;
+    /** Whole-file byte ceiling for read_file (config READ_FILE_MAX_BYTES). */
+    readFileMaxBytes?: number;
     /** Immutable per-session workspace authorization policy. */
     workspacePolicy: SessionWorkspacePolicy;
     /** Optional: live multi-runtime owner diagnostics for list_codebases / status. */

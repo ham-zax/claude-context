@@ -20,6 +20,7 @@ import type {
 import type { SearchNavigationHelpers } from "./search-navigation.js";
 import { callGraphInputSchema, callGraphTool } from "../tools/call_graph.js";
 import { readFileInputSchema, readFileTool } from "../tools/read_file.js";
+import { createSessionWorkspacePolicy } from "./session-workspace-policy.js";
 import type { ToolContext } from "../tools/types.js";
 
 const ROOT = "/workspace/repo";
@@ -476,8 +477,22 @@ test("documented grouped navigation mappings validate and execute through regist
         let composedInput: unknown;
         const exactReadResponse = await readFileTool.execute(exactReadInput, {
             readFileMaxLines: 100,
+            workspacePolicy: createSessionWorkspacePolicy({
+                roots: [tempRoot],
+                homeDirectory: os.homedir(),
+                stateRoot: path.join(os.homedir(), ".satori"),
+            }),
             snapshotManager: {
-                getAllCodebases: () => [{ path: tempRoot, info: { status: "indexed" } }],
+                getAllCodebases: () => [{
+                    path: tempRoot,
+                    info: {
+                        status: "indexed",
+                        indexManifest: {
+                            indexedPaths: ["src/fallback.ts"],
+                            updatedAt: "2026-01-01T00:00:00.000Z",
+                        },
+                    },
+                }],
             },
             syncManager: { touchWatchedCodebase: async () => undefined },
             toolHandlers: {
@@ -526,8 +541,22 @@ test("documented grouped navigation mappings validate and execute through regist
 
         const readResponse = await readFileTool.execute(readInput, {
             readFileMaxLines: 100,
+            workspacePolicy: createSessionWorkspacePolicy({
+                roots: [tempRoot],
+                homeDirectory: os.homedir(),
+                stateRoot: path.join(os.homedir(), ".satori"),
+            }),
             snapshotManager: {
-                getAllCodebases: () => [{ path: tempRoot, info: { status: "indexed" } }],
+                getAllCodebases: () => [{
+                    path: tempRoot,
+                    info: {
+                        status: "indexed",
+                        indexManifest: {
+                            indexedPaths: ["src/fallback.ts"],
+                            updatedAt: "2026-01-01T00:00:00.000Z",
+                        },
+                    },
+                }],
             },
             syncManager: { touchWatchedCodebase: async () => undefined },
             toolHandlers: {},
