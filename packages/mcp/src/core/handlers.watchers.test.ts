@@ -15,7 +15,17 @@ import {
 import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
 import { ToolHandlers } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import { IndexFingerprint } from '../config.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -391,7 +401,7 @@ test('handleSyncCodebase touches the watch list on success and handleClearIndex 
         const outlineResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const outlinePayload = parsePayload(outlineResponse);
         assert.equal(outlinePayload.status, 'not_indexed');
         assert.equal(outlinePayload.reason, 'not_indexed');
@@ -667,7 +677,7 @@ test('navigation remains non-mutating and blocks while watcher events are pendin
         const outlineResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/auth.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const outlinePayload = parsePayload(outlineResponse);
         assert.equal(outlinePayload.status, 'not_ready');
         assert.equal(outlinePayload.reason, 'source_state_unverified');
@@ -686,7 +696,7 @@ test('navigation remains non-mutating and blocks while watcher events are pendin
             direction: 'both',
             depth: 1,
             limit: 5
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const graphPayload = parsePayload(graphResponse);
         assert.equal(graphPayload.status, 'not_ready');
         assert.equal(graphPayload.reason, 'source_state_unverified');
@@ -737,7 +747,7 @@ test('navigation discards an outline when a watcher event is consumed during con
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/auth.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = parsePayload(response);
 
         assert.equal(payload.status, 'not_ready');
@@ -985,7 +995,7 @@ test('navigation never mixes a prepared publication with a later active publicat
         const outlineResponse = await outlineCandidate.handlers.handleFileOutline({
             path: repoPath,
             file: 'src/auth.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const outlinePayload = parsePayload(outlineResponse);
         assert.equal(outlinePayload.status, 'not_ready');
         assert.equal(outlinePayload.reason, 'source_state_unverified');
@@ -1002,7 +1012,7 @@ test('navigation never mixes a prepared publication with a later active publicat
             direction: 'both',
             depth: 1,
             limit: 5,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const graphPayload = parsePayload(graphResponse);
         assert.equal(graphPayload.status, 'not_ready');
         assert.equal(graphPayload.reason, 'source_state_unverified');

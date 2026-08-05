@@ -33,6 +33,16 @@ import { IndexFingerprint } from '../config.js';
 import { ToolHandlers } from './handlers.js';
 import type { SnapshotManager } from './snapshot.js';
 import { SyncManager } from './sync.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
@@ -481,7 +491,7 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
             const staleOutline = parsePayload(await handlers.handleFileOutline({
                 path: repoPath,
                 file: ignoredRelativePath,
-            }));
+            }, fixtureWorkspacePolicy(repoPath)));
             assert.equal(staleOutline.status, 'requires_reindex');
             assert.equal(staleOutline.outline, null);
             assert.equal(JSON.stringify(staleOutline).includes(oldSymbolInstanceId), false);
@@ -491,7 +501,7 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
                 file: ignoredRelativePath,
                 resolveMode: 'exact',
                 symbolIdExact: oldSymbolInstanceId,
-            }));
+            }, fixtureWorkspacePolicy(repoPath)));
             assert.equal(staleExactOutline.status, 'requires_reindex');
             assert.equal(staleExactOutline.outline, null);
 
@@ -524,7 +534,7 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
                 direction: 'both',
                 depth: 1,
                 limit: 10,
-            }));
+            }, fixtureWorkspacePolicy(repoPath)));
             assert.equal(staleCallGraph.status, 'requires_reindex');
             assert.equal(staleCallGraph.supported, false);
             assert.equal(staleCallGraph.reason, 'requires_reindex');

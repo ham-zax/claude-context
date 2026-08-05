@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import * as path from "path";
 import crypto from "node:crypto";
 import ignore from "ignore";
@@ -232,6 +231,7 @@ import {
     type RuntimeOwnerMutationGateResult,
 } from "./runtime-owner.js";
 import { MutationLeaseCoordinator, type RootMutationLease } from "./mutation-lease.js";
+import type { SessionWorkspacePolicy } from "./session-workspace-policy.js";
 
 const SEARCH_PARTIAL_INDEX_LIMIT_REACHED_WARNING = 'SEARCH_PARTIAL_INDEX:limit_reached';
 const SEARCH_PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_WARNING = 'SEARCH_PARTIAL_INDEX_NAVIGATION_UNAVAILABLE';
@@ -3540,6 +3540,7 @@ export class ToolHandlers {
     private getRegistryFileFreshness(input: {
         symbols: SymbolRecord[];
         absoluteFile: string;
+        sourceBytes: Buffer;
     }): { status: 'fresh' | 'stale' | 'unknown' | 'inconsistent'; registryHash?: string; currentHash?: string } {
         const hashes = Array.from(new Set(input.symbols.map((symbol) => symbol.fileHash).filter(Boolean)));
         if (hashes.length === 0 || hashes.some((hash) => !this.isSha256HexHash(hash))) {
@@ -3550,7 +3551,10 @@ export class ToolHandlers {
         }
 
         const registryHash = hashes[0];
-        const sourceBytes = fs.readFileSync(input.absoluteFile);
+        // The freshness hash is computed over the same bytes the caller
+        // already read through an authorized descriptor; this path never
+        // re-reads the file by pathname.
+        const sourceBytes = input.sourceBytes;
         const sourceObservation = beginSourceMeasurementObservation({
             owner: sourceIoOwnerForCurrentOperation('outline'),
             filePath: input.absoluteFile,
@@ -3561,7 +3565,7 @@ export class ToolHandlers {
             observation: sourceObservation,
             startByte: 0,
             endByte: sourceBytes.length,
-            basis: 'path_read',
+            basis: 'descriptor_read',
         });
         finishSourceMeasurementObservation({
             observation: sourceObservation,
@@ -3680,6 +3684,7 @@ export class ToolHandlers {
         direction: CallGraphDirection;
         depth: number;
         limit: number;
+        readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
     }): Promise<{
         supported: true;
         direction: CallGraphDirection;
@@ -5493,12 +5498,12 @@ export class ToolHandlers {
         });
     }
 
-    public async handleFileOutline(args: FileOutlineInput) {
-        return this.navigationHandlers.handleFileOutline(args);
+    public async handleFileOutline(args: FileOutlineInput, workspacePolicy: SessionWorkspacePolicy) {
+        return this.navigationHandlers.handleFileOutline(args, workspacePolicy);
     }
 
-    public async handleCallGraph(args: ToolArgs) {
-        return this.navigationHandlers.handleCallGraph(args);
+    public async handleCallGraph(args: ToolArgs, workspacePolicy: SessionWorkspacePolicy) {
+        return this.navigationHandlers.handleCallGraph(args, workspacePolicy);
     }
 
     public async handleClearIndex(args: ToolArgs) {

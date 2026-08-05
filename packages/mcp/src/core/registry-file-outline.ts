@@ -107,6 +107,7 @@ export async function buildRegistryFileOutlinePayload(input: {
     warnings?: string[];
     buildCallGraphHint: (symbol: SymbolRecord) => CallGraphHint;
     buildOutlineSpanWarningCodes: (repair: PythonSourceBackedSpanRepair | undefined) => string[];
+    readSourceLines: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
 }): Promise<FileOutlineResponseEnvelope> {
     // Symbol keys bind the repo-relative file, so this complete file-scoped
     // registry view contains every possible parent-key candidate.
@@ -208,9 +209,10 @@ export async function buildRegistryFileOutlinePayload(input: {
         };
     }
 
-    const repairs = repairSourceBackedPythonSpans({
+    const repairs = await repairSourceBackedPythonSpans({
         codebaseRoot: input.codebaseRoot,
         symbols: input.symbols,
+        readSourceLines: input.readSourceLines,
     });
     const repairedSymbols = repairs.map((repair) => repair.symbol);
     const repairBySymbolId = new Map(repairs.map((repair) => [repair.symbol.symbolInstanceId, repair]));

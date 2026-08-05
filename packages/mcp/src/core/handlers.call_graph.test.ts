@@ -17,7 +17,17 @@ import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest } from '@
 import { ToolHandlers } from './handlers.js';
 import { resolveInboundCoverageReason } from './relationship-backed-call-graph.js';
 import { CapabilityResolver } from './capabilities.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import { IndexFingerprint } from '../config.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -228,7 +238,7 @@ test('handleCallGraph returns requires_reindex without internal freshness eviden
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         assert.equal(response.isError, undefined);
         const payload = JSON.parse(response.content[0]?.text || '{}');
@@ -297,7 +307,10 @@ test('handleCallGraph allows source-backed traversal under runtime fingerprint m
                 symbols: [symbol],
                 manifestHash: 'manifest-hash',
                 warnings: [],
-                registry: { manifest: { builtAt: new Date('2026-01-01T00:00:00.000Z').toISOString() } },
+                registry: buildSymbolRegistry({
+                    manifest: navigationManifest([{ path: 'src/runtime.ts', hash: fileHash, language: 'typescript', symbolCount: 1, definitionStatus: 'definitions_present' }]),
+                    symbols: [symbol],
+                }),
             }),
             getCompatibilityState: async () => ({
                 relationships: {
@@ -352,7 +365,7 @@ test('handleCallGraph allows source-backed traversal under runtime fingerprint m
             direction: 'callees',
             depth: 1,
             limit: 5,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -403,7 +416,7 @@ test('handleCallGraph returns requires_reindex when snapshot marks codebase bloc
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
@@ -452,7 +465,7 @@ test('handleCallGraph reports partial index navigation unavailable for limit_rea
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
@@ -511,7 +524,7 @@ test('handleCallGraph returns requires_reindex for indexed roots that only have 
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
@@ -584,7 +597,7 @@ test('handleCallGraph traverses compatible relationship sidecars without requiri
             direction: 'callees',
             depth: 2,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -669,7 +682,7 @@ test('handleCallGraph discloses partial inbound coverage and verification for ze
                 direction,
                 depth: 1,
                 limit: 20,
-            });
+            }, fixtureWorkspacePolicy(repoPath));
             const payload = JSON.parse(response.content[0]?.text || '{}');
             assert.equal(payload.status, 'ok');
             assert.equal(payload.edges.length, direction === 'both' ? 1 : 0);
@@ -708,7 +721,7 @@ test('handleCallGraph discloses partial inbound coverage and verification for ze
             direction: 'callees',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const calleesPayload = JSON.parse(calleesResponse.content[0]?.text || '{}');
         assert.equal(calleesPayload.edges.length, 1);
         assert.ok(!calleesPayload.warnings?.includes('CALL_GRAPH_INBOUND_COVERAGE_PARTIAL'));
@@ -813,7 +826,7 @@ test('handleCallGraph synthesizes source-backed Python callees when stored span 
             direction: 'callees',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -942,7 +955,7 @@ test('handleCallGraph does not synthesize Python callee fallback for unbound cro
             direction: 'callees',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1041,7 +1054,7 @@ test('handleCallGraph surfaces suppressed low-confidence Python candidates and r
             direction: 'callees',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const calleesPayload = JSON.parse(calleesResponse.content[0]?.text || '{}');
         assert.equal(calleesPayload.status, 'ok');
@@ -1072,7 +1085,7 @@ test('handleCallGraph surfaces suppressed low-confidence Python candidates and r
             direction: 'callers',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
         assert.equal(callersPayload.status, 'ok');
@@ -1192,7 +1205,7 @@ test('handleCallGraph does not synthesize Python caller fallback when the suppre
             direction: 'callers',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
         assert.equal(callersPayload.status, 'ok');
@@ -1306,7 +1319,7 @@ test('handleCallGraph notes-only inbound fallback path uses unique cross-file ca
             direction: 'callers',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
         assert.equal(payload.edges.length, 0);
@@ -1416,7 +1429,7 @@ test('handleCallGraph notes-only inbound omits path: when suppressed callers spa
             direction: 'callers',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
         assert.equal(payload.edges.length, 0);
@@ -1530,7 +1543,7 @@ test('handleCallGraph node ordering is independent of String.prototype.localeCom
                 direction: 'callers',
                 depth: 1,
                 limit: 20,
-            });
+            }, fixtureWorkspacePolicy(repoPath));
             const payload = JSON.parse(response.content[0]?.text || '{}');
             assert.equal(payload.status, 'ok');
             assert.equal(payload.edges.length, 2);
@@ -1549,7 +1562,7 @@ test('handleCallGraph node ordering is independent of String.prototype.localeCom
                 direction: 'callers',
                 depth: 1,
                 limit: 20,
-            });
+            }, fixtureWorkspacePolicy(repoPath));
             const second = JSON.parse(response2.content[0]?.text || '{}').edges.map(
                 (edge: { srcSymbolId: string; dstSymbolId: string }) => `${edge.srcSymbolId}->${edge.dstSymbolId}`,
             );
@@ -1657,7 +1670,7 @@ test('handleCallGraph does not synthesize Python caller fallback when the record
             direction: 'callers',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
         assert.equal(callersPayload.status, 'ok');
@@ -1762,7 +1775,7 @@ test('handleCallGraph does not synthesize Python caller fallback when the valida
             direction: 'callers',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
         assert.equal(callersPayload.status, 'ok');
@@ -1863,7 +1876,7 @@ test('handleCallGraph does not accept legacy v3 symbol ids as steady-state exact
             direction: 'callees',
             depth: 2,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
@@ -1933,7 +1946,7 @@ test('handleCallGraph does not accept symbolKey as a steady-state exact input', 
             direction: 'callees',
             depth: 2,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
@@ -2013,7 +2026,7 @@ test('handleCallGraph treats an optional symbol label as advisory to the exact s
                 direction: 'callees',
                 depth: 2,
                 limit: 20
-            });
+            }, fixtureWorkspacePolicy(repoPath));
 
             const payload = JSON.parse(response.content[0]?.text || '{}');
             assert.equal(payload.status, 'ok', symbolLabel);
@@ -2138,7 +2151,7 @@ test('handleCallGraph returns relationship-backed test references without mergin
             direction: 'callees',
             depth: 2,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -2277,7 +2290,7 @@ test('handleCallGraph includes import/export-backed cross-file CALLS v0 edges in
             direction: 'callees',
             depth: 2,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -2417,7 +2430,7 @@ test('handleCallGraph includes Python relative-import-backed cross-file CALLS v0
             direction: 'callees',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const calleesPayload = JSON.parse(calleesResponse.content[0]?.text || '{}');
         assert.equal(calleesPayload.status, 'ok');
@@ -2441,7 +2454,7 @@ test('handleCallGraph includes Python relative-import-backed cross-file CALLS v0
             direction: 'callers',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
         assert.equal(callersPayload.status, 'ok');
@@ -2499,7 +2512,7 @@ test('handleCallGraph maps missing_symbol to status not_found', async () => {
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
@@ -2555,7 +2568,7 @@ test('handleCallGraph maps unsupported_language to status unsupported', async ()
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'unsupported');
@@ -2607,7 +2620,7 @@ test('handleCallGraph returns not_ready envelope when codebase is indexing', asy
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_ready');
@@ -2658,7 +2671,7 @@ test('handleCallGraph failed-index payload preserves failure diagnostics', async
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_indexed');
@@ -2765,7 +2778,7 @@ test('handleCallGraph records constructor resolution as the applicable inbound p
             direction: 'callers',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
         assert.equal(payload.edges.length, 0);
@@ -2867,7 +2880,7 @@ test('handleCallGraph reports fallback_failed evidence when suppressed callers c
             direction: 'callers',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const callersPayload = JSON.parse(callersResponse.content[0]?.text || '{}');
         assert.equal(callersPayload.status, 'ok');
         assert.equal(callersPayload.edges.length, 0);
@@ -2941,7 +2954,7 @@ test('handleCallGraph records constructorResolutionApplicable for Python class t
             direction: 'callers',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
         assert.equal(payload.edges.length, 0);
@@ -3040,7 +3053,7 @@ test('handleCallGraph returns cross-module constructor callers through the publi
             direction: 'callers',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
         assert.equal(payload.edges.length, 1);
@@ -3050,4 +3063,200 @@ test('handleCallGraph returns cross-module constructor callers through the publi
         assert.ok(payload.edges[0].confidence > 0, 'promoted direct-binding caller must carry confidence');
         assert.equal(payload.inboundCoverageEvidence, undefined);
     }));
+});
+
+test('handleCallGraph source fallback rejects an outside symlink', async () => {
+    await withTempRepo(async (repoPath) => {
+        const secret = path.join(os.tmpdir(), `satori-cg-outside-${process.pid}-${Date.now()}.txt`);
+        fs.writeFileSync(secret, 'CG-TOP-SECRET');
+        const symlinkFile = path.join(repoPath, 'src', 'leak.ts');
+        fs.symlinkSync(secret, symlinkFile);
+        const source = 'export function run() { return true; }\n';
+        const fileHash = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+        const symbol = createFunctionSymbol({
+            file: 'src/leak.ts',
+            name: 'run',
+            qualifiedName: 'src.leak.run',
+            label: 'function run()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            getVectorStore: () => ({ listCollections: async () => [] }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getAllCodebases: () => [{
+                path: repoPath,
+                info: {
+                    status: 'indexed',
+                    indexedFiles: 1,
+                    totalChunks: 1,
+                    indexStatus: 'completed',
+                    lastUpdated: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+                }
+            }],
+            getIndexedCodebases: () => [repoPath],
+            getIndexingCodebases: () => [],
+            getCodebaseInfo: () => undefined,
+            getCodebaseStatus: () => 'indexed',
+            ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+            saveCodebaseSnapshot: () => undefined,
+        } as unknown as HandlerSnapshotManager;
+        const navigationStore = {
+            getSymbolsByFile: async () => ({
+                status: 'ok',
+                symbols: [symbol],
+                manifestHash: 'manifest-hash',
+                warnings: [],
+                registry: buildSymbolRegistry({
+                    manifest: navigationManifest([{ path: 'src/leak.ts', hash: fileHash, language: 'typescript', symbolCount: 1, definitionStatus: 'definitions_present' }]),
+                    symbols: [symbol],
+                }),
+            }),
+            getCompatibilityState: async () => ({
+                relationships: {
+                    status: 'ok',
+                    manifest: { builtAt: new Date('2026-01-01T00:00:00.000Z').toISOString() },
+                },
+            }),
+        } as unknown as HandlerNavigationStore;
+        try {
+            const handlers = new ToolHandlers(
+                context,
+                snapshotManager,
+                {} as unknown as HandlerSyncManager,
+                RUNTIME_FINGERPRINT,
+                CAPABILITIES,
+                () => Date.parse('2026-01-01T01:00:00.000Z'),
+                undefined,
+                undefined,
+                undefined,
+                navigationStore,
+            );
+            (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+                outcome: 'valid',
+            });
+            const response = await handlers.handleCallGraph({
+                path: repoPath,
+                symbolRef: {
+                    file: 'src/leak.ts',
+                    symbolId: symbol.symbolInstanceId,
+                    symbolLabel: symbol.label,
+                    span: { startLine: 1, endLine: 1 },
+                },
+                direction: 'callers',
+                depth: 1,
+                limit: 5,
+            }, fixtureWorkspacePolicy(repoPath));
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            // The symbol file escapes the workspace through a symlink: the
+            // authorized open fails and the registry hash is present, so the
+            // existing stale-symbol contract applies. Never raw content.
+            assert.equal(payload.status, 'not_found');
+            assert.equal(payload.reason, 'stale_symbol_ref');
+            assert.equal(JSON.stringify(payload).includes('CG-TOP-SECRET'), false);
+        } finally {
+            fs.rmSync(secret, { force: true });
+        }
+    });
+});
+
+test('handleCallGraph ordinary published files retain existing graph results', async () => {
+    await withTempRepo(async (repoPath) => {
+        const source = 'export function run() { return true; }\n';
+        const fileHash = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+        const symbol = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'run',
+            qualifiedName: 'src.runtime.run',
+            label: 'function run()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            getVectorStore: () => ({ listCollections: async () => [] }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getAllCodebases: () => [{
+                path: repoPath,
+                info: {
+                    status: 'indexed',
+                    indexedFiles: 1,
+                    totalChunks: 1,
+                    indexStatus: 'completed',
+                    lastUpdated: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+                }
+            }],
+            getIndexedCodebases: () => [repoPath],
+            getIndexingCodebases: () => [],
+            getCodebaseInfo: () => undefined,
+            getCodebaseStatus: () => 'indexed',
+            ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+            saveCodebaseSnapshot: () => undefined,
+        } as unknown as HandlerSnapshotManager;
+        const navigationStore = {
+            getSymbolsByFile: async () => ({
+                status: 'ok',
+                symbols: [symbol],
+                manifestHash: 'manifest-hash',
+                warnings: [],
+                registry: buildSymbolRegistry({
+                    manifest: navigationManifest([{ path: 'src/runtime.ts', hash: fileHash, language: 'typescript', symbolCount: 1, definitionStatus: 'definitions_present' }]),
+                    symbols: [symbol],
+                }),
+            }),
+            getCompatibilityState: async () => ({
+                relationships: {
+                    status: 'ok',
+                    manifest: { builtAt: new Date('2026-01-01T00:00:00.000Z').toISOString() },
+                },
+            }),
+        } as unknown as HandlerNavigationStore;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+            () => Date.parse('2026-01-01T01:00:00.000Z'),
+            undefined,
+            undefined,
+            undefined,
+            navigationStore,
+        );
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+            outcome: 'valid',
+        });
+        (handlers as unknown as ToolHandlersTestOverrides).buildRelationshipBackedCallGraph = async () => ({
+            supported: true,
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+            nodes: [{ symbolId: symbol.symbolInstanceId, symbolLabel: symbol.label, file: symbol.file, language: symbol.language, span: symbol.span }],
+            edges: [],
+            notes: [],
+            notesTruncated: false,
+            totalNoteCount: 0,
+            returnedNoteCount: 0,
+        });
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: symbol.symbolInstanceId,
+                symbolLabel: symbol.label,
+                span: { startLine: 1, endLine: 1 },
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.nodes[0]?.symbolId, symbol.symbolInstanceId);
+    });
 });

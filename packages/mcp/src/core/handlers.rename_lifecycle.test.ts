@@ -32,6 +32,16 @@ import { ToolHandlers } from './handlers.js';
 import { SnapshotManager } from './snapshot.js';
 import { SyncManager } from './sync.js';
 import { MutationLeaseCoordinator } from './mutation-lease.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
@@ -697,7 +707,7 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
         const initialOutline = parsePayload(await handlers.handleFileOutline({
             path: repoPath,
             file: oldRelativePath,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(initialOutline.status, 'ok');
         const oldLoginSymbol = findSymbol(initialOutline, 'login');
         const oldSymbolInstanceId = oldLoginSymbol.symbolId;
@@ -729,13 +739,13 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
         const oldOutline = parsePayload(await handlers.handleFileOutline({
             path: repoPath,
             file: oldRelativePath,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(oldOutline.status, 'not_found');
 
         const newOutline = parsePayload(await handlers.handleFileOutline({
             path: repoPath,
             file: newRelativePath,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(newOutline.status, 'ok');
         const newLoginSymbol = findSymbol(newOutline, 'login');
         assert.equal(newLoginSymbol.symbolId, newLoginGroup.target.symbolId);
@@ -745,7 +755,7 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
             file: newRelativePath,
             resolveMode: 'exact',
             symbolIdExact: oldSymbolInstanceId,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(oldExactOutline.status, 'not_found');
 
         const newExactOutline = parsePayload(await handlers.handleFileOutline({
@@ -753,7 +763,7 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
             file: newRelativePath,
             resolveMode: 'exact',
             symbolIdExact: newLoginGroup.target.symbolId,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(newExactOutline.status, 'ok');
         const newExactSymbols = (newExactOutline.outline as { symbols?: OutlineSymbol[] }).symbols || [];
         assert.equal(newExactSymbols[0]?.symbolId, newLoginGroup.target.symbolId);
@@ -804,7 +814,7 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
             direction: 'both',
             depth: 1,
             limit: 10,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(oldCallGraph.status, 'not_found');
         assert.equal(oldCallGraph.supported, false);
         assert.equal(oldCallGraph.reason, 'missing_symbol');
@@ -815,7 +825,7 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
             direction: 'both',
             depth: 1,
             limit: 10,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(newCallGraph.status, 'ok');
         assert.equal(JSON.stringify(newCallGraph).includes(oldSymbolInstanceId), false);
         const newCallGraphNodes = newCallGraph.nodes as Array<{ symbolId?: string }> | undefined;
@@ -1033,7 +1043,7 @@ test('MCP direct navigation fails closed for dirty files until search freshness 
         const initialOutline = parsePayload(await handlers.handleFileOutline({
             path: repoPath,
             file: relativePath,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(initialOutline.status, 'ok');
         const oldRunSymbol = findSymbol(initialOutline, 'run');
         const oldSymbolInstanceId = oldRunSymbol.symbolId;
@@ -1079,7 +1089,7 @@ test('MCP direct navigation fails closed for dirty files until search freshness 
             file: relativePath,
             resolveMode: 'exact',
             symbolIdExact: oldSymbolInstanceId,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(staleExactOutline.status, 'requires_reindex');
         assert.equal(staleExactOutline.reason, 'stale_symbol_ref');
         assert.equal(ensureFreshnessCalls, 0);
@@ -1141,7 +1151,7 @@ test('MCP direct navigation fails closed for dirty files until search freshness 
             direction: 'both',
             depth: 1,
             limit: 10,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(staleCallGraph.status, 'not_found');
         assert.equal(staleCallGraph.reason, 'stale_symbol_ref');
         assert.equal(staleCallGraph.supported, false);
@@ -1167,7 +1177,7 @@ test('MCP direct navigation fails closed for dirty files until search freshness 
             file: relativePath,
             resolveMode: 'exact',
             symbolIdExact: freshGroup.target.symbolId,
-        }));
+        }, fixtureWorkspacePolicy(repoPath)));
         assert.equal(freshExactOutline.status, 'ok');
         const freshExactSymbols = (freshExactOutline.outline as { symbols?: OutlineSymbol[] }).symbols || [];
         assert.equal(freshExactSymbols[0]?.symbolId, freshGroup.target.symbolId);

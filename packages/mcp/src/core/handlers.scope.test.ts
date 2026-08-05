@@ -12,6 +12,7 @@ import {
     ToolHandlers,
 } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import { IndexFingerprint } from '../config.js';
 import {
     SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
@@ -32,6 +33,15 @@ import {
     RerankerRequestError,
 } from '@zokizuan/satori-core';
 import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -3575,7 +3585,7 @@ test('successful coalesced freshness supports chained search_codebase to call_gr
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const graphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
         assert.equal(graphPayload.status, 'ok');
@@ -6102,7 +6112,7 @@ test('handleSearchCode compacts multiline signatures without leaking parameter f
     });
 });
 
-test('handleSearchCode repairs registry-owned Python multiline spans before exposing navigation actions', async () => {
+test('handleSearchCode keeps as-indexed Python spans when no authorized source lines are available', async () => {
     await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
         const relativePath = 'src/phases.py';
         const source = [
@@ -6171,20 +6181,23 @@ test('handleSearchCode repairs registry-owned Python multiline spans before expo
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
-        assert.equal(payload.results[0].target.span.startLine, 4);
-        assert.equal(payload.results[0].target.span.endLine, 15);
-        assert.deepEqual(payload.results[0].evidenceSpan, { startLine: 4, endLine: 9 });
+        // No authorized source lines reach search result rendering, so the
+        // shared Python span repair fails closed: the target keeps its
+        // as-indexed span and no pathname-derived warnings are emitted.
+        assert.equal(payload.results[0].target.span.startLine, 2);
+        assert.equal(payload.results[0].target.span.endLine, 9);
+        assert.equal(payload.results[0].evidenceSpan, undefined);
         assert.equal(payload.results[0].target.symbolId, owner.symbolInstanceId);
         assert.equal(payload.results[0].quality.owner, 'high');
         assert.equal(payload.results[0].navigation.graph, 'ready');
         assert.equal(payload.recommendedNextAction?.args?.open_symbol?.symbolId, owner.symbolInstanceId);
         assert.equal(payload.results[0].nextActions, undefined);
-        assert.ok(warningCodes(payload).includes('SEARCH_SPAN_START_BEFORE_DEF'));
-        assert.ok(warningCodes(payload).includes('SEARCH_TRUNCATED_SYMBOL_SPAN'));
+        assert.equal(warningCodes(payload).includes('SEARCH_SPAN_START_BEFORE_DEF'), false);
+        assert.equal(warningCodes(payload).includes('SEARCH_TRUNCATED_SYMBOL_SPAN'), false);
     }));
 });
 
-test('handleSearchCode downgrades openSymbol capability when Python span validation fails', async () => {
+test('handleSearchCode keeps openSymbol capability at default quality when Python source validation is not applicable', async () => {
     await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
         const relativePath = 'src/phases.py';
         const currentSource = [
@@ -6248,9 +6261,11 @@ test('handleSearchCode downgrades openSymbol capability when Python span validat
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results[0].target.span.startLine, 1);
         assert.equal(payload.results[0].target.span.endLine, 6);
-        assert.equal(payload.results[0].quality.owner, 'medium');
+        // Repair is not attempted without authorized source lines, so
+        // span validation is "not_applicable" and quality stays high.
+        assert.equal(payload.results[0].quality.owner, 'high');
         assert.equal(payload.results[0].capabilities, undefined);
-        assert.ok(warningCodes(payload).includes('SEARCH_SYMBOL_SPAN_UNVERIFIED'));
+        assert.equal(warningCodes(payload).includes('SEARCH_SYMBOL_SPAN_UNVERIFIED'), false);
     }));
 });
 

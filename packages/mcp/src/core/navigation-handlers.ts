@@ -13,6 +13,15 @@ import {
     type PythonSourceBackedSpanRepair,
 } from "./python-call-fallback.js";
 import {
+    openAuthorizedPublishedFile,
+    PublishedFileAuthorizationError,
+    type AuthorizedPublishedFile,
+} from "./published-file-authorization.js";
+import {
+    WorkspaceAuthorizationError,
+    type SessionWorkspacePolicy,
+} from "./session-workspace-policy.js";
+import {
     buildRegistryFileOutlinePayload,
     findExactRegistrySymbols,
 } from "./registry-file-outline.js";
@@ -92,6 +101,7 @@ type NavigationHandlersHost = {
     getRegistryFileFreshness(input: {
         symbols: SymbolRecord[];
         absoluteFile: string;
+        sourceBytes: Buffer;
     }): { status: "fresh" | "stale" | "unknown" | "inconsistent"; registryHash?: string; currentHash?: string };
     buildStaleSymbolRefFileOutlinePayload(codebasePath: string, args: Record<string, unknown>, detail?: string): FileOutlineResponseEnvelope;
     loadRegistryValidatedCallGraphSidecar(input: {
@@ -173,6 +183,7 @@ type NavigationHandlersHost = {
         direction: CallGraphDirection;
         depth: number;
         limit: number;
+        readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
     }): Promise<{
         supported: true;
         direction: CallGraphDirection;
@@ -462,7 +473,10 @@ function formatUnknownError(error: unknown): string {
 export class NavigationHandlers {
     constructor(private readonly host: NavigationHandlersHost) {}
 
-    public async handleFileOutline(args: FileOutlineInput): Promise<ToolTextResponse> {
+    public async handleFileOutline(
+        args: FileOutlineInput,
+        workspacePolicy: SessionWorkspacePolicy,
+    ): Promise<ToolTextResponse> {
         const limitSymbols = Number.isFinite(args?.limitSymbols)
             ? Math.max(1, Number(args.limitSymbols))
             : 500;
@@ -637,19 +651,6 @@ export class NavigationHandlers {
                 ? this.host.getPreparedReadCacheObservation(effectiveRoot)
                 : undefined;
             const absoluteFile = path.resolve(effectiveRoot, normalizedFile);
-            const relativeToRoot = path.relative(effectiveRoot, absoluteFile);
-            if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
-                const payload = this.host.buildInvalidFileOutlineRequestPayload(
-                    effectiveRoot,
-                    normalizedFile,
-                    `File '${normalizedFile}' must be inside codebase root '${effectiveRoot}'.`,
-                    "not_found",
-                );
-                return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
-                    isError: true,
-                };
-            }
 
             const proofDebugHint = trackedRootState.proofDebugHint;
 
@@ -668,35 +669,6 @@ export class NavigationHandlers {
                 };
             }
 
-            if (!fs.existsSync(absoluteFile)) {
-                const payload: FileOutlineResponseEnvelope = {
-                    status: "not_found",
-                    path: effectiveRoot,
-                    file: normalizedFile,
-                    outline: null,
-                    hasMore: false,
-                    message: `File '${normalizedFile}' does not exist under codebase root '${effectiveRoot}'.`,
-                };
-                return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(payload, proofDebugHint)) }],
-                };
-            }
-
-            const fileStat = fs.statSync(absoluteFile);
-            if (!fileStat.isFile()) {
-                const payload: FileOutlineResponseEnvelope = {
-                    status: "not_found",
-                    path: effectiveRoot,
-                    file: normalizedFile,
-                    outline: null,
-                    hasMore: false,
-                    message: `'${normalizedFile}' is not a file.`,
-                };
-                return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(payload, proofDebugHint)) }],
-                };
-            }
-
             const windowStart = requestedStartLine;
             const windowEnd = requestedEndLine && requestedStartLine
                 ? Math.max(requestedEndLine, requestedStartLine)
@@ -706,239 +678,90 @@ export class NavigationHandlers {
                 trackedRootState,
                 normalizedFile,
             );
-            if (registryState.status === "ok") {
-                const registrySymbols = registryState.symbols;
-                if (registrySymbols.length > 0) {
-                    const fileFreshness = this.host.getRegistryFileFreshness({
-                        symbols: registrySymbols,
-                        absoluteFile,
+            if (registryState.status !== "ok") {
+                // No navigation publication authority exists for this root.
+                // Fail closed through the session workspace policy before any
+                // existence probe or content read: a workspace denial is
+                // surfaced deterministically, and in-workspace files keep the
+                // existing missing-file / missing-registry contract.
+                try {
+                    workspacePolicy.authorizePath(absoluteFile);
+                } catch (error) {
+                    return this.mapNavigationAuthorizationDenial({
+                        error,
+                        effectiveRoot,
+                        normalizedFile,
+                        args,
+                        proofDebugHint,
+                        fallbackStatus: "not_found",
+                        fallbackMessage: `File '${normalizedFile}' is not readable under codebase root '${effectiveRoot}'.`,
                     });
-                    if (fileFreshness.status === "inconsistent") {
-                        const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexFileOutlinePayload(effectiveRoot, {
-                            ...args,
-                            file: normalizedFile,
-                        }, `Symbol registry contains inconsistent file hashes for '${normalizedFile}'.`, "incompatible_symbol_registry"), proofDebugHint);
-                        return {
-                            content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
-                        };
-                    }
-                    if (fileFreshness.status === "stale") {
-                        const payload = this.host.withProofDebugHint(this.host.buildStaleSymbolRefFileOutlinePayload(effectiveRoot, {
-                            ...args,
-                            file: normalizedFile,
-                        }, `File '${normalizedFile}' has changed since the symbol registry snapshot was published.`), proofDebugHint);
-                        return {
-                            content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
-                        };
-                    }
-
-                    const relationshipGraph = await this.host.loadRegistryValidatedCallGraphSidecar({
-                        codebaseRoot: effectiveRoot,
-                        registryManifestHash: registryState.manifestHash,
-                        preparedRead: trackedRootState,
-                    });
-                    const outlineWarnings: string[] = [];
-                    if (relationshipGraph.warning) {
-                        outlineWarnings.push(`OUTLINE_${relationshipGraph.warning}`);
-                    }
-                    const payload = await buildRegistryFileOutlinePayload({
-                        codebaseRoot: effectiveRoot,
+                }
+                if (!fs.existsSync(absoluteFile) || !fs.statSync(absoluteFile).isFile()) {
+                    const payload: FileOutlineResponseEnvelope = {
+                        status: "not_found",
+                        path: effectiveRoot,
                         file: normalizedFile,
-                        symbols: registrySymbols,
+                        outline: null,
+                        hasMore: false,
+                        message: `File '${normalizedFile}' does not exist under codebase root '${effectiveRoot}'.`,
+                    };
+                    return {
+                        content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(payload, proofDebugHint)) }],
+                    };
+                }
+            } else {
+                const publishedRelativePaths = new Set(
+                    registryState.registry.manifest.files.map((file) => file.path),
+                );
+                let authorizedFile: AuthorizedPublishedFile;
+                try {
+                    authorizedFile = await openAuthorizedPublishedFile({
+                        workspacePolicy,
+                        codebaseRoot: effectiveRoot,
+                        requestedPath: absoluteFile,
+                        publishedRelativePaths,
+                    });
+                } catch (error) {
+                    return this.mapNavigationAuthorizationDenial({
+                        error,
+                        effectiveRoot,
+                        normalizedFile,
+                        args,
+                        proofDebugHint,
+                        fallbackStatus: "not_found",
+                        fallbackMessage: `File '${normalizedFile}' is not readable under codebase root '${effectiveRoot}'.`,
+                    });
+                }
+                const sourceBytes = await authorizedFile.handle.readFile();
+                try {
+                    return await this.buildFileOutlineFromAuthorizedFile({
+                        args,
+                        effectiveRoot,
+                        normalizedFile,
+                        absoluteFile,
+                        sourceBytes,
+                        registryState,
+                        trackedRootState,
+                        proofDebugHint,
                         limitSymbols,
                         resolveMode,
                         symbolIdExact,
                         symbolLabelExact,
                         windowStart,
                         windowEnd,
-                        warnings: outlineWarnings.length > 0 ? outlineWarnings : undefined,
-                        buildCallGraphHint: (symbol) => this.host.buildRegistrySymbolCallGraphHint(symbol, normalizedFile, relationshipGraph),
-                        buildOutlineSpanWarningCodes: (repair) => this.host.buildOutlineSpanWarningCodes(repair),
-                    });
-                    await this.host.touchWatchedCodebase(effectiveRoot);
-                    let projectedPayload = payload;
-                    if (detail === "analysis" && payload.status === "ok") {
-                        if (
-                            !analysisBarrier
-                            || analysisBarrier.observation === null
-                            || analysisBarrier.sourceObservation === null
-                            || analysisBarrier.unavailableReason !== undefined
-                        ) {
-                            projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                                effectiveRoot,
-                                normalizedFile,
-                                "Satori could not verify this analysis against the current source.",
-                            );
-                        } else {
-                            const selectedSymbol = payload.outline?.symbols[0];
-                            if (!selectedSymbol) {
-                                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                                    effectiveRoot,
-                                    normalizedFile,
-                                    "No exact canonical symbol was available for structural analysis.",
-                                );
-                            } else if (selectedSymbol.language !== "python") {
-                                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                                    effectiveRoot,
-                                    normalizedFile,
-                                    "Structural analysis v1 is available only for Python symbols.",
-                                    "unsupported_language",
-                                );
-                            } else {
-                                const analysisResult = await analyzePythonSymbolStructure({
-                                    content: fs.readFileSync(absoluteFile, "utf8"),
-                                    symbol: {
-                                        kind: selectedSymbol.kind,
-                                        name: selectedSymbol.name,
-                                        qualifiedName: selectedSymbol.qualifiedName,
-                                        span: selectedSymbol.span,
-                                    },
-                                });
-                                const finalBarrier = this.host.getPreparedReadCacheObservation(effectiveRoot);
-                                if (!sourceBarrierMatches(analysisBarrier, finalBarrier)) {
-                                    projectedPayload = buildSourceStateUnverifiedFileOutlinePayload(
-                                        this.host,
-                                        effectiveRoot,
-                                        normalizedFile,
-                                        "source_changed_during_request",
-                                        {
-                                            ...args,
-                                            path: effectiveRoot,
-                                            file: normalizedFile,
-                                        },
-                                    );
-                                } else if (analysisResult.status === "ok") {
-                                    projectedPayload = withPythonStructuralAnalysis(
-                                        payload,
-                                        analysisResult.analysis,
-                                    );
-                                } else {
-                                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                                        effectiveRoot,
-                                        normalizedFile,
-                                        analysisResult.reason === "unsupported_symbol_kind"
-                                            ? "Structural analysis v1 supports Python functions and methods only."
-                                            : `Python structural analysis is unavailable (${analysisResult.reason}).`,
-                                        analysisResult.reason === "unsupported_symbol_kind"
-                                            ? "unsupported_symbol_kind"
-                                            : "analysis_unavailable",
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    if (detail === "relationships" && payload.status === "ok") {
-                        const selectedSymbol = payload.outline?.symbols[0];
-                        const target = selectedSymbol
-                            ? registryState.registry.symbolsByInstanceId.get(selectedSymbol.symbolId)
-                            : undefined;
-                        if (!selectedSymbol || !target) {
-                            projectedPayload = withRelationshipMetadata(
-                                payload,
-                                unavailableRelationshipMetadata("unavailable"),
-                            );
-                        } else if (!this.host.isCallGraphLanguageSupported(
-                            selectedSymbol.language,
-                            selectedSymbol.file,
-                        )) {
-                            projectedPayload = withRelationshipMetadata(
-                                payload,
-                                unavailableRelationshipMetadata("unsupported"),
-                            );
-                        } else if (!preparedNavigationReadWasCurrent) {
-                            projectedPayload = withRelationshipMetadata(
-                                payload,
-                                unavailableRelationshipMetadata("unavailable"),
-                            );
-                        } else {
-                            const navigationBinding = trackedRootState.generationReceipt?.navigation;
-                            const compatibility = navigationBinding
-                                ? await this.host.loadPreparedNavigationCompatibility(
-                                    trackedRootState,
-                                    registryState.manifestHash,
-                                )
-                                : undefined;
-                            const relationshipState = compatibility?.relationships;
-                            const traversals = (
-                                navigationBinding
-                                && registryState.manifestHash === navigationBinding.symbolRegistryManifestHash
-                                && relationshipState?.status === "ok"
-                                && relationshipState.manifestHash === navigationBinding.relationshipManifestHash
-                            )
-                                ? await prepareRelationshipTraversals({
-                                    rootPath: effectiveRoot,
-                                    registryManifestIdentity: registryState.manifestHash,
-                                    relationshipManifestIdentity: relationshipState.manifestHash,
-                                    registry: registryState.registry,
-                                    target,
-                                    relationshipManifest: relationshipState.manifest,
-                                    relationshipRecords: relationshipState.records,
-                                    relationshipWarnings: relationshipState.warnings || [],
-                                })
-                                : undefined;
-                            if (
-                                !traversals
-                                || !this.host.isPreparedNavigationReadCurrent(trackedRootState)
-                            ) {
-                                projectedPayload = withRelationshipMetadata(
-                                    payload,
-                                    unavailableRelationshipMetadata("unavailable"),
-                                );
-                            } else {
-                                projectedPayload = withRelationshipMetadata(
-                                    payload,
-                                    buildPartialRelationshipMetadata({
-                                        targetSymbolId: target.symbolInstanceId,
-                                        callers: traversals.callers.edges,
-                                        callees: traversals.callees.edges,
-                                    }),
-                                );
-                            }
-                        }
-                    }
-                    const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-                    const guidedPayload = !preparedNavigationBarrierMatches(
+                        detail,
+                        analysisBarrier,
                         preparedNavigationReadWasCurrent,
-                        this.host.isPreparedNavigationReadCurrent(trackedRootState),
-                    ) || !navigationSourceBarrierMatches(
-                            navigationSourceBarrier,
-                            finalNavigationSourceBarrier,
-                        )
-                        ? buildSourceStateUnverifiedFileOutlinePayload(
-                            this.host,
-                            effectiveRoot,
-                            normalizedFile,
-                        )
-                        : projectedPayload;
-                    return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(guidedPayload, proofDebugHint)) }],
-                    };
+                        navigationSourceBarrier,
+                        workspacePolicy,
+                        publishedRelativePaths,
+                    });
+                } finally {
+                    await authorizedFile.handle.close().catch(() => undefined);
                 }
-
-                const languageStatus = this.host.getOutlineStatusForLanguage(normalizedFile);
-                if (languageStatus !== "ok") {
-                    const payload: FileOutlineResponseEnvelope = {
-                        status: "unsupported",
-                        reason: "unsupported_language",
-                        path: effectiveRoot,
-                        file: normalizedFile,
-                        outline: null,
-                        hasMore: false,
-                        message: `File '${normalizedFile}' is not supported for sidecar outline. Supported extensions: ${OUTLINE_SUPPORTED_EXTENSIONS.join(", ")}.`,
-                    };
-                    return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(payload, proofDebugHint)) }],
-                    };
-                }
-
-                const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexFileOutlinePayload(effectiveRoot, {
-                    ...args,
-                    file: normalizedFile,
-                }, `File '${normalizedFile}' is missing from the symbol registry for this snapshot.`, "missing_symbol_registry"), proofDebugHint);
-                return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
-                };
             }
+
 
             if (registryState.status === "incompatible") {
                 const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexFileOutlinePayload(effectiveRoot, {
@@ -992,7 +815,10 @@ export class NavigationHandlers {
         }
     }
 
-    public async handleCallGraph(args: ToolArgs): Promise<ToolTextResponse> {
+    public async handleCallGraph(
+        args: ToolArgs,
+        workspacePolicy: SessionWorkspacePolicy,
+    ): Promise<ToolTextResponse> {
         const rawDirection = args?.direction;
         const direction: CallGraphDirection = rawDirection === "callers" || rawDirection === "callees" || rawDirection === "both"
             ? rawDirection
@@ -1294,15 +1120,66 @@ export class NavigationHandlers {
                 };
             }
 
+            const publishedRelativePaths = new Set(
+                registryState.registry.manifest.files.map((file) => file.path),
+            );
+            const readAuthorizedSourceLines = async (
+                codebaseRoot: string,
+                relativeFilePath: string,
+            ): Promise<string[] | undefined> => {
+                try {
+                    const authorized = await openAuthorizedPublishedFile({
+                        workspacePolicy,
+                        codebaseRoot,
+                        requestedPath: path.resolve(codebaseRoot, relativeFilePath),
+                        publishedRelativePaths,
+                    });
+                    try {
+                        const sourceBytes = await authorized.handle.readFile();
+                        return sourceBytes.toString("utf8").split(/\r?\n/);
+                    } finally {
+                        await authorized.handle.close().catch(() => undefined);
+                    }
+                } catch (error) {
+                    if (error instanceof PublishedFileAuthorizationError || error instanceof WorkspaceAuthorizationError) {
+                        return undefined;
+                    }
+                    throw error;
+                }
+            };
+
+            const absoluteSymbolFile = path.resolve(effectiveRoot, normalizedSymbolFile);
+            let authorizedSymbolFile: AuthorizedPublishedFile | undefined;
+            let symbolSourceBytes: Buffer | undefined;
+            try {
+                authorizedSymbolFile = await openAuthorizedPublishedFile({
+                    workspacePolicy,
+                    codebaseRoot: effectiveRoot,
+                    requestedPath: absoluteSymbolFile,
+                    publishedRelativePaths,
+                });
+                symbolSourceBytes = await authorizedSymbolFile.handle.readFile();
+            } catch (error) {
+                if (!(error instanceof PublishedFileAuthorizationError) && !(error instanceof WorkspaceAuthorizationError)) {
+                    throw error;
+                }
+            } finally {
+                if (authorizedSymbolFile) {
+                    await authorizedSymbolFile.handle.close().catch(() => undefined);
+                }
+            }
+
             const resolvedSymbolRepair = repairSourceBackedPythonSpan({
                 codebaseRoot: effectiveRoot,
                 symbol: exactRegistrySymbols[0],
+                // Always supply source lines (empty when unauthorized) so the
+                // single-symbol repair can never fall back to a pathname read.
+                sourceLines: symbolSourceBytes !== undefined
+                    ? symbolSourceBytes.toString("utf8").split(/\r?\n/)
+                    : [],
             });
             const resolvedSymbol = resolvedSymbolRepair.symbol;
-            const absoluteSymbolFile = path.resolve(effectiveRoot, normalizedSymbolFile);
-            const relativeSymbolFile = path.relative(effectiveRoot, absoluteSymbolFile);
-            const symbolFileInsideRoot = !relativeSymbolFile.startsWith("..") && !path.isAbsolute(relativeSymbolFile);
-            if (!symbolFileInsideRoot || !fs.existsSync(absoluteSymbolFile) || !fs.statSync(absoluteSymbolFile).isFile()) {
+            if (symbolSourceBytes === undefined) {
                 if (exactRegistrySymbols.some((symbol) => this.host.isSha256HexHash(symbol.fileHash))) {
                     const payload = this.host.withProofDebugHint(this.host.buildStaleSymbolRefCallGraphPayload({
                         codebaseRoot: effectiveRoot,
@@ -1313,7 +1190,7 @@ export class NavigationHandlers {
                             depth,
                             limit,
                         },
-                        message: `Symbol reference points at '${normalizedSymbolFile}', but the current file is unavailable. Refresh the index before using exact call graph navigation.`,
+                        message: `Symbol reference points at '${normalizedSymbolFile}', but the current file is unavailable or not authorized. Refresh the index before using exact call graph navigation.`,
                     }), proofDebugHint);
                     return {
                         content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
@@ -1323,6 +1200,7 @@ export class NavigationHandlers {
                 const fileFreshness = this.host.getRegistryFileFreshness({
                     symbols: exactRegistrySymbols,
                     absoluteFile: absoluteSymbolFile,
+                    sourceBytes: symbolSourceBytes,
                 });
                 if (fileFreshness.status === "inconsistent") {
                     const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
@@ -1420,6 +1298,7 @@ export class NavigationHandlers {
                 direction,
                 depth,
                 limit,
+                readAuthorizedSourceLines,
             });
             if (!relationshipBackedGraph) {
                 const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
@@ -1489,5 +1368,321 @@ export class NavigationHandlers {
         } finally {
             releasePublicationReadLease?.();
         }
+    }
+
+    /**
+     * Map a workspace or publication authorization denial onto the existing
+     * file_outline denial contract: a structured `not_found` envelope with a
+     * stable message. Never raw content, never a permissive fallback.
+     */
+    private mapNavigationAuthorizationDenial(input: {
+        error: unknown;
+        effectiveRoot: string;
+        normalizedFile: string;
+        args: FileOutlineInput;
+        proofDebugHint?: CompletionProbeDebugHint;
+        fallbackStatus: FileOutlineStatus;
+        fallbackMessage: string;
+    }): ToolTextResponse {
+        const payload: FileOutlineResponseEnvelope = {
+            status: input.fallbackStatus,
+            path: input.effectiveRoot,
+            file: input.normalizedFile,
+            outline: null,
+            hasMore: false,
+            message: input.fallbackMessage,
+        };
+        return {
+            content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(payload, input.proofDebugHint)) }],
+            isError: true,
+        };
+    }
+
+    /**
+     * Build the file_outline response from source bytes already read through
+     * the publication-authorized descriptor. Every structural, freshness,
+     * and analysis read in this method consumes the authorized bytes or the
+     * injected authorized reader; no pathname-based read happens here.
+     */
+    private async buildFileOutlineFromAuthorizedFile(input: {
+        args: FileOutlineInput;
+        effectiveRoot: string;
+        normalizedFile: string;
+        absoluteFile: string;
+        sourceBytes: Buffer;
+        registryState: Extract<
+            Awaited<ReturnType<NavigationHandlersHost["loadPreparedNavigationSymbolsByFile"]>>,
+            { status: "ok" }
+        >;
+        trackedRootState: Extract<TrackedRootReadinessState, { state: "ready" }>;
+        proofDebugHint?: CompletionProbeDebugHint;
+        limitSymbols: number;
+        resolveMode: "exact" | "outline";
+        symbolIdExact?: string;
+        symbolLabelExact?: string;
+        windowStart?: number;
+        windowEnd?: number;
+        detail: "summary" | "analysis" | "relationships";
+        analysisBarrier?: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>;
+        preparedNavigationReadWasCurrent: boolean;
+        navigationSourceBarrier: ReturnType<NavigationHandlersHost["getWatcherObservation"]>;
+        workspacePolicy: SessionWorkspacePolicy;
+        publishedRelativePaths: ReadonlySet<string>;
+    }): Promise<ToolTextResponse> {
+        const {
+            args,
+            effectiveRoot,
+            normalizedFile,
+            absoluteFile,
+            sourceBytes,
+            registryState,
+            trackedRootState,
+            proofDebugHint,
+            limitSymbols,
+            resolveMode,
+            symbolIdExact,
+            symbolLabelExact,
+            windowStart,
+            windowEnd,
+            detail,
+            analysisBarrier,
+            preparedNavigationReadWasCurrent,
+            navigationSourceBarrier,
+            workspacePolicy,
+            publishedRelativePaths,
+        } = input;
+        const registrySymbols = registryState.symbols;
+
+        const fileFreshness = this.host.getRegistryFileFreshness({
+            symbols: registrySymbols,
+            absoluteFile,
+            sourceBytes,
+        });
+        if (fileFreshness.status === "inconsistent") {
+            const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexFileOutlinePayload(effectiveRoot, {
+                ...args,
+                file: normalizedFile,
+            }, `Symbol registry contains inconsistent file hashes for '${normalizedFile}'.`, "incompatible_symbol_registry"), proofDebugHint);
+            return {
+                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+            };
+        }
+        if (fileFreshness.status === "stale") {
+            const payload = this.host.withProofDebugHint(this.host.buildStaleSymbolRefFileOutlinePayload(effectiveRoot, {
+                ...args,
+                file: normalizedFile,
+            }, `File '${normalizedFile}' has changed since the symbol registry snapshot was published.`), proofDebugHint);
+            return {
+                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+            };
+        }
+
+        const readSourceLines = async (
+            codebaseRoot: string,
+            relativeFilePath: string,
+        ): Promise<string[] | undefined> => {
+            try {
+                const authorized = await openAuthorizedPublishedFile({
+                    workspacePolicy,
+                    codebaseRoot,
+                    requestedPath: path.resolve(codebaseRoot, relativeFilePath),
+                    publishedRelativePaths,
+                });
+                try {
+                    const bytes = await authorized.handle.readFile();
+                    return bytes.toString("utf8").split(/\r?\n/);
+                } finally {
+                    await authorized.handle.close().catch(() => undefined);
+                }
+            } catch (error) {
+                if (error instanceof PublishedFileAuthorizationError || error instanceof WorkspaceAuthorizationError) {
+                    return undefined;
+                }
+                throw error;
+            }
+        };
+
+        const relationshipGraph = await this.host.loadRegistryValidatedCallGraphSidecar({
+            codebaseRoot: effectiveRoot,
+            registryManifestHash: registryState.manifestHash,
+            preparedRead: trackedRootState,
+        });
+        const outlineWarnings: string[] = [];
+        if (relationshipGraph.warning) {
+            outlineWarnings.push(`OUTLINE_${relationshipGraph.warning}`);
+        }
+        const payload = await buildRegistryFileOutlinePayload({
+            codebaseRoot: effectiveRoot,
+            file: normalizedFile,
+            symbols: registrySymbols,
+            limitSymbols,
+            resolveMode,
+            symbolIdExact,
+            symbolLabelExact,
+            windowStart,
+            windowEnd,
+            warnings: outlineWarnings.length > 0 ? outlineWarnings : undefined,
+            buildCallGraphHint: (symbol) => this.host.buildRegistrySymbolCallGraphHint(symbol, normalizedFile, relationshipGraph),
+            buildOutlineSpanWarningCodes: (repair) => this.host.buildOutlineSpanWarningCodes(repair),
+            readSourceLines,
+        });
+        await this.host.touchWatchedCodebase(effectiveRoot);
+        let projectedPayload = payload;
+        if (detail === "analysis" && payload.status === "ok") {
+            if (
+                !analysisBarrier
+                || analysisBarrier.observation === null
+                || analysisBarrier.sourceObservation === null
+                || analysisBarrier.unavailableReason !== undefined
+            ) {
+                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                    effectiveRoot,
+                    normalizedFile,
+                    "Satori could not verify this analysis against the current source.",
+                );
+            } else {
+                const selectedSymbol = payload.outline?.symbols[0];
+                if (!selectedSymbol) {
+                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                        effectiveRoot,
+                        normalizedFile,
+                        "No exact canonical symbol was available for structural analysis.",
+                    );
+                } else if (selectedSymbol.language !== "python") {
+                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                        effectiveRoot,
+                        normalizedFile,
+                        "Structural analysis v1 is available only for Python symbols.",
+                        "unsupported_language",
+                    );
+                } else {
+                    const analysisResult = await analyzePythonSymbolStructure({
+                        content: sourceBytes.toString("utf8"),
+                        symbol: {
+                            kind: selectedSymbol.kind,
+                            name: selectedSymbol.name,
+                            qualifiedName: selectedSymbol.qualifiedName,
+                            span: selectedSymbol.span,
+                        },
+                    });
+                    const finalBarrier = this.host.getPreparedReadCacheObservation(effectiveRoot);
+                    if (!sourceBarrierMatches(analysisBarrier, finalBarrier)) {
+                        projectedPayload = buildSourceStateUnverifiedFileOutlinePayload(
+                            this.host,
+                            effectiveRoot,
+                            normalizedFile,
+                            "source_changed_during_request",
+                            {
+                                ...args,
+                                path: effectiveRoot,
+                                file: normalizedFile,
+                            },
+                        );
+                    } else if (analysisResult.status === "ok") {
+                        projectedPayload = withPythonStructuralAnalysis(
+                            payload,
+                            analysisResult.analysis,
+                        );
+                    } else {
+                        projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                            effectiveRoot,
+                            normalizedFile,
+                            analysisResult.reason === "unsupported_symbol_kind"
+                                ? "Structural analysis v1 supports Python functions and methods only."
+                                : `Python structural analysis is unavailable (${analysisResult.reason}).`,
+                            analysisResult.reason === "unsupported_symbol_kind"
+                                ? "unsupported_symbol_kind"
+                                : "analysis_unavailable",
+                        );
+                    }
+                }
+            }
+        }
+        if (detail === "relationships" && payload.status === "ok") {
+            const selectedSymbol = payload.outline?.symbols[0];
+            const target = selectedSymbol
+                ? registryState.registry.symbolsByInstanceId.get(selectedSymbol.symbolId)
+                : undefined;
+            if (!selectedSymbol || !target) {
+                projectedPayload = withRelationshipMetadata(
+                    payload,
+                    unavailableRelationshipMetadata("unavailable"),
+                );
+            } else if (!this.host.isCallGraphLanguageSupported(
+                selectedSymbol.language,
+                selectedSymbol.file,
+            )) {
+                projectedPayload = withRelationshipMetadata(
+                    payload,
+                    unavailableRelationshipMetadata("unsupported"),
+                );
+            } else if (!preparedNavigationReadWasCurrent) {
+                projectedPayload = withRelationshipMetadata(
+                    payload,
+                    unavailableRelationshipMetadata("unavailable"),
+                );
+            } else {
+                const navigationBinding = trackedRootState.generationReceipt?.navigation;
+                const compatibility = navigationBinding
+                    ? await this.host.loadPreparedNavigationCompatibility(
+                        trackedRootState,
+                        registryState.manifestHash,
+                    )
+                    : undefined;
+                const relationshipState = compatibility?.relationships;
+                const traversals = (
+                    navigationBinding
+                    && registryState.manifestHash === navigationBinding.symbolRegistryManifestHash
+                    && relationshipState?.status === "ok"
+                    && relationshipState.manifestHash === navigationBinding.relationshipManifestHash
+                )
+                    ? await prepareRelationshipTraversals({
+                        rootPath: effectiveRoot,
+                        registryManifestIdentity: registryState.manifestHash,
+                        relationshipManifestIdentity: relationshipState.manifestHash,
+                        registry: registryState.registry,
+                        target,
+                        relationshipManifest: relationshipState.manifest,
+                        relationshipRecords: relationshipState.records,
+                        relationshipWarnings: relationshipState.warnings || [],
+                    })
+                    : undefined;
+                if (
+                    !traversals
+                    || !this.host.isPreparedNavigationReadCurrent(trackedRootState)
+                ) {
+                    projectedPayload = withRelationshipMetadata(
+                        payload,
+                        unavailableRelationshipMetadata("unavailable"),
+                    );
+                } else {
+                    projectedPayload = withRelationshipMetadata(
+                        payload,
+                        buildPartialRelationshipMetadata({
+                            targetSymbolId: target.symbolInstanceId,
+                            callers: traversals.callers.edges,
+                            callees: traversals.callees.edges,
+                        }),
+                    );
+                }
+            }
+        }
+        const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+        const guidedPayload = !preparedNavigationBarrierMatches(
+            preparedNavigationReadWasCurrent,
+            this.host.isPreparedNavigationReadCurrent(trackedRootState),
+        ) || !navigationSourceBarrierMatches(
+                navigationSourceBarrier,
+                finalNavigationSourceBarrier,
+            )
+            ? buildSourceStateUnverifiedFileOutlinePayload(
+                this.host,
+                effectiveRoot,
+                normalizedFile,
+            )
+            : projectedPayload;
+        return {
+            content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(guidedPayload, proofDebugHint)) }],
+        };
     }
 }

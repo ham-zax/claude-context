@@ -43,6 +43,15 @@ export type RelationshipBackedCallGraphInput = {
     direction: CallGraphDirection;
     depth: number;
     limit: number;
+    /**
+     * Publication-authorized source reader for the Python source-backed
+     * fallback. When absent the dynamic fallback is SKIPPED entirely (no
+     * edges from source reconstruction, never a legacy pathname read).
+     * The navigation tool boundary always supplies it; other callers that
+     * cannot bind a session policy therefore fail closed by losing the
+     * dynamic fallback rather than reading unauthenticated source.
+     */
+    readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
 };
 
 export type RelationshipBackedCallGraphResult = {
@@ -490,26 +499,30 @@ export class RelationshipBackedCallGraph {
         ));
 
         const shouldAttemptDynamicCalleeFallback = (input.direction === "callees" || input.direction === "both")
+            && Boolean(input.readAuthorizedSourceLines)
             && (Boolean(input.sourceSpanRepair?.repaired) || hasSuppressedOutgoingLowConfidence);
-        const dynamicCalleeFallback = shouldAttemptDynamicCalleeFallback
-            ? buildSourceBackedPythonCalleeFallback({
+        const dynamicCalleeFallback = shouldAttemptDynamicCalleeFallback && input.readAuthorizedSourceLines
+            ? await buildSourceBackedPythonCalleeFallback({
                 codebaseRoot: input.codebaseRoot,
                 registry: input.registry,
                 source: input.resolvedSymbol,
                 sortEdges: (fallbackEdges) => this.sortEdges(fallbackEdges),
+                readSourceLines: input.readAuthorizedSourceLines,
             })
             : { edges: [], symbols: [], notes: [] };
 
         const shouldAttemptDynamicCallerFallback = (input.direction === "callers" || input.direction === "both")
+            && Boolean(input.readAuthorizedSourceLines)
             && hasSuppressedIncomingLowConfidence;
-        const dynamicCallerFallback = shouldAttemptDynamicCallerFallback
-            ? buildSourceBackedPythonCallerFallback({
+        const dynamicCallerFallback = shouldAttemptDynamicCallerFallback && input.readAuthorizedSourceLines
+            ? await buildSourceBackedPythonCallerFallback({
                 codebaseRoot: input.codebaseRoot,
                 registry: input.registry,
                 resolvedTarget: input.resolvedSymbol,
                 suppressedRecords: suppressedLowConfidenceRecords,
                 sortEdges: (fallbackEdges) => this.sortEdges(fallbackEdges),
                 sortNotes: (fallbackNotes) => this.sortNotes(fallbackNotes),
+                readSourceLines: input.readAuthorizedSourceLines,
             })
             : { edges: [], symbols: [], notes: [] };
 
