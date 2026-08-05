@@ -10,6 +10,10 @@ satori_priority: P3
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 6
 fix_commit: "feat(search): expose finalizing readiness state"
+status: open
+verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fixed_in: ""
+fix_verified_at: ""
 ---
 
 # W5 — `not_ready` "indexing" window after 100% progress
@@ -48,3 +52,12 @@ and only the marker is missing, respond `status: "not_ready", reason:
 "marker_doc"`; never return results before marker proof; do not add a new
 top-level status unless the MCP response schema is versioned. Acceptance: the
 plan's readiness regression tests pass (red → green).
+
+## Verification (2026-08-06 — audit reissue)
+
+**Status: open — no fix landed.** `reason: "finalizing"` is absent from the audited
+commit `7c961512` and from current HEAD (`grep finalizing packages/mcp/src` → 0 matches);
+the `not_ready`/`indexing` window after 100% progress persists. Deliberate fail-closed
+design (the cost of the atomic completion-marker proof); severity low, non-exploitable,
+P3. Excluded from the report's headline finding counts (as in the original issue) but
+remains tracked. The W-fix plan's Task 6 (optional UX) is the pending remediation.

@@ -10,6 +10,10 @@ satori_priority: P2
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 2
 fix_commit: "fix(reranker): bound VoyageAI latency and report failures"
+status: fixed
+verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fixed_in: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fix_verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
 ---
 
 # W2 — Reranking has no timeout, retry, or backoff
@@ -48,3 +52,15 @@ payloads/responses, or caller cancellation), add
 `rerankerFailures/rerankerRetries/rerankerTimeouts` diagnostics, and keep
 `rerankAdjusted === false` for every candidate on terminal failure. Acceptance:
 the plan's voyageai-reranker and reranker regression tests pass (red → green).
+
+## Resolution (2026-08-06 — audit reissue)
+
+**Status: fixed.** Verified present at the audited commit `7c961512`:
+`VoyageAIReranker.rerank` implements a 30s per-attempt timeout, at most two attempts,
+250ms backoff, retry classification (408/425/429/5xx, ETIMEDOUT, ECONNRESET, EAI_AGAIN;
+never permanent failures or invalid responses), caller-cancellation propagation, and
+`onExecutionDiagnostics` telemetry (`rerankerRetries`/`rerankerTimeouts`/`rerankerFailures`
+surfaced in search diagnostics). The report's "raw unbounded fetch, no failure telemetry"
+claim is false at the audited commit. Focused regression tests cover transient success,
+terminal 503, permanent 401, hung-request timeout, retryable network errors, invalid
+responses, and cancellation.

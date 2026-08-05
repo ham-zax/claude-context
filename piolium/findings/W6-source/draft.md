@@ -10,6 +10,10 @@ satori_priority: P3
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 7
 fix_commit: "docs(search): document full-source retrieval"
+status: fixed
+verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fixed_in: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fix_verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
 ---
 
 # W6 — Source reads are span-bounded; full files unreachable through symbol tools
@@ -49,3 +53,12 @@ exact requested range; `read_file` with `presentation:"full"` returns raw
 multiline source subject to read_file byte/range limits. Do not add
 `sourceMode:"full"` to `symbol_context` in this pass. Acceptance: description
 snapshot tests updated and passing.
+
+## Resolution (2026-08-06 — audit reissue)
+
+**Status: fixed (documentation).** Verified present at the audited commit `7c961512`:
+`read_file`'s schema and description advertise `presentation: "full"` ("use full for raw
+multiline source") and the compact-envelope rule for ranges longer than 40 lines
+(`READ_FILE_AUTO_COMPACT_MIN_LINES`), so the full-source path is documented; symbol tools
+remain span-bounded with continuation fingerprints by design. Low severity,
+non-exploitable; excluded from the report's headline counts.

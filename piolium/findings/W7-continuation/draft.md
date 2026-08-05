@@ -10,6 +10,10 @@ satori_priority: P2
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 8
 fix_commit: "feat(search): report continuation availability"
+status: fixed
+verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fixed_in: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fix_verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
 ---
 
 # W7 — `continue_search` handle was not surfaced
@@ -49,3 +53,13 @@ total/returned counts, and never fabricate a handle. Do not raise
 replay-byte limits in the same commit — first collect evidence on rejection
 rates. Acceptance: the plan's search-result-finalization regression tests
 pass (red → green).
+
+## Resolution (2026-08-06 — audit reissue)
+
+**Status: fixed.** Verified present at the audited commit `7c961512`: the public response
+carries `SearchPaginationEvidence` (`totalGroupCount`, `returnedGroupCount`,
+`continuation: "complete" | "attached" | "not_admissible"`); when continuation storage
+rejects the ranked set, the handler removes the unusable handle and explicitly returns
+total/returned counts, `continuation: "not_admissible"`, and the warning. The report's
+claim that the path discloses neither total nor returned groups is false at the audited
+commit.

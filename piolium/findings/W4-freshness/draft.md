@@ -10,6 +10,10 @@ satori_priority: P1
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 5
 fix_commit: "fix(freshness): include untracked files in live search"
+status: fixed
+verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fixed_in: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fix_verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
 ---
 
 # W4 — Untracked files are invisible to freshness and `live_path`
@@ -54,3 +58,15 @@ exact source comparison as paths with no checkpoint record, and join the
 `live_path` lane; `.satoriignore`'d untracked files stay invisible with no
 sync churn. Acceptance: the plan's working-tree-state and freshness regression
 tests pass (red → green).
+
+## Resolution (2026-08-06 — audit reissue)
+
+**Status: fixed.** Verified present at the audited commit `7c961512`:
+`getChangedFilesForCodebase` parses `git status --porcelain=v1 -z --untracked-files=all`
+(tracked modifications, deletions, renames, `??` paths, paths containing spaces and
+unusual characters); untracked paths invalidate freshness, enter exact source comparison
+as paths with no checkpoint record, and join the `live_path` lane; `.satoriignore`'d
+untracked files stay invisible with no sync churn; the dot-prefixed-path correction
+handles names like `..config.ts` without traversal. The original invisibility defect no
+longer holds. A performance consideration remains for repositories with very large
+numbers of non-ignored untracked files — not the original defect.

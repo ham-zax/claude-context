@@ -10,6 +10,10 @@ satori_priority: P1
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 1
 fix_commit: "fix(search): add bounded must-constrained retrieval"
+status: fixed
+verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fixed_in: "7c961512c7d7ec14859f616de038488f61ff0d70"
+fix_verified_at: "7c961512c7d7ec14859f616de038488f61ff0d70"
 ---
 
 # W1 — `must:` is a post-retrieval substring filter
@@ -52,3 +56,20 @@ survives, `MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET` on partial
 recovery with exhausted budget. Acceptance: the plan's search-query-planning /
 search-execution regression tests pass (red → green), and queries without
 `must:` remain byte-equivalent.
+
+## Resolution (2026-08-06 — audit reissue)
+
+**Status: fixed.** Verified present at the audited commit `7c961512`: a dedicated bounded
+conjunctive `must:` retrieval lane (`search-execution.ts` — `must_lane` pass with
+`attempt:N/must_lane` retries, bounded lane failure keeping primary results), merged into
+the candidate set and re-evaluated by the normal evaluator, with explicit warning states
+(`MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET`,
+`MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET`,
+`MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE`), plus a vector-backend lexical contract that
+explicitly supports or rejects `all_terms` instead of silently degrading. The original
+High finding (silent post-retrieval omission) no longer holds; a bounded search can still
+miss matches beyond its budget, but that is now disclosed. The report's stale-baseline
+error: this section reused the `403723ee`-era verification document
+(`docs/remediation/2026-08-04-search-weakness-report-verification.md`) without checking
+the audited commit's ancestry. Baseline fixtures:
+`docs/evidence/search-integrity-baseline-20260805/`.
