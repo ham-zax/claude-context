@@ -564,6 +564,7 @@ async function rerankSearchCandidates(
             searchDiagnostics.rerankerCandidates += rerankDocuments.length;
             searchDiagnostics.rerankerInputBytes += byteSelection.inputBytes;
             let rerankResults: Array<{ index: number }> = [];
+            let rerankerExecutionDiagnosticsObserved = false;
             try {
                 rerankResults = await host.measureSearchPhase(
                     'rerank',
@@ -574,20 +575,43 @@ async function rerankSearchCandidates(
                         identities: rerankSlice.map((candidate) => (
                             searchCandidateIdentity(candidate.result).candidateId
                         )),
+                        // Execution telemetry fires on success and terminal
+                        // failure alike, so retries hidden by a later success
+                        // are still counted. Max-based so repeated reports
+                        // never lose a higher count.
+                        onExecutionDiagnostics: (diagnostics) => {
+                            rerankerExecutionDiagnosticsObserved = true;
+                            searchDiagnostics.rerankerRetries = Math.max(
+                                searchDiagnostics.rerankerRetries,
+                                diagnostics.retries,
+                            );
+                            searchDiagnostics.rerankerTimeouts = Math.max(
+                                searchDiagnostics.rerankerTimeouts,
+                                diagnostics.timeouts,
+                            );
+                        },
                     }),
                 );
             } catch (error) {
                 rerankerFailurePhase = 'api_call';
                 rerankerOperationalReason = resolveLateOnOperationalReason(error);
-                searchDiagnostics.rerankerFailures += 1;
                 if (error instanceof RerankerRequestError) {
-                    if (error.kind === 'timeout') {
-                        searchDiagnostics.rerankerTimeouts += 1;
-                    }
-                    if (error.attempts > 1) {
-                        searchDiagnostics.rerankerRetries += error.attempts - 1;
-                    }
                     searchDiagnostics.rerankerFailureKind = error.kind;
+                    if (!rerankerExecutionDiagnosticsObserved) {
+                        // Fallback for rerankers that throw RerankerRequestError
+                        // without reporting execution diagnostics: the terminal
+                        // error still carries attempt counts.
+                        searchDiagnostics.rerankerRetries = Math.max(
+                            searchDiagnostics.rerankerRetries,
+                            Math.max(0, error.attempts - 1),
+                        );
+                        if (error.kind === 'timeout') {
+                            searchDiagnostics.rerankerTimeouts = Math.max(
+                                searchDiagnostics.rerankerTimeouts,
+                                1,
+                            );
+                        }
+                    }
                 }
                 throw new Error('reranker_api_call_failed');
             }
@@ -647,6 +671,9 @@ async function rerankSearchCandidates(
             }
         } catch {
             rerankerFailurePhase ||= 'parse_results';
+            // Every terminal reranker failure -- api_call, document
+            // projection, parse/invalid results -- counts exactly once here.
+            searchDiagnostics.rerankerFailures += 1;
         }
     }
 

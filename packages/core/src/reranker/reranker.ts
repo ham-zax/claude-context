@@ -21,6 +21,18 @@ export interface RerankOptions {
     identities?: readonly string[];
     /** Cancels queued or executing provider work. Providers must not return partial results. */
     signal?: AbortSignal;
+    /**
+     * Bounded execution telemetry reported once per rerank() call on
+     * successful completion or terminal provider failure, so callers can
+     * count retries that were hidden by a later successful attempt. Not
+     * reported for caller cancellation, and must never throw: a throwing
+     * callback is ignored so telemetry cannot alter ranking behavior.
+     */
+    onExecutionDiagnostics?: (diagnostics: {
+        attempts: number;
+        retries: number;
+        timeouts: number;
+    }) => void;
 }
 
 export interface Reranker {

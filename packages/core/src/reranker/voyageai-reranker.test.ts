@@ -315,3 +315,211 @@ test('VoyageAIReranker aborts a hung request when the caller cancels mid-flight 
     });
     assert.equal(calls.length, 1);
 });
+
+test('VoyageAIReranker classifies a stalled response body as a timeout, not invalid response', async () => {
+    const calls: string[] = [];
+    await withMutedConsoleError(async () => {
+        await withMockedFetch(async (url, init) => {
+            calls.push('call');
+            const signal = init?.signal as AbortSignal | undefined;
+            return {
+                ok: true,
+                status: 200,
+                json: () => new Promise<never>((_, reject) => {
+                    signal?.addEventListener('abort', () => {
+                        reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+                    });
+                }),
+                text: async () => '',
+            };
+        }, async () => {
+            const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0, timeoutMs: 25 });
+            await assert.rejects(
+                () => reranker.rerank('find auth', ['alpha document']),
+                (error: unknown) => {
+                    assert.ok(error instanceof RerankerRequestError);
+                    assert.equal(error.kind, 'timeout');
+                    assert.equal(error.attempts, 2);
+                    return true;
+                },
+            );
+        });
+    });
+    assert.equal(calls.length, 2);
+});
+
+test('VoyageAIReranker retries a connection reset during the response body read', async () => {
+    const calls: string[] = [];
+    await withMockedFetch(async (url, init) => {
+        calls.push('call');
+        return {
+            ok: true,
+            status: 200,
+            json: async () => {
+                if (calls.length === 1) {
+                    throw Object.assign(new TypeError('fetch failed'), {
+                        cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+                    });
+                }
+                return { data: [{ index: 0, relevance_score: 0.85 }] };
+            },
+            text: async () => '',
+        };
+    }, async () => {
+        const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0 });
+        const results = await reranker.rerank('find auth', ['alpha document']);
+        assert.equal(calls.length, 2);
+        assert.equal(results[0].relevanceScore, 0.85);
+    });
+});
+
+test('VoyageAIReranker reports retry diagnostics when a transient failure is followed by success', async () => {
+    const calls: string[] = [];
+    let reported: { attempts: number; retries: number; timeouts: number } | null = null;
+    await withMockedFetch(async () => {
+        calls.push('call');
+        if (calls.length === 1) {
+            return { ok: false, status: 503, json: async () => ({}), text: async () => 'unavailable' };
+        }
+        return { ok: true, status: 200, json: async () => ({ data: [{ index: 0, relevance_score: 0.9 }] }), text: async () => '' };
+    }, async () => {
+        const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0 });
+        await reranker.rerank('find auth', ['alpha document'], {
+            onExecutionDiagnostics: (diagnostics) => {
+                reported = diagnostics;
+            },
+        });
+    });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(reported, { attempts: 2, retries: 1, timeouts: 0 });
+});
+
+test('VoyageAIReranker reports timeout and retry diagnostics when a timeout is followed by success', async () => {
+    const calls: string[] = [];
+    let reported: { attempts: number; retries: number; timeouts: number } | null = null;
+    await withMockedFetch(async (url, init) => {
+        calls.push('call');
+        if (calls.length === 1) {
+            const signal = init?.signal as AbortSignal | undefined;
+            return new Promise<never>((_, reject) => {
+                signal?.addEventListener('abort', () => {
+                    reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+                });
+            });
+        }
+        return { ok: true, status: 200, json: async () => ({ data: [{ index: 0, relevance_score: 0.9 }] }), text: async () => '' };
+    }, async () => {
+        const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0, timeoutMs: 25 });
+        await reranker.rerank('find auth', ['alpha document'], {
+            onExecutionDiagnostics: (diagnostics) => {
+                reported = diagnostics;
+            },
+        });
+    });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(reported, { attempts: 2, retries: 1, timeouts: 1 });
+});
+
+test('VoyageAIReranker terminates immediately when the caller cancels during the retry delay', async () => {
+    const calls: string[] = [];
+    const controller = new AbortController();
+    const pending = (async () => {
+        await withMutedConsoleError(async () => {
+            await withMockedFetch(async () => {
+                calls.push('call');
+                return { ok: false, status: 503, json: async () => ({}), text: async () => 'unavailable' };
+            }, async () => {
+                const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 60_000 });
+                await reranker.rerank('find auth', ['alpha document'], { signal: controller.signal });
+            });
+        });
+    })();
+    // Let the first attempt fail and enter the retry delay, then cancel.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    controller.abort();
+    await assert.rejects(pending, (error: unknown) => {
+        assert.equal((error as { name?: string })?.name, 'AbortError');
+        return true;
+    });
+    assert.equal(calls.length, 1);
+});
+
+test('VoyageAIReranker ignores a throwing diagnostics callback on success', async () => {
+    const calls: string[] = [];
+    let callbackFires = 0;
+    await withMockedFetch(async () => {
+        calls.push('call');
+        return { ok: true, status: 200, json: async () => ({ data: [{ index: 0, relevance_score: 0.9 }] }), text: async () => '' };
+    }, async () => {
+        const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0 });
+        const results = await reranker.rerank('find auth', ['alpha document'], {
+            onExecutionDiagnostics: () => {
+                callbackFires += 1;
+                throw new Error('telemetry exploded');
+            },
+        });
+        assert.equal(results.length, 1);
+        assert.equal(results[0].relevanceScore, 0.9);
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(callbackFires, 1);
+});
+
+test('VoyageAIReranker preserves the real terminal error when the diagnostics callback throws', async () => {
+    let callbackFires = 0;
+    await withMutedConsoleError(async () => {
+        await withMockedFetch(async () => {
+            return { ok: false, status: 401, json: async () => ({}), text: async () => 'unauthorized' };
+        }, async () => {
+            const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0 });
+            await assert.rejects(
+                () => reranker.rerank('find auth', ['alpha document'], {
+                    onExecutionDiagnostics: () => {
+                        callbackFires += 1;
+                        throw new Error('telemetry exploded');
+                    },
+                }),
+                (error: unknown) => {
+                    assert.ok(error instanceof RerankerRequestError);
+                    assert.equal(error.kind, 'permanent_http');
+                    assert.equal(error.status, 401);
+                    return true;
+                },
+            );
+        });
+    });
+    assert.equal(callbackFires, 1);
+});
+
+test('VoyageAIReranker classifies a stalled HTTP error body as a timeout and retries', async () => {
+    const calls: string[] = [];
+    let reported: { attempts: number; retries: number; timeouts: number } | null = null;
+    await withMutedConsoleError(async () => {
+        await withMockedFetch(async (url, init) => {
+            calls.push('call');
+            if (calls.length === 1) {
+                const signal = init?.signal as AbortSignal | undefined;
+                return {
+                    ok: false,
+                    status: 503,
+                    json: async () => ({}),
+                    text: () => new Promise<never>((_, reject) => {
+                        signal?.addEventListener('abort', () => {
+                            reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+                        });
+                    }),
+                };
+            }
+            return { ok: true, status: 200, json: async () => ({ data: [{ index: 0, relevance_score: 0.9 }] }), text: async () => '' };
+        }, async () => {
+            const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0, timeoutMs: 25 });
+            await reranker.rerank('find auth', ['alpha document'], {
+                onExecutionDiagnostics: (diagnostics) => {
+                    reported = diagnostics;
+                },
+            });
+        });
+    });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(reported, { attempts: 2, retries: 1, timeouts: 1 });
+});

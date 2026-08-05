@@ -13569,3 +13569,40 @@ test('raw search results carry the must-constraint hint contract', async () => {
         });
     });
 });
+test('handleSearchCode counts every terminal reranker failure exactly once including parse failures', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 10 }, (_, idx) => ({
+            content: `export const value${idx} = ${idx};`,
+            relativePath: `src/value-${idx}.ts`,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_value_${idx}`,
+            symbolLabel: `function value${idx}()`,
+        }));
+        // The reranker returns fewer results than requested: a parse-phase
+        // failure (result count mismatch), not an api_call failure.
+        const reranker = {
+            rerank: async () => [{ index: 0, relevanceScore: 0.9 }],
+        };
+        const handlers = createHandlers(repoPath, denseResults, reranker, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the values',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(warningCodes(payload).includes('RERANKER_FAILED'), true);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerFailures, 1);
+    });
+});

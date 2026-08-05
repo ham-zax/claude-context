@@ -171,6 +171,21 @@ export class VoyageAIReranker implements Reranker {
             requestBody.top_k = topK;
         }
 
+        let timeoutEvents = 0;
+        const reportDiagnostics = (attempts: number): void => {
+            try {
+                options.onExecutionDiagnostics?.({
+                    attempts,
+                    retries: Math.max(0, attempts - 1),
+                    timeouts: timeoutEvents,
+                });
+            } catch {
+                // Diagnostics are observational only: a throwing telemetry
+                // callback must never turn a successful rerank into a failure
+                // or replace the real terminal error classification.
+            }
+        };
+
         for (let attempt = 1; attempt <= RERANK_MAX_ATTEMPTS; attempt += 1) {
             if (signal?.aborted) {
                 throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
@@ -179,9 +194,11 @@ export class VoyageAIReranker implements Reranker {
             const attemptSignal = signal
                 ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
                 : AbortSignal.timeout(this.timeoutMs);
-            let response: Response;
             try {
-                response = await fetch(`${this.baseUrl}/rerank`, {
+                // The whole attempt -- headers, body consumption and response
+                // validation -- sits inside the timeout-aware boundary so a
+                // stall after the headers still classifies as a timeout.
+                const response = await fetch(`${this.baseUrl}/rerank`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${this.apiKey}`,
@@ -190,68 +207,66 @@ export class VoyageAIReranker implements Reranker {
                     body: JSON.stringify(requestBody),
                     signal: attemptSignal,
                 });
-            } catch (error) {
-                if (signal?.aborted) {
-                    // Caller cancellation is independent of the attempt timeout and is never retried.
-                    throw signal.reason ?? error;
-                }
-                const timedOut = isAbortLikeError(error);
-                const classification = classifyRerankerFailure(error, timedOut, null);
-                if (attempt < RERANK_MAX_ATTEMPTS && classification.retryable) {
-                    await this.delayBeforeRetry();
-                    continue;
-                }
-                throw new RerankerRequestError(
-                    classification.kind,
-                    null,
-                    attempt,
-                    `VoyageAI Rerank request failed (${classification.kind}): ${errorMessage(error)}`,
-                );
-            }
 
-            if (!response.ok) {
-                const status = response.status;
-                const classification = classifyRerankerFailure(null, false, status);
-                const errorText = await response.text().catch(() => '');
-                if (attempt < RERANK_MAX_ATTEMPTS && classification.retryable) {
-                    await this.delayBeforeRetry();
-                    continue;
+                if (!response.ok) {
+                    const status = response.status;
+                    let errorText = '';
+                    try {
+                        errorText = await response.text();
+                    } catch (error) {
+                        if (isAbortLikeError(error)) {
+                            // A stalled error body is an attempt timeout, not
+                            // an HTTP classification: let it flow into the
+                            // timeout-aware classification boundary.
+                            throw error;
+                        }
+                        // A non-timeout inability to read an HTTP error body
+                        // may use an empty body.
+                    }
+                    throw Object.assign(
+                        new Error(`VoyageAI Rerank API error (${status}): ${errorText}`),
+                        { rerankerHttpStatus: status },
+                    );
                 }
-                throw new RerankerRequestError(
-                    classification.kind,
-                    status,
-                    attempt,
-                    `VoyageAI Rerank API error (${status}): ${errorText}`,
-                );
-            }
 
-            try {
                 const result = await response.json() as { data?: unknown };
-
                 if (!result.data || !Array.isArray(result.data)) {
-                    throw new Error('VoyageAI Rerank API returned invalid response');
+                    throw Object.assign(
+                        new Error('VoyageAI Rerank API returned invalid response'),
+                        { rerankerValidationFailure: true, rerankerHttpStatus: response.status },
+                    );
                 }
 
                 const rerankResults: RerankResult[] = result.data.map((item, responseIndex) => {
                     if (!item || typeof item !== 'object') {
-                        throw new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`);
+                        throw Object.assign(
+                            new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`),
+                            { rerankerValidationFailure: true },
+                        );
                     }
-
                     const row = item as Record<string, unknown>;
                     if (!Number.isInteger(row.index) || (row.index as number) < 0 || (row.index as number) >= documents.length) {
-                        throw new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`);
+                        throw Object.assign(
+                            new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`),
+                            { rerankerValidationFailure: true },
+                        );
                     }
                     if (typeof row.relevance_score !== 'number' || !Number.isFinite(row.relevance_score)) {
-                        throw new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`);
+                        throw Object.assign(
+                            new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`),
+                            { rerankerValidationFailure: true },
+                        );
                     }
-
                     const mapped: RerankResult = {
                         index: row.index as number,
                         relevanceScore: row.relevance_score,
                     };
                     if (returnDocuments && Object.prototype.hasOwnProperty.call(row, 'document')) {
                         if (typeof row.document !== 'string') {
-                            throw new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`);
+                            throw Object.assign(
+                                new Error(`VoyageAI Rerank API returned invalid response row at index ${responseIndex}`),
+                                { rerankerValidationFailure: true },
+                            );
                         }
                         mapped.document = row.document;
                     }
@@ -259,15 +274,38 @@ export class VoyageAIReranker implements Reranker {
                 });
 
                 console.log(`[VoyageAI Reranker] ✅ Reranked ${rerankResults.length} results. Top score: ${rerankResults[0]?.relevanceScore?.toFixed(4) || 'N/A'}`);
-
+                reportDiagnostics(attempt);
                 return rerankResults;
             } catch (error) {
-                // A well-formed HTTP response with an invalid body is never retried.
+                if (signal?.aborted) {
+                    // Caller cancellation is independent of the attempt timeout and is never retried.
+                    throw signal.reason ?? error;
+                }
+                const timedOut = isAbortLikeError(error);
+                if (timedOut) {
+                    timeoutEvents += 1;
+                }
+                const httpStatus = (error as { rerankerHttpStatus?: number }).rerankerHttpStatus;
+                const validationFailure = (error as { rerankerValidationFailure?: boolean }).rerankerValidationFailure;
+                let classification: RerankerFailureClassification;
+                if (validationFailure) {
+                    // A well-formed HTTP response with an invalid body is never retried.
+                    classification = { kind: 'invalid_response', retryable: false };
+                } else if (httpStatus !== undefined) {
+                    classification = classifyRerankerFailure(null, false, httpStatus);
+                } else {
+                    classification = classifyRerankerFailure(error, timedOut, null);
+                }
+                if (attempt < RERANK_MAX_ATTEMPTS && classification.retryable) {
+                    await this.delayBeforeRetry(signal);
+                    continue;
+                }
+                reportDiagnostics(attempt);
                 throw new RerankerRequestError(
-                    'invalid_response',
-                    response.status,
+                    classification.kind,
+                    httpStatus ?? null,
                     attempt,
-                    `VoyageAI Rerank returned an invalid response: ${errorMessage(error)}`,
+                    `VoyageAI Rerank ${httpStatus !== undefined ? 'API' : 'request'} failed (${classification.kind}): ${errorMessage(error)}`,
                 );
             }
         }
@@ -275,10 +313,20 @@ export class VoyageAIReranker implements Reranker {
         throw new Error('Unreachable: rerank attempts loop exhausted without returning or throwing.');
     }
 
-    private async delayBeforeRetry(): Promise<void> {
-        if (this.retryDelayMs > 0) {
-            await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
+    private async delayBeforeRetry(signal?: AbortSignal): Promise<void> {
+        if (this.retryDelayMs <= 0) {
+            return;
         }
+        if (signal?.aborted) {
+            throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+        }
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(resolve, this.retryDelayMs);
+            signal?.addEventListener('abort', () => {
+                clearTimeout(timer);
+                reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+            }, { once: true });
+        });
     }
 
     /**
