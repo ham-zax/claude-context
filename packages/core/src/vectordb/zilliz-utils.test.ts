@@ -2,6 +2,7 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { getEventListeners } from 'node:events';
 import { ClusterManager, type CreateFreeClusterRequest, type DescribeClusterResponse } from './zilliz-utils';
 
 type Handler = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void;
@@ -232,4 +233,50 @@ test('oversized management response is rejected', async (t) => {
             return true;
         });
     });
+});
+
+test('polling releases abort listeners from a shared caller signal', { timeout: 5000 }, async (t) => {
+    let describeCount = 0;
+    const server = await startServer((req, res) => {
+        if (req.url?.includes('/createFree')) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                code: 0,
+                data: { clusterId: 'cluster-1', username: 'u', password: 'p', prompt: 'pr' },
+            }));
+            return;
+        }
+        if (req.url?.startsWith('/v2/clusters/')) {
+            describeCount += 1;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ code: 0, data: describeCount < 3 ? DESCRIBE_INITIALIZING : DESCRIBE_RUNNING }));
+            return;
+        }
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('not found');
+    });
+    t.after(() => server.close());
+
+    const manager = new ClusterManager({
+        baseUrl: server.url,
+        token: 'test-token',
+        httpPolicy: { attemptTimeoutMs: 1000, maxAttempts: 1, retryDelayMs: 5 },
+    });
+    const controller = new AbortController();
+    const baseline = getEventListeners(controller.signal, 'abort').length;
+
+    // Two poll cycles run abortableDelay on the shared signal (describes 1-2
+    // report INITIALIZING), then the third describe reports RUNNING.
+    const created = await withMutedConsoleError(() => manager.createFreeCluster(
+        CREATE_REQUEST,
+        5000,
+        5,
+        controller.signal,
+    ));
+    assert.equal(created.clusterId, 'cluster-1');
+    assert.ok(describeCount >= 3, `expected at least 3 describes, saw ${describeCount}`);
+
+    // No poll-delay listener may survive completion: the shared signal must
+    // be back at its baseline instead of accumulating one closure per cycle.
+    assert.equal(getEventListeners(controller.signal, 'abort').length, baseline);
 });
