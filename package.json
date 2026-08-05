@@ -18,7 +18,7 @@
     "check": "pnpm run lint && pnpm run typecheck && pnpm run versions:check",
     "lint": "pnpm -r lint",
     "lint:fix": "pnpm -r run lint:fix",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "node scripts/typecheck-all.mjs",
     "versions:check": "node scripts/check-version-freshness.mjs",
     "release:check": "pnpm run versions:check && pnpm run build && pnpm run release:smoke:mcp && pnpm run release:smoke:cli && pnpm run release:check:packed",
     "release:check:packed": "node scripts/check-release-graph.mjs",
