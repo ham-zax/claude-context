@@ -15,6 +15,7 @@ import {
     type ContextMcpConfig,
 } from "../config.js";
 import { SharedRuntimeHost } from "./shared-runtime.js";
+import { createSessionWorkspacePolicy } from "../core/session-workspace-policy.js";
 import { runSharedRuntimeClient } from "./shared-runtime-client.js";
 import { SharedRuntimeSocketHost } from "./shared-runtime-host.js";
 import { BoundedSocketTransport } from "./shared-runtime-transport.js";
@@ -313,6 +314,7 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
         challengeNonce: "a".repeat(48),
+        workspaceRoots: [path.join(root, "workspace")],
     })}\n`)) as { accepted: boolean; error: string };
     assert.equal(rejected.accepted, false);
     assert.match(rejected.error, /identity does not match/);
@@ -353,6 +355,7 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
         challengeNonce: "b".repeat(48),
+        workspaceRoots: [path.join(root, "workspace")],
     });
     assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
 
@@ -410,6 +413,7 @@ test("protocol v2 echoes challengeNonce", async (t) => {
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
         challengeNonce: "c".repeat(48),
+        workspaceRoots: [path.join(root, "workspace")],
     })}\n`)) as { accepted: boolean; challengeNonce: string; error?: string };
     assert.equal(response.accepted, true, response.error);
     assert.equal(response.challengeNonce, "c".repeat(48));
@@ -490,6 +494,7 @@ test("ownershipToken is not described as launcher authentication", async (t) => 
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
         challengeNonce: "d".repeat(48),
+        workspaceRoots: [path.join(root, "workspace")],
     })}\n`)) as Record<string, unknown> & { accepted?: boolean; error?: string };
     assert.equal(response.accepted, true, String(response.error));
     assert.equal("ownershipToken" in response, false);
@@ -670,5 +675,89 @@ test("host startup failure closes its listener and shared runtime authorities", 
 
     await assert.rejects(socketHost.start());
     assert.equal(fs.existsSync(paths.socketPath), false);
-    assert.throws(() => runtimeHost.createSession(), /shutting down/);
+    const boundPolicy = createSessionWorkspacePolicy({
+        roots: [path.join(root, "workspace")],
+        homeDirectory: os.homedir(),
+        stateRoot: root,
+    });
+    assert.throws(() => runtimeHost.createSession(boundPolicy), /shutting down/);
+});
+
+test("attach with more than 16 workspace roots is rejected", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-too-many-roots-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    const tooManyRoots = Array.from({ length: 17 }, (_, index) => (
+        path.join(root, `workspace-${index}`)
+    ));
+    const response = JSON.parse(await sendHandshake(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        challengeNonce: "e".repeat(48),
+        workspaceRoots: tooManyRoots,
+    })}\n`)) as { accepted: boolean; error: string };
+    assert.equal(response.accepted, false);
+    assert.match(response.error, /malformed/);
+    assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
+});
+
+test("attach with a broad workspace root is rejected", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-broad-root-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    const response = JSON.parse(await sendHandshake(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        challengeNonce: "f".repeat(48),
+        workspaceRoots: [path.sep],
+    })}\n`)) as { accepted: boolean; error: string };
+    assert.equal(response.accepted, false);
+    assert.match(response.error, /not authorized/);
+    assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
 });

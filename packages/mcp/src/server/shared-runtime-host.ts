@@ -1,10 +1,17 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import {
     createMcpConfig,
     resolveMcpRuntimeBootstrap,
 } from "../config.js";
+import {
+    WorkspaceAuthorizationError,
+    createSessionWorkspacePolicy,
+    type SessionWorkspacePolicy,
+} from "../core/session-workspace-policy.js";
 import {
     SHARED_RUNTIME_HANDSHAKE_MAX_BYTES,
     SHARED_RUNTIME_IDLE_MS,
@@ -33,7 +40,15 @@ type AttachRequest = Readonly<{
     installedRuntimeRoot: string;
     mcpVersion: string;
     challengeNonce: string;
+    workspaceRoots: readonly string[];
 }>;
+
+function isAbsolutePathArray(value: unknown): value is readonly string[] {
+    return Array.isArray(value)
+        && value.length >= 1
+        && value.length <= 16
+        && value.every((entry) => typeof entry === "string" && path.isAbsolute(entry));
+}
 
 function parseAttachRequest(line: string): AttachRequest | null {
     try {
@@ -59,6 +74,16 @@ function parseAttachRequest(line: string): AttachRequest | null {
         ) {
             return null;
         }
+        // Protocol v2 carries the launcher's immutable workspace roots; shape
+        // is validated here (absolute strings, 1-16), and the session policy
+        // is constructed after identity checks so broad or unauthorized roots
+        // reject the attach with a stable message.
+        if (
+            value.protocolVersion === SHARED_RUNTIME_PROTOCOL_VERSION
+            && !isAbsolutePathArray(value.workspaceRoots)
+        ) {
+            return null;
+        }
         return Object.freeze({
             type: "satori-shared-runtime-attach",
             protocolVersion: value.protocolVersion,
@@ -66,6 +91,9 @@ function parseAttachRequest(line: string): AttachRequest | null {
             installedRuntimeRoot: value.installedRuntimeRoot,
             mcpVersion: value.mcpVersion,
             challengeNonce,
+            workspaceRoots: value.protocolVersion === SHARED_RUNTIME_PROTOCOL_VERSION
+                ? value.workspaceRoots
+                : [],
         } as AttachRequest);
     } catch {
         return null;
@@ -260,6 +288,22 @@ export class SharedRuntimeSocketHost {
                 reject("Shared runtime host is not accepting sessions.");
                 return;
             }
+            let workspacePolicy: SessionWorkspacePolicy;
+            try {
+                workspacePolicy = createSessionWorkspacePolicy({
+                    roots: request.workspaceRoots,
+                    homeDirectory: os.homedir(),
+                    stateRoot: this.identity.stateRoot,
+                });
+            } catch (error) {
+                const reason = error instanceof WorkspaceAuthorizationError
+                    ? error.message
+                    : error instanceof Error
+                        ? error.message
+                        : String(error);
+                reject(`Attach handshake workspace roots are not authorized: ${reason}`);
+                return;
+            }
             const response = {
                 type: "satori-shared-runtime-attached",
                 accepted: true,
@@ -277,7 +321,7 @@ export class SharedRuntimeSocketHost {
                 challengeNonce: request.challengeNonce,
             };
             socket.write(`${JSON.stringify(response)}\n`);
-            void this.attachSession(socket, trailing).catch(() => {
+            void this.attachSession(socket, trailing, workspacePolicy).catch(() => {
                 socket.destroy();
                 this.scheduleIdleShutdown();
             });
@@ -288,12 +332,16 @@ export class SharedRuntimeSocketHost {
         socket.resume();
     }
 
-    private async attachSession(socket: net.Socket, trailing: Buffer): Promise<void> {
+    private async attachSession(
+        socket: net.Socket,
+        trailing: Buffer,
+        workspacePolicy: SessionWorkspacePolicy,
+    ): Promise<void> {
         if (this.closing) {
             socket.destroy();
             return;
         }
-        const session = this.runtimeHost.createSession();
+        const session = this.runtimeHost.createSession(workspacePolicy);
         let released = false;
         const release = (): void => {
             if (released) return;

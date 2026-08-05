@@ -14,7 +14,9 @@ import {
     resolveVectorStoreConfig,
 } from "../config.js";
 import type { ToolContext } from "../tools/types.js";
+import { WorkspaceAuthorizationError } from "../core/session-workspace-policy.js";
 import {
+    UNBOUND_WORKSPACE_POLICY,
     createLocalOnlyContext,
     ProviderRuntime,
     resolveConfiguredEmbeddingDimension,
@@ -175,6 +177,38 @@ test("LanceDB runtime selection seals backend identity without requiring Milvus"
         "not_found",
     );
     await assert.rejects(vectorStore.listCollections(), /closed/);
+});
+
+test("raw provider contexts carry the deny-all workspace policy", async (t) => {
+    const databasePath = fs.mkdtempSync(path.join(os.tmpdir(), "satori-provider-unbound-"));
+    t.after(() => fs.rmSync(databasePath, { recursive: true, force: true }));
+    const config = baseConfig({
+        vectorStoreProvider: "LanceDB",
+        lanceDbPath: databasePath,
+        milvusEndpoint: undefined,
+        milvusApiToken: undefined,
+        embeddingArtifactDigest: "a".repeat(64),
+    });
+    const runtime = createRuntime(config);
+    t.after(() => runtime.shutdown());
+    const toolContext = await runtime.requireToolContext("vector_only");
+    if ("code" in toolContext) {
+        throw new Error("expected a raw provider context");
+    }
+    // The raw host-wide context is never bound to an MCP session: every
+    // authorization attempt fails closed with WORKSPACE_POLICY_NOT_BOUND
+    // instead of inheriting process.cwd() or any session's roots.
+    assert.equal(toolContext.workspacePolicy, UNBOUND_WORKSPACE_POLICY);
+    assert.throws(
+        () => toolContext.workspacePolicy.authorizePath("/etc/passwd"),
+        (error: unknown) => error instanceof WorkspaceAuthorizationError
+            && error.code === "WORKSPACE_POLICY_NOT_BOUND",
+    );
+    assert.throws(
+        () => toolContext.workspacePolicy.authorizeRoot("/"),
+        (error: unknown) => error instanceof WorkspaceAuthorizationError
+            && error.code === "WORKSPACE_POLICY_NOT_BOUND",
+    );
 });
 
 test("vector-only context preserves the configured embedding identity", () => {

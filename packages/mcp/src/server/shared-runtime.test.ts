@@ -16,7 +16,17 @@ import {
 } from "../core/handlers.js";
 import { toolRegistry } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
-import { SharedRuntimeHost } from "./shared-runtime.js";
+import {
+    WorkspaceAuthorizationError,
+    createSessionWorkspacePolicy,
+    type SessionWorkspacePolicy,
+} from "../core/session-workspace-policy.js";
+import {
+    SharedRuntimeHost,
+    createSessionWorkspacePolicyFromEnv,
+    resolveSessionWorkspaceRoots,
+} from "./shared-runtime.js";
+import { ContextMcpServer } from "./start-server.js";
 
 function config(): ContextMcpConfig {
     return {
@@ -34,9 +44,13 @@ function config(): ContextMcpConfig {
     };
 }
 
-async function connectClient(host: SharedRuntimeHost, name: string) {
+async function connectClient(host: SharedRuntimeHost, name: string, stateRoot: string) {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const session = host.createSession();
+    const session = host.createSession(createSessionWorkspacePolicy({
+        roots: [path.join(stateRoot, "workspace")],
+        homeDirectory: os.homedir(),
+        stateRoot,
+    }));
     const client = new Client({ name, version: "1.0.0" });
     await session.connect(serverTransport);
     await client.connect(clientTransport);
@@ -61,8 +75,8 @@ test("one runtime host serves independent MCP sessions over separate transports"
     );
     t.after(() => host.shutdown());
 
-    const first = await connectClient(host, "first");
-    const second = await connectClient(host, "second");
+    const first = await connectClient(host, "first", stateRoot);
+    const second = await connectClient(host, "second", stateRoot);
     t.after(async () => {
         await first.client.close();
         await first.session.shutdown();
@@ -200,7 +214,7 @@ test("session shutdown waits for its active operation without stopping the host"
         buildRuntimeIndexFingerprint(runtimeConfig, 1024),
         "cli",
     );
-    const connected = await connectClient(host, "operation-owner");
+    const connected = await connectClient(host, "operation-owner", stateRoot);
     const originalTool = toolRegistry.manage_index!;
     let releaseOperation!: () => void;
     const operationGate = new Promise<void>((resolve) => {
@@ -262,8 +276,8 @@ test("disconnecting one session does not cancel shared provider bootstrap", asyn
         buildRuntimeIndexFingerprint(runtimeConfig, 1024),
         "cli",
     );
-    const first = await connectClient(host, "bootstrap-first");
-    const second = await connectClient(host, "bootstrap-second");
+    const first = await connectClient(host, "bootstrap-first", stateRoot);
+    const second = await connectClient(host, "bootstrap-second", stateRoot);
     const firstInternals = first.session as unknown as {
         resources: { toolContext: ToolContext };
     };
@@ -337,4 +351,203 @@ test("disconnecting one session does not cancel shared provider bootstrap", asyn
     assert.equal(bootstrapCount, 1);
     assert.equal((await second.client.listTools()).tools.length, 7);
     assert.deepEqual(host.getActivity(), { sessions: 1, operations: 0 });
+});
+
+test("tool context receives the session policy", async (t) => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-session-policy-"));
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = stateRoot;
+    const runtimeConfig = config();
+    const host = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, 1024),
+        "cli",
+    );
+    const session = host.createSession(createSessionWorkspacePolicy({
+        roots: [path.join(stateRoot, "workspace")],
+        homeDirectory: os.homedir(),
+        stateRoot,
+    }));
+    t.after(async () => {
+        await session.shutdown();
+        await host.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    });
+    const internals = session as unknown as {
+        resources: { toolContext: ToolContext };
+    };
+    assert.equal(
+        internals.resources.toolContext.workspacePolicy.authorizePath(
+            path.join(stateRoot, "workspace", "src", "main.ts"),
+        ).relativePath,
+        "src/main.ts",
+    );
+    assert.equal(
+        internals.resources.toolContext.workspacePolicy.roots.length,
+        1,
+    );
+});
+
+test("two sessions may have different immutable workspace policies", async (t) => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-session-policies-"));
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = stateRoot;
+    const runtimeConfig = config();
+    const host = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, 1024),
+        "cli",
+    );
+    const policyA = createSessionWorkspacePolicy({
+        roots: [path.join(stateRoot, "repo-a")],
+        homeDirectory: os.homedir(),
+        stateRoot,
+    });
+    const policyB = createSessionWorkspacePolicy({
+        roots: [path.join(stateRoot, "repo-b")],
+        homeDirectory: os.homedir(),
+        stateRoot,
+    });
+    const sessionA = host.createSession(policyA);
+    const sessionB = host.createSession(policyB);
+    t.after(async () => {
+        await sessionA.shutdown();
+        await sessionB.shutdown();
+        await host.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    });
+    const internalsA = sessionA as unknown as {
+        resources: { toolContext: ToolContext };
+    };
+    const internalsB = sessionB as unknown as {
+        resources: { toolContext: ToolContext };
+    };
+    assert.equal(internalsA.resources.toolContext.workspacePolicy, policyA);
+    assert.equal(internalsB.resources.toolContext.workspacePolicy, policyB);
+    assert.notEqual(
+        internalsA.resources.toolContext.workspacePolicy,
+        internalsB.resources.toolContext.workspacePolicy,
+    );
+    assert.ok(Object.isFrozen(policyA.roots));
+    assert.ok(Object.isFrozen(policyB.roots));
+    assert.throws(
+        () => internalsA.resources.toolContext.workspacePolicy.authorizeRoot(
+            path.join(stateRoot, "repo-b"),
+        ),
+        (error: unknown) => error instanceof WorkspaceAuthorizationError
+            && error.code === "ROOT_NOT_AUTHORIZED",
+    );
+});
+
+test("tool arguments cannot expand the session roots", async (t) => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-session-immutable-"));
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = stateRoot;
+    const runtimeConfig = config();
+    const host = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, 1024),
+        "cli",
+    );
+    const policy = createSessionWorkspacePolicy({
+        roots: [path.join(stateRoot, "workspace")],
+        homeDirectory: os.homedir(),
+        stateRoot,
+    });
+    const session = host.createSession(policy);
+    t.after(async () => {
+        await session.shutdown();
+        await host.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    });
+    const sessionPolicy = (session as unknown as {
+        resources: { toolContext: ToolContext };
+    }).resources.toolContext.workspacePolicy;
+    // A tool-argument-shaped path outside every root stays unauthorized even
+    // after the session is live: the policy cannot be mutated or expanded.
+    assert.ok(Object.isFrozen(sessionPolicy));
+    assert.ok(Object.isFrozen(sessionPolicy.roots));
+    assert.throws(
+        () => sessionPolicy.authorizePath("/etc/passwd"),
+        (error: unknown) => error instanceof WorkspaceAuthorizationError
+            && error.code === "ROOT_NOT_AUTHORIZED",
+    );
+    assert.throws(
+        () => (sessionPolicy.roots as string[]).push("/etc"),
+        TypeError,
+    );
+});
+
+test("invalid JSON roots reject startup", () => {
+    const invalid: Array<[NodeJS.ProcessEnv, RegExp]> = [
+        [{ SATORI_SESSION_ROOTS_JSON: "{not json" }, /SATORI_SESSION_ROOTS_JSON/],
+        [{ SATORI_SESSION_ROOTS_JSON: JSON.stringify([17]) }, /absolute/],
+        [{ SATORI_SESSION_ROOTS_JSON: JSON.stringify(["relative/path"]) }, /absolute/],
+        [{ SATORI_SESSION_ROOTS_JSON: JSON.stringify([]) }, /1-16/],
+        [{ SATORI_SESSION_ROOTS_JSON: JSON.stringify(Array.from({ length: 17 }, () => "/tmp")) }, /1-16/],
+    ];
+    for (const [env, message] of invalid) {
+        assert.throws(
+            () => createSessionWorkspacePolicyFromEnv(env),
+            (error: unknown) => error instanceof WorkspaceAuthorizationError
+                && error.code === "INVALID_WORKSPACE_ROOT"
+                && message.test(error.message),
+        );
+    }
+});
+
+test("direct stdio binds the environment-derived policy before tool execution", async (t) => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-stdio-policy-"));
+    const workspace = path.join(stateRoot, "workspace");
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    const previousRoots = process.env.SATORI_SESSION_ROOTS_JSON;
+    process.env.SATORI_STATE_ROOT = stateRoot;
+    process.env.SATORI_SESSION_ROOTS_JSON = JSON.stringify([workspace]);
+    const runtimeConfig = config();
+    const server = new ContextMcpServer(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, 1024),
+        "cli",
+    );
+    t.after(async () => {
+        await server.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        if (previousRoots === undefined) delete process.env.SATORI_SESSION_ROOTS_JSON;
+        else process.env.SATORI_SESSION_ROOTS_JSON = previousRoots;
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    });
+    const sessionPolicy = (server as unknown as {
+        session: { resources: { toolContext: ToolContext } };
+    }).session.resources.toolContext.workspacePolicy;
+    assert.equal(sessionPolicy.roots.length, 1);
+    assert.equal(
+        sessionPolicy.authorizePath(path.join(workspace, "src", "main.ts")).relativePath,
+        "src/main.ts",
+    );
+    assert.throws(
+        () => sessionPolicy.authorizePath("/etc/passwd"),
+        (error: unknown) => error instanceof WorkspaceAuthorizationError
+            && error.code === "ROOT_NOT_AUTHORIZED",
+    );
+});
+
+test("direct stdio and shared runtime resolve roots identically", () => {
+    const roots = [
+        path.join(os.tmpdir(), "satori-workspace-one"),
+        path.join(os.tmpdir(), "satori-workspace-two"),
+    ];
+    const env = { SATORI_SESSION_ROOTS_JSON: JSON.stringify(roots) };
+    assert.deepEqual(resolveSessionWorkspaceRoots(env), roots);
+    const policy = createSessionWorkspacePolicyFromEnv(env);
+    assert.deepEqual([...policy.roots].sort(), [...roots].sort());
+    // No env variable: every session falls back to the process working
+    // directory, identical for direct stdio and the shared runtime launcher.
+    assert.deepEqual(resolveSessionWorkspaceRoots({}), [process.cwd()]);
 });

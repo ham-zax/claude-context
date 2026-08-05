@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import { CapabilityResolver } from '../core/capabilities.js';
+import { createSessionWorkspacePolicy } from '../core/session-workspace-policy.js';
 import { ContextMcpConfig } from '../config.js';
 import { getMcpToolList, toolRegistry } from './registry.js';
 import { ToolContext } from './types.js';
@@ -31,6 +34,11 @@ function buildContext(overrides: Partial<ContextMcpConfig> = {}): ToolContext {
     const capabilities = new CapabilityResolver(buildConfig(overrides));
     return {
         capabilities,
+        workspacePolicy: createSessionWorkspacePolicy({
+            roots: [path.join(os.tmpdir(), 'satori-registry-test')],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.homedir(), '.satori'),
+        }),
     } as ToolContext;
 }
 
