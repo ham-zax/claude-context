@@ -173,7 +173,7 @@ test("LateOn model store downloads the pinned closure once and reuses it", async
 });
 
 test("LateOn model store fails closed for a corrupt cached artifact", async () => {
-    const artifacts = { "model.onnx": "expected", "tokenizer.json": "tokenizer" };
+    const artifacts: Record<string, string> = { "model.onnx": "expected", "tokenizer.json": "tokenizer" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const modelDirectory = resolveDefaultLateOnModelDirectory(homeDir);
         writeModelDirectory(modelDirectory, { "model.onnx": "corrupt", "tokenizer.json": "tokenizer" });
@@ -278,7 +278,7 @@ test("LateOn model store rejects acquisition that exceeds its deadline", async (
 });
 
 test("LateOn model store follows HTTPS redirects within the acquisition policy", async () => {
-    const artifacts = { "model.onnx": "expected" };
+    const artifacts: Record<string, string> = { "model.onnx": "expected" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const requested: string[] = [];
         const fetchImpl = (async (input: string | URL | Request) => {
@@ -372,7 +372,7 @@ test("LateOn model store removes the staging directory after a failed download",
 });
 
 test("LateOn model store verifies and reuses a valid destination that appears during acquisition", async () => {
-    const artifacts = { "model.onnx": "expected", "tokenizer.json": "tokenizer" };
+    const artifacts: Record<string, string> = { "model.onnx": "expected", "tokenizer.json": "tokenizer" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const modelDirectory = resolveDefaultLateOnModelDirectory(homeDir);
         const fetchImpl = (async (input: string | URL | Request) => {
@@ -388,7 +388,7 @@ test("LateOn model store verifies and reuses a valid destination that appears du
 });
 
 test("verifyLateOnModelDirectory accepts a verified explicit directory", async () => {
-    const artifacts = { "model.onnx": "expected" };
+    const artifacts: Record<string, string> = { "model.onnx": "expected" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const modelDirectory = path.join(homeDir, "explicit-model");
         writeModelDirectory(modelDirectory, artifacts);
@@ -411,7 +411,7 @@ test("verifyLateOnModelDirectory rejects a directory missing an artifact", async
 });
 
 test("verifyLateOnModelDirectory rejects an intermediate directory symlink", async () => {
-    const artifacts = { "nested/model.onnx": "expected" };
+    const artifacts: Record<string, string> = { "nested/model.onnx": "expected" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const modelDirectory = path.join(homeDir, "explicit-model");
         const target = path.join(homeDir, "real-nested");
@@ -486,7 +486,7 @@ test("production explicit model verification binds the exact frozen profile dige
 });
 
 test("LateOn model store reuses a valid destination that appears before the rename", async () => {
-    const artifacts = { "model.onnx": "expected" };
+    const artifacts: Record<string, string> = { "model.onnx": "expected" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const modelDirectory = resolveDefaultLateOnModelDirectory(homeDir);
         let renamed = false;
@@ -516,7 +516,7 @@ test("LateOn model store reuses a valid destination that appears before the rena
 });
 
 test("LateOn model store refuses a corrupt destination that appears before the rename", async () => {
-    const artifacts = { "model.onnx": "expected" };
+    const artifacts: Record<string, string> = { "model.onnx": "expected" };
     await withLateOnFixture(artifacts, async ({ homeDir, runtimePackageRoot }) => {
         const fetchImpl = (async (input: string | URL | Request) => {
             const artifactPath = String(input).slice(String(input).lastIndexOf("/") + 1);

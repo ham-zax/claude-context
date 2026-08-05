@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { isolatedSmokeEnv } from "../scripts/release-smoke.js";
+import { isolatedSmokeEnv } from "./smoke-env.js";
 
 test("release smoke isolates machine configuration and removes pnpm-only npm variables", () => {
     const smokeHome = "/tmp/satori-release-smoke-home";

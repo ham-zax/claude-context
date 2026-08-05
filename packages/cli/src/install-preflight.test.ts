@@ -185,6 +185,7 @@ process.exit(1);
         await assert.rejects(
             probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
             (error) => {
+                assert.ok(error instanceof Error);
                 assert.match(error.message, /Candidate runtime failed before completing MCP preflight\./);
                 assert.match(error.message, /Candidate command:/);
                 assert.match(error.message, /Candidate stderr:/);
@@ -238,6 +239,7 @@ test("preflight diagnostics include only safe candidate identities", async () =>
         await assert.rejects(
             probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
             (error) => {
+                assert.ok(error instanceof Error);
                 assert.match(error.message, /Expected MCP version: 6\.8\.1/);
                 assert.match(error.message, new RegExp(`Candidate MCP package root: ${mcpPackageRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
                 assert.match(error.message, new RegExp(`Candidate runtime root: ${runtimeRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
@@ -440,6 +442,7 @@ process.exit(1);
         await assert.rejects(
             probeManagedRuntimeCandidate(failingProbeInput(homeDir, entryPath)),
             (error) => {
+                assert.ok(error instanceof Error);
                 assert.equal(error.message.includes("�"), false);
                 assert.equal(error.message.includes("€"), true);
                 return true;

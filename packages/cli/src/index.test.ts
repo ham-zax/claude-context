@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { CallToolResult, ListToolsResult } from "./client.js";
-import type { DoctorResult } from "./doctor.js";
+import type { DoctorResult, RuntimeVersionState } from "./doctor.js";
 import { CliError } from "./errors.js";
 import { isExecutedDirectlyForPaths, runCli } from "./index.js";
 import { CliUpgradeDelegationStartError } from "./upgrade.js";
@@ -264,7 +264,7 @@ test("runCli version shortcuts report the installed CLI, MCP, and Core set", asy
         { name: "@zokizuan/satori-mcp", version: MCP_PACKAGE_VERSION, source: "test" },
         { name: "@zokizuan/satori-core", version: CORE_PACKAGE_VERSION, source: "test" },
     ];
-    const noLauncherState = () => ({
+    const noLauncherState = (): RuntimeVersionState => ({
         cliVersion: CLI_PACKAGE_VERSION,
         bundledMcpVersion: MCP_PACKAGE_VERSION,
         bundledCoreVersion: CORE_PACKAGE_VERSION,
@@ -973,6 +973,7 @@ test("runCli doctor defaults to a human summary without starting an MCP session"
                 },
             ],
             nextSteps: ["Set MILVUS_ADDRESS."],
+            managedRuntime: null,
             localDiagnostics: {
                 schemaVersion: "v1", storage: "local_only",
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
@@ -1013,6 +1014,7 @@ test("runCli doctor renders configured client runtimes instead of one global def
                 { name: "embedding_provider_env", status: "ok", message: "Configured client credentials are present." },
             ],
             nextSteps: [],
+            managedRuntime: null,
             localDiagnostics: {
                 schemaVersion: "v1", storage: "local_only",
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
@@ -1045,6 +1047,7 @@ test("runCli doctor preserves complete JSON output through both explicit forms",
                 packageVersionNote: "independent package versions",
                 checks: [{ name: "milvus_address", status: "error", message: "MILVUS_ADDRESS is required." }],
                 nextSteps: ["Set MILVUS_ADDRESS."],
+                managedRuntime: null,
                 localDiagnostics: {
                     schemaVersion: "v1", storage: "local_only",
                     privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
@@ -1179,6 +1182,7 @@ test("runCli doctor text mode hides sensitive diagnostic details", async () => {
                 }
             ],
             nextSteps: ["Retry the intended manage_index action after verifying the abandoned operation."],
+            managedRuntime: null,
             localDiagnostics: {
                 schemaVersion: "v1", storage: "local_only",
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
@@ -1213,6 +1217,7 @@ test("runCli doctor verbose mode includes complete support details", async () =>
                 message: "abandoned root=/private/repo operation=88bea106-5ead-44fa-a478-9a7783032076",
             }],
             nextSteps: [],
+            managedRuntime: null,
             localDiagnostics: {
                 schemaVersion: "v1", storage: "local_only",
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
