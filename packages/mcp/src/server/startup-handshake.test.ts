@@ -170,6 +170,7 @@ async function withProviderEnvSession(
     fs.mkdirSync(homeDir, { recursive: true });
     const savedEnv = clearProviderEnv();
     const savedHome = process.env.HOME;
+    const savedSessionRoots = process.env.SATORI_SESSION_ROOTS_JSON;
     const originalConsole = {
         log: console.log,
         warn: console.warn,
@@ -181,6 +182,11 @@ async function withProviderEnvSession(
     };
     process.env.HOME = homeDir;
     Object.assign(process.env, envOverrides);
+    if (process.env.SATORI_SESSION_ROOTS_JSON === undefined) {
+        // Authorize the temp workspace so manage_index/search reach their
+        // empty-provider behavior instead of being denied by the workspace gate.
+        process.env.SATORI_SESSION_ROOTS_JSON = JSON.stringify([tempDir]);
+    }
     console.log = capture;
     console.warn = capture;
     console.error = capture;
@@ -200,6 +206,11 @@ async function withProviderEnvSession(
             delete process.env.HOME;
         } else {
             process.env.HOME = savedHome;
+        }
+        if (savedSessionRoots === undefined) {
+            delete process.env.SATORI_SESSION_ROOTS_JSON;
+        } else {
+            process.env.SATORI_SESSION_ROOTS_JSON = savedSessionRoots;
         }
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
