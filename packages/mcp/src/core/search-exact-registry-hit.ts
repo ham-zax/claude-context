@@ -107,6 +107,9 @@ export function buildExactRegistryHitEnvelope(
         repair: repairSourceBackedPythonSpan({
             codebaseRoot: input.codebaseRoot,
             symbol: match.symbol,
+            // No authorized source lines are available in search result
+            // rendering: the shared repair fails closed without any
+            // pathname read (attempted=false, validated=false).
         }),
     }));
     const finalizedSearchWarnings = buildExactRegistryWarnings({

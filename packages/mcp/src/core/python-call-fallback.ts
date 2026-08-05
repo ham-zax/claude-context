@@ -1,11 +1,4 @@
-import * as fs from "fs";
-import * as path from "path";
 import {
-    beginSourceMeasurementObservation,
-    finishSourceMeasurementObservation,
-    recordSourceIo,
-    recordSourceProcessing,
-    sourceIoOwnerForCurrentOperation,
     type RelationshipRecord,
     type SymbolRecord,
     type SymbolRegistry,
@@ -41,43 +34,6 @@ export type SourceBackedPythonCallFallback = {
 type ReadAuthorizedCodebaseFileLines = (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
 type SortCallGraphEdges = (edges: CallGraphEdge[]) => CallGraphEdge[];
 type SortCallGraphNotes = (notes: CallGraphNote[]) => CallGraphNote[];
-
-function readMeasuredSourceLines(absoluteFile: string): string[] {
-    const sourceBytes = fs.readFileSync(absoluteFile);
-    const observation = beginSourceMeasurementObservation({
-        owner: sourceIoOwnerForCurrentOperation("validation"),
-        filePath: absoluteFile,
-        logicalBytesRequested: sourceBytes.length,
-        scanKind: "complete",
-    });
-    recordSourceIo({
-        observation,
-        startByte: 0,
-        endByte: sourceBytes.length,
-        basis: "path_read",
-    });
-    finishSourceMeasurementObservation({
-        observation,
-        status: "completed",
-    });
-    const selectorStartedAt = performance.now();
-    let selectorOutcome: "success" | "failed" = "failed";
-    let lines: string[];
-    try {
-        lines = sourceBytes.toString("utf8").split(/\r?\n/);
-        selectorOutcome = "success";
-    } finally {
-        recordSourceProcessing({
-            observation,
-            owner: "selector",
-            inputBytesProcessed: sourceBytes.length,
-            basis: "shared_buffer",
-            outcome: selectorOutcome,
-            durationMs: performance.now() - selectorStartedAt,
-        });
-    }
-    return lines;
-}
 
 function extractDirectCallNamesFromLine(line: string, options: {
     includeAttributeCalls?: boolean;
@@ -337,9 +293,12 @@ export function repairSourceBackedPythonSpan(input: {
             endTruncated: false,
         };
     }
-    const absoluteFile = path.resolve(input.codebaseRoot, symbol.file);
-    const relativeToRoot = path.relative(input.codebaseRoot, absoluteFile);
-    if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot) || !fs.existsSync(absoluteFile)) {
+    const lines = input.sourceLines;
+    if (lines === undefined) {
+        // No authorized source lines were supplied: fail closed without any
+        // pathname read. Callers with publication authority pass sourceLines;
+        // callers without authorization evidence (search result rendering,
+        // denied files) get the unverified shape.
         return {
             symbol,
             attempted: false,
@@ -349,7 +308,6 @@ export function repairSourceBackedPythonSpan(input: {
             endTruncated: false,
         };
     }
-    const lines = input.sourceLines || readMeasuredSourceLines(absoluteFile);
     const definitionIndex = findPythonDefinitionIndexNearSpan(lines, symbol);
     if (definitionIndex === undefined) {
         return {
@@ -548,6 +506,12 @@ export async function buildSourceBackedPythonCallerFallback(input: {
                 sourceLines = await readSource(input.codebaseRoot, source.file);
                 linesByFile.set(source.file, sourceLines);
             }
+            if (sourceLines === undefined) {
+                // Authorized source is unavailable (denied, unpublished,
+                // escaped, or unreadable): skip this record entirely. Never
+                // fall back to a pathname read for span repair.
+                continue;
+            }
             sourceRepair = repairSourceBackedPythonSpan({
                 codebaseRoot: input.codebaseRoot,
                 symbol: source,
@@ -574,6 +538,11 @@ export async function buildSourceBackedPythonCallerFallback(input: {
         if (sourceLines === undefined) {
             sourceLines = await readSource(input.codebaseRoot, repairedSource.file);
             linesByFile.set(repairedSource.file, sourceLines);
+        }
+        if (sourceLines === undefined) {
+            // Source became unavailable between validation and site
+            // extraction: fail closed for this record.
+            continue;
         }
         const siteLine = sourceLines?.[siteStartLine - 1];
         if (typeof siteLine !== "string") {

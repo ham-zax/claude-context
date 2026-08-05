@@ -700,6 +700,9 @@ export function buildVisibleGroupedSearchResults(input: {
             ? repairSourceBackedPythonSpan({
                 codebaseRoot: input.codebaseRoot,
                 symbol: rawRegistrySymbol,
+                // No authorized source lines are available in search result
+                // rendering: the shared repair fails closed without any
+                // pathname read (attempted=false, validated=false).
             })
             : undefined;
         for (const warning of buildSearchSpanWarningCodes(registrySymbolRepair)) {
