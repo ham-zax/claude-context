@@ -1,10 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TrackedRootReadiness, type TrackedRootReadinessHost } from "./tracked-root-readiness.js";
+import type { CodebaseInfo } from "../config.js";
 
 function createHost(options: { fingerprintMismatch?: boolean } = {}): TrackedRootReadinessHost {
     const root = "/repo";
-    const info = { status: "indexed" as const };
+    const info = {
+        status: "indexed" as const,
+        indexedFiles: 1,
+        totalChunks: 1,
+        indexStatus: "completed" as const,
+        lastUpdated: "2026-01-01T00:00:00.000Z",
+    } satisfies CodebaseInfo;
     return {
         refreshSnapshotStateFromDisk: () => undefined,
         isPathWithinCodebase: (targetPath, rootPath) => targetPath === rootPath || targetPath.startsWith(`${rootPath}/`),
@@ -29,6 +36,7 @@ function createHost(options: { fingerprintMismatch?: boolean } = {}): TrackedRoo
             tool: "manage_index",
             args: { action, path: codebasePath },
             rationale,
+            reason: rationale,
         }),
         buildStaleLocalMessage: () => "stale",
     };

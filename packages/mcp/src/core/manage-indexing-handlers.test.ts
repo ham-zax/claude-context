@@ -9,7 +9,7 @@ import {
     IndexPolicyPublicationError,
     SynchronizerCheckpointPublicationError,
 } from "@zokizuan/satori-core";
-import type { CanonicalPublicationBinding } from "@zokizuan/satori-core";
+import type { CanonicalPublicationBinding, IndexPolicyPublicationReceipt } from "@zokizuan/satori-core";
 import { ManageIndexingHandlers } from "./manage-indexing-handlers.js";
 import type {
     IndexFingerprint,
@@ -129,7 +129,7 @@ function resolveCollectionName(codebasePath: string): string {
 
 type RepairResult = {
     status: "ok" | "blocked" | "requires_reindex";
-    reason?: "needs_create" | "requires_reindex";
+    reason?: "needs_create" | "requires_reindex" | "repair_proof_limit";
     message: string;
     missingCount?: number;
     warnings?: string[];
@@ -468,7 +468,7 @@ function createFailedIndexingHarness(
                 collectionName: binding.collectionName,
                 navigation: { ...binding.navigation },
                 ...(binding.publication ? { publication: structuredClone(binding.publication) } : {}),
-            };
+            } as Extract<IndexPolicyPublicationReceipt, { operation: 'publish' }>;
             const publish = () => {
                 publishedCustomExtensions = [...policy.customExtensions];
                 publishedCustomIgnorePatterns = [...policy.customIgnorePatterns];
@@ -2529,11 +2529,12 @@ test("handleRepairIndex rejects generic repair success when the effective source
         const response = await harness.handler.handleRepairIndex({ path: repoPath });
         const payload = JSON.parse(response.content[0].text) as {
             status: string;
+            message?: string;
             operation?: IndexOperationReceipt;
         };
 
         assert.equal(payload.status, "error");
-        assert.match(payload.message, /did not preserve a valid source checkpoint/i);
+        assert.match(payload.message ?? "", /did not preserve a valid source checkpoint/i);
         assert.equal(payload.operation?.phase, "failed");
         assert.equal(harness.persisted.at(-1)?.indexed, false);
     });
@@ -2598,7 +2599,7 @@ test("handleRepairIndex publishes blocked receipt when proof requires reindex", 
 test("handleRepairIndex publishes blocked proof-limit receipt without remediation hints", async () => {
     await withTempRepo(async (repoPath) => {
         const harness = createRepairReceiptHarness(repoPath, {
-            repairIndex: async () => ({
+            repairIndex: (async () => ({
                 status: "blocked",
                 reason: "repair_proof_limit",
                 message: "backend cannot prove one stable payload state",
@@ -2608,7 +2609,7 @@ test("handleRepairIndex publishes blocked proof-limit receipt without remediatio
                     staleRemoteChunks: { status: "unproven", basis: "same_state_payload_authority_unavailable" },
                     navigation: { status: "not_checked" },
                 },
-            }),
+            })) as unknown as (repairOptions?: RepairOptionsLike) => Promise<RepairResult>,
         });
 
         const response = await harness.handler.handleRepairIndex({ path: repoPath });

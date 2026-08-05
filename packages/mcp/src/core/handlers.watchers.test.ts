@@ -319,7 +319,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parsePayload(response: ToolTextResponse): JsonPayload {
     const text = response?.content?.[0]?.text;
     assert.equal(typeof text, 'string');
-    const parsed: unknown = JSON.parse(text);
+    const parsed: unknown = JSON.parse(text as string);
     assert.equal(isRecord(parsed), true);
     return parsed as JsonPayload;
 }

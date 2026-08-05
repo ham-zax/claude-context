@@ -52,7 +52,7 @@ function initGitRepo(repoPath: string): void {
 function parseManageEnvelope(response: ToolTextResponse): ManageIndexResponseEnvelope {
     const payload = response?.content?.[0]?.text;
     assert.equal(typeof payload, 'string');
-    return JSON.parse(payload) as ManageIndexResponseEnvelope;
+    return JSON.parse(payload as string) as ManageIndexResponseEnvelope;
 }
 
 function createHandlers(

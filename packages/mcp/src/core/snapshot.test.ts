@@ -1255,10 +1255,14 @@ test('setCodebaseSyncCompleted respects explicit fingerprintSource override', ()
         }, FINGERPRINT_A, 'verified');
         const updated = manager.getCodebaseInfo(codebase);
         assert.ok(updated);
-        assert.equal(updated?.status, 'sync_completed');
+        // Capture the discriminant before assert.equal: TS 6 narrows through
+        // assert.equal, which would make the defensive guard's else-branch
+        // 'never' and break this access.
+        const updatedStatus = updated?.status;
+        assert.equal(updatedStatus, 'sync_completed');
         assert.equal(updated?.fingerprintSource, 'verified');
-        if (updated?.status !== 'sync_completed') {
-            assert.fail(`Expected sync_completed, received ${updated?.status}`);
+        if (updatedStatus !== 'sync_completed') {
+            assert.fail(`Expected sync_completed, received ${updatedStatus}`);
         }
         assert.equal(updated.indexedFiles, 3);
         assert.equal(updated.totalChunks, 7);

@@ -1190,12 +1190,13 @@ test('handleGetIndexingStatus keeps indexed status when marker probe fails', asy
 
 test('handleGetIndexingStatus preserves getIndexCompletionMarker receiver binding', async () => {
     await withTempRepo(async (repoPath) => {
+        const marker = buildMarker(repoPath);
         const context = {
-            marker: buildMarker(repoPath),
+            marker,
             async getIndexCompletionMarker(codebasePath: string) {
                 assert.equal(this, context);
                 assert.equal(codebasePath, repoPath);
-                return this.marker;
+                return marker;
             }
         } as unknown as HandlerContext;
         const snapshotManager = {

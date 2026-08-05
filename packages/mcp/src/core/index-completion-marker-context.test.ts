@@ -61,6 +61,13 @@ class FakeEmbedding extends Embedding {
     }
 }
 
+type InMemoryVectorDb = VectorDatabase & {
+    seedDocuments: (
+        collectionName: string,
+        documents: Array<IndexedVectorDocument | VectorDocument>,
+    ) => Promise<void>;
+};
+
 function createInMemoryVectorDb(options?: { hybridResults?: VectorCandidate[]; vectorResults?: VectorCandidate[] }) {
     const byCollection = new Map<string, Map<string, VectorDocument>>();
     let lastDenseRequest: DenseCandidateRequest | undefined;
@@ -84,8 +91,8 @@ function createInMemoryVectorDb(options?: { hybridResults?: VectorCandidate[]; v
     };
 
     const db = {
-        async createCollection(collectionName) { ensureCollection(collectionName); },
-        async createHybridCollection(collectionName) { ensureCollection(collectionName); },
+        async createCollection(collectionName: string, _dimension?: number) { ensureCollection(collectionName); },
+        async createHybridCollection(collectionName: string, _dimension?: number) { ensureCollection(collectionName); },
         async dropCollection(collectionName) {
             byCollection.delete(collectionName);
         },
@@ -185,7 +192,7 @@ function createInMemoryVectorDb(options?: { hybridResults?: VectorCandidate[]; v
         async checkCollectionLimit() {
             return true;
         }
-    } satisfies VectorDatabase;
+    } satisfies InMemoryVectorDb;
 
     return {
         db,

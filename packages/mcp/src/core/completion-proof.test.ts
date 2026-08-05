@@ -515,7 +515,7 @@ test('validateCompletionProof retains partial status and the complete fingerprin
 
 test('validateCompletionProof requires an explicit canonical marker status', async () => {
     const withoutStatus = marker();
-    delete withoutStatus.indexStatus;
+    delete (withoutStatus as { indexStatus?: unknown }).indexStatus;
     const result = await validateCompletionProof({
         codebasePath: '/repo/a',
         runtimeFingerprint: RUNTIME_FINGERPRINT,

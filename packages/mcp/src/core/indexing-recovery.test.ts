@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { IndexCompletionMarkerDocument } from '@zokizuan/satori-core';
+import { IndexCompletionMarkerDocument, type CanonicalCompletionFingerprint } from '@zokizuan/satori-core';
 import { IndexFingerprint } from '../config.js';
 import { decideInterruptedIndexingRecovery } from './indexing-recovery.js';
 
@@ -23,7 +23,7 @@ function buildMarker(overrides: Partial<IndexCompletionMarkerDocument> = {}): In
     return {
         kind: 'satori_index_completion_v3',
         codebasePath: '/repo/app',
-        fingerprint: RUNTIME_FINGERPRINT,
+        fingerprint: RUNTIME_FINGERPRINT as CanonicalCompletionFingerprint,
         indexedFiles: 169,
         totalChunks: 728,
         completedAt: '2026-02-27T23:57:10.000Z',
@@ -63,7 +63,7 @@ test('decideInterruptedIndexingRecovery promotes indexed state when marker finge
     };
     const decision = decideInterruptedIndexingRecovery(
         buildMarker({
-            fingerprint: mismatchedFingerprint
+            fingerprint: mismatchedFingerprint as CanonicalCompletionFingerprint
         }),
         RUNTIME_FINGERPRINT
     );
@@ -134,7 +134,7 @@ test('decideInterruptedIndexingRecovery rejects malformed expanded fingerprint f
         fingerprint: {
             ...RUNTIME_FINGERPRINT,
             parserVersion: 17,
-        } as unknown as IndexFingerprint,
+        } as unknown as CanonicalCompletionFingerprint,
     });
 
     const decision = decideInterruptedIndexingRecovery(marker, RUNTIME_FINGERPRINT);

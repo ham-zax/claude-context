@@ -400,7 +400,7 @@ test('cached exact search cannot survive direct collection deletion', async () =
             context,
             createSnapshotManager(repoPath),
             syncManager,
-            receipt!.marker.fingerprint,
+            receipt!.marker.fingerprint as IndexFingerprint,
             CAPABILITIES,
             () => Date.parse('2026-06-18T00:00:00.000Z'),
             undefined,
@@ -479,7 +479,7 @@ test('cached exact search downgrades navigation after direct symbol shard deleti
             context,
             createSnapshotManager(repoPath),
             syncManager,
-            receipt!.marker.fingerprint,
+            receipt!.marker.fingerprint as IndexFingerprint,
             CAPABILITIES,
             () => Date.parse('2026-06-18T00:00:00.000Z'),
             undefined,
@@ -592,7 +592,12 @@ test('cached exact search downgrades navigation after direct symbol shard deleti
             groupBy: 'symbol',
             limit: 5,
             debugMode: 'ranking',
-        }));
+        })) as unknown as {
+            status: string;
+            results?: SearchGroup[];
+            warnings?: Array<{ code?: string }>;
+            hints?: { debugSearch?: { exactRegistry?: { reason?: string } } };
+        };
         assert.equal(degraded.status, 'ok', JSON.stringify(degraded));
         assert.equal(vectorDatabase.payloadCountQueryCount, semanticPayloadCountQueries);
         assert.notEqual(degraded.results?.[0]?.navigation?.graph, 'ready');
@@ -782,7 +787,7 @@ test('MCP handlers reject stale rename symbols and publish new navigation after 
             },
         }, toolContext);
         assert.equal(newReadResponse.isError, undefined);
-        const newReadPayload = parsePayload(newReadResponse);
+        const newReadPayload = parsePayload(newReadResponse) as unknown as { formatVersion: number; kind: string; status: string; symbol?: { symbolId: string }; source: unknown };
         assert.equal(newReadPayload.formatVersion, 2);
         assert.equal(newReadPayload.kind, 'symbol_context');
         assert.equal(newReadPayload.status, 'ok');
@@ -1044,7 +1049,7 @@ test('MCP direct navigation fails closed for dirty files until search freshness 
             },
         }, createToolContext(repoPath, handlers));
         assert.equal(currentReadResponse.isError, undefined);
-        const currentReadPayload = parsePayload(currentReadResponse);
+        const currentReadPayload = parsePayload(currentReadResponse) as unknown as { formatVersion: number; kind: string; status: string; symbol?: { symbolId: string }; source: unknown };
         assert.equal(currentReadPayload.formatVersion, 2);
         assert.equal(currentReadPayload.kind, 'symbol_context');
         assert.equal(currentReadPayload.status, 'ok');

@@ -237,7 +237,10 @@ test('handleGetIndexingStatus gates on a live sync lease regardless of operation
                 satoriVersion: 'test',
             },
         };
-        let currentOperation: typeof matchingOperation | undefined = matchingOperation;
+        let currentOperation:
+            | typeof matchingOperation
+            | (Omit<typeof matchingOperation, "phase"> & { phase: "completed" })
+            | undefined = matchingOperation;
         const snapshotManager = {
             getLatestOperation: () => currentOperation,
             getCodebaseStatus: () => 'indexed',
