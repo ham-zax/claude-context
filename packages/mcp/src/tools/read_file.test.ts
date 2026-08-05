@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { readFileTool } from './read_file.js';
 import { ToolContext } from './types.js';
+import { createSessionWorkspacePolicy } from '../core/session-workspace-policy.js';
 import { withSourceMeasurementOperation } from '@zokizuan/satori-core';
 
 type SnapshotManagerLike = ToolContext['snapshotManager'];
@@ -19,22 +21,53 @@ function withTempDir<T>(fn: (dir: string) => Promise<T> | T): Promise<T> | T {
     });
 }
 
+function scanRegularFiles(root: string): string[] {
+    const paths: string[] = [];
+    const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const absolute = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                walk(absolute);
+            } else if (entry.isFile()) {
+                paths.push(path.relative(root, absolute).replace(/\\/g, '/'));
+            }
+        }
+    };
+    walk(root);
+    return paths.sort();
+}
+
 function indexedSnapshot(
     repoPath: string,
     status: 'indexed' | 'sync_completed' | 'indexing' | 'requires_reindex' = 'indexed',
     extra: Record<string, unknown> = {}
 ): SnapshotManagerLike {
+    const manifest = extra.indexManifest ?? {
+        indexedPaths: scanRegularFiles(repoPath),
+        updatedAt: '2026-01-01T00:00:00.000Z',
+    };
     return {
         getAllCodebases: () => [{
             path: repoPath,
-            info: { status, ...extra }
+            info: { status, indexManifest: manifest, ...extra }
         }]
     } as unknown as SnapshotManagerLike;
+}
+
+function permissiveWorkspacePolicy() {
+    return createSessionWorkspacePolicy({
+        roots: ['/'],
+        homeDirectory: os.homedir(),
+        stateRoot: path.join(os.tmpdir(), 'read-file-test-state'),
+        allowBroadRoots: true,
+    });
 }
 
 function buildContext(readFileMaxLines: number, overrides: Partial<ToolContext> = {}): ToolContext {
     return {
         readFileMaxLines,
+        readFileMaxBytes: 8 * 1024 * 1024,
+        workspacePolicy: permissiveWorkspacePolicy(),
         snapshotManager: {
             getAllCodebases: () => []
         },
@@ -132,7 +165,7 @@ test('read_file source instrumentation preserves output and records one acquisit
         ]);
         assert.equal(records[0].relativeFile, 'small.ts');
         assert.equal(records[1].bytesObtained, 6);
-        assert.equal(records[1].basis, 'path_read');
+        assert.equal(records[1].basis, 'descriptor_read');
         assert.equal(records[2].status, 'completed');
         assert.equal(records[3].owner, 'selector');
         assert.equal(records[3].outcome, 'success');
@@ -154,7 +187,13 @@ test('read_file touches the resolved indexed codebase root on successful reads',
                 snapshotManager: {
                     getAllCodebases: () => [{
                         path: repoPath,
-                        info: { status: 'indexed' }
+                        info: {
+                            status: 'indexed',
+                            indexManifest: {
+                                indexedPaths: ['src/small.ts'],
+                                updatedAt: '2026-01-01T00:00:00.000Z',
+                            },
+                        },
                     }]
                 } as unknown as SnapshotManagerLike,
                 syncManager: {
@@ -189,7 +228,13 @@ test('read_file refreshes snapshot state before resolving indexed roots', async 
                     },
                     getAllCodebases: () => [{
                         path: repoPath,
-                        info: { status: 'indexed' }
+                        info: {
+                            status: 'indexed',
+                            indexManifest: {
+                                indexedPaths: ['src/small.ts'],
+                                updatedAt: '2026-01-01T00:00:00.000Z',
+                            },
+                        },
                     }]
                 } as unknown as SnapshotManagerLike,
             }
@@ -534,7 +579,16 @@ test('read_file annotated mode returns content and outline metadata when outline
             mode: 'annotated'
         }, 1000, {
             snapshotManager: {
-                getAllCodebases: () => [{ path: repoPath, info: { status: 'indexed' } }]
+                getAllCodebases: () => [{
+                    path: repoPath,
+                    info: {
+                        status: 'indexed',
+                        indexManifest: {
+                            indexedPaths: ['src/runtime.ts'],
+                            updatedAt: '2026-01-01T00:00:00.000Z',
+                        },
+                    },
+                }]
             } as unknown as SnapshotManagerLike,
             toolHandlers: {
                 handleFileOutline: async () => ({
@@ -1135,5 +1189,268 @@ test('read_file exact-symbol request reports navigation unavailable while its ro
             code: 'NAVIGATION_UNAVAILABLE',
         });
         assert.equal(response.content[0].text.includes(repoPath), false);
+    });
+});
+
+function assertStructuredDenial(response: { isError?: boolean; content: Array<{ text: string }> }, expected: { reason: string; code: string }, secret?: string) {
+    assert.equal(response.isError, true);
+    const payload = JSON.parse(response.content[0].text);
+    assert.equal(payload.status, 'error');
+    assert.equal(payload.reason, expected.reason);
+    assert.equal(payload.code, expected.code);
+    if (secret !== undefined) {
+        assert.equal(response.content[0].text.includes(secret), false);
+        assert.equal(payload.content, undefined);
+    }
+}
+
+test('read_file rejects a file absent from the published path set', async () => {
+    await withTempDir(async (dir) => {
+        const filePath = path.join(dir, 'unpublished.ts');
+        fs.writeFileSync(filePath, 'UNPUBLISHED_SECRET\n', 'utf8');
+
+        const response = await runReadFile({ path: filePath }, 1000, {
+            snapshotManager: indexedSnapshot(dir, 'indexed', {
+                indexManifest: { indexedPaths: ['src/other.ts'], updatedAt: '2026-01-01T00:00:00.000Z' }
+            })
+        });
+        assertStructuredDenial(response, { reason: 'file_not_published', code: 'FILE_NOT_PUBLISHED' }, 'UNPUBLISHED_SECRET');
+    });
+});
+
+test('read_file rejects an ignored .env file even under an indexed root', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const envPath = path.join(repoPath, '.env');
+        fs.mkdirSync(repoPath, { recursive: true });
+        fs.writeFileSync(envPath, 'API_KEY=SECRET_VALUE\n', 'utf8');
+
+        const response = await runReadFile({ path: envPath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: ['src/main.ts'], updatedAt: '2026-01-01T00:00:00.000Z' }
+            })
+        });
+        assertStructuredDenial(response, { reason: 'file_not_published', code: 'FILE_NOT_PUBLISHED' }, 'API_KEY');
+        assert.equal(response.content[0].text.includes('SECRET_VALUE'), false);
+    });
+});
+
+test('read_file rejects an outside symlink', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const outside = path.join(dir, 'outside', 'secret.txt');
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        fs.mkdirSync(path.dirname(outside), { recursive: true });
+        fs.writeFileSync(outside, 'OUTSIDE_SYMLINK_SECRET\n', 'utf8');
+        const symlinkPath = path.join(repoPath, 'src', 'leak');
+        fs.symlinkSync(outside, symlinkPath);
+
+        const response = await runReadFile({ path: symlinkPath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: ['src/leak'], updatedAt: '2026-01-01T00:00:00.000Z' }
+            })
+        });
+        // The canonical target resolves outside every indexed root, so the
+        // denial is the outside-indexed-root envelope (no content, no leak).
+        assertOutsideIndexedRoot(response, 'OUTSIDE_SYMLINK_SECRET');
+    });
+});
+
+test('read_file resolves an inside symlink to its published canonical target', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const targetPath = path.join(repoPath, 'src', 'target.ts');
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.writeFileSync(targetPath, 'INSIDE_TARGET_CONTENT\n', 'utf8');
+        const symlinkPath = path.join(repoPath, 'src', 'alias.ts');
+        fs.symlinkSync(targetPath, symlinkPath);
+
+        // The canonical (resolved) target is published, so the alias is served
+        // from the target's descriptor; the symlink itself is never opened by
+        // pathname. Membership is decided on the canonical relative path.
+        const published = await runReadFile({ path: symlinkPath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: ['src/target.ts'], updatedAt: '2026-01-01T00:00:00.000Z' }
+            })
+        });
+        assert.equal(published.isError, undefined);
+        assert.equal(published.content[0].text, 'INSIDE_TARGET_CONTENT');
+
+        // A symlink whose canonical target is unpublished is denied before any
+        // content is read (membership is decided on the resolved path).
+        const unpublished = await runReadFile({ path: symlinkPath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: ['src/alias.ts'], updatedAt: '2026-01-01T00:00:00.000Z' }
+            })
+        });
+        assertStructuredDenial(unpublished, { reason: 'file_not_published', code: 'FILE_NOT_PUBLISHED' }, 'INSIDE_TARGET_CONTENT');
+    });
+});
+
+test('read_file rejects a file above READ_FILE_MAX_BYTES before reading', async () => {
+    await withTempDir(async (dir) => {
+        const filePath = path.join(dir, 'oversized.ts');
+        fs.writeFileSync(filePath, 'x'.repeat(70_000), 'utf8');
+        const ledgerFile = path.join(dir, 'ledger.jsonl');
+
+        const response = await withSourceMeasurementOperation({
+            operation: 'read_file',
+            ledgerFile,
+            rootDir: dir,
+        }, () => runReadFile({ path: filePath }, 1000, {
+            snapshotManager: indexedSnapshot(dir),
+            readFileMaxBytes: 65_536,
+        }));
+
+        assertStructuredDenial(response, { reason: 'file_too_large', code: 'FILE_TOO_LARGE' });
+        assert.match(response.content[0].text, /65_536|65536|maxBytes/);
+        // No source observation may begin for an oversized file: the ledger is
+        // either absent or empty (the denial happens before any read).
+        const ledgerPath = ledgerFile;
+        if (fs.existsSync(ledgerPath)) {
+            assert.equal(fs.readFileSync(ledgerPath, 'utf8').trim(), '');
+        }
+    });
+});
+
+test('read_file reads through the authorized descriptor', async () => {
+    await withTempDir(async (dir) => {
+        const filePath = path.join(dir, 'descriptor.ts');
+        fs.writeFileSync(filePath, 'DESCRIPTOR_READ\n', 'utf8');
+        const ledgerFile = path.join(dir, 'ledger.jsonl');
+
+        const response = await withSourceMeasurementOperation({
+            operation: 'read_file',
+            ledgerFile,
+            rootDir: dir,
+        }, () => runReadFile({ path: filePath }, 1000, {
+            snapshotManager: indexedSnapshot(dir),
+        }));
+
+        assert.equal(response.isError, undefined);
+        assert.equal(response.content[0].text, 'DESCRIPTOR_READ');
+        const records = fs.readFileSync(ledgerFile, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+        const ioRecord = records.find((record) => record.kind === 'source_io');
+        assert.ok(ioRecord, 'expected a source_io record');
+        assert.equal(ioRecord.basis, 'descriptor_read');
+    });
+});
+
+test('read_file detects replacement during the read', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const filePath = path.join(repoPath, 'src', 'swap.ts');
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, 'ORIGINAL_CONTENT\n', 'utf8');
+
+        const response = await runReadFile({ path: filePath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath),
+            syncManager: {
+                touchWatchedCodebase: async () => {
+                    fs.writeFileSync(filePath, 'REPLACED_CONTENT\n', 'utf8');
+                },
+            } as unknown as SyncManagerLike,
+        });
+
+        assertStructuredDenial(response, { reason: 'file_replaced', code: 'FILE_REPLACED' }, 'ORIGINAL_CONTENT');
+        assert.equal(response.content[0].text.includes('REPLACED_CONTENT'), false);
+    });
+});
+
+test('existing compact and full presentations remain byte-compatible', async () => {
+    await withTempDir(async (dir) => {
+        const filePath = path.join(dir, 'compat.ts');
+        const lines = [
+            '    });',
+            '}',
+            "test('compat presentation', async () => {",
+            ...Array.from({ length: 41 }, (_, index) => `    const value${index} = ${index};`),
+            '});',
+        ];
+        fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8');
+        const snapshot = { snapshotManager: indexedSnapshot(dir) };
+
+        const compact = await runReadFile({
+            path: filePath,
+            start_line: 1,
+            end_line: lines.length,
+        }, 1000, snapshot);
+        assert.equal(compact.content[0].text.includes('\n'), false);
+        const compactPayload = JSON.parse(compact.content[0].text);
+        assert.deepEqual(compactPayload, {
+            presentation: 'compact',
+            path: path.resolve(filePath),
+            startLine: 1,
+            endLine: 45,
+            preview: "test('compat presentation', async () => {",
+            source: lines.join('\n'),
+        });
+        assert.deepEqual(compact.structuredContent, compactPayload);
+
+        const full = await runReadFile({
+            path: filePath,
+            start_line: 1,
+            end_line: lines.length,
+            presentation: 'full',
+        }, 1000, snapshot);
+        assert.equal(full.content[0].text, lines.join('\n'));
+    });
+});
+
+test('read_file rejects an untracked ignored file even when it is language-capable', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const ignoredPath = path.join(repoPath, 'src', 'secret.ts');
+        const inScopePath = path.join(repoPath, 'src', 'ok.ts');
+        fs.mkdirSync(path.dirname(ignoredPath), { recursive: true });
+        fs.writeFileSync(ignoredPath, 'export const secret = 1;\n', 'utf8');
+        fs.writeFileSync(inScopePath, 'export const ok = 1;\n', 'utf8');
+        execFileSync('git', ['init', '-q', repoPath]);
+        const context = {
+            getActiveIgnorePatterns: () => ['src/secret.ts'],
+        } as unknown as ToolContext['context'];
+
+        const denied = await runReadFile({ path: ignoredPath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: [], updatedAt: '2026-01-01T00:00:00.000Z' }
+            }),
+            context,
+        });
+        assertStructuredDenial(denied, { reason: 'file_not_published', code: 'FILE_NOT_PUBLISHED' });
+        assert.equal(denied.content[0].text.includes('export const secret'), false);
+
+        const allowed = await runReadFile({ path: inScopePath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: [], updatedAt: '2026-01-01T00:00:00.000Z' }
+            }),
+            context,
+        });
+        assert.equal(allowed.isError, undefined);
+        assert.equal(allowed.content[0].text, 'export const ok = 1;');
+    });
+});
+
+test('read_file serves an untracked in-scope source file found through live_path', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const filePath = path.join(repoPath, 'src', 'live.ts');
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, 'export const live = 1;\n', 'utf8');
+        execFileSync('git', ['init', '-q', repoPath]);
+
+        const response = await runReadFile({ path: filePath }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: [], updatedAt: '2026-01-01T00:00:00.000Z' }
+            }),
+            context: {
+                getActiveIgnorePatterns: () => [],
+            } as unknown as ToolContext['context'],
+        });
+
+        assert.equal(response.isError, undefined);
+        assert.equal(response.content[0].text, 'export const live = 1;');
     });
 });

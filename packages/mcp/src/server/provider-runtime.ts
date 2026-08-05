@@ -261,6 +261,7 @@ export class ProviderRuntime {
     private readonly runtimeFingerprint: IndexFingerprint;
     private readonly capabilities: CapabilityResolver;
     private readonly readFileMaxLines: number;
+    private readonly readFileMaxBytes: number;
     private readonly watchSyncEnabled: boolean;
     private readonly watchDebounceMs: number;
     private readonly startSyncLifecycle: boolean;
@@ -283,6 +284,7 @@ export class ProviderRuntime {
         runtimeFingerprint: IndexFingerprint;
         capabilities: CapabilityResolver;
         readFileMaxLines: number;
+        readFileMaxBytes?: number;
         watchSyncEnabled: boolean;
         watchDebounceMs: number;
         startSyncLifecycle?: boolean;
@@ -298,6 +300,7 @@ export class ProviderRuntime {
         this.runtimeFingerprint = args.runtimeFingerprint;
         this.capabilities = args.capabilities;
         this.readFileMaxLines = args.readFileMaxLines;
+        this.readFileMaxBytes = args.readFileMaxBytes ?? 8 * 1024 * 1024;
         this.watchSyncEnabled = args.watchSyncEnabled;
         this.watchDebounceMs = args.watchDebounceMs;
         this.startSyncLifecycle = args.startSyncLifecycle === true;
@@ -440,6 +443,7 @@ export class ProviderRuntime {
                 runtimeFingerprint: this.runtimeFingerprint,
                 toolHandlers,
                 readFileMaxLines: this.readFileMaxLines,
+                readFileMaxBytes: this.readFileMaxBytes,
                 runtimeOwnerGate: this.runtimeOwnerGate,
                 providerRuntime: this,
                 // Raw host-wide provider contexts are never bound to an MCP

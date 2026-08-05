@@ -26,6 +26,7 @@ import type {
 } from '@zokizuan/satori-core';
 import { readFileTool } from '../tools/read_file.js';
 import type { ToolContext } from '../tools/types.js';
+import { createSessionWorkspacePolicy } from './session-workspace-policy.js';
 import { CapabilityResolver } from './capabilities.js';
 import { parseIndexFingerprint, type IndexFingerprint } from '../config.js';
 import { ToolHandlers } from './handlers.js';
@@ -324,6 +325,11 @@ function createSnapshotManager(repoPath: string): SnapshotManager {
 function createToolContext(repoPath: string, handlers: ToolHandlers): ToolContext {
     return {
         readFileMaxLines: 1000,
+        workspacePolicy: createSessionWorkspacePolicy({
+            roots: [repoPath],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.homedir(), '.satori'),
+        }),
         snapshotManager: createSnapshotManager(repoPath),
         syncManager: {
             touchWatchedCodebase: async () => undefined,
