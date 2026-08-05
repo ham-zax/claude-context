@@ -1,5 +1,5 @@
 import { envManager } from '../utils/env-manager';
-import { BoundedHttpError, fetchWithDeadline } from '../net/fetch-with-deadline';
+import { fetchWithDeadline } from '../net/fetch-with-deadline';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -232,7 +232,7 @@ export class ClusterManager {
                 throw options.signal.reason ?? error;
             }
             // Log the original error for more details, especially for fetch errors.
-            // BoundedHttpError messages carry kind/status/attempts without the token.
+            // BoundedHttpError messages (kind/status/attempts) carry no token.
             console.error('[ZillizUtils] ❌ Original error in makeRequest:', error);
             throw new Error(`Zilliz API request failed: ${errorMessage(error)}`);
         }
