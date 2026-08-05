@@ -24,6 +24,7 @@ function result(index: number, preview = `result ${index}`): SearchGroupResult {
         navigation: { graph: "unsupported_language" },
         __groupId: `group-${index}`,
         __symbolKey: `symbol-${index}`,
+        __candidateIds: [],
         __exactLexicalMatch: false,
     };
 }
@@ -33,7 +34,7 @@ function buildEnvelope(
     disclosure?: SearchDisclosureSummary,
 ): SearchGroupedResponseEnvelope {
     return {
-        formatVersion: 2,
+        formatVersion: 3,
         status: "ok",
         path: "/repo",
         codebaseRoot: "/repo",

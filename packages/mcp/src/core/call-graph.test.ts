@@ -6,10 +6,6 @@ import path from 'node:path';
 import { CallGraphSidecarManager, SupportedSourceDeltaPolicy } from './call-graph.js';
 import { IndexFingerprint } from '../config.js';
 
-type TestableCallGraphSidecarManager = CallGraphSidecarManager & {
-    getSidecarPath(codebasePath: string): string;
-};
-
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
     embeddingModel: 'voyage-4-large',
@@ -47,7 +43,7 @@ function sortEdgesForAssertion(edges: Array<{ srcSymbolId: string; dstSymbolId: 
 }
 
 function getSidecarPathForTest(manager: CallGraphSidecarManager, codebasePath: string): string {
-    return (manager as unknown as TestableCallGraphSidecarManager).getSidecarPath(codebasePath);
+    return ((manager as unknown as { getSidecarPath(path: string): string }).getSidecarPath(codebasePath));
 }
 
 test('call graph sidecar builds and query traversal is deterministic on TS fixture', async () => {

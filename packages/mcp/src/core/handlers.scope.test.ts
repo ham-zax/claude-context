@@ -40,7 +40,13 @@ type HandlerCallGraphManager = NonNullable<ConstructorParameters<typeof ToolHand
 type HandlerReranker = Pick<
     NonNullable<ConstructorParameters<typeof ToolHandlers>[7]>,
     'rerank'
->;
+> & Partial<Pick<
+    NonNullable<ConstructorParameters<typeof ToolHandlers>[7]>,
+    'getIdentity'
+>> & {
+    /** LateOn-specific bounded admission; absent on generic rerankers. */
+    getMaxDocuments?: () => number;
+};
 type SearchFixtureResult = {
     content: string;
     relativePath: string;
@@ -49,6 +55,7 @@ type SearchFixtureResult = {
     language: string;
     score: number;
     indexedAt: string;
+    candidateId?: string;
     symbolId?: string;
     symbolLabel?: string;
     symbolKey?: string;
@@ -106,6 +113,7 @@ type SearchPayloadResultView = {
 };
 type ChangedFilesState = { available: boolean; files: Set<string> };
 type SearchDebugChangedCodeView = {
+    basis: "git_tracked_worktree";
     files: string[];
     symbols: unknown[];
     directCallers: unknown[];
@@ -622,7 +630,7 @@ function createHandlers(
         },
         semanticSearchWithCandidateTraceInProvenGeneration: async (
             _receipt: unknown,
-            request: { topK: number },
+            request: { query: string; topK: number },
         ) => {
             if (options?.mustLaneBlockedQueries?.includes(request.query)) {
                 return {
@@ -872,6 +880,7 @@ test('handleSearchCode falls back from structural ownership when completion proo
                 startLine: 1,
                 endLine: 1,
                 language: 'typescript',
+                indexedAt: '2026-01-01T00:30:00.000Z',
                 score: 0.99,
             }]);
             (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
@@ -1005,10 +1014,15 @@ function assertClosedDebugProjection(
     assert.ok(hints.debugSearch.readiness);
     assert.ok(hints.debugSearch.queryIntent);
     if (expectCandidateSurvival) {
-        assert.equal(hints.debugSearch.candidateSurvival?.schemaVersion, 'search_candidate_survival_v2');
-        const queryEmbeddings = hints.debugSearch.candidateSurvival?.queryEmbeddings ?? [];
+        const survival = hints.debugSearch.candidateSurvival as {
+            schemaVersion?: string;
+            queryEmbeddings?: unknown[];
+            stages?: Array<{ stage: string }>;
+        } | undefined;
+        assert.equal(survival?.schemaVersion, 'search_candidate_survival_v2');
+        const queryEmbeddings = survival?.queryEmbeddings ?? [];
         assert.ok(Array.isArray(queryEmbeddings));
-        if (hints.debugSearch.candidateSurvival?.stages.some(
+        if (survival?.stages?.some(
             (stage) => stage.stage === 'raw_dense' || stage.stage === 'core_result',
         )) {
             assert.deepEqual(queryEmbeddings, [{
@@ -1018,14 +1032,14 @@ function assertClosedDebugProjection(
         }
         if (expectCandidateSurvival === 'exact') {
             assert.deepEqual(
-                hints.debugSearch.candidateSurvival?.stages.map((stage) => stage.stage),
+                survival?.stages?.map((stage) => stage.stage),
                 ['grouped', 'disclosed'],
             );
         } else {
-            assert.ok(hints.debugSearch.candidateSurvival?.stages.some((stage) => stage.stage === 'mcp_fusion'));
+            assert.ok(survival?.stages?.some((stage) => stage.stage === 'mcp_fusion'));
         }
-        assert.ok(hints.debugSearch.candidateSurvival?.stages.some((stage) => stage.stage === 'disclosed'));
-        assert.equal(JSON.stringify(hints.debugSearch.candidateSurvival).includes('return session.isValid'), false);
+        assert.ok(survival?.stages?.some((stage) => stage.stage === 'disclosed'));
+        assert.equal(JSON.stringify(survival).includes('return session.isValid'), false);
     } else {
         assert.equal(hints.debugSearch.candidateSurvival, undefined);
     }
@@ -1294,22 +1308,22 @@ test('manage status prepares one reusable proof and genuine authority drift stil
         const semanticSearch = internals.context.semanticSearchInProvenGeneration
             .bind(internals.context);
         let authorityInitialized = false;
-        internals.context.getIndexAuthorityObservations = () => authorityInitialized
+        internals.context.getIndexAuthorityObservations = (() => authorityInitialized
             ? {
                 vector: 'vector-authority',
                 navigation: 'navigation-authority',
             }
-            : null;
+            : null) as unknown as typeof internals.context.getIndexAuthorityObservations;
         internals.context.isPreparedVectorReceiptBoundToCurrentAuthority = () => true;
         internals.context.revalidatePreparedGeneration = async () => {
             throw new Error('status-prepared reuse must not reread the completion proof');
         };
         internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
         internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
-        internals.context.semanticSearchInProvenGeneration = async (receipt, request) => {
+        internals.context.semanticSearchInProvenGeneration = (async (receipt: unknown, request: unknown) => {
             semanticReceipt = receipt;
-            return semanticSearch(receipt, request);
-        };
+            return semanticSearch(receipt as never, request as never);
+        }) as unknown as typeof internals.context.semanticSearchInProvenGeneration;
         internals.syncManager.getPreparedReadObservation = () => sourceObservationAvailable
             ? {
                 available: true,
@@ -1453,12 +1467,12 @@ test('status-prepared search routes an untracked pending watcher event through f
             }>;
         };
         let authorityInitialized = false;
-        internals.context.getIndexAuthorityObservations = () => authorityInitialized
+        internals.context.getIndexAuthorityObservations = (() => authorityInitialized
             ? {
                 vector: 'vector-authority',
                 navigation: 'navigation-authority',
             }
-            : null;
+            : null) as unknown as typeof internals.context.getIndexAuthorityObservations;
         internals.context.isPreparedVectorReceiptBoundToCurrentAuthority = () => true;
         internals.syncManager.getPreparedReadObservation = () => sourceEventPending
             ? {
@@ -1641,25 +1655,25 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             let nowMs = Date.now();
             const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
             const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
-            internals.context.semanticSearchInProvenGeneration = async (...args) => {
+            internals.context.semanticSearchInProvenGeneration = (async (...args: unknown[]) => {
                 retrievalCalls += 1;
                 return originalSearch(...args);
-            };
-            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+            }) as unknown as typeof internals.context.semanticSearchInProvenGeneration;
+            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = (async (...args: unknown[]) => {
                 retrievalCalls += 1;
                 return originalTracedSearch(...args);
-            };
-            internals.context.getIndexAuthorityObservations = () => ({
+            }) as unknown as typeof internals.context.semanticSearchWithCandidateTraceInProvenGeneration;
+            internals.context.getIndexAuthorityObservations = (() => ({
                 vector: vectorAuthority,
                 navigation: navigationAuthority,
-            });
-            internals.context.revalidatePreparedGeneration = async () => ({
+            })) as unknown as typeof internals.context.getIndexAuthorityObservations;
+            internals.context.revalidatePreparedGeneration = (async () => ({
                 vectorReceipt: { collectionName: 'committed-v3' } as never,
                 navigationProof: { status: 'not_bound' },
-            });
-            internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
-            internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
-            internals.context.inspectSourceFreshnessCheckpoint = async () => ({
+            })) as unknown as typeof internals.context.revalidatePreparedGeneration;
+            internals.context.compareAllSourceToFreshnessCheckpoint = (async () => ({ status: 'matches' })) as unknown as typeof internals.context.compareAllSourceToFreshnessCheckpoint;
+            internals.context.compareSourceObservationToFreshnessCheckpoint = (async () => ({ status: 'matches' })) as unknown as typeof internals.context.compareSourceObservationToFreshnessCheckpoint;
+            internals.context.inspectSourceFreshnessCheckpoint = (async () => ({
                 status: 'valid',
                 observationToken: 'continuation-checkpoint-observation',
                 generationReceipt: {
@@ -1669,7 +1683,7 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
                         indexPolicyHash: 'continuation-policy-hash',
                     },
                 },
-            });
+            })) as unknown as typeof internals.context.inspectSourceFreshnessCheckpoint;
             internals.syncManager.getPreparedReadObservation = () => sourceAvailable
                 ? {
                     available: true,
@@ -2444,14 +2458,14 @@ test('search continuation reports not_admissible pagination when the replay budg
         });
         internals.context.compareAllSourceToFreshnessCheckpoint = async () => ({ status: 'matches' });
         internals.context.compareSourceObservationToFreshnessCheckpoint = async () => ({ status: 'matches' });
-        internals.context.inspectSourceFreshnessCheckpoint = async () => ({
+        internals.context.inspectSourceFreshnessCheckpoint = (async () => ({
             status: 'valid',
             observationToken: 'not-admissible-checkpoint-observation',
             generationReceipt: {
                 collectionName: 'committed-v3',
                 marker: { runId: 'not-admissible-marker-run', indexPolicyHash: 'policy-hash' },
             },
-        });
+        })) as unknown as typeof internals.context.inspectSourceFreshnessCheckpoint;
         internals.syncManager.getPreparedReadObservation = () => ({
             available: true,
             observation: { freshnessEpoch: 0, watcherState: 'ready' },
@@ -2863,7 +2877,7 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
             finalComparisonCalls += 1;
             return { status: 'matches' };
         };
-        internals.context.inspectSourceFreshnessCheckpoint = async () => {
+        internals.context.inspectSourceFreshnessCheckpoint = (async () => {
             checkpointInspectionCalls += 1;
             return {
                 status: 'valid',
@@ -2876,19 +2890,19 @@ test('watcher-disabled search uses the existing full checkpoint comparison as it
                     },
                 },
             };
-        };
+        }) as unknown as typeof internals.context.inspectSourceFreshnessCheckpoint;
         internals.context.getIndexAuthorityObservations = () => ({
             vector: 'vector-stable',
             navigation: 'navigation-stable',
         });
-        internals.syncManager.getWatcherObservation = () => ({
+        internals.syncManager.getWatcherObservation = (() => ({
             observedEventEpoch: 0,
             comparedThroughEventEpoch: 0,
             latestEpochByReason: {},
             coverage: 'disabled',
             coverageGapSinceEpoch: 0,
             pending: true,
-        });
+        })) as unknown as typeof internals.syncManager.getWatcherObservation;
         internals.syncManager.getPreparedReadObservation = () => ({
             available: false,
             reason: 'watcher_disabled',
@@ -2995,14 +3009,14 @@ test('watcher-disabled search preserves exact changed paths for the first freshn
             finalComparisonCalls += 1;
             return { status: 'matches' };
         };
-        internals.context.inspectSourceFreshnessCheckpoint = async () => ({
+        internals.context.inspectSourceFreshnessCheckpoint = (async () => ({
             status: 'valid',
             observationToken: 'checkpoint-observation',
             generationReceipt: {
                 collectionName: 'committed-v3',
                 marker: { runId: 'marker-run', indexPolicyHash: 'policy-hash' },
             },
-        });
+        })) as unknown as typeof internals.context.inspectSourceFreshnessCheckpoint;
         internals.context.getIndexAuthorityObservations = () => ({
             vector: 'vector-stable',
             navigation: 'navigation-stable',
@@ -3011,13 +3025,13 @@ test('watcher-disabled search preserves exact changed paths for the first freshn
             available: true,
             files: new Set(['src/owner.ts']),
         });
-        internals.syncManager.getWatcherObservation = () => ({
+        internals.syncManager.getWatcherObservation = (() => ({
             observedEventEpoch: 0,
             comparedThroughEventEpoch: 0,
             latestEpochByReason: {},
             coverage: 'disabled',
             pending: false,
-        });
+        })) as unknown as typeof internals.syncManager.getWatcherObservation;
         internals.syncManager.getPreparedReadObservation = () => ({
             available: false,
             reason: 'watcher_disabled',
@@ -3097,7 +3111,7 @@ test('handleSearchCode reports the exact recount used by fallback collection pro
             fallbackProofs += 1;
             return 'committed-v3';
         };
-        internals.context.getVectorStore = () => ({ hasCollection: async () => true });
+        internals.context.getVectorStore = (() => ({ hasCollection: async () => true })) as unknown as typeof internals.context.getVectorStore;
         internals.context.getIndexAuthorityObservations = () => ({
             vector: 'vector-stable',
             navigation: 'navigation-stable',
@@ -3990,10 +4004,10 @@ test('handleSearchCode exact registry fast path returns a grouped symbol despite
                     return [];
                 }
             });
-            (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
-                ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false }),
+            (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
+                ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false, checkedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(), thresholdMs: 180000 }),
                 touchWatchedCodebase: async () => { throw new Error('watch boom'); },
-            };
+            }) as unknown as ToolHandlersTestOverrides['syncManager'];
             (handlers as unknown as ToolHandlersTestOverrides).context.semanticSearch = async () => {
                 semanticSearchCalls += 1;
                 throw new Error('semanticSearch should not run for exact registry hits');
@@ -4886,7 +4900,7 @@ test('handleSearchCode tracked lexical recovery short-circuits exact-ish line sc
                     trackedNewlineSplitCalls += 1;
                 }
                 return originalSplit.call(this, separator as string & RegExp, limit);
-            };
+            } as typeof String.prototype.split;
 
             let response;
             try {
@@ -5275,7 +5289,7 @@ test('sortGroupedSearchResults preserves exactMatchPinned provenance when exact 
                     },
                 },
             },
-        ] as SortableGroupedSearchResult[];
+        ] as unknown as SortableGroupedSearchResult[];
 
         const applied = (handlers as unknown as ToolHandlersTestOverrides).sortGroupedSearchResults(grouped, true);
         assert.equal(applied, true);
@@ -7178,9 +7192,9 @@ test('handleSearchCode exposes freshness summary and warns when dirty files were
             }
         ]);
 
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
-            ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false })
-        };
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
+            ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false, checkedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(), thresholdMs: 180000 })
+        }) as unknown as ToolHandlersTestOverrides['syncManager'];
         (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase = () => ({
             available: true,
             files: new Set(['src/changed.ts'])
@@ -7231,7 +7245,7 @@ test('handleSearchCode forces an exact freshness comparison for a dirty working 
             symbolLabel: 'function recentlySyncedOwner()',
         }]);
         const freshnessCalls: Array<{ thresholdMs: number; options: unknown }> = [];
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
             ensureFreshness: async (_codebasePath: string, thresholdMs: number, options: unknown) => {
                 freshnessCalls.push({ thresholdMs, options });
                 return {
@@ -7240,7 +7254,7 @@ test('handleSearchCode forces an exact freshness comparison for a dirty working 
                     thresholdMs,
                 };
             },
-        } as unknown as HandlerSyncManager;
+        }) as unknown as ToolHandlersTestOverrides['syncManager'] as unknown as HandlerSyncManager;
         (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase = () => ({
             available: true,
             files: new Set([relativePath]),
@@ -7277,16 +7291,17 @@ test('handleSearchCode preserves successful results when watcher maintenance fai
             content: 'export const result = true;',
             relativePath: 'src/result.ts',
             startLine: 1,
+            indexedAt: '2026-01-01T00:30:00.000Z',
             endLine: 1,
             language: 'typescript',
             score: 0.99,
             symbolId: 'sym_result',
             symbolLabel: 'const result',
         }]);
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
-            ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false }),
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
+            ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false, checkedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(), thresholdMs: 180000 }),
             touchWatchedCodebase: async () => { throw new Error('watch boom'); },
-        };
+        }) as unknown as ToolHandlersTestOverrides['syncManager'];
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -7342,9 +7357,9 @@ test('handleSearchCode supplements exact path-scoped dirty file evidence when in
             }
         ]);
 
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
-            ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false })
-        };
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
+            ensureFreshness: async () => ({ mode: 'skipped_recent', changed: false, checkedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(), thresholdMs: 180000 })
+        }) as unknown as ToolHandlersTestOverrides['syncManager'];
         (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase = () => ({
             available: true,
             files: new Set([relativePath])
@@ -7527,13 +7542,13 @@ test('handleSearchCode supplements exact path-scoped dirty file evidence after s
             }
         ]);
 
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
             ensureFreshness: async () => ({
                 mode: 'synced',
                 changed: true,
                 stats: { added: 0, removed: 0, modified: 1 },
             })
-        };
+        }) as unknown as ToolHandlersTestOverrides['syncManager'];
         (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase = () => ({
             available: true,
             files: new Set([relativePath])
@@ -7568,9 +7583,9 @@ test('handleSearchCode does not read dirty live-path symlinks whose targets are 
         fs.symlinkSync(outsidePath, path.join(repoPath, relativePath));
 
         const handlers = createHandlers(repoPath, []);
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
-            ensureFreshness: async () => ({ mode: 'synced', changed: true, stats: { added: 0, removed: 0, modified: 1 } })
-        };
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
+            ensureFreshness: async () => ({ mode: 'synced', changed: true, stats: { added: 0, removed: 0, modified: 1 }, checkedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(), thresholdMs: 180000 })
+        }) as unknown as ToolHandlersTestOverrides['syncManager'];
         (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase = () => ({
             available: true,
             files: new Set([relativePath]),
@@ -7624,13 +7639,13 @@ test('handleSearchCode supplements exact path-scoped tracked test evidence witho
         ]);
 
         (handlers as unknown as ToolHandlersTestOverrides).context.getTrackedRelativePaths = () => [relativePath, 'src/unrelated.ts'];
-        (handlers as unknown as ToolHandlersTestOverrides).syncManager = {
+        (handlers as unknown as ToolHandlersTestOverrides).syncManager = ({
             ensureFreshness: async () => ({
                 mode: 'skipped_recent',
                 checkedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
                 thresholdMs: 180000
             })
-        };
+        }) as unknown as ToolHandlersTestOverrides['syncManager'];
         (handlers as unknown as ToolHandlersTestOverrides).getChangedFilesForCodebase = () => ({
             available: true,
             files: new Set<string>()
@@ -7691,7 +7706,7 @@ test('handleSearchCode uses real synchronizer tracked paths for exact path-scope
         context.getActiveIndexedCollectionName = async () => context.resolveCollectionName(repoPath);
         context.getVectorStore = () => ({
             hasCollection: async () => true,
-        }) as ReturnType<MutableHandlerContext['getVectorStore']>;
+        }) as unknown as ReturnType<MutableHandlerContext['getVectorStore']>;
         context.semanticSearch = async () => ([
             {
                 content: 'export const unrelated = true;',
@@ -9016,7 +9031,7 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
                 ...vectorReceipt,
                 navigation: {
                     generationId: navigationGeneration.generationId,
-                    generationRoot: navigationGeneration.generationRoot,
+                    generationRoot: navigationGeneration.rootPath,
                     symbolRegistryManifestHash: navigationGeneration.manifestHash,
                     relationshipManifestHash: navigationGeneration.relationshipManifestHash,
                     navigationSealHash: navigationGeneration.navigationSealHash,
@@ -11512,6 +11527,7 @@ test('full candidate diagnostics preserve reranker input, grouping, and disclose
                 startLine: 1,
                 endLine: 8,
                 language: 'typescript',
+                indexedAt: '2026-01-01T00:30:00.000Z',
                 content: 'export function validateSessionLifecycle() { return true; }',
                 score: 0.92,
             },
@@ -11520,6 +11536,7 @@ test('full candidate diagnostics preserve reranker input, grouping, and disclose
                 startLine: 3,
                 endLine: 11,
                 language: 'typescript',
+                indexedAt: '2026-01-01T00:30:00.000Z',
                 content: 'export function readSessionCache() { return true; }',
                 score: 0.81,
             },
@@ -11528,6 +11545,7 @@ test('full candidate diagnostics preserve reranker input, grouping, and disclose
                 startLine: 5,
                 endLine: 13,
                 language: 'typescript',
+                indexedAt: '2026-01-01T00:30:00.000Z',
                 content: 'export function sessionStatus() { return true; }',
                 score: 0.74,
             },
@@ -11569,6 +11587,7 @@ test('full diagnostics chunk the complete multi-arm replay-signal union without 
             language: 'typescript',
             content: `export const ${arm}${index} = true;`,
             score: 1 - (index / 1000),
+            indexedAt: '2026-01-01T00:30:00.000Z',
         }));
         const dense = buildArm('dense');
         const handlers = createHandlers(repoPath, [dense[0]], undefined, {
@@ -11854,7 +11873,7 @@ test('handleSearchCode redacts unclassified all-pass failures from output, diagn
             },
         ];
         assert.deepEqual(payload.hints?.debugSearch?.semanticPassFailures, expectedFailures);
-        assert.deepEqual(response.meta?.searchDiagnostics?.semanticPassFailures, expectedFailures);
+        assert.deepEqual((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.semanticPassFailures, expectedFailures);
         assert.doesNotMatch(response.content[0]?.text || '', /secret-value/);
         assert.doesNotMatch(JSON.stringify(response.meta), /secret-value/);
         assert.doesNotMatch(capturedLogs.join('\n'), /secret-value/);
@@ -11930,9 +11949,9 @@ test('handleSearchCode preserves a redacted terminal embedding cause without sta
                 'Restart the MCP server after correcting the credential.',
             ],
         });
-        assert.equal(response.meta?.searchDiagnostics?.searchPassCount, 1);
-        assert.equal(response.meta?.searchDiagnostics?.semanticExpansionReason, 'primary_terminal_provider_failure');
-        assert.deepEqual(response.meta?.searchDiagnostics?.semanticPassFailures, [{
+        assert.equal((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.searchPassCount, 1);
+        assert.equal((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.semanticExpansionReason, 'primary_terminal_provider_failure');
+        assert.deepEqual((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.semanticPassFailures, [{
             passId: 'primary',
             errorName: 'EmbeddingProviderError',
             code: 'EMBEDDING_PROVIDER_AUTH_FAILED',
@@ -11986,7 +12005,7 @@ test('handleSearchCode returns structured backend diagnostics when all semantic 
         assert.equal(payload.freshnessDecision, undefined);
         assert.deepEqual(payload.results, []);
         assert.match(payload.hints.backend.nextSteps.join(' '), /Resume the Zilliz Cloud cluster/);
-        assert.deepEqual(response.meta?.searchDiagnostics?.semanticPassFailures, [
+        assert.deepEqual((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.semanticPassFailures, [
             {
                 passId: 'primary',
                 errorName: 'Error',
@@ -12129,7 +12148,7 @@ test('handleSearchCode supports deterministic test-only fault injection for expa
                 (warning: { code?: string }) => warning.code === 'SEARCH_PASS_FAILED:expanded'
             );
             assert.equal(passWarning?.severity, 'degraded');
-            assert.equal(response.meta?.searchDiagnostics?.searchPassFailureCount, 1);
+            assert.equal((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.searchPassFailureCount, 1);
         });
     });
 });
@@ -12202,7 +12221,7 @@ test('handleSearchCode ignores fault injection env outside test mode', { concurr
             assert.equal(payload.status, 'ok');
             assert.equal(payload.results.length, 2);
             assert.deepEqual(warningCodes(payload), ['NAVIGATION_REPAIR_REQUIRED']);
-            assert.equal(response.meta?.searchDiagnostics?.searchPassFailureCount, 0);
+            assert.equal((response.meta as unknown as { searchDiagnostics?: Record<string, unknown> })?.searchDiagnostics?.searchPassFailureCount, 0);
         });
     });
 });
@@ -12943,6 +12962,7 @@ test('handleSearchCode indexing payload recommends manage_index status', async (
         assert.equal(payload.indexing?.progressPct, 42);
     });
 });
+
 test('pagination totalGroupCount reports the frozen set, not the full available set', async () => {
     await withTempRepo(async (repoPath) => {
         const denseResults = Array.from({ length: 100 }, (_, idx) => ({
@@ -13063,6 +13083,7 @@ test('pagination totalGroupCount reports the frozen set, not the full available 
         assert.notEqual(payload.pagination?.totalGroupCount, payload.resultCounts?.availableGroupCount);
     });
 });
+
 test('handleSearchCode routes untracked files through live paths and dirty overlay but never ignored ones (handler integration; real git-status coverage in working-tree-state tests)', async () => {
     await withTempRepo(async (repoPath) => {
         fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
@@ -13091,9 +13112,11 @@ test('handleSearchCode routes untracked files through live paths and dirty overl
                     ensureFreshness: async () => ({
                         mode: 'synced',
                         changed: true,
+                        checkedAt: '2026-01-01T00:00:00.000Z',
+                        thresholdMs: 0,
                         stats: { added: 1, removed: 0, modified: 0 },
                     }),
-                };
+                } as unknown as ToolHandlersTestOverrides['syncManager'];
             }
             overrides.getChangedFilesForCodebase = () => ({
                 available: true,
@@ -13195,16 +13218,16 @@ test('handleSearchCode reports conjunctive unavailability without claiming the m
             }
             return undefined;
         };
-        internals.context.semanticSearchInProvenGeneration = async (...args) => {
+        internals.context.semanticSearchInProvenGeneration = (async (...args: unknown[]) => {
             const rejected = rejectConjunctive(...args);
             if (rejected !== undefined) return rejected;
             return originalSearch(...args);
-        };
-        internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+        }) as unknown as typeof internals.context.semanticSearchInProvenGeneration;
+        internals.context.semanticSearchWithCandidateTraceInProvenGeneration = (async (...args: unknown[]) => {
             const rejected = rejectConjunctive(...args);
             if (rejected !== undefined) return rejected;
             return originalTracedSearch(...args);
-        };
+        }) as unknown as typeof internals.context.semanticSearchWithCandidateTraceInProvenGeneration;
 
         const response = await handlers.handleSearchCode({
             path: repoPath,
@@ -13266,16 +13289,16 @@ test('handleSearchCode reports a failed conjunctive lane without claiming the bu
                 }
                 return undefined;
             };
-            internals.context.semanticSearchInProvenGeneration = async (...args) => {
+            internals.context.semanticSearchInProvenGeneration = (async (...args: unknown[]) => {
                 const rejected = failLane(...args);
                 if (rejected !== undefined) return rejected;
                 return originalSearch(...args);
-            };
-            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+            }) as unknown as typeof internals.context.semanticSearchInProvenGeneration;
+            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = (async (...args: unknown[]) => {
                 const rejected = failLane(...args);
                 if (rejected !== undefined) return rejected;
                 return originalTracedSearch(...args);
-            };
+            }) as unknown as typeof internals.context.semanticSearchWithCandidateTraceInProvenGeneration;
             const response = await handlers.handleSearchCode({
                 path: repoPath,
                 query: `must:${needle ?? 'NO_SUCH_PHRASE_XYZ'} runtime`,
@@ -13348,227 +13371,6 @@ test('raw search results carry the must-constraint hint contract', async () => {
     });
 });
 
-test('handleSearchCode counts every terminal reranker failure exactly once including parse failures', async () => {
-    await withTempRepo(async (repoPath) => {
-        const denseResults = Array.from({ length: 10 }, (_, idx) => ({
-            content: `export const value${idx} = ${idx};`,
-            relativePath: `src/value-${idx}.ts`,
-            startLine: 1,
-            endLine: 1,
-            language: 'typescript',
-            score: 0.99 - (idx * 0.0001),
-            indexedAt: '2026-01-01T00:30:00.000Z',
-            symbolId: `sym_value_${idx}`,
-            symbolLabel: `function value${idx}()`,
-        }));
-        // The reranker returns fewer results than requested: a parse-phase
-        // failure (result count mismatch), not an api_call failure.
-        const reranker = {
-            rerank: async () => [{ index: 0, relevanceScore: 0.9 }],
-        };
-        const handlers = createHandlers(repoPath, denseResults, reranker, {
-            respectSemanticTopK: true,
-            enableVectorReceipt: true,
-        });
-        const response = await handlers.handleSearchCode({
-            path: repoPath,
-            query: 'find the values',
-            scope: 'runtime',
-            resultMode: 'grouped',
-            groupBy: 'symbol',
-            limit: 5,
-            debugMode: 'full',
-        });
-        const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.status, 'ok');
-        assert.equal(warningCodes(payload).includes('RERANKER_FAILED'), true);
-        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerFailures, 1);
-    });
-});
-test('handleSearchCode reports conjunctive unavailability without claiming the must budget was examined', async () => {
-    await withTempRepo(async (repoPath) => {
-        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
-            content: `candidate ${idx}`,
-            relativePath: `src/absent-${idx}.ts`,
-            startLine: 1,
-            endLine: 2,
-            language: 'typescript',
-            score: 0.99 - (idx * 0.0001),
-            indexedAt: '2026-01-01T00:30:00.000Z',
-            symbolId: `sym_absent_${idx}`,
-            symbolLabel: `function absent${idx}()`,
-        }));
-        const handlers = createHandlers(repoPath, denseResults, undefined, {
-            respectSemanticTopK: true,
-            enableVectorReceipt: true,
-        });
-        const internals = handlers as unknown as {
-            context: HandlerContext & {
-                semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
-                semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
-            };
-        };
-        const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
-        const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
-        const rejectConjunctive = (...args: unknown[]) => {
-            const request = args[1] as { lexicalMatchMode?: string } | undefined;
-            if (request?.lexicalMatchMode === 'all_terms') {
-                throw new LexicalRetrievalModeUnsupportedError(
-                    'Conjunctive (all-terms) lexical retrieval is not supported by the mock backend.',
-                );
-            }
-            return undefined;
-        };
-        internals.context.semanticSearchInProvenGeneration = async (...args) => {
-            const rejected = rejectConjunctive(...args);
-            if (rejected !== undefined) return rejected;
-            return originalSearch(...args);
-        };
-        internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
-            const rejected = rejectConjunctive(...args);
-            if (rejected !== undefined) return rejected;
-            return originalTracedSearch(...args);
-        };
-
-        const response = await handlers.handleSearchCode({
-            path: repoPath,
-            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
-            scope: 'runtime',
-            resultMode: 'grouped',
-            groupBy: 'symbol',
-            limit: 1,
-            debugMode: 'full',
-        });
-        const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.status, 'ok');
-        assert.equal(payload.results.length, 0);
-        assert.equal(
-            warningCodes(payload).includes('MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE'),
-            true,
-            'an unsupported backend must report conjunctive unavailability',
-        );
-        assert.equal(
-            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
-            false,
-            'an unsupported lane must not claim the retrieval budget was examined',
-        );
-        assert.equal(payload.hints?.mustConstraint?.status, 'unsupported');
-        assert.equal(payload.hints?.mustConstraint?.candidatesExamined, 0);
-    });
-});
-test('handleSearchCode reports a failed conjunctive lane without claiming the budget was examined', async () => {
-    await withTempRepo(async (repoPath) => {
-        const runCase = async (needle: string | null) => {
-            const denseResults = Array.from({ length: 40 }, (_, idx) => ({
-                content: idx === 7 && needle ? `contains ${needle}` : `candidate ${idx}`,
-                relativePath: `src/case-${idx}.ts`,
-                startLine: 1,
-                endLine: 2,
-                language: 'typescript',
-                score: 0.99 - (idx * 0.0001),
-                indexedAt: '2026-01-01T00:30:00.000Z',
-                symbolId: `sym_case_${idx}`,
-                symbolLabel: `function case${idx}()`,
-            }));
-            const handlers = createHandlers(repoPath, denseResults, undefined, {
-                respectSemanticTopK: true,
-                enableVectorReceipt: true,
-            });
-            const internals = handlers as unknown as {
-                context: HandlerContext & {
-                    semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
-                    semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
-                };
-            };
-            const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
-            const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
-            const failLane = (...args: unknown[]) => {
-                const request = args[1] as { lexicalMatchMode?: string } | undefined;
-                if (request?.lexicalMatchMode === 'all_terms') {
-                    throw new Error('mock conjunctive lane backend failure');
-                }
-                return undefined;
-            };
-            internals.context.semanticSearchInProvenGeneration = async (...args) => {
-                const rejected = failLane(...args);
-                if (rejected !== undefined) return rejected;
-                return originalSearch(...args);
-            };
-            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
-                const rejected = failLane(...args);
-                if (rejected !== undefined) return rejected;
-                return originalTracedSearch(...args);
-            };
-            const response = await handlers.handleSearchCode({
-                path: repoPath,
-                query: `must:${needle ?? 'NO_SUCH_PHRASE_XYZ'} runtime`,
-                scope: 'runtime',
-                resultMode: 'grouped',
-                groupBy: 'symbol',
-                limit: 5,
-                debugMode: 'full',
-            });
-            return JSON.parse(response.content[0]?.text || '{}');
-        };
-
-        const zeroSurvivors = await runCase(null);
-        assert.equal(zeroSurvivors.status, 'ok');
-        assert.equal(zeroSurvivors.results.length, 0);
-        assert.equal(warningCodes(zeroSurvivors).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
-        assert.equal(warningCodes(zeroSurvivors).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'), false);
-        assert.equal(warningCodes(zeroSurvivors).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
-        assert.equal(zeroSurvivors.hints?.mustConstraint?.status, 'failed');
-
-        const oneSurvivor = await runCase('NEEDLE_OK');
-        assert.equal(oneSurvivor.status, 'ok');
-        assert.equal(oneSurvivor.results.length, 1);
-        assert.equal(warningCodes(oneSurvivor).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
-        assert.equal(warningCodes(oneSurvivor).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
-        assert.equal(oneSurvivor.hints?.mustConstraint?.status, 'failed');
-    });
-});
-test('raw search results carry the must-constraint hint contract', async () => {
-    await withTempRepo(async (repoPath) => {
-        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
-            content: `candidate ${idx}`,
-            relativePath: `src/raw-absent-${idx}.ts`,
-            startLine: 1,
-            endLine: 2,
-            language: 'typescript',
-            score: 0.99 - (idx * 0.0001),
-            indexedAt: '2026-01-01T00:30:00.000Z',
-            symbolId: `sym_raw_absent_${idx}`,
-            symbolLabel: `function rawAbsent${idx}()`,
-        }));
-        const handlers = createHandlers(repoPath, denseResults, undefined, {
-            respectSemanticTopK: true,
-            enableVectorReceipt: true,
-        });
-        const response = await handlers.handleSearchCode({
-            path: repoPath,
-            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
-            scope: 'runtime',
-            resultMode: 'raw',
-            groupBy: 'symbol',
-            limit: 1,
-            debugMode: 'full',
-        });
-        const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.status, 'ok');
-        assert.equal(payload.resultMode, 'raw');
-        assert.equal(
-            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
-            true,
-        );
-        assert.deepEqual(payload.hints?.mustConstraint, {
-            status: 'attempted',
-            mustTokens: ['NO_SUCH_PHRASE_XYZ'],
-            candidateBudget: 80,
-            candidatesExamined: 40,
-            budgetExhausted: false,
-        });
-    });
-});
 test('handleSearchCode counts every terminal reranker failure exactly once including parse failures', async () => {
     await withTempRepo(async (repoPath) => {
         const denseResults = Array.from({ length: 10 }, (_, idx) => ({

@@ -4,13 +4,13 @@ import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
     buildSymbolRegistry,
 } from "@zokizuan/satori-core";
-import type { SymbolRecord, SymbolRegistryManifest } from "@zokizuan/satori-core";
+import type { SymbolRecord, SymbolRegistryManifest, SymbolRegistryManifestFile } from "@zokizuan/satori-core";
 import {
     findExactRegistryMatch,
     shouldAttemptExactRegistryLookup,
 } from "./exact-registry.js";
 
-function manifest(files: SymbolRegistryManifest["files"]): SymbolRegistryManifest {
+function manifest(files: Array<Omit<SymbolRegistryManifestFile, "definitionStatus">>): SymbolRegistryManifest {
     return {
         schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
         normalizedRootPath: "/repo",
@@ -20,7 +20,7 @@ function manifest(files: SymbolRegistryManifest["files"]): SymbolRegistryManifes
         extractorVersion: "test-extractor",
         relationshipVersion: "test-relationships",
         builtAt: "2026-01-01T00:00:00.000Z",
-        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
+        files: files.map((file) => ({ ...file, definitionStatus: 'definitions_present' })),
     };
 }
 
@@ -63,6 +63,7 @@ function registry(symbols: SymbolRecord[]) {
             hash: `${file}-hash`,
             language: symbols.find((entry) => entry.file === file)?.language || "typescript",
             symbolCount: symbols.filter((entry) => entry.file === file).length,
+            definitionStatus: "definitions_present" as const,
         }));
     return buildSymbolRegistry({
         manifest: manifest(files),

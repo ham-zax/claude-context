@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { PathCategory } from "./search-constants.js";
 import {
     buildRerankCandidatePool,
     selectRerankCandidates,
@@ -19,7 +18,6 @@ function candidate(input: {
     ownerInstanceId?: string;
     ownerKey?: string;
     exact?: boolean;
-    pathCategory?: PathCategory;
     retrievalPasses?: string[];
     startLine?: number;
     relativePath?: string;
@@ -41,9 +39,6 @@ function candidate(input: {
             ...(input.ownerInstanceId ? { ownerSymbolInstanceId: input.ownerInstanceId } : {}),
             ...(input.ownerKey ? { ownerSymbolKey: input.ownerKey } : {}),
         },
-        pathCategory: input.pathCategory ?? "srcRuntime",
-        exactLexicalMatch: input.exact ?? false,
-        retrievalPasses: input.retrievalPasses ?? ["primary"],
     };
 }
 

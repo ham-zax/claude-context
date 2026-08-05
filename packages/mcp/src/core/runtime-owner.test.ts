@@ -305,7 +305,7 @@ test('getLiveOwnersSummary prunes dead and reports multi-version', async () => {
             currentProcess: liveA,
             now: () => 2_000,
         });
-        const summary = registry.getLiveOwnersSummary();
+        const summary = registry.getLiveOwnersSummary()!;
         assert.equal(summary.liveCount, 2);
         assert.equal(summary.multiVersion, true);
         assert.deepEqual(summary.versions, ['4.11.13', '4.11.15']);

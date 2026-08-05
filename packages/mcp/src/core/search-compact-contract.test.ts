@@ -13,6 +13,9 @@ import type {
     SearchChunkResult,
     SearchGroupResult,
     SearchGroupedResultV2,
+    SearchGroupedResponseEnvelope,
+    SearchRankingDebugHint,
+    SearchFreshnessDebugHint,
 } from "./search-types.js";
 import type { SearchNavigationHelpers } from "./search-navigation.js";
 import { callGraphInputSchema, callGraphTool } from "../tools/call_graph.js";
@@ -64,6 +67,7 @@ function makeGroup(index: number, options: {
             : { graph },
         __groupId: `internal_group_${index}`,
         __symbolKey: `internal_symbol_key_${index}`,
+        __candidateIds: [],
         ...(symbolId ? { __symbolInstanceId: symbolId } : {}),
         __exactLexicalMatch: false,
         ...(options.debug ? {
@@ -105,7 +109,7 @@ function makeGroup(index: number, options: {
     };
 }
 
-function buildGroupedEnvelope(results: SearchGroupResult[]) {
+function buildGroupedEnvelope(results: SearchGroupResult[]): SearchGroupedResponseEnvelope {
     return buildGroupedSearchEnvelope({
         codebaseRoot: ROOT,
         absolutePath: ROOT,
@@ -118,7 +122,7 @@ function buildGroupedEnvelope(results: SearchGroupResult[]) {
         freshnessSummary: FRESHNESS_SUMMARY,
         warnings: [],
         results,
-    });
+    }) as SearchGroupedResponseEnvelope;
 }
 
 function byteLength(value: unknown): number {
@@ -203,12 +207,12 @@ test("debug modes are projected from explicit source-level whitelists", () => {
             filterSummary: fullDebug.filterSummary,
             changedFilesBoost: fullDebug.changedFilesBoost,
             rerank: fullDebug.rerank,
-        } } : {}),
+        } as SearchRankingDebugHint } : {}),
         ...(debugMode === "freshness" ? { debugSearch: {
             phaseTimingsMs: fullDebug.phaseTimingsMs,
             readiness: fullDebug.readiness,
             changedCode: fullDebug.changedCode,
-        } } : {}),
+        } as SearchFreshnessDebugHint } : {}),
         results: [],
     });
 
@@ -382,6 +386,8 @@ test("malformed grouped candidates are omitted with one deterministic warning", 
         retrievalPasses: ["primary"],
         backendScoreKindsSeen: ["dense_similarity" as const],
         lexicalScore: 0.5,
+        entrypointOwnerScoreBoost: 0,
+        entrypointOwnerScoreReason: "not_applicable",
     });
 
     const stringSpanCandidate = candidate("src/string-span.ts", 1, 3, 0.6);

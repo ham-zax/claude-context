@@ -125,13 +125,12 @@ test("ranked-set digest binds every pageable group field and complete order", ()
             value.orderedResults[0]!.navigation = { graph: "missing_relationship_sidecar" };
             return value;
         }),
-        withMutation((value) => {
-            value.recommendedActions[0] = {
-                ...value.recommendedActions[0]!,
-                reason: "Different action.",
-            };
-            return value;
-        }),
+        withMutation((value) => ({
+            ...value,
+            recommendedActions: value.recommendedActions.map((action, index) => (
+                index === 0 && action ? { ...action, reason: "Different action." } : action
+            )),
+        })),
         withMutation((value) => ({
             ...value,
             orderedResults: [...value.orderedResults].reverse(),

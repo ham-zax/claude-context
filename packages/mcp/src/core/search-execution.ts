@@ -1266,6 +1266,7 @@ export async function runSearchExecution(
             const mustLaneBudget = retrievalPolicy.maxCandidateLimit;
             let laneResults: SearchResultLike[] = [];
             let laneFailed = false;
+            let conjunctiveUnavailable = false;
             try {
                 const laneResponse = await host.measureSearchPhase(
                     "semanticSearch",

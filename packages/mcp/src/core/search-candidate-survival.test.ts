@@ -131,13 +131,13 @@ test("grouped and disclosed stages retain underlying candidate identities", () =
         displayLabel: "function owner()",
         language: "typescript",
         score: 0.9,
-        quality: { owner: "verified", semantic: "high" },
+        quality: { owner: "high", semantic: "high" },
         preview: "function owner()",
         navigation: { graph: "unavailable" },
         __groupId: "owner-1",
         __candidateIds: ["stored-1", 'derived:["src/owner.ts",15,18,"typescript"]'],
         __exactLexicalMatch: false,
-    } as SearchGroupResult;
+    } as unknown as SearchGroupResult;
 
     appendGroupedCandidateStage(trace, "grouped", [group]);
     appendGroupedCandidateStage(trace, "disclosed", [group]);

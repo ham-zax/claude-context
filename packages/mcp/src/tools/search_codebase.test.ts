@@ -33,7 +33,7 @@ function captureTelemetry(run: () => Promise<void>): Promise<string[]> {
         }
         return originalWrite(
             chunk as string,
-            ...(args as [NodeJS.BufferEncoding?, ((err?: Error) => void)?])
+            ...(args as [NodeJS.BufferEncoding?, ((err?: Error | null | undefined) => void)?])
         );
     }) as typeof process.stderr.write;
 
@@ -296,7 +296,7 @@ test('search_codebase accepts an optional compact result index only for grouped 
     assert.equal(acceptedGrouped.isError, undefined);
     assert.equal(rejectedRaw.isError, true);
     assert.equal(calls.length, 2);
-    assert.equal(Object.hasOwn(calls[0] ?? {}, 'includeResultIndex'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(calls[0] ?? {}, 'includeResultIndex'), false);
     assert.equal(calls[1]?.includeResultIndex, true);
     assert.match(rejectedRaw.content[0]?.text ?? '', /includeResultIndex.*grouped/i);
 });
@@ -520,7 +520,7 @@ test('search_codebase emits telemetry with diagnostics from handler meta', async
     assert.equal(payload.candidates_with_current_source_evidence, 0);
     assert.equal(payload.semantic_expansion_attempted, true);
     assert.equal(payload.semantic_expansion_reason, 'primary_candidate_pool_small');
-    assert.equal(Object.hasOwn(payload, 'parallel_fanout'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, 'parallel_fanout'), false);
     assert.doesNotMatch(telemetry[0], /auth|src\/auth\.ts/);
     assert.equal(payload.response_bytes, Buffer.byteLength(responseText, 'utf8'));
 });

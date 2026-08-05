@@ -28,8 +28,8 @@ type ToolHandlersTestOverrides = {
     validateCompletionProof: (codebasePath: string) => Promise<unknown>;
     buildRelationshipBackedCallGraph: (...args: unknown[]) => Promise<unknown>;
 };
-type CallGraphNoteView = { type?: string; detail?: string; symbolId?: string; symbolLabel?: string; file?: string; startLine?: number };
-type CallGraphNodeView = { symbolId?: string };
+type CallGraphNoteView = { type?: string; detail?: string; symbolId?: string; symbolLabel?: string; file?: string; startLine?: number; confidence?: number };
+type CallGraphNodeView = { symbolId?: string; symbolLabel?: string };
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
@@ -85,7 +85,7 @@ function navigationManifest(files: SymbolRegistryManifest['files']): SymbolRegis
         extractorVersion: 'extractor-v1',
         relationshipVersion: 'relationship-v1',
         builtAt: '2026-06-17T00:00:00.000Z',
-        files: files.map((file) => ({ definitionStatus: 'definitions_present', ...file })),
+        files: files.map((file) => ({ ...file, definitionStatus: 'definitions_present' })),
     };
 }
 
@@ -165,6 +165,7 @@ async function writeTestNavigation(input: {
                 hash: metadata.hash,
                 language: metadata.language,
                 symbolCount: metadata.symbolCount,
+                definitionStatus: 'definitions_present',
             }))),
             normalizedRootPath: input.repoPath,
         },
@@ -1057,7 +1058,7 @@ test('handleCallGraph surfaces suppressed low-confidence Python candidates and r
             && note.symbolLabel === build.label
             && note.confidence === 0.35
             && note.startLine === 10
-            && note.detail.includes('src/phases.py:10')
+            && (note.detail ?? '').includes('src/phases.py:10')
         )));
         assert.ok(calleesPayload.notes.some((note: CallGraphNoteView) => note.type === 'dynamic_edge'));
 
@@ -1096,7 +1097,7 @@ test('handleCallGraph surfaces suppressed low-confidence Python candidates and r
             && note.symbolLabel === attach.label
             && note.confidence === 0.35
             && note.startLine === 10
-            && note.detail.includes('src/phases.py:10')
+            && (note.detail ?? '').includes('src/phases.py:10')
         )));
         assert.ok(callersPayload.notes.some((note: CallGraphNoteView) => (
             note.type === 'dynamic_edge'
@@ -1201,7 +1202,7 @@ test('handleCallGraph does not synthesize Python caller fallback when the suppre
         assert.ok(callersPayload.notes.some((note: CallGraphNoteView) => (
             note.type === 'suppressed_edge'
             && note.symbolId === attach.symbolInstanceId
-            && note.detail.includes('src/phases.py:4')
+            && (note.detail ?? '').includes('src/phases.py:4')
         )));
         assert.ok(!callersPayload.notes.some((note: CallGraphNoteView) => note.type === 'dynamic_edge'));
         // C1: notes-only inbound promotes executable must: identifier search.
@@ -1312,7 +1313,7 @@ test('handleCallGraph notes-only inbound fallback path uses unique cross-file ca
         assert.ok(payload.notes.some((note: CallGraphNoteView) => (
             note.type === 'suppressed_edge'
             && note.file === 'src/caller.ts'
-            && note.detail.includes('caller candidate')
+            && (note.detail ?? '').includes('caller candidate')
         )));
         const nextStep = payload.hints?.nextSteps?.[0];
         assert.equal(nextStep?.tool, 'search_codebase');
@@ -1666,7 +1667,7 @@ test('handleCallGraph does not synthesize Python caller fallback when the record
         assert.ok(callersPayload.notes.some((note: CallGraphNoteView) => (
             note.type === 'suppressed_edge'
             && note.symbolId === attach.symbolInstanceId
-            && note.detail.includes('src/phases.py:3')
+            && (note.detail ?? '').includes('src/phases.py:3')
         )));
         assert.ok(!callersPayload.notes.some((note: CallGraphNoteView) => note.type === 'dynamic_edge'));
     }));
@@ -1771,7 +1772,7 @@ test('handleCallGraph does not synthesize Python caller fallback when the valida
         assert.ok(callersPayload.notes.some((note: CallGraphNoteView) => (
             note.type === 'suppressed_edge'
             && note.symbolId === attach.symbolInstanceId
-            && note.detail.includes('src/phases.py:5')
+            && (note.detail ?? '').includes('src/phases.py:5')
         )));
         assert.ok(!callersPayload.notes.some((note: CallGraphNoteView) => note.type === 'dynamic_edge'));
     }));

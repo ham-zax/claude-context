@@ -100,6 +100,7 @@ test("current-source validation rejects non-throwing parser fallback evidence", 
             symbols: [],
             moduleBindings: [],
             callSites: [],
+            receiverTypeBindings: [],
             chunks: [],
         }),
     };

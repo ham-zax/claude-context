@@ -53,6 +53,8 @@ function groupedCandidate() {
         changedFilesMultiplier: 1,
         agentFitMultiplier: 1,
         agentFitReason: "implementation_symbol",
+        entrypointOwnerScoreBoost: 0,
+        entrypointOwnerScoreReason: "not_applicable",
         passesMatchedMust: true,
         exactLexicalMatch: true,
         exactMatchPinned: false,

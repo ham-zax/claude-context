@@ -19,7 +19,7 @@ const owner: SymbolRecord = {
     symbolKey: "typescript:src/owner.ts:owner",
     symbolInstanceId: "symbol-owner",
     language: "typescript",
-    kind: "FUNCTION",
+    kind: "function",
     name: "owner",
     qualifiedName: "owner",
     label: "owner",

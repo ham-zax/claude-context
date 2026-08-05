@@ -99,6 +99,7 @@ test("exact registry retains the complete frozen order behind a compact first pa
     assert.ok(completeIndexed);
     assert.equal(completeIndexed.kind, "ok");
     if (completeIndexed.kind !== "ok") return;
+    assert.equal(completeIndexed.envelope.resultMode, "grouped");
     assert.equal(completeIndexed.envelope.continuation, undefined);
     assert.equal(completeIndexed.resultSet?.orderedResults.length, 1);
 });

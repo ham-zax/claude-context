@@ -5,8 +5,9 @@ import {
     buildGroupedSymbolSearchResult,
     buildVisibleGroupedSearchResults,
 } from "./search-group-results.js";
-import { resolveSearchOwnerFromRegistry } from "./search-owner-resolution.js";
+import { resolveSearchOwnerFromRegistry, type SearchOwnerResolutionInputResult } from "./search-owner-resolution.js";
 import { buildSearchGroupRecommendedAction } from "./search-response-helpers.js";
+import type { SearchResultLike } from "./search-lexical-scoring.js";
 
 const navigationHelpers = {
     now: () => Date.parse("2026-01-01T00:00:00.000Z"),
@@ -38,6 +39,8 @@ function candidate(file: string, startLine: number, endLine: number, score: numb
         rerankAdjusted: false,
         retrievalPasses: ["primary"],
         backendScoreKindsSeen: ["dense_similarity" as const],
+        entrypointOwnerScoreBoost: 0,
+        entrypointOwnerScoreReason: "not_applicable",
         lexicalScore: 0,
     };
 }
@@ -60,7 +63,7 @@ test("registry owner metadata is rejected when its symbol is in another evidence
     const registry = {
         symbolsByInstanceId: new Map([[staleOwner.symbolInstanceId, staleOwner]]),
         symbolsByFile: new Map<string, SymbolRecord[]>([["src/a.ts", []]]),
-    } as SymbolRegistry;
+    } as unknown as SymbolRegistry;
 
     const resolved = resolveSearchOwnerFromRegistry({
         result: {
@@ -165,7 +168,7 @@ test("registry owner byte evidence fails closed unless both ordered safe pairs p
                 content: "run();",
                 ownerSymbolKey: owner.symbolKey,
                 ownerSymbolInstanceId: owner.symbolInstanceId,
-            },
+            } as unknown as SearchOwnerResolutionInputResult,
             registry,
             sanitizeIndexedRelativeFilePath: (file) => file,
             hasTokenBoundaryMatch: () => false,
@@ -275,7 +278,7 @@ test("grouped target publication preserves byte-authoritative ownership and reje
                 endByte,
                 ownerSymbolKey: owner.symbolKey,
                 ownerSymbolInstanceId: owner.symbolInstanceId,
-            },
+            } as unknown as SearchResultLike,
         }],
         codebaseRoot: "/repo",
         groupBy: "symbol",
@@ -294,7 +297,7 @@ test("grouped target publication preserves byte-authoritative ownership and reje
         navigationHelpers,
         parseIndexedAtMs: () => undefined,
         resolveOwner: (result) => resolveSearchOwnerFromRegistry({
-            result,
+            result: result as unknown as SearchOwnerResolutionInputResult,
             registry,
             sanitizeIndexedRelativeFilePath: (file) => file,
             hasTokenBoundaryMatch: () => false,

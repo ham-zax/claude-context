@@ -54,6 +54,7 @@ const PHASE_0_CONTRACT = JSON.parse(fs.readFileSync(path.resolve(
     '../../../../evals/agent-discovery/bounded-symbol-context-phase-0.json',
 ), 'utf8')) as {
     historicalExactOpen: {
+        request: { mode: string };
         source: string;
         symbol: {
             file: string;
@@ -328,11 +329,37 @@ function createGenerationReceipt(
         collectionName: 'hybrid_code_chunks_golden',
         marker: {
             kind: 'satori_index_completion_v3' as const,
+            codebasePath: canonicalRoot,
+            fingerprint: {
+                embeddingProvider: 'VoyageAI',
+                embeddingModel: 'voyage-code-3',
+                embeddingDimension: 1024,
+                embeddingArtifactDigest: null,
+                embeddingNormalizationPolicy: 'provider_output_v1',
+                vectorStoreProvider: 'LanceDB',
+                schemaVersion: 'hybrid_v3',
+                parserVersion: 'parser-v1',
+                extractorVersion: 'extractor-v1',
+                relationshipVersion: 'relationship-v1',
+                embeddingProjectionVersion: 'embedding_projection_v1',
+                lexicalProjectionVersion: 'lexical_projection_v1',
+            },
+            indexedFiles: 1,
+            totalChunks: 1,
+            completedAt: '2026-01-01T00:00:00.000Z',
             runId: 'golden-run-1',
             indexPolicyHash: 'policy-hash-golden',
+            indexStatus: 'completed',
+            navigation: { status: 'not_bound' },
         },
         policy: {
             canonicalRoot,
+            profile: 'default' as const,
+            customExtensions: [],
+            customIgnorePatterns: [],
+            fileBasedIgnorePatterns: [],
+            supportedExtensions: [],
+            effectiveIgnorePatterns: [],
             policyHash: 'policy-hash-golden',
         },
         policyDocumentDigest: '1'.repeat(64),
@@ -362,12 +389,15 @@ function createHandlers(
         : {
             navigation: { navigationSealHash: 'a'.repeat(64) },
         };
+    const resolvedGenerationReceipt = preparedAuthority
+        ? generationReceipt as ProvenVectorGenerationReceipt
+        : null;
     const vectorReceipt: ProvenVectorGenerationReceipt | undefined = preparedAuthority
         ? {
-            collectionName: generationReceipt.collectionName,
-            marker: generationReceipt.marker,
-            policy: generationReceipt.policy,
-            policyDocumentDigest: generationReceipt.policyDocumentDigest,
+            collectionName: resolvedGenerationReceipt!.collectionName,
+            marker: resolvedGenerationReceipt!.marker,
+            policy: resolvedGenerationReceipt!.policy,
+            policyDocumentDigest: resolvedGenerationReceipt!.policyDocumentDigest,
             exactPayloadCount: 1,
             observations: {
                 profileFileToken: null,
@@ -541,13 +571,13 @@ function scrubGolden(value: unknown, context: GoldenContext): unknown {
     }
 
     let output = value;
-    output = output.replaceAll(context.repoPath, '<repo>');
+    output = output.split(context.repoPath).join('<repo>');
     if (context.stateRoot) {
-        output = output.replaceAll(context.stateRoot, '<state>');
+        output = output.split(context.stateRoot).join('<state>');
     }
     for (const symbol of context.symbols || []) {
-        output = output.replaceAll(symbol.symbolInstanceId, symbolPlaceholder(symbol));
-        output = output.replaceAll(symbol.symbolKey, symbolKeyPlaceholder(symbol));
+        output = output.split(symbol.symbolInstanceId).join(symbolPlaceholder(symbol));
+        output = output.split(symbol.symbolKey).join(symbolKeyPlaceholder(symbol));
     }
     output = output.replace(/[a-f0-9]{64}/g, '<hash>');
     return output;
@@ -603,6 +633,7 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
                 hash: fileHash,
                 language: 'typescript',
                 symbolCount: symbols.length,
+                definitionStatus: 'definitions_present',
             }],
             records: [{
                 sourceKey: validateSymbol.symbolKey,
@@ -625,9 +656,7 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
             score: 0.99,
             indexedAt: '2026-01-01T00:30:00.000Z',
             symbolLabel: validateSymbol.label,
-            ownerSymbolKey: validateSymbol.symbolKey,
-            ownerSymbolInstanceId: validateSymbol.symbolInstanceId,
-            symbolKind: validateSymbol.kind,
+            symbolId: validateSymbol.symbolKey,
         }]);
 
         const response = await handlers.handleSearchCode({
