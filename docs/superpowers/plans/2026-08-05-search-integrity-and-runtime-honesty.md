@@ -524,6 +524,14 @@ paths containing spaces
 ### Tests
 
 * [ ] Brand-new untracked source file triggers freshness work.
+
+**Coverage layering (release receipt, 2026-08-04):** the handler-level test
+`handleSearchCode routes untracked files through live paths and dirty overlay
+but never ignored ones` proves changed-set → live_path/dirty_overlay routing
+with the changed set supplied via the `getChangedFilesForCodebase` seam; the
+real git-status boundary (untracked paths entering that set) is proven by the
+real-Git tests in `working-tree-state.test.ts`. The two layers together cover
+the plan bullets; neither alone is a full end-to-end reproduction.
 * [ ] The untracked file appears in `live_path`.
 * [ ] After indexing or committing, normal freshness resumes.
 * [ ] Untracked `.satoriignore` path does not trigger freshness.

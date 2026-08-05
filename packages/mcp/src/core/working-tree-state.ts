@@ -78,7 +78,7 @@ export function parseGitStatusChangedPaths(
         }
 
         const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
-        if (normalizedPath.length === 0 || normalizedPath.startsWith("..")) {
+        if (normalizedPath.length === 0 || normalizedPath === ".." || normalizedPath.startsWith("../")) {
             continue;
         }
 
@@ -115,7 +115,7 @@ export function parseGitStatusChangedPathsZ(
             continue;
         }
         const normalizedPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
-        if (normalizedPath.length === 0 || normalizedPath.startsWith("..")) {
+        if (normalizedPath.length === 0 || normalizedPath === ".." || normalizedPath.startsWith("../")) {
             continue;
         }
         files.add(normalizedPath);

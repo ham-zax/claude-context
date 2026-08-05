@@ -74,6 +74,17 @@ test("parseGitStatusChangedPathsZ preserves untracked paths containing spaces", 
     assert.deepEqual([...parsed].sort(), ["plain.ts", "untracked with spaces.ts"]);
 });
 
+test("parseGitStatusChangedPathsZ retains legitimate dot-dot-prefixed filenames and rejects escapes", () => {
+    const parsed = parseGitStatusChangedPathsZ(
+        "?? ..config.ts\0?? nested/..config.ts\0?? ../outside.ts\0?? ..\0",
+        { includeUntracked: true },
+    );
+    assert.deepEqual(
+        [...parsed].sort(),
+        ["..config.ts", "nested/..config.ts"],
+    );
+});
+
 test("parseGitStatusChangedPathsZ keeps the destination of rename entries and skips the origin record", () => {
     const parsed = parseGitStatusChangedPathsZ(
         "RM renamed.txt\0orig.txt\0?? new.ts\0",

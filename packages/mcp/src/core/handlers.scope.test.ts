@@ -7995,9 +7995,19 @@ test('handlers newline git-status parser ignores untracked entries by default (p
             'R  src/old.ts -> src/renamed.ts',
             '?? .satori/mcp-codebase-snapshot.json',
             '?? coverage/lcov.info',
+            // The preflight parser ignores untracked entries by default, so
+            // the dot-dot regression cases must be tracked modifications.
+            ' M ..config.ts',
+            ' M nested/..config.ts',
+            ' M ../outside.ts',
         ].join('\n'));
 
-        assert.deepEqual(Array.from(parsed).sort(), ['src/changed.ts', 'src/renamed.ts']);
+        assert.deepEqual(Array.from(parsed).sort(), [
+            '..config.ts',
+            'nested/..config.ts',
+            'src/changed.ts',
+            'src/renamed.ts',
+        ]);
     });
 });
 
@@ -13046,5 +13056,102 @@ test('pagination totalGroupCount reports the frozen set, not the full available 
             continuation: 'complete',
         });
         assert.notEqual(payload.pagination?.totalGroupCount, payload.resultCounts?.availableGroupCount);
+    });
+});
+test('handleSearchCode routes untracked files through live paths and dirty overlay but never ignored ones (handler integration; real git-status coverage in working-tree-state tests)', async () => {
+    await withTempRepo(async (repoPath) => {
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(repoPath, 'src', 'untracked.ts'), [
+            'export function UntrackedProbe() {',
+            '    return 42;',
+            '}',
+            '',
+        ].join('\n'), 'utf8');
+        fs.writeFileSync(path.join(repoPath, 'src', 'ignored.ts'), [
+            'export function IgnoredProbe() {',
+            '    return 0;',
+            '}',
+            '',
+        ].join('\n'), 'utf8');
+
+        // Handler-level integration: the changed set is supplied as the
+        // untracked-inclusive output of getChangedFilesForCodebase (real
+        // git-status coverage lives in working-tree-state.test.ts); the
+        // .satoriignore exclusion is applied by the lanes.
+        const makeHandlers = (synced: boolean) => {
+            const handlers = createHandlers(repoPath, []);
+            const overrides = handlers as unknown as ToolHandlersTestOverrides;
+            if (synced) {
+                overrides.syncManager = {
+                    ensureFreshness: async () => ({
+                        mode: 'synced',
+                        changed: true,
+                        stats: { added: 1, removed: 0, modified: 0 },
+                    }),
+                };
+            }
+            overrides.getChangedFilesForCodebase = () => ({
+                available: true,
+                files: new Set(['src/untracked.ts', 'src/ignored.ts']),
+            });
+            overrides.context.getTrackedRelativePaths = () => [];
+            overrides.context.getActiveIgnorePatterns = () => ['src/ignored.ts'];
+            return handlers;
+        };
+
+        // Exact path: query reaches the untracked file through the live path lane.
+        const exactHandlers = makeHandlers(true);
+        const exactResponse = await exactHandlers.handleSearchCode({
+            path: repoPath,
+            query: 'path:src/untracked.ts UntrackedProbe',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'full',
+        });
+        const exactPayload = JSON.parse(exactResponse.content[0]?.text || '{}');
+        assert.equal(exactPayload.status, 'ok');
+        assert.equal(exactPayload.results.length, 1);
+        assert.equal(exactPayload.results[0].target.file, 'src/untracked.ts');
+        assert.ok(
+            exactPayload.results[0].debug.provenance.retrievalPasses.includes('live_path'),
+            `expected live_path pass, got ${JSON.stringify(exactPayload.results[0].debug.provenance.retrievalPasses)}`,
+        );
+
+        // General query: with an unsynced dirty tree the untracked file is
+        // reachable through the dirty overlay lane.
+        const generalHandlers = makeHandlers(false);
+        const generalResponse = await generalHandlers.handleSearchCode({
+            path: repoPath,
+            query: 'UntrackedProbe',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'full',
+        });
+        const generalPayload = JSON.parse(generalResponse.content[0]?.text || '{}');
+        assert.equal(generalPayload.status, 'ok', JSON.stringify(generalPayload.message || ''));
+        assert.equal(generalPayload.results.length, 1);
+        assert.equal(generalPayload.results[0].target.file, 'src/untracked.ts');
+        assert.ok(
+            generalPayload.results[0].debug.provenance.retrievalPasses.includes('dirty_overlay'),
+            `expected dirty_overlay pass, got ${JSON.stringify(generalPayload.results[0].debug.provenance.retrievalPasses)}`,
+        );
+
+        // The .satoriignore-excluded untracked file is reachable through neither route.
+        const ignoredResponse = await generalHandlers.handleSearchCode({
+            path: repoPath,
+            query: 'path:src/ignored.ts IgnoredProbe',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'full',
+        });
+        const ignoredPayload = JSON.parse(ignoredResponse.content[0]?.text || '{}');
+        assert.equal(ignoredPayload.status, 'ok', JSON.stringify(ignoredPayload.message || ''));
+        assert.equal(ignoredPayload.results.length, 0);
     });
 });
