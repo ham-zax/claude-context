@@ -736,7 +736,8 @@ export async function finalizeSearchResults(
         },
     });
     if (disclosureProjection.status === "page_too_large") {
-        const { continuation: _continuation, ...authorityEnvelope } = disclosureProjection.envelope;
+        const authorityEnvelope = { ...disclosureProjection.envelope };
+        delete authorityEnvelope.continuation;
         return {
             kind: "page_too_large",
             envelope: {

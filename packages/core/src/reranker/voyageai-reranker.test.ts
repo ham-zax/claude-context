@@ -350,7 +350,7 @@ test('VoyageAIReranker classifies a stalled response body as a timeout, not inva
 
 test('VoyageAIReranker retries a connection reset during the response body read', async () => {
     const calls: string[] = [];
-    await withMockedFetch(async (url, init) => {
+    await withMockedFetch(async (_url, _init) => {
         calls.push('call');
         return {
             ok: true,
