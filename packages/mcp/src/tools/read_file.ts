@@ -1089,7 +1089,7 @@ export const readFileTool: McpTool = {
                             file: relativeFile,
                             start_line: totalLines === 0 ? undefined : startLine,
                             end_line: totalLines === 0 ? undefined : endLine,
-                        });
+                        }, ctx.workspacePolicy);
                         const parsedOutline = JSON.parse(outlineResponse.content?.[0]?.text || "{}");
                         const status = parsedOutline?.status;
                         if (status === "ok" || status === "requires_reindex" || status === "unsupported" || status === "ambiguous") {
