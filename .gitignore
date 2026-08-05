@@ -100,3 +100,4 @@ piolium/audit-state.json
 piolium/tmp/
 piolium/confirm-workspace/
 piolium/confirmation-report.md
+piolium/**
