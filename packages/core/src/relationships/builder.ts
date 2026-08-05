@@ -463,6 +463,75 @@ function resolvePythonClassReference(input: {
     return classCandidates.length === 1 ? classCandidates[0] : undefined;
 }
 
+function sameModulePythonConstructorShadowed(input: {
+    call: CallSite;
+    source: SymbolRecord;
+    evidence: RelationshipAnalysisEvidence;
+    registry: SymbolRegistry;
+    targetClass: SymbolRecord;
+}): boolean {
+    const name = input.call.calleeName;
+    const fileSymbols = input.registry.symbolsByFile.get(input.source.file) ?? [];
+
+    // A parameter or local constructor binding with the class name shadows
+    // the module-level class for every later call in the same callable.
+    for (const binding of input.evidence.receiverTypeBindings ?? []) {
+        if (
+            binding.localName !== name
+            || (binding.kind !== 'local_constructor' && binding.kind !== 'parameter_annotation')
+        ) {
+            continue;
+        }
+        const owner = ownerForCall(fileSymbols, { calleeName: '', span: binding.span });
+        if (owner?.symbolInstanceId !== input.source.symbolInstanceId) {
+            continue;
+        }
+        if (binding.kind === 'parameter_annotation' || binding.span.endByte <= input.call.span.startByte) {
+            return true;
+        }
+    }
+
+    // A local assignment rebinding the class name before the call shadows
+    // the class for this call site.
+    for (const fact of input.evidence.pythonFlowFacts ?? []) {
+        if (fact.kind !== 'assignment_origin' || fact.targetText !== name) {
+            continue;
+        }
+        if (fact.span.endByte > input.call.span.startByte) {
+            continue;
+        }
+        if (factBelongsToContext(input.registry, input.source.file, fact, input.source)) {
+            return true;
+        }
+    }
+
+    // A module-scope rebinding that occurs after the class definition and
+    // before the call shadows the class for this call site.
+    for (const fact of input.evidence.pythonFlowFacts ?? []) {
+        if (fact.kind !== 'assignment_origin' || fact.targetText !== name) {
+            continue;
+        }
+        if (fact.span.endByte > input.call.span.startByte) {
+            continue;
+        }
+        const classSpan = input.targetClass.span;
+        if (!classSpan) {
+            continue;
+        }
+        const isModuleScope = !(fileSymbols.some((symbol) => (
+            isSourceOwner(symbol)
+            && spanContainsSpan(symbol.span as SourceSpan, fact.contextSpan)
+        )));
+        if (isModuleScope
+            && (classSpan.startByte !== undefined && fact.span.startByte !== undefined
+                ? classSpan.startByte < fact.span.startByte
+                : classSpan.startLine < fact.span.startLine)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function resolvePythonDirectTarget(input: {
     call: CallSite;
     source: SymbolRecord;
@@ -512,6 +581,25 @@ function resolvePythonDirectTarget(input: {
 
     const sameFile = eligible.filter((candidate) => candidate.file === input.source.file);
     if (sameFile.length === 1) return sameFile[0];
+
+    // A same-module bare constructor call resolves to the exact class only
+    // when the name is unique in this file and no local binding shadows it.
+    if (sameFile.length === 0 && input.source.language === 'python' && input.call.kind === 'direct') {
+        const sameFileClasses = input.candidates.filter((candidate) => (
+            candidate.kind === 'class'
+            && candidate.file === input.source.file
+            && candidate.name === input.call.calleeName
+        ));
+        if (sameFileClasses.length === 1 && !sameModulePythonConstructorShadowed({
+            call: input.call,
+            source: input.source,
+            evidence: input.evidence,
+            registry: input.registry,
+            targetClass: sameFileClasses[0],
+        })) {
+            return sameFileClasses[0];
+        }
+    }
     // A cross-file Python call without an exact import binding has no provider
     // proof. Do not turn a unique repository-wide name into an authority.
     return undefined;
@@ -1798,7 +1886,10 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
                 type: 'CALLS',
                 file: source.file,
                 span: relationshipSpan(call),
-                confidence: target.file === source.file ? 'high' : 'low',
+                confidence: target.file === source.file
+                    && !(source.language === 'python' && target.kind === 'class' && call.kind === 'direct')
+                    ? 'high'
+                    : 'low',
                 ...(resolutionClaim
                     && (resolutionClaim.resolutionAuthority === 'direct_binding'
                         || resolutionClaim.resolutionAuthority === 'origin_flow')

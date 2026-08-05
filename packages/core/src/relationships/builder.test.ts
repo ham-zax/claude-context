@@ -1043,7 +1043,7 @@ test('buildCallRelationshipsForRegistry resolves bounded Python constructor rece
     )), ['Runner.run', 'Runner.run', 'Runner.run']);
 });
 
-test('buildCallRelationshipsForRegistry leaves same-module constructor calls unchanged', async () => {
+test('buildCallRelationshipsForRegistry resolves one exact same-module constructor', async () => {
     const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
         'src/runner.py': [
             'class TradingEntryVetoes:',
@@ -1054,13 +1054,86 @@ test('buildCallRelationshipsForRegistry leaves same-module constructor calls unc
         ].join('\n'),
     });
     const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
-    const constructorEdges = records.filter((record) => (
+    const edges = records.filter((record) => (
         record.type === 'CALLS'
         && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.kind === 'class'
     ));
-    // Same-module bare constructor calls keep their existing resolution
-    // behavior: no fabricated CALLS edge to the class.
-    assert.deepEqual(constructorEdges, []);
+    assert.equal(edges.length, 1, `expected one constructor edge, got ${JSON.stringify(edges)}`);
+    assert.equal(registry.symbolsByInstanceId.get(edges[0].sourceInstanceId ?? '')?.qualifiedName, 'run');
+    assert.equal(registry.symbolsByInstanceId.get(edges[0].targetInstanceId ?? '')?.name, 'TradingEntryVetoes');
+    assert.equal(edges[0].confidence, 'low');
+    assert.equal(edges[0].resolutionAuthority, 'direct_binding');
+});
+
+test('buildCallRelationshipsForRegistry fails closed when two same-module classes are ambiguous', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/runner.py': [
+            'class A:',
+            '    pass',
+            '',
+            'class Outer:',
+            '    class A:',
+            '        pass',
+            '',
+            'def run():',
+            '    A()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edges = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+    ));
+    assert.deepEqual(edges, []);
+});
+
+test('buildCallRelationshipsForRegistry does not treat a shadowing local variable as the class constructor', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/runner.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+            '',
+            'def run():',
+            '    TradingEntryVetoes = make_vetoes()',
+            '    TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edges = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'run'
+    ));
+    assert.deepEqual(edges, []);
+});
+
+test('buildCallRelationshipsForRegistry mixed same-module and cross-module callers both appear', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+            '',
+            'def local_run():',
+            '    TradingEntryVetoes()',
+        ].join('\n'),
+        'src/runner.py': [
+            'from rules import TradingEntryVetoes',
+            '',
+            'def run():',
+            '    TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edges = records.filter((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.name === 'TradingEntryVetoes'
+    ));
+    assert.equal(edges.length, 2, `expected same-module and cross-module edges, got ${JSON.stringify(edges)}`);
+    assert.deepEqual(
+        edges.map((record) => (
+            registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName
+        )).sort(),
+        ['local_run', 'run'],
+    );
 });
 
 test('buildCallRelationshipsForRegistry resolves cross-module constructor callers via direct imports', async () => {
