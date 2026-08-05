@@ -814,6 +814,10 @@ export class MilvusVectorDatabase implements VectorDatabase {
             provider: isZilliz ? 'zilliz' : 'milvus',
             transport: 'grpc',
             address,
+            // The gRPC adapter has provider-defined sparse semantics; it does
+            // not declare standardized lexical match modes.
+            lexicalMatchModes: [],
+            defaultLexicalMatchMode: 'provider_sparse',
         };
     }
 

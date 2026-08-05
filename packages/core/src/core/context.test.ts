@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { LexicalRetrievalModeUnsupportedError } from './semantic-search-service';
 import { Context, createGenerationProofCoordinator, IndexPolicyPublicationError } from './context';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
@@ -509,6 +510,8 @@ class InMemoryLanceVectorDatabase extends InMemoryVectorDatabase {
             provider: 'lancedb' as const,
             transport: 'embedded' as const,
             address: '/tmp/in-memory-lance',
+            lexicalMatchModes: ['all_terms' as const, 'any_terms' as const],
+            defaultLexicalMatchMode: 'all_terms' as const,
         };
     }
 }
@@ -534,6 +537,8 @@ class NonAtomicInMemoryMilvusVectorDatabase extends InMemoryVectorDatabase {
         return {
             provider: 'milvus' as const,
             transport: 'grpc' as const,
+            lexicalMatchModes: [],
+            defaultLexicalMatchMode: 'provider_sparse' as const,
         };
     }
 
@@ -6369,8 +6374,10 @@ test('Context hybrid search uses the proven collection without a non-gating quer
         assert.equal(completionMarkerReads, 0);
         assert.deepEqual(vectorDatabase.denseRequests.map((request) => request.limit), [8]);
         assert.deepEqual(vectorDatabase.lexicalRequests.map((request) => request.limit), [8, 8]);
+        // The effective primary mode is now passed explicitly (all_terms is
+        // LanceDB's declared default), so execution matches the trace.
         assert.deepEqual(vectorDatabase.lexicalRequests.map((request) => request.matchMode), [
-            undefined,
+            'all_terms',
             'any_terms',
         ]);
         assert.deepEqual(
@@ -10503,6 +10510,216 @@ test('Context.repairIndex fingerprint mismatch returns requires_reindex, not rep
         assert.equal(repairResult.proof.marker.status, 'failed');
         assert.equal(repairResult.proof.fingerprint.status, 'failed');
         assert.equal(repairResult.proof.payload.status, 'not_checked');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context rejects all-terms lexical retrieval on a backend without conjunctive support', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-conjunctive-unsupported-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'auth.ts'), 'export const alpha = 1;\n', 'utf8');
+        const vectorDatabase = new NonAtomicInMemoryMilvusVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        await assert.rejects(
+            () => context.semanticSearch({
+                codebasePath,
+                query: 'alpha beta',
+                topK: 5,
+                retrievalMode: 'lexical',
+                lexicalMatchMode: 'all_terms',
+                scorePolicy: { kind: 'topk_only' },
+            }),
+            (error: unknown) => {
+                assert.ok(error instanceof LexicalRetrievalModeUnsupportedError);
+                assert.match(String(error.message), /milvus/);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context forwards an explicit all-terms lexical match mode to the LanceDB backend', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-conjunctive-honored-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'auth.ts'), 'export const alpha = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
+        assert.ok(collectionName);
+        let observedMatchMode: string | undefined;
+        const originalRetrieveLexical = vectorDatabase.retrieveLexical.bind(vectorDatabase);
+        vectorDatabase.retrieveLexical = async (name, request) => {
+            if (name === collectionName) {
+                observedMatchMode = request.matchMode;
+            }
+            return originalRetrieveLexical(name, request);
+        };
+
+        const results = await context.semanticSearch({
+            codebasePath,
+            query: 'alpha',
+            topK: 5,
+            retrievalMode: 'lexical',
+            lexicalMatchMode: 'all_terms',
+            scorePolicy: { kind: 'topk_only' },
+        });
+        assert.equal(observedMatchMode, 'all_terms');
+        assert.equal(results.length > 0, true);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context traces an explicit any-terms lexical mode and never issues a duplicate OR fallback', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-anyterms-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'auth.ts'), 'export const alpha = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
+        assert.ok(collectionName);
+        const matchModes: Array<string | undefined> = [];
+        const originalRetrieveLexical = vectorDatabase.retrieveLexical.bind(vectorDatabase);
+        vectorDatabase.retrieveLexical = async (name, request) => {
+            if (name === collectionName) {
+                matchModes.push(request.matchMode);
+            }
+            return originalRetrieveLexical(name, request);
+        };
+
+        const receipt = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(receipt);
+        const execution = await context.semanticSearchWithCandidateTraceInProvenGeneration(
+            receipt,
+            {
+                codebasePath,
+                query: 'alpha beta',
+                topK: 5,
+                retrievalMode: 'lexical',
+                lexicalMatchMode: 'any_terms',
+                scorePolicy: { kind: 'topk_only' },
+            },
+            8,
+            {
+                captureLexicalFallback: true,
+                diagnosticCandidateLimit: 8,
+                lexicalFallbackTerms: ['alpha', 'beta'],
+            },
+        );
+        assert.deepEqual(matchModes, ['any_terms']);
+        // The trace must describe the executed mode, and the diagnostic OR
+        // fallback must not fire when the primary is already any-terms.
+        assert.deepEqual(execution.candidateTrace.lexicalRequests, [{
+            role: 'primary',
+            querySha256: crypto.createHash('sha256').update('alpha beta', 'utf8').digest('hex'),
+            matchMode: 'any_terms',
+        }]);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context rejects an explicit any-terms mode on a backend that declares no standardized modes', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-anyterms-unsupported-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'auth.ts'), 'export const alpha = 1;\n', 'utf8');
+        const vectorDatabase = new NonAtomicInMemoryMilvusVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        await assert.rejects(
+            () => context.semanticSearch({
+                codebasePath,
+                query: 'alpha beta',
+                topK: 5,
+                retrievalMode: 'lexical',
+                lexicalMatchMode: 'any_terms',
+                scorePolicy: { kind: 'topk_only' },
+            }),
+            (error: unknown) => {
+                assert.ok(error instanceof LexicalRetrievalModeUnsupportedError);
+                assert.match(String(error.message), /'any_terms'/);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context rejects lexicalMatchMode combined with dense retrieval', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-dense-mode-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'auth.ts'), 'export const alpha = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        await assert.rejects(
+            () => context.semanticSearch({
+                codebasePath,
+                query: 'alpha',
+                topK: 5,
+                retrievalMode: 'dense',
+                lexicalMatchMode: 'all_terms',
+                scorePolicy: { kind: 'topk_only' },
+            }),
+            /lexicalMatchMode is invalid for dense retrieval/,
+        );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

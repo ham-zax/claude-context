@@ -732,6 +732,8 @@ export class LanceDbVectorDatabase implements VectorDatabase {
             provider: 'lancedb',
             transport: 'embedded',
             address: this.databasePath,
+            lexicalMatchModes: ['all_terms', 'any_terms'],
+            defaultLexicalMatchMode: 'all_terms',
         };
     }
 

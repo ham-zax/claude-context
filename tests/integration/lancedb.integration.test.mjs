@@ -185,3 +185,97 @@ test('Core publishes and reopens a LanceDB-backed hybrid generation', async (t) 
         collectionName,
     );
 });
+
+test('LanceDB all-terms lexical retrieval excludes partial-term matches', async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-lancedb-conjunctive-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const repositoryPath = path.join(root, 'repo');
+    const databasePath = path.join(root, 'database');
+    fs.mkdirSync(repositoryPath, { recursive: true });
+    // The all-token candidate carries each token exactly once; the single-token
+    // files repeat their token heavily. Only conjunctive (all-terms) retrieval
+    // must surface both.ts. This test proves genuine conjunctive semantics on
+    // a real LanceDB index; outside-primary-pool recovery is covered by the
+    // mocked must-lane MCP test, not by this integration test.
+    fs.writeFileSync(path.join(repositoryPath, 'both.ts'), 'export const both = "alpha beta";\n', 'utf8');
+    for (let index = 0; index < 4; index += 1) {
+        fs.writeFileSync(
+            path.join(repositoryPath, `alpha-${index}.ts`),
+            `// ${'alpha '.repeat(40)}\nexport const a${index} = 1;\n`,
+            'utf8',
+        );
+        fs.writeFileSync(
+            path.join(repositoryPath, `beta-${index}.ts`),
+            `// ${'beta '.repeat(40)}\nexport const b${index} = 1;\n`,
+            'utf8',
+        );
+    }
+
+    const previousHybridMode = process.env.HYBRID_MODE;
+    process.env.HYBRID_MODE = 'true';
+    t.after(() => {
+        if (previousHybridMode === undefined) delete process.env.HYBRID_MODE;
+        else process.env.HYBRID_MODE = previousHybridMode;
+    });
+
+    const database = new LanceDbVectorDatabase({ databasePath });
+    t.after(() => database.close());
+    const context = new Context({
+        embedding: new IntegrationEmbedding(),
+        vectorDatabase: database,
+        vectorStoreProvider: 'LanceDB',
+        symbolRegistryStateRoot: path.join(root, 'navigation'),
+        indexPolicyStateRoot: path.join(root, 'policy'),
+    });
+    const stats = await context.indexCodebase(repositoryPath, undefined, true);
+    assert.ok(stats.totalChunks > 0);
+
+    const allTerms = await context.semanticSearch({
+        codebasePath: repositoryPath,
+        query: 'alpha beta',
+        topK: 5,
+        retrievalMode: 'lexical',
+        lexicalMatchMode: 'all_terms',
+        scorePolicy: { kind: 'topk_only' },
+    });
+    assert.ok(
+        allTerms.some((result) => result.relativePath === 'both.ts'),
+        'all-terms retrieval must surface the candidate containing every term',
+    );
+
+    const anyTerms = await context.semanticSearch({
+        codebasePath: repositoryPath,
+        query: 'alpha beta',
+        topK: 50,
+        retrievalMode: 'lexical',
+        lexicalMatchMode: 'any_terms',
+        scorePolicy: { kind: 'topk_only' },
+    });
+    assert.ok(
+        anyTerms.some((result) => result.relativePath.startsWith('alpha-')),
+        'any-terms retrieval must surface single-token candidates',
+    );
+    assert.ok(
+        anyTerms.some((result) => result.relativePath.startsWith('beta-')),
+        'any-terms retrieval must surface single-token candidates',
+    );
+    // Conjunctive contrast: any-terms returns documents that lack one of the
+    // mandatory terms, while all-terms retrieval never does.
+    const anyTermsMissingToken = anyTerms.filter((result) => {
+        const content = result.content || '';
+        const hasAlpha = /alpha/.test(content);
+        const hasBeta = /beta/.test(content);
+        return !(hasAlpha && hasBeta);
+    });
+    assert.ok(
+        anyTermsMissingToken.length > 0,
+        'any-terms must return documents missing at least one query term',
+    );
+    assert.ok(
+        allTerms.every((result) => {
+            const content = result.content || '';
+            return /alpha/.test(content) && /beta/.test(content);
+        }),
+        'all-terms retrieval must return only documents containing every term',
+    );
+});

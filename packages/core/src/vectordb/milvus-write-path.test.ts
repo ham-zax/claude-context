@@ -79,7 +79,7 @@ test('Milvus gRPC searchable write does not perform a non-gating collection load
             ensureLoaded: async () => {
                 throw new Error('write path must not inspect collection load state');
             },
-            getBackendInfo: () => ({ provider: 'milvus', transport: 'grpc' }),
+            getBackendInfo: () => ({ provider: 'milvus', transport: 'grpc', lexicalMatchModes: [], defaultLexicalMatchMode: 'provider_sparse' }),
             upsertDocuments: async (collectionName: string, data: Array<Record<string, unknown>>) => {
                 calls.push({ collection_name: collectionName, data });
             },

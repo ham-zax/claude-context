@@ -142,6 +142,8 @@ test("LanceDB runtime selection seals backend identity without requiring Milvus"
         provider: "lancedb",
         transport: "embedded",
         address: databasePath,
+        lexicalMatchModes: ["all_terms", "any_terms"],
+        defaultLexicalMatchMode: "all_terms",
     });
     await vectorStore.createCollection("runtime_probe", 2);
     assert.deepEqual(await vectorStore.listCollections(), ["runtime_probe"]);

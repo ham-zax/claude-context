@@ -133,7 +133,7 @@ test('must: lane recovers a match outside the normal top-N lexical pool', async 
     assert.equal(laneCall?.topK, 80, 'lane must use the operator-constraint candidate maximum as its hard budget');
     assert.equal(laneCall?.retrievalMode, 'lexical');
 
-    assert.equal(outcome.mustConstraintRetrievalOutcome?.attempted, true);
+    assert.equal(outcome.mustConstraintRetrievalOutcome?.status, 'attempted');
     assert.equal(outcome.mustConstraintRetrievalOutcome?.candidatesExamined, 1);
     assert.equal(outcome.mustConstraintRetrievalOutcome?.candidateBudget, 80);
     assert.equal(outcome.mustConstraintRetrievalOutcome?.budgetExhausted, false);

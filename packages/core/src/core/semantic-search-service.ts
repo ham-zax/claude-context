@@ -174,12 +174,34 @@ function hashSemanticSearchLexicalQuery(query: string): string {
     return crypto.createHash('sha256').update(query, 'utf8').digest('hex');
 }
 
-function semanticSearchLexicalMatchMode(
-    vectorDatabase: VectorDatabase,
-): SemanticSearchCandidateTrace['lexicalRequests'][number]['matchMode'] {
+function resolveLexicalMatchCapabilities(vectorDatabase: VectorDatabase): {
+    supportedModes: readonly ('all_terms' | 'any_terms')[];
+    defaultMode: 'all_terms' | 'any_terms' | 'provider_sparse';
+} {
     const backend = vectorDatabase.getBackendInfo?.();
-    if (!backend) return 'unspecified';
-    return backend.provider === 'lancedb' ? 'all_terms' : 'provider_sparse';
+    // Missing declarations resolve conservatively: no standardized modes and
+    // provider-defined sparse semantics, so older/custom backends keep their
+    // existing implicit behavior.
+    const supportedModes = backend?.lexicalMatchModes ?? [];
+    const defaultMode = backend?.defaultLexicalMatchMode ?? 'provider_sparse';
+    if (defaultMode !== 'provider_sparse' && !supportedModes.includes(defaultMode)) {
+        throw new Error(
+            `Backend declares default lexical mode '${defaultMode}' without listing it as supported.`,
+        );
+    }
+    return { supportedModes, defaultMode };
+}
+
+/**
+ * Raised when a request demands a standardized lexical match mode the active
+ * vector backend does not declare. Callers must not silently degrade to
+ * provider-defined sparse behavior.
+ */
+export class LexicalRetrievalModeUnsupportedError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'LexicalRetrievalModeUnsupportedError';
+    }
 }
 
 function normalizeBreadcrumbs(value: unknown): string[] | undefined {
@@ -389,9 +411,20 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         const hybridCollection = this.isHybridEnabled();
         const isSparseOnly = resolvedRequest.retrievalMode === 'lexical' && hybridCollection;
         const isHybrid = resolvedRequest.retrievalMode === 'hybrid' && hybridCollection;
-        const lexicalMatchMode = semanticSearchLexicalMatchMode(vectorDatabase);
+        const lexicalCapabilities = resolveLexicalMatchCapabilities(vectorDatabase);
+        const requestedMatchMode = resolvedRequest.lexicalMatchMode;
+        if (requestedMatchMode && !lexicalCapabilities.supportedModes.includes(requestedMatchMode)) {
+            const backend = vectorDatabase.getBackendInfo?.();
+            throw new LexicalRetrievalModeUnsupportedError(
+                `Lexical match mode '${requestedMatchMode}' is not supported by the ${backend?.provider ?? 'unknown'} backend.`,
+            );
+        }
+        // Effective mode drives the primary request, candidate traces, and
+        // diagnostic fallback eligibility -- never the backend-derived value.
+        const effectivePrimaryMatchMode = requestedMatchMode
+            ?? lexicalCapabilities.defaultMode;
         const captureLexicalFallback = candidateTraceOptions.captureLexicalFallback === true
-            && lexicalMatchMode === 'all_terms'
+            && effectivePrimaryMatchMode === 'all_terms'
             && (isSparseOnly || isHybrid);
         const lexicalFallbackTerms = candidateTraceOptions.lexicalFallbackTerms;
         const lexicalFallbackQuery = lexicalFallbackTerms?.join(' ') ?? resolvedRequest.query;
@@ -473,6 +506,9 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                     query: resolvedRequest.query,
                     limit: candidateRetrievalLimit,
                     filter: resolvedRequest.filter,
+                    ...(effectivePrimaryMatchMode !== 'provider_sparse'
+                        ? { matchMode: effectivePrimaryMatchMode }
+                        : {}),
                 }),
                 captureLexicalFallback
                     ? vectorDatabase.retrieveLexical(collectionName, {
@@ -512,7 +548,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 lexicalRequests: [{
                     role: 'primary',
                     querySha256: hashSemanticSearchLexicalQuery(resolvedRequest.query),
-                    matchMode: lexicalMatchMode,
+                    matchMode: effectivePrimaryMatchMode,
                 }, ...(lexicalFallback ? [{
                     role: 'fallback_or' as const,
                     querySha256: hashSemanticSearchLexicalQuery(lexicalFallbackQuery),
@@ -556,6 +592,9 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                     query: resolvedRequest.query,
                     limit: candidateRetrievalLimit,
                     filter: resolvedRequest.filter,
+                    ...(effectivePrimaryMatchMode !== 'provider_sparse'
+                        ? { matchMode: effectivePrimaryMatchMode }
+                        : {}),
                 }),
                 captureLexicalFallback
                     ? vectorDatabase.retrieveLexical(collectionName, {
@@ -607,7 +646,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 lexicalRequests: [{
                     role: 'primary',
                     querySha256: hashSemanticSearchLexicalQuery(resolvedRequest.query),
-                    matchMode: lexicalMatchMode,
+                    matchMode: effectivePrimaryMatchMode,
                 }, ...(lexicalFallback ? [{
                     role: 'fallback_or' as const,
                     querySha256: hashSemanticSearchLexicalQuery(lexicalFallbackQuery),
@@ -705,8 +744,8 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
 
     private resolveRequest(request: SemanticSearchRequest): Omit<
         Required<SemanticSearchRequest>,
-        'filter'
-    > & { filter?: VectorFilter; retrievalMode: RetrievalMode; scorePolicy: ScorePolicy } {
+        'filter' | 'lexicalMatchMode'
+    > & { filter?: VectorFilter; lexicalMatchMode?: 'all_terms' | 'any_terms'; retrievalMode: RetrievalMode; scorePolicy: ScorePolicy } {
         const hybridEnabled = this.isHybridEnabled();
         const retrievalMode = request.retrievalMode ?? (hybridEnabled ? 'hybrid' : 'dense');
         const scorePolicy = request.scorePolicy ?? (retrievalMode === 'dense'
@@ -727,11 +766,17 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 `Dense similarity threshold score policy is invalid for ${retrievalMode} retrieval.`,
             );
         }
+        if (retrievalMode === 'dense' && request.lexicalMatchMode !== undefined) {
+            throw new Error(
+                'lexicalMatchMode is invalid for dense retrieval; it applies only to lexical or hybrid retrieval.',
+            );
+        }
         return {
             codebasePath: request.codebasePath,
             query: request.query,
             topK: request.topK ?? 5,
             retrievalMode,
+            lexicalMatchMode: request.lexicalMatchMode,
             filter: request.filter === undefined
                 ? undefined
                 : validateVectorFilter(request.filter),

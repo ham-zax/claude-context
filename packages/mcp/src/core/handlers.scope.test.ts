@@ -28,6 +28,7 @@ import {
     writeSymbolRegistrySidecar,
     COLLECTION_LIMIT_MESSAGE,
     EmbeddingProviderError,
+    LexicalRetrievalModeUnsupportedError,
     RerankerRequestError,
 } from '@zokizuan/satori-core';
 import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
@@ -6765,9 +6766,13 @@ test('handleSearchCode attaches must-constraint budget metadata when the dedicat
             true,
             'an unsatisfiable must: phrase must produce the explicit budget note in the response',
         );
-        assert.deepEqual(payload.hints?.mustConstraint?.mustTokens, ['NO_SUCH_PHRASE_XYZ']);
-        assert.equal(payload.hints?.mustConstraint?.candidateBudget, 80);
-        assert.equal(typeof payload.hints?.mustConstraint?.candidatesExamined, 'number');
+        assert.deepEqual(payload.hints?.mustConstraint, {
+            status: 'attempted',
+            mustTokens: ['NO_SUCH_PHRASE_XYZ'],
+            candidateBudget: 80,
+            candidatesExamined: 40,
+            budgetExhausted: false,
+        });
     });
 });
 
@@ -13153,5 +13158,414 @@ test('handleSearchCode routes untracked files through live paths and dirty overl
         const ignoredPayload = JSON.parse(ignoredResponse.content[0]?.text || '{}');
         assert.equal(ignoredPayload.status, 'ok', JSON.stringify(ignoredPayload.message || ''));
         assert.equal(ignoredPayload.results.length, 0);
+    });
+});
+
+test('handleSearchCode reports conjunctive unavailability without claiming the must budget was examined', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+            content: `candidate ${idx}`,
+            relativePath: `src/absent-${idx}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_absent_${idx}`,
+            symbolLabel: `function absent${idx}()`,
+        }));
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const internals = handlers as unknown as {
+            context: HandlerContext & {
+                semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+            };
+        };
+        const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
+        const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
+        const rejectConjunctive = (...args: unknown[]) => {
+            const request = args[1] as { lexicalMatchMode?: string } | undefined;
+            if (request?.lexicalMatchMode === 'all_terms') {
+                throw new LexicalRetrievalModeUnsupportedError(
+                    'Conjunctive (all-terms) lexical retrieval is not supported by the mock backend.',
+                );
+            }
+            return undefined;
+        };
+        internals.context.semanticSearchInProvenGeneration = async (...args) => {
+            const rejected = rejectConjunctive(...args);
+            if (rejected !== undefined) return rejected;
+            return originalSearch(...args);
+        };
+        internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+            const rejected = rejectConjunctive(...args);
+            if (rejected !== undefined) return rejected;
+            return originalTracedSearch(...args);
+        };
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 1,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 0);
+        assert.equal(
+            warningCodes(payload).includes('MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE'),
+            true,
+            'an unsupported backend must report conjunctive unavailability',
+        );
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            false,
+            'an unsupported lane must not claim the retrieval budget was examined',
+        );
+        assert.equal(payload.hints?.mustConstraint?.status, 'unsupported');
+        assert.equal(payload.hints?.mustConstraint?.candidatesExamined, 0);
+    });
+});
+
+test('handleSearchCode reports a failed conjunctive lane without claiming the budget was examined', async () => {
+    await withTempRepo(async (repoPath) => {
+        const runCase = async (needle: string | null) => {
+            const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+                content: idx === 7 && needle ? `contains ${needle}` : `candidate ${idx}`,
+                relativePath: `src/case-${idx}.ts`,
+                startLine: 1,
+                endLine: 2,
+                language: 'typescript',
+                score: 0.99 - (idx * 0.0001),
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: `sym_case_${idx}`,
+                symbolLabel: `function case${idx}()`,
+            }));
+            const handlers = createHandlers(repoPath, denseResults, undefined, {
+                respectSemanticTopK: true,
+                enableVectorReceipt: true,
+            });
+            const internals = handlers as unknown as {
+                context: HandlerContext & {
+                    semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                    semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                };
+            };
+            const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
+            const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
+            const failLane = (...args: unknown[]) => {
+                const request = args[1] as { lexicalMatchMode?: string } | undefined;
+                if (request?.lexicalMatchMode === 'all_terms') {
+                    throw new Error('mock conjunctive lane backend failure');
+                }
+                return undefined;
+            };
+            internals.context.semanticSearchInProvenGeneration = async (...args) => {
+                const rejected = failLane(...args);
+                if (rejected !== undefined) return rejected;
+                return originalSearch(...args);
+            };
+            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+                const rejected = failLane(...args);
+                if (rejected !== undefined) return rejected;
+                return originalTracedSearch(...args);
+            };
+            const response = await handlers.handleSearchCode({
+                path: repoPath,
+                query: `must:${needle ?? 'NO_SUCH_PHRASE_XYZ'} runtime`,
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 5,
+                debugMode: 'full',
+            });
+            return JSON.parse(response.content[0]?.text || '{}');
+        };
+
+        const zeroSurvivors = await runCase(null);
+        assert.equal(zeroSurvivors.status, 'ok');
+        assert.equal(zeroSurvivors.results.length, 0);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(zeroSurvivors.hints?.mustConstraint?.status, 'failed');
+
+        const oneSurvivor = await runCase('NEEDLE_OK');
+        assert.equal(oneSurvivor.status, 'ok');
+        assert.equal(oneSurvivor.results.length, 1);
+        assert.equal(warningCodes(oneSurvivor).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
+        assert.equal(warningCodes(oneSurvivor).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(oneSurvivor.hints?.mustConstraint?.status, 'failed');
+    });
+});
+
+test('raw search results carry the must-constraint hint contract', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+            content: `candidate ${idx}`,
+            relativePath: `src/raw-absent-${idx}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_raw_absent_${idx}`,
+            symbolLabel: `function rawAbsent${idx}()`,
+        }));
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
+            scope: 'runtime',
+            resultMode: 'raw',
+            groupBy: 'symbol',
+            limit: 1,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.resultMode, 'raw');
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            true,
+        );
+        assert.deepEqual(payload.hints?.mustConstraint, {
+            status: 'attempted',
+            mustTokens: ['NO_SUCH_PHRASE_XYZ'],
+            candidateBudget: 80,
+            candidatesExamined: 40,
+            budgetExhausted: false,
+        });
+    });
+});
+
+test('handleSearchCode counts every terminal reranker failure exactly once including parse failures', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 10 }, (_, idx) => ({
+            content: `export const value${idx} = ${idx};`,
+            relativePath: `src/value-${idx}.ts`,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_value_${idx}`,
+            symbolLabel: `function value${idx}()`,
+        }));
+        // The reranker returns fewer results than requested: a parse-phase
+        // failure (result count mismatch), not an api_call failure.
+        const reranker = {
+            rerank: async () => [{ index: 0, relevanceScore: 0.9 }],
+        };
+        const handlers = createHandlers(repoPath, denseResults, reranker, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the values',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(warningCodes(payload).includes('RERANKER_FAILED'), true);
+        assert.equal(payload.hints?.debugSearch?.providerWork?.rerankerFailures, 1);
+    });
+});
+test('handleSearchCode reports conjunctive unavailability without claiming the must budget was examined', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+            content: `candidate ${idx}`,
+            relativePath: `src/absent-${idx}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_absent_${idx}`,
+            symbolLabel: `function absent${idx}()`,
+        }));
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const internals = handlers as unknown as {
+            context: HandlerContext & {
+                semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+            };
+        };
+        const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
+        const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
+        const rejectConjunctive = (...args: unknown[]) => {
+            const request = args[1] as { lexicalMatchMode?: string } | undefined;
+            if (request?.lexicalMatchMode === 'all_terms') {
+                throw new LexicalRetrievalModeUnsupportedError(
+                    'Conjunctive (all-terms) lexical retrieval is not supported by the mock backend.',
+                );
+            }
+            return undefined;
+        };
+        internals.context.semanticSearchInProvenGeneration = async (...args) => {
+            const rejected = rejectConjunctive(...args);
+            if (rejected !== undefined) return rejected;
+            return originalSearch(...args);
+        };
+        internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+            const rejected = rejectConjunctive(...args);
+            if (rejected !== undefined) return rejected;
+            return originalTracedSearch(...args);
+        };
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 1,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 0);
+        assert.equal(
+            warningCodes(payload).includes('MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE'),
+            true,
+            'an unsupported backend must report conjunctive unavailability',
+        );
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            false,
+            'an unsupported lane must not claim the retrieval budget was examined',
+        );
+        assert.equal(payload.hints?.mustConstraint?.status, 'unsupported');
+        assert.equal(payload.hints?.mustConstraint?.candidatesExamined, 0);
+    });
+});
+test('handleSearchCode reports a failed conjunctive lane without claiming the budget was examined', async () => {
+    await withTempRepo(async (repoPath) => {
+        const runCase = async (needle: string | null) => {
+            const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+                content: idx === 7 && needle ? `contains ${needle}` : `candidate ${idx}`,
+                relativePath: `src/case-${idx}.ts`,
+                startLine: 1,
+                endLine: 2,
+                language: 'typescript',
+                score: 0.99 - (idx * 0.0001),
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: `sym_case_${idx}`,
+                symbolLabel: `function case${idx}()`,
+            }));
+            const handlers = createHandlers(repoPath, denseResults, undefined, {
+                respectSemanticTopK: true,
+                enableVectorReceipt: true,
+            });
+            const internals = handlers as unknown as {
+                context: HandlerContext & {
+                    semanticSearchInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                    semanticSearchWithCandidateTraceInProvenGeneration: (...args: unknown[]) => Promise<unknown>;
+                };
+            };
+            const originalSearch = internals.context.semanticSearchInProvenGeneration.bind(internals.context);
+            const originalTracedSearch = internals.context.semanticSearchWithCandidateTraceInProvenGeneration.bind(internals.context);
+            const failLane = (...args: unknown[]) => {
+                const request = args[1] as { lexicalMatchMode?: string } | undefined;
+                if (request?.lexicalMatchMode === 'all_terms') {
+                    throw new Error('mock conjunctive lane backend failure');
+                }
+                return undefined;
+            };
+            internals.context.semanticSearchInProvenGeneration = async (...args) => {
+                const rejected = failLane(...args);
+                if (rejected !== undefined) return rejected;
+                return originalSearch(...args);
+            };
+            internals.context.semanticSearchWithCandidateTraceInProvenGeneration = async (...args) => {
+                const rejected = failLane(...args);
+                if (rejected !== undefined) return rejected;
+                return originalTracedSearch(...args);
+            };
+            const response = await handlers.handleSearchCode({
+                path: repoPath,
+                query: `must:${needle ?? 'NO_SUCH_PHRASE_XYZ'} runtime`,
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 5,
+                debugMode: 'full',
+            });
+            return JSON.parse(response.content[0]?.text || '{}');
+        };
+
+        const zeroSurvivors = await runCase(null);
+        assert.equal(zeroSurvivors.status, 'ok');
+        assert.equal(zeroSurvivors.results.length, 0);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(zeroSurvivors.hints?.mustConstraint?.status, 'failed');
+
+        const oneSurvivor = await runCase('NEEDLE_OK');
+        assert.equal(oneSurvivor.status, 'ok');
+        assert.equal(oneSurvivor.results.length, 1);
+        assert.equal(warningCodes(oneSurvivor).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
+        assert.equal(warningCodes(oneSurvivor).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(oneSurvivor.hints?.mustConstraint?.status, 'failed');
+    });
+});
+test('raw search results carry the must-constraint hint contract', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 40 }, (_, idx) => ({
+            content: `candidate ${idx}`,
+            relativePath: `src/raw-absent-${idx}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_raw_absent_${idx}`,
+            symbolLabel: `function rawAbsent${idx}()`,
+        }));
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'must:NO_SUCH_PHRASE_XYZ runtime',
+            scope: 'runtime',
+            resultMode: 'raw',
+            groupBy: 'symbol',
+            limit: 1,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.resultMode, 'raw');
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            true,
+        );
+        assert.deepEqual(payload.hints?.mustConstraint, {
+            status: 'attempted',
+            mustTokens: ['NO_SUCH_PHRASE_XYZ'],
+            candidateBudget: 80,
+            candidatesExamined: 40,
+            budgetExhausted: false,
+        });
     });
 });

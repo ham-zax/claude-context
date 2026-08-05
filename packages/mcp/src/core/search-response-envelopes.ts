@@ -16,6 +16,7 @@ import type {
     SearchResponseEnvelope,
 } from "./search-types.js";
 import { SEARCH_RESPONSE_FORMAT_VERSION } from "./search-types.js";
+import type { SearchMustConstraintHint } from "./search-types.js";
 import type { CompletionProbeDebugHint } from "./tracked-root-readiness.js";
 import {
     buildSearchWarningDetails,
@@ -40,11 +41,7 @@ type SearchResponseCommonInput = {
     proofDebugHint?: CompletionProbeDebugHint;
     noiseMitigationHint?: unknown;
     generatedArtifactsHint?: unknown;
-    mustConstraintHint?: {
-        mustTokens: readonly string[];
-        candidateBudget: number;
-        candidatesExamined: number;
-    };
+    mustConstraintHint?: SearchMustConstraintHint;
 };
 
 function buildSearchResponseHints(input: SearchResponseCommonInput): { hints?: Record<string, unknown> } {

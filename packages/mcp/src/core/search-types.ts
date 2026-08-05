@@ -659,8 +659,30 @@ export type SearchRankingDebugHint = Pick<SearchDebugHint,
 export type SearchFreshnessDebugHint = Pick<SearchDebugHint, "phaseTimingsMs" | "readiness" | "changedCode">;
 export type SearchPassFailureDebugHint = Pick<SearchDebugHint, "semanticPassFailures">;
 
+export type SearchMustConstraintHint =
+    | {
+        status: "attempted";
+        mustTokens: readonly string[];
+        candidateBudget: number;
+        candidatesExamined: number;
+        budgetExhausted: boolean;
+    }
+    | {
+        status: "unsupported";
+        mustTokens: readonly string[];
+        candidateBudget: number;
+        candidatesExamined: 0;
+    }
+    | {
+        status: "failed";
+        mustTokens: readonly string[];
+        candidateBudget: number;
+        candidatesExamined: number;
+    };
+
 export interface SearchResponseHints extends Record<string, unknown> {
     version?: 1;
+    mustConstraint?: SearchMustConstraintHint;
     noiseMitigation?: SearchNoiseMitigationHint;
     debugSearch?: SearchDebugHint | SearchRankingDebugHint | SearchFreshnessDebugHint | SearchPassFailureDebugHint;
     debugSummary?: {

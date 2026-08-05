@@ -11,6 +11,13 @@ export interface SemanticSearchRequest {
     query: string;
     topK?: number;
     retrievalMode?: RetrievalMode;
+    /**
+     * Standardized lexical matching mode for the primary lexical retrieval.
+     * Backends must reject unsupported requested modes with
+     * `LexicalRetrievalModeUnsupportedError` rather than silently using
+     * provider-defined sparse semantics.
+     */
+    lexicalMatchMode?: "all_terms" | "any_terms";
     filter?: VectorFilter;
     scorePolicy?: ScorePolicy;
 }

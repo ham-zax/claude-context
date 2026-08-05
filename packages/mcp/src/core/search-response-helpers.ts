@@ -135,6 +135,24 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Narrow the query or add path:/lang: constraints to reach more matching candidates.",
         };
     }
+    if (code === WARNING_CODES.MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE) {
+        return {
+            code,
+            severity: "degraded",
+            blocksUse: false,
+            message: "The active search backend cannot guarantee conjunctive (all-terms) lexical matching, so the dedicated must: retrieval lane was not run.",
+            action: "Use must: values that are also good semantic queries, or switch to a backend that supports all-terms lexical retrieval.",
+        };
+    }
+    if (code === WARNING_CODES.MUST_CONJUNCTIVE_RETRIEVAL_FAILED) {
+        return {
+            code,
+            severity: "degraded",
+            blocksUse: false,
+            message: "The dedicated conjunctive must: retrieval lane failed before examining its candidate budget, so returned matches may be incomplete.",
+            action: "Narrow the query or retry; the retrieval budget was not fully examined.",
+        };
+    }
     if (code === WARNING_CODES.RERANKER_FAILED) {
         return {
             code,

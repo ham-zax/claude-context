@@ -492,6 +492,10 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
             provider: isZilliz ? 'zilliz' : 'milvus',
             transport: 'rest',
             address,
+            // The REST adapter has provider-defined sparse semantics; it does
+            // not declare standard all-terms/any-terms lexical match modes.
+            lexicalMatchModes: [],
+            defaultLexicalMatchMode: 'provider_sparse',
         };
     }
 

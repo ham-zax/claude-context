@@ -46,6 +46,7 @@ import type {
     SearchGroupedResponseEnvelope,
     SearchResponseHints,
     SearchResponseEnvelope,
+    SearchMustConstraintHint,
 } from "./search-types.js";
 import {
     buildSearchDebugSummary,
@@ -238,6 +239,35 @@ export async function finalizeSearchResults(
     const rerankDecision = host.searchQuerySupport.resolveRerankDecision(input.scope, input.queryPlan);
     const mustApplied = input.parsedOperators.must.length > 0;
     const mustSatisfied = !mustApplied || scored.length > 0;
+
+    const buildMustConstraintHint = (): SearchMustConstraintHint | undefined => {
+        if (!mustConstraintRetrievalOutcome) {
+            return undefined;
+        }
+        const common = {
+            mustTokens: [...mustConstraintMustTokens],
+            candidateBudget: mustConstraintRetrievalOutcome.candidateBudget,
+            candidatesExamined: mustConstraintRetrievalOutcome.candidatesExamined,
+        };
+        if (mustConstraintRetrievalOutcome.status === "attempted") {
+            return {
+                ...common,
+                status: "attempted" as const,
+                budgetExhausted: mustConstraintRetrievalOutcome.budgetExhausted,
+            };
+        }
+        if (mustConstraintRetrievalOutcome.status === "unsupported") {
+            return {
+                ...common,
+                status: "unsupported" as const,
+                candidatesExamined: 0,
+            };
+        }
+        return {
+            ...common,
+            status: "failed" as const,
+        };
+    };
 
     const buildRankingDebug = (
         diversitySummary?: SearchDebugHint["diversitySummary"],
@@ -469,6 +499,7 @@ export async function finalizeSearchResults(
                 span: result.span,
             })),
         );
+        const mustConstraintHint = buildMustConstraintHint();
         return {
             kind: "ok",
             envelope: buildRawSearchEnvelopeHelper({
@@ -486,6 +517,7 @@ export async function finalizeSearchResults(
                 proofDebugHint: input.proofDebugHint,
                 noiseMitigationHint,
                 generatedArtifactsHint,
+                mustConstraintHint,
                 results: rawResults,
             }),
         };
@@ -654,13 +686,7 @@ export async function finalizeSearchResults(
                     span: result.target.span,
                 })),
             );
-            const mustConstraintHint = mustConstraintRetrievalOutcome?.attempted
-                ? {
-                    mustTokens: [...mustConstraintMustTokens],
-                    candidateBudget: mustConstraintRetrievalOutcome.candidateBudget,
-                    candidatesExamined: mustConstraintRetrievalOutcome.candidatesExamined,
-                }
-                : undefined;
+            const mustConstraintHint = buildMustConstraintHint();
             const envelope = buildGroupedSearchEnvelopeHelper({
                 codebaseRoot: input.effectiveRoot,
                 absolutePath: input.absolutePath,

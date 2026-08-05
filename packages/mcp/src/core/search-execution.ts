@@ -4,6 +4,7 @@ import type {
     SemanticSearchResult,
 } from "@zokizuan/satori-core";
 import {
+    LexicalRetrievalModeUnsupportedError,
     RerankerRequestError,
     type RerankerFailureKind,
 } from "@zokizuan/satori-core";
@@ -367,12 +368,25 @@ export type SearchExecutionOutcome =
         semanticPassFailures: SemanticPassFailureDiagnostic[];
     };
 
-export interface MustConstraintRetrievalOutcome {
-    attempted: boolean;
-    candidatesExamined: number;
-    candidateBudget: number;
-    budgetExhausted: boolean;
-}
+export type MustConstraintRetrievalOutcome =
+    | {
+        status: "attempted";
+        candidatesExamined: number;
+        candidateBudget: number;
+        budgetExhausted: boolean;
+    }
+    | {
+        status: "unsupported";
+        candidatesExamined: 0;
+        candidateBudget: number;
+        budgetExhausted: false;
+    }
+    | {
+        status: "failed";
+        candidatesExamined: number;
+        candidateBudget: number;
+        budgetExhausted: true;
+    };
 
 export type SearchExecutionHost = {
     searchQuerySupport: SearchQuerySupport;
@@ -381,6 +395,7 @@ export type SearchExecutionHost = {
         query: string;
         topK: number;
         retrievalMode: "dense" | "lexical" | "hybrid";
+        lexicalMatchMode?: "all_terms" | "any_terms";
         scorePolicy: { kind: "topk_only" } | { kind: "dense_similarity_min"; min: number };
         diagnosticLexicalFallbackTerms?: string[];
     }) => Promise<SemanticSearchResult[] | SemanticSearchExecutionResult>;
@@ -1232,18 +1247,30 @@ export async function runSearchExecution(
                         query: mustTokens.join(" "),
                         topK: mustLaneBudget,
                         retrievalMode: "lexical",
+                        // Every must: value is mandatory: the backend must honor
+                        // all-terms matching or reject the request explicitly.
+                        lexicalMatchMode: "all_terms",
                         scorePolicy: { kind: "topk_only" },
                     }),
                 );
                 laneResults = Array.isArray(laneResponse)
                     ? laneResponse
                     : laneResponse.results;
-            } catch {
-                // A lane failure is bounded: keep the primary results and
-                // report that the budget could not be fully examined.
-                laneFailed = true;
+            } catch (error) {
+                if (error instanceof LexicalRetrievalModeUnsupportedError) {
+                    // The backend cannot guarantee conjunctive semantics; do not
+                    // silently run provider-defined sparse matching and never
+                    // claim the must: lane examined the candidate pool.
+                    conjunctiveUnavailable = true;
+                } else {
+                    // A lane failure is bounded: keep the primary results and
+                    // report that the budget could not be fully examined.
+                    laneFailed = true;
+                }
             }
-            if (laneResults.length > 0) {
+            if (conjunctiveUnavailable) {
+                searchWarningsSet.add(WARNING_CODES.MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE);
+            } else if (laneResults.length > 0) {
                 if (candidateSurvival) {
                     appendSearchCandidatePass(
                         candidateSurvival,
@@ -1257,12 +1284,30 @@ export async function runSearchExecution(
                 attemptFilterSummary = buildEmptyFilterSummary();
                 evaluateAllCandidates();
             }
-            mustConstraintRetrievalOutcome = {
-                attempted: true,
-                candidatesExamined: laneResults.length,
-                candidateBudget: mustLaneBudget,
-                budgetExhausted: laneFailed || laneResults.length >= mustLaneBudget,
-            };
+            mustConstraintRetrievalOutcome = conjunctiveUnavailable
+                ? {
+                    // The backend cannot guarantee conjunctive semantics, so
+                    // the dedicated lane was never attempted and no budget was
+                    // examined. Only the conjunctive-unavailable warning may
+                    // accompany this state.
+                    status: "unsupported",
+                    candidatesExamined: 0,
+                    candidateBudget: mustLaneBudget,
+                    budgetExhausted: false,
+                }
+                : laneFailed
+                    ? {
+                        status: "failed",
+                        candidatesExamined: laneResults.length,
+                        candidateBudget: mustLaneBudget,
+                        budgetExhausted: true,
+                    }
+                    : {
+                        status: "attempted",
+                        candidatesExamined: laneResults.length,
+                        candidateBudget: mustLaneBudget,
+                        budgetExhausted: laneResults.length >= mustLaneBudget,
+                    };
         }
 
         const beforeFilter = byChunkKey.size;
@@ -1466,7 +1511,12 @@ export async function runSearchExecution(
     if (mustApplied && !mustSatisfied) {
         searchWarnings.push("FILTER_MUST_UNSATISFIED");
     }
-    if (mustApplied && mustConstraintRetrievalOutcome?.attempted) {
+    if (mustApplied && mustConstraintRetrievalOutcome?.status === "failed") {
+        // The lane failed before examining its budget: matches may be
+        // incomplete, but the budget was never exhausted.
+        searchWarnings.push(WARNING_CODES.MUST_CONJUNCTIVE_RETRIEVAL_FAILED);
+    }
+    if (mustApplied && mustConstraintRetrievalOutcome?.status === "attempted") {
         if (!mustSatisfied) {
             searchWarnings.push(WARNING_CODES.MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET);
         } else if (
