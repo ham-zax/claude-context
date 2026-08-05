@@ -7,6 +7,7 @@ import { SyncManager } from "../core/sync.js";
 import { IndexFingerprint } from "../config.js";
 import { ToolHandlers } from "../core/handlers.js";
 import type { RuntimeOwnerMutationGate } from "../core/runtime-owner.js";
+import type { SessionWorkspacePolicy } from "../core/session-workspace-policy.js";
 
 export type ProviderBackedOperation = "embedding_vector" | "vector_only";
 
@@ -39,6 +40,8 @@ export interface ToolContext {
     runtimeFingerprint: IndexFingerprint;
     toolHandlers: ToolHandlers;
     readFileMaxLines: number;
+    /** Immutable per-session workspace authorization policy. */
+    workspacePolicy: SessionWorkspacePolicy;
     /** Optional: live multi-runtime owner diagnostics for list_codebases / status. */
     runtimeOwnerGate?: RuntimeOwnerMutationGate | null;
     providerRuntime?: {

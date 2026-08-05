@@ -28,9 +28,35 @@ import {
     resolveRerankerProvider,
 } from "../config.js";
 import { createEmbeddingInstance, logEmbeddingProviderInfo } from "../embedding.js";
+import {
+    WorkspaceAuthorizationError,
+    type SessionWorkspacePolicy,
+} from "../core/session-workspace-policy.js";
 import { MissingProviderConfigIssue, ProviderBackedOperation, ToolContext } from "../tools/types.js";
 import { LateOnReranker } from "./lateon-reranker.js";
 import type { LateOnRuntimeProfileId } from "./lateon-reranker-protocol.js";
+
+/**
+ * Deny-all workspace policy for raw host-wide provider contexts that have
+ * not been bound to an MCP session. Any tool path that accidentally uses the
+ * raw context fails closed with WORKSPACE_POLICY_NOT_BOUND instead of
+ * inheriting process.cwd() authority or a session-specific root set.
+ */
+export const UNBOUND_WORKSPACE_POLICY: SessionWorkspacePolicy = {
+    roots: [],
+    authorizeRoot() {
+        throw new WorkspaceAuthorizationError(
+            "WORKSPACE_POLICY_NOT_BOUND",
+            "Tool context has not been bound to an MCP session.",
+        );
+    },
+    authorizePath() {
+        throw new WorkspaceAuthorizationError(
+            "WORKSPACE_POLICY_NOT_BOUND",
+            "Tool context has not been bound to an MCP session.",
+        );
+    },
+};
 
 type VectorSearchResults = Awaited<ReturnType<VectorDatabase["retrieveDense"]>>;
 type VectorQueryRows = Awaited<ReturnType<VectorDatabase["queryDocuments"]>>;
@@ -416,6 +442,10 @@ export class ProviderRuntime {
                 readFileMaxLines: this.readFileMaxLines,
                 runtimeOwnerGate: this.runtimeOwnerGate,
                 providerRuntime: this,
+                // Raw host-wide provider contexts are never bound to an MCP
+                // session: deny-all until a session wrapper supplies the
+                // immutable per-session workspace policy.
+                workspacePolicy: UNBOUND_WORKSPACE_POLICY,
             };
             this.activeEmbeddings.add(embedding);
             if (reranker) this.activeRerankers.add(reranker);

@@ -26,6 +26,7 @@ import type {
 } from '@zokizuan/satori-core';
 import { readFileTool } from '../tools/read_file.js';
 import type { ToolContext } from '../tools/types.js';
+import { createSessionWorkspacePolicy } from './session-workspace-policy.js';
 import { ToolHandlers } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
 import { IndexFingerprint } from '../config.js';
@@ -536,6 +537,11 @@ function createReadFileToolContext(input: {
         runtimeFingerprint: RUNTIME_FINGERPRINT,
         toolHandlers: input.handlers,
         readFileMaxLines: input.readFileMaxLines ?? 1000,
+        workspacePolicy: createSessionWorkspacePolicy({
+            roots: [path.join(os.tmpdir(), 'satori-golden-workspace')],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.homedir(), '.satori'),
+        }),
     };
 }
 

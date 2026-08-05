@@ -3,6 +3,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Readable, Writable } from "node:stream";
+import os from "node:os";
+import path from "node:path";
 import { withSourceMeasurementOperation } from "@zokizuan/satori-core";
 import type { ContextMcpConfig, IndexFingerprint } from "../config.js";
 import { CapabilityResolver } from "../core/capabilities.js";
@@ -17,6 +19,11 @@ import {
     RuntimeOwnerRegistry,
     buildRuntimeOwnerIdentityFromConfig,
 } from "../core/runtime-owner.js";
+import {
+    WorkspaceAuthorizationError,
+    createSessionWorkspacePolicy,
+    type SessionWorkspacePolicy,
+} from "../core/session-workspace-policy.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
 import { getMcpToolList, toolRegistry } from "../tools/registry.js";
@@ -30,6 +37,57 @@ import { createLocalOnlyContext, ProviderRuntime } from "./provider-runtime.js";
 import { SHARED_RUNTIME_MAX_PENDING_REQUESTS } from "./shared-runtime-identity.js";
 
 export type ServerRunMode = "mcp" | "cli" | "postflight" | "host";
+
+/**
+ * Session workspace root rule: SATORI_SESSION_ROOTS_JSON when present,
+ * otherwise [process.cwd()]. Returns the same roots for direct stdio sessions
+ * and for the shared-runtime launcher, so both paths construct identical
+ * session workspace policies.
+ */
+export const SESSION_WORKSPACE_ROOTS_MAX = 16;
+
+export function resolveSessionWorkspaceRoots(env: NodeJS.ProcessEnv): readonly string[] {
+    const raw = env.SATORI_SESSION_ROOTS_JSON;
+    if (raw === undefined || raw === "") {
+        return [process.cwd()];
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new WorkspaceAuthorizationError(
+            "INVALID_WORKSPACE_ROOT",
+            "SATORI_SESSION_ROOTS_JSON must be a JSON array of 1-16 absolute path strings.",
+        );
+    }
+    if (
+        !Array.isArray(parsed)
+        || parsed.length < 1
+        || parsed.length > SESSION_WORKSPACE_ROOTS_MAX
+    ) {
+        throw new WorkspaceAuthorizationError(
+            "INVALID_WORKSPACE_ROOT",
+            `SATORI_SESSION_ROOTS_JSON must be a JSON array of 1-${SESSION_WORKSPACE_ROOTS_MAX} absolute path strings.`,
+        );
+    }
+    for (const entry of parsed) {
+        if (typeof entry !== "string" || !path.isAbsolute(entry)) {
+            throw new WorkspaceAuthorizationError(
+                "INVALID_WORKSPACE_ROOT",
+                "SATORI_SESSION_ROOTS_JSON entries must be absolute path strings.",
+            );
+        }
+    }
+    return parsed;
+}
+
+export function createSessionWorkspacePolicyFromEnv(env: NodeJS.ProcessEnv): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: resolveSessionWorkspaceRoots(env),
+        homeDirectory: os.homedir(),
+        stateRoot: env.SATORI_STATE_ROOT ?? path.join(env.HOME ?? os.homedir(), ".satori"),
+    });
+}
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -50,6 +108,7 @@ class SessionProviderRuntime {
         private readonly continuationCoordinator: SearchContinuationCoordinator,
         private readonly mutationLeaseCoordinator: MutationLeaseCoordinator,
         private readonly callGraphManager: CallGraphSidecarManager,
+        private readonly workspacePolicy: SessionWorkspacePolicy,
     ) {}
 
     async requireToolContext(
@@ -84,6 +143,11 @@ class SessionProviderRuntime {
             ...shared,
             toolHandlers,
             providerRuntime: this,
+            // The provider-shared raw context carries the deny-all sentinel;
+            // the session wrapper binds the immutable per-session policy so
+            // every tool context obeys this session's roots and any unbind
+            // path fails closed with WORKSPACE_POLICY_NOT_BOUND.
+            workspacePolicy: this.workspacePolicy,
         };
         this.contexts.set(shared, sessionContext);
         this.handlers.add(toolHandlers);
@@ -195,11 +259,11 @@ export class SharedRuntimeHost {
         this.snapshotManager.loadCodebaseSnapshot();
     }
 
-    createSession(): McpSession {
+    createSession(workspacePolicy: SessionWorkspacePolicy): McpSession {
         if (this.shutdownStarted) {
             throw new Error("Shared Satori runtime host is shutting down.");
         }
-        return new McpSession(this);
+        return new McpSession(this, workspacePolicy);
     }
 
     createSearchContinuationCoordinator(): SearchContinuationCoordinator {
@@ -208,6 +272,7 @@ export class SharedRuntimeHost {
 
     createSessionResources(
         continuationCoordinator: SearchContinuationCoordinator,
+        workspacePolicy: SessionWorkspacePolicy,
     ): SessionResources {
         const localHandlers = new ToolHandlers(
             this.localContext,
@@ -229,6 +294,7 @@ export class SharedRuntimeHost {
             continuationCoordinator,
             this.mutationLeaseCoordinator,
             this.callGraphManager,
+            workspacePolicy,
         );
         return {
             localHandlers,
@@ -244,6 +310,7 @@ export class SharedRuntimeHost {
                 readFileMaxLines: this.readFileMaxLines,
                 runtimeOwnerGate: this.runtimeOwnerRegistry,
                 providerRuntime,
+                workspacePolicy,
             },
         };
     }
@@ -318,7 +385,10 @@ export class McpSession {
     private resolveResourceRelease: (() => void) | null = null;
     private keepAliveTimer: NodeJS.Timeout | null = null;
 
-    constructor(private readonly host: SharedRuntimeHost) {
+    constructor(
+        private readonly host: SharedRuntimeHost,
+        private readonly workspacePolicy: SessionWorkspacePolicy,
+    ) {
         this.continuationCoordinator = host.createSearchContinuationCoordinator();
         this.server = new Server(
             {
@@ -331,7 +401,10 @@ export class McpSession {
                 },
             },
         );
-        this.resources = host.createSessionResources(this.continuationCoordinator);
+        this.resources = host.createSessionResources(
+            this.continuationCoordinator,
+            workspacePolicy,
+        );
         this.setupTools();
     }
 

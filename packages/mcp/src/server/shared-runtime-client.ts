@@ -19,6 +19,7 @@ import {
     removeOwnedLifecycleState,
     type SharedRuntimeHostMetadata,
 } from "./shared-runtime-lifecycle.js";
+import { resolveSessionWorkspaceRoots } from "./shared-runtime.js";
 
 type AttachRequest = Readonly<{
     type: "satori-shared-runtime-attach";
@@ -27,6 +28,7 @@ type AttachRequest = Readonly<{
     installedRuntimeRoot: string;
     mcpVersion: string;
     challengeNonce: string;
+    workspaceRoots: readonly string[];
 }>;
 
 type AttachResponse = Readonly<{
@@ -88,6 +90,7 @@ async function attach(
     socketPath: string,
     identity: ReturnType<typeof buildSharedRuntimeIdentity>,
     timeoutMs: number,
+    workspaceRoots: readonly string[],
     expectedHost?: SharedRuntimeHostMetadata,
 ): Promise<net.Socket> {
     const socket = await connectSocket(socketPath, timeoutMs);
@@ -105,6 +108,7 @@ async function attach(
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
         challengeNonce,
+        workspaceRoots,
     });
     socket.write(`${JSON.stringify(request)}\n`);
 
@@ -207,6 +211,7 @@ async function attachFromMetadata(
     identity: ReturnType<typeof buildSharedRuntimeIdentity>,
     metadataPath: string,
     timeoutMs: number,
+    workspaceRoots: readonly string[],
 ): Promise<net.Socket | null> {
     const metadata = readHostMetadata(metadataPath);
     if (!metadata) return null;
@@ -220,7 +225,7 @@ async function attachFromMetadata(
     })) {
         return null;
     }
-    return attach(metadata.socketPath, identity, timeoutMs, metadata);
+    return attach(metadata.socketPath, identity, timeoutMs, workspaceRoots, metadata);
 }
 
 function isTransientAttachError(error: unknown): boolean {
@@ -236,6 +241,7 @@ async function waitForHostTransition(
     metadataPath: string,
     socketPath: string,
     timeoutMs: number,
+    workspaceRoots: readonly string[],
 ): Promise<net.Socket | null> {
     const deadline = Date.now() + timeoutMs;
     let lastError: unknown = null;
@@ -248,6 +254,7 @@ async function waitForHostTransition(
                     socketPath,
                     identity,
                     Math.min(500, Math.max(1, deadline - Date.now())),
+                    workspaceRoots,
                 );
                 unexpected.destroy();
                 throw new Error(
@@ -277,6 +284,7 @@ async function waitForHostTransition(
                     metadata.socketPath,
                     identity,
                     Math.min(500, Math.max(1, deadline - Date.now())),
+                    workspaceRoots,
                     metadata,
                 );
             } catch (error) {
@@ -316,6 +324,9 @@ async function connectOrStart(options: SharedRuntimeClientOptions): Promise<net.
     const deadline = Date.now() + timeoutMs;
     const identity = buildSharedRuntimeIdentity(options.runtimeEntry, options.env);
     const paths = resolveSharedRuntimePaths(identity, options.env);
+    // The launcher captures its immutable workspace roots before connecting;
+    // the host binds them to the session from the attach request.
+    const workspaceRoots = resolveSessionWorkspaceRoots(options.env);
     const remainingTime = (): number => Math.max(1, deadline - Date.now());
 
     for (;;) {
@@ -325,6 +336,7 @@ async function connectOrStart(options: SharedRuntimeClientOptions): Promise<net.
                 identity,
                 paths.metadataPath,
                 Math.min(500, remainingTime()),
+                workspaceRoots,
             );
         } catch (error) {
             if (!isTransientAttachError(error)) throw error;
@@ -333,6 +345,7 @@ async function connectOrStart(options: SharedRuntimeClientOptions): Promise<net.
                 paths.metadataPath,
                 paths.socketPath,
                 remainingTime(),
+                workspaceRoots,
             );
         }
         if (existing) return existing;
@@ -348,6 +361,7 @@ async function connectOrStart(options: SharedRuntimeClientOptions): Promise<net.
                     identity,
                     paths.metadataPath,
                     Math.min(500, remainingTime()),
+                    workspaceRoots,
                 );
             } catch (error) {
                 if (!isTransientAttachError(error)) throw error;
@@ -380,6 +394,7 @@ async function connectOrStart(options: SharedRuntimeClientOptions): Promise<net.
                         paths.socketPath,
                         identity,
                         Math.min(500, remainingTime()),
+                        workspaceRoots,
                     );
                 } catch (error) {
                     const code = (error as NodeJS.ErrnoException).code;
@@ -415,6 +430,7 @@ async function connectOrStart(options: SharedRuntimeClientOptions): Promise<net.
                         identity,
                         paths.metadataPath,
                         Math.min(500, remainingTime()),
+                        workspaceRoots,
                     );
                     if (connected) return connected;
                 } catch (error) {

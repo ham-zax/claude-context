@@ -12,6 +12,7 @@ import {
     McpSession,
     ServerRunMode,
     SharedRuntimeHost,
+    createSessionWorkspacePolicyFromEnv,
 } from "./shared-runtime.js";
 
 export type { ServerRunMode } from "./shared-runtime.js";
@@ -98,7 +99,14 @@ export class ContextMcpServer {
         private readonly protocolStdin?: Readable,
     ) {
         this.host = new SharedRuntimeHost(config, runtimeFingerprint, runMode);
-        this.session = this.host.createSession();
+        // Direct stdio sessions bind the same environment-derived workspace
+        // policy as the shared-runtime launcher: SATORI_SESSION_ROOTS_JSON
+        // when present, otherwise [process.cwd()]. Invalid or broad roots
+        // reject startup with the policy's stable message before the session
+        // accepts any tool call.
+        this.session = this.host.createSession(
+            createSessionWorkspacePolicyFromEnv(process.env),
+        );
     }
 
     async start(): Promise<void> {

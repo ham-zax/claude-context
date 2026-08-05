@@ -13,7 +13,8 @@ import path from "node:path";
 export type WorkspaceAuthorizationCode =
     | "ROOT_NOT_AUTHORIZED"
     | "BROAD_ROOT_NOT_ALLOWED"
-    | "INVALID_WORKSPACE_ROOT";
+    | "INVALID_WORKSPACE_ROOT"
+    | "WORKSPACE_POLICY_NOT_BOUND";
 
 export class WorkspaceAuthorizationError extends Error {
     readonly code: WorkspaceAuthorizationCode;

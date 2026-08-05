@@ -31,6 +31,7 @@ import type {
     VectorFilter,
 } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "../core/capabilities.js";
+import { createSessionWorkspacePolicy } from "../core/session-workspace-policy.js";
 import type { IndexFingerprint } from "../config.js";
 import { ToolHandlers } from "../core/handlers.js";
 import { SnapshotManager } from "../core/snapshot.js";
@@ -392,6 +393,11 @@ test("public tools lifecycle: status/list → search → outline → read_file a
             reranker: null,
             runtimeFingerprint: RUNTIME_FINGERPRINT,
             toolHandlers: handlers,
+            workspacePolicy: createSessionWorkspacePolicy({
+                roots: [repoPath],
+                homeDirectory: os.homedir(),
+                stateRoot: path.join(os.homedir(), ".satori"),
+            }),
         };
 
         // manage_index status (public tool)
@@ -611,6 +617,11 @@ test("public reindex replaces a coherent retired v2 tuple with restart-proven v4
                 reranker: null,
                 runtimeFingerprint: currentFingerprint,
                 toolHandlers: handlers,
+                workspacePolicy: createSessionWorkspacePolicy({
+                    roots: [repoPath],
+                    homeDirectory: os.homedir(),
+                    stateRoot: path.join(os.homedir(), ".satori"),
+                }),
             };
 
             const initialStatus = parsePayload(await manageIndexTool.execute({
