@@ -690,6 +690,99 @@ test('read_file annotated mode treats Go and Rust files as outline-capable', asy
     });
 });
 
+test('read_file annotated mode cannot bypass read authorization through the internal outline call', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const envPath = path.join(repoPath, '.env');
+        fs.mkdirSync(repoPath, { recursive: true });
+        fs.writeFileSync(envPath, 'API_KEY=SECRET_VALUE\n', 'utf8');
+
+        let outlineInvocations = 0;
+        const response = await runReadFile({ path: envPath, mode: 'annotated' }, 1000, {
+            snapshotManager: indexedSnapshot(repoPath, 'indexed', {
+                indexManifest: { indexedPaths: ['src/main.ts'], updatedAt: '2026-01-01T00:00:00.000Z' }
+            }),
+            toolHandlers: {
+                handleFileOutline: async () => {
+                    outlineInvocations += 1;
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({ status: 'ok', outline: { symbols: [] }, hasMore: false })
+                        }]
+                    };
+                }
+            } as unknown as ToolHandlersLike
+        });
+
+        assertStructuredDenial(response, { reason: 'file_not_published', code: 'FILE_NOT_PUBLISHED' }, 'API_KEY');
+        assert.equal(response.content[0].text.includes('SECRET_VALUE'), false);
+        // The denial must occur before any internal outline invocation: annotated mode
+        // cannot smuggle an unauthorized file through file-outline internals.
+        assert.equal(outlineInvocations, 0);
+    });
+});
+
+test('read_file annotated mode forwards the session workspace policy to the internal outline call', async () => {
+    await withTempDir(async (dir) => {
+        const repoPath = path.join(dir, 'repo');
+        const srcPath = path.join(repoPath, 'src');
+        fs.mkdirSync(srcPath, { recursive: true });
+        const filePath = path.join(srcPath, 'runtime.ts');
+        fs.writeFileSync(filePath, 'export function run() {\n  return true;\n}\n', 'utf8');
+
+        const sessionPolicy = createSessionWorkspacePolicy({
+            roots: [repoPath],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.tmpdir(), 'read-file-test-state'),
+        });
+        let capturedPolicy: unknown;
+
+        const response = await runReadFile({
+            path: filePath,
+            mode: 'annotated'
+        }, 1000, {
+            workspacePolicy: sessionPolicy,
+            snapshotManager: {
+                getAllCodebases: () => [{
+                    path: repoPath,
+                    info: {
+                        status: 'indexed',
+                        indexManifest: {
+                            indexedPaths: ['src/runtime.ts'],
+                            updatedAt: '2026-01-01T00:00:00.000Z',
+                        },
+                    },
+                }]
+            } as unknown as SnapshotManagerLike,
+            toolHandlers: {
+                handleFileOutline: async (_args: unknown, workspacePolicy: unknown) => {
+                    capturedPolicy = workspacePolicy;
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                status: 'ok',
+                                path: repoPath,
+                                file: 'src/runtime.ts',
+                                outline: { symbols: [] },
+                                hasMore: false
+                            })
+                        }]
+                    };
+                }
+            } as unknown as ToolHandlersLike
+        });
+
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.mode, 'annotated');
+        assert.equal(payload.outlineStatus, 'ok');
+        // The exact session-bound policy object must reach the outline handler;
+        // a missing or different policy would violate the required-parameter contract.
+        assert.equal(capturedPolicy, sessionPolicy);
+    });
+});
+
 test('read_file exact-symbol schema rejects legacy, mixed, and unknown request shapes', async () => {
     const base = {
         path: '/repo/src/runtime.ts',
