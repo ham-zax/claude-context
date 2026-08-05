@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { SharedRuntimeIdentity, SharedRuntimePaths } from "./shared-runtime-identity.js";
+import {
+    SHARED_RUNTIME_PROTOCOL_VERSION,
+    type SharedRuntimeIdentity,
+    type SharedRuntimePaths,
+} from "./shared-runtime-identity.js";
 
 export type LinuxProcessIdentity = Readonly<{
     pid: number;
@@ -18,6 +22,7 @@ export type SharedRuntimeHostMetadata = Readonly<{
     mcpVersion: string;
     sharedRuntimeIdentityHash: string;
     installedRuntimeRoot: string;
+    /** Lifecycle-state ownership marker only; never used to authenticate launcher attach sessions. */
     ownershipToken: string;
     socketPath: string;
     socketDevice: number;
@@ -87,7 +92,7 @@ export function readHostMetadata(metadataPath: string): SharedRuntimeHostMetadat
         if (
             !record
             || record.formatVersion !== 1
-            || record.protocolVersion !== 1
+            || record.protocolVersion !== SHARED_RUNTIME_PROTOCOL_VERSION
             || typeof record.hostPid !== "number"
             || typeof record.bootId !== "string"
             || typeof record.processStartTime !== "string"

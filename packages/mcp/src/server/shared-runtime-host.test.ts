@@ -20,9 +20,11 @@ import { SharedRuntimeSocketHost } from "./shared-runtime-host.js";
 import { BoundedSocketTransport } from "./shared-runtime-transport.js";
 import {
     SHARED_RUNTIME_MESSAGE_MAX_BYTES,
+    SHARED_RUNTIME_PROTOCOL_VERSION,
     buildSharedRuntimeIdentity,
     resolveSharedRuntimePaths,
 } from "./shared-runtime-identity.js";
+import { readHostMetadata } from "./shared-runtime-lifecycle.js";
 
 type JsonRpcResponse = {
     id?: unknown;
@@ -155,6 +157,32 @@ async function sendHandshake(socketPath: string, payload: string): Promise<strin
     });
 }
 
+/** Resolves on the first complete response line, then closes the connection. */
+async function sendHandshakeLine(socketPath: string, payload: string): Promise<string> {
+    const socket = net.createConnection({ path: socketPath });
+    return new Promise((resolve, reject) => {
+        let response = "";
+        const timer = setTimeout(() => {
+            socket.destroy();
+            reject(new Error("handshake line test timed out"));
+        }, 1_000);
+        socket.on("data", (chunk) => {
+            response += chunk.toString();
+            const newline = response.indexOf("\n");
+            if (newline < 0) return;
+            clearTimeout(timer);
+            const line = response.slice(0, newline);
+            socket.destroy();
+            resolve(line);
+        });
+        socket.once("connect", () => socket.write(payload));
+        socket.once("error", (error) => {
+            clearTimeout(timer);
+            reject(error);
+        });
+    });
+}
+
 async function sendOversizedJsonRpcFrame(
     socketPath: string,
     request: Record<string, unknown>,
@@ -280,22 +308,22 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
 
     const rejected = JSON.parse(await sendHandshake(paths.socketPath, `${JSON.stringify({
         type: "satori-shared-runtime-attach",
-        protocolVersion: 1,
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
         sharedRuntimeIdentityHash: "f".repeat(64),
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
-        launcherNonce: "a".repeat(48),
+        challengeNonce: "a".repeat(48),
     })}\n`)) as { accepted: boolean; error: string };
     assert.equal(rejected.accepted, false);
     assert.match(rejected.error, /identity does not match/);
 
     const protocolRejected = JSON.parse(await sendHandshake(paths.socketPath, `${JSON.stringify({
         type: "satori-shared-runtime-attach",
-        protocolVersion: 2,
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION + 1,
         sharedRuntimeIdentityHash: identity.hash,
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
-        launcherNonce: "a".repeat(48),
+        challengeNonce: "a".repeat(48),
     })}\n`)) as { accepted: boolean; error: string };
     assert.equal(protocolRejected.accepted, false);
     assert.match(protocolRejected.error, /identity does not match/);
@@ -320,11 +348,11 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
 
     await sendOversizedJsonRpcFrame(paths.socketPath, {
         type: "satori-shared-runtime-attach",
-        protocolVersion: 1,
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
         sharedRuntimeIdentityHash: identity.hash,
         installedRuntimeRoot: identity.installedRuntimeRoot,
         mcpVersion: identity.mcpVersion,
-        launcherNonce: "b".repeat(48),
+        challengeNonce: "b".repeat(48),
     });
     assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
 
@@ -349,6 +377,127 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
     assert.equal((await second.request("tools/list")).result?.tools?.length, 7);
     await second.close();
     assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
+});
+
+test("protocol v2 echoes challengeNonce", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-nonce-echo-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    const response = JSON.parse(await sendHandshakeLine(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        challengeNonce: "c".repeat(48),
+    })}\n`)) as { accepted: boolean; challengeNonce: string; error?: string };
+    assert.equal(response.accepted, true, response.error);
+    assert.equal(response.challengeNonce, "c".repeat(48));
+});
+
+test("protocol v1 is rejected", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-v1-reject-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    // A protocol-v1 launcher still sends the legacy launcherNonce field. The
+    // host parses it so the version gate can reject the handshake with the
+    // incompatible-runtime response rather than a malformed-message error.
+    const response = JSON.parse(await sendHandshake(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: 1,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        launcherNonce: "a".repeat(48),
+    })}\n`)) as { accepted: boolean; protocolVersion: number; error: string };
+    assert.equal(response.accepted, false);
+    assert.equal(response.protocolVersion, SHARED_RUNTIME_PROTOCOL_VERSION);
+    assert.match(response.error, /identity does not match/);
+});
+
+test("ownershipToken is not described as launcher authentication", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-token-role-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(runtimeHost, identity, paths, 5_000);
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    // The handshake never transmits the token: an attach request carries only
+    // the client-generated challenge, and the response echoes it without any
+    // ownershipToken field. The token stays in host.json as a lifecycle-state
+    // ownership marker (mode 0600) used only for cleanup bookkeeping.
+    const response = JSON.parse(await sendHandshakeLine(paths.socketPath, `${JSON.stringify({
+        type: "satori-shared-runtime-attach",
+        protocolVersion: SHARED_RUNTIME_PROTOCOL_VERSION,
+        sharedRuntimeIdentityHash: identity.hash,
+        installedRuntimeRoot: identity.installedRuntimeRoot,
+        mcpVersion: identity.mcpVersion,
+        challengeNonce: "d".repeat(48),
+    })}\n`)) as Record<string, unknown> & { accepted?: boolean; error?: string };
+    assert.equal(response.accepted, true, String(response.error));
+    assert.equal("ownershipToken" in response, false);
+    assert.equal("token" in response, false);
+    const metadata = readHostMetadata(paths.metadataPath);
+    assert.ok(metadata);
+    assert.equal(typeof metadata.ownershipToken, "string");
+    assert.ok(metadata.ownershipToken.length > 0);
 });
 
 test("socket host shutdown closes active sessions before awaiting listener closure", async () => {

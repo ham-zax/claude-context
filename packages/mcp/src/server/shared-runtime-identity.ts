@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const SHARED_RUNTIME_PROTOCOL_VERSION = 1;
+export const SHARED_RUNTIME_PROTOCOL_VERSION = 2;
 export const SHARED_RUNTIME_HANDSHAKE_MAX_BYTES = 16 * 1024;
 export const SHARED_RUNTIME_MESSAGE_MAX_BYTES = 8 * 1024 * 1024;
 export const SHARED_RUNTIME_MAX_PENDING_REQUESTS = 16;
@@ -208,6 +208,15 @@ function assertOwnedDirectory(directory: string): void {
         fs.chmodSync(directory, 0o700);
     }
 }
+
+// Trust boundary: the shared runtime is a same-OS-user facility. Socket mode
+// 0600 and the owned 0700 directories enforce an OS-user boundary, not a
+// process-within-the-same-UID boundary. Any process running as the same OS
+// user can read host.json and connect to the socket; that is accepted for the
+// current release. The attach challenge is a client-generated freshness/
+// correlation value echoed by the host, not an authentication credential
+// against a malicious same-UID process, and the metadata ownership token is a
+// lifecycle-state marker used only for cleanup bookkeeping.
 
 function ensureOwnedDirectory(directory: string): void {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
