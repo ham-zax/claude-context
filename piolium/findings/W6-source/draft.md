@@ -10,6 +10,11 @@ satori_priority: P3
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 7
 fix_commit: "docs(search): document full-source retrieval"
+status: fixed
+introduced_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+verified_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+fixed_in: "a2b9da9b17b9ce07cdb57cf90543560321ed4f66"
+fix_verified_at: "a2b9da9b17b9ce07cdb57cf90543560321ed4f66"
 ---
 
 # W6 — Source reads are span-bounded; full files unreachable through symbol tools

@@ -10,6 +10,11 @@ satori_priority: P2
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 2
 fix_commit: "fix(reranker): bound VoyageAI latency and report failures"
+status: fixed
+introduced_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+verified_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+fixed_in: "f54f98dc96f742cc99b879f03e2007661d2a3b16"
+fix_verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"
 ---
 
 # W2 — Reranking has no timeout, retry, or backoff

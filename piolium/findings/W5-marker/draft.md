@@ -10,6 +10,11 @@ satori_priority: P3
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 6
 fix_commit: "feat(search): expose finalizing readiness state"
+status: fixed
+introduced_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+verified_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+fixed_in: "c6381683c0ffb12b726afe3fb9eacdcea891ff63"
+fix_verified_at: "c6381683c0ffb12b726afe3fb9eacdcea891ff63"
 ---
 
 # W5 — `not_ready` "indexing" window after 100% progress

@@ -10,6 +10,11 @@ satori_priority: P1
 source: docs/remediation/2026-08-04-search-weakness-report-verification.md
 plan_task: 1
 fix_commit: "fix(search): add bounded must-constrained retrieval"
+status: fixed
+introduced_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+verified_at: "403723ee09ed9762195d983b3c4595985a917f5d"
+fixed_in: "14ddc476c363f8210126bce002758501f851d0a3"
+fix_verified_at: "94a3dc659d3edce892f6f7f859a6c70597343751"
 ---
 
 # W1 — `must:` is a post-retrieval substring filter
