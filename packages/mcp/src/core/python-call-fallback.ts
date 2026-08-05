@@ -38,7 +38,7 @@ export type SourceBackedPythonCallFallback = {
     notes: CallGraphNote[];
 };
 
-type ReadSafeCodebaseFileLines = (codebaseRoot: string, relativeFilePath: string) => string[] | undefined;
+type ReadAuthorizedCodebaseFileLines = (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
 type SortCallGraphEdges = (edges: CallGraphEdge[]) => CallGraphEdge[];
 type SortCallGraphNotes = (notes: CallGraphNote[]) => CallGraphNote[];
 
@@ -135,15 +135,6 @@ function buildDirectCallTargetIndex(registry: SymbolRegistry): Map<string, Symbo
     }
     return targetsByName;
 }
-
-const readSafeCodebaseFileLines: ReadSafeCodebaseFileLines = (codebaseRoot, relativeFilePath) => {
-    const absoluteFile = path.resolve(codebaseRoot, relativeFilePath);
-    const relativeToRoot = path.relative(codebaseRoot, absoluteFile);
-    if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot) || !fs.existsSync(absoluteFile)) {
-        return undefined;
-    }
-    return readMeasuredSourceLines(absoluteFile);
-};
 
 function countPythonIndent(line: string): number {
     let indent = 0;
@@ -409,9 +400,10 @@ export function repairSourceBackedPythonSpan(input: {
 export function repairSourceBackedPythonSpans(input: {
     codebaseRoot: string;
     symbols: SymbolRecord[];
-}): PythonSourceBackedSpanRepair[] {
+    readSourceLines: ReadAuthorizedCodebaseFileLines;
+}): Promise<PythonSourceBackedSpanRepair[]> {
     const linesByFile = new Map<string, string[] | undefined>();
-    return input.symbols.map((symbol) => {
+    return Promise.all(input.symbols.map(async (symbol) => {
         if (symbol.language !== "python" || (symbol.kind !== "function" && symbol.kind !== "method")) {
             return {
                 symbol,
@@ -423,27 +415,41 @@ export function repairSourceBackedPythonSpans(input: {
             };
         }
         if (!linesByFile.has(symbol.file)) {
-            linesByFile.set(symbol.file, readSafeCodebaseFileLines(input.codebaseRoot, symbol.file));
+            linesByFile.set(symbol.file, await input.readSourceLines(input.codebaseRoot, symbol.file));
+        }
+        const sourceLines = linesByFile.get(symbol.file);
+        if (sourceLines === undefined) {
+            // Authorized source is unavailable (denied, unpublished, escaped,
+            // or unreadable): fail closed without any pathname fallback read.
+            return {
+                symbol,
+                attempted: false,
+                validated: false,
+                repaired: false,
+                startBeforeDefinition: false,
+                endTruncated: false,
+            };
         }
         return repairSourceBackedPythonSpan({
             codebaseRoot: input.codebaseRoot,
             symbol,
-            sourceLines: linesByFile.get(symbol.file),
+            sourceLines,
         });
-    });
+    }));
 }
 
-export function buildSourceBackedPythonCalleeFallback(input: {
+export async function buildSourceBackedPythonCalleeFallback(input: {
     codebaseRoot: string;
     registry: SymbolRegistry;
     source: SymbolRecord;
     sortEdges: SortCallGraphEdges;
-}): SourceBackedPythonCallFallback {
+    readSourceLines: ReadAuthorizedCodebaseFileLines;
+}): Promise<SourceBackedPythonCallFallback> {
     const source = input.source;
     if (source.language !== "python" || (source.kind !== "function" && source.kind !== "method")) {
         return { edges: [], symbols: [], notes: [] };
     }
-    const lines = readSafeCodebaseFileLines(input.codebaseRoot, source.file);
+    const lines = await input.readSourceLines(input.codebaseRoot, source.file);
     if (!lines) {
         return { edges: [], symbols: [], notes: [] };
     }
@@ -501,18 +507,23 @@ export function buildSourceBackedPythonCalleeFallback(input: {
     };
 }
 
-export function buildSourceBackedPythonCallerFallback(input: {
+export async function buildSourceBackedPythonCallerFallback(input: {
     codebaseRoot: string;
     registry: SymbolRegistry;
     resolvedTarget: SymbolRecord;
     suppressedRecords: RelationshipRecord[];
     sortEdges: SortCallGraphEdges;
     sortNotes: SortCallGraphNotes;
-}): SourceBackedPythonCallFallback {
+    readSourceLines: ReadAuthorizedCodebaseFileLines;
+}): Promise<SourceBackedPythonCallFallback> {
     const target = input.resolvedTarget;
     if (target.language !== "python" || (target.kind !== "function" && target.kind !== "method")) {
         return { edges: [], symbols: [], notes: [] };
     }
+
+    const readSource = async (codebaseRoot: string, relativeFilePath: string): Promise<string[] | undefined> => {
+        return input.readSourceLines(codebaseRoot, relativeFilePath);
+    };
 
     const targetsByName = buildDirectCallTargetIndex(input.registry);
     const sourceRepairsById = new Map<string, PythonSourceBackedSpanRepair>();
@@ -534,7 +545,7 @@ export function buildSourceBackedPythonCallerFallback(input: {
         if (!sourceRepair) {
             let sourceLines = linesByFile.get(source.file);
             if (sourceLines === undefined) {
-                sourceLines = readSafeCodebaseFileLines(input.codebaseRoot, source.file);
+                sourceLines = await readSource(input.codebaseRoot, source.file);
                 linesByFile.set(source.file, sourceLines);
             }
             sourceRepair = repairSourceBackedPythonSpan({
@@ -561,7 +572,7 @@ export function buildSourceBackedPythonCallerFallback(input: {
 
         let sourceLines = linesByFile.get(repairedSource.file);
         if (sourceLines === undefined) {
-            sourceLines = readSafeCodebaseFileLines(input.codebaseRoot, repairedSource.file);
+            sourceLines = await readSource(input.codebaseRoot, repairedSource.file);
             linesByFile.set(repairedSource.file, sourceLines);
         }
         const siteLine = sourceLines?.[siteStartLine - 1];

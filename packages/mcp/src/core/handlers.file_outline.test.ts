@@ -23,7 +23,17 @@ type WriteSymbolRegistrySidecarResult = Awaited<ReturnType<typeof writeSymbolReg
 import { ToolHandlers } from './handlers.js';
 import { buildRegistryFileOutlinePayload } from './registry-file-outline.js';
 import { CapabilityResolver } from './capabilities.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import { IndexFingerprint } from '../config.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -422,7 +432,7 @@ test('handleFileOutline returns requires_reindex when sidecar metadata is missin
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
@@ -475,6 +485,20 @@ test('handleFileOutline allows source-backed navigation under runtime fingerprin
                 symbols: [symbol],
                 manifestHash: 'manifest-hash',
                 warnings: [],
+                registry: buildSymbolRegistry({
+                    manifest: {
+                        schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
+                        normalizedRootPath: repoPath,
+                        rootFingerprint: 'test-root-fingerprint',
+                        indexPolicyHash: 'test-policy',
+                        languageRouterVersion: 'test-router-v1',
+                        extractorVersion: 'test-extractor-v1',
+                        relationshipVersion: 'test-relationships-v1',
+                        builtAt: '2026-01-01T00:00:00.000Z',
+                        files: [{ path: 'src/runtime.ts', hash: fileHash, language: 'typescript', symbolCount: 1, definitionStatus: 'definitions_present' }],
+                    },
+                    symbols: [symbol],
+                }),
             }),
             getCompatibilityState: async () => ({
                 relationships: {
@@ -504,7 +528,7 @@ test('handleFileOutline allows source-backed navigation under runtime fingerprin
             path: repoPath,
             file: 'src/runtime.ts',
             resolveMode: 'outline',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -614,7 +638,7 @@ test('handleFileOutline proves the sealed source-backed generation before servin
         ).handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const passingPayload = JSON.parse(
             passingResponse.content[0]?.text || '{}',
         );
@@ -629,7 +653,7 @@ test('handleFileOutline proves the sealed source-backed generation before servin
         ).handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const blockedPayload = JSON.parse(
             blockedResponse.content[0]?.text || '{}',
         );
@@ -667,7 +691,7 @@ test('handleFileOutline returns requires_reindex, not unsupported, for Go/Rust w
         const handlers = new ToolHandlers(baseContext(), snapshotManager, {} as unknown as HandlerSyncManager, RUNTIME_FINGERPRINT, CAPABILITIES);
 
         for (const file of ['src/service.go', 'src/stack.rs']) {
-            const response = await handlers.handleFileOutline({ path: repoPath, file });
+            const response = await handlers.handleFileOutline({ path: repoPath, file }, fixtureWorkspacePolicy(repoPath));
             const payload = JSON.parse(response.content[0]?.text || '{}');
 
             assert.equal(payload.status, 'requires_reindex');
@@ -697,7 +721,7 @@ test('handleFileOutline reports partial index navigation unavailable for limit_r
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
@@ -734,7 +758,7 @@ test('handleFileOutline returns not_ready envelope when codebase is indexing', a
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_ready');
@@ -769,7 +793,7 @@ test('handleFileOutline failed-index payload preserves failure diagnostics', asy
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_indexed');
@@ -822,7 +846,7 @@ test('handleFileOutline returns unsupported for unsupported file extensions', as
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'docs.md'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'unsupported');
@@ -841,7 +865,7 @@ test('handleFileOutline supports JavaScript extensions for sidecar-backed outlin
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.js'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'requires_reindex');
@@ -878,7 +902,7 @@ test('handleFileOutline returns registry-backed outline when call graph sidecar 
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1001,17 +1025,17 @@ test('handleFileOutline reuses navigation evidence only within the same marker g
         const firstResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const secondResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         markerRunId = 'run-2';
         const thirdResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         assert.equal(JSON.parse(firstResponse.content[0]?.text || '{}').status, 'ok');
         assert.equal(JSON.parse(secondResponse.content[0]?.text || '{}').status, 'ok');
@@ -1091,7 +1115,7 @@ test('handleFileOutline repairs stale Python multiline-signature spans from sour
             file: 'src/phases.py',
             resolveMode: 'exact',
             symbolIdExact: attach.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1152,7 +1176,7 @@ test('handleFileOutline returns Python structural analysis only for an exact can
             resolveMode: 'exact',
             symbolIdExact: symbol.symbolInstanceId,
             detail: 'analysis',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1209,7 +1233,7 @@ test('handleFileOutline discards structural analysis when its source barrier cha
             resolveMode: 'exact',
             symbolIdExact: symbol.symbolInstanceId,
             detail: 'analysis',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_ready');
@@ -1293,7 +1317,7 @@ test('handleFileOutline returns unique direct relationship counts and confirmed 
             resolveMode: 'exact',
             symbolIdExact: target.symbolInstanceId,
             detail: 'relationships',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.equal(payload.status, 'ok');
@@ -1330,7 +1354,7 @@ test('handleFileOutline does not report zero direct counts under partial coverag
             resolveMode: 'exact',
             symbolIdExact: target.symbolInstanceId,
             detail: 'relationships',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.deepEqual(payload.outline.symbols[0].relationships, {
@@ -1369,7 +1393,7 @@ test('handleFileOutline reports unsupported relationship coverage without fabric
             resolveMode: 'exact',
             symbolIdExact: target.symbolInstanceId,
             detail: 'relationships',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.deepEqual(payload.outline.symbols[0].relationships, {
@@ -1406,7 +1430,7 @@ test('handleFileOutline reports unavailable relationship coverage when relations
             resolveMode: 'exact',
             symbolIdExact: target.symbolInstanceId,
             detail: 'relationships',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.deepEqual(payload.outline.symbols[0].relationships, {
@@ -1445,7 +1469,7 @@ test('handleFileOutline discards relationship metadata when publication Q activa
             resolveMode: 'exact',
             symbolIdExact: target.symbolInstanceId,
             detail: 'relationships',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.equal(payload.status, 'not_ready');
@@ -1477,7 +1501,7 @@ test('handleFileOutline summary remains unchanged when relationship metadata is 
             file,
             resolveMode: 'exact',
             symbolIdExact: target.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const payload = JSON.parse(response.content[0]?.text || '{}');
 
         assert.equal(payload.status, 'ok');
@@ -1521,7 +1545,7 @@ test('handleFileOutline exact mode repairs stale TypeScript spans from current s
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: owner.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1569,7 +1593,7 @@ test('handleFileOutline exact mode repairs stale JavaScript spans from current s
             file: 'src/runtime.js',
             resolveMode: 'exact',
             symbolIdExact: owner.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1608,7 +1632,7 @@ test('handleFileOutline exact mode fails closed when the persisted symbol is abs
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: removed.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
@@ -1648,7 +1672,7 @@ test('handleFileOutline exact mode preserves ambiguous current-source validation
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: owner.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ambiguous');
@@ -1699,7 +1723,7 @@ test('handleFileOutline exact symbol id validates its full duplicate-key cohort 
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: second.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1752,7 +1776,7 @@ test('handleFileOutline exact symbol id rejects duplicate ordinal pairing withou
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: second.symbolInstanceId,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ambiguous');
@@ -1784,6 +1808,7 @@ test('handleFileOutline exact mode reports unverified current-source validation'
             symbolIdExact: owner.symbolInstanceId,
             buildCallGraphHint: () => ({ supported: false, reason: 'missing_relationship_sidecar' }),
             buildOutlineSpanWarningCodes: () => [],
+            readSourceLines: async () => undefined,
         });
         assert.equal(payload.status, 'not_ready');
         assert.equal(payload.reason, undefined);
@@ -1821,7 +1846,7 @@ test('handleFileOutline returns relationship-backed call graph hints when legacy
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -1871,7 +1896,7 @@ test('handleFileOutline returns Go symbols without enabling call_graph even when
         const outlineResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/service.go'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const outlinePayload = JSON.parse(outlineResponse.content[0]?.text || '{}');
         assert.equal(outlinePayload.status, 'ok');
@@ -1890,7 +1915,7 @@ test('handleFileOutline returns Go symbols without enabling call_graph even when
             direction: 'callees',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const callGraphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
         assert.equal(callGraphPayload.status, 'unsupported');
         assert.equal(callGraphPayload.supported, false);
@@ -1939,7 +1964,7 @@ test('handleFileOutline returns Rust symbols without enabling call_graph even wh
         const outlineResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/stack.rs'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const outlinePayload = JSON.parse(outlineResponse.content[0]?.text || '{}');
         assert.equal(outlinePayload.status, 'ok');
@@ -1958,7 +1983,7 @@ test('handleFileOutline returns Rust symbols without enabling call_graph even wh
             direction: 'callees',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
         const callGraphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
         assert.equal(callGraphPayload.status, 'unsupported');
         assert.equal(callGraphPayload.supported, false);
@@ -2049,7 +2074,7 @@ test('handleFileOutline exactly resolves Java, C#, C++, and Scala symbols withou
                     file: fixture.file,
                     resolveMode: 'exact',
                     symbolIdExact: symbol.symbolInstanceId,
-                });
+                }, fixtureWorkspacePolicy(repoPath));
                 const payload = JSON.parse(response.content[0]?.text || '{}');
 
                 assert.equal(payload.status, 'ok', fixture.language);
@@ -2115,7 +2140,7 @@ test('handleFileOutline relationship-backed callGraphHint works end to end with 
         const outlineResponse = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const outlinePayload = JSON.parse(outlineResponse.content[0]?.text || '{}');
         assert.equal(outlinePayload.status, 'ok', JSON.stringify(outlinePayload));
@@ -2129,7 +2154,7 @@ test('handleFileOutline relationship-backed callGraphHint works end to end with 
             direction: 'callees',
             depth: 2,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const graphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
         assert.equal(graphPayload.status, 'ok');
@@ -2216,7 +2241,7 @@ test('handleFileOutline explicit sqlite backend does not serve navigation after 
             const outlineResponse = await handlers.handleFileOutline({
                 path: repoPath,
                 file: 'src/runtime.ts'
-            });
+            }, fixtureWorkspacePolicy(repoPath));
 
             const outlinePayload = JSON.parse(outlineResponse.content[0]?.text || '{}');
             assert.equal(outlinePayload.status, 'requires_reindex');
@@ -2236,7 +2261,7 @@ test('handleFileOutline explicit sqlite backend does not serve navigation after 
                 direction: 'callees',
                 depth: 2,
                 limit: 20,
-            });
+            }, fixtureWorkspacePolicy(repoPath));
 
             const callGraphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
             assert.equal(callGraphPayload.status, 'requires_reindex');
@@ -2312,7 +2337,7 @@ test('handleFileOutline env-selected sqlite backend does not serve navigation af
                 const outlineResponse = await handlers.handleFileOutline({
                     path: repoPath,
                     file: 'src/runtime.ts'
-                });
+                }, fixtureWorkspacePolicy(repoPath));
 
                 const outlinePayload = JSON.parse(outlineResponse.content[0]?.text || '{}');
                 assert.equal(outlinePayload.status, 'requires_reindex');
@@ -2332,7 +2357,7 @@ test('handleFileOutline env-selected sqlite backend does not serve navigation af
                     direction: 'callees',
                     depth: 2,
                     limit: 20,
-                });
+                }, fixtureWorkspacePolicy(repoPath));
 
                 const callGraphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
                 assert.equal(callGraphPayload.status, 'requires_reindex');
@@ -2430,7 +2455,7 @@ test('handleFileOutline can read registry-backed outline from an injected naviga
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -2487,7 +2512,7 @@ test('handleFileOutline registry exact mode resolves a unique symbolInstanceId',
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: beta.symbolInstanceId
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -2555,7 +2580,7 @@ test('handleFileOutline registry exact mode returns ambiguous for duplicate exac
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolLabelExact: 'function same()'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ambiguous');
@@ -2616,7 +2641,7 @@ test('handleFileOutline registry-backed outline emits symbolInstanceId call grap
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -2680,7 +2705,7 @@ test('handleFileOutline registry exact mode does not resolve legacy call graph s
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: 'legacy_sym_alpha'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
@@ -2711,7 +2736,7 @@ test('handleFileOutline registry exact mode does not treat symbolKey as an exact
             file: 'src/runtime.ts',
             resolveMode: 'exact',
             symbolIdExact: alpha.symbolKey
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
@@ -2781,7 +2806,7 @@ test('handleFileOutline returns unsupported graph hints when relationship sideca
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
@@ -2822,10 +2847,168 @@ test('handleFileOutline returns not_found for missing files under root', async (
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/missing.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_found');
         assert.equal(payload.outline, null);
     });
+});
+
+test('handleFileOutline rejects an outside symlink before structural analysis', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const secret = path.join(os.tmpdir(), `satori-outside-secret-${process.pid}-${Date.now()}.txt`);
+        fs.writeFileSync(secret, 'TOP-SECRET-CONTENT');
+        const symlinkFile = path.join(repoPath, 'src', 'leak.ts');
+        fs.symlinkSync(secret, symlinkFile);
+        const source = 'export function run() { return true; }\n';
+        const symbol = createTestSymbol({
+            file: 'src/leak.ts',
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(source),
+            language: 'typescript',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+        try {
+            const handlers = new ToolHandlers(
+                baseContext(),
+                baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+                {} as unknown as HandlerSyncManager,
+                RUNTIME_FINGERPRINT,
+                CAPABILITIES,
+            );
+            const response = await handlers.handleFileOutline({
+                path: repoPath,
+                file: 'src/leak.ts',
+            }, fixtureWorkspacePolicy(repoPath));
+            const payload = JSON.parse(response.content[0]?.text || '{}');
+            assert.equal(payload.status, 'not_found');
+            assert.equal(payload.outline, null);
+            assert.equal(JSON.stringify(payload).includes('TOP-SECRET-CONTENT'), false);
+        } finally {
+            fs.rmSync(secret, { force: true });
+        }
+    }));
+});
+
+test('handleFileOutline rejects an unpublished file even under an indexed root', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const source = 'export function run() { return true; }\n';
+        const symbol = createTestSymbol({
+            file: 'src/runtime.ts',
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(source),
+            language: 'typescript',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+        fs.writeFileSync(path.join(repoPath, 'src', 'unpublished.ts'), 'export const secret = "UNPUBLISHED-SECRET";\n');
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/unpublished.ts',
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'not_found');
+        assert.equal(payload.outline, null);
+        assert.equal(JSON.stringify(payload).includes('UNPUBLISHED-SECRET'), false);
+    }));
+});
+
+test('handleFileOutline Python analysis reads the authorized descriptor', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const source = 'def analyze(values: list[int]) -> int:\n    total = 0\n    for value in values:\n        total += value\n    return total\n';
+        fs.writeFileSync(path.join(repoPath, 'src', 'descriptor.py'), source);
+        const symbol = createTestSymbol({
+            file: 'src/descriptor.py',
+            label: 'function analyze',
+            name: 'analyze',
+            qualifiedName: 'analyze',
+            startLine: 1,
+            endLine: 5,
+            fileHash: sha256Content(source),
+            language: 'python',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const overrides = handlers as unknown as ToolHandlersTestOverrides;
+        overrides.getPreparedAuthorityObservation = () => 'analysis-authority';
+        overrides.getPreparedReadCacheObservation = () => ({
+            observation: 'analysis-authority',
+            sourceObservation: 'analysis-source',
+        });
+
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/descriptor.py',
+            resolveMode: 'exact',
+            symbolIdExact: symbol.symbolInstanceId,
+            detail: 'analysis',
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.outline.symbols[0]?.analysis?.analysisVersion, 'python_structural_v1');
+        assert.equal(payload.outline.symbols[0].analysis.metrics.parameterCount.value, 1);
+        assert.equal(payload.outline.symbols[0].analysis.metrics.loopCount.value, 1);
+    }));
+});
+
+test('handleFileOutline detects replacement during the read and fails closed', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const original = 'export function run() { return true; }\n';
+        const symbol = createTestSymbol({
+            file: 'src/runtime.ts',
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(original),
+            language: 'typescript',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+        fs.writeFileSync(path.join(repoPath, 'src', 'runtime.ts'), 'export const REPLACED = "REPLACED-SECRET";\n');
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/runtime.ts',
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'requires_reindex');
+        assert.equal(payload.reason, 'stale_symbol_ref');
+        assert.equal(payload.outline, null);
+        assert.equal(JSON.stringify(payload).includes('REPLACED-SECRET'), false);
+    }));
 });

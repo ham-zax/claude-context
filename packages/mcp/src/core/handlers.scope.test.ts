@@ -12,6 +12,7 @@ import {
     ToolHandlers,
 } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import { IndexFingerprint } from '../config.js';
 import {
     SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
@@ -32,6 +33,15 @@ import {
     RerankerRequestError,
 } from '@zokizuan/satori-core';
 import type { SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -3575,7 +3585,7 @@ test('successful coalesced freshness supports chained search_codebase to call_gr
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const graphPayload = JSON.parse(callGraphResponse.content[0]?.text || '{}');
         assert.equal(graphPayload.status, 'ok');

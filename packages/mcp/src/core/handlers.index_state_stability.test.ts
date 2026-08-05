@@ -7,10 +7,20 @@ import { ToolHandlers } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
 import { IndexFingerprint } from '../config.js';
 import { SnapshotManager } from './snapshot.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import {
     MutationLeaseCoordinator,
     type RootMutationLease,
 } from './mutation-lease.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 type HandlerContext = ConstructorParameters<typeof ToolHandlers>[0];
 type HandlerSnapshotManager = ConstructorParameters<typeof ToolHandlers>[1];
@@ -910,7 +920,7 @@ test('handleFileOutline returns stale-local not_indexed when completion marker i
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_indexed');
@@ -940,7 +950,7 @@ test('handleCallGraph returns stale-local not_indexed when completion marker is 
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_indexed');
@@ -978,7 +988,7 @@ test('handleFileOutline returns not_indexed when search collection readiness is 
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts'
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_indexed');
@@ -1020,7 +1030,7 @@ test('handleCallGraph returns not_indexed when search collection readiness is go
             direction: 'both',
             depth: 1,
             limit: 20
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'not_indexed');

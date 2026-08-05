@@ -26,11 +26,20 @@ import type {
 } from '@zokizuan/satori-core';
 import { readFileTool } from '../tools/read_file.js';
 import type { ToolContext } from '../tools/types.js';
-import { createSessionWorkspacePolicy } from './session-workspace-policy.js';
+import { createSessionWorkspacePolicy, type SessionWorkspacePolicy } from './session-workspace-policy.js';
 import { ToolHandlers } from './handlers.js';
 import { CapabilityResolver } from './capabilities.js';
 import { IndexFingerprint } from '../config.js';
 import type { MutationLeaseCoordinator } from './mutation-lease.js';
+
+function fixtureWorkspacePolicy(repoPath: string): SessionWorkspacePolicy {
+    return createSessionWorkspacePolicy({
+        roots: [repoPath],
+        homeDirectory: os.homedir(),
+        stateRoot: process.env.SATORI_STATE_ROOT ?? path.join(os.homedir(), '.satori'),
+    });
+}
+
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
@@ -758,7 +767,7 @@ test('golden MCP file_outline ok shape', async () => {
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot, symbols: [run] });
         assert.deepEqual(payload, {
@@ -805,7 +814,7 @@ test('golden MCP file_outline missing registry requires_reindex shape', async ()
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
         assert.deepEqual(payload, {
@@ -838,7 +847,7 @@ test('golden MCP file_outline unsupported language shape', async () => {
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/notes.txt',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
         assert.deepEqual(payload, {
@@ -859,7 +868,7 @@ test('golden MCP call_graph invalid symbol ref shape', async () => {
 
         const response = await handlers.handleCallGraph({
             path: repoPath,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         assert.equal(response.isError, true);
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
@@ -978,7 +987,7 @@ test('golden MCP file_outline invalid root shape', async () => {
         const response = await handlers.handleFileOutline({
             path: missingRoot,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         assert.equal(response.isError, true);
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
@@ -1001,7 +1010,7 @@ test('golden MCP file_outline failed index shape', async () => {
         const response = await handlers.handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
         assert.deepEqual(payload, {
@@ -1040,7 +1049,7 @@ test('golden MCP call_graph invalid root shape', async () => {
         const response = await handlers.handleCallGraph({
             path: missingRoot,
             symbolRef: { file: 'src/runtime.ts', symbolId: 'sym_runtime' },
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         assert.equal(response.isError, true);
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
@@ -1077,7 +1086,7 @@ test('golden MCP call_graph failed index shape', async () => {
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot });
         assert.deepEqual(payload, {
@@ -1138,7 +1147,7 @@ test('golden MCP call_graph unsupported_language shape', async () => {
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot, symbols: [add] });
         assert.deepEqual(payload, {
@@ -1184,7 +1193,7 @@ test('golden MCP call_graph stale symbol id shape', async () => {
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot, symbols: [run] });
         assert.deepEqual(payload, {
@@ -1228,7 +1237,7 @@ test('golden MCP call_graph missing relationship sidecar shape', async () => {
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot, symbols: [run] });
         assert.deepEqual(payload, {
@@ -1287,7 +1296,7 @@ test('golden MCP call_graph incompatible relationship sidecar shape', async () =
             direction: 'both',
             depth: 1,
             limit: 20,
-        });
+        }, fixtureWorkspacePolicy(repoPath));
 
         const payload = scrubGolden(parsePayload(response), { repoPath, stateRoot, symbols: [run] });
         assert.deepEqual(payload, {
