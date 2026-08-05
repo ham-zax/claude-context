@@ -46,6 +46,11 @@ const REQUIRED_FIELDS = [
   'poc_kind',
 ];
 
+/** Fields that must hold a non-empty commit SHA. */
+const REQUIRED_SHA_FIELDS = ['introduced_at', 'verified_at'];
+/** Fields that may be empty but, when present, must hold a valid commit SHA. */
+const OPTIONAL_SHA_FIELDS = ['fixed_in', 'fix_verified_at'];
+
 export function parseCheckArgs(argv) {
   const args = { head: 'HEAD', root: 'piolium/findings' };
   for (let index = 0; index < argv.length; index += 1) {
@@ -136,7 +141,6 @@ export function isAncestor(ancestor, head, repoRoot) {
 function validateShaField(fields, key, errors) {
   const value = fields[key];
   if (value === undefined || value === '') {
-    errors.push(`missing required field '${key}'`);
     return;
   }
   try {
@@ -152,6 +156,19 @@ export function validateFinding(fields, headSha) {
     if (fields[field] === undefined) {
       errors.push(`missing required field '${field}'`);
     }
+  }
+  for (const field of REQUIRED_SHA_FIELDS) {
+    if (fields[field] === undefined) {
+      continue;
+    }
+    if (fields[field] === '') {
+      errors.push(`'${field}' must be a non-empty commit SHA`);
+      continue;
+    }
+    validateShaField(fields, field, errors);
+  }
+  for (const field of OPTIONAL_SHA_FIELDS) {
+    validateShaField(fields, field, errors);
   }
   if (fields.id !== undefined && /[^A-Za-z0-9._-]/.test(fields.id)) {
     errors.push(`id '${fields.id}' contains characters outside [A-Za-z0-9._-]`);
@@ -206,7 +223,16 @@ export function validateFinding(fields, headSha) {
 }
 
 export function checkFindings({ head, root, repoRoot = process.cwd() }) {
-  const headSha = resolveCommit(head, repoRoot);
+  let headSha;
+  try {
+    headSha = resolveCommit(head, repoRoot);
+  } catch {
+    return {
+      headSha: null,
+      findings: [],
+      errors: [`--head '${head}' does not resolve to a commit`],
+    };
+  }
   const draftPaths = collectDraftPaths(root);
   const findings = [];
   const errors = [];
@@ -247,18 +273,21 @@ export function checkFindings({ head, root, repoRoot = process.cwd() }) {
 export function main(argv) {
   const { head, root } = parseCheckArgs(argv);
   const result = checkFindings({ head, root });
-  process.stdout.write(`check-piolium-findings: head ${result.headSha}\n`);
+  process.stdout.write(`check-piolium-findings: head ${result.headSha ?? '<unresolved>'}\n`);
+  if (result.errors.length > 0) {
+    for (const message of result.errors) {
+      process.stdout.write(`  - ${message}\n`);
+    }
+    process.stdout.write(`${result.errors.length} finding error(s): validation failed\n`);
+    process.exitCode = 1;
+    return;
+  }
   for (const finding of result.findings) {
     const status = finding.errors.length === 0 ? 'OK' : 'FAIL';
     process.stdout.write(`${status} ${finding.id}\n`);
     for (const message of finding.errors) {
       process.stdout.write(`  - ${message}\n`);
     }
-  }
-  if (result.errors.length > 0) {
-    process.stdout.write(`${result.errors.length} finding error(s): validation failed\n`);
-    process.exitCode = 1;
-    return;
   }
   process.stdout.write('all findings consistent\n');
 }
