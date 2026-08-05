@@ -83,7 +83,7 @@ export interface InboundCoverageEvidence {
     suppressedRelationshipCount: number;
     fallbackAttempted: boolean;
     fallbackRecoveredCount: number;
-    constructorResolutionAttempted: boolean;
+    constructorResolutionApplicable: boolean;
 }
 
 /**
@@ -575,10 +575,11 @@ export class RelationshipBackedCallGraph {
                 fallbackAttempted: shouldAttemptDynamicCallerFallback,
                 fallbackRecoveredCount: addedDynamicCallerEdges.length,
                 // Constructor-receiver resolution is the index-time extraction
-                // path that produces inbound CALLS for class symbols. Record
-                // that it applies so empty-inbound evidence on a class is not
-                // misread as proof the class is never constructed.
-                constructorResolutionAttempted: input.resolvedSymbol.kind === "class",
+                // path that produces inbound CALLS for Python class symbols.
+                // "Applicable" records that the path exists for this symbol,
+                // never that resolution was attempted or succeeded.
+                constructorResolutionApplicable: input.resolvedSymbol.kind === "class"
+                    && input.resolvedSymbol.language === "python",
             }
             : undefined;
         const warnings = [...new Set([

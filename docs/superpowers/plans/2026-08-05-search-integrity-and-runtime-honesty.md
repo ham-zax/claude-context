@@ -460,6 +460,21 @@ interface PythonConstructorResolution {
 ### Tests
 
 * [ ] Same-module constructor remains unchanged.
+
+**Known limitation (release receipt, 2026-08-04):** same-module bare Python
+constructor calls deliberately produce no CALLS edge to the class
+(`buildCallRelationshipsForRegistry leaves same-module constructor calls
+unchanged` asserts `[]`). This is fail-closed by design, not a regression:
+only import-binding-proven cross-module constructor calls emit edges. Retain
+as a documented limitation unless a future task resolves unambiguous
+same-module class constructors with the same proof discipline.
+
+Product consequence of the same-module gap (release receipt): a class with one
+cross-module caller and one same-module caller returns a nonempty edge list
+without a partial-coverage warning, because the partial-coverage evidence is
+attached only when the inbound edge set is empty. Python constructor coverage
+must therefore never be described as complete; the documented limitation above
+is the disclosure.
 * [ ] Direct cross-module import creates the inbound constructor edge.
 * [ ] Imported alias creates the edge.
 * [ ] Qualified module alias creates the edge.

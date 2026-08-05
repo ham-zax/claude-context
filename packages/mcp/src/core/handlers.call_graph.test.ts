@@ -684,7 +684,7 @@ test('handleCallGraph discloses partial inbound coverage and verification for ze
                 suppressedRelationshipCount: 0,
                 fallbackAttempted: false,
                 fallbackRecoveredCount: 0,
-                constructorResolutionAttempted: false,
+                constructorResolutionApplicable: false,
             });
             const nextStep = payload.hints?.nextSteps?.[0];
             assert.equal(nextStep?.tool, 'search_codebase');
@@ -2774,7 +2774,7 @@ test('handleCallGraph records constructor resolution as the applicable inbound p
         assert.equal(payload.inboundCoverageEvidence?.suppressedRelationshipCount, 0);
         assert.equal(payload.inboundCoverageEvidence?.fallbackAttempted, false);
         assert.equal(payload.inboundCoverageEvidence?.fallbackRecoveredCount, 0);
-        assert.equal(payload.inboundCoverageEvidence?.constructorResolutionAttempted, true);
+        assert.equal(payload.inboundCoverageEvidence?.constructorResolutionApplicable, false);
         assert.equal(payload.hints?.nextSteps?.[0]?.tool, 'search_codebase');
     }));
 });
@@ -2878,10 +2878,175 @@ test('handleCallGraph reports fallback_failed evidence when suppressed callers c
             suppressedRelationshipCount: 1,
             fallbackAttempted: true,
             fallbackRecoveredCount: 0,
-            constructorResolutionAttempted: false,
+            constructorResolutionApplicable: false,
         });
         const nextStep = callersPayload.hints?.nextSteps?.[0];
         assert.equal(nextStep?.tool, 'search_codebase');
         assert.match(String(nextStep?.reason || ''), /coverage is partial/i);
+    }));
+});
+
+test('handleCallGraph records constructorResolutionApplicable for Python class targets', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const source = [
+            'class PythonVetoes:',
+            '    pass',
+            '',
+        ].join('\n');
+        fs.writeFileSync(path.join(repoPath, 'src', 'vetoes.py'), source);
+        const fileHash = sha256Content(source);
+        const target = createFunctionSymbol({
+            file: 'src/vetoes.py',
+            name: 'PythonVetoes',
+            label: 'class PythonVetoes',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+            kind: 'class',
+            language: 'python',
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [target],
+            records: [],
+        });
+
+        const handlers = new ToolHandlers(
+            {
+                getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+                getVectorStore: () => ({ listCollections: async () => [] }),
+            } as unknown as HandlerContext,
+            {
+                getIndexedCodebases: () => [repoPath],
+                getCodebaseInfo: () => undefined,
+                getCodebaseCallGraphSidecar: () => undefined,
+                ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+                saveCodebaseSnapshot: () => undefined,
+                getAllCodebases: () => [],
+            } as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/vetoes.py',
+                symbolId: target.symbolInstanceId,
+                symbolLabel: target.label,
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 20,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.edges.length, 0);
+        assert.equal(payload.inboundCoverageEvidence?.constructorResolutionApplicable, true);
+    }));
+});
+
+test('handleCallGraph returns cross-module constructor callers through the public tool (navigation sidecar seeded from the extractor contract)', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const rulesSource = [
+            'class TradingEntryVetoes:',
+            '    pass',
+            '',
+        ].join('\n');
+        const mainSource = [
+            'from rules import TradingEntryVetoes',
+            '',
+            'def main():',
+            '    vetoes = TradingEntryVetoes()',
+            '    return vetoes',
+            '',
+        ].join('\n');
+        fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(repoPath, 'src', 'rules.py'), rulesSource, 'utf8');
+        fs.writeFileSync(path.join(repoPath, 'src', 'main.py'), mainSource, 'utf8');
+        const rulesHash = sha256Content(rulesSource);
+        const mainHash = sha256Content(mainSource);
+        const vetoes = createFunctionSymbol({
+            file: 'src/rules.py',
+            name: 'TradingEntryVetoes',
+            label: 'class TradingEntryVetoes',
+            startLine: 1,
+            endLine: 1,
+            fileHash: rulesHash,
+            kind: 'class',
+            language: 'python',
+        });
+        const main = createFunctionSymbol({
+            file: 'src/main.py',
+            name: 'main',
+            label: 'function main(',
+            startLine: 3,
+            endLine: 5,
+            fileHash: mainHash,
+            language: 'python',
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [vetoes, main],
+            // NOTE: the relationship record is seeded manually here, so this
+            // test proves navigation-sidecar -> public-tool traversal, not
+            // parser -> builder extraction. The extractor contract it mirrors
+            // (cross-module constructor resolution emitting a low-confidence
+            // CALLS record with direct-binding proof) is proven by the real
+            // builder tests in packages/core/src/relationships/builder.test.ts
+            // (buildAnalyzedPythonRegistry parses actual Python source).
+            records: [{
+                sourceKey: main.symbolKey,
+                sourceInstanceId: main.symbolInstanceId,
+                targetKey: vetoes.symbolKey,
+                targetInstanceId: vetoes.symbolInstanceId,
+                type: 'CALLS',
+                file: 'src/main.py',
+                span: { startLine: 4, endLine: 4 },
+                confidence: 'low',
+                resolutionAuthority: 'direct_binding',
+            }],
+        });
+
+        const handlers = new ToolHandlers(
+            {
+                getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+                getVectorStore: () => ({ listCollections: async () => [] }),
+            } as unknown as HandlerContext,
+            {
+                getIndexedCodebases: () => [repoPath],
+                getCodebaseInfo: () => undefined,
+                getCodebaseCallGraphSidecar: () => undefined,
+                ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+                saveCodebaseSnapshot: () => undefined,
+                getAllCodebases: () => [],
+            } as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/rules.py',
+                symbolId: vetoes.symbolInstanceId,
+                symbolLabel: vetoes.label,
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 20,
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.edges.length, 1);
+        assert.equal(payload.edges[0].srcSymbolId, main.symbolInstanceId);
+        assert.equal(payload.edges[0].dstSymbolId, vetoes.symbolInstanceId);
+        assert.equal(payload.edges[0].site.file, 'src/main.py');
+        assert.ok(payload.edges[0].confidence > 0, 'promoted direct-binding caller must carry confidence');
+        assert.equal(payload.inboundCoverageEvidence, undefined);
     }));
 });
