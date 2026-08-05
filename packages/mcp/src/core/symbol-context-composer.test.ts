@@ -4,6 +4,7 @@ import test from "node:test";
 import { SYMBOL_REGISTRY_SCHEMA_VERSION, type SymbolRecord, type SymbolRegistry } from "@zokizuan/satori-core";
 import type { CallGraphEdge } from "./call-graph.js";
 import type { CurrentSourceSymbolValidation } from "./current-source-symbols.js";
+import type { SymbolContextRelationshipProjection } from "./symbol-context-composer.js";
 import type {
     InspectableSourceFinalizationResult,
     PrepareInspectableSourceResult,
@@ -285,7 +286,7 @@ function request(overrides: Partial<ComposeSymbolContextInput> = {}): ComposeSym
         },
         budgets: defaultBudgets(),
         ...overrides,
-    };
+    } as ComposeSymbolContextInput;
 }
 
 test("composer uses one prepared snapshot and returns independent bounded domains", async () => {
@@ -791,9 +792,12 @@ test("mandatory source survives response pressure before optional graph evidence
             : false,
         true,
     );
+    const countEdges = (
+        projection: SymbolContextRelationshipProjection,
+    ): number => "edges" in projection ? (projection.edges as readonly unknown[]).length : 0;
     assert.ok(
-        pressured.context.relationships.callers.returnedCount
-        + pressured.context.relationships.callees.returnedCount
+        countEdges(pressured.context.relationships.callers)
+        + countEdges(pressured.context.relationships.callees)
         < 4,
     );
 });

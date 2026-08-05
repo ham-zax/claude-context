@@ -59,8 +59,13 @@ test("exact request strings are trimmed and blank identity or continuation value
     assert.equal(trimmed.symbolId, "sym_target");
     assert.equal(trimmed.continuation?.kind, "caller_page");
     if (trimmed.continuation?.kind !== "caller_page") return;
-    assert.equal(trimmed.continuation.fingerprint, "sha256_callers_fixture");
-    assert.equal(trimmed.continuation.cursor, "canonical-cursor");
+    const continuation = trimmed.continuation as {
+        kind: "caller_page";
+        fingerprint: string;
+        cursor: string;
+    };
+    assert.equal(continuation.fingerprint, "sha256_callers_fixture");
+    assert.equal(continuation.cursor, "canonical-cursor");
 
     const invalidRequests = [
         {
@@ -267,5 +272,5 @@ test("public envelope projects only frozen fields and cannot be overwritten by i
     assert.equal(envelope.formatVersion, 2);
     assert.equal(envelope.kind, "symbol_context");
     assert.equal(envelope.effectiveRequest, resolved.effectiveRequest);
-    assert.equal(Object.hasOwn(envelope, "internalOnly"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(envelope, "internalOnly"), false);
 });

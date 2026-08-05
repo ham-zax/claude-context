@@ -18,6 +18,8 @@ import {
     writeSymbolRegistrySidecar,
 } from '@zokizuan/satori-core';
 import type { RelationshipRecord, SymbolRecord, SymbolRegistryManifest } from '@zokizuan/satori-core';
+
+type WriteSymbolRegistrySidecarResult = Awaited<ReturnType<typeof writeSymbolRegistrySidecar>>;
 import { ToolHandlers } from './handlers.js';
 import { buildRegistryFileOutlinePayload } from './registry-file-outline.js';
 import { CapabilityResolver } from './capabilities.js';
@@ -234,7 +236,15 @@ async function writeTestSymbolRegistry(
         records: [],
         analysisByFile,
     });
-    return { registry, result };
+    // The registry sidecar does not carry navigation-generation fields; the
+    // tests that read them rely on the pre-existing runtime behavior where
+    // those properties are undefined and JSON.stringify drops them.
+    const resultWithOptionalNavigation = result as WriteSymbolRegistrySidecarResult & {
+        generationId?: string;
+        navigationSealHash?: string;
+        relationshipManifestHash?: string;
+    };
+    return { registry, result: resultWithOptionalNavigation };
 }
 
 async function createGenerationBoundHandlers(input: {
@@ -600,7 +610,7 @@ test('handleFileOutline proves the sealed source-backed generation before servin
         };
 
         const passingResponse = await createHandlers(
-            generation.navigationSealHash,
+            generation.navigationSealHash ?? '',
         ).handleFileOutline({
             path: repoPath,
             file: 'src/runtime.ts',
@@ -910,7 +920,7 @@ test('handleFileOutline reuses navigation evidence only within the same marker g
                 generationRoot: path.join(
                     resolveNavigationSidecarRoot(undefined, repoPath),
                     'generations',
-                    registryResult.generationId,
+                    registryResult.generationId ?? '',
                 ),
                 symbolRegistryManifestHash: registryResult.manifestHash,
                 relationshipManifestHash: registryResult.relationshipManifestHash,
@@ -1420,7 +1430,7 @@ test('handleFileOutline discards relationship metadata when publication Q activa
             endLine: 1,
             fileHash: sha256Content(fs.readFileSync(path.join(repoPath, file), 'utf8')),
         });
-        let activateQ = () => undefined;
+        let activateQ: () => void = () => undefined;
         const fixture = await createGenerationBoundHandlers({
             repoPath,
             symbols: [target],
@@ -1778,7 +1788,7 @@ test('handleFileOutline exact mode reports unverified current-source validation'
         assert.equal(payload.status, 'not_ready');
         assert.equal(payload.reason, undefined);
         assert.equal(payload.warnings?.includes('OUTLINE_SYMBOL_SPAN_UNVERIFIED'), true);
-        assert.match(payload.message, /could not be verified/i);
+        assert.match(payload.message || '', /could not be verified/i);
     }));
 });
 
@@ -2023,13 +2033,13 @@ test('handleFileOutline exactly resolves Java, C#, C++, and Scala symbols withou
                     endLine: fixture.endLine,
                     language: fixture.language,
                     kind: fixture.kind,
-                    parentQualifiedNamePath: fixture.parentQualifiedNamePath,
+                    parentQualifiedNamePath: [...(fixture.parentQualifiedNamePath ?? [])],
                 });
                 await writeTestSymbolRegistry(repoPath, [symbol]);
 
                 const handlers = new ToolHandlers(
                     baseContext(),
-                    baseSnapshotManager(repoPath),
+                    baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
                     {} as unknown as HandlerSyncManager,
                     RUNTIME_FINGERPRINT,
                     CAPABILITIES,
@@ -2221,7 +2231,7 @@ test('handleFileOutline explicit sqlite backend does not serve navigation after 
                 symbolRef: {
                     file: 'src/runtime.ts',
                     symbolId: alpha.symbolInstanceId,
-                    symbolLabel: alpha.symbolLabel,
+                    symbolLabel: alpha.label,
                 },
                 direction: 'callees',
                 depth: 2,
@@ -2317,7 +2327,7 @@ test('handleFileOutline env-selected sqlite backend does not serve navigation af
                     symbolRef: {
                         file: 'src/runtime.ts',
                         symbolId: alpha.symbolInstanceId,
-                        symbolLabel: alpha.symbolLabel,
+                        symbolLabel: alpha.label,
                     },
                     direction: 'callees',
                     depth: 2,
