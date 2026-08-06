@@ -8,13 +8,14 @@ import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
     buildSymbolRecordsForFile,
     buildSymbolRegistry,
-    writeRelationshipSidecar,
-    writeSymbolRegistrySidecar,
+    writeNavigationSidecarGeneration,
     type SymbolRecord,
     type SymbolRegistryManifest,
 } from '../../packages/core/src/index.js';
 import { ToolHandlers } from '../../packages/mcp/src/core/handlers.js';
 import { CapabilityResolver } from '../../packages/mcp/src/core/capabilities.js';
+import type { CompletionProofValidationResult } from '../../packages/mcp/src/core/completion-proof.js';
+import { MutationLeaseCoordinator } from '../../packages/mcp/src/core/mutation-lease.js';
 import type { IndexFingerprint } from '../../packages/mcp/src/config.js';
 
 const FIXED_NOW = '2026-01-01T01:00:00.000Z';
@@ -25,8 +26,15 @@ const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
     embeddingModel: 'voyage-4-large',
     embeddingDimension: 1024,
+    embeddingArtifactDigest: null,
+    embeddingNormalizationPolicy: 'provider_output_v1',
     vectorStoreProvider: 'Milvus',
     schemaVersion: 'hybrid_v3',
+    parserVersion: 'search-quality-v1-router',
+    extractorVersion: 'search-quality-v1',
+    relationshipVersion: 'search-quality-v1-relationships',
+    embeddingProjectionVersion: 'search-quality-v1-embedding',
+    lexicalProjectionVersion: 'search-quality-v1-lexical',
 };
 
 type SearchScope = 'runtime' | 'mixed' | 'docs';
@@ -224,13 +232,7 @@ type EvaluationCallGraphManager = NonNullable<ConstructorParameters<typeof ToolH
 type EvaluationReranker = NonNullable<ConstructorParameters<typeof ToolHandlers>[7]>;
 
 type HandlerOverrides = {
-    validateCompletionProof: () => Promise<{
-        outcome: 'valid';
-        navigationStatus: 'valid';
-        generationReceipt: {
-            navigation: { navigationSealHash: string };
-        };
-    }>;
+    validateCompletionProof: (codebasePath: string) => Promise<CompletionProofValidationResult>;
 };
 
 type EvaluationEnvironment = {
@@ -293,7 +295,7 @@ async function buildNavigationSidecars(input: {
     manifest: FixtureManifest;
 }): Promise<{
     symbolByCandidateId: Map<string, SymbolRecord>;
-    manifestHash: string;
+    navigation: Awaited<ReturnType<typeof writeNavigationSidecarGeneration>>;
 }> {
     const symbolByCandidateId = new Map<string, SymbolRecord>();
     const symbols: SymbolRecord[] = [];
@@ -369,19 +371,12 @@ async function buildNavigationSidecars(input: {
         builtAt: FIXED_INDEXED_AT,
         files: manifestFiles.sort((left, right) => left.path.localeCompare(right.path)),
     };
-    const writeResult = await writeSymbolRegistrySidecar({
-        registry: buildSymbolRegistry({ manifest: sidecarManifest, symbols }),
-    });
     const checkpointWriter = symbolByCandidateId.get('checkpoint.writeSourceCheckpoint');
     const checkpointCaller = symbolByCandidateId.get('checkpoint.refreshCheckpoint');
     assert.ok(checkpointWriter, 'checkpoint writer symbol missing from evaluation fixture');
     assert.ok(checkpointCaller, 'checkpoint caller symbol missing from evaluation fixture');
-    await writeRelationshipSidecar({
-        normalizedRootPath: input.repoPath,
-        symbolRegistryManifestHash: writeResult.manifestHash,
-        relationshipVersion: sidecarManifest.relationshipVersion,
-        builtAt: sidecarManifest.builtAt,
-        files: sidecarManifest.files,
+    const navigation = await writeNavigationSidecarGeneration({
+        registry: buildSymbolRegistry({ manifest: sidecarManifest, symbols }),
         records: [{
             sourceKey: checkpointCaller.symbolKey,
             sourceInstanceId: checkpointCaller.symbolInstanceId,
@@ -397,7 +392,7 @@ async function buildNavigationSidecars(input: {
             callSites: [],
         }])),
     });
-    return { symbolByCandidateId, manifestHash: writeResult.manifestHash };
+    return { symbolByCandidateId, navigation };
 }
 
 function createEmptyProviderMetrics(): ProviderMetrics {
@@ -456,7 +451,98 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
 
     const previousStateRoot = process.env.SATORI_STATE_ROOT;
     process.env.SATORI_STATE_ROOT = stateRoot;
-    const { symbolByCandidateId } = await buildNavigationSidecars({ repoPath, manifest });
+    const { symbolByCandidateId, navigation } = await buildNavigationSidecars({ repoPath, manifest });
+    const collectionName = 'search_quality_fixture_v1';
+    const marker: NonNullable<CompletionProofValidationResult['marker']> = {
+        kind: 'satori_index_completion_v3',
+        codebasePath: repoPath,
+        fingerprint: {
+            embeddingProvider: RUNTIME_FINGERPRINT.embeddingProvider,
+            embeddingModel: RUNTIME_FINGERPRINT.embeddingModel,
+            embeddingDimension: RUNTIME_FINGERPRINT.embeddingDimension,
+            embeddingArtifactDigest: RUNTIME_FINGERPRINT.embeddingArtifactDigest ?? null,
+            embeddingNormalizationPolicy: RUNTIME_FINGERPRINT.embeddingNormalizationPolicy
+                ?? 'provider_output_v1',
+            vectorStoreProvider: RUNTIME_FINGERPRINT.vectorStoreProvider,
+            schemaVersion: RUNTIME_FINGERPRINT.schemaVersion,
+            parserVersion: RUNTIME_FINGERPRINT.parserVersion ?? 'search-quality-v1-router',
+            extractorVersion: RUNTIME_FINGERPRINT.extractorVersion ?? 'search-quality-v1',
+            relationshipVersion: RUNTIME_FINGERPRINT.relationshipVersion
+                ?? 'search-quality-v1-relationships',
+            embeddingProjectionVersion: RUNTIME_FINGERPRINT.embeddingProjectionVersion
+                ?? 'search-quality-v1-embedding',
+            lexicalProjectionVersion: RUNTIME_FINGERPRINT.lexicalProjectionVersion
+                ?? 'search-quality-v1-lexical',
+        },
+        indexedFiles: manifest.files.length,
+        totalChunks: manifest.candidates.length,
+        completedAt: FIXED_INDEXED_AT,
+        runId: 'search-quality-v1-run',
+        indexPolicyHash: 'search-quality-v1-policy',
+        indexStatus: 'completed',
+        navigation: {
+            status: 'sealed',
+            generationId: navigation.generationId,
+            symbolRegistryManifestHash: navigation.manifestHash,
+            relationshipManifestHash: navigation.relationshipManifestHash,
+            sealHash: navigation.navigationSealHash,
+        },
+    };
+    const policy = {
+        canonicalRoot: repoPath,
+        profile: 'default' as const,
+        customExtensions: [],
+        customIgnorePatterns: [],
+        fileBasedIgnorePatterns: [],
+        supportedExtensions: [],
+        effectiveIgnorePatterns: [],
+        policyHash: marker.indexPolicyHash,
+    };
+    const policyDocumentDigest = sha256(JSON.stringify(policy));
+    const vectorReceipt: NonNullable<CompletionProofValidationResult['vectorReceipt']> = {
+        collectionName,
+        marker,
+        policy,
+        policyDocumentDigest,
+        exactPayloadCount: marker.totalChunks,
+        observations: {
+            profileFileToken: null,
+            policyFileToken: 'search-quality-v1-policy-token',
+        },
+    };
+    const generationReceipt: NonNullable<CompletionProofValidationResult['generationReceipt']> = {
+        ...vectorReceipt,
+        navigation: {
+            generationId: navigation.generationId,
+            generationRoot: path.join(navigation.rootPath, 'generations', navigation.generationId),
+            symbolRegistryManifestHash: navigation.manifestHash,
+            relationshipManifestHash: navigation.relationshipManifestHash,
+            navigationSealHash: navigation.navigationSealHash,
+        },
+        observations: {
+            ...vectorReceipt.observations,
+            navigationToken: 'search-quality-v1-navigation-token',
+        },
+    };
+    const sourceObservation = {
+        fixtureId: manifest.fixtureId,
+        fixtureFilesSha256: sha256(JSON.stringify(manifest.files)),
+        navigationGenerationId: navigation.generationId,
+        navigationSealHash: navigation.navigationSealHash,
+    };
+    const authorityObservations = {
+        vector: JSON.stringify({
+            collectionName,
+            markerRunId: marker.runId,
+            policyDocumentDigest,
+        }),
+        navigation: JSON.stringify({
+            generationId: navigation.generationId,
+            symbolRegistryManifestHash: navigation.manifestHash,
+            relationshipManifestHash: navigation.relationshipManifestHash,
+            navigationSealHash: navigation.navigationSealHash,
+        }),
+    };
     const candidateById = new Map(manifest.candidates.map((candidate) => [candidate.id, candidate]));
     const candidateIdBySymbolInstanceId = new Map<string, string>();
     for (const [candidateId, record] of symbolByCandidateId) {
@@ -532,11 +618,18 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
     const context = {
         getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
         getTrackedRelativePaths: () => manifest.files.map((file) => file.path),
+        getIndexAuthorityObservations: (codebasePath: string) => {
+            assert.equal(codebasePath, repoPath);
+            return authorityObservations;
+        },
         semanticSearch: async (request: { query?: string; retrievalMode?: string; topK?: number }) => runSemanticSearch(request),
         semanticSearchInProvenGeneration: async (
-            _receipt: unknown,
+            receipt: unknown,
             request: { query?: string; retrievalMode?: string; topK?: number },
-        ) => runSemanticSearch(request),
+        ) => {
+            assert.equal(receipt, vectorReceipt);
+            return runSemanticSearch(request);
+        },
     } as unknown as EvaluationContext;
 
     const snapshotManager = {
@@ -548,6 +641,10 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
     } as unknown as EvaluationSnapshotManager;
 
     const syncManager = {
+        getPreparedReadObservation: (codebasePath: string) => {
+            assert.equal(codebasePath, repoPath);
+            return { available: true, observation: sourceObservation };
+        },
         ensureFreshness: async () => ({
             mode: 'skipped_recent',
             changed: false,
@@ -559,9 +656,13 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
     const capabilities = new CapabilityResolver({
         name: 'search-quality-evaluation',
         version: '1.0.0',
+        executionProfile: 'connected',
+        networkPolicy: { kind: 'remote-allowed' },
         encoderProvider: 'VoyageAI',
         encoderModel: 'voyage-4-large',
         voyageKey: 'hermetic-test-key',
+        vectorStoreProvider: 'Milvus',
+        milvusEndpoint: 'http://127.0.0.1:19530',
     });
 
     const sidecarNodes = [...symbolByCandidateId.values()].map((record) => ({
@@ -587,6 +688,11 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
     } as unknown as EvaluationCallGraphManager;
 
     const reranker = {
+        getIdentity: () => ({
+            provider: 'search-quality-fixture',
+            model: 'deterministic-v1',
+            profile: 'hermetic',
+        }),
         rerank: async (_query: string, documents: string[]) => {
             metrics.rerankCalls += 1;
             metrics.rerankerCandidates += documents.length;
@@ -620,6 +726,11 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
         },
     } as unknown as EvaluationReranker;
 
+    const mutationLeaseCoordinator = new MutationLeaseCoordinator({
+        stateDir: path.join(stateRoot, 'runtime', 'mutation-leases'),
+        ownerId: 'search-quality-evaluation',
+        now: () => Date.parse(FIXED_NOW),
+    });
     const handlers = new ToolHandlers(
         context,
         snapshotManager,
@@ -629,14 +740,24 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
         () => Date.parse(FIXED_NOW),
         callGraphManager,
         reranker,
+        undefined,
+        undefined,
+        null,
+        mutationLeaseCoordinator,
     );
-    (handlers as unknown as HandlerOverrides).validateCompletionProof = async () => ({
-        outcome: 'valid',
-        navigationStatus: 'valid',
-        generationReceipt: {
-            navigation: { navigationSealHash: 'a'.repeat(64) },
-        },
-    });
+    (handlers as unknown as HandlerOverrides).validateCompletionProof = async (codebasePath) => {
+        assert.equal(codebasePath, repoPath);
+        return {
+            outcome: 'valid',
+            marker,
+            collectionName,
+            vectorReceipt,
+            generationReceipt,
+            navigationStatus: 'valid',
+            exactPayloadRecounts: 0,
+            proofSource: 'reused',
+        };
+    };
 
     return {
         repoPath,
