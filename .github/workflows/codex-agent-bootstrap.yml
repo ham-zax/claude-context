@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace core package
+        run: pnpm --filter @zokizuan/satori-core build
+
       - name: Run R0.1A verification and capture logs
         id: verify
         shell: bash
