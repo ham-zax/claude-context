@@ -3,20 +3,22 @@
     "task_id": "R0.0",
     "title": "R0.0: Merge and verify security hardening (owner merge/evidence task)",
     "risk": "medium",
-    "invariant": "Hardening branch integrate/security-hardening-20260805 tip 73fbe70 is verified an ancestor of the frozen HEAD via `git merge-base --is-ancestor`, AND a behavioral hardening acceptance receipt (receipt.commitSha === frozen integration HEAD) is produced at the frozen HEAD; ancestry alone never substitutes for the behavioral rerun (plan §1.2, §9.2 risk 'Hardening prerequisite'). Audited at round_base 652ec82c: `git merge-base --is-ancestor 73fbe70 HEAD` exits 0, so the plan §10 snapshot 'hardening unmerged at base, merge-base 94a3dc6' is stale and favorable — the merge part of R0.0 is evidence-only, but the behavioral receipt at the frozen HEAD is still mandatory.",
-    "owners": ["R0.0"],
+    "invariant": "Hardening branch integrate/security-hardening-20260805 tip 73fbe70 is verified an ancestor of the frozen HEAD via `git merge-base --is-ancestor`, AND a behavioral hardening acceptance receipt (receipt.commitSha === frozen integration HEAD) is produced at the frozen HEAD; ancestry alone never substitutes for the behavioral rerun (plan \u00a71.2, \u00a79.2 risk 'Hardening prerequisite'). Audited at round_base 652ec82c: `git merge-base --is-ancestor 73fbe70 HEAD` exits 0, so the plan \u00a710 snapshot 'hardening unmerged at base, merge-base 94a3dc6' is stale and favorable \u2014 the merge part of R0.0 is evidence-only, but the behavioral receipt at the frozen HEAD is still mandatory.",
+    "owners": [
+      "R0.0"
+    ],
     "production_callers": [
-      "hardening acceptance suite from the frozen command map (plan §1.2 items: indexing / rejected; home-directory indexing rejected unless authorized; .ssh/.aws/configured secret roots rejected; read_file rejects unpublished/unauthorized files; symlink and special-file cases fail closed; byte ceilings before whole-file allocation; shared-runtime context/auth per threat model; bounded cancellation/deadline on external provider requests) — exact command map is not enumerated in plan §7.5/§7.6"
+      "hardening acceptance suite from the frozen command map (plan \u00a71.2 items: indexing / rejected; home-directory indexing rejected unless authorized; .ssh/.aws/configured secret roots rejected; read_file rejects unpublished/unauthorized files; symlink and special-file cases fail closed; byte ceilings before whole-file allocation; shared-runtime context/auth per threat model; bounded cancellation/deadline on external provider requests) \u2014 exact command map is not enumerated in plan \u00a77.5/\u00a77.6"
     ],
     "test_callers": [
-      "hardening acceptance suite tests (plan §1.2 items; exact test names not cataloged in §7.5/§7.6)"
+      "hardening acceptance suite tests (plan \u00a71.2 items; exact test names not cataloged in \u00a77.5/\u00a77.6)"
     ],
     "approved_files": [],
     "interface_changes": [
       "hardening acceptance receipt binding receipt.commitSha === frozen integration HEAD (evidence output)"
     ],
     "security_boundaries": [
-      "ancestor check via `git merge-base --is-ancestor <integration-commit> HEAD` PLUS behavioral rerun at the frozen HEAD; ancestry alone never substitutes for the behavioral receipt (plan §1.2)",
+      "ancestor check via `git merge-base --is-ancestor <integration-commit> HEAD` PLUS behavioral rerun at the frozen HEAD; ancestry alone never substitutes for the behavioral receipt (plan \u00a71.2)",
       "if the receipt cannot be re-issued at the final HEAD, run the exact hardening acceptance suite at the final HEAD and issue a new receipt bound to that HEAD"
     ],
     "overlap_with": [
@@ -27,14 +29,16 @@
     "affected_command": "hardening suite from frozen command map",
     "full_suite_triggers": [],
     "red_evidence_required": false,
-    "instructions": "Evidence card per §7.5/§7.6 (unmet-precondition: hardening integration is not an ancestor or behavioral receipt is absent; validating assertion: ancestor check passes AND receipt.commitSha equals the tested HEAD). The command is plan-specified as 'hardening suite from frozen command map' and the command map is not enumerated in §7.5/§7.6 — unverifiable-at-base; no repo-verified substitute exists at base (the merge is already present, so nothing to merge). Audited fact: `git merge-base --is-ancestor 73fbe70 HEAD` exits 0 at round_base — plan §10 'unmerged at base, merge-base 94a3dc6' is stale; do not re-litigate the merge. Still required: run the hardening suite at the frozen (post-repair) HEAD and issue the behavioral receipt with receipt.commitSha === that HEAD; ancestry alone never substitutes (plan §1.2, §9.2). No tracked-file edits expected."
+    "instructions": "Evidence card per \u00a77.5/\u00a77.6 (unmet-precondition: hardening integration is not an ancestor or behavioral receipt is absent; validating assertion: ancestor check passes AND receipt.commitSha equals the tested HEAD). The command is plan-specified as 'hardening suite from frozen command map' and the command map is not enumerated in \u00a77.5/\u00a77.6 \u2014 unverifiable-at-base; no repo-verified substitute exists at base (the merge is already present, so nothing to merge). Audited fact: `git merge-base --is-ancestor 73fbe70 HEAD` exits 0 at round_base \u2014 plan \u00a710 'unmerged at base, merge-base 94a3dc6' is stale; do not re-litigate the merge. Still required: run the hardening suite at the frozen (post-repair) HEAD and issue the behavioral receipt with receipt.commitSha === that HEAD; ancestry alone never substitutes (plan \u00a71.2, \u00a79.2). No tracked-file edits expected."
   },
   {
     "task_id": "R0.1A",
     "title": "R0.1A: Repair the search-quality fixture (RED -> GREEN)",
     "risk": "medium",
-    "invariant": "Fixture is RED at round_base 652ec82c and remains RED until R0.1A lands; after repair, all workloads are ok, expected owner ranks match, and production files are unchanged (§7.6 minimal passing behavior). Audited RED mechanism: `pnpm eval:search-quality` exits 1 with `TypeError: Cannot read properties of undefined (reading 'kind')` at packages/mcp/src/config.ts:238 (resolveRerankerProvider reads config.networkPolicy.kind with networkPolicy undefined in the hermetic evaluation config) — NOT the plan §10 'three stale seams / source_state_unverified' chain.",
-    "owners": ["R0.1A"],
+    "invariant": "Fixture is RED at round_base 652ec82c and remains RED until R0.1A lands; after repair, all workloads are ok, expected owner ranks match, and production files are unchanged (\u00a77.6 minimal passing behavior). Audited RED mechanism: `pnpm eval:search-quality` exits 1 with `TypeError: Cannot read properties of undefined (reading 'kind')` at packages/mcp/src/config.ts:238 (resolveRerankerProvider reads config.networkPolicy.kind with networkPolicy undefined in the hermetic evaluation config) \u2014 NOT the plan \u00a710 'three stale seams / source_state_unverified' chain.",
+    "owners": [
+      "R0.1A"
+    ],
     "production_callers": [
       "evals/search-quality/search-quality-evaluation.ts (createEvaluationEnvironment :440-559, CapabilityResolver crash site at :559; runSearchQualityEvaluation :813)",
       "evals/search-quality/run.ts (eval entry; read-only without --output)",
@@ -57,11 +61,11 @@
       "evals/search-quality/ranking-v3-fixture-repair.test.ts (new RED test, plan-specified)"
     ],
     "security_boundaries": [
-      "no product behavior change: §7.6 requires all workloads ok, expected owner ranks match, and production files unchanged; the repair must not alter search-ranking runtime behavior",
-      "do not weaken fixture assertions or rewrite fixtures to pass (plan §9.2 risk 'Fixture authority')"
+      "no product behavior change: \u00a77.6 requires all workloads ok, expected owner ranks match, and production files unchanged; the repair must not alter search-ranking runtime behavior",
+      "do not weaken fixture assertions or rewrite fixtures to pass (plan \u00a79.2 risk 'Fixture authority')"
     ],
     "overlap_with": [
-      "FT-C: R0.1A -> A10 -> C6 sequential exclusive ownership of evals/search-quality/search-quality-evaluation.ts (§7.1); A10/C6 must not touch the file before R0.1A",
+      "FT-C: R0.1A -> A10 -> C6 sequential exclusive ownership of evals/search-quality/search-quality-evaluation.ts (\u00a77.1); A10/C6 must not touch the file before R0.1A",
       "R0.1V prerequisite (plan edge R0.1V: R0.1A)",
       "FT-G0 round invariant: fixture stays RED until R0.1A"
     ],
@@ -73,16 +77,18 @@
       "pnpm check"
     ],
     "red_evidence_required": true,
-    "instructions": "Code-change card per §7.6. Audited at base: `pnpm eval:search-quality` exits 1 (recorded RED) with `TypeError: Cannot read properties of undefined (reading 'kind')` at config.ts:238:30 via CapabilityResolver.buildMatrix (capabilities.ts:54) -> createEvaluationEnvironment (search-quality-evaluation.ts:559) -> runSearchQualityEvaluation (:813) -> run.ts:29; evals/search-quality/search-quality-evaluation.test.ts fails identically (1 test, 1 fail, exit 1). This is a deterministic hermetic-fixture defect (evaluation config lacks networkPolicy), NOT the plan §10 'source_state_unverified' chain — repair scope may differ from §10; the §7.6 RED wording 'exits nonzero or reports source_state_unverified' accommodates the observed failure. Focused command is plan-specified and its new test file does not exist at base (unverifiable-at-base); affected command is repo-verified (ran at base, exit 1). Prefer repairing the eval-side hermetic config inside search-quality-evaluation.ts (§7.5 catalog: 'Modify evals/search-quality/search-quality-evaluation.ts'); config.ts/capabilities.ts/run.ts are round-approved fallback only if they are the smallest correct repair. Card flow: failing focused test -> minimal implementation -> passing focused test -> one semantic commit -> independent review."
+    "instructions": "Code-change card per \u00a77.6. Audited at base: `pnpm eval:search-quality` exits 1 (recorded RED) with `TypeError: Cannot read properties of undefined (reading 'kind')` at config.ts:238:30 via CapabilityResolver.buildMatrix (capabilities.ts:54) -> createEvaluationEnvironment (search-quality-evaluation.ts:559) -> runSearchQualityEvaluation (:813) -> run.ts:29; evals/search-quality/search-quality-evaluation.test.ts fails identically (1 test, 1 fail, exit 1). This is a deterministic hermetic-fixture defect (evaluation config lacks networkPolicy), NOT the plan \u00a710 'source_state_unverified' chain \u2014 repair scope may differ from \u00a710; the \u00a77.6 RED wording 'exits nonzero or reports source_state_unverified' accommodates the observed failure. Focused command is plan-specified and its new test file does not exist at base (unverifiable-at-base); affected command is repo-verified (ran at base, exit 1). Prefer repairing the eval-side hermetic config inside search-quality-evaluation.ts (\u00a77.5 catalog: 'Modify evals/search-quality/search-quality-evaluation.ts'); config.ts/capabilities.ts/run.ts are round-approved fallback only if they are the smallest correct repair. Card flow: failing focused test -> minimal implementation -> passing focused test -> one semantic commit -> independent review. \u00a77.6 exact RED test name: `repairs_all_three_stale_fixture_seams_without_product_changes` (test file evals/search-quality/ranking-v3-fixture-repair.test.ts)."
   },
   {
     "task_id": "R0.1V",
     "title": "R0.1V: Implement and seal the Gate-0 verifier (verify-ranking-v3-rebase.mjs) and tuning-only capture wrapper (run-ranking-v3-baseline-capture.mjs)",
     "risk": "medium",
-    "invariant": "Verifier rejects any head or tree not equal to the frozen base; capture wrapper executes only inside a verified detached baseline worktree whose capture process cwd and tree digest equal the frozen base; held-out is denied (plan §7.6 R0.1V row; §7.1: the wrapper 'creates a detached worktree at baselineCommit, verifies its tree digest, and runs capture only inside that worktree').",
-    "owners": ["R0.1V"],
+    "invariant": "Verifier rejects any head or tree not equal to the frozen base; capture wrapper executes only inside a verified detached baseline worktree whose capture process cwd and tree digest equal the frozen base; held-out is denied (plan \u00a77.6 R0.1V row; \u00a77.1: the wrapper 'creates a detached worktree at baselineCommit, verifies its tree digest, and runs capture only inside that worktree').",
+    "owners": [
+      "R0.1V"
+    ],
     "production_callers": [
-      "scripts/verify-ranking-v3-rebase.mjs (new; CLI snapshot-tree/verify; consumed by R0.1 verify command and by every §7.4 boundary generator — R1.0B, R1.6, DB, DC0, DC1, DD, DE, DF, DG, DH, DI — for DISPATCH_TREE.json binding)",
+      "scripts/verify-ranking-v3-rebase.mjs (new; CLI snapshot-tree/verify; consumed by R0.1 verify command and by every \u00a77.4 boundary generator \u2014 R1.0B, R1.6, DB, DC0, DC1, DD, DE, DF, DG, DH, DI \u2014 for DISPATCH_TREE.json binding)",
       "scripts/run-ranking-v3-baseline-capture.mjs (new; creates detached worktree at baselineCommit, verifies tree digest, runs capture only inside that worktree; consumed by R0.2)"
     ],
     "test_callers": [
@@ -107,7 +113,7 @@
     "overlap_with": [
       "R0.1 (consumes the verify CLI; plan edge R0.1: R0.1V)",
       "R0.2 (executes the capture wrapper; plan edge R0.2: R0.1B)",
-      "§7.4 boundary generators (bind dispatch trees via snapshot-tree; R0.1B cards and FT-G1 depend on this tooling)"
+      "\u00a77.4 boundary generators (bind dispatch trees via snapshot-tree; R0.1B cards and FT-G1 depend on this tooling)"
     ],
     "focused_command": "node --test scripts/verify-ranking-v3-rebase.test.mjs scripts/run-ranking-v3-baseline-capture.test.mjs",
     "affected_command": "node --test scripts/verify-ranking-v3-rebase.test.mjs scripts/run-ranking-v3-baseline-capture.test.mjs",
@@ -116,17 +122,19 @@
       "pnpm check"
     ],
     "red_evidence_required": true,
-    "instructions": "Code-change card per §7.6. Both test files are plan-specified and do not exist at base — focused/affected commands unverifiable-at-base. RED semantics: verifier accepts a mismatched tree OR wrapper executes from the caller worktree; minimal passing behavior: mismatch is rejected; capture process cwd and tree digest equal the frozen base. Note pnpm test:scripts globs scripts/*.test.mjs, so these tests join the script suite automatically once created. Do NOT modify scripts/satori-search-candidate-capture.mjs (exclusive owner B6 per §7.1); the wrapper invokes it from the detached worktree. Card flow: failing focused test -> minimal implementation -> passing focused test -> one semantic commit -> independent review."
+    "instructions": "Code-change card per \u00a77.6. Both test files are plan-specified and do not exist at base \u2014 focused/affected commands unverifiable-at-base. RED semantics: verifier accepts a mismatched tree OR wrapper executes from the caller worktree; minimal passing behavior: mismatch is rejected; capture process cwd and tree digest equal the frozen base. Note pnpm test:scripts globs scripts/*.test.mjs, so these tests join the script suite automatically once created. Do NOT modify scripts/satori-search-candidate-capture.mjs (exclusive owner B6 per \u00a77.1); the wrapper invokes it from the detached worktree. Card flow: failing focused test -> minimal implementation -> passing focused test -> one semantic commit -> independent review."
   },
   {
     "task_id": "R0.1",
     "title": "R0.1: Freeze the post-hardening, post-repair HEAD with Gate-0 manifests",
     "risk": "medium",
-    "invariant": "All five Gate-0 manifests parse, hash, and bind the same frozen commit/tree; every Gate-0 receipt binds the frozen HEAD and its tree (§7.6 R0.1 row). Per plan §1.1 the freeze executes at the post-hardening, post-repair integration HEAD via --expected-head \"$(git rev-parse HEAD)\"; at scout round_base the candidate frozen HEAD is 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 and every Gate-0 receipt at this round binds that HEAD and its tree.",
-    "owners": ["R0.1"],
+    "invariant": "All five Gate-0 manifests parse, hash, and bind the same frozen commit/tree; every Gate-0 receipt binds the frozen HEAD and its tree (\u00a77.6 R0.1 row). Per plan \u00a71.1 the freeze executes at the post-hardening, post-repair integration HEAD via --expected-head \"$(git rev-parse HEAD)\"; at scout round_base the candidate frozen HEAD is 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 and every Gate-0 receipt at this round binds that HEAD and its tree.",
+    "owners": [
+      "R0.1"
+    ],
     "production_callers": [
       "R0.2 ($BASELINE_COMMIT and $BASELINE_TREE_SHA256 from the frozen-base receipt)",
-      "R0.1B and all later §7.4 generators (baselineCommit in ranking_v3_dispatch_cards_v2 manifests; baselineCommit never changes)",
+      "R0.1B and all later \u00a77.4 generators (baselineCommit in ranking_v3_dispatch_cards_v2 manifests; baselineCommit never changes)",
       "G5 (CONTINUATION_SITES.json continuation sites)",
       "G7 and DH build-input-index (LOCKFILE_AUTHORITY.json lockfile authority)",
       "later evals and Wave A-C tasks (SOURCE_ANCHORS.json anchor manifest)"
@@ -149,7 +157,7 @@
       "LOCKFILE_AUTHORITY.json"
     ],
     "security_boundaries": [
-      "trusted-root manifests binding exactly ONE frozen commit and its tree (plan §7.5 R0.1 row; §10: 'The authoritative anchor manifest is SOURCE_ANCHORS.json (R0.1)')",
+      "trusted-root manifests binding exactly ONE frozen commit and its tree (plan \u00a77.5 R0.1 row; \u00a710: 'The authoritative anchor manifest is SOURCE_ANCHORS.json (R0.1)')",
       "all five manifests must parse, hash, and bind the same frozen commit/tree; a manifest missing or binding a different commit invalidates the card"
     ],
     "overlap_with": [
@@ -161,16 +169,18 @@
     "affected_command": "node scripts/verify-ranking-v3-rebase.mjs verify --evidence-dir \"$TASK_OUTPUT\" --expected-head \"$(git rev-parse HEAD)\"",
     "full_suite_triggers": [],
     "red_evidence_required": false,
-    "instructions": "Evidence card per §7.6 (unmet-precondition: any required Gate-0 manifest is absent; validating assertion: all five manifests parse, hash, and bind the same frozen commit/tree). The verify script is plan-specified (R0.1V-owned) and does not exist at base — commands unverifiable-at-base. Plan §1.1: 'R0.1 freeze the post-hardening, post-repair HEAD' — the frozen HEAD is the integration HEAD at R0.1 execution (a descendant of round_base); at scout round_base the candidate frozen HEAD is 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 and every Gate-0 receipt binds that HEAD and its tree. Outputs are evidence manifests; no code changes. $TASK_OUTPUT is the card's immutable output directory; the verify command must be run from the integration checkout at the frozen HEAD."
+    "instructions": "Evidence card per \u00a77.6 (unmet-precondition: any required Gate-0 manifest is absent; validating assertion: all five manifests parse, hash, and bind the same frozen commit/tree). The verify script is plan-specified (R0.1V-owned) and does not exist at base \u2014 commands unverifiable-at-base. Plan \u00a71.1: 'R0.1 freeze the post-hardening, post-repair HEAD' \u2014 the frozen HEAD is the integration HEAD at R0.1 execution (a descendant of round_base); at scout round_base the candidate frozen HEAD is 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 and every Gate-0 receipt binds that HEAD and its tree. Outputs are evidence manifests; no code changes. $TASK_OUTPUT is the card's immutable output directory; the verify command must be run from the integration checkout at the frozen HEAD."
   },
   {
     "task_id": "R0.1B",
     "title": "R0.1B: Implement and seal the dispatch-card tool (ranking-v3-dispatch-cards.mjs) and generate the R0.2/R1.T0/R1.0/R1.0B card set",
     "risk": "medium",
-    "invariant": "Every generated card resolves to a §7.5 Task Interface Catalog entry and an exact §7.6 RED or unmet-precondition assertion (plan §9.3 item 7); the generated manifest is ranking_v3_dispatch_cards_v2 binding baselineCommit (R0.1 receipt) and dispatchCommit (frozen HEAD) with dispatchTreeSha256; the card set contains target tasks (R0.2, R1.T0, R1.0) plus the next boundary-generator card R1.0B, which stays nondispatchable until its sealed gate receipt exists (§7.4).",
-    "owners": ["R0.1B"],
+    "invariant": "Every generated card resolves to a \u00a77.5 Task Interface Catalog entry and an exact \u00a77.6 RED or unmet-precondition assertion (plan \u00a79.3 item 7); the generated manifest is ranking_v3_dispatch_cards_v2 binding baselineCommit (R0.1 receipt) and dispatchCommit (frozen HEAD) with dispatchTreeSha256; the card set contains target tasks (R0.2, R1.T0, R1.0) plus the next boundary-generator card R1.0B, which stays nondispatchable until its sealed gate receipt exists (\u00a77.4).",
+    "owners": [
+      "R0.1B"
+    ],
     "production_callers": [
-      "scripts/ranking-v3-dispatch-cards.mjs (new; CLI build/verify) invoked by every §7.4 boundary generator (R1.0B, R1.6, DB, DC0, DC1, DD, DE, DF, DG, DH, DI)",
+      "scripts/ranking-v3-dispatch-cards.mjs (new; CLI build/verify) invoked by every \u00a77.4 boundary generator (R1.0B, R1.6, DB, DC0, DC1, DD, DE, DF, DG, DH, DI)",
       "exported buildCardManifest and validateCardManifest functions"
     ],
     "test_callers": [
@@ -186,8 +196,8 @@
       "exports buildCardManifest, validateCardManifest"
     ],
     "security_boundaries": [
-      "every generated card must have a §7.5 Task Interface Catalog entry and an exact §7.6 RED/unmet-precondition assertion; unknown/uncataloged tasks are rejected (RED test manifest_includes_next_boundary_generator_and_rejects_unknown_catalog_task)",
-      "the next boundary-generator card (R1.0B) is included but nondispatchable until its sealed gate receipt exists; a new manifest revokes only overlapping unexecuted cards (§7.4)"
+      "every generated card must have a \u00a77.5 Task Interface Catalog entry and an exact \u00a77.6 RED/unmet-precondition assertion; unknown/uncataloged tasks are rejected (RED test manifest_includes_next_boundary_generator_and_rejects_unknown_catalog_task)",
+      "the next boundary-generator card (R1.0B) is included but nondispatchable until its sealed gate receipt exists; a new manifest revokes only overlapping unexecuted cards (\u00a77.4)"
     ],
     "overlap_with": [
       "FT-G1 (R0.1B generates the R0.2/R1.T0/R1.0/R1.0B card set; R1.0B is the next boundary generator)",
@@ -201,14 +211,16 @@
       "pnpm check"
     ],
     "red_evidence_required": true,
-    "instructions": "Code-change card per §7.6. Test file is plan-specified and does not exist at base — commands unverifiable-at-base. RED semantics: generator omits the next boundary card or accepts an uncataloged task; minimal passing behavior: target tasks (R0.2, R1.T0, R1.0) plus next generator R1.0B are present and every task resolves to §§7.5-7.6. pnpm test:scripts auto-globs scripts/*.test.mjs once the test is created. Generate the initial card set at the frozen HEAD (after R0.1) so cards bind baselineCommit and dispatchCommit; the verify subcommand must pass on the produced cards.manifest.json. R0.1B is owner-authorized and not itself card-generated (plan §1.4)."
+    "instructions": "Code-change card per \u00a77.6. Test file is plan-specified and does not exist at base \u2014 commands unverifiable-at-base. RED semantics: generator omits the next boundary card or accepts an uncataloged task; minimal passing behavior: target tasks (R0.2, R1.T0, R1.0) plus next generator R1.0B are present and every task resolves to \u00a7\u00a77.5-7.6. pnpm test:scripts auto-globs scripts/*.test.mjs once the test is created. Generate the initial card set at the frozen HEAD (after R0.1) so cards bind baselineCommit and dispatchCommit; the verify subcommand must pass on the produced cards.manifest.json. R0.1B is owner-authorized and not itself card-generated (plan \u00a71.4)."
   },
   {
     "task_id": "R0.2",
     "title": "R0.2: Execute the tuning-only Phase-0 baseline capture in a verified detached worktree",
     "risk": "medium",
-    "invariant": "Capture executes only inside a verified detached worktree whose capture cwd and tree digest equal the frozen base ($BASELINE_COMMIT/$BASELINE_TREE_SHA256); held-out partition is denied (--deny-heldout); the receipt proves the executed HEAD/tree equals the frozen base (plan §7.5 R0.2 row, §7.6 R0.2 row).",
-    "owners": ["R0.2"],
+    "invariant": "Capture executes only inside a verified detached worktree whose capture cwd and tree digest equal the frozen base ($BASELINE_COMMIT/$BASELINE_TREE_SHA256); held-out partition is denied (--deny-heldout); the receipt proves the executed HEAD/tree equals the frozen base (plan \u00a77.5 R0.2 row, \u00a77.6 R0.2 row).",
+    "owners": [
+      "R0.2"
+    ],
     "production_callers": [
       "scripts/run-ranking-v3-baseline-capture.mjs (R0.1V-owned wrapper) invoking scripts/satori-search-candidate-capture.mjs (existing; parseArgs with --out, ~:1221-1257) against evals/search-ranking/cross-repository-v3.manifest.json (existing; 6 tuning + 6 held-out partitions)",
       "downstream consumers: B8 (pre-instrumentation byte-identity baseline) and B9 (corpus manifest binding)"
@@ -235,6 +247,6 @@
     "affected_command": "node scripts/run-ranking-v3-baseline-capture.mjs --manifest evals/search-ranking/cross-repository-v3.manifest.json --partition tuning --deny-heldout --baseline-commit \"$BASELINE_COMMIT\" --baseline-tree-sha256 \"$BASELINE_TREE_SHA256\" --detached-worktree \"$TASK_OUTPUT/worktree\" --out \"$TASK_OUTPUT/evidence\"",
     "full_suite_triggers": [],
     "red_evidence_required": false,
-    "instructions": "Execution card per §7.6 (unmet-precondition: no detached verified baseline worktree exists; validating assertion: receipt proves capture process ran at baselineCommit and baselineTreeSha256, with held-out denied). The wrapper is plan-specified (R0.1V-owned) and does not exist at base — commands unverifiable-at-base. Do NOT modify scripts/satori-search-candidate-capture.mjs (exclusive owner B6, §7.1) or evals/search-ranking/cross-repository-v3.manifest.json (exists at base with 6 tuning + 6 held-out partitions; partition tuning with --deny-heldout selects tuning only). Baseline evidence must remain byte-stable: B8 later proves pre/post-instrumentation byte identity against this capture (FT-B). Run only after R0.1B card dispatch; $BASELINE_COMMIT/$BASELINE_TREE_SHA256 come from the R0.1 receipt."
+    "instructions": "Execution card per \u00a77.6 (unmet-precondition: no detached verified baseline worktree exists; validating assertion: receipt proves capture process ran at baselineCommit and baselineTreeSha256, with held-out denied). The wrapper is plan-specified (R0.1V-owned) and does not exist at base \u2014 commands unverifiable-at-base. Do NOT modify scripts/satori-search-candidate-capture.mjs (exclusive owner B6, \u00a77.1) or evals/search-ranking/cross-repository-v3.manifest.json (exists at base with 6 tuning + 6 held-out partitions; partition tuning with --deny-heldout selects tuning only). Baseline evidence must remain byte-stable: B8 later proves pre/post-instrumentation byte identity against this capture (FT-B). Run only after R0.1B card dispatch; $BASELINE_COMMIT/$BASELINE_TREE_SHA256 come from the R0.1 receipt."
   }
 ]

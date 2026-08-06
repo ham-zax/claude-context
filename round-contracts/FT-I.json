@@ -4,7 +4,10 @@
     "title": "I0 owner authorization for held-out opening (fixed-schema human_decision card)",
     "risk": "high",
     "invariant": "I0 emits exactly one OwnerAuthorizationReceiptV1 binding heldoutManifestSha256, h10RegistrySha256 equal to the ActivationCycleManifestV1 expectedPendingRegistrySha256 (the H10 newRegistrySha256 digest verified by I1), and authorizationDecisionSha256 derived from a fixed-schema human_decision artifact via canonical validation; I1 consumes the exact I0 receipt digest as its previousReceiptSha256, so the I0->I1->I2->I3->(I4|I3R) chain is enforced by exact previousReceiptSha256 equality.",
-    "owners": ["I0", "G6C"],
+    "owners": [
+      "I0",
+      "G6C"
+    ],
     "production_callers": [
       "DI-provided ActivationCycleManifestV1 (G6C build-activation-cycle, plan 7.5 Waves H and I)",
       "G6C `authorize` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table)"
@@ -34,14 +37,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs authorize --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`; the activation-cycle authority is DI-created and mandatory - I0 never accepts the pre-held-out manifest. G6C build-activation-cycle parses the H10 transition receipt, verifies transitionKind create_pending_heldout, copies newRegistrySha256 into expectedPendingRegistrySha256, and binds the H10 receipt digest; I0 must bind that same digest. Plan 7.6 row I0-I6/I3R: unmet-precondition = activation-cycle manifest or required predecessor is absent; validating assertion = exactly one chain successor parses, binds the H10 pending-registry digest, and keeps acceptance/rejection paths exclusive. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified (packages/mcp/package.json \"test\"). Prerequisites per plan 7.2: I0: DI, H_GATE_QUALIFIED, G6C."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs authorize --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`; the activation-cycle authority is DI-created and mandatory - I0 never accepts the pre-held-out manifest. G6C build-activation-cycle parses the H10 transition receipt, verifies transitionKind create_pending_heldout, copies newRegistrySha256 into expectedPendingRegistrySha256, and binds the H10 receipt digest; I0 must bind that same digest. Plan 7.6 row I0-I6/I3R: unmet-precondition = activation-cycle manifest or required predecessor is absent; validating assertion = exactly one chain successor parses, binds the H10 pending-registry digest, and keeps acceptance/rejection paths exclusive. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified (packages/mcp/package.json \"test\"). Prerequisites per plan 7.2: I0: DI, H_GATE_QUALIFIED, G6C. NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I1",
     "title": "I1 held-out opening record binding owner authorization, verified registry digest, and executable manifest",
     "risk": "high",
     "invariant": "I1 consumes the exact I0 OwnerAuthorizationReceiptV1 digest as previousReceiptSha256, verifies H10's registry digest through ActivationCycleManifestV1.expectedPendingRegistrySha256, and emits HeldoutOpeningRecordV1 binding ownerAuthorizationReceiptSha256, heldoutManifestSha256, verifiedRegistrySha256 equal to expectedPendingRegistrySha256, and executableManifestSha256; opening is the point of no return - after I1, no source/model/artifact/threshold/contract/feature/evaluator changes and no deletion or rewriting of evidence (plan 3 invariant 13).",
-    "owners": ["I1", "G6C"],
+    "owners": [
+      "I1",
+      "G6C"
+    ],
     "production_callers": [
       "G6C `open` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table)",
       "H10 RegistryTransitionReceiptV1 (transitionKind create_pending_heldout) digest via ActivationCycleManifestV1 (plan 7.5, 5.5)"
@@ -71,14 +77,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs open --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. Every Wave-I command consumes only ActivationCycleManifestV1 binding H10's newRegistrySha256 (expectedPendingRegistrySha256); I1 is the step that verifies the H10 digest (prerequisites I0, H10, G7, G6C per plan 7.2). Plan 7.6 row I0-I6/I3R applies: exactly one chain successor parses, binds the H10 pending-registry digest, and keeps acceptance/rejection paths exclusive. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs open --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. Every Wave-I command consumes only ActivationCycleManifestV1 binding H10's newRegistrySha256 (expectedPendingRegistrySha256); I1 is the step that verifies the H10 digest (prerequisites I0, H10, G7, G6C per plan 7.2). Plan 7.6 row I0-I6/I3R applies: exactly one chain successor parses, binds the H10 pending-registry digest, and keeps acceptance/rejection paths exclusive. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified. NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I2",
     "title": "I2 single held-out execution via sealed replay substrate with executionCommandSha256 receipt",
     "risk": "high",
     "invariant": "I2 consumes the exact I1 HeldoutOpeningRecordV1 digest as previousReceiptSha256 and emits HeldoutExecutionReceiptV1 binding openingRecordSha256, heldoutManifestSha256, resultsSha256, and executionCommandSha256; the execution runs exactly one preregistered held-out execution on G7-sealed tooling (scripts/satori-search-candidate-replay.mjs with --held-out-opening and --require-neural-disabled) and never draws held-out judgments into the tuning pipeline.",
-    "owners": ["I2", "G6C"],
+    "owners": [
+      "I2",
+      "G6C"
+    ],
     "production_callers": [
       "scripts/satori-search-candidate-replay.mjs (repo-verified anchors: --held-out-opening parse at line 2386 with enforcement 2404-2410 and binding 2425-2426; --require-neural-disabled at lines 1747, 2390; held-out binding at 2407-2426)",
       "G6C `execute` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table); execution module ranking-v3-heldout-execution.mjs (plan 7.5 G6C row)"
@@ -110,14 +119,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs execute --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. The activation manifest fixes the replay command, capture path, and output directory; executionCommandSha256 records the exact executed command (prerequisites I1, G6C, A12 per plan 7.2). Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified (packages/mcp/package.json \"test\")."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs execute --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. The activation manifest fixes the replay command, capture path, and output directory; executionCommandSha256 records the exact executed command (prerequisites I1, G6C, A12 per plan 7.2). Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified (packages/mcp/package.json \"test\"). NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I3",
     "title": "I3 preregistered held-out adjudication emitting accepted or rejected receipt",
     "risk": "high",
     "invariant": "I3 consumes the exact I2 HeldoutExecutionReceiptV1 digest as previousReceiptSha256 and emits exactly one of HeldoutAcceptanceReceiptV1 (decision \"accepted\") or HeldoutRejectionReceiptV1 (decision \"rejected\") from preregistered adjudication only, each binding executionReceiptSha256 and adjudicationResultSha256; acceptance and rejection are mutually exclusive for one opening record, and the I4/I3R branch is decided exclusively by this receipt (plan 5.5, 7.2 conditional edges).",
-    "owners": ["I3", "G6C"],
+    "owners": [
+      "I3",
+      "G6C"
+    ],
     "production_callers": [
       "G6C `adjudicate` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table); adjudication module ranking-v3-heldout-adjudication.mjs (plan 7.5 G6C row)",
       "Preregistered adjudication contract (R1.3 decision contract authority; plan 7.2, 6.8)"
@@ -148,14 +160,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs adjudicate --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"` (prerequisite I2, G6C per plan 7.2). The receipt's decision field drives the two receipt_outcome conditional edges in plan 7.2: HeldoutAcceptanceReceiptV1.decision == accepted dispatches I4; HeldoutRejectionReceiptV1.decision == rejected dispatches I3R. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs adjudicate --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"` (prerequisite I2, G6C per plan 7.2). The receipt's decision field drives the two receipt_outcome conditional edges in plan 7.2: HeldoutAcceptanceReceiptV1.decision == accepted dispatches I4; HeldoutRejectionReceiptV1.decision == rejected dispatches I3R. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified. NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I4",
     "title": "I4 activation transition pending_heldout -> activation_qualified via F9 writer",
     "risk": "high",
     "invariant": "I4 fires only when the I3 HeldoutAcceptanceReceiptV1 with decision \"accepted\" exists (plan 7.2 receipt_outcome edge), consumes its exact digest as both previousReceiptSha256 and triggeringReceiptSha256, and via the F9 writer performs pending_heldout -> activation_qualified (transitionKind activate_pending) on the same I1-verified expectedPendingRegistrySha256; this terminates the pending logical entry (plan 3 invariant 12) and is the first point at which the product selector may return learned_v3 (plan 3 invariant 10; plan 6.8).",
-    "owners": ["I4", "G6C"],
+    "owners": [
+      "I4",
+      "G6C"
+    ],
     "production_callers": [
       "F9 registry-transition writer (ActivatePendingInputV1; plan 5.4, 7.5 F9 row)",
       "G6C `activate` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table); registry-cycle module ranking-v3-registry-cycle.mjs (plan 7.5 G6C row)"
@@ -188,14 +203,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs activate --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. Both I4 and I3R must bind the same I1-verified digest (ActivationCycleManifestV1.expectedPendingRegistrySha256) and terminate the pending entry; they are mutually exclusive via the plan 7.2 conditional edges (I4 requires I3 with HeldoutAcceptanceReceiptV1.decision == accepted). Prerequisites per plan 7.2: I1, H10, F9, G6C plus the receipt_outcome edge from I3. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs activate --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. Both I4 and I3R must bind the same I1-verified digest (ActivationCycleManifestV1.expectedPendingRegistrySha256) and terminate the pending entry; they are mutually exclusive via the plan 7.2 conditional edges (I4 requires I3 with HeldoutAcceptanceReceiptV1.decision == accepted). Prerequisites per plan 7.2: I1, H10, F9, G6C plus the receipt_outcome edge from I3. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified. NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I3R",
     "title": "I3R rejection transition pending_heldout -> revoked (reason heldout_rejected) via F9 writer",
     "risk": "high",
     "invariant": "I3R fires only when the I3 HeldoutRejectionReceiptV1 with decision \"rejected\" exists (plan 7.2 receipt_outcome edge), consumes its exact digest as both previousReceiptSha256 and triggeringReceiptSha256, and via the F9 writer performs pending_heldout -> revoked with reason heldout_rejected (transitionKind reject_pending) on the same I1-verified expectedPendingRegistrySha256; this terminates the pending logical entry (plan 3 invariant 12) so it can never block a later qualification cycle for its scope, and I5/I6 never follow I3R (plan 6.8).",
-    "owners": ["I3R", "G6C"],
+    "owners": [
+      "I3R",
+      "G6C"
+    ],
     "production_callers": [
       "F9 registry-transition writer (RejectPendingInputV1; plan 5.4, 7.5 F9 row)",
       "G6C `reject` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table); registry-cycle module ranking-v3-registry-cycle.mjs (plan 7.5 G6C row)"
@@ -228,14 +246,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs reject --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. Both I4 and I3R must bind the same I1-verified digest (ActivationCycleManifestV1.expectedPendingRegistrySha256) and terminate the pending entry; they are mutually exclusive via the plan 7.2 conditional edges (I3R requires I3 with HeldoutRejectionReceiptV1.decision == rejected). Prerequisites per plan 7.2: I1, H10, F9, G6C plus the receipt_outcome edge from I3. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs reject --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"`. Both I4 and I3R must bind the same I1-verified digest (ActivationCycleManifestV1.expectedPendingRegistrySha256) and terminate the pending entry; they are mutually exclusive via the plan 7.2 conditional edges (I3R requires I3 with HeldoutRejectionReceiptV1.decision == rejected). Prerequisites per plan 7.2: I1, H10, F9, G6C plus the receipt_outcome edge from I3. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified. NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I5",
     "title": "I5 configuration-only rollback drill with stale-continuation proof (never revokes)",
     "risk": "high",
     "invariant": "I5 runs only after a successful I4 (never after I3R) and is configuration-only: select the qualified learned artifact, create a continuation, select baseline through preregistered configuration, prove new requests use baseline and the old continuation is stale, then reselect the same still-activation_qualified artifact without revoking it; every selection is recorded in an append-only RolloutSelectionReceiptV1 and I5 emits RollbackDriftReceiptV1-style RollbackDrillReceiptV1 binding learnedSelectionReceiptSha256, baselineSelectionReceiptSha256, reselectionReceiptSha256, and staleContinuationProofSha256 (plan 5.5, 6.8).",
-    "owners": ["I5", "G6C"],
+    "owners": [
+      "I5",
+      "G6C"
+    ],
     "production_callers": [
       "packages/mcp/src/core/handlers.ts (repo-verified anchors: SEARCH_RESULT_SET_STALE continuation-staleness failures at lines 5260, 5301, 5314, 5328, 5443, 5478; ranked-set binding construction with rankingPolicyIdentity at line 406)",
       "packages/mcp/src/core/search-result-set-identity.ts (repo-verified anchors: rankingPolicyIdentity at lines 37 and 51, required-identity validation at line 136, identity construction at line 156)",
@@ -273,14 +294,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs rollback-drill --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"` (prerequisite I4, G6C per plan 7.2). Stale-continuation proof: the drill creates a continuation against the selected learned artifact, switches configuration to baseline, and proves new requests use baseline while the old continuation is stale - the production anchors are the SEARCH_RESULT_SET_STALE failures in packages/mcp/src/core/handlers.ts lines 5260-5478 (bindingValid failure at 5301, observation changes at 5314/5328, projection change at 5443, advance conflict fallback at 5478) and the ranked-set binding identity at line 406; the identity field is validated and hashed in packages/mcp/src/core/search-result-set-identity.ts lines 37/51/136/156, so a ranking-policy identity change stales the continuation. Then I5 reselects the same still-activation_qualified artifact without revoking. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified (packages/mcp/package.json \"test\")."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs rollback-drill --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"` (prerequisite I4, G6C per plan 7.2). Stale-continuation proof: the drill creates a continuation against the selected learned artifact, switches configuration to baseline, and proves new requests use baseline while the old continuation is stale - the production anchors are the SEARCH_RESULT_SET_STALE failures in packages/mcp/src/core/handlers.ts lines 5260-5478 (bindingValid failure at 5301, observation changes at 5314/5328, projection change at 5443, advance conflict fallback at 5478) and the ranked-set binding identity at line 406; the identity field is validated and hashed in packages/mcp/src/core/search-result-set-identity.ts lines 37/51/136/156, so a ranking-policy identity change stales the continuation. Then I5 reselects the same still-activation_qualified artifact without revoking. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified (packages/mcp/package.json \"test\"). NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I6",
     "title": "I6 limited activation with activationConfigurationDigest receipt",
     "risk": "high",
     "invariant": "I6 runs only after a successful I5 (never after I3R) and emits LimitedActivationReceiptV1 binding previousReceiptSha256 equal to the I5 RollbackDrillReceiptV1 digest, rollbackDrillReceiptSha256, and activationConfigurationDigest; the limited activation never changes registry state (registry stays append-only; no revocation) and post-opening configuration selection remains limited to baseline and already sealed, activation-qualified hashes (plan 5.5, 6.8).",
-    "owners": ["I6", "G6C"],
+    "owners": [
+      "I6",
+      "G6C"
+    ],
     "production_callers": [
       "F6 selector + config boundary (plan 7.5 Wave F row) as the consumer of activationConfigurationDigest",
       "G6C `limited-activation` entrypoint of scripts/ranking-v3-heldout-activation.mjs (plan 7.5 Wave H/I table); rollout module ranking-v3-rollout.mjs (plan 7.5 G6C row)"
@@ -311,14 +335,17 @@
       "pnpm test:scripts"
     ],
     "red_evidence_required": false,
-    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs limited-activation --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"` (prerequisite I5, G6C per plan 7.2). activationConfigurationDigest binds the exact configuration that limits learned_v3 exposure; the digest is the configuration-only contract of the rollout, recorded append-only. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified."
+    "instructions": "Execution card. Exact catalog command (plan 7.5 Wave H/I table): `node scripts/ranking-v3-heldout-activation.mjs limited-activation --activation-cycle \"$ACTIVATION_CYCLE\" --out \"$TASK_OUTPUT\"` (prerequisite I5, G6C per plan 7.2). activationConfigurationDigest binds the exact configuration that limits learned_v3 exposure; the digest is the configuration-only contract of the rollout, recorded append-only. Plan 7.6 row I0-I6/I3R applies. focused_command targets future test files (plan-specified G6C command, unverifiable-at-base); affected_command is repo-verified. NOTE: this card's focused_command is the G6B/G6C tooling test (owned by the tooling cards); the card's own verification is the \u00a77.6 unmet-precondition/validating-assertion check at execution time."
   },
   {
     "task_id": "I_GATE_ACCEPTED",
     "title": "I_GATE_ACCEPTED gate: accepted Wave-I terminal branch (I6)",
     "risk": "high",
     "invariant": "I_GATE_ACCEPTED is the terminal gate of the accepted Wave-I branch: it is dispatchable only when the I6 LimitedActivationReceiptV1 exists (prerequisite table: I_GATE_ACCEPTED: I6), and it emits GateReceiptV1 listing every resolved edge with the exact ready/terminal verdict; the verifier checks the edge kind and parsed receipt outcome and never infers a branch from filenames (plan 7.5 gate node block, 7.6 gate row).",
-    "owners": ["I_GATE_ACCEPTED", "R1.T1"],
+    "owners": [
+      "I_GATE_ACCEPTED",
+      "R1.T1"
+    ],
     "production_callers": [
       "scripts/ranking-v3-task-graph.mjs verify-ready (plan 7.5 gate node block: --graph \"$TASK_GRAPH\" --node \"I_GATE_ACCEPTED\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\")"
     ],
@@ -353,7 +380,10 @@
     "title": "I_GATE_REJECTED gate: rejected Wave-I terminal branch (I3R)",
     "risk": "high",
     "invariant": "I_GATE_REJECTED is the terminal gate of the rejected Wave-I branch: it is dispatchable only when the I3R rejection-transition receipt exists (prerequisite table: I_GATE_REJECTED: I3R), and it emits GateReceiptV1 listing every resolved edge with the exact ready/terminal verdict; the verifier checks the edge kind and parsed receipt outcome and never infers a branch from filenames (plan 7.5 gate node block, 7.6 gate row).",
-    "owners": ["I_GATE_REJECTED", "R1.T1"],
+    "owners": [
+      "I_GATE_REJECTED",
+      "R1.T1"
+    ],
     "production_callers": [
       "scripts/ranking-v3-task-graph.mjs verify-ready (plan 7.5 gate node block: --graph \"$TASK_GRAPH\" --node \"I_GATE_REJECTED\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\")"
     ],

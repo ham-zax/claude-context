@@ -4,7 +4,9 @@
     "title": "G1: residual scoring integration into search-execution.ts (second of three sequential owners: B5 -> G1 -> G2)",
     "risk": "high",
     "invariant": "Residual never changes admission or exact-control ownership. shouldSkipRerankForExactPin bypass preserves the pre-rerank ordering unchanged; a residual crossing the admission cutoff neither newly enters the provider request, nor displaces a baseline-admitted candidate, nor receives neural evidence (plan invariants #2/#3/#5). deterministicV3Score = preRerankBaselineScore + clamp(dot(weights, normalizedFeatures), -maximumResidual, maximumResidual); RRF constants 100/60 stay frozen in all modes.",
-    "owners": ["G1"],
+    "owners": [
+      "G1"
+    ],
     "production_callers": [
       "packages/mcp/src/core/search-execution.ts (runSearchExecution, called from handlers.ts:4857; shouldSkipRerankForExactPin :288, used :485; rerankResults :566; finalScore/computeSearchCandidateFinalScore :651/:1229; rerank RRF blend :649-650)"
     ],
@@ -14,7 +16,9 @@
       "packages/mcp/src/core/search-execution.must-lane.test.ts",
       "packages/mcp/src/core/handlers.golden.test.ts"
     ],
-    "approved_files": ["packages/mcp/src/core/search-execution.ts"],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ts"
+    ],
     "interface_changes": [
       "residual stage integrated between the frozen baselineAdmissionSet snapshot and the optional provider call (canonical order in plan 4.1)",
       "imports D7 residual scoring unchanged; no evaluation-only or runtime-only duplicate is permitted (plan 4.4)",
@@ -47,7 +51,9 @@
     "title": "G2: provider request/permutation integration into search-execution.ts via A12/D7 (third and final sequential owner)",
     "risk": "high",
     "invariant": "Provider failure preserves the deterministic V3 sequence byte-for-byte with no partial permutation and no score-based re-sort. Any timeout, provider error, malformed response, duplicate/omitted/foreign identity, non-finite score, or gate rejection discards the detached provider result and preserves the pre-provider deterministic V3 sequence byte-for-byte; permutation occurs only within baseline-admitted positions; postPolicyRank is one-based, unique, contiguous from 1..N; no downstream component may sort the final sequence again by finalScore or deterministicV3Score (plan 4.2/4.3, invariant #4).",
-    "owners": ["G2"],
+    "owners": [
+      "G2"
+    ],
     "production_callers": [
       "packages/mcp/src/core/search-execution.ts (runSearchExecution, called from handlers.ts:4857; shouldSkipRerankForExactPin :288, used :485; rerankResults :566; finalScore/computeSearchCandidateFinalScore :651/:1229; rerank RRF blend :649-650)"
     ],
@@ -57,7 +63,9 @@
       "packages/mcp/src/core/search-execution.must-lane.test.ts",
       "packages/mcp/src/core/handlers.golden.test.ts"
     ],
-    "approved_files": ["packages/mcp/src/core/search-execution.ts"],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ts"
+    ],
     "interface_changes": [
       "provider-derived slot permutation integrated via D7/A12 imports unchanged (A12 ranking-provider-request-v1 request construction; D7 provider-slot-permutation)",
       "complete validated provider response required; identities permuted only within baseline-admitted positions; never promotes an unadmitted or filtered candidate (invariant #4)",
@@ -93,12 +101,18 @@
     "title": "G3: ranking-v3 diagnostics in search-types.ts (score + final rank; bounded truthful projection)",
     "risk": "medium",
     "invariant": "Diagnostics expose deterministic score and final rank as a bounded truthful projection; they never imply that the deterministic score caused a provider-derived rank; no feature-vector dumps in public responses (plan 4.3, invariant #16).",
-    "owners": ["G3"],
+    "owners": [
+      "G3"
+    ],
     "production_callers": [
       "packages/mcp/src/core/search-types.ts (existing diagnostics types verified at base: rerankerFailures :408, rerankerRetries :409, rerankerTimeouts :410; SearchDiagnostics operationalReason :612; SearchRerankerOperationalReason :628)"
     ],
-    "test_callers": ["packages/mcp/src/core/search-types.test.ts"],
-    "approved_files": ["packages/mcp/src/core/search-types.ts"],
+    "test_callers": [
+      "packages/mcp/src/core/search-types.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-types.ts"
+    ],
     "interface_changes": [
       "extend search diagnostics with deterministic score and final (post-policy) rank (bounded projection)",
       "diagnostics must not imply the deterministic score caused a provider-derived rank",
@@ -125,7 +139,9 @@
     "title": "G4: startup/runtime construction (baseline default; reject target/configuration/request-contract/registry mismatch with truthful reason)",
     "risk": "high",
     "invariant": "Startup rejects any target/configuration/request-contract/registry mismatch with baseline fallback and truthful diagnostic; learned_v3 becomes selectable no earlier than I4; provider-derived mode additionally requires an exact active provider/model/projection/configuration/request-contract match; disabled mode requires no active provider identity (plan invariants #9/#10, 9.1).",
-    "owners": ["G4"],
+    "owners": [
+      "G4"
+    ],
     "production_callers": [
       "packages/mcp/src/config.ts (resolveRerankerProvider :235; packet anchor cited :238 - declaration verified at :235 at base)",
       "evals/search-quality/search-quality-evaluation.ts (evaluation envelope; fixture RED at base per plan 9.2/10)"
@@ -134,7 +150,9 @@
       "evals/search-quality/search-quality-evaluation.test.ts (RED at base)",
       "packages/mcp/src/core/handlers.golden.test.ts"
     ],
-    "approved_files": ["packages/mcp/src/config.ts"],
+    "approved_files": [
+      "packages/mcp/src/config.ts"
+    ],
     "interface_changes": [
       "startup/runtime construction enforcing production qualification: F2 registry loading, F6 policy selection, G4 construction (plan 4.5)",
       "any mismatched authority (target, configuration, request contract, registry) -> baseline fallback with truthful reason",
@@ -167,7 +185,9 @@
     "title": "G5: continuation sites from CONTINUATION_SITES.json (never re-rank; stale on policy identity change)",
     "risk": "high",
     "invariant": "Continuation never re-ranks and stales on policy identity change: no new retrieval, scoring, or reranking on continuation; pagination exposes one immutable ranked set; policy identity changes invalidate continuation handles via existing revalidation (SEARCH_RESULT_SET_STALE); composite policy identity search_ranking_policy_v3:<artifact-sha256> carried by the ranked-set binding (plan invariant #14, 5.7).",
-    "owners": ["G5"],
+    "owners": [
+      "G5"
+    ],
     "production_callers": [
       "packages/mcp/src/core/handlers.ts (continuation region with SEARCH_RESULT_SET_STALE :5260-5478; runSearchFrontDoor :3915)",
       "packages/mcp/src/core/search-result-set-identity.ts (policy identity region :37-156; buildSearchRankedSetBinding ~:112)"
@@ -210,7 +230,9 @@
     "title": "G6: runtime matrix (pending/revoked/wrong-scope/invalid-transition evidence; every invalid case falls back)",
     "risk": "medium",
     "invariant": "Runtime matrix covers pending, revoked, wrong-scope, and invalid-transition evidence; every invalid case falls back; no product path can select pending, revoked, incompatible, or configuration-mismatched entries (plan 8.8, invariant #10).",
-    "owners": ["G6"],
+    "owners": [
+      "G6"
+    ],
     "production_callers": [
       "packages/mcp/src/core/ranking-policy-selector.ts (F6; plan-specified file)",
       "packages/mcp/src/core/ranking-policy-qualification-store.ts (F2; plan-specified file)",
@@ -223,7 +245,9 @@
       "evals/search-quality/search-quality-evaluation.test.ts (RED at base)",
       "packages/mcp/src/core/handlers.golden.test.ts"
     ],
-    "approved_files": [],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-v3-runtime-matrix.test.ts"
+    ],
     "interface_changes": [
       "runtime matrix test evidence: pending/revoked/wrong-scope/invalid-transition cases each fall back to baseline",
       "one matrix dimension per registry status x scope x configuration state",
@@ -253,13 +277,19 @@
     "title": "G6A: ranking-v3 resource harness in evals/search-ranking (loaded-policy path measurement + environment identity)",
     "risk": "medium",
     "invariant": "Resource harness measures the actual loaded-policy path and binds environment identity: the loaded runtime path and environment identity are bound, not a stub path (plan 7.5 G6A row, 9.2 calibration risk).",
-    "owners": ["G6A"],
+    "owners": [
+      "G6A"
+    ],
     "production_callers": [
       "evals/search-ranking/ (resource harness domain; exists at base with cross-repository-v3.manifest.json)",
       "evals/search-ranking/ranking-v3-resource-contract.json (D5 resource contract; plan-specified future file)"
     ],
-    "test_callers": ["evals/search-ranking/ (existing manifests; no harness test at base)"],
-    "approved_files": ["evals/search-ranking/ranking-v3-resource-harness.test.mjs"],
+    "test_callers": [
+      "evals/search-ranking/ (existing manifests; no harness test at base)"
+    ],
+    "approved_files": [
+      "evals/search-ranking/ranking-v3-resource-harness.test.mjs"
+    ],
     "interface_changes": [
       "loaded-policy path measurement under actual runtime construction (G4), not a stub path",
       "environment identity binding (platform/service class: online vs offline_linux_x64)",
@@ -288,12 +318,16 @@
     "title": "G6B: offline qualification CLI scripts/ranking-v3-offline-qualification.mjs + modules; owns DhInputIndexV1 and QualificationCycleManifestV1; H replay/gate entrypoints",
     "risk": "high",
     "invariant": "Offline qualification toolchain (Wave H) is sealed and deterministic: exactly one normative SelectedModeReplayReceipt per qualification cycle; H9 emits one outcome and binds H0's RegistryReadyReceiptV1 plus the expected current registry digest; DH input index and qualification-cycle manifests parse canonically; replay reproduces the deterministic V3 sequence via sealed D7 (plan 6.7, 8.10).",
-    "owners": ["G6B"],
+    "owners": [
+      "G6B"
+    ],
     "production_callers": [
       "scripts/satori-search-candidate-replay.mjs (computeSearchCandidateFinalScore :908/:1827; --require-neural-disabled and --held-out-opening: usage :2369, parsing :2386-2405)",
       "packages/mcp/src/core/search-execution.ts finalScore authority (computeSearchCandidateFinalScore :651/:1229)"
     ],
-    "test_callers": ["scripts/satori-search-candidate-replay.test.mjs"],
+    "test_callers": [
+      "scripts/satori-search-candidate-replay.test.mjs"
+    ],
     "approved_files": [
       "scripts/ranking-v3-offline-qualification.mjs",
       "scripts/ranking-v3-cycle-manifest.mjs",
@@ -336,13 +370,17 @@
     "title": "G6C: held-out activation CLI scripts/ranking-v3-heldout-activation.mjs + modules; owns PreHeldoutCycleManifestV1 and ActivationCycleManifestV1; H0/H10 and all Wave-I entrypoints",
     "risk": "high",
     "invariant": "Held-out activation toolchain (Wave I) is sealed and deterministic: ActivationCycleManifestV1 binds H10's new pending registry digest and exactly one I4/I3R terminal chain; every Wave-I command consumes the activation manifest; G6C rejects every byte sequence G6B rejects (shared DhInputIndexV1); pending_heldout terminates on both acceptance and rejection (plan 6.8, 8.11, invariant #12).",
-    "owners": ["G6C"],
+    "owners": [
+      "G6C"
+    ],
     "production_callers": [
       "scripts/ranking-v3-heldout-activation.mjs (owned CLI; H0 registry-ready, H10 pending, I0 authorize, I1 open, I2 execute, I3 adjudicate, I4 activate, I3R reject, I5 rollback-drill, I6 limited-activation entrypoints)",
       "DH boundary generator invokes build-pre-heldout-cycle; DI boundary generator invokes build-activation-cycle (plan 7.5 DH/DI rows)",
       "scripts/satori-search-candidate-replay.mjs (computeSearchCandidateFinalScore :908/:1827 as replay authority reused by sealed execution)"
     ],
-    "test_callers": ["scripts/satori-search-candidate-replay.test.mjs"],
+    "test_callers": [
+      "scripts/satori-search-candidate-replay.test.mjs"
+    ],
     "approved_files": [
       "scripts/ranking-v3-heldout-activation.mjs",
       "scripts/ranking-v3-registry-cycle.mjs",
@@ -384,7 +422,9 @@
     "title": "G7: IMPLEMENTATION_SEAL.json + scripts/verify-ranking-v3-implementation-seal.mjs (lockfile authority; every H/I entrypoint named and sealed)",
     "risk": "high",
     "invariant": "G7 seals every H/I entrypoint against the Gate-0-resolved lockfile authority: IMPLEMENTATION_SEAL.json binds source/built outputs, exact commands/tests, Node version, and the Gate-0-resolved pnpm-lock.yaml digest (R0.1 LOCKFILE_AUTHORITY.json); every H/I entrypoint is named and sealed; the verifier fails closed on hardcoded lockfile or missing executable (plan 8.9, 7.6 G7 row).",
-    "owners": ["G7"],
+    "owners": [
+      "G7"
+    ],
     "production_callers": [
       "scripts/verify-ranking-v3-implementation-seal.mjs (owned verifier; exact command per plan 7.5 G7 row)",
       "IMPLEMENTATION_SEAL.json (owned artifact)",

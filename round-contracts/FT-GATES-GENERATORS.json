@@ -1,0 +1,625 @@
+[
+  {
+    "task_id": "A_GATE",
+    "title": "Gate evidence card A_GATE (requires A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11Q, A11H, A12)",
+    "risk": "medium",
+    "invariant": "A_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (\u00a77.5); the next boundary generator stays nondispatchable until this gate receipt exists (\u00a77.4).",
+    "owners": [
+      "A_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.2 exact prerequisite table, \u00a77.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "A_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for A_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists \u2014 prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; A_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=A_GATE. \u00a77.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11Q, A11H, A12. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per \u00a77.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "B_GATE",
+    "title": "Gate evidence card B_GATE (requires B1, B2, B3, B4, B5, B6, B7, B8, B9)",
+    "risk": "medium",
+    "invariant": "B_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (\u00a77.5); the next boundary generator stays nondispatchable until this gate receipt exists (\u00a77.4).",
+    "owners": [
+      "B_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.2 exact prerequisite table, \u00a77.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "B_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for B_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists \u2014 prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; B_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=B_GATE. \u00a77.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): B1, B2, B3, B4, B5, B6, B7, B8, B9. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per \u00a77.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "C_GATE",
+    "title": "Gate evidence card C_GATE (requires C1, C1G, all expanded packet tasks, C3S, C4, C5, C6)",
+    "risk": "medium",
+    "invariant": "C_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (\u00a77.5); the next boundary generator stays nondispatchable until this gate receipt exists (\u00a77.4).",
+    "owners": [
+      "C_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.2 exact prerequisite table, \u00a77.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "C_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for C_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists \u2014 prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; C_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=C_GATE. \u00a77.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): C1, C1G, all expanded packet tasks, C3S, C4, C5, C6. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per \u00a77.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "D_GATE",
+    "title": "Gate evidence card D_GATE (requires D2, D3, D4, D5, D6, D7, D8)",
+    "risk": "medium",
+    "invariant": "D_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (\u00a77.5); the next boundary generator stays nondispatchable until this gate receipt exists (\u00a77.4).",
+    "owners": [
+      "D_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.2 exact prerequisite table, \u00a77.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "D_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for D_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists \u2014 prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; D_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=D_GATE. \u00a77.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): D2, D3, D4, D5, D6, D7, D8. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per \u00a77.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "F_GATE",
+    "title": "Gate evidence card F_GATE (requires F0, F1, F2, F6, F7, F8, F9)",
+    "risk": "medium",
+    "invariant": "F_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (\u00a77.5); the next boundary generator stays nondispatchable until this gate receipt exists (\u00a77.4).",
+    "owners": [
+      "F_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.2 exact prerequisite table, \u00a77.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "F_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for F_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists \u2014 prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; F_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=F_GATE. \u00a77.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): F0, F1, F2, F6, F7, F8, F9. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per \u00a77.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "G_GATE",
+    "title": "Gate evidence card G_GATE (requires G7)",
+    "risk": "medium",
+    "invariant": "G_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (\u00a77.5); the next boundary generator stays nondispatchable until this gate receipt exists (\u00a77.4).",
+    "owners": [
+      "G_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.2 exact prerequisite table, \u00a77.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "G_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for G_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists \u2014 prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; G_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=G_GATE. \u00a77.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): G7. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per \u00a77.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DB",
+    "title": "Boundary-generator card DB (dispatch scope wave-b, next DC0)",
+    "risk": "medium",
+    "invariant": "DB binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DC0; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DB",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DB: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-b (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DC0 present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DC0 is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DB (scope wave-b, next DC0). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-b and $NEXT_GENERATOR_ID_OR_NONE=DC0 as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: Wave-B card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DC0",
+    "title": "Boundary-generator card DC0 (dispatch scope wave-c-seed, next DC1)",
+    "risk": "medium",
+    "invariant": "DC0 binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DC1; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DC0",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DC0: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-c-seed (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DC1 present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DC1 is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DC0 (scope wave-c-seed, next DC1). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-c-seed and $NEXT_GENERATOR_ID_OR_NONE=DC1 as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: C1/C1G/DC1 card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DC1",
+    "title": "Boundary-generator card DC1 (dispatch scope wave-c-expanded, next DD)",
+    "risk": "medium",
+    "invariant": "DC1 binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DD; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DC1",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DC1: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-c-expanded (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DD present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DD is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DC1 (scope wave-c-expanded, next DD). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-c-expanded and $NEXT_GENERATOR_ID_OR_NONE=DD as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: expanded Wave-C card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DD",
+    "title": "Boundary-generator card DD (dispatch scope wave-d, next DE)",
+    "risk": "medium",
+    "invariant": "DD binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DE; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DD",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DD: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-d (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DE present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DE is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DD (scope wave-d, next DE). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-d and $NEXT_GENERATOR_ID_OR_NONE=DE as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: Wave-D card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DE",
+    "title": "Boundary-generator card DE (dispatch scope wave-e, next DF)",
+    "risk": "medium",
+    "invariant": "DE binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DF; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DE",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DE: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-e (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DF present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DF is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DE (scope wave-e, next DF). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-e and $NEXT_GENERATOR_ID_OR_NONE=DF as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: Wave-E card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DF",
+    "title": "Boundary-generator card DF (dispatch scope wave-f, next DG)",
+    "risk": "medium",
+    "invariant": "DF binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DG; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DF",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DF: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-f (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DG present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DG is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DF (scope wave-f, next DG). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-f and $NEXT_GENERATOR_ID_OR_NONE=DG as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: Wave-F card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DG",
+    "title": "Boundary-generator card DG (dispatch scope wave-g, next DH)",
+    "risk": "medium",
+    "invariant": "DG binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DH; every card resolves to a \u00a77.5/\u00a77.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DG",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.4 dispatch-card generation, \u00a77.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DG: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-g (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DH present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DH is nondispatchable until the current scope gate receipt exists \u2014 prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same \u00a77.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DG (scope wave-g, next DH). Exact \u00a77.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-g and $NEXT_GENERATOR_ID_OR_NONE=DH as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: Wave-G card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DH",
+    "title": "Boundary-generator card DH (build qualification/pre-heldout cycle manifests, dispatch scope wave-h, next DI)",
+    "risk": "high",
+    "invariant": "DH first creates the exact DhInputIndexV1 through G6B's sealed schema authority, then materializes QualificationCycleManifestV1 and PreHeldoutCycleManifestV1 (expectedPendingRegistrySha256: null \u2014 no future H10 digest), then builds the Wave-H card set; every Wave-H card consumes one of those canonical manifests.",
+    "owners": [
+      "DH",
+      "G6B",
+      "G6C",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.5 DH row, \u00a76.7)",
+      "PREREQUISITE_RECEIPT_INDEX.json",
+      "ACTIVATION_CONTRACT_INDEX.json (R1.4)",
+      "LOCKFILE_AUTHORITY.json (R0.1)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-heldout-activation.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DH: manifest/card-generation task; produces DH_INPUT_INDEX.json, QUALIFICATION_CYCLE_MANIFEST.json, PRE_HELDOUT_CYCLE_MANIFEST.json, card-set directory; no source file ownership"
+    ],
+    "interface_changes": [
+      "DhInputIndexV1 (artifact/target/contract/index/seal/corpus/tuning/registry/lockfile digests)",
+      "QualificationCycleManifestV1 (commandInputs H1..H9)",
+      "PreHeldoutCycleManifestV1 (expectedPendingRegistrySha256: null; commandInputs H0/H10)"
+    ],
+    "security_boundaries": [
+      "PreHeldoutCycleManifestV1 must NOT contain any future H10 digest (expectedPendingRegistrySha256: null)",
+      "Every execution card uses one canonical manifest; manifests fix all source paths, receipt paths, artifact hashes, commands, and output directories",
+      "commandInputDescriptorSha256 hashes only immutable prerequisite paths/digests/exact CLI args/reserved output dir \u2014 never future receipts"
+    ],
+    "overlap_with": [
+      "FT-G (G6B/G6C own the build-cycle entrypoints)",
+      "FT-H (all Wave-H cards consume DH's manifests)",
+      "FT-I (DI builds the activation manifest after H10)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DH. Exact sequence: (1) node scripts/ranking-v3-offline-qualification.mjs build-input-index --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --activation-contract-index \"$ACTIVATION_CONTRACT_INDEX\" --lockfile-authority \"$LOCKFILE_AUTHORITY\" --out \"$TASK_OUTPUT/DH_INPUT_INDEX.json\"; (2) node scripts/ranking-v3-offline-qualification.mjs build-cycle --input-index \"$TASK_OUTPUT/DH_INPUT_INDEX.json\" --out \"$TASK_OUTPUT/QUALIFICATION_CYCLE_MANIFEST.json\"; (3) node scripts/ranking-v3-heldout-activation.mjs build-pre-heldout-cycle --input-index \"$TASK_OUTPUT/DH_INPUT_INDEX.json\" --out \"$TASK_OUTPUT/PRE_HELDOUT_CYCLE_MANIFEST.json\"; (4) \u00a77.4 dispatch CLI, scope wave-h, next DI. PreHeldoutCycleManifestV1 binds expectedPendingRegistrySha256: null. Focused command targets future G6B/G6C test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  {
+    "task_id": "DI",
+    "title": "Boundary-generator card DI (build activation-cycle manifest, dispatch scope wave-i, next none)",
+    "risk": "high",
+    "invariant": "DI runs only after H10 and H_GATE_QUALIFIED; it creates the immutable ActivationCycleManifestV1 before building any Wave-I card (G6C parses the H10 transition receipt, verifies transitionKind create_pending_heldout, copies newRegistrySha256 into expectedPendingRegistrySha256); every Wave-I command accepts --activation-cycle; the final card set has no next generator.",
+    "owners": [
+      "DI",
+      "G6C",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (\u00a77.5 DI row, \u00a76.8)",
+      "PRE_HELDOUT_CYCLE.json (DH)",
+      "H10_TRANSITION_RECEIPT.json (H_GATE_QUALIFIED)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-heldout-activation.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-registry-cycle.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DI: manifest/card-generation task; produces ACTIVATION_CYCLE_MANIFEST.json + Wave-I card set; no source file ownership"
+    ],
+    "interface_changes": [
+      "ActivationCycleManifestV1 (preHeldoutCycleManifestSha256; h10TransitionReceiptSha256; artifactSha256; expectedPendingRegistrySha256 = H10 newRegistrySha256; commandInputs I0-I6/I3R)"
+    ],
+    "security_boundaries": [
+      "DI rejects any activation-cycle build whose H10 receipt is absent, wrong-kind (not create_pending_heldout), or binds a different pending registry digest (\u00a79.3 check 4)",
+      "No Wave-I card accepts the pre-held-out manifest as its authority",
+      "Wave-I card set has next generator: none \u2014 the dispatch chain terminates"
+    ],
+    "overlap_with": [
+      "FT-I (all Wave-I contracts consume the activation manifest)",
+      "FT-G (G6C owns build-activation-cycle)",
+      "FT-H (DI depends on H10 + H_GATE_QUALIFIED)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-heldout-activation.test.mjs scripts/ranking-v3-registry-cycle.test.mjs scripts/ranking-v3-heldout-adjudication.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DI. Exact sequence: (1) node scripts/ranking-v3-heldout-activation.mjs build-activation-cycle --pre-heldout-cycle \"$PRE_HELDOUT_CYCLE\" --h10-transition-receipt \"$H10_TRANSITION_RECEIPT\" --out \"$TASK_OUTPUT/ACTIVATION_CYCLE_MANIFEST.json\"; (2) \u00a77.4 dispatch CLI, scope wave-i, next none. G6C parses the H10 transition receipt, verifies transitionKind create_pending_heldout, copies newRegistrySha256 into expectedPendingRegistrySha256, and creates immutable command-input descriptors for I0-I6/I3R. Focused command targets future G6C test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  }
+]
