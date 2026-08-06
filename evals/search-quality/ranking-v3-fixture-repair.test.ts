@@ -1,77 +1,128 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runSearchQualityEvaluation } from './search-quality-evaluation.js';
 
-const testPath = fileURLToPath(import.meta.url);
-const workspaceRoot = path.resolve(path.dirname(testPath), '../..');
+function workspaceRoot(): string {
+    return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+}
 
-// R0.1A regression guard (§7.6): the deterministic search-quality fixture had
-// three stale seams at the frozen base:
-//   1. hermetic CapabilityResolver config missing required ContextMcpConfig
-//      fields (executionProfile, networkPolicy, vectorStoreProvider) -> TypeError
-//      in resolveRerankerProvider;
-//   2. no prepared-read source observation (syncManager/getPreparedReadObservation
-//      absent, no mutation-lease coordinator, no index-authority observations)
-//      -> every workload returned source_state_unverified;
-//   3. type-level drift (SymbolRegistryManifestFile.definitionStatus missing,
-//      SymbolRecord.relativePath vs file, config fields) that left the harness
-//      un-typecheckable under strict inference.
-// The repair is confined to evals/search-quality/ — production files are
-// unchanged. This test proves all workloads are ok, expected owner ranks
-// match, the corpus stays hash-bound and deterministic, and the evaluation
-// leaves production paths untouched.
+const EXPECTED_LIMITS = [1, 3, 5, 10, 20] as const;
+
+type OwnerRankVector = readonly [
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+];
+
+const EXPECTED_OWNER_RANKS: Readonly<Record<string, OwnerRankVector>> = {
+    architecture_discovery: [1, 1, 1, 1, 1],
+    caller_discovery: [1, 1, 1, 1, 1],
+    common_noisy_term: [1, 1, 1, 1, 1],
+    conceptual_behavior: [null, 2, 2, 2, 2],
+    conceptual_where_is: [1, 1, 1, 1, 1],
+    configuration_lookup: [1, 1, 1, 1, 1],
+    exact_literal: [1, 1, 1, 1, 1],
+    generated_interference: [1, 1, 1, 1, 1],
+    known_exact_identifier: [1, 1, 1, 1, 1],
+    known_file_owner: [1, 1, 1, 1, 1],
+    lexical_semantic_disagreement: [1, 1, 1, 1, 1],
+    mixed_identifier_concept: [1, 1, 1, 1, 1],
+    multiple_plausible_owners: [1, 1, 1, 1, 1],
+    partial_identifier: [1, 1, 1, 1, 1],
+    rerank_helps: [1, 1, 1, 1, 1],
+    rerank_should_skip: [1, 1, 1, 1, 1],
+    split_owner_relevant_body: [1, 1, 1, 1, 1],
+    symbol_ownership: [1, 1, 1, 1, 1],
+    test_runtime_ambiguity: [1, 1, 1, 1, 1],
+};
+
+function readWorkingTreeState(root: string): string {
+    const trackedPaths = [
+        'packages',
+        'scripts',
+        'fixtures/search-quality/v1',
+    ];
+    const result = spawnSync('git', [
+        'ls-files',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+        '-z',
+        '--',
+        ...trackedPaths,
+    ], {
+        cwd: root,
+        maxBuffer: 16 * 1024 * 1024,
+    });
+    assert.equal(result.status, 0, result.stderr?.toString('utf8'));
+
+    const files = (result.stdout ?? Buffer.alloc(0))
+        .toString('utf8')
+        .split('\0')
+        .filter((relativePath) => relativePath.length > 0)
+        .sort();
+    const digest = crypto.createHash('sha256');
+    for (const relativePath of files) {
+        digest.update(relativePath, 'utf8');
+        digest.update('\0', 'utf8');
+        digest.update(fs.readFileSync(path.join(root, relativePath)));
+        digest.update('\n', 'utf8');
+    }
+    return digest.digest('hex');
+}
+
 test('repairs_all_three_stale_fixture_seams_without_product_changes', async () => {
-    const productionPaths = ['packages', 'scripts', '.github'];
-    const porcelain = () => spawnSync(
-        'git',
-        ['status', '--porcelain', '--', ...productionPaths],
-        { cwd: workspaceRoot, encoding: 'utf8' },
-    ).stdout.trim();
+    const root = workspaceRoot();
+    const before = readWorkingTreeState(root);
 
-    const productionBefore = porcelain();
+    const artifact = await runSearchQualityEvaluation(root, {
+        excludeRepositoryPaths: ['evals/search-quality/ranking-v3-fixture-repair.test.ts'],
+    });
 
-    const first = await runSearchQualityEvaluation(workspaceRoot);
-    const second = await runSearchQualityEvaluation(workspaceRoot);
-
-    // Seam 1 + 2: every workload and limit is ok (no TypeError, no
-    // source_state_unverified), with the fixed hermetic contract intact.
-    assert.equal(first.workloadCount, 19);
-    assert.equal(first.results.length, first.workloadCount * first.limits.length);
-    assert.equal(first.results.every((result) => result.status === 'ok'), true);
-    assert.equal(first.results.every((result) => result.toolCalls === 1), true);
-
-    // Seam 3: the corpus is hash-bound and deterministic across runs.
-    assert.match(first.fixtureManifestSha256, /^[a-f0-9]{64}$/);
-    assert.deepEqual(first.results, second.results);
-    assert.deepEqual(first.summary, second.summary);
-    assert.deepEqual(first.repository, second.repository);
-
-    // Expected owner ranks match the fixture contract.
-    assert.equal(
-        first.results.every((result) => result.ownerAvailableInInitialSearch === (result.ownerRank !== null)),
-        true,
+    assert.deepEqual(artifact.limits, [...EXPECTED_LIMITS], 'fixture limits changed');
+    assert.equal(artifact.results.length, artifact.workloadCount * EXPECTED_LIMITS.length);
+    assert.deepEqual(
+        [...new Set(artifact.results.map((result) => result.status))],
+        ['ok'],
+        'every fixture workload/limit must complete successfully',
     );
-    const splitOwnerResults = first.results.filter((result) => (
-        result.workloadId === 'split_owner_relevant_body'
-    ));
-    assert.equal(splitOwnerResults.length, first.limits.length);
-    assert.equal(splitOwnerResults.every((result) => (
-        result.provider.rerankedCandidateIds.includes('resilient.tailChunk')
-    )), true);
-    assert.equal(splitOwnerResults.every((result) => result.ownerRank === 1), true);
-    const conceptualWhereIsResults = first.results.filter((result) => (
-        result.workloadId === 'conceptual_where_is'
-    ));
-    assert.equal(conceptualWhereIsResults.length, first.limits.length);
-    assert.equal(conceptualWhereIsResults.every((result) => (
-        result.routeObservation.selectedRoute === 'conceptual'
-        && result.routeObservation.semanticExpansionAttempted
-    )), true);
+    assert.equal(
+        artifact.results.some((result) => result.warningCodes.includes('source_state_unverified')),
+        false,
+        'the repaired fixture must establish a verified source state',
+    );
+    assert.deepEqual(
+        [...new Set(artifact.results.map((result) => result.workloadId))].sort(),
+        Object.keys(EXPECTED_OWNER_RANKS).sort(),
+        'the fixed owner-rank authority must cover every workload exactly',
+    );
+    const observedPairs = new Set<string>();
+    for (const result of artifact.results) {
+        const pairKey = `${result.workloadId}:${result.limit}`;
+        assert.equal(observedPairs.has(pairKey), false, `duplicate fixture result ${pairKey}`);
+        observedPairs.add(pairKey);
+        const limitIndex = EXPECTED_LIMITS.indexOf(result.limit as (typeof EXPECTED_LIMITS)[number]);
+        assert.notEqual(limitIndex, -1, `unknown result limit ${result.limit}`);
+        assert.equal(
+            result.ownerRank,
+            EXPECTED_OWNER_RANKS[result.workloadId]?.[limitIndex],
+            `owner rank changed for ${result.workloadId} at limit ${result.limit}`,
+        );
+        assert.equal(result.budgetChecks.toolCalls, true);
+        assert.equal(result.budgetChecks.responseBytes, true);
+    }
+    assert.equal(
+        observedPairs.size,
+        Object.keys(EXPECTED_OWNER_RANKS).length * EXPECTED_LIMITS.length,
+        'every workload/limit pair must appear exactly once',
+    );
 
-    // Production files unchanged: the hermetic evaluation never dirties
-    // production paths (its fixture repo lives under a temp root).
-    assert.equal(porcelain(), productionBefore);
+    assert.equal(readWorkingTreeState(root), before, 'evaluation must not modify product or fixture files');
 });

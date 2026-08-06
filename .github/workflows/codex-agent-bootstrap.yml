@@ -1,0 +1,262 @@
+name: Codex agent bootstrap
+
+on:
+  push:
+    branches:
+      - codex/ranking-v3-r0-1a-fixture
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply staged agent patch
+        id: apply_patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_dir=.agent-patches
+          single_patch="$patch_dir/pending.patch"
+          metadata="$patch_dir/METADATA"
+          ready="$patch_dir/READY"
+          if [[ ! -f "$single_patch" && ! -f "$ready" ]]; then
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          while IFS= read -r changed_path; do
+            if [[ "$changed_path" != .agent-patches/* ]]; then
+              echo "Patch transport commit may change only .agent-patches/*" >&2
+              exit 1
+            fi
+          done < <(git diff --name-only HEAD^ HEAD)
+
+          if [[ -f "$single_patch" ]]; then
+            expected_parent=$(sed -n 's/^# agent-parent-sha: //p' "$single_patch" | head -n 1)
+            commit_message=$(sed -n 's/^# agent-commit-message: //p' "$single_patch" | head -n 1)
+            sed '/^# agent-parent-sha: /d; /^# agent-commit-message: /d'               "$single_patch" > /tmp/agent.patch
+          else
+            if [[ ! -f "$metadata" ]]; then
+              echo "Multipart patch transport is missing METADATA." >&2
+              exit 1
+            fi
+            expected_parent=$(sed -n 's/^parent=//p' "$metadata" | head -n 1)
+            commit_message=$(sed -n 's/^message=//p' "$metadata" | head -n 1)
+            payload_encoding=$(sed -n 's/^encoding=//p' "$metadata" | head -n 1)
+            mapfile -t patch_parts < <(find "$patch_dir" -maxdepth 1 -type f -name 'part-*.patch' -print | sort)
+            if (( ${#patch_parts[@]} == 0 )); then
+              echo "Multipart patch transport has no patch parts." >&2
+              exit 1
+            fi
+            cat "${patch_parts[@]}" > /tmp/agent.payload
+            if [[ "$payload_encoding" == "gzip" ]]; then
+              gzip -dc /tmp/agent.payload > /tmp/agent.patch
+            elif [[ -z "$payload_encoding" || "$payload_encoding" == "plain" ]]; then
+              cp /tmp/agent.payload /tmp/agent.patch
+            else
+              echo "Unsupported multipart payload encoding: $payload_encoding" >&2
+              exit 1
+            fi
+          fi
+
+          actual_parent=$(git rev-parse HEAD^)
+          if [[ ! "$expected_parent" =~ ^[a-f0-9]{40}$ || "$actual_parent" != "$expected_parent" ]]; then
+            echo "Patch parent mismatch: expected=$expected_parent actual=$actual_parent" >&2
+            exit 1
+          fi
+          if [[ -z "$commit_message" ]]; then
+            echo "Patch commit message is missing" >&2
+            exit 1
+          fi
+
+          git apply --check /tmp/agent.patch
+          git apply /tmp/agent.patch
+          rm -rf "$patch_dir"
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "$commit_message"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "applied=true" >> "$GITHUB_OUTPUT"
+
+      - name: Record effective branch head
+        id: effective_head
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+
+      - name: Create local-clone Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master --no-tags
+          git update-ref refs/heads/agent-feature HEAD
+          git update-ref refs/heads/agent-master refs/remotes/origin/master
+          git bundle create satori-agent.bundle \
+            refs/heads/agent-feature \
+            refs/heads/agent-master
+          git bundle verify satori-agent.bundle
+          cat > agent-bundle-metadata.json <<EOF
+          {
+            "repository": "ham-zax/satori",
+            "sourceBranch": "codex/ranking-v3-r0-1a-fixture",
+            "sourceHead": "$(git rev-parse HEAD)",
+            "sourceTree": "$(git rev-parse HEAD^{tree})",
+            "masterHead": "$(git rev-parse refs/remotes/origin/master)",
+            "masterTree": "$(git rev-parse refs/remotes/origin/master^{tree})"
+          }
+          EOF
+          printf '%s\n' 125 > r0-1a-focused.status
+          printf '%s\n' 125 > r0-1a-eval.status
+          : > r0-1a-focused.log
+          : > r0-1a-eval.log
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace core package
+        run: pnpm --filter @zokizuan/satori-core build
+
+      - name: Run Ranking V3 verification and capture logs
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+
+          node --import tsx --test \
+            evals/search-quality/ranking-v3-fixture-repair.test.ts \
+            2>&1 | tee r0-1a-focused.log
+          fixture_status=${PIPESTATUS[0]}
+
+          wave_a_tests=(
+            packages/core/src/core/semantic-search-candidate-trace.test.ts
+            packages/mcp/src/core/search-ranking-evidence.test.ts
+            packages/mcp/src/core/rerank-evidence.test.ts
+            packages/mcp/src/core/ranking-features-v1.test.ts
+            packages/mcp/src/core/ranking-policy-artifact.test.ts
+            packages/mcp/src/core/ranking-policy-qualification.test.ts
+            packages/mcp/src/core/ranking-policy-identity.test.ts
+            packages/mcp/src/core/ranking-qualification-receipts.test.ts
+            packages/mcp/src/core/ranking-heldout-receipts.test.ts
+            packages/mcp/src/core/ranking-provider-request-v1.test.ts
+            evals/search-quality/ranking-v3-metrics.test.ts
+          )
+          node --import tsx --test "${wave_a_tests[@]}" 2>&1 | tee ranking-v3-wave-a-tests.log
+          wave_a_status=${PIPESTATUS[0]}
+
+          script_tests=(
+            scripts/ranking-judgments.test.mjs
+            scripts/ranking-lofo-folds.test.mjs
+          )
+          while IFS= read -r test_file; do
+            script_tests+=("$test_file")
+          done < <(find scripts -maxdepth 1 -type f \
+            \( -name 'ranking-v3*.test.mjs' -o -name 'verify-ranking-v3*.test.mjs' -o -name 'run-ranking-v3*.test.mjs' \) \
+            -print | sort)
+          node --test "${script_tests[@]}" 2>&1 | tee ranking-v3-script-tests.log
+          script_status=${PIPESTATUS[0]}
+
+          pnpm --filter @zokizuan/satori-core typecheck \
+            2>&1 | tee ranking-v3-core-typecheck.log
+          core_typecheck_status=${PIPESTATUS[0]}
+          pnpm --filter @zokizuan/satori-mcp typecheck \
+            2>&1 | tee ranking-v3-mcp-typecheck.log
+          mcp_typecheck_status=${PIPESTATUS[0]}
+
+          pnpm eval:search-quality \
+            2>&1 | tee r0-1a-eval.log
+          eval_status=${PIPESTATUS[0]}
+
+          focused_status=0
+          if [[ "$fixture_status" != "0" || "$wave_a_status" != "0" || "$script_status" != "0" || "$core_typecheck_status" != "0" || "$mcp_typecheck_status" != "0" ]]; then
+            focused_status=1
+          fi
+          printf '%s\n' "$focused_status" > r0-1a-focused.status
+          printf '%s\n' "$eval_status" > r0-1a-eval.status
+          printf '%s\n' "$wave_a_status" > ranking-v3-wave-a-tests.status
+          printf '%s\n' "$script_status" > ranking-v3-script-tests.status
+          printf '%s\n' "$core_typecheck_status" > ranking-v3-core-typecheck.status
+          printf '%s\n' "$mcp_typecheck_status" > ranking-v3-mcp-typecheck.status
+          printf 'focused_status=%s\n' "$focused_status" >> "$GITHUB_OUTPUT"
+          printf 'eval_status=%s\n' "$eval_status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload bundle and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: satori-agent-bundle-${{ steps.effective_head.outputs.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            satori-agent.bundle
+            agent-bundle-metadata.json
+            r0-1a-focused.log
+            r0-1a-eval.log
+            r0-1a-focused.status
+            r0-1a-eval.status
+            ranking-v3-wave-a-tests.log
+            ranking-v3-wave-a-tests.status
+            ranking-v3-script-tests.log
+            ranking-v3-script-tests.status
+            ranking-v3-core-typecheck.log
+            ranking-v3-core-typecheck.status
+            ranking-v3-mcp-typecheck.log
+            ranking-v3-mcp-typecheck.status
+
+      - name: Publish bootstrap run locator
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          focused_status=$(cat r0-1a-focused.status 2>/dev/null || printf '%s' 125)
+          eval_status=$(cat r0-1a-eval.status 2>/dev/null || printf '%s' 125)
+          body=$(cat <<EOF
+          Agent bootstrap run ID: ${GITHUB_RUN_ID}
+          Commit: ${{ steps.effective_head.outputs.sha }}
+          Artifact: satori-agent-bundle-${{ steps.effective_head.outputs.sha }}
+          Applied staged patch: ${{ steps.apply_patch.outputs.applied }}
+          Focused status: ${focused_status}
+          Evaluation status: ${eval_status}
+          EOF
+          )
+          gh api "repos/${GITHUB_REPOSITORY}/issues/3/comments" -f body="$body"
+
+      - name: Enforce R0.1A verification result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          focused_status=$(cat r0-1a-focused.status 2>/dev/null || printf '%s' 125)
+          eval_status=$(cat r0-1a-eval.status 2>/dev/null || printf '%s' 125)
+          if [[ "$focused_status" != "0" || "$eval_status" != "0" ]]; then
+            echo "R0.1A verification failed: focused=$focused_status eval=$eval_status" >&2
+            exit 1
+          fi
