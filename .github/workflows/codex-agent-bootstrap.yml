@@ -27,20 +27,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          patch_path=.agent-patches/pending.patch
-          if [[ ! -f "$patch_path" ]]; then
+          patch_dir=.agent-patches
+          single_patch="$patch_dir/pending.patch"
+          metadata="$patch_dir/METADATA"
+          ready="$patch_dir/READY"
+          if [[ ! -f "$single_patch" && ! -f "$ready" ]]; then
             echo "applied=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          changed_paths=$(git diff --name-only HEAD^ HEAD)
-          if [[ "$changed_paths" != "$patch_path" ]]; then
-            echo "Patch transport commit must change only $patch_path" >&2
-            exit 1
+          while IFS= read -r changed_path; do
+            if [[ "$changed_path" != .agent-patches/* ]]; then
+              echo "Patch transport commit may change only .agent-patches/*" >&2
+              exit 1
+            fi
+          done < <(git diff --name-only HEAD^ HEAD)
+
+          if [[ -f "$single_patch" ]]; then
+            expected_parent=$(sed -n 's/^# agent-parent-sha: //p' "$single_patch" | head -n 1)
+            commit_message=$(sed -n 's/^# agent-commit-message: //p' "$single_patch" | head -n 1)
+            sed '/^# agent-parent-sha: /d; /^# agent-commit-message: /d' "$single_patch" > /tmp/agent.patch
+          else
+            if [[ ! -f "$metadata" ]]; then
+              echo "Multipart patch transport is missing METADATA." >&2
+              exit 1
+            fi
+            expected_parent=$(sed -n 's/^parent=//p' "$metadata" | head -n 1)
+            commit_message=$(sed -n 's/^message=//p' "$metadata" | head -n 1)
+            mapfile -t patch_parts < <(find "$patch_dir" -maxdepth 1 -type f -name 'part-*.patch' -print | sort)
+            if (( ${#patch_parts[@]} == 0 )); then
+              echo "Multipart patch transport has no patch parts." >&2
+              exit 1
+            fi
+            cat "${patch_parts[@]}" > /tmp/agent.patch
           fi
 
-          expected_parent=$(sed -n 's/^# agent-parent-sha: //p' "$patch_path" | head -n 1)
-          commit_message=$(sed -n 's/^# agent-commit-message: //p' "$patch_path" | head -n 1)
           actual_parent=$(git rev-parse HEAD^)
           if [[ ! "$expected_parent" =~ ^[a-f0-9]{40}$ || "$actual_parent" != "$expected_parent" ]]; then
             echo "Patch parent mismatch: expected=$expected_parent actual=$actual_parent" >&2
@@ -51,12 +72,9 @@ jobs:
             exit 1
           fi
 
-          sed '/^# agent-parent-sha: /d; /^# agent-commit-message: /d' \
-            "$patch_path" > /tmp/agent.patch
           git apply --check /tmp/agent.patch
           git apply /tmp/agent.patch
-          rm "$patch_path"
-          rmdir .agent-patches 2>/dev/null || true
+          rm -rf "$patch_dir"
 
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -126,31 +144,55 @@ jobs:
             2>&1 | tee r0-1a-focused.log
           fixture_status=${PIPESTATUS[0]}
 
-          script_tests=()
+          wave_a_tests=(
+            packages/core/src/core/semantic-search-candidate-trace.test.ts
+            packages/mcp/src/core/search-ranking-evidence.test.ts
+            packages/mcp/src/core/rerank-evidence.test.ts
+            packages/mcp/src/core/ranking-features-v1.test.ts
+            packages/mcp/src/core/ranking-policy-artifact.test.ts
+            packages/mcp/src/core/ranking-policy-qualification.test.ts
+            packages/mcp/src/core/ranking-policy-identity.test.ts
+            packages/mcp/src/core/ranking-qualification-receipts.test.ts
+            packages/mcp/src/core/ranking-heldout-receipts.test.ts
+            packages/mcp/src/core/ranking-provider-request-v1.test.ts
+            evals/search-quality/ranking-v3-metrics.test.ts
+          )
+          node --import tsx --test "${wave_a_tests[@]}" 2>&1 | tee ranking-v3-wave-a-tests.log
+          wave_a_status=${PIPESTATUS[0]}
+
+          script_tests=(
+            scripts/ranking-judgments.test.mjs
+            scripts/ranking-lofo-folds.test.mjs
+          )
           while IFS= read -r test_file; do
             script_tests+=("$test_file")
           done < <(find scripts -maxdepth 1 -type f \
             \( -name 'ranking-v3*.test.mjs' -o -name 'verify-ranking-v3*.test.mjs' -o -name 'run-ranking-v3*.test.mjs' \) \
             -print | sort)
-          if (( ${#script_tests[@]} > 0 )); then
-            node --test "${script_tests[@]}" 2>&1 | tee ranking-v3-script-tests.log
-            script_status=${PIPESTATUS[0]}
-          else
-            : > ranking-v3-script-tests.log
-            script_status=0
-          fi
+          node --test "${script_tests[@]}" 2>&1 | tee ranking-v3-script-tests.log
+          script_status=${PIPESTATUS[0]}
+
+          pnpm --filter @zokizuan/satori-core typecheck \
+            2>&1 | tee ranking-v3-core-typecheck.log
+          core_typecheck_status=${PIPESTATUS[0]}
+          pnpm --filter @zokizuan/satori-mcp typecheck \
+            2>&1 | tee ranking-v3-mcp-typecheck.log
+          mcp_typecheck_status=${PIPESTATUS[0]}
 
           pnpm eval:search-quality \
             2>&1 | tee r0-1a-eval.log
           eval_status=${PIPESTATUS[0]}
 
           focused_status=0
-          if [[ "$fixture_status" != "0" || "$script_status" != "0" ]]; then
+          if [[ "$fixture_status" != "0" || "$wave_a_status" != "0" || "$script_status" != "0" || "$core_typecheck_status" != "0" || "$mcp_typecheck_status" != "0" ]]; then
             focused_status=1
           fi
           printf '%s\n' "$focused_status" > r0-1a-focused.status
           printf '%s\n' "$eval_status" > r0-1a-eval.status
+          printf '%s\n' "$wave_a_status" > ranking-v3-wave-a-tests.status
           printf '%s\n' "$script_status" > ranking-v3-script-tests.status
+          printf '%s\n' "$core_typecheck_status" > ranking-v3-core-typecheck.status
+          printf '%s\n' "$mcp_typecheck_status" > ranking-v3-mcp-typecheck.status
           printf 'focused_status=%s\n' "$focused_status" >> "$GITHUB_OUTPUT"
           printf 'eval_status=%s\n' "$eval_status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -169,8 +211,14 @@ jobs:
             r0-1a-eval.log
             r0-1a-focused.status
             r0-1a-eval.status
+            ranking-v3-wave-a-tests.log
+            ranking-v3-wave-a-tests.status
             ranking-v3-script-tests.log
             ranking-v3-script-tests.status
+            ranking-v3-core-typecheck.log
+            ranking-v3-core-typecheck.status
+            ranking-v3-mcp-typecheck.log
+            ranking-v3-mcp-typecheck.status
 
       - name: Publish bootstrap run locator
         if: always()
