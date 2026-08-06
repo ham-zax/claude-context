@@ -4,168 +4,168 @@
     "taskId": "A1",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/core/src/core/semantic-search-candidate-trace.test.ts",
     "result": "passed",
     "artifactSha256": "06fc7fc054ffbf7edb6ec458cd533e9de90c5463f9f8bdcd0f818f0af086cd44",
-    "sha256": "6b9ac174a88ce792744b0922d4138ad4ce0ffa092b3e0a3f2dde07347823c03e"
+    "sha256": "88ba58b68b616cddcf2bda4ab1ab52a53a67e926cdcb12857e0f0186ee484fea"
   },
   "A2": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A2",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/search-ranking-evidence.test.ts",
     "result": "passed",
     "artifactSha256": "1ecd6ab229dc3d859a93aa16e0b4481fd19e3f200a2da5f1d880f3dea32bb87a",
-    "sha256": "8114e285c320008c5e711cf5bc96d97aa3bbdf8e41d128d3f38a01c7261ce3f5"
+    "sha256": "4c63e38c619c7ed0f080a29b0b28c6a667044cb6326ae73e841cdae234b32cbc"
   },
   "A3": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A3",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/rerank-evidence.test.ts",
     "result": "passed",
     "artifactSha256": "faefc9274aa104a9b6166b35a76c81eb6396c7c256ae1dc59d5954e370e1dbfd",
-    "sha256": "46dfac69328bbdb5eaf9ae1614d1d6320b06aa300c3587f647b0adcd8f011510"
+    "sha256": "55f828fd03e9ccfa18cd71d9b0925269de97177b7b4eee7e1081fb12d665ad96"
   },
   "A4": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A4",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-features-v1.test.ts",
     "result": "passed",
     "artifactSha256": "dc233996a27851b47a9ec61a3fbaac38e9844722d40721b28cf776728252403b",
-    "sha256": "ee63f8fc60b310342e5f6e297cacb5dbe1031ff52d43ad6f0e4f203607c611eb"
+    "sha256": "98791fc702948b2b0078e12beafed48a4e2c070b093e9a76e12277bca1dd5cb8"
   },
   "A5": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A5",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-policy-artifact.test.ts",
     "result": "passed",
     "artifactSha256": "94fd8389ef8fd795f5dbfcaee29571e39b27335318fb415ba9e30694375eade4",
-    "sha256": "4cb8306b67c5bc1073cfd9a74101068f6b8e3ffd8c7bd750fe73de8b5ba3dac8"
+    "sha256": "51a3346dcc66dd1c31d0e247192347aa7dab15018dc80eb8b19050a57dc5af02"
   },
   "A6": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A6",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-policy-qualification.test.ts",
     "result": "passed",
     "artifactSha256": "f604b337112a11dc99f23104530fe171f0a6a0ac1a2a38562eb0f78b040f5078",
-    "sha256": "326af6bff87fadfe4d406a8a9434623631ae27d2415a918ab7f46f22ed69a10d"
+    "sha256": "403a201bbe2ad87574c357574bbd0f8c17da9c9cdf7bed76d8d040f358a292de"
   },
   "A7": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A7",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-policy-identity.test.ts",
     "result": "passed",
     "artifactSha256": "c7263bebe9456bfbdc38e587f60c534b183312ae6a333c9961fa39d5a55ea2fb",
-    "sha256": "43e5c071b601e89373f218187fe836c927fad6a186db7912265d172cde60390a"
+    "sha256": "d125435d55463a41a6fee006127d267091b38e87f5ff4e438d4de44891e51e71"
   },
   "A8": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A8",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --test scripts/ranking-judgments.test.mjs",
     "result": "passed",
     "artifactSha256": "0d78946ec992b3d216086ecc2dd678df7c773dfc4d10f82738cfead2d6192df8",
-    "sha256": "7489f5ecad754eabdbe04cb1c8fc4750a72b898be59b0877027b5f9b7806546e"
+    "sha256": "279705d2f6b06e869b99a2183e360720bdf43b7f0911e8a5ae48bbe91d170e55"
   },
   "A9": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A9",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --test scripts/ranking-lofo-folds.test.mjs",
     "result": "passed",
     "artifactSha256": "bb21f728a5c4769ebe8d107ad44b7e9d745e3b41c155cb6f1b62ae7340788d59",
-    "sha256": "e82fbd1fcf5f4aa89e4b838ca56becb0abd93181e96f32a1f2dc215c6eaac6c0"
+    "sha256": "aa12e0a41d12d15ee948a94908ca41e3ff52fed183f30e571ead3d7350b11bb8"
   },
   "A10": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A10",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test evals/search-quality/ranking-v3-metrics.test.ts",
     "result": "passed",
     "artifactSha256": "51c0882e72a168f58d43b74e3e116c15fe1b84d27070bc0bae3868f0ab8aa78d",
-    "sha256": "faa8778d168e7de0738a271cfd90a2c35e1016a733f3a6faeb5853fa051f3820"
+    "sha256": "e0b1db5c2542580c2590cace56d2f9eff759b8304cb58b7ed61f4eb2a120ecda"
   },
   "A11Q": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A11Q",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-qualification-receipts.test.ts",
     "result": "passed",
     "artifactSha256": "d729689941ab50626aa646b810c62a120e92391617046e0527ae76c6786cfc8a",
-    "sha256": "07915e7deded09ea606378137a0fc60a81d7197a1046769d0e91901c3a2c805f"
+    "sha256": "819f304337244270cb9e1eb3312202832aed6ea86cf53afbc0480e2a66a0f4e8"
   },
   "A11H": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A11H",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-heldout-receipts.test.ts",
     "result": "passed",
     "artifactSha256": "812ca109df8475dd4de7ab727824b2ae23ce9feeee4897b63cbe21ddc9300212",
-    "sha256": "42b9720ac7587990fc25a3439e8c1bfcbf57f47a8462f219a103021df035f018"
+    "sha256": "dafbea93b99aab26f262f3a3dde1b2dcf0e1ca6d0563a64c8bd8fca3ab0bf3f5"
   },
   "A12": {
     "schemaVersion": "ranking_v3_task_receipt_v1",
     "taskId": "A12",
     "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
     "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-    "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+    "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
     "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
     "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
     "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-provider-request-v1.test.ts",
     "result": "passed",
     "artifactSha256": "5c2669393a1c844bbbd44ccd4ec4abeaf5172132d2d4f20383e27434cb4c64f7",
-    "sha256": "6eb5ce126c5476c4c3393c7cb812406f1aebf1bce12d289e760e7478bc27778c"
+    "sha256": "847c423f82ec735b6e61de02aec97ce0f6cc580827aae59bf26653d08b8665aa"
   }
 }

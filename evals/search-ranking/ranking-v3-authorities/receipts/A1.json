@@ -3,11 +3,11 @@
   "taskId": "A1",
   "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
   "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-  "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+  "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
   "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
   "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
   "testCommand": "node --import tsx --test packages/core/src/core/semantic-search-candidate-trace.test.ts",
   "result": "passed",
   "artifactSha256": "06fc7fc054ffbf7edb6ec458cd533e9de90c5463f9f8bdcd0f818f0af086cd44",
-  "sha256": "6b9ac174a88ce792744b0922d4138ad4ce0ffa092b3e0a3f2dde07347823c03e"
+  "sha256": "88ba58b68b616cddcf2bda4ab1ab52a53a67e926cdcb12857e0f0186ee484fea"
 }

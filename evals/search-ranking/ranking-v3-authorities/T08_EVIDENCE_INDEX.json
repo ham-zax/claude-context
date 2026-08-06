@@ -1,0 +1,60 @@
+{
+  "entries": {
+    "B1": {
+      "evidenceSha256": "8d3747af0010c0776e607666aad347f1f427cf1e1b0f3c1e8db9e008e3f8b88f",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+      "taskId": "B1"
+    },
+    "B2": {
+      "evidenceSha256": "adb098afaa19f1e38fcdd6af938aa0e77a6ed712deb5bd9c361e456c6b4f6cd8",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+      "taskId": "B2"
+    },
+    "B3": {
+      "evidenceSha256": "8c5f04c4c8e3e0f6b50f3394e00ba0c068c478160cd939e91479b28a933341d4",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+      "taskId": "B3"
+    },
+    "B4": {
+      "evidenceSha256": "e016e356f30ebb02bc5adea23c821dbbd36786b74840a959263549d1172f06d9",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+      "taskId": "B4"
+    },
+    "B5": {
+      "evidenceSha256": "c47aefdf315179c873c490e6d56bda49a7015f11a951814e11f541330683ca7b",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+      "taskId": "B5"
+    },
+    "B6": {
+      "evidenceSha256": "16d8c8173da7971e079798c1f217fc8c55cddca4b3d9773aec3c224a4a30dae6",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "8ae8f4ebc4eea6fc72e2b29d80174042f16a978d",
+      "taskId": "B6"
+    },
+    "B7": {
+      "evidenceSha256": "8f9b00bd8746d15897ddcdaeebcf8ab032d053820bb1244e3bf5f0c170b83a9b",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "8ae8f4ebc4eea6fc72e2b29d80174042f16a978d",
+      "taskId": "B7"
+    },
+    "B8": {
+      "evidenceSha256": "3f53aeb1baac05d84ece8d1d5008d06717dd2872cce88a59ac2f9a1e14d9875a",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "b1b6798aeb922d4ab7efd4769b26e4c2d086fd82",
+      "taskId": "B8"
+    },
+    "B9": {
+      "evidenceSha256": "89ecec946446f0aeca661c5dbc34a15790243f78a6ccd38c032cc7eb40b3333e",
+      "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+      "redBaseCommit": "b1b6798aeb922d4ab7efd4769b26e4c2d086fd82",
+      "taskId": "B9"
+    }
+  },
+  "indexSha256": "59a25b9a3939b084c8ae684d57e1db3ff3e82cfcc959339ad85b9f40f48b18c3",
+  "schemaVersion": "ranking_v3_t08_evidence_index_v1"
+}

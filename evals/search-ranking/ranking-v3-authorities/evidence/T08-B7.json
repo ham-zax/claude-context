@@ -1,0 +1,11 @@
+{
+  "evidenceSha256": "8f9b00bd8746d15897ddcdaeebcf8ab032d053820bb1244e3bf5f0c170b83a9b",
+  "expectedRedFailure": "TypeError: assertRankingV3ReplayAuthorities is not a function",
+  "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+  "observedGreenExitCode": 0,
+  "observedRedExitCode": 1,
+  "redBaseCommit": "8ae8f4ebc4eea6fc72e2b29d80174042f16a978d",
+  "taskId": "B7",
+  "testCommand": "node --import tsx --test scripts/satori-search-candidate-replay.test.mjs",
+  "testOutputSha256": "047b067e81d616c291a65f78c70f6bd2f3d5018e0041e4aff6dff47f85aab589"
+}

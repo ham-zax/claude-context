@@ -1,0 +1,252 @@
+[
+ {
+  "taskId": "gitnexus-analyze-command",
+  "captureSha256": "6a63da5f7927efb144fb3b5eb4437a9b11b04abbd8cc70f13a145d26ca9e26d2",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-heritage",
+  "captureSha256": "1c6aa29f258b26425d63c1886999919df7961788e86bd848f2282e016bd69709",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-processes",
+  "captureSha256": "57be11105edb92f75f0ac324d6d98fd6bcd9f70eb0dcbbe3cf3b6ddd12548dbc",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-walk-repository",
+  "captureSha256": "7a341b838f104d682295f0d294374c7431b4cd09b703a04dcf03d6d1489730f8",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-process-calls",
+  "captureSha256": "23a68b7cce4179d6685087d827754b85a56d2437f49b234f3116f55c625f415f",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-create-graph",
+  "captureSha256": "1d895b4cede7bda1d1b1c06ea609ceb86814c1fd34447f8b48c3fbffb2d10464",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-negative-sql-migration",
+  "captureSha256": "fbedf74cdfc753de8eab6ab3a94689d7ea180631a10c97962df3f6b5e3bc6c34",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "gitnexus-negative-oauth-refresh",
+  "captureSha256": "5974a75d5d1c52760c22adc6586605fba830afb4ab14a6921eb6efc398d83e72",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-route-message",
+  "captureSha256": "05ec79b3f7fecca29faefc53d11d18f4b18d8d6a82f5770d60c3cd42c2c29677",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-create",
+  "captureSha256": "0f746aa99700a5fea3bc9540abd02c7a2dc3686639d6715ab6b776079011ec9c",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-classify-url",
+  "captureSha256": "df39b744422e005083cbfee69b624625b93c8a25d3e2f451a36a8d2b3e98c74b",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-openrouter-models",
+  "captureSha256": "5bf8918f68bf3920a9560f6fa1bd593b45a5df6477b66333094474e1bae1f321",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-popup-classify",
+  "captureSha256": "83f6f2744796b13d6bb39b15399725378e8ca27f2379895f3be10af180eca822",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-store-api-key",
+  "captureSha256": "f2703b540ee47f14c72f1de9a3eb972e1509969a9f1ed3fffe3c6da096b9e000",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-negative-csv-export",
+  "captureSha256": "98c985c6cd79d028ffe4f2395d5f9e79780280b9cac02fb5f0bfbf3fa9aa0ccd",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "bookmark-negative-jwt-decrypt",
+  "captureSha256": "a1fff29c575511d8c29b48e3fbcadb36f1f72b4706b8c32e9f008fede14a7f38",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-reader-items",
+  "captureSha256": "282b68cdac8fb09aa5dbd263dab4ea5147c482e215df76e0fdd86451502d744a",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-sync-write",
+  "captureSha256": "41cbf43ff35e4e5f403835afc491357f9ebf03685d304612099b5991aff7aa20",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-login-post",
+  "captureSha256": "32d03ebf7ad711e434f22e7c5bf6079fb5d8ea26e9d4f8368c7f8072ac235c3d",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-reader-path",
+  "captureSha256": "36daf759d6e4f57429329c2003e33cd463554cc7456489fea5a7e85adaa82e11",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-builtin-paths",
+  "captureSha256": "23ac62dbb0fb01301fcea983bdbe1bef434d70d6165ffa94befaec890b4c1643",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-reader-flow-test",
+  "captureSha256": "887aacc0b08bba08acfb2affb910c69df1f9cb88ab7c3cd84b78c9238dc892ee",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-negative-python-backtest",
+  "captureSha256": "941db95116f7dc256f20a19edb828b00b97b60e881ca3468b6d58bfba55f9406",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "duas-negative-oauth-migration",
+  "captureSha256": "5b7cfc2b580cfd5543567d34ca64e9e0dcfbca9e0cc41be5717f157448b477f0",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-split-text",
+  "captureSha256": "0a18d4f552cc0b5cd0c07e2c128cb82be23a6e097a58da6cde7b17b0b97875d1",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-build-payload",
+  "captureSha256": "9d506fc86aea33fab95d3c716bfa313e3fa3eba0a0e8872ed76f658a8f023c0c",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-create-speech",
+  "captureSha256": "7de8407d533c48fe22eee70d293d18dd4e58272793858cff45b4baef57829611",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-generation-queue",
+  "captureSha256": "529903366f7035bf6879238d2ba63bbb679203fc45376243e09736b07c513687",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-boot",
+  "captureSha256": "cf0ec5e824dea941387b03df27b206fa80b93534f4a6ddd36827b7c6057e318c",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-configure-patch",
+  "captureSha256": "347102a0507da4cff40d9472ddbae2ea7438558283c53b56a65e4fea9565aa0a",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-negative-oauth-refresh",
+  "captureSha256": "d2d406749e83e2b78e84d1c9cecdaf1c4080937f5f26ebffd101610f321c0f71",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "vox-negative-relational-insert",
+  "captureSha256": "f30120cccac62f4e4faf17c7da63d83a0265ce0d9be9b69f6fcd628ba225303b",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-choose-next-task",
+  "captureSha256": "188970cd30c1029f048d67ed459aa91ffafd374272efec29eb916bd80d01042d",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-grade-attempt",
+  "captureSha256": "90073de8a900224a5d34e68c8e637fe7bb20152b441c407563b962f102839fbd",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-rebuild-recall",
+  "captureSha256": "3c11e9272d1b4e5c7e6357607c95ff967fe756365c440aa016838484697b54e5",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-format-term",
+  "captureSha256": "8cbf45e25293197087de6862031268951de591582cbebcbe183fd0c8b03400c6",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-strictness-config",
+  "captureSha256": "e428a7e5a7356c0cdbaaf5fc4f51c61a23a3098722e898435e85aeabc1376d7b",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-extension-entry",
+  "captureSha256": "4c19cf78c5a98f4c5ea12f2608400df2230b8d58e4f5ea12cf1a7e3ee45fc452",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-strictness-safety-control",
+  "captureSha256": "6ec9b396c42360a35bf4added02e852dcb9c525db46b9976134e814971823da1",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-negative-email-digest",
+  "captureSha256": "291937c3e363bb1e0c1e523d1dd7cd015c01c960409fa258fcffdc91549105c5",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "rpc-negative-db-migration",
+  "captureSha256": "3fdb3bd5a150ea4c5e89ed5b0eff6fd02cba4d8c8dad1b90920972e2f1660d99",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-voice-options",
+  "captureSha256": "0a48ccfe8cba25649d20d3ea367c3416fc66d5965cf5e0a62f481105194e0100",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-generate-audio",
+  "captureSha256": "58a4a8ad842f2e06964ab2ae623c7de8928ebfc6abc7c0853d2f4560bd7bc5fd",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-start-server",
+  "captureSha256": "42610fc9f1f2c3a51b282b4d0dce0a7a5c73053b40bd6fd4f1c57d34b0088a9d",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-http-get",
+  "captureSha256": "b93c635c30b94ea3f9f230267398ec0d5d484e5c56f9abe1ccbf3bc5527cfc12",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-http-post",
+  "captureSha256": "31eb5c26d51f2ca4420b09840ca796e5aa644ed1d0575bc81c84fa360289b305",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-player-stop",
+  "captureSha256": "ae3043ec2c72699ca8131d0e372483cf44b1d12149772e930e9b693f4a9a1f82",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-voice-options-safety-control",
+  "captureSha256": "56208aa91e521e03cc57e0d3ab9f8a000b8e13efaa066af5b6c703c264a2c2a6",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-negative-sql-migration",
+  "captureSha256": "2437aaa86675cc4aefb171c91624ad17be157abad0f20874adca804b64e7c95d",
+  "providerEvidence": null
+ },
+ {
+  "taskId": "edge-negative-browser-routes",
+  "captureSha256": "b0b8207f77d804ea818af313a73683f85bfe7422522e97db4d774347a4404c74",
+  "providerEvidence": null
+ }
+]

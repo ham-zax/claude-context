@@ -4,10 +4,10 @@
   "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
   "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
   "dispatchCommit": "30d3374b925b5b2091e44cc63db00414957ff845",
-  "dispatchTreeSha256": "555a6de5d180c13bdcd39891c117f6f62f22d0acacf0340242eab086b647e1e6",
+  "dispatchTreeSha256": "61dcace57896afa45aa38fb1330fd1a8d8caf1f17d56f126d66903b72b4b249d",
   "qualificationTargetSha256": null,
-  "contractSealSha256": null,
-  "taskGraphSha256": null,
+  "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
+  "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
   "taskGraphExpansionReceipts": [],
   "prerequisiteReceipts": [],
   "previousManifestSha256": null,
@@ -220,5 +220,5 @@
       "dispatchable": false
     }
   ],
-  "manifestSha256": "61aaf8aa1f515f3311e3d215d377a068a0c89d1af4f4201aad34e2a3144a3fc8"
+  "manifestSha256": "6affda384e85dce8cc8fae87bc15696c8b3a9599964be3bc4256eda08f86804c"
 }

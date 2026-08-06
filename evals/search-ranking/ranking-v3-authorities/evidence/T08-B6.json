@@ -1,0 +1,11 @@
+{
+  "evidenceSha256": "16d8c8173da7971e079798c1f217fc8c55cddca4b3d9773aec3c224a4a30dae6",
+  "expectedRedFailure": "TypeError: buildSearchCandidateSurvivalV3 is not a function",
+  "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+  "observedGreenExitCode": 0,
+  "observedRedExitCode": 1,
+  "redBaseCommit": "8ae8f4ebc4eea6fc72e2b29d80174042f16a978d",
+  "taskId": "B6",
+  "testCommand": "node --import tsx --test scripts/satori-search-candidate-capture.test.mjs",
+  "testOutputSha256": "8a0e6fc2b1501dfcf1c2622dff11de0040379ecf874462488a0cc7789f31a2f3"
+}

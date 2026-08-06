@@ -25,7 +25,7 @@
         "ownerSymbol": "runExactRegistryFastPath",
         "ownerSpan": {
           "startLine": 189,
-          "endLine": 604
+          "endLine": 607
         },
         "requiredRelations": [
           {

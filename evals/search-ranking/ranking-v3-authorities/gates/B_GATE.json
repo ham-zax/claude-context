@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "ranking_v3_gate_receipt_v1",
+  "gateId": "B_GATE",
+  "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
+  "prerequisiteReceiptIndexSha256": "c1fbfabd47a533309b229053909b1866c48d896274bc237c96e6756f83ce260f",
+  "resolvedConditions": [
+    {
+      "edgeKind": "hard",
+      "requires": "B1",
+      "authoritySha256": "8726166e52b6be6b327a2784ba954510ce65f7e0a83e5185359e6a7904102777",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B2",
+      "authoritySha256": "efe985f4273cd491b83f7c14866afa77394c230dfa030704d178a558869c0db0",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B3",
+      "authoritySha256": "5ed808e7e5da615fb6858561cf6ae4605e01a2dacb1b47997c3507755717888b",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B4",
+      "authoritySha256": "9357d09bf8b201100742c1ad6b285f5b9ed855149277df9df56869b3311c04cd",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B5",
+      "authoritySha256": "c3720f3cb322903e236d188f4583ac037fcb9f48f0e002cd041faf5e2e3c097f",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B6",
+      "authoritySha256": "2e435a9fcfce55c98f5e9e182dab25b7509e38038d62f9abdec9225618ca76c6",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B7",
+      "authoritySha256": "ee0735cac931dd3fbf611ada5683e6c10f0943797fb43a25927e73b32f043bc5",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B8",
+      "authoritySha256": "64072919d89574ddb7b826f2f85d4424fd7281c154012d2f6b67caa687a5f787",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B9",
+      "authoritySha256": "494bfbae71d72f6e04a70c4d60ddce1050007ac4ed986479458fbe0cceb04330",
+      "matchedValue": null
+    }
+  ],
+  "verdict": "ready",
+  "receiptSha256": "1071baf5a44107e5fe1936f854c59097566543a090e02e499f213392ad87bfe5"
+}

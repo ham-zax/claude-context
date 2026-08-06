@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "ranking_v3_baseline_capture_receipt_v1",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "baselineTreeSha256": "1c09b1f2490a155c2f377ead0a73ca760dd4efffd17996dc6dc41e778e3e3781",
+  "executedHead": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "executedGitTree": "3a1740e423c55b8fbbbb7e704b5a2cd67f3687e8",
+  "captureCwd": "/tmp/r0-2-run/out/worktree",
+  "manifestSha256": "281c5354d98c42e8d576e607de50046230e7d31ca4059a6d77d89e7454b1db09",
+  "selectedManifestSha256": "2922cbddebf2615bcada7bc481eb7d366c01dbef0ecaf44312ae5009f17b7d6b",
+  "taskSuiteSha256": "3ccce7672a7df2b90084c25a8d82edf65ec1e7f9e8cbb21d553100b98b9cea78",
+  "observationSetSha256": "ceaaba6df8c7d619a8b0f45cc2c85ebe9502eb7c16981a7847d1af76b5fbaa1f",
+  "captureSha256": "2e9c904191e4d51757cacc2a9307ab54f53be66a1153089bdccb49a54329de28",
+  "captureCommand": [
+    "/home/hamza/.nvm/versions/node/v24.13.0/bin/node",
+    "/tmp/r0-2-run/out/worktree/scripts/satori-search-candidate-capture.mjs",
+    "--tasks",
+    "/tmp/r0-2-run/out/evidence/TASK_SUITE.json",
+    "--observations",
+    "/tmp/r0-2-run/out/evidence/OBSERVATION_SET.json",
+    "--out",
+    "/tmp/r0-2-run/out/evidence/capture.json",
+    "--policy",
+    "baseline"
+  ],
+  "partition": "tuning",
+  "heldoutDenied": true,
+  "receiptSha256": "7577761de39c6299f50db63e496039c3e40c4524e5b13e21948ab855f143ff81"
+}

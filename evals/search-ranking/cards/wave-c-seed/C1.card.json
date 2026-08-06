@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "C1",
+  "cardType": "evidence_or_code",
+  "contractSha256": "5e48d00a89d4217128b22e3716524a35bf7691cd01d951664dd19d98de470b29",
+  "contract": {
+    "task_id": "C1",
+    "title": "Build RANKING_JUDGMENT_PACKET_MANIFEST.json: exact packet partition of the 50 tuning tasks (scripts/build-ranking-judgment-packets.mjs)",
+    "risk": "medium",
+    "invariant": "Every tuning task is covered exactly once by RANKING_JUDGMENT_PACKET_MANIFEST.json; the packet partition derives from the sealed B9 tuning corpus (the 50 tuning tasks in the 6 tuning-split families of cross-repository-v3.manifest.json) and never includes any held-out task.",
+    "owners": [
+      "scripts/build-ranking-judgment-packets.mjs"
+    ],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs expand (C1G; consumes $PACKET_MANIFEST for graph expansion)",
+      "scripts/ranking-judgments.mjs verify-pool (C2.<packetId>; packet/task binding comes from the packet manifest)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (source partition: 50 tuning tasks, 6 tuning families; 51 held-out tasks must be excluded)"
+    ],
+    "test_callers": [
+      "scripts/build-ranking-judgment-packets.test.mjs (future; §7.6 RED test packet_manifest_covers_each_tuning_task_exactly_once)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-convention precedent)"
+    ],
+    "approved_files": [
+      "scripts/build-ranking-judgment-packets.mjs",
+      "scripts/build-ranking-judgment-packets.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/build-ranking-judgment-packets.mjs (new CLI emitting RANKING_JUDGMENT_PACKET_MANIFEST.json; binds $PACKET_MANIFEST substitution authority)"
+    ],
+    "security_boundaries": [
+      "Tuning-only partitioning: the 51 held_out tasks of cross-repository-v3.manifest.json must never appear in any packet",
+      "Packet manifest binds task digests so packet agents cannot substitute or swap tasks",
+      "Held-out discipline: no held-out tasks, queries, captures, or outcomes enter packet design or construction"
+    ],
+    "overlap_with": [
+      "FT-G1 (C1G consumes C1's packet manifest via $PACKET_MANIFEST)",
+      "FT-B (B9 corpus binds the exact 50 tuning tasks that C1 partitions; capture digests flow through B6)"
+    ],
+    "focused_command": "node --test scripts/build-ranking-judgment-packets.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Code-change card per §7.5 Wave C and §7.6 code-change table. focused_command targets the future test file scripts/build-ranking-judgment-packets.test.mjs which does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and will cover this test once created. §7.6 RED row: expected failure before implementation is 'missing or duplicate task appears'; minimal passing behavior is 'exact task partition is produced' — every one of the 50 tuning tasks appears in exactly one packet, zero held-out tasks appear. Prerequisites per §7.2: C1: DC0, A8, B9. Do not confuse the 6 tuning-split (LOFO) families (gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app — repositoryIds gitnexus-r0/bookmark-ai-organizer-r0/duas-r0/vox-infinity-r0/rpc-r0/edge-tts-app-r0, 50 tasks) with leakage.tuningOnlyRepositoryFamilies which has 11 entries including non-LOFO families. Output: RANKING_JUDGMENT_PACKET_MANIFEST.json (becomes $PACKET_MANIFEST)."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}
