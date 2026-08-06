@@ -3387,3 +3387,81 @@ test('handleCallGraph fails closed when the published symbol file is replaced wi
         assert.equal(JSON.stringify(payload).includes('BBBB'), false);
     }));
 });
+
+test("handleCallGraph denies published file exceeding configured readFileMaxBytes options limit", async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const filePath = path.join(repoPath, "src", "large.ts");
+        const header = "export function processLargeFile() { return \"ok\"; }\n";
+        const padding = "// " + "x".repeat(128 * 1024 - header.length - 3) + "\n";
+        const fileContent = header + padding;
+        fs.writeFileSync(filePath, fileContent, "utf8");
+
+        const fileHash = sha256Content(fileContent);
+        const symbol = createFunctionSymbol({
+            file: "src/large.ts",
+            name: "processLargeFile",
+            qualifiedName: "src.large.processLargeFile",
+            label: "function processLargeFile()",
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [symbol],
+            records: [],
+        });
+
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => "VoyageAI" }),
+            getVectorStore: () => ({ listCollections: async () => [] })
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getIndexedCodebases: () => [repoPath],
+            getCodebaseInfo: () => undefined,
+            getCodebaseCallGraphSidecar: () => undefined,
+            ensureFingerprintCompatibilityOnAccess: () => ({
+                allowed: true,
+                changed: false
+            }),
+            saveCodebaseSnapshot: () => undefined,
+            getAllCodebases: () => []
+        } as unknown as HandlerSnapshotManager;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            { readFileMaxBytes: 64 * 1024 },
+        );
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({ outcome: "valid" });
+
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: "src/large.ts",
+                symbolId: symbol.symbolInstanceId,
+                symbolLabel: symbol.label,
+                span: { startLine: 1, endLine: 1 },
+            },
+            direction: "callers",
+            depth: 1,
+            limit: 5,
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || "{}");
+        assert.equal(payload.status, "not_found");
+        assert.equal(payload.supported, false);
+        assert.equal(payload.reason, "stale_symbol_ref");
+        assert.match(payload.message, /unavailable or not authorized|FILE_TOO_LARGE|exceeds/i);
+    }));
+});

@@ -212,6 +212,9 @@ function boundResponseBody(
             controller.enqueue(chunk.value);
         },
         cancel(reason) {
+            if (settled) return Promise.resolve();
+            settled = true;
+            removeAttemptAbortHandler();
             return reader.cancel(reason);
         },
     });

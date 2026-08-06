@@ -138,6 +138,7 @@ class SessionProviderRuntime {
             shared.runtimeOwnerGate,
             this.mutationLeaseCoordinator,
             this.continuationCoordinator,
+            { readFileMaxBytes: shared.readFileMaxBytes },
         );
         const sessionContext: ToolContext = {
             ...shared,
@@ -239,6 +240,7 @@ export class SharedRuntimeHost {
             this.runtimeOwnerRegistry,
             this.mutationLeaseCoordinator,
             new SearchContinuationCoordinator(this.searchContinuationPool),
+            { readFileMaxBytes: this.readFileMaxBytes },
         );
         this.providerRuntime = new ProviderRuntime({
             config,
@@ -291,6 +293,7 @@ export class SharedRuntimeHost {
             this.runtimeOwnerRegistry,
             this.mutationLeaseCoordinator,
             continuationCoordinator,
+            { readFileMaxBytes: this.readFileMaxBytes },
         );
         const providerRuntime = new SessionProviderRuntime(
             this.providerRuntime,

@@ -3098,3 +3098,54 @@ test('handleFileOutline fails closed when the published file is replaced with sa
         assert.equal(JSON.stringify(payload).includes('BBBB'), false);
     }));
 });
+
+test("handleFileOutline denies published file exceeding configured readFileMaxBytes options limit", async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const filePath = path.join(repoPath, "src", "large.ts");
+        const header = "export function processLargeFile() { return \"ok\"; }\n";
+        const padding = "// " + "x".repeat(128 * 1024 - header.length - 3) + "\n";
+        const fileContent = header + padding;
+        fs.writeFileSync(filePath, fileContent, "utf8");
+
+        const symbol = createTestSymbol({
+            file: "src/large.ts",
+            label: "function processLargeFile()",
+            name: "processLargeFile",
+            qualifiedName: "processLargeFile",
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(fileContent),
+            language: "typescript",
+            kind: "function",
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            { readFileMaxBytes: 64 * 1024 },
+        );
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: "src/large.ts",
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || "{}");
+        assert.equal(response.isError, true);
+        assert.equal(payload.status, "not_found");
+        assert.equal(payload.outline, null);
+        assert.equal(payload.hasMore, false);
+        assert.equal(payload.file, "src/large.ts");
+        assert.match(payload.message, /not readable|exceeds|FILE_TOO_LARGE/i);
+    }));
+});

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import {
     RootBoundFileError,
     beginSourceMeasurementObservation,
+    finishSourceMeasurementObservation,
     readFileHandleExactly,
     verifyStableFileObservation,
     type RootBoundFileIdentity,
@@ -127,22 +128,36 @@ export async function readAuthorizedPublishedSource(input: {
             })
             : undefined;
 
-        // Descriptor-bound read capped at the observed byte length: growth or
-        // truncation during the read surfaces as a RootBoundFileError and
-        // readFileHandleExactly finalizes the measurement observation on every
-        // path (completed / partial / failed).
-        const bytes = await readFileHandleExactly(
-            handle,
-            observedStat.size,
-            measurementObservation,
-        );
-
-        // Verify the stable descriptor/pathname observation after the read and
-        // before returning content: replacement or truncation during the read
-        // fails closed instead of serving mixed content.
+        // Descriptor-bound read capped at the observed byte length with deferred outcome:
+        // growth, truncation, or path identity drift during read/verification surfaces
+        // as a RootBoundFileError and is caught and mapped to AuthorizedSourceReadError("FILE_REPLACED").
+        // Measurement observation is finalized as completed only after verifyStableFileObservation passes.
+        let bytes: Buffer;
+        let readSucceeded = false;
         try {
+            bytes = await readFileHandleExactly(
+                handle,
+                observedStat.size,
+                measurementObservation,
+                { deferSuccessfulObservationOutcome: true },
+            );
+            readSucceeded = true;
+
             await verifyStableFileObservation(handle, absolutePath, codebaseRoot, observedStat);
+
+            if (measurementObservation) {
+                finishSourceMeasurementObservation({
+                    observation: measurementObservation,
+                    status: "completed",
+                });
+            }
         } catch (error) {
+            if (readSucceeded && measurementObservation) {
+                finishSourceMeasurementObservation({
+                    observation: measurementObservation,
+                    status: bytes!.length > 0 ? "partial" : "failed",
+                });
+            }
             if (error instanceof RootBoundFileError) {
                 throw new AuthorizedSourceReadError("FILE_REPLACED", error.message);
             }
