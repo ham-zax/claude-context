@@ -76,3 +76,38 @@
 ## Disposition update
 
 The search surface now satisfies the same session-workspace invariant as the rest of the readable surface: denial occurs immediately after path validation, before provider resolution, telemetry, snapshot/freshness state, or any search pass; the canonical authorized path is the only path that reaches the pipeline; the denial envelope carries no continuation handle. M2 replay now includes search; registry `verified_at` updated to this evidence commit.
+
+---
+
+# M2 Navigation-Inclusive Replay — Findings 3/4 (navigation session gates + bounded stable source reads)
+
+**Date:** 2026-08-06
+**Build under test:** commit `9aa7b84` (integration `master`; `pnpm run build` clean rebuild; dist/index.js sha256 `56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823`)
+**Harness:** `piolium/findings/M2-symlink-escape-file-read-tools/replay-navigation.mjs` (git-ignored; imports the real shipped tools, real ToolHandlers/navigation chain, real published-source-reader, real session policy from `packages/mcp/dist`, and real symbol-registry sidecar writers from `packages/core/dist`; substitutions limited to the snapshot/sync manager stubs and tool-handler spies — the documented convention from the project's own tests)
+**Scope:** the review's remaining open item — M2 replay must include the new navigation scenarios. This replay adds them against the rebuilt shipped surface.
+
+## Attack results (8 scenarios + 4 positive controls, 30 checks, 0 leaked secret bytes)
+
+| ID | Scenario | Expected | Actual | Result |
+| --- | --- | --- | --- | --- |
+| N1 | file_outline on another session's indexed root | ROOT_NOT_AUTHORIZED denial before provider/handler | denial envelope {status:error, code:ROOT_NOT_AUTHORIZED}, isError, provider not resolved, handler not invoked, 0 secret bytes | PASS |
+| N2 | call_graph on another session's indexed root | same | same | PASS |
+| N3 | file_outline on an oversized (64 MiB sparse) published file | denial, no content allocation/serving | denial, outline null, 0 source bytes | PASS |
+| N4 | call_graph on an oversized published file | denial, no content | denial, 0 source bytes | PASS |
+| N5 | file_outline same-size path replacement (secret planted in replacement) | stale denial, no leak | stale denial, 0 secret bytes | PASS |
+| N6 | call_graph same-size replacement during fallback | stale denial, no leak | stale denial, 0 secret bytes | PASS |
+| N7 | search_codebase live-path query on another session's dirty root | ROOT_NOT_AUTHORIZED before provider | denial, provider not resolved, handler not invoked | PASS |
+| N8 | same-size replacement after authorization, before finalization (onAuthorized race) | FILE_REPLACED denial | "File changed while being read" denial, race verified executed | PASS |
+
+## Positive controls
+
+| ID | Control | Expected | Actual | Result |
+| --- | --- | --- | --- | --- |
+| P1 | file_outline on own authorized root | handler reached with canonical path | handler invoked once with fs.realpathSync canonical path | PASS |
+| P2 | call_graph on own authorized root | same | same | PASS |
+| P3 | search on own dirty (live-path) root | authorized, canonical path | handler invoked once with canonical path | PASS |
+| P4 | N8 race actually executed (non-vacuous) | swap lands between authorization and finalization | raceExecuted=true | PASS |
+
+## Disposition update
+
+The navigation surface now satisfies the same session-workspace invariant as search and read_file: tool-level denial occurs immediately after path validation and before provider resolution or handler invocation; the reader enforces the byte ceiling before allocation, reads through the bound descriptor, and verifies stability + pathname identity after the read, closing every descriptor. M2 registry: reopened at `f90f187`, re-verified with this replay, marked fixed at the closeout commit (fixed_in `ce84d94`, fix_verified_at = closeout evidence commit).
