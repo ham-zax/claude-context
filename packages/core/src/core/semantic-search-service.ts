@@ -24,12 +24,42 @@ import { validateVectorFilter } from '../vectordb/filters';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     fuseVectorCandidatesWithRrf,
+    fuseVectorCandidatesWithRrfEvidence,
     orderVectorCandidateArm,
     vectorCandidateOwnerId,
     VECTOR_CANDIDATE_RRF_K_V1,
 } from './vector-candidate-fusion';
+import type { SemanticSearchCandidateTraceV2 } from './semantic-search-candidate-trace';
 
 const MAX_SEMANTIC_SEARCH_TRACE_ENTRIES_PER_STAGE = 160;
+
+export function buildSemanticSearchCandidateTracesV2(input: {
+    dense?: readonly VectorCandidate[];
+    lexical?: readonly VectorCandidate[];
+    fallbackLexical?: readonly VectorCandidate[];
+    result: readonly VectorCandidate[];
+}): SemanticSearchCandidateTraceV2[] {
+    const armRanks = (arm: readonly VectorCandidate[] | undefined): Map<string, number> => {
+        const result = new Map<string, number>();
+        if (!arm) return result;
+        const seenOwners = new Set<string>();
+        for (const candidate of orderVectorCandidateArm(arm)) {
+            if (result.has(candidate.document.id)) continue;
+            const ownerId = vectorCandidateOwnerId(candidate);
+            if (seenOwners.has(ownerId)) continue;
+            seenOwners.add(ownerId);
+            result.set(candidate.document.id, result.size + 1);
+        }
+        return result;
+    };
+    const dense = armRanks(input.dense), lexical = armRanks(input.lexical), fallback = armRanks(input.fallbackLexical);
+    const core = new Map(input.result.map((candidate, index) => [candidate.document.id, index + 1]));
+    return [...new Set([...dense.keys(), ...lexical.keys(), ...fallback.keys(), ...core.keys()])].sort(compareContractStrings).map((candidateId) => ({
+        schemaVersion: 'semantic_search_candidate_trace_v2', candidateId,
+        rawDenseRank: dense.get(candidateId) ?? null, rawLexicalRank: lexical.get(candidateId) ?? null,
+        rawFallbackLexicalRank: fallback.get(candidateId) ?? null, coreFusionRank: core.get(candidateId) ?? null,
+    }));
+}
 
 export type MutationGenerationObservation = Readonly<{
     generation: number;
@@ -306,6 +336,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         this.assertCandidateTraceOptions(maxEntriesPerStage, options);
         let candidateTrace: SemanticSearchCandidateTrace | undefined;
         let diagnosticCandidateArms: SemanticSearchExecutionResult['diagnosticCandidateArms'];
+        let rankingV3CandidateTraces: readonly SemanticSearchCandidateTraceV2[] | undefined;
         const results = await this.searchWithReceipt(
             receipt,
             request,
@@ -322,6 +353,9 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             (arms) => {
                 diagnosticCandidateArms = arms;
             },
+            (traces) => {
+                rankingV3CandidateTraces = traces;
+            },
         );
         if (!candidateTrace) {
             throw new Error('Candidate trace was not produced for the semantic search.');
@@ -330,7 +364,8 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             results,
             candidateTrace,
             ...(diagnosticCandidateArms ? { diagnosticCandidateArms } : {}),
-        };
+            ...(rankingV3CandidateTraces ? { rankingV3CandidateTraces } : {}),
+        } as SemanticSearchExecutionResult & { rankingV3CandidateTraces?: readonly SemanticSearchCandidateTraceV2[] };
     }
 
     private assertCandidateTraceOptions(
@@ -391,6 +426,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         diagnosticCandidateArmsConsumer?: (
             arms: NonNullable<SemanticSearchExecutionResult['diagnosticCandidateArms']>,
         ) => void,
+        rankingV3TraceConsumer?: (traces: readonly SemanticSearchCandidateTraceV2[]) => void,
     ): Promise<SemanticSearchResult[]> {
         const request = this.normalizeRequest(
             requestOrCodebasePath,
@@ -525,6 +561,11 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 );
             }
             const productResults = searchResults.slice(0, resolvedRequest.topK);
+            rankingV3TraceConsumer?.(buildSemanticSearchCandidateTracesV2({
+                lexical: searchResults,
+                ...(lexicalFallback ? { fallbackLexical: lexicalFallback } : {}),
+                result: productResults,
+            }));
             diagnosticCandidateArmsConsumer?.({
                 preciseLexical: searchResults.map((result) => (
                     toSemanticSearchResult(result, 'lexical_rank')
@@ -608,15 +649,15 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             await assertCandidateReadAuthorityUnchanged(
                 'Index generation changed during hybrid retrieval.',
             );
-            const lexicalFusionCandidates = lexicalCandidates.length > 0
-                ? lexicalCandidates
-                : lexicalFallback ?? [];
-            const searchResults = fuseVectorCandidatesWithRrf({
+            const fusionEvidence = fuseVectorCandidatesWithRrfEvidence({
                 dense: denseCandidates.slice(0, resolvedRequest.topK),
-                lexical: lexicalFusionCandidates.slice(0, resolvedRequest.topK),
+                lexical: lexicalCandidates.slice(0, resolvedRequest.topK),
+                ...(lexicalFallback ? { fallbackLexical: lexicalFallback.slice(0, resolvedRequest.topK) } : {}),
                 k: VECTOR_CANDIDATE_RRF_K_V1,
                 limit: resolvedRequest.topK,
             });
+            const searchResults = fusionEvidence.candidates;
+            rankingV3TraceConsumer?.(fusionEvidence.traces);
             diagnosticCandidateArmsConsumer?.({
                 dense: denseCandidates.map((result) => (
                     toSemanticSearchResult(result, 'dense_similarity')
@@ -677,6 +718,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             filter: resolvedRequest.filter,
         });
         const productResults = searchResults.slice(0, resolvedRequest.topK);
+        rankingV3TraceConsumer?.(buildSemanticSearchCandidateTracesV2({ dense: searchResults, result: productResults }));
         diagnosticCandidateArmsConsumer?.({
             dense: searchResults.map((result) => (
                 toSemanticSearchResult(result, 'dense_similarity')

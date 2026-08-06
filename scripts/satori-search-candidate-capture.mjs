@@ -1329,3 +1329,65 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
         process.exitCode = 1;
     }
 }
+
+const RANKING_V3_SURVIVAL_SCHEMA = "search_candidate_survival_v3";
+const RANKING_V3_SURVIVAL_MAX_CANDIDATES = 160;
+
+export function parseSearchCandidateSurvivalV3(value) {
+    const input = requireRecord(value, "SearchCandidateSurvivalV3");
+    requireExactKeys(input, [
+        "schemaVersion", "queryId", "candidateIds", "evidenceSha256", "authorities", "stages",
+    ], "SearchCandidateSurvivalV3");
+    if (input.schemaVersion !== RANKING_V3_SURVIVAL_SCHEMA) {
+        throw new Error(`SearchCandidateSurvivalV3.schemaVersion must be ${RANKING_V3_SURVIVAL_SCHEMA}.`);
+    }
+    const authorities = requireRecord(input.authorities, "SearchCandidateSurvivalV3.authorities");
+    requireExactKeys(authorities, [
+        "contractSha256", "policySha256", "qualificationTargetSha256",
+    ], "SearchCandidateSurvivalV3.authorities");
+    if (!Array.isArray(input.candidateIds) || input.candidateIds.length > RANKING_V3_SURVIVAL_MAX_CANDIDATES) {
+        throw new Error(`SearchCandidateSurvivalV3.candidateIds must contain at most ${RANKING_V3_SURVIVAL_MAX_CANDIDATES} entries.`);
+    }
+    const candidateIds = input.candidateIds.map((candidateId, index) => requireString(
+        candidateId,
+        `SearchCandidateSurvivalV3.candidateIds[${index}]`,
+    ));
+    if (new Set(candidateIds).size !== candidateIds.length) {
+        throw new Error("SearchCandidateSurvivalV3.candidateIds contains duplicates.");
+    }
+    if (!Array.isArray(input.stages)) throw new Error("SearchCandidateSurvivalV3.stages must be an array.");
+    const stages = input.stages.map((rawStage, index) => {
+        const stage = requireRecord(rawStage, `SearchCandidateSurvivalV3.stages[${index}]`);
+        requireExactKeys(stage, ["stage", "candidateIds"], `SearchCandidateSurvivalV3.stages[${index}]`);
+        if (!Array.isArray(stage.candidateIds)) throw new Error(`SearchCandidateSurvivalV3.stages[${index}].candidateIds must be an array.`);
+        const stageCandidateIds = stage.candidateIds.map((candidateId, candidateIndex) => requireString(
+            candidateId,
+            `SearchCandidateSurvivalV3.stages[${index}].candidateIds[${candidateIndex}]`,
+        ));
+        if (stageCandidateIds.some((candidateId) => !candidateIds.includes(candidateId))) {
+            throw new Error(`SearchCandidateSurvivalV3.stages[${index}] contains a foreign candidate.`);
+        }
+        return {
+            stage: requireString(stage.stage, `SearchCandidateSurvivalV3.stages[${index}].stage`),
+            candidateIds: stageCandidateIds,
+        };
+    });
+    const parsed = {
+        schemaVersion: RANKING_V3_SURVIVAL_SCHEMA,
+        queryId: requireString(input.queryId, "SearchCandidateSurvivalV3.queryId"),
+        candidateIds,
+        evidenceSha256: requireSha256(input.evidenceSha256, "SearchCandidateSurvivalV3.evidenceSha256"),
+        authorities: {
+            contractSha256: requireSha256(authorities.contractSha256, "SearchCandidateSurvivalV3.authorities.contractSha256"),
+            policySha256: requireSha256(authorities.policySha256, "SearchCandidateSurvivalV3.authorities.policySha256"),
+            qualificationTargetSha256: requireSha256(authorities.qualificationTargetSha256, "SearchCandidateSurvivalV3.authorities.qualificationTargetSha256"),
+        },
+        stages,
+    };
+    assertNoSourcePayload(parsed, "SearchCandidateSurvivalV3");
+    return parsed;
+}
+
+export function buildSearchCandidateSurvivalV3(value) {
+    return parseSearchCandidateSurvivalV3(value);
+}

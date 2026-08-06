@@ -75,6 +75,35 @@ import {
 } from './search-policy.js';
 import type { ResolvedSearchPolicy } from './search-policy.js';
 
+
+export interface SearchExecutionSemanticCandidateTraceV2 {
+    schemaVersion: 'semantic_search_candidate_trace_v2';
+    candidateId: string;
+    rawDenseRank: number | null;
+    rawLexicalRank: number | null;
+    rawFallbackLexicalRank: number | null;
+    coreFusionRank: number | null;
+}
+
+export interface SearchExecutionRankingV3EvidenceEnvelopeV1 {
+    schemaVersion: 'search_execution_ranking_v3_evidence_v1';
+    mode: 'enabled' | 'disabled';
+    admittedCandidateIds: string[];
+    semanticPasses: Array<{
+        passId: string;
+        candidateTraces: SearchExecutionSemanticCandidateTraceV2[];
+    }>;
+}
+
+export function deliverSearchExecutionRankingV3Evidence<T>(
+    outcome: T,
+    evidence: SearchExecutionRankingV3EvidenceEnvelopeV1,
+    consumer?: (evidence: SearchExecutionRankingV3EvidenceEnvelopeV1) => void,
+): T {
+    consumer?.(structuredClone(evidence));
+    return outcome;
+}
+
 type SearchPassId = "primary" | "expanded";
 type BackendScoreKind = "dense_similarity" | "lexical_rank" | "rrf_fusion" | "unknown";
 type ChangedFilesState = { available: boolean; files: Set<string> };
@@ -428,6 +457,7 @@ export type SearchExecutionInput = {
     observedChangedFilesState: ChangedFilesState;
     retrievalPolicy: ResolvedSearchPolicy;
     entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
+    rankingV3EvidenceConsumer?: (evidence: SearchExecutionRankingV3EvidenceEnvelopeV1) => void;
 };
 
 type RerankPhaseResult = {
@@ -763,6 +793,7 @@ export async function runSearchExecution(
     let attemptsUsed = 0;
     const searchWarningsSet = new Set<string>();
     const semanticPassFailures: SemanticPassFailureDiagnostic[] = [];
+    const rankingV3SemanticPasses: SearchExecutionRankingV3EvidenceEnvelopeV1['semanticPasses'] = [];
     const suppressedDirtyPaths = new Set<string>();
     const representedDirtyPaths = new Set<string>();
     const passesUsed = new Set<string>();
@@ -880,6 +911,7 @@ export async function runSearchExecution(
             id: string;
             results: SearchResultLike[];
             diagnosticCandidateArms?: SemanticSearchExecutionResult["diagnosticCandidateArms"];
+            rankingV3CandidateTraces?: SearchExecutionSemanticCandidateTraceV2[];
         }> = [];
         let embeddingProviderDiagnostic = primaryEmbeddingDiagnostic;
         let vectorBackendDiagnostic: VectorBackendDiagnostic | null = null;
@@ -895,6 +927,11 @@ export async function runSearchExecution(
                     results,
                     ...(!Array.isArray(passResult.value) && passResult.value.diagnosticCandidateArms
                         ? { diagnosticCandidateArms: passResult.value.diagnosticCandidateArms }
+                        : {}),
+                    ...(!Array.isArray(passResult.value)
+                        && 'rankingV3CandidateTraces' in passResult.value
+                        && Array.isArray(passResult.value.rankingV3CandidateTraces)
+                        ? { rankingV3CandidateTraces: structuredClone(passResult.value.rankingV3CandidateTraces) as SearchExecutionSemanticCandidateTraceV2[] }
                         : {}),
                 });
                 if (candidateSurvival && !Array.isArray(passResult.value)) {
@@ -924,6 +961,11 @@ export async function runSearchExecution(
             searchWarningsSet.add(buildSearchPassWarningHelper(passDescriptor.id));
         }
 
+        rankingV3SemanticPasses.push(...successfulPasses.flatMap((pass) => (
+            pass.rankingV3CandidateTraces
+                ? [{ passId: pass.id, candidateTraces: pass.rankingV3CandidateTraces }]
+                : []
+        )));
         searchDiagnostics.searchPassSuccessCount += successfulPasses.length;
         searchDiagnostics.searchPassFailureCount += passDescriptors.length - successfulPasses.length;
         searchDiagnostics.semanticPassFailures = semanticPassFailures.map((failure) => ({ ...failure }));
@@ -1558,7 +1600,7 @@ export async function runSearchExecution(
         appendSearchCandidateStage(candidateSurvival, "mcp_ranked", scored);
     }
 
-    return {
+    const outcome: SearchExecutionOutcome = {
         kind: "ok",
         scored,
         operatorSummary,
@@ -1624,4 +1666,10 @@ export async function runSearchExecution(
         mustConstraintRetrievalOutcome,
         mustConstraintMustTokens: [...input.parsedOperators.must],
     };
+    return deliverSearchExecutionRankingV3Evidence(outcome, {
+        schemaVersion: 'search_execution_ranking_v3_evidence_v1',
+        mode: host.reranker ? 'enabled' : 'disabled',
+        admittedCandidateIds: scored.map((candidate) => searchCandidateIdentity(candidate.result).candidateId),
+        semanticPasses: rankingV3SemanticPasses,
+    }, input.rankingV3EvidenceConsumer);
 }
