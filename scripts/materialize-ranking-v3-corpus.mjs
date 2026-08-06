@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import process from 'node:process';
+import { parseQualificationTargetV1 } from './ranking-qualification-target.mjs';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const RAW_KEYS = [
@@ -10,6 +11,7 @@ const RAW_KEYS = [
     'baselineAdmissionSetSha256', 'requestCandidateIds', 'returnedCandidates',
     'canonicalRequestSha256', 'canonicalResponseSha256', 'outcome',
 ].sort();
+const NO_PROVIDER_CAPTURE_KEYS = ['captureSha256', 'providerEvidence', 'taskId'].sort();
 function canonical(value) {
     if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
     if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
@@ -30,6 +32,19 @@ function exact(value, keys, label) {
 function text(value, label) { if (typeof value !== 'string' || !value) throw new Error(`${label} must be non-empty.`); return value; }
 function positive(value, label) { if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be positive.`); return value; }
 function finite(value, label) { if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be finite.`); return value; }
+function parseNoProviderCapture(value) {
+    const capture = record(value, 'capture');
+    exact(capture, NO_PROVIDER_CAPTURE_KEYS, 'capture');
+    if (capture.providerEvidence !== null) throw new Error('No-provider captures must carry providerEvidence: null.');
+    return {
+        taskId: text(capture.taskId, 'capture.taskId'),
+        captureSha256: digest(capture.captureSha256, 'captureSha256'),
+        providerEvidence: null,
+    };
+}
+function sealedTargetDigest(target) {
+    return crypto.createHash('sha256').update(`${canonical(target)}\n`).digest('hex');
+}
 function parseRawEvidence(value, expectedServiceClass, expectedContractSha) {
     const input = record(value, 'rawProviderEvidence');
     exact(input, RAW_KEYS, 'rawProviderEvidence');
@@ -67,8 +82,14 @@ function parseRawEvidence(value, expectedServiceClass, expectedContractSha) {
 export function materializeRankingV3Corpus(input) {
     const source = record(input.manifest, 'manifest');
     if (!Array.isArray(source.tasks)) throw new Error('manifest.tasks must be an array.');
-    const tuningTaskIds = source.tasks.filter((task) => task?.split === 'tuning').map((task) => text(task.id, 'task.id')).sort();
+    const target = parseQualificationTargetV1(record(input.qualificationTarget, 'qualificationTarget'));
+    if (digest(input.qualificationTargetSha256, 'qualificationTargetSha256') !== sealedTargetDigest(target)) throw new Error('qualificationTargetSha256 does not match the sealed qualification target.');
+    const isFixed = target.providerTarget === 'fixed';
+    if (!isFixed && input.providerRequestContractSha256 !== undefined) throw new Error('providerRequestContractSha256 must not be provided when the qualification target has providerTarget "none".');
+    const tuningTasks = source.tasks.filter((task) => task?.split === 'tuning');
+    const tuningTaskIds = tuningTasks.map((task) => text(task.id, 'task.id')).sort();
     if (new Set(tuningTaskIds).size !== tuningTaskIds.length) throw new Error('Tuning task IDs contain duplicates.');
+    const taskById = new Map(tuningTasks.map((task) => [task.id, task]));
     if (!Array.isArray(input.captures)) throw new Error('captures must be an array.');
     const capturesByTask = new Map();
     for (const rawCapture of input.captures) {
@@ -76,21 +97,32 @@ export function materializeRankingV3Corpus(input) {
         const taskId = text(capture.taskId, 'capture.taskId');
         if (capturesByTask.has(taskId)) throw new Error(`Duplicate capture '${taskId}'.`);
         if (!tuningTaskIds.includes(taskId)) throw new Error(`Capture '${taskId}' is outside the tuning partition.`);
-        capturesByTask.set(taskId, {
-            taskId,
-            captureSha256: digest(capture.captureSha256, 'captureSha256'),
-            rawProviderEvidence: parseRawEvidence(capture.rawProviderEvidence, input.serviceClass, input.providerRequestContractSha256),
-        });
+        capturesByTask.set(taskId, isFixed
+            ? {
+                taskId,
+                captureSha256: digest(capture.captureSha256, 'captureSha256'),
+                rawProviderEvidence: parseRawEvidence(capture.rawProviderEvidence, target.serviceClass, input.providerRequestContractSha256),
+            }
+            : parseNoProviderCapture(capture));
     }
     if (capturesByTask.size !== tuningTaskIds.length || tuningTaskIds.some((taskId) => !capturesByTask.has(taskId))) throw new Error('Corpus capture coverage must exactly match every tuning task.');
     const body = {
         schemaVersion: 'ranking_v3_corpus_manifest_v1',
         sourceManifestSha256: digest(source.sha256, 'manifest.sha256'),
-        qualificationTargetSha256: digest(input.qualificationTargetSha256, 'qualificationTargetSha256'),
-        providerRequestContractSha256: digest(input.providerRequestContractSha256, 'providerRequestContractSha256'),
-        serviceClass: text(input.serviceClass, 'serviceClass'),
+        qualificationTargetSha256: input.qualificationTargetSha256,
+        ...(isFixed ? { providerRequestContractSha256: digest(input.providerRequestContractSha256, 'providerRequestContractSha256') } : {}),
+        serviceClass: target.serviceClass,
         taskCount: tuningTaskIds.length,
         taskIds: tuningTaskIds,
+        tasks: tuningTaskIds.map((taskId) => {
+            const task = taskById.get(taskId);
+            return {
+                taskId,
+                repositoryId: text(task.repositoryId, `task ${taskId} repositoryId`),
+                split: 'tuning',
+                taskSha256: crypto.createHash('sha256').update(canonical(task)).digest('hex'),
+            };
+        }),
         captures: tuningTaskIds.map((taskId) => capturesByTask.get(taskId)),
         tuningOnlyProof: { includedSplit: 'tuning', heldOutTaskCount: 0 },
     };
@@ -103,13 +135,18 @@ function parseArgs(argv) {
 }
 export function main(argv = process.argv.slice(2)) {
     const options = parseArgs(argv);
-    for (const key of ['manifest', 'captures', 'target-sha256', 'request-contract-sha256', 'service-class', 'out']) if (!options[key]) throw new Error(`Missing --${key}.`);
+    for (const key of ['manifest', 'target', 'target-sha256', 'captures', 'out']) if (!options[key]) throw new Error(`Missing --${key}.`);
+    const targetBytes = fs.readFileSync(options.target);
+    const target = parseQualificationTargetV1(record(JSON.parse(targetBytes.toString('utf8')), 'qualificationTarget'));
+    if (crypto.createHash('sha256').update(targetBytes).digest('hex') !== options['target-sha256']) throw new Error('--target-sha256 does not match the qualification target bytes.');
+    if (target.providerTarget === 'fixed' && !options['request-contract-sha256']) throw new Error('Missing --request-contract-sha256.');
+    if (target.providerTarget === 'none' && options['request-contract-sha256'] !== undefined) throw new Error('--request-contract-sha256 must not be provided when the qualification target has providerTarget "none".');
     const result = materializeRankingV3Corpus({
         manifest: JSON.parse(fs.readFileSync(options.manifest, 'utf8')),
         captures: JSON.parse(fs.readFileSync(options.captures, 'utf8')),
+        qualificationTarget: target,
         qualificationTargetSha256: options['target-sha256'],
         providerRequestContractSha256: options['request-contract-sha256'],
-        serviceClass: options['service-class'],
     });
     fs.writeFileSync(options.out, `${canonical(result)}\n`);
     return result;
