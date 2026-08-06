@@ -426,6 +426,7 @@ export class ProviderRuntime {
                 this.runtimeOwnerGate,
                 this.mutationLeaseCoordinator,
                 this.searchContinuationCoordinator,
+                { readFileMaxBytes: this.readFileMaxBytes },
             );
 
             await startProviderSyncLifecycle(syncManager, {

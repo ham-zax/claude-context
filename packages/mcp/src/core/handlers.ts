@@ -861,6 +861,7 @@ export class ToolHandlers {
         private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null = null,
         private readonly mutationLeaseCoordinator: MutationLeaseCoordinator | null = null,
         searchContinuationCoordinator?: SearchContinuationCoordinator,
+        options?: { readFileMaxBytes?: number },
     ) {
         this.context = context;
         this.snapshotManager = snapshotManager;
@@ -1012,7 +1013,7 @@ export class ToolHandlers {
             // Session tool contexts expose the configured READ_FILE_MAX_BYTES
             // ceiling; when absent (as for a bare core Context), the shared
             // reader enforces its 8 MiB default.
-            readFileMaxBytes: (this.context as unknown as { readFileMaxBytes?: number }).readFileMaxBytes,
+            readFileMaxBytes: options?.readFileMaxBytes,
             buildStaleSymbolRefFileOutlinePayload: buildStaleSymbolRefFileOutlinePayloadForNavigation,
             loadRegistryValidatedCallGraphSidecar: this.loadRegistryValidatedCallGraphSidecar.bind(this),
             buildRegistrySymbolCallGraphHint: this.buildRegistrySymbolCallGraphHint.bind(this),

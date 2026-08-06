@@ -592,3 +592,39 @@ test("reuses one connection across successful responses and closes deterministic
         }),
     ]);
 });
+
+test("direct response.body.cancel() sets settled state and cleans up abort listener", async (t) => {
+    const server = await startServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.write("partial data");
+    });
+    t.after(() => server.close());
+
+    const controller = new AbortController();
+    const baseline = getEventListeners(controller.signal, "abort").length;
+
+    const response = await fetchWithDeadline({
+        url: `${server.url}/direct-cancel`,
+        init: { method: "GET" },
+        signal: controller.signal,
+        attemptTimeoutMs: 10_000,
+        maxAttempts: 1,
+        ...basePolicy,
+    });
+
+    assert.ok(response.body);
+
+    const cancelReason = new Error("direct body cancel");
+    await response.body.cancel(cancelReason);
+
+    // Verify caller signal abort listener is kept clean after direct cancel
+    assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
+
+    // Verify settled state: repeated cancel returns resolved promise without error
+    await assert.doesNotReject(() => response.body!.cancel("second cancel"));
+
+    // Verify stream reader reflects settled state
+    const reader = response.body.getReader();
+    const chunk = await reader.read();
+    assert.equal(chunk.done, true);
+});

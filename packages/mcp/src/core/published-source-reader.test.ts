@@ -285,3 +285,93 @@ test('readAuthorizedPublishedSource records the source measurement ledger when r
         assert.equal(outcome.status, 'completed');
     });
 });
+
+test("readAuthorizedPublishedSource detects truncation inside onAuthorized during read", async () => {
+    await withTempRepo(async (repoPath) => {
+        const filePath = path.join(repoPath, "src", "runtime.ts");
+        fs.writeFileSync(filePath, "export function run() { return true; }\n", "utf8");
+
+        await assert.rejects(
+            () => readSource({
+                repoPath,
+                onAuthorized: async () => {
+                    // Truncate the file inside onAuthorized during the read process
+                    fs.truncateSync(filePath, 5);
+                },
+            }),
+            (error: unknown) => {
+                assert.ok(error instanceof AuthorizedSourceReadError);
+                assert.equal(error.code, "FILE_REPLACED");
+                assert.match(error.message, /does not match the observed size|changed/i);
+                return true;
+            },
+        );
+    });
+});
+
+test("readAuthorizedPublishedSource maps RootBoundFileError to FILE_REPLACED and records non-completed measurement outcome when truncated inside onAuthorized", async () => {
+    await withTempRepo(async (repoPath) => {
+        const filePath = path.join(repoPath, "src", "runtime.ts");
+        fs.writeFileSync(filePath, "export function run() { return true; }\n", "utf8");
+        const ledgerFile = path.join(repoPath, "ledger.jsonl");
+
+        await withSourceMeasurementOperation({
+            operation: "read_file",
+            ledgerFile,
+            rootDir: repoPath,
+        }, async () => {
+            await assert.rejects(
+                () => readAuthorizedPublishedSource({
+                    workspacePolicy: buildWorkspacePolicy(repoPath),
+                    codebaseRoot: repoPath,
+                    requestedPath: filePath,
+                    publishedRelativePaths: PUBLISHED,
+                    onAuthorized: async () => {
+                        fs.truncateSync(filePath, 0);
+                    },
+                    sourceMeasurement: {
+                        owner: "validation",
+                        filePath,
+                        scanKind: "complete",
+                    },
+                }),
+                (error: unknown) => {
+                    assert.ok(error instanceof AuthorizedSourceReadError);
+                    assert.equal(error.code, "FILE_REPLACED");
+                    return true;
+                },
+            );
+        });
+
+        const records = fs.readFileSync(ledgerFile, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+        const outcome = records.find((record) => record.kind === "source_observation_outcome");
+        assert.ok(outcome, "expected a source_observation_outcome record");
+        assert.notEqual(outcome.status, "completed");
+    });
+});
+
+test("readAuthorizedPublishedSource detects growth inside onAuthorized during read", async () => {
+    await withTempRepo(async (repoPath) => {
+        const filePath = path.join(repoPath, "src", "runtime.ts");
+        fs.writeFileSync(filePath, "export function run() { return true; }\n", "utf8");
+
+        await assert.rejects(
+            () => readSource({
+                repoPath,
+                onAuthorized: async () => {
+                    fs.appendFileSync(filePath, "unexpected growth beyond observed size\n");
+                },
+            }),
+            (error: unknown) => {
+                assert.ok(error instanceof AuthorizedSourceReadError);
+                assert.equal(error.code, "FILE_REPLACED");
+                assert.match(error.message, /grew beyond the observed size|changed/i);
+                return true;
+            },
+        );
+    });
+});
+
