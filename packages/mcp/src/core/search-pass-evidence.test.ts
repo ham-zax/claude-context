@@ -10,3 +10,20 @@ test('pass_evidence_contributions_are_stable_and_exact', () => {
     assert.deepEqual(first.contributions.map((item) => item.passId), ['expanded', 'primary']);
     assert.equal(first.totalContribution, first.contributions.reduce((sum, item) => sum + item.contribution, 0));
 });
+
+test('pass_evidence_weight_scales_contribution_exactly', () => {
+    // Weighted passes (e.g. the dirty overlay) must mirror the execution
+    // fusion delta passWeight * (1 / (K + rank)) exactly.
+    const evidence = buildSearchPassEvidenceV1({
+        candidateId: 'c1',
+        passes: [{ passId: 'attempt:1/dirty_overlay', rank: 3, rrfK: 60, weight: 2 }],
+    });
+    assert.deepEqual(evidence.contributions, [{
+        passId: 'attempt:1/dirty_overlay',
+        rank: 3,
+        rrfK: 60,
+        weight: 2,
+        contribution: 2 * (1 / (60 + 3)),
+    }]);
+    assert.equal(evidence.totalContribution, evidence.contributions[0].contribution);
+});

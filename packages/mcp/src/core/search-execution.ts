@@ -3,6 +3,7 @@ import type {
     SemanticSearchExecutionResult,
     SemanticSearchResult,
 } from "@zokizuan/satori-core";
+import crypto from "node:crypto";
 import {
     LexicalRetrievalModeUnsupportedError,
     RerankerRequestError,
@@ -52,6 +53,12 @@ import {
     sortSearchCandidates as sortSearchCandidatesHelper,
 } from "./search-ranking-policy.js";
 import type { SearchQuerySupport } from "./search-query-support.js";
+import { extractRankingFeaturesV1, type RankingFeatureVectorV1 } from "./ranking-features-v1.js";
+import { buildSearchPassEvidenceV1, type SearchPassEvidenceV1 } from "./search-pass-evidence.js";
+import type { SemanticSearchCandidateTraceV2Like } from "./search-ranking-evidence.js";
+import { assembleSearchRankingEvidenceV1, type SearchRankingEvidenceRecordV1 } from "./search-ranking-evidence-assembler.js";
+import { retainRawValidatedRerankEvidenceV1, type RawValidatedRerankEvidenceV1 } from "./search-rerank-evidence-retention.js";
+import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
 import type {
     SearchQueryPlan,
     SearchResultLike,
@@ -93,6 +100,9 @@ export interface SearchExecutionRankingV3EvidenceEnvelopeV1 {
         passId: string;
         candidateTraces: readonly SearchExecutionSemanticCandidateTraceV2[];
     }[];
+    passEvidence: readonly SearchPassEvidenceV1[];
+    rawRerankEvidence: RawValidatedRerankEvidenceV1 | null;
+    assembledRecords: readonly SearchRankingEvidenceRecordV1[];
 }
 
 export function deliverSearchExecutionRankingV3Evidence<T>(
@@ -102,6 +112,26 @@ export function deliverSearchExecutionRankingV3Evidence<T>(
 ): T {
     consumer?.(structuredClone(evidence));
     return outcome;
+}
+
+/**
+ * Deterministic recursive canonical JSON (sorted object keys) used to digest
+ * bounded evidence payloads. This is a side-channel identity only: it never
+ * changes product response bytes.
+ */
+function canonicalJson(value: unknown): string {
+    if (value === undefined) return 'null';
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value as Record<string, unknown>).sort()
+            .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`)
+            .join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+function sha256Digest(value: unknown): string {
+    return crypto.createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
 
 type SearchPassId = "primary" | "expanded";
@@ -417,6 +447,20 @@ export type MustConstraintRetrievalOutcome =
         budgetExhausted: true;
     };
 
+export type RankingV3RerankEvidenceEnvironmentV1 = {
+    /** Environment-qualified service class for the applied reranker. */
+    serviceClass: 'online' | 'offline_linux_x64';
+    /** Environment-qualified provider key for the applied reranker. */
+    providerKey: string;
+    /** SHA-256 of the provider configuration that produced the applied reranker. */
+    providerConfigurationDigest: string;
+    /** SHA-256 of the provider request contract used by this deployment. */
+    providerRequestContractSha256: string;
+    /** Bounded rerank execution telemetry for the successful provider response. */
+    timeoutMs: number;
+    attempts: number;
+};
+
 export type SearchExecutionHost = {
     searchQuerySupport: SearchQuerySupport;
     semanticSearch: (request: {
@@ -433,6 +477,13 @@ export type SearchExecutionHost = {
         semanticQuery: string,
         result: SearchResultLike,
     ) => Promise<string | undefined>;
+    /**
+     * Optional environment metadata for the ranking-v3 rerank evidence side
+     * channel. When absent (or null), the raw validated rerank retention is
+     * omitted from the evidence envelope; product behavior never depends on
+     * this hook.
+     */
+    rankingV3RerankEvidenceEnvironment?: () => RankingV3RerankEvidenceEnvironmentV1 | null;
     shouldForceSearchPassFailure: (passId: SearchPassId) => boolean;
     classifyEmbeddingProviderError: (error: unknown) => EmbeddingProviderDiagnostic | null;
     classifyVectorBackendError: (error: unknown) => VectorBackendDiagnostic | null;
@@ -477,6 +528,19 @@ type RerankPhaseResult = {
     rerankerByteBudgetOmittedCandidates: number;
     warning?: 'RERANKER_FAILED';
     rerankerFailureKind?: RerankerFailureKind;
+    /**
+     * Validated rerank response material for the ranking-v3 evidence side
+     * channel. Present only when a complete provider permutation was applied;
+     * never read by the product path.
+     */
+    rawRerankEvidence?: {
+        requestCandidateIds: string[];
+        orderedCandidates: Array<{ candidateId: string; rawScore: number }>;
+        canonicalRequestSha256: string;
+        canonicalResponseSha256: string;
+        rerankerIdentity: string;
+        rerankerProjectionIdentity: string;
+    } | null;
 };
 
 async function rerankSearchCandidates(
@@ -508,6 +572,7 @@ async function rerankSearchCandidates(
     let rerankerCandidateBudget = 0;
     let rerankerBudgetReason: RerankBudgetReason | undefined;
     let rerankerByteBudgetOmittedCandidates = 0;
+    let rawRerankEvidence: RerankPhaseResult['rawRerankEvidence'] = null;
     const skippedByExactPin = Boolean(
         rerankDecision.enabled
         && host.reranker
@@ -593,7 +658,7 @@ async function rerankSearchCandidates(
             searchDiagnostics.rerankerCalls += 1;
             searchDiagnostics.rerankerCandidates += rerankDocuments.length;
             searchDiagnostics.rerankerInputBytes += byteSelection.inputBytes;
-            let rerankResults: Array<{ index: number }> = [];
+            let rerankResults: Array<{ index: number; relevanceScore: number }> = [];
             let rerankerExecutionDiagnosticsObserved = false;
             try {
                 rerankResults = await host.measureSearchPhase(
@@ -699,6 +764,52 @@ async function rerankSearchCandidates(
             if (rerankerApplied && lateOnProvider) {
                 rerankerOperationalReason = "lateon_applied";
             }
+
+            // Bounded side-channel material: the raw provider permutation and
+            // canonical digests. Built in its own guard so evidence capture can
+            // never turn a validated rerank into a product failure.
+            try {
+                const rerankerBinding = host.reranker?.getIdentity();
+                if (rerankerApplied && rerankerBinding) {
+                    const requestCandidateIds = rerankSlice.map((candidate) => (
+                        searchCandidateIdentity(candidate.result).candidateId
+                    ));
+                    const rawScores = new Map<number, number>();
+                    for (const result of rerankResults) {
+                        rawScores.set(result.index, result.relevanceScore);
+                    }
+                    rawRerankEvidence = {
+                        requestCandidateIds,
+                        orderedCandidates: [...rerankRanks.entries()]
+                            .sort((left, right) => left[1] - right[1])
+                            .map(([originalIndex]) => ({
+                                candidateId: searchCandidateIdentity(
+                                    rerankSlice[originalIndex].result,
+                                ).candidateId,
+                                rawScore: rawScores.get(originalIndex) ?? Number.NaN,
+                            })),
+                        canonicalRequestSha256: sha256Digest({
+                            query: input.semanticQuery,
+                            candidateIds: requestCandidateIds,
+                            documents: rerankDocuments,
+                            topK: rerankCount,
+                            truncation: true,
+                            returnDocuments: false,
+                        }),
+                        canonicalResponseSha256: sha256Digest(
+                            rerankResults.map((result) => ({
+                                index: result.index,
+                                relevanceScore: result.relevanceScore,
+                            })),
+                        ),
+                        rerankerIdentity: `${rerankerBinding.provider}:${rerankerBinding.model}`,
+                        rerankerProjectionIdentity: host.reranker?.getDocumentProjectionVersion?.()
+                            ?? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION,
+                    };
+                }
+            } catch {
+                rawRerankEvidence = null;
+            }
         } catch {
             rerankerFailurePhase ||= 'parse_results';
             // Every terminal reranker failure -- api_call, document
@@ -723,6 +834,7 @@ async function rerankSearchCandidates(
         rerankerBudgetReason,
         rerankerByteBudgetOmittedCandidates,
         rerankerFailureKind: searchDiagnostics.rerankerFailureKind,
+        rawRerankEvidence,
         ...(rerankerFailurePhase ? { warning: 'RERANKER_FAILED' as const } : {}),
     };
 }
@@ -737,6 +849,26 @@ function buildEmptyFilterSummary(): SearchFilterSummary {
         removedByExclude: 0,
     };
 }
+
+/** Deterministic chunk identity used by fusion and ranking-v3 pass evidence. */
+function chunkKeyOf(result: SearchResultLike): string {
+    return `${result.relativePath}:${result.startLine}:${result.endLine}:${result.language || "unknown"}`;
+}
+
+type RankingV3PassContribution = {
+    passId: string;
+    rank: number;
+    rrfK: number;
+    weight: number;
+};
+
+type RankingV3EvidenceCandidate = {
+    candidateId: string;
+    baselineScore: number;
+    candidateTrace: SemanticSearchCandidateTraceV2Like;
+    passEvidence: SearchPassEvidenceV1;
+    features: RankingFeatureVectorV1;
+};
 
 export async function runSearchExecution(
     input: SearchExecutionInput,
@@ -793,7 +925,12 @@ export async function runSearchExecution(
     let attemptsUsed = 0;
     const searchWarningsSet = new Set<string>();
     const semanticPassFailures: SemanticPassFailureDiagnostic[] = [];
-    const rankingV3SemanticPasses: SearchExecutionRankingV3EvidenceEnvelopeV1['semanticPasses'] = [];
+    const rankingV3SemanticPasses: Array<{
+        passId: string;
+        candidateTraces: SearchExecutionSemanticCandidateTraceV2[];
+    }> = [];
+    const rankingV3PassContributions: Map<string, RankingV3PassContribution[]> = new Map();
+    const rankingV3FinalAttemptTraces = new Map<string, SemanticSearchCandidateTraceV2Like>();
     const suppressedDirtyPaths = new Set<string>();
     const representedDirtyPaths = new Set<string>();
     const passesUsed = new Set<string>();
@@ -823,6 +960,11 @@ export async function runSearchExecution(
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         attemptsUsed = attempt + 1;
+        // Per-attempt evidence state: the final attempt owns the admitted
+        // candidates, and attempt-qualified pass ids keep evidence pass ids
+        // unique across retries (matching the candidate-survival convention).
+        rankingV3PassContributions.clear();
+        rankingV3FinalAttemptTraces.clear();
         const runPasses = (passDescriptors: Array<{ id: SearchPassId; query: string }>) => {
             searchDiagnostics.searchPassCount += passDescriptors.length;
             return host.measureSearchPhase(
@@ -963,9 +1105,16 @@ export async function runSearchExecution(
 
         rankingV3SemanticPasses.push(...successfulPasses.flatMap((pass) => (
             pass.rankingV3CandidateTraces
-                ? [{ passId: pass.id, candidateTraces: pass.rankingV3CandidateTraces }]
+                ? [{ passId: `attempt:${attempt + 1}/${pass.id}`, candidateTraces: pass.rankingV3CandidateTraces }]
                 : []
         )));
+        for (const pass of successfulPasses) {
+            for (const trace of pass.rankingV3CandidateTraces ?? []) {
+                if (!rankingV3FinalAttemptTraces.has(trace.candidateId)) {
+                    rankingV3FinalAttemptTraces.set(trace.candidateId, trace);
+                }
+            }
+        }
         searchDiagnostics.searchPassSuccessCount += successfulPasses.length;
         searchDiagnostics.searchPassFailureCount += passDescriptors.length - successfulPasses.length;
         searchDiagnostics.semanticPassFailures = semanticPassFailures.map((failure) => ({ ...failure }));
@@ -1049,9 +1198,20 @@ export async function runSearchExecution(
                 if (passId === "dirty_overlay") {
                     representedDirtyPaths.add(normalizedResultPath);
                 }
-                const key = `${result.relativePath}:${result.startLine}:${result.endLine}:${result.language || "unknown"}`;
+                const key = chunkKeyOf(result);
                 const rank = i + 1;
                 const rrf = passWeight * (1 / (SEARCH_RRF_K + rank));
+                let passContributions = rankingV3PassContributions.get(key);
+                if (!passContributions) {
+                    passContributions = [];
+                    rankingV3PassContributions.set(key, passContributions);
+                }
+                passContributions.push({
+                    passId: `attempt:${attempt + 1}/${passId}`,
+                    rank,
+                    rrfK: SEARCH_RRF_K,
+                    weight: passWeight,
+                });
                 const existing = byChunkKey.get(key);
                 if (!existing) {
                     const backendScoreKind = typeof result.backendScoreKind === "string"
@@ -1514,6 +1674,72 @@ export async function runSearchExecution(
         candidateLimit = resolveNextSearchCandidateLimit(candidateLimit);
     }
 
+    // Ranking-v3 evidence side channel: snapshot the deterministic,
+    // post-admission, pre-residual state before the reranker mutates scores.
+    // Evidence capture degrades to an empty side channel and can never change
+    // product response bytes.
+    const rankingV3AdmittedCandidateIds = scored.map((candidate) => (
+        searchCandidateIdentity(candidate.result).candidateId
+    ));
+    const rankingV3QueryId = sha256Digest({ semanticQuery: input.semanticQuery });
+    let rankingV3EvidenceCandidates: RankingV3EvidenceCandidate[] = [];
+    try {
+        rankingV3EvidenceCandidates = scored.map((candidate) => {
+            const candidateId = searchCandidateIdentity(candidate.result).candidateId;
+            const candidateTrace = rankingV3FinalAttemptTraces.get(candidateId)
+                ?? {
+                    schemaVersion: 'semantic_search_candidate_trace_v2' as const,
+                    candidateId,
+                    rawDenseRank: null,
+                    rawLexicalRank: null,
+                    rawFallbackLexicalRank: null,
+                    coreFusionRank: null,
+                };
+            const pathCategory = classifyPathCategory(candidate.result.relativePath);
+            return {
+                candidateId,
+                baselineScore: candidate.finalScore,
+                candidateTrace,
+                passEvidence: buildSearchPassEvidenceV1({
+                    candidateId,
+                    passes: rankingV3PassContributions.get(chunkKeyOf(candidate.result)) ?? [],
+                }),
+                features: extractRankingFeaturesV1({
+                    baselineFinalScore: candidate.finalScore,
+                    backendScore: candidate.backendScore,
+                    fusionScore: candidate.fusionScore,
+                    exactLexicalMatch: candidate.exactLexicalMatch,
+                    exactMatchPinned: candidate.exactMatchPinned,
+                    passesMatchedMust: candidate.passesMatchedMust,
+                    rerankAdjusted: false,
+                    retrievalPassCount: candidate.retrievalPasses.length,
+                    denseSeen: candidate.backendScoreKindsSeen.includes('dense_similarity'),
+                    lexicalSeen: candidate.backendScoreKindsSeen.includes('lexical_rank')
+                        || candidate.backendScoreKindsSeen.includes('rrf_fusion'),
+                    rawDenseRank: candidateTrace.rawDenseRank,
+                    rawLexicalRank: candidateTrace.rawLexicalRank,
+                    rawFallbackLexicalRank: candidateTrace.rawFallbackLexicalRank,
+                    coreFusionRank: candidateTrace.coreFusionRank,
+                    mcpUnionRank: null,
+                    postEligibilityRank: null,
+                    rerankerAdmissionRank: null,
+                    intentConfidence: input.queryPlan.confidence,
+                    testIntent: input.queryPlan.testSeeking,
+                    implementationIntent: input.queryPlan.implementationSeeking,
+                    writerIntent: input.queryPlan.writerSeeking,
+                    docsRoute: input.scope === 'docs',
+                    explicitGeneratedOrPathIntent: input.parsedOperators.path.length > 0,
+                    isTestPath: pathCategory === 'tests',
+                    isDocsPath: pathCategory === 'docs',
+                    isGeneratedPath: pathCategory === 'generated',
+                    isFixturePath: pathCategory === 'fixture',
+                }),
+            };
+        });
+    } catch {
+        rankingV3EvidenceCandidates = [];
+    }
+
     const searchWarnings = Array.from(searchWarningsSet);
     if (dirtyFilesNotFreshened) {
         searchWarnings.push(WARNING_CODES.SEARCH_DIRTY_WORKTREE_NOT_SYNCED);
@@ -1552,6 +1778,55 @@ export async function runSearchExecution(
         rerankerBudgetReason,
         rerankerByteBudgetOmittedCandidates,
     } = rerankPhase;
+
+    let rankingV3RawRerankEvidence: RawValidatedRerankEvidenceV1 | null = null;
+    let rankingV3AssembledRecords: SearchRankingEvidenceRecordV1[] = [];
+    try {
+        const rerankEvidenceMaterial = rerankPhase.rawRerankEvidence;
+        const rerankEvidenceEnvironment = host.rankingV3RerankEvidenceEnvironment?.() ?? null;
+        if (rerankEvidenceMaterial && rerankEvidenceEnvironment) {
+            rankingV3RawRerankEvidence = retainRawValidatedRerankEvidenceV1({
+                serviceClass: rerankEvidenceEnvironment.serviceClass,
+                providerKey: rerankEvidenceEnvironment.providerKey,
+                rerankerIdentity: rerankEvidenceMaterial.rerankerIdentity,
+                rerankerProjectionIdentity: rerankEvidenceMaterial.rerankerProjectionIdentity,
+                providerConfigurationDigest: rerankEvidenceEnvironment.providerConfigurationDigest,
+                providerRequestContractSha256: rerankEvidenceEnvironment.providerRequestContractSha256,
+                baselineAdmissionSetSha256: sha256Digest(rankingV3AdmittedCandidateIds),
+                canonicalRequestSha256: rerankEvidenceMaterial.canonicalRequestSha256,
+                canonicalResponseSha256: rerankEvidenceMaterial.canonicalResponseSha256,
+                requestCandidateIds: rerankEvidenceMaterial.requestCandidateIds,
+                response: {
+                    schemaVersion: 'validated_rerank_response_v1',
+                    orderedCandidates: rerankEvidenceMaterial.orderedCandidates,
+                },
+                outcome: {
+                    status: 'complete',
+                    timeoutMs: rerankEvidenceEnvironment.timeoutMs,
+                    attempts: rerankEvidenceEnvironment.attempts,
+                },
+            });
+        }
+        rankingV3AssembledRecords = assembleSearchRankingEvidenceV1({
+            queryId: rankingV3QueryId,
+            evidenceStage: 'post_admission_pre_residual',
+            candidates: rankingV3EvidenceCandidates.map((entry, index) => ({
+                candidateId: entry.candidateId,
+                baselineScore: entry.baselineScore,
+                admissionRank: index + 1,
+                candidateTrace: entry.candidateTrace,
+                passEvidence: entry.passEvidence,
+                features: entry.features,
+                rawRerankEvidence: rankingV3RawRerankEvidence
+                    && rankingV3RawRerankEvidence.requestCandidateIds.includes(entry.candidateId)
+                    ? rankingV3RawRerankEvidence
+                    : null,
+            })),
+        });
+    } catch {
+        rankingV3RawRerankEvidence = null;
+        rankingV3AssembledRecords = [];
+    }
 
     searchDiagnostics.excludedByIgnore = Math.max(0, searchDiagnostics.resultsBeforeFilter - searchDiagnostics.resultsAfterFilter);
     searchDiagnostics.rerankerAttempted = rerankerAttempted;
@@ -1669,7 +1944,10 @@ export async function runSearchExecution(
     return deliverSearchExecutionRankingV3Evidence(outcome, {
         schemaVersion: 'search_execution_ranking_v3_evidence_v1',
         mode: host.reranker ? 'enabled' : 'disabled',
-        admittedCandidateIds: scored.map((candidate) => searchCandidateIdentity(candidate.result).candidateId),
+        admittedCandidateIds: rankingV3AdmittedCandidateIds,
         semanticPasses: rankingV3SemanticPasses,
+        passEvidence: rankingV3EvidenceCandidates.map((entry) => entry.passEvidence),
+        rawRerankEvidence: rankingV3RawRerankEvidence,
+        assembledRecords: rankingV3AssembledRecords,
     }, input.rankingV3EvidenceConsumer);
 }
