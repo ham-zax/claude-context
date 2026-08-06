@@ -1,5 +1,0 @@
-parent=2e12d07584d8c185bc38227ba1edce60ddc2cd4c
-message=feat(ranking-v3): add Wave A schema and receipt authorities
-encoding=gzip
-patchSha256=6371acc57c12ea5541ee85a32278d6edcaeab555d8decb67cc419199684dfe64
-payloadSha256=18de0b5e5a7dc83282d1bb52724a664b7d672b41df5bde97d8d7f8fc14b823bf

@@ -1028,3 +1028,53 @@ export async function runSearchQualityEvaluation(
         summary: summarizeResults(results),
     };
 }
+
+export type RankingV3GradedMetricsInput = {
+    stages: Record<string, readonly string[]>;
+    judgments: Readonly<Record<string, number>>;
+    pairs: readonly (readonly [string, string])[];
+};
+
+export type RankingV3GradedMetrics = {
+    stageSurvival: Record<string, number>;
+    judgedCoverageAt10: number;
+    pairwiseAccuracy: number | null;
+    ndcgAt10: number | null;
+};
+
+function gradedDcg(candidateIds: readonly string[], judgments: Readonly<Record<string, number>>): number {
+    return candidateIds.slice(0, 10).reduce((total, candidateId, index) => {
+        const grade = judgments[candidateId];
+        if (!Number.isInteger(grade) || grade < 0) return total;
+        return total + ((2 ** grade) - 1) / Math.log2(index + 2);
+    }, 0);
+}
+
+export function computeRankingV3GradedMetrics(input: RankingV3GradedMetricsInput): RankingV3GradedMetrics {
+    const admitted = input.stages.admitted ?? [];
+    const admittedSet = new Set(admitted);
+    const stageSurvival: Record<string, number> = {};
+    for (const [stage, candidateIds] of Object.entries(input.stages)) {
+        if (new Set(candidateIds).size !== candidateIds.length) {
+            throw new Error(`Ranking V3 stage '${stage}' contains duplicate candidate IDs.`);
+        }
+        stageSurvival[stage] = admitted.length === 0
+            ? 1
+            : Number((candidateIds.filter((candidateId) => admittedSet.has(candidateId)).length / admitted.length).toFixed(6));
+    }
+    const final = input.stages.final ?? [];
+    const judgedAt10 = final.slice(0, 10).filter((candidateId) => Number.isInteger(input.judgments[candidateId])).length;
+    const judgedCoverageAt10 = final.slice(0, 10).length === 0
+        ? 0
+        : Number((judgedAt10 / final.slice(0, 10).length).toFixed(6));
+    const finalRank = new Map(final.map((candidateId, index) => [candidateId, index]));
+    const comparablePairs = input.pairs.filter(([preferred, other]) => finalRank.has(preferred) && finalRank.has(other));
+    const pairwiseAccuracy = comparablePairs.length === 0
+        ? null
+        : Number((comparablePairs.filter(([preferred, other]) => (finalRank.get(preferred) ?? Infinity) < (finalRank.get(other) ?? Infinity)).length / comparablePairs.length).toFixed(6));
+    const judgedFinal = final.filter((candidateId) => Number.isInteger(input.judgments[candidateId]));
+    const ideal = [...judgedFinal].sort((left, right) => (input.judgments[right] ?? -1) - (input.judgments[left] ?? -1));
+    const idealDcg = gradedDcg(ideal, input.judgments);
+    const ndcgAt10 = idealDcg === 0 ? null : Number((gradedDcg(final, input.judgments) / idealDcg).toFixed(6));
+    return { stageSurvival, judgedCoverageAt10, pairwiseAccuracy, ndcgAt10 };
+}
