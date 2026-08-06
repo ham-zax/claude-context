@@ -1,0 +1,13 @@
+{
+ "schemaVersion": "ranking_v3_task_receipt_v1",
+ "taskId": "B2",
+ "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+ "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
+ "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
+ "headSha": "31868165b896d41e4ccef4bc3e78bc5be2833e71",
+ "treeSha": "2240503289b0eb60605fbdefb2b9341a2401981f",
+ "testCommand": "node --import tsx --test packages/mcp/src/core/search-pass-evidence.test.ts",
+ "result": "passed",
+ "artifactSha256": "6384cdc78cdc1a771db6c970499fb446d0fbc3beeed99ee52a1bb91600ce7845",
+ "sha256": "efe985f4273cd491b83f7c14866afa77394c230dfa030704d178a558869c0db0"
+}

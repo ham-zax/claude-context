@@ -1,0 +1,13 @@
+{
+ "schemaVersion": "ranking_v3_task_receipt_v1",
+ "taskId": "B7",
+ "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+ "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
+ "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
+ "headSha": "31868165b896d41e4ccef4bc3e78bc5be2833e71",
+ "treeSha": "2240503289b0eb60605fbdefb2b9341a2401981f",
+ "testCommand": "node --import tsx --test scripts/satori-search-candidate-replay.test.mjs",
+ "result": "passed",
+ "artifactSha256": "5f4a814e3c5e93430f0895545c75e5390365ef2881aa118d425163322ca67006",
+ "sha256": "ee0735cac931dd3fbf611ada5683e6c10f0943797fb43a25927e73b32f043bc5"
+}
