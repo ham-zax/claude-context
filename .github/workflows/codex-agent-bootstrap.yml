@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
 
@@ -21,6 +21,83 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Apply staged agent patch
+        id: apply_patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_path=.agent-patches/pending.patch
+          if [[ ! -f "$patch_path" ]]; then
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed_paths=$(git diff --name-only HEAD^ HEAD)
+          if [[ "$changed_paths" != "$patch_path" ]]; then
+            echo "Patch transport commit must change only $patch_path" >&2
+            exit 1
+          fi
+
+          expected_parent=$(sed -n 's/^# agent-parent-sha: //p' "$patch_path" | head -n 1)
+          commit_message=$(sed -n 's/^# agent-commit-message: //p' "$patch_path" | head -n 1)
+          actual_parent=$(git rev-parse HEAD^)
+          if [[ ! "$expected_parent" =~ ^[a-f0-9]{40}$ || "$actual_parent" != "$expected_parent" ]]; then
+            echo "Patch parent mismatch: expected=$expected_parent actual=$actual_parent" >&2
+            exit 1
+          fi
+          if [[ -z "$commit_message" ]]; then
+            echo "Patch commit message is missing" >&2
+            exit 1
+          fi
+
+          sed '/^# agent-parent-sha: /d; /^# agent-commit-message: /d' \
+            "$patch_path" > /tmp/agent.patch
+          git apply --check /tmp/agent.patch
+          git apply /tmp/agent.patch
+          rm "$patch_path"
+          rmdir .agent-patches 2>/dev/null || true
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "$commit_message"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "applied=true" >> "$GITHUB_OUTPUT"
+
+      - name: Record effective branch head
+        id: effective_head
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+
+      - name: Create local-clone Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master --no-tags
+          git update-ref refs/heads/agent-feature HEAD
+          git update-ref refs/heads/agent-master refs/remotes/origin/master
+          git bundle create satori-agent.bundle \
+            refs/heads/agent-feature \
+            refs/heads/agent-master
+          git bundle verify satori-agent.bundle
+          cat > agent-bundle-metadata.json <<EOF
+          {
+            "repository": "ham-zax/satori",
+            "sourceBranch": "codex/ranking-v3-r0-1a-fixture",
+            "sourceHead": "$(git rev-parse HEAD)",
+            "sourceTree": "$(git rev-parse HEAD^{tree})",
+            "masterHead": "$(git rev-parse refs/remotes/origin/master)",
+            "masterTree": "$(git rev-parse refs/remotes/origin/master^{tree})"
+          }
+          EOF
+          printf '%s\n' 125 > r0-1a-focused.status
+          printf '%s\n' 125 > r0-1a-eval.status
+          : > r0-1a-focused.log
+          : > r0-1a-eval.log
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -59,33 +136,11 @@ jobs:
           printf 'eval_status=%s\n' "$eval_status" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Create local-clone Git bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin master --no-tags
-          git update-ref refs/heads/agent-feature HEAD
-          git update-ref refs/heads/agent-master refs/remotes/origin/master
-          git bundle create satori-agent.bundle \
-            refs/heads/agent-feature \
-            refs/heads/agent-master
-          git bundle verify satori-agent.bundle
-          cat > agent-bundle-metadata.json <<EOF
-          {
-            "repository": "ham-zax/satori",
-            "sourceBranch": "codex/ranking-v3-r0-1a-fixture",
-            "sourceHead": "$(git rev-parse HEAD)",
-            "sourceTree": "$(git rev-parse HEAD^{tree})",
-            "masterHead": "$(git rev-parse refs/remotes/origin/master)",
-            "masterTree": "$(git rev-parse refs/remotes/origin/master^{tree})"
-          }
-          EOF
-
       - name: Upload bundle and verification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: satori-agent-bundle-${{ github.sha }}
+          name: satori-agent-bundle-${{ steps.effective_head.outputs.sha }}
           if-no-files-found: error
           retention-days: 7
           path: |
@@ -103,12 +158,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          focused_status=$(cat r0-1a-focused.status 2>/dev/null || printf '%s' 125)
+          eval_status=$(cat r0-1a-eval.status 2>/dev/null || printf '%s' 125)
           body=$(cat <<EOF
           Agent bootstrap run ID: ${GITHUB_RUN_ID}
-          Commit: ${GITHUB_SHA}
-          Artifact: satori-agent-bundle-${GITHUB_SHA}
-          Focused status: ${{ steps.verify.outputs.focused_status || 'not-run' }}
-          Evaluation status: ${{ steps.verify.outputs.eval_status || 'not-run' }}
+          Commit: ${{ steps.effective_head.outputs.sha }}
+          Artifact: satori-agent-bundle-${{ steps.effective_head.outputs.sha }}
+          Applied staged patch: ${{ steps.apply_patch.outputs.applied }}
+          Focused status: ${focused_status}
+          Evaluation status: ${eval_status}
           EOF
           )
           gh api "repos/${GITHUB_REPOSITORY}/issues/3/comments" -f body="$body"
@@ -118,8 +176,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          focused_status=$(cat r0-1a-focused.status)
-          eval_status=$(cat r0-1a-eval.status)
+          focused_status=$(cat r0-1a-focused.status 2>/dev/null || printf '%s' 125)
+          eval_status=$(cat r0-1a-eval.status 2>/dev/null || printf '%s' 125)
           if [[ "$focused_status" != "0" || "$eval_status" != "0" ]]; then
             echo "R0.1A verification failed: focused=$focused_status eval=$eval_status" >&2
             exit 1
