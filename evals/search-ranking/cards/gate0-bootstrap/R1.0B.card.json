@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.0B",
+  "cardType": "boundary_generator",
+  "contractSha256": "59eeacf34252859f4ad4d40a80f88e75d90b0ee3b0b0fa24953c8a8277db37b3",
+  "contract": {
+    "task_id": "R1.0B",
+    "title": "Execute the §7.4 dispatch CLI with scope gate1-target-bound and next generator R1.6 (target-bound Gate-1 card set)",
+    "risk": "medium",
+    "invariant": "R1.0B generates the target-bound card set for R1.T1, R1.T2, R1.1-R1.5, and R1.6 only after R1.0 has produced the exact target digest; the R1.6 boundary-generator card is present but nondispatchable until R1.5's gate receipt exists.",
+    "owners": [
+      "R1.0B"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.4 CLI, §7.5/§7.6 catalogs)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task)",
+      "package.json (round-level approved; plan path binding in card manifest)",
+      "Card set directory with cards.manifest.json (schemaVersion ranking_v3_dispatch_cards_v2), written to $CARD_SET_DIR per §7.4; not a tracked repo file"
+    ],
+    "interface_changes": [
+      "Card-set manifest schemaVersion ranking_v3_dispatch_cards_v2 (plan §7.4, lines 2039-2052)",
+      "Scope ID gate1-target-bound and next generator R1.6 (plan §7.5 row line 2132; §6.4A reachable target-bound card generation, lines 1503-1510)"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest produced by R0.1B/R1.0B/R1.6 or a named DX boundary task (§1.4)",
+      "No executing agent chooses a CLI argument or discovers a file: all arguments come from named prerequisite receipts and sealed files (§7.4)",
+      "Every card must resolve to a §7.5/§7.6 catalog row; a card missing its catalog entry, prerequisite edge, or exact command is invalid (§7.5, §7.6 preamble)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R1.0B requires the R0.1B card set and R0.1B-owned dispatch tool scripts/ranking-v3-dispatch-cards.mjs; R0.1B exports buildCardManifest/validateCardManifest)",
+      "R1.T1/R1.T2/R1.1-R1.5/R1.6 (the target tasks of this card set; §6.4A: R1.0B covers R1.T1, R1.T2, R1.1-R1.5, R1.6)",
+      "R0.1V (dispatch CLI first binds the wave-boundary tree through scripts/verify-ranking-v3-rebase.mjs snapshot-tree)"
+    ],
+    "focused_command": "node scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\" && node scripts/ranking-v3-dispatch-cards.mjs build --scope \"gate1-target-bound\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"R1.6\" --out \"$CARD_SET_DIR\" && node scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2132 (execute dispatch CLI with scope gate1-target-bound, next generator R1.6; output target-bound card set); §7.4 lines 2015-2071 (exact CLI shape: snapshot-tree, build with all named arguments, verify; manifest shape with schemaVersion ranking_v3_dispatch_cards_v2, planSha256, baselineCommit, dispatchCommit, dispatchTreeSha256, qualificationTargetSha256, contractSealSha256, taskGraphSha256); §1.1 bootstrap order (R1.0B generates target-bound cards for R1.T1, R1.T2, R1.1-R1.5, R1.6 after R1.0); §1.4 dispatch authority; §6.4A lines 1503-1510; §8.1 Gate-0 acceptance (R1.0B generates target-bound Gate-1 cards plus the R1.6 boundary-generator card).\nPrerequisite edges (exact prerequisite table, plan line 1732): R1.0B: R1.0, R0.1B.\nfocused_command is the plan-specified §7.4 command; it depends on R0.1V-owned scripts/verify-ranking-v3-rebase.mjs and R0.1B-owned scripts/ranking-v3-dispatch-cards.mjs, neither of which exists at round_base, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an execution card, not a code-change card: verification uses the §7.6 unmet-precondition/validating-assertion pattern (card-set manifest includes target scope plus next generator and binds the current dispatch tree); no first-RED test is required.\nThe next generator R1.6 is nondispatchable until R1.5's gate receipt exists (sealed graph/gate receipts); R1.0B does not generate cards for tasks whose output digests do not exist yet. The dispatch tree is bound through $DISPATCH_COMMIT (integration HEAD named by the preceding gate receipt)."
+  },
+  "isBoundaryGenerator": true,
+  "dispatchable": false
+}

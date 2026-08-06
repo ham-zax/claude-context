@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.T0",
+  "cardType": "code_change",
+  "contractSha256": "1a21747421ab086ad36f3ba61b24f18260a1862905e73dbcacb8c31eb0d34261",
+  "contract": {
+    "task_id": "R1.T0",
+    "title": "Implement/seal QualificationTargetV1 schema, canonicalization, and hash tooling (scripts/ranking-qualification-target.mjs)",
+    "risk": "medium",
+    "invariant": "R1.T0 is the only authority that transforms OwnerTargetDecisionV1 into canonical QUALIFICATION_TARGET.json.",
+    "owners": [
+      "R1.T0"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §6.4 schema authority and §7.5 catalog row)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family/task anchors for downstream R1.3, not consumed by this task)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/ranking-qualification-target.test.mjs (plan-specified future test file; does not exist at round_base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task)",
+      "package.json (round-level approved; not consumed by this task)",
+      "scripts/ranking-qualification-target.mjs (new file, to create - §7.1 exclusive owner R1.T0)",
+      "scripts/ranking-qualification-target.test.mjs (new file, to create - §7.6 RED row)"
+    ],
+    "interface_changes": [
+      "QualificationTargetV1 = NoProviderTargetV1 | FixedProviderTargetV1 (plan §6.4, lines 1396-1442)",
+      "OwnerTargetDecisionV1 with schemaVersion ranking_v3_owner_target_decision_v1 (plan §6.4, lines 1403-1427)",
+      "scripts/ranking-qualification-target.mjs exposing write and verify commands (plan §7.5 line 2130)"
+    ],
+    "security_boundaries": [
+      "Executable schema authority for QualificationTargetV1: R1.T0 is the only tool allowed to transform OwnerTargetDecisionV1 into canonical QUALIFICATION_TARGET.json (§6.4)",
+      "Rejects handwritten target JSON and unknown decision keys; only a parsed OwnerTargetDecisionV1 produces canonical target bytes (§7.6 line 2350)"
+    ],
+    "overlap_with": [
+      "R1.0 (consumes this tool; prerequisite edge R1.0: R0.2, R1.T0)",
+      "FT-G0 (R0.1B card set includes the R1.T0 card; prerequisite edge R1.T0: R0.1B)"
+    ],
+    "focused_command": "node --test scripts/ranking-qualification-target.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": true,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 row line 2130; §7.6 code-change RED row line 2350 (test writes_canonical_target_only_from_owner_target_decision_v1: expected failure before implementation is that handwritten target JSON or unknown decision keys are accepted; minimal passing behavior is that only parsed OwnerTargetDecisionV1 produces canonical target bytes); §6.4 lines 1396-1442 (schema authority: parse OwnerTargetDecisionV1, canonicalize, hash, write QUALIFICATION_TARGET.json); §1.1 bootstrap order (R1.T0 before R1.0); §8.1 Gate-0 acceptance (R1.T0 validates target canonical bytes).\nPrerequisite edges (exact prerequisite table, plan lines 1728-1729): R1.T0: R0.1B.\nfocused_command is a plan-specified future-gate tool test command; its target file scripts/ranking-qualification-target.test.mjs does not exist at round_base, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nRequired first-RED evidence: implement the test first, confirm it fails at base state, then implement scripts/ranking-qualification-target.mjs (parse/canonicalize/hash/write) until the focused test passes.\nThe target states whether fixed provider evidence is available for the cycle; it does not select the final artifact mode (E3 alone selects disabled | provider_derived). Do not add fields beyond the sealed OwnerTargetDecisionV1/QualificationTargetV1 shapes."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

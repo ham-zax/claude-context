@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.0",
+  "cardType": "human_decision",
+  "contractSha256": "dce2a73d06c98380940a8fefa0c91e1009d1cbf5794d5f86192b8a2701b0d34e",
+  "contract": {
+    "task_id": "R1.0",
+    "title": "Issue QUALIFICATION_TARGET.json by invoking R1.T0 from the owner's OwnerTargetDecisionV1 (human_decision card)",
+    "risk": "medium",
+    "invariant": "R1.T0 is the only authority that transforms OwnerTargetDecisionV1 into canonical QUALIFICATION_TARGET.json (R1.0 invokes R1.T0; it does not construct the target itself).",
+    "owners": [
+      "R1.0"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.5 row and §7.6 evidence row)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task)",
+      "package.json (round-level approved; not consumed by this task)",
+      "QUALIFICATION_TARGET.json (output artifact, written to $TASK_OUTPUT per §7.5; not a tracked repo file)"
+    ],
+    "interface_changes": [
+      "OwnerTargetDecisionV1 (schemaVersion ranking_v3_owner_target_decision_v1) as the human_decision card input (plan §1.4 human_decision card type; §6.4 lines 1403-1427)",
+      "QUALIFICATION_TARGET.json canonical output; $QUALIFICATION_TARGET is this output path (plan §7.5 line 2131, §7.5 variable table line 2090)"
+    ],
+    "security_boundaries": [
+      "human_decision card: owner decision artifact with fixed sealed schema (ranking_v3_owner_target_decision_v1), canonical-schema validation, digest receipt (§1.4 human_decision card requirements; §7.6 line 2412)",
+      "Unmet precondition: no parsed OwnerTargetDecisionV1 exists; validating assertion: canonical target verifies and receipt binds decision digest (§7.6 line 2412)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.1B card set includes the R1.0 card; R1.0B requires R1.0 output before target-bound cards are generated; prerequisite edges R1.0: R0.2, R1.T0 and R1.0B: R1.0, R0.1B)",
+      "FT-D (D7 and D8 depend on R1.0 per exact prerequisite table: D7: DD, A3, A4, A5, A12, R1.0, R1.1, R1.2, R1.4; D8: DD, A5, D2, D3, R1.0, R1.1, R1.2, R1.4; also A3: R1.6, R1.0, R1.2 and A12: R1.6, R1.0, R1.2)",
+      "R1.T0 (tool owner invoked by this card)"
+    ],
+    "focused_command": "node scripts/ranking-qualification-target.mjs write --decision \"$OWNER_TARGET_DECISION\" --out \"$TASK_OUTPUT/QUALIFICATION_TARGET.json\" && node scripts/ranking-qualification-target.mjs verify --target \"$TASK_OUTPUT/QUALIFICATION_TARGET.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2131 (exact verification command; output canonical target + digest receipt; $QUALIFICATION_TARGET is this output path); §7.6 evidence/human-decision row line 2412 (unmet precondition: no parsed OwnerTargetDecisionV1 exists; validating assertion: canonical target verifies and receipt binds decision digest); §1.1 bootstrap order (R1.0 issued with the R1.T0 tool after R0.2 capture); §8.1 Gate-0 acceptance (R1.0 emits the target).\nPrerequisite edges (exact prerequisite table, plan lines 1731-1732): R1.0: R0.2, R1.T0; R1.0B: R1.0, R0.1B.\nfocused_command is the plan-specified §7.5 command; it depends on scripts/ranking-qualification-target.mjs (R1.T0-owned, does not exist at round_base) and on the owner-supplied OwnerTargetDecisionV1 (in-plan human_decision input, not for this round), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence/human-decision card, not a code-change card: verification uses the unmet-precondition check then the validating assertion (§7.6); no first-RED test is required.\n$OWNER_TARGET_DECISION is the R1.0 human-decision input parsed as OwnerTargetDecisionV1 (plan §7.5 variable table line 2088). The owner decision is supplied by the owner at dispatch time; do not fabricate a decision artifact in this round."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}
