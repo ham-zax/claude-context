@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { getEventListeners } from "node:events";
+import { ReadableStream } from "node:stream/web";
 import { BoundedHttpError, fetchWithDeadline } from "./fetch-with-deadline";
 
 type Handler = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void;
@@ -11,18 +12,36 @@ interface TestServer {
     url: string;
     requestCount: () => number;
     connectionCount: () => number;
+    closedConnectionCount: () => number;
     close: () => Promise<void>;
+}
+
+// Polls until `predicate` holds or `timeoutMs` elapses, so tests can wait for
+// deterministic connection release without fixed sleeps. The caller's
+// assertion reports the actual values when the wait expires.
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+        if (Date.now() > deadline) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
 }
 
 async function startServer(handler: Handler): Promise<TestServer> {
     const server = createServer(handler);
     let requests = 0;
     let connections = 0;
+    let closedConnections = 0;
     server.on("request", () => {
         requests += 1;
     });
-    server.on("connection", () => {
+    server.on("connection", (connection) => {
         connections += 1;
+        connection.on("close", () => {
+            closedConnections += 1;
+        });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
     const { port } = server.address() as AddressInfo;
@@ -30,6 +49,7 @@ async function startServer(handler: Handler): Promise<TestServer> {
         url: `http://127.0.0.1:${port}`,
         requestCount: () => requests,
         connectionCount: () => connections,
+        closedConnectionCount: () => closedConnections,
         close: async () => {
             server.closeAllConnections();
             await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -335,4 +355,240 @@ test("releases retry-delay abort listeners from a shared caller signal", async (
     // back at its baseline instead of accumulating one closure per retry.
     assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
     assert.equal(server.requestCount(), 10);
+});
+
+test("cancels the underlying reader exactly once when the byte limit is exceeded", async (t) => {
+    const realFetch = globalThis.fetch;
+    const cancelReasons: unknown[] = [];
+    const spyBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+            const chunk = new Uint8Array(1024).fill(0x61);
+            controller.enqueue(chunk);
+            controller.enqueue(chunk);
+            controller.enqueue(chunk);
+        },
+        cancel(reason) {
+            cancelReasons.push(reason);
+        },
+    });
+    globalThis.fetch = (async () => new Response(spyBody, { status: 200 })) as typeof fetch;
+    t.after(() => {
+        globalThis.fetch = realFetch;
+    });
+
+    const response = await fetchWithDeadline({
+        url: "http://spy.invalid/large",
+        init: { method: "GET" },
+        attemptTimeoutMs: 1000,
+        maxAttempts: 1,
+        ...basePolicy,
+        maxResponseBytes: 2048,
+    });
+
+    await assert.rejects(
+        () => response.text(),
+        (error: unknown) => {
+            assert.ok(error instanceof BoundedHttpError);
+            assert.equal(error.kind, "response_too_large");
+            return true;
+        },
+    );
+
+    // The wrapped stream must release the original reader (and with it the
+    // socket) instead of leaving it parked with unread body data.
+    assert.equal(cancelReasons.length, 1);
+    assert.ok(cancelReasons[0] instanceof BoundedHttpError);
+    assert.equal((cancelReasons[0] as BoundedHttpError).kind, "response_too_large");
+});
+
+test("repeated oversized responses release every connection instead of accumulating them", async (t) => {
+    const server = await startServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("x".repeat(512 * 1024));
+    });
+    t.after(() => server.close());
+
+    for (let i = 0; i < 5; i += 1) {
+        const response = await fetchWithDeadline({
+            url: `${server.url}/large`,
+            init: { method: "GET" },
+            attemptTimeoutMs: 2000,
+            maxAttempts: 1,
+            ...basePolicy,
+            maxResponseBytes: 4096,
+        });
+        await assert.rejects(
+            () => response.text(),
+            (error: unknown) => {
+                assert.ok(error instanceof BoundedHttpError);
+                assert.equal(error.kind, "response_too_large");
+                return true;
+            },
+        );
+    }
+    assert.equal(server.requestCount(), 5);
+
+    // A body abandoned above the byte limit must not keep its connection
+    // parked with unread data: every connection that was opened must be
+    // released deterministically, otherwise the count below accumulates.
+    await waitUntil(() => server.closedConnectionCount() === server.connectionCount());
+    assert.ok(server.connectionCount() >= 2, "the storm must have exercised real connections");
+    assert.equal(server.closedConnectionCount(), server.connectionCount());
+});
+
+test("keeps the caller signal free of abort listeners after success and each terminal error", async (t) => {
+    const server = await startServer((req, res) => {
+        if (req.url === "/ok") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end('{"ok":true}');
+            return;
+        }
+        if (req.url === "/large") {
+            res.writeHead(200, { "Content-Type": "text/plain" });
+            res.end("x".repeat(64 * 1024));
+            return;
+        }
+        // /stall and /hang: headers arrive, the body never does, so body
+        // consumption is what ends the attempt.
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.flushHeaders();
+    });
+    t.after(() => server.close());
+
+    const controller = new AbortController();
+    const baseline = getEventListeners(controller.signal, "abort").length;
+
+    // Success: fully consumed body.
+    const ok = await fetchWithDeadline({
+        url: `${server.url}/ok`,
+        init: { method: "GET" },
+        signal: controller.signal,
+        attemptTimeoutMs: 1000,
+        maxAttempts: 1,
+        ...basePolicy,
+    });
+    assert.equal(await ok.text(), '{"ok":true}');
+    assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
+
+    // Byte-limit exceedance.
+    const large = await fetchWithDeadline({
+        url: `${server.url}/large`,
+        init: { method: "GET" },
+        signal: controller.signal,
+        attemptTimeoutMs: 1000,
+        maxAttempts: 1,
+        ...basePolicy,
+        maxResponseBytes: 1024,
+    });
+    await assert.rejects(
+        () => large.text(),
+        (error: unknown) => {
+            assert.ok(error instanceof BoundedHttpError);
+            assert.equal(error.kind, "response_too_large");
+            return true;
+        },
+    );
+    assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
+
+    // Attempt timeout while the body is stalled.
+    const stalled = await fetchWithDeadline({
+        url: `${server.url}/stall`,
+        init: { method: "GET" },
+        signal: controller.signal,
+        attemptTimeoutMs: 150,
+        maxAttempts: 1,
+        ...basePolicy,
+    });
+    await assert.rejects(
+        () => stalled.text(),
+        (error: unknown) => {
+            assert.ok(error instanceof BoundedHttpError);
+            assert.equal(error.kind, "timeout");
+            return true;
+        },
+    );
+    assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
+
+    // Caller cancellation during body consumption, on a fresh signal.
+    const cancelController = new AbortController();
+    const cancelBaseline = getEventListeners(cancelController.signal, "abort").length;
+    const hanging = await fetchWithDeadline({
+        url: `${server.url}/hang`,
+        init: { method: "GET" },
+        signal: cancelController.signal,
+        attemptTimeoutMs: 10_000,
+        maxAttempts: 1,
+        ...basePolicy,
+    });
+    const timer = setTimeout(() => {
+        cancelController.abort(new Error("caller cancelled"));
+    }, 60);
+    try {
+        await assert.rejects(
+            () => hanging.text(),
+            (error: unknown) => error instanceof Error && error.message === "caller cancelled",
+        );
+    } finally {
+        clearTimeout(timer);
+    }
+    assert.equal(getEventListeners(cancelController.signal, "abort").length, cancelBaseline);
+});
+
+test("reuses one connection across successful responses and closes deterministically after oversized ones", async (t) => {
+    let oversized = false;
+    const server = await startServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end(oversized ? "x".repeat(512 * 1024) : "ok");
+    });
+    t.after(() => server.close());
+
+    const call = () => fetchWithDeadline({
+        url: `${server.url}/mixed`,
+        init: { method: "GET" },
+        attemptTimeoutMs: 2000,
+        maxAttempts: 1,
+        ...basePolicy,
+        maxResponseBytes: 4096,
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+        const response = await call();
+        assert.equal(await response.text(), "ok");
+        // Let the completed connection settle back into the keep-alive pool
+        // so the reuse assertion below is deterministic instead of racing
+        // the pool's bookkeeping.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // Fully consumed responses must keep reusing the same keep-alive
+    // connection instead of churning new ones.
+    assert.equal(server.connectionCount(), 1);
+
+    oversized = true;
+    for (let i = 0; i < 3; i += 1) {
+        const response = await call();
+        await assert.rejects(
+            () => response.text(),
+            (error: unknown) => {
+                assert.ok(error instanceof BoundedHttpError);
+                assert.equal(error.kind, "response_too_large");
+                return true;
+            },
+        );
+    }
+
+    // Service continuity: a normal response still succeeds after the storm.
+    oversized = false;
+    const response = await call();
+    assert.equal(await response.text(), "ok");
+
+    // Deterministic closure: no connection may stay open with unread body
+    // data, and the server must shut down without hanging on leaked sockets.
+    await waitUntil(() => server.closedConnectionCount() === server.connectionCount());
+    assert.equal(server.closedConnectionCount(), server.connectionCount());
+    await Promise.race([
+        server.close(),
+        new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error("server.close() did not complete promptly")), 1000);
+        }),
+    ]);
 });
