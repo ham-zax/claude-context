@@ -1,0 +1,292 @@
+oviderKey,
++        rank: result.rank,
++        rawScore: result.rawScore,
++        withinQueryPercentile: rounded((response.results.length - 1 - index) / denominator),
++        candidateToTopMargin: rounded(topScore - result.rawScore),
++        topToSecondMargin: rounded(topScore - secondScore),
++    }));
++}
+diff --git a/packages/mcp/src/core/neural-ranking-gate.test.ts b/packages/mcp/src/core/neural-ranking-gate.test.ts
+new file mode 100644
+index 0000000..6f7d5e7
+--- /dev/null
++++ b/packages/mcp/src/core/neural-ranking-gate.test.ts
+@@ -0,0 +1,19 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { evaluateNeuralGate } from './neural-ranking-gate.js';
++import { buildNeuralRankingEvidence } from './neural-ranking-evidence.js';
++import type { ValidatedRerankResponseV1 } from './rerank-evidence.js';
++
++const sha = (c:string) => c.repeat(64);
++const target = { providerTarget:'fixed' as const, providerKey:'p', rerankerIdentity:'m', rerankerProjectionIdentity:'proj', providerConfigurationDigest:sha('a'), providerRequestContractSha256:sha('b') };
++const suppliedIdentity = { providerKey:'p', rerankerIdentity:'m', rerankerProjectionIdentity:'proj', providerConfigurationDigest:sha('a'), providerRequestContractSha256:sha('b') };
++const response: ValidatedRerankResponseV1 = { schemaVersion:'validated_rerank_response_v1', ...suppliedIdentity, canonicalRequestSha256:sha('c'), requestCandidateIds:['a','b','c'], results:[{candidateId:'b',rank:1,rawScore:10},{candidateId:'a',rank:2,rawScore:7},{candidateId:'c',rank:3,rawScore:1}] };
++const policy = { mode:'provider_derived' as const, providerKey:'p', minimumCandidates:3, minimumNormalizedTopToSecondMargin:0.2 };
++
++test('pure_gate_applies_only_for_exact_identity_complete_evidence_and_margin', () => {
++    const evidence = buildNeuralRankingEvidence(response);
++    assert.deepEqual(evaluateNeuralGate({ policy, target, suppliedIdentity, response, evidence, exactControlOwnsResult:false, baselineAdmissionIds:['a','b','c'] }), { decision:'apply' });
++    assert.deepEqual(evaluateNeuralGate({ policy, target, suppliedIdentity:{...suppliedIdentity, rerankerIdentity:'wrong'}, response, evidence, exactControlOwnsResult:false, baselineAdmissionIds:['a','b','c'] }), { decision:'fallback_deterministic', reason:'identity_mismatch' });
++    assert.deepEqual(evaluateNeuralGate({ policy:{...policy, minimumNormalizedTopToSecondMargin:0.5}, target, suppliedIdentity, response, evidence, exactControlOwnsResult:false, baselineAdmissionIds:['a','b','c'] }), { decision:'skip', reason:'insufficient_margin' });
++    assert.deepEqual(evaluateNeuralGate({ policy:{mode:'disabled'}, target, exactControlOwnsResult:false, baselineAdmissionIds:['a','b','c'] }), { decision:'skip', reason:'mode_disabled' });
++});
+diff --git a/packages/mcp/src/core/neural-ranking-gate.ts b/packages/mcp/src/core/neural-ranking-gate.ts
+new file mode 100644
+index 0000000..4d0c0ee
+--- /dev/null
++++ b/packages/mcp/src/core/neural-ranking-gate.ts
+@@ -0,0 +1,79 @@
++import type { NeuralRankingEvidenceV1 } from './neural-ranking-evidence.js';
++import type { QualifiedRerankerV1 } from './ranking-policy-qualification.js';
++import type { ValidatedRerankResponseV1 } from './rerank-evidence.js';
++
++export interface NoProviderTargetV1 { providerTarget: 'none' }
++export interface FixedProviderTargetV1 extends QualifiedRerankerV1 { providerTarget: 'fixed' }
++export type QualificationTargetV1 = NoProviderTargetV1 | FixedProviderTargetV1;
++export type NeuralReorderPolicy =
++    | { mode: 'disabled' }
++    | { mode: 'provider_derived'; providerKey: string; minimumCandidates: number; minimumNormalizedTopToSecondMargin: number };
++export type NeuralGateDecision =
++    | { decision: 'apply' }
++    | { decision: 'skip'; reason: 'mode_disabled' | 'exact_control' | 'insufficient_margin' | 'insufficient_candidates' }
++    | { decision: 'fallback_deterministic'; reason: 'provider_mismatch' | 'invalid_response' | 'identity_mismatch' | 'non_finite_score' };
++
++export type NeuralGateInput =
++    | { policy: { mode: 'disabled' }; target: QualificationTargetV1; exactControlOwnsResult: boolean; baselineAdmissionIds: readonly string[] }
++    | {
++        policy: Extract<NeuralReorderPolicy, { mode: 'provider_derived' }>;
++        target: FixedProviderTargetV1;
++        suppliedIdentity: QualifiedRerankerV1;
++        response: ValidatedRerankResponseV1;
++        evidence: readonly NeuralRankingEvidenceV1[];
++        exactControlOwnsResult: boolean;
++        baselineAdmissionIds: readonly string[];
++    };
++
++const sameIdentity = (left: QualifiedRerankerV1, right: QualifiedRerankerV1): boolean =>
++    left.providerKey === right.providerKey
++    && left.rerankerIdentity === right.rerankerIdentity
++    && left.rerankerProjectionIdentity === right.rerankerProjectionIdentity
++    && left.providerConfigurationDigest === right.providerConfigurationDigest
++    && left.providerRequestContractSha256 === right.providerRequestContractSha256;
++
++export function evaluateNeuralGate(input: NeuralGateInput): NeuralGateDecision {
++    if (input.policy.mode === 'disabled') return { decision: 'skip', reason: 'mode_disabled' };
++    if (input.exactControlOwnsResult) return { decision: 'skip', reason: 'exact_control' };
++    if (input.policy.providerKey !== input.target.providerKey || input.response.providerKey !== input.target.providerKey) {
++        return { decision: 'fallback_deterministic', reason: 'provider_mismatch' };
++    }
++    if (!sameIdentity(input.target, input.suppliedIdentity) || !sameIdentity(input.target, input.response)) {
++        return { decision: 'fallback_deterministic', reason: 'identity_mismatch' };
++    }
++    const minimumCandidates = Math.max(3, input.policy.minimumCandidates);
++    if (input.baselineAdmissionIds.length < minimumCandidates) return { decision: 'skip', reason: 'insufficient_candidates' };
++    const admitted = new Set(input.baselineAdmissionIds);
++    if (admitted.size !== input.baselineAdmissionIds.length
++        || input.response.requestCandidateIds.length !== input.baselineAdmissionIds.length
++        || input.response.requestCandidateIds.some((candidateId, index) => candidateId !== input.baselineAdmissionIds[index])
++        || input.response.results.length !== input.baselineAdmissionIds.length
++        || input.evidence.length !== input.baselineAdmissionIds.length
++        || input.response.results.some((result, index) => result.rank !== index + 1 || !admitted.has(result.candidateId))
++        || new Set(input.response.results.map((result) => result.candidateId)).size !== admitted.size
++        || new Set(input.evidence.map((result) => result.candidateId)).size !== admitted.size) {
++        return { decision: 'fallback_deterministic', reason: 'invalid_response' };
++    }
++    if (input.response.results.some((result) => !Number.isFinite(result.rawScore))
++        || input.evidence.some((entry) => !Number.isFinite(entry.rawScore)
++            || !Number.isFinite(entry.withinQueryPercentile)
++            || !Number.isFinite(entry.candidateToTopMargin)
++            || !Number.isFinite(entry.topToSecondMargin))) {
++        return { decision: 'fallback_deterministic', reason: 'non_finite_score' };
++    }
++    for (let index = 1; index < input.response.results.length; index += 1) {
++        if (input.response.results[index - 1].rawScore < input.response.results[index].rawScore) {
++            return { decision: 'fallback_deterministic', reason: 'invalid_response' };
++        }
++    }
++    const top = input.response.results[0].rawScore;
++    const second = input.response.results[1].rawScore;
++    const bottom = input.response.results[input.response.results.length - 1].rawScore;
++    const range = top - bottom;
++    const normalizedMargin = range > 0 ? (top - second) / Math.max(Number.EPSILON, range) : 0;
++    if (!Number.isFinite(normalizedMargin)) return { decision: 'fallback_deterministic', reason: 'non_finite_score' };
++    if (normalizedMargin < input.policy.minimumNormalizedTopToSecondMargin) {
++        return { decision: 'skip', reason: 'insufficient_margin' };
++    }
++    return { decision: 'apply' };
++}
+diff --git a/packages/mcp/src/core/provider-slot-permutation.test.ts b/packages/mcp/src/core/provider-slot-permutation.test.ts
+new file mode 100644
+index 0000000..39af676
+--- /dev/null
++++ b/packages/mcp/src/core/provider-slot-permutation.test.ts
+@@ -0,0 +1,21 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { applyProviderSlotPermutation } from './provider-slot-permutation.js';
++
++test('provider_permutation_is_final_complete_and_rank_contiguous', () => {
++    const deterministicOrder = [
++        { candidateId:'a', deterministicV3Score:100, postPolicyRank:1 },
++        { candidateId:'b', deterministicV3Score:1, postPolicyRank:2 },
++        { candidateId:'c', deterministicV3Score:50, postPolicyRank:3 },
++    ];
++    const result = applyProviderSlotPermutation({ deterministicOrder, baselineAdmissionIds:['a','b','c'], providerOrder:['b','c','a'] });
++    assert.deepEqual(result, [
++        { candidateId:'b', deterministicV3Score:1, postPolicyRank:1 },
++        { candidateId:'c', deterministicV3Score:50, postPolicyRank:2 },
++        { candidateId:'a', deterministicV3Score:100, postPolicyRank:3 },
++    ]);
++    assert.deepEqual(result.map((item) => item.candidateId), ['b','c','a'], 'a later score sort must not undo provider order');
++    assert.throws(() => applyProviderSlotPermutation({ deterministicOrder, baselineAdmissionIds:['a','b','c'], providerOrder:['b','a'] }), /complete|omission/i);
++    assert.throws(() => applyProviderSlotPermutation({ deterministicOrder, baselineAdmissionIds:['a','b','c'], providerOrder:['b','b','a'] }), /duplicate/i);
++    assert.throws(() => applyProviderSlotPermutation({ deterministicOrder:[{...deterministicOrder[0],postPolicyRank:2},...deterministicOrder.slice(1)], baselineAdmissionIds:['a','b','c'], providerOrder:['b','c','a'] }), /rank/i);
++});
+diff --git a/packages/mcp/src/core/provider-slot-permutation.ts b/packages/mcp/src/core/provider-slot-permutation.ts
+new file mode 100644
+index 0000000..27e06b1
+--- /dev/null
++++ b/packages/mcp/src/core/provider-slot-permutation.ts
+@@ -0,0 +1,37 @@
++import type { RankedCandidateV3 } from './ranking-policy-v3.js';
++
++export interface ProviderSlotPermutationInput {
++    deterministicOrder: readonly RankedCandidateV3[];
++    baselineAdmissionIds: readonly string[];
++    providerOrder: readonly string[];
++}
++
++function uniqueIds(ids: readonly string[], label: string): void {
++    if (ids.some((id) => typeof id !== 'string' || id.length === 0)) throw new Error(`${label} contains an invalid candidate ID.`);
++    if (new Set(ids).size !== ids.length) throw new Error(`${label} contains duplicate candidate IDs.`);
++}
++
++export function applyProviderSlotPermutation(input: ProviderSlotPermutationInput): RankedCandidateV3[] {
++    uniqueIds(input.baselineAdmissionIds, 'baselineAdmissionIds');
++    uniqueIds(input.providerOrder, 'providerOrder');
++    if (input.deterministicOrder.length !== input.baselineAdmissionIds.length) throw new Error('Deterministic order must cover the complete admitted set.');
++    const admitted = new Set(input.baselineAdmissionIds);
++    const byId = new Map<string, RankedCandidateV3>();
++    input.deterministicOrder.forEach((candidate, index) => {
++        if (candidate.postPolicyRank !== index + 1 || !Number.isFinite(candidate.deterministicV3Score)) {
++            throw new Error('Deterministic order ranks must be one-based, contiguous, and finite.');
++        }
++        if (!admitted.has(candidate.candidateId)) throw new Error('Deterministic order contains a foreign candidate.');
++        if (byId.has(candidate.candidateId)) throw new Error('Deterministic order contains duplicate candidates.');
++        byId.set(candidate.candidateId, candidate);
++    });
++    if (input.providerOrder.length !== input.baselineAdmissionIds.length) throw new Error('Provider order must be a complete permutation; omission detected.');
++    for (const candidateId of input.providerOrder) {
++        if (!admitted.has(candidateId)) throw new Error('Provider order contains a foreign candidate.');
++    }
++    if (byId.size !== admitted.size) throw new Error('Deterministic order is incomplete.');
++    return input.providerOrder.map((candidateId, index) => ({
++        ...byId.get(candidateId)!,
++        postPolicyRank: index + 1,
++    }));
++}
+diff --git a/packages/mcp/src/core/ranking-policy-qualification-store.test.ts b/packages/mcp/src/core/ranking-policy-qualification-store.test.ts
+new file mode 100644
+index 0000000..1ca5524
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-qualification-store.test.ts
+@@ -0,0 +1,29 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {
++    parseRankingPolicyQualificationRegistryV1,
++    qualificationScopeKeyV1,
++} from './ranking-policy-qualification.js';
++import { selectActivationQualifiedEntryV1 } from './ranking-policy-qualification-store.js';
++
++const sha = (character: string): string => character.repeat(64);
++const base = {
++    artifactSha256: sha('a'), serviceClass: 'online' as const, qualificationTargetSha256: sha('b'),
++    selectedArtifactMode: 'disabled' as const, qualifiedRerankers: [], offlineQualificationReceiptSha256: sha('c'),
++};
++const scope = qualificationScopeKeyV1(base);
++function registry(status: 'pending_heldout' | 'activation_qualified' | 'revoked') {
++    const common = { ...base, qualificationScopeKey: scope };
++    const entry = status === 'pending_heldout' ? { ...common, status }
++        : status === 'activation_qualified' ? { ...common, status, heldoutAcceptanceReceiptSha256: sha('d') }
++            : { ...common, status, terminalEvidence: { reason: 'heldout_rejected', heldoutRejectionReceiptSha256: sha('e') } };
++    return parseRankingPolicyQualificationRegistryV1({ schemaVersion: 'ranking_policy_qualification_registry_v1', entries: [entry] });
++}
++
++test('only_activation_qualified_exact_scope_is_selectable', () => {
++    const key = { artifactSha256: base.artifactSha256, serviceClass: base.serviceClass, qualificationScopeKey: scope };
++    assert.equal(selectActivationQualifiedEntryV1({ registry: registry('pending_heldout'), ...key }), null);
++    assert.equal(selectActivationQualifiedEntryV1({ registry: registry('revoked'), ...key }), null);
++    assert.equal(selectActivationQualifiedEntryV1({ registry: registry('activation_qualified'), ...key })?.status, 'activation_qualified');
++    assert.equal(selectActivationQualifiedEntryV1({ registry: registry('activation_qualified'), ...key, qualificationScopeKey: sha('f') }), null);
++});
+diff --git a/packages/mcp/src/core/ranking-policy-qualification-store.ts b/packages/mcp/src/core/ranking-policy-qualification-store.ts
+new file mode 100644
+index 0000000..d4e996c
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-qualification-store.ts
+@@ -0,0 +1,48 @@
++import crypto from 'node:crypto';
++import path from 'node:path';
++import {
++    openTrustedRegularFileInsideRootV1,
++    readFileHandleExactly,
++    verifyTrustedPathHierarchyV1,
++} from '@zokizuan/satori-core';
++import {
++    parseRankingPolicyQualificationRegistryV1,
++    qualificationRegistryLogicalKeyV1,
++    type QualificationRegistryEntryV1,
++    type RankingPolicyQualificationRegistryV1,
++    type ServiceClass,
++} from './ranking-policy-qualification.js';
++
++export function selectActivationQualifiedEntryV1(input: {
++    registry: RankingPolicyQualificationRegistryV1;
++    artifactSha256: string;
++    serviceClass: ServiceClass;
++    qualificationScopeKey: string;
++}): Extract<QualificationRegistryEntryV1, { status: 'activation_qualified' }> | null {
++    const expected = `${input.artifactSha256}\0${input.serviceClass}\0${input.qualificationScopeKey}`;
++    const matches = input.registry.entries.filter((entry) => qualificationRegistryLogicalKeyV1(entry) === expected);
++    if (matches.length > 1) throw new Error('Qualification registry contains multiple exact-scope entries.');
++    const match = matches[0];
++    return match?.status === 'activation_qualified' ? match : null;
++}
++
++export async function loadQualificationRegistryFromTrustedStoreV1(input: {
++    rootDir: string;
++    registryPath: string;
++    expectedRegistryBytesSha256?: string;
++}): Promise<{ registry: RankingPolicyQualificationRegistryV1; registryBytesSha256: string }> {
++    const absolutePath = path.isAbsolute(input.registryPath) ? path.normalize(input.registryPath) : path.resolve(input.rootDir, input.registryPath);
++    const opened = await openTrustedRegularFileInsideRootV1(absolutePath, input.rootDir);
++    try {
++        const bytes = await readFileHandleExactly(opened.handle, opened.observedStat.size);
++        const registryBytesSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
++        if (input.expectedRegistryBytesSha256 && registryBytesSha256 !== input.expectedRegistryBytesSha256) {
++            throw new Error('Opened qualification-registry bytes do not match the expected digest.');
++        }
++        const registry = parseRankingPolicyQualificationRegistryV1(JSON.parse(bytes.toString('utf8')));
++        await verifyTrustedPathHierarchyV1(opened);
++        return { registry, registryBytesSha256 };
++    } finally {
++        await opened.handle.close().catch(() => undefined);
++    }
++}
+diff --git a/packages/mcp/src/core/ranking-policy-qualification-writer.test.ts b/packages/mcp/src/core/ranking-policy-qualification-writer.test.ts
+new file mode 100644
+index 0000000..b952822
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-qualification-writer.test.ts
+@@ -0,0 +1,99 @@
++import assert from 'node:assert/strict';
++import crypto from 'node:crypto';
++import * as fsp from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import {
++    canonicalizeRankingPolicyQualificationRegistryV1,
++    
