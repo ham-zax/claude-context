@@ -1,0 +1,106 @@
+name: Codex agent bootstrap
+
+on:
+  push:
+    branches:
+      - codex/ranking-v3-r0-1a-fixture
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run R0.1A verification and capture logs
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+
+          node --import tsx --test \
+            evals/search-quality/ranking-v3-fixture-repair.test.ts \
+            2>&1 | tee r0-1a-focused.log
+          focused_status=${PIPESTATUS[0]}
+
+          pnpm eval:search-quality \
+            2>&1 | tee r0-1a-eval.log
+          eval_status=${PIPESTATUS[0]}
+
+          printf '%s\n' "$focused_status" > r0-1a-focused.status
+          printf '%s\n' "$eval_status" > r0-1a-eval.status
+          printf 'focused_status=%s\n' "$focused_status" >> "$GITHUB_OUTPUT"
+          printf 'eval_status=%s\n' "$eval_status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Create local-clone Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master --no-tags
+          git update-ref refs/heads/agent-feature HEAD
+          git update-ref refs/heads/agent-master refs/remotes/origin/master
+          git bundle create satori-agent.bundle \
+            refs/heads/agent-feature \
+            refs/heads/agent-master
+          git bundle verify satori-agent.bundle
+          cat > agent-bundle-metadata.json <<EOF
+          {
+            "repository": "ham-zax/satori",
+            "sourceBranch": "codex/ranking-v3-r0-1a-fixture",
+            "sourceHead": "$(git rev-parse HEAD)",
+            "sourceTree": "$(git rev-parse HEAD^{tree})",
+            "masterHead": "$(git rev-parse refs/remotes/origin/master)",
+            "masterTree": "$(git rev-parse refs/remotes/origin/master^{tree})"
+          }
+          EOF
+
+      - name: Upload bundle and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: satori-agent-bundle-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            satori-agent.bundle
+            agent-bundle-metadata.json
+            r0-1a-focused.log
+            r0-1a-eval.log
+            r0-1a-focused.status
+            r0-1a-eval.status
+
+      - name: Enforce R0.1A verification result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          focused_status=$(cat r0-1a-focused.status)
+          eval_status=$(cat r0-1a-eval.status)
+          if [[ "$focused_status" != "0" || "$eval_status" != "0" ]]; then
+            echo "R0.1A verification failed: focused=$focused_status eval=$eval_status" >&2
+            exit 1
+          fi
