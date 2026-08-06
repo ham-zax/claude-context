@@ -8,6 +8,7 @@ import {
   checkFindings,
   parseFrontMatter,
   parseCheckArgs,
+  parseRegistry,
   resolveCommit,
   isAncestor,
 } from './check-piolium-findings.mjs';
@@ -297,8 +298,38 @@ test('invalid --head produces a stable validation error, not a stack trace', () 
 
 function registryYaml(entries) {
   return `findings:\n${entries
-    .map((entry) => `  - id: ${entry.id}\n    status: ${entry.status}\n    verified_at: "${entry.verified_at}"\n    fixed_in: "${entry.fixed_in ?? ''}"\n    resolution: "${entry.resolution ?? ''}"`)
+    .map((entry) => `  - id: ${entry.id}\n    status: ${entry.status}\n    verified_at: "${entry.verified_at}"\n    fixed_in: "${entry.fixed_in ?? ''}"\n    fix_verified_at: "${entry.fix_verified_at ?? ''}"\n    resolution: "${entry.resolution ?? ''}"`)
     .join('\n')}\n`;
+}
+
+/**
+ * Create a real, valid commit that is NOT an ancestor of the audited head by
+ * writing an orphan commit into the repository object store via git commit-tree
+ * (no branch refs are touched; the worktree HEAD is not moved). The object is
+ * unreachable and harmless until gc.
+ */
+function createOrphanCommit(repoRoot) {
+  const emptyTree = execFileSync(
+    'git',
+    ['hash-object', '-t', 'tree', '/dev/null'],
+    { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+  ).trim();
+  return execFileSync(
+    'git',
+    ['commit-tree', emptyTree, '-m', 'unmerged side-branch fix commit for registry test'],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'satori-test',
+        GIT_AUTHOR_EMAIL: 'satori-test@example.com',
+        GIT_COMMITTER_NAME: 'satori-test',
+        GIT_COMMITTER_EMAIL: 'satori-test@example.com',
+      },
+    },
+  ).trim();
 }
 
 const REGISTRY_SHA = '94a3dc659d3edce892f6f7f859a6c70597343751';
@@ -316,7 +347,7 @@ function writeRegistry(files) {
 test('valid registry passes alongside drafts', () => {
   const cwd = writeRegistry({
     'registry.yml': registryYaml([
-      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: 'documented trust boundary' },
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, fix_verified_at: REGISTRY_SHA, resolution: 'documented trust boundary' },
       { id: 'M2', status: 'open', verified_at: REGISTRY_SHA, fixed_in: '', resolution: 'tasks 4-7 in flight' },
     ]),
   });
@@ -391,7 +422,7 @@ test('M1/M2 drafts absent passes via registry', () => {
   // tracked registry carries their status. Must not fail on their absence.
   const cwd = writeRegistry({
     'registry.yml': registryYaml([
-      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: 'documented trust boundary' },
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, fix_verified_at: REGISTRY_SHA, resolution: 'documented trust boundary' },
       { id: 'M2', status: 'open', verified_at: REGISTRY_SHA, fixed_in: '', resolution: 'tasks 4-7 in flight' },
     ]),
   });
@@ -405,7 +436,7 @@ test('entirely absent findings root passes via registry', () => {
   // exist at all. The registry alone must be a pass condition.
   const cwd = writeRegistry({
     'registry.yml': registryYaml([
-      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: 'documented trust boundary' },
+      { id: 'M1', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, fix_verified_at: REGISTRY_SHA, resolution: 'documented trust boundary' },
     ]),
   });
   const absentRoot = path.join(cwd, 'does-not-exist');
@@ -432,6 +463,80 @@ test('missing registry file fails', () => {
   });
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /registry file .* not found/);
+});
+
+test('parseRegistry captures the optional fix_verified_at field', () => {
+  const { entries, errors } = parseRegistry(
+    'findings:\n' +
+      '  - id: M1\n' +
+      '    status: fixed\n' +
+      '    verified_at: "' + REGISTRY_SHA + '"\n' +
+      '    fixed_in: "' + REGISTRY_SHA + '"\n' +
+      '    fix_verified_at: "' + REGISTRY_SHA + '"\n' +
+      '    resolution: ""\n',
+  );
+  assert.deepEqual(errors, []);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].fix_verified_at, REGISTRY_SHA);
+});
+
+test('registry status fixed without fix_verified_at fails', () => {
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M2', status: 'fixed', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /fix_verified_at/);
+});
+
+test('registry fixed_in that is not an ancestor of audited head fails', () => {
+  // Real valid commit on an unmerged side branch: verified_at sits on the
+  // audited head, but fixed_in (the orphan commit) is not an ancestor of HEAD.
+  const orphanSha = createOrphanCommit(REPO_ROOT);
+  assert.equal(isAncestor(orphanSha, 'HEAD', REPO_ROOT), false);
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M9', status: 'accepted', verified_at: REGISTRY_SHA, fixed_in: orphanSha, resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /fixed_in/);
+  assert.match(result.errors[0], /not an ancestor of audited head/);
+});
+
+test('registry fix_verified_at that is not an ancestor of audited head fails', () => {
+  const orphanSha = createOrphanCommit(REPO_ROOT);
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M2', status: 'fixed', verified_at: REGISTRY_SHA, fixed_in: REGISTRY_SHA, fix_verified_at: orphanSha, resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /fix_verified_at/);
+  assert.match(result.errors[0], /not an ancestor of audited head/);
+});
+
+test('registry verified_at predating fixed_in fails for fixed status', () => {
+  // e3c9a698 resolves, is an ancestor of HEAD, but is not an ancestor of the
+  // verified_at commit 94a3dc659: the finding claims verification before the
+  // fix point existed.
+  const FIX_SHA = 'e3c9a6988813e8f4b76a213c5133e7a8bac9820f';
+  const cwd = writeRegistry({
+    'registry.yml': registryYaml([
+      { id: 'M2', status: 'fixed', verified_at: REGISTRY_SHA, fixed_in: FIX_SHA, fix_verified_at: FIX_SHA, resolution: '' },
+    ]),
+  });
+  const root = createFindingWorkspace({ 'W9/draft.md': OPEN_DRAFT });
+  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT, registry: path.join(cwd, 'registry.yml') });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /at or after the fix point/);
 });
 
 test('parseCheckArgs resolves the registry default and override', () => {

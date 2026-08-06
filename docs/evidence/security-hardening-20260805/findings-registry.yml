@@ -5,9 +5,12 @@
 # gate in CI. The validator (scripts/check-piolium-findings.mjs --registry)
 # enforces the same consistency rules on this registry as on tracked drafts:
 #   - status enum, non-empty verified_at resolving to a commit
-#   - fixed_in (when non-empty) resolving to a commit
+#   - fixed_in (when non-empty) resolving to a commit and ancestral to the head
 #   - accepted/fixed require non-empty fixed_in; open requires empty fixed_in
-#   - verified_at must be an ancestor of the audited head
+#   - fixed additionally requires non-empty fix_verified_at resolving to a
+#     commit ancestral to the head
+#   - verified_at must be an ancestor of the audited head and, for fixed,
+#     at or after the fix point (commit order)
 #   - IDs must not duplicate tracked draft IDs or each other
 
 findings:
@@ -15,9 +18,11 @@ findings:
     status: accepted
     verified_at: "b7da4e6190340d172d6e30df521959fec5f0b73d"
     fixed_in: "b7da4e6190340d172d6e30df521959fec5f0b73d"
+    fix_verified_at: "b7da4e6190340d172d6e30df521959fec5f0b73d"
     resolution: "same-UID processes are inside the documented trust boundary; protocol v2 states this honestly (challengeNonce is a freshness challenge, ownershipToken is lifecycle-only)"
   - id: M2
     status: fixed
     verified_at: "17831852e97b91c4c70b2c393c5a6c6202095ee0"
     fixed_in: "17831852e97b91c4c70b2c393c5a6c6202095ee0"
+    fix_verified_at: "17831852e97b91c4c70b2c393c5a6c6202095ee0"
     resolution: "arbitrary root registration and root-wide read authorization remediated by Tasks 4-7; M2 replay against the rebuilt shipped surface (commit cc98366, dist/index.js sha256 56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823) denied all 14 attacks with zero secret bytes and passed all 4 positive controls; evidence: docs/evidence/security-hardening-20260805/M2-REPLAY.md"
