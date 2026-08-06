@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B5",
+  "cardType": "evidence_or_code",
+  "contractSha256": "d189c5e62d7a9c7b0b1e371208950441c7464b139af8e135db44fec863537b0f",
+  "contract": {
+    "task_id": "B5",
+    "title": "search-execution.ts evidence integration (evidence hooks)",
+    "risk": "medium",
+    "invariant": "Evidence hooks never alter enabled or disabled baseline response bytes: both baseline envelopes (reranker-enabled and reranker-disabled) remain identical to pre-instrumentation.",
+    "owners": [
+      "B5"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (rerankResults :566, finalScore via computeSearchCandidateFinalScore :651/:1229, shouldSkipRerankForExactPin :288/:485; invoked from handlers.ts runSearchExecution ~:4857)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts (new; RED)",
+      "packages/mcp/src/core/search-execution-expansion.test.ts (existing at base)",
+      "packages/mcp/src/core/search-execution.exact-pin-rerank.test.ts (existing at base; imports shouldSkipRerankForExactPin)",
+      "packages/mcp/src/core/search-execution.must-lane.test.ts (existing at base)",
+      "packages/mcp/src/core/handlers.*.test.ts suites (existing at base)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ts"
+    ],
+    "interface_changes": [
+      "evidence hooks integrated into search-execution.ts (advisory-only; enabled+disabled envelopes unchanged)",
+      "packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "evidence hooks never alter enabled/disabled baseline response bytes"
+    ],
+    "overlap_with": [
+      "FT-G (G1 then G2 sequentially own search-execution.ts after B5 per plan §7.1; Wave-G contracts reference B5's evidence-hook state)",
+      "FT-G0 (baseline envelopes must match the R0.2 pre-instrumentation baseline)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B1, B2, B3, B4. RED test (§7.6): search-execution.ranking-v3-evidence.test.ts — evidence_hooks_preserve_baseline_enabled_and_disabled_envelopes; expected failure before implementation: instrumentation changes response bytes; minimal passing behavior: both baseline envelopes remain identical. The focused command targets a future file that does NOT exist at base (verified) — unverifiable-at-base. Audited base fact: there is NO plain search-execution.test.ts at base; existing coverage is search-execution-expansion / search-execution.exact-pin-rerank / search-execution.must-lane plus handlers.* suites. Plan §7.1: search-execution.ts has exclusive sequential ownership B5, then G1, then G2 — B5 must leave the file in a state G1 can extend without overlap."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

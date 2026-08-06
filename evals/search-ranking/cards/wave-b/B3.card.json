@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B3",
+  "cardType": "evidence_or_code",
+  "contractSha256": "be1f6adac714f1d653448622b38418c1f8048b67f5db5d51ebce84fbe5510671",
+  "contract": {
+    "task_id": "B3",
+    "title": "Raw validated response retention (search-rerank-evidence-retention.ts)",
+    "risk": "medium",
+    "invariant": "One complete raw validated provider response is retained without normalization; derived fields are absent (raw authority is kept, no derived fields stored).",
+    "owners": [
+      "B3"
+    ],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-rerank-evidence-retention.test.ts (new; RED)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-rerank-evidence-retention.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/search-rerank-evidence-retention.ts (new; one complete raw validated response, no normalization)",
+      "packages/mcp/src/core/search-rerank-evidence-retention.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "raw provider authority only — no derived/normalized fields stored; bounded retention schema"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A3 ValidatedRerankResponseV1 and A12 provider-request contract)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-rerank-evidence-retention.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A3, A12. RED test (§7.6): search-rerank-evidence-retention.test.ts — retains_one_complete_raw_validated_response_without_normalization; expected failure before implementation: scores are dropped or normalized fields are stored; minimal passing behavior: raw authority is retained and derived fields are absent. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. affected_command pnpm --filter @zokizuan/satori-mcp test is repo-verified."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B1",
+  "cardType": "evidence_or_code",
+  "contractSha256": "27edb4481e57085f04cf8b0ce71089929ab50b9a1f1469e0a91526c94296c23f",
+  "contract": {
+    "task_id": "B1",
+    "title": "Core trace implementation (raw arm ranks + core fusion ranks)",
+    "risk": "medium",
+    "invariant": "Trace v2 records raw arm ranks and core fusion ranks without any product-output change: vector-candidate-fusion product output bytes remain equal to pre-instrumentation (B8 Phase-0 identity holds).",
+    "owners": [
+      "B1"
+    ],
+    "production_callers": [
+      "packages/core/src/core/vector-candidate-fusion.ts (VECTOR_CANDIDATE_RRF_K_V1 = 100 at :12)",
+      "packages/core/src/core/semantic-search-service.ts (core trace emission via candidateTrace consumer path)"
+    ],
+    "test_callers": [
+      "packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts (new; RED)",
+      "packages/core/src/core/semantic-search-service.ranking-v3.test.ts (new; RED)",
+      "packages/core/src/core/vector-candidate-fusion.test.ts (existing at base; must keep passing)"
+    ],
+    "approved_files": [
+      "packages/core/src/core/vector-candidate-fusion.ts",
+      "packages/core/src/core/semantic-search-service.ts"
+    ],
+    "interface_changes": [
+      "trace v2 fields: raw arm ranks + core fusion ranks (advisory-only; no product-output change)",
+      "packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts (new)",
+      "packages/core/src/core/semantic-search-service.ranking-v3.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "trace fields are advisory-only and must never alter fusion product output (byte-identity invariant)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.2 captures pre-instrumentation fusion output bytes; B1 must not change them)"
+    ],
+    "focused_command": "node --import tsx --test packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts packages/core/src/core/semantic-search-service.ranking-v3.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-core test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A1 (A1 owns semantic-search-candidate-trace.ts parser; B1 consumes the A1 trace contract). RED test (§7.6): vector-candidate-fusion.ranking-v3.test.ts — trace_records_raw_arm_and_core_fusion_ranks_without_product_change; expected failure before implementation: new trace fields are absent or product output changes; minimal passing behavior: fields are present and product output remains equal. The focused command targets future test files that DO NOT exist at base (verified) — unverifiable-at-base; do not run until the implementation round. affected_command pnpm --filter @zokizuan/satori-core test is repo-verified (packages/core/package.json test script globs src/**/*.test.ts). Existing vector-candidate-fusion.test.ts asserts VECTOR_CANDIDATE_RRF_K_V1 === 100 and must keep passing."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

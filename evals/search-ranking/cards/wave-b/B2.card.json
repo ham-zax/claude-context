@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B2",
+  "cardType": "evidence_or_code",
+  "contractSha256": "c550a0cedc2cfecdcfb188e819b75a049b45fd86724c4d77ff40fbd5b36a6dcb",
+  "contract": {
+    "task_id": "B2",
+    "title": "search-pass-evidence.ts (deterministic per-pass evidence)",
+    "risk": "medium",
+    "invariant": "Pass evidence contributions are stable and exact: repeated construction yields canonical repeated output and contribution sums agree.",
+    "owners": [
+      "B2"
+    ],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-pass-evidence.test.ts (new; RED)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-pass-evidence.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/search-pass-evidence.ts (new module; stable exact per-pass contribution evidence)",
+      "packages/mcp/src/core/search-pass-evidence.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "evidence holds bounded ranks/contributions only — no source text, no feature vectors, no forbidden identity fields (plan §5.2 forbidden-features list)"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A2 deterministic evidence schema/parser)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-pass-evidence.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A2. RED test (§7.6): search-pass-evidence.test.ts — pass_evidence_contributions_are_stable_and_exact; expected failure before implementation: repeated construction differs or sums disagree; minimal passing behavior: canonical repeated output and exact contribution sums. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. affected_command pnpm --filter @zokizuan/satori-mcp test is repo-verified (packages/mcp/package.json test script globs src/core/**/*.test.ts). This is a new module with no base production caller; B4/B5 are the future consumers."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

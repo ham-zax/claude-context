@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B9",
+  "cardType": "evidence_or_code",
+  "contractSha256": "c15c50f0a3002852999e8f9cf6b4b1771c8c9846c88a5000a1e2c09420171573",
+  "contract": {
+    "task_id": "B9",
+    "title": "Authoritative tuning corpus materialization (raw provider authority only)",
+    "risk": "medium",
+    "invariant": "B9 corpus binds exactly the 50 verified tuning tasks across the 6 v3 families with raw provider authority only (no derived normalization); held-out tasks never appear.",
+    "owners": [
+      "B9"
+    ],
+    "production_callers": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (corpus source; verified at base: 101 tasks = 50 tuning + 51 held-out; 6 tuning families: gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app)",
+      "docs/evidence/search-integrity-baseline-20260805/BASELINE.md (W-fix landed evidence)"
+    ],
+    "test_callers": [
+      "scripts/materialize-ranking-v3-corpus.test.mjs (new; RED)",
+      "scripts/satori-search-ranking-r3.test.mjs (v3 manifest consumer, exists at base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (exists at base)"
+    ],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json",
+      "docs/evidence/search-integrity-baseline-20260805/BASELINE.md"
+    ],
+    "interface_changes": [
+      "scripts/materialize-ranking-v3-corpus.mjs (new)",
+      "CORPUS_MANIFEST.json (new output; binds all tuning tasks, exact target/service class, capture count, raw validated provider authority when applicable, and a tuning-only proof)",
+      "scripts/materialize-ranking-v3-corpus.test.mjs (new)"
+    ],
+    "security_boundaries": [
+      "raw provider authority only — no percentiles, normalized margins, or any other derived neural evidence (plan §6.3: D7 derives those exclusively later during E2 and H4)",
+      "tuning-only corpus: exactly the 50 verified tuning tasks; held-out tasks must never appear"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A12 request contract, R1.0 target, R1.2 training contract)",
+      "FT-G (G6B depends on B9; E2 consumes B9 raw authority per plan §7.2/§4.4)"
+    ],
+    "focused_command": "node --test scripts/materialize-ranking-v3-corpus.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B7, B8, A12, R1.0, R1.2. RED test (§7.6): materialize-ranking-v3-corpus.test.mjs — corpus_binds_all_tuning_tasks_and_contains_raw_provider_authority_only; expected failure before implementation: tasks are missing, held-out appears, or normalized fields are stored; minimal passing behavior: exact tuning coverage, target binding, and raw-only provider evidence. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. Plan §6.3 fixes the raw provider authority field set: serviceClass, providerKey, rerankerIdentity, rerankerProjectionIdentity, providerConfigurationDigest, providerRequestContractSha256, baselineAdmissionSet digest, request candidate order, complete returned candidate order, finite raw scores, request/response digests, timeout/failure outcome. Corpus source verified at base: cross-repository-v3.manifest.json holds 50 tuning tasks (8/8/8/8/9/9 across the six tuning families) and 51 held-out tasks."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

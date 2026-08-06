@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B7",
+  "cardType": "evidence_or_code",
+  "contractSha256": "ae25815febfbc64eb4a92fc61434b89c2dd05a0321dd388dfe0565afc1853df0",
+  "contract": {
+    "task_id": "B7",
+    "title": "Replay v3 (survival_v3 replay with digest authority)",
+    "risk": "medium",
+    "invariant": "Replay rejects unknown contract, policy, or target digests — every authority digest must match sealed sources.",
+    "owners": [
+      "B7"
+    ],
+    "production_callers": [
+      "scripts/satori-search-candidate-replay.mjs (usage :2368, computeSearchCandidateFinalScore :908/:1827, --held-out-opening :2386, --require-neural-disabled :2390)"
+    ],
+    "test_callers": [
+      "scripts/satori-search-candidate-replay.test.mjs (EXISTS at base, 243 lines; plan EXTENDS it with replay_rejects_unknown_contract_policy_or_target_digest)",
+      "scripts/satori-search-ranking-r3.test.mjs (v3 manifest consumer, exists at base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (exists at base)"
+    ],
+    "approved_files": [
+      "scripts/satori-search-candidate-replay.mjs"
+    ],
+    "interface_changes": [
+      "survival_v3 replay schema; replay rejects unknown contract/policy/target digest",
+      "scripts/satori-search-candidate-replay.test.mjs extended with replay_rejects_unknown_contract_policy_or_target_digest"
+    ],
+    "security_boundaries": [
+      "digest authority: every authority digest (contract/policy/target) must match sealed sources; unknown digests are rejected"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A5/A6/R1.2/R1.4)",
+      "FT-G (G6B depends on B7)",
+      "FT-C (C6 depends on B7)"
+    ],
+    "focused_command": "node --test scripts/satori-search-candidate-replay.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B6, A5, A6, R1.2, R1.4. RED test (§7.6): satori-search-candidate-replay.test.mjs — replay_rejects_unknown_contract_policy_or_target_digest; expected failure before implementation: replay accepts an unsealed digest; minimal passing behavior: every authority digest must match. Audited base fact: the test FILE already exists at base (243 lines) and is EXTENDED, not created, by the plan; the specific RED test name does not exist at base — new test is unverifiable-at-base. The round-level focused command (plan-specified, unverifiable-at-base) combines the B8 and B7 future gates: node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts && node --test scripts/satori-search-candidate-replay.test.mjs. affected_command pnpm test:scripts is repo-verified."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

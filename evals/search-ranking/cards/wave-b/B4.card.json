@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B4",
+  "cardType": "evidence_or_code",
+  "contractSha256": "103221762805cc9c311a4e9749595c3c5cfab1d88ff697afa96570675b1df677",
+  "contract": {
+    "task_id": "B4",
+    "title": "Deterministic evidence assembler (search-ranking-evidence-assembler.ts)",
+    "risk": "medium",
+    "invariant": "Exactly one post-admission DeterministicRankingEvidenceV1 record per eligible candidate: no missing, duplicated, or pre-admission records.",
+    "owners": [
+      "B4"
+    ],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-ranking-evidence-assembler.test.ts (new; RED)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-ranking-evidence-assembler.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/search-ranking-evidence-assembler.ts (new; one post-admission record per eligible candidate)",
+      "packages/mcp/src/core/search-ranking-evidence-assembler.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "records exist only after the admission snapshot; one record per eligible candidate; never pre-admission, never duplicated"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A2 evidence schema and A4 feature extraction)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-ranking-evidence-assembler.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A2, A4, B2, B3. RED test (§7.6): search-ranking-evidence-assembler.test.ts — assembles_one_record_per_post_eligibility_candidate; expected failure before implementation: candidates are missing, duplicated, or assembled pre-admission; minimal passing behavior: one post-admission record per eligible candidate. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. affected_command pnpm --filter @zokizuan/satori-mcp test is repo-verified."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

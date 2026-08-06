@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B6",
+  "cardType": "evidence_or_code",
+  "contractSha256": "e26bec4063d082be2f182b8275dd7d0066741c5227126992643ce0fd72c0307f",
+  "contract": {
+    "task_id": "B6",
+    "title": "Capture survival v3 (bounded schema extension, no source payload)",
+    "risk": "medium",
+    "invariant": "B6 capture never stores source payloads; the bounded survival_v3 schema round-trips capture fields without loss.",
+    "owners": [
+      "B6"
+    ],
+    "production_callers": [
+      "scripts/satori-search-candidate-capture.mjs (parseArgs :1220, --out :1240, usage :1257)"
+    ],
+    "test_callers": [
+      "scripts/satori-search-candidate-capture.test.mjs (EXISTS at base, 1738 lines; plan EXTENDS it with survival_v3_round_trips_without_source_payload)"
+    ],
+    "approved_files": [
+      "scripts/satori-search-candidate-capture.mjs"
+    ],
+    "interface_changes": [
+      "survival_v3 capture schema (bounded schema round-trip; no source payload)",
+      "scripts/satori-search-candidate-capture.test.mjs extended with survival_v3_round_trips_without_source_payload"
+    ],
+    "security_boundaries": [
+      "no source payload in capture — bounded schema round-trip only"
+    ],
+    "overlap_with": [],
+    "focused_command": "node --test scripts/satori-search-candidate-capture.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B5. RED test (§7.6): satori-search-candidate-capture.test.mjs — survival_v3_round_trips_without_source_payload; expected failure before implementation: capture loses fields or stores source text; minimal passing behavior: bounded schema round-trips and source payload is absent. Audited base fact: the test FILE already exists at base (1738 lines) and is EXTENDED, not created, by the plan; the specific RED test name does not exist at base (verified by grep — no survival_v3/source_payload matches in capture test/script) — new test is unverifiable-at-base. The existing file may be run at base as a state check; do not run it as RED evidence. affected_command pnpm test:scripts is repo-verified (root package.json: node --import tsx --test scripts/*.test.mjs evals/agent-discovery/*.test.mjs)."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "B8",
+  "cardType": "evidence_or_code",
+  "contractSha256": "52b11744295aae5c5916cba9a8620da67d51f573b3405153425fab10e24aa418",
+  "contract": {
+    "task_id": "B8",
+    "title": "Byte-identity proof (Phase-0 envelopes vs R0.2 baseline)",
+    "risk": "medium",
+    "invariant": "Instrumentation preserves baseline envelopes byte-for-byte: Phase-0 identity against the R0.2 capture bytes — exact bytes, order, removals, grouping, and disclosure match.",
+    "owners": [
+      "B8"
+    ],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts (new; RED)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts",
+      "BYTE_IDENTICAL_PROOF.md"
+    ],
+    "interface_changes": [
+      "BYTE_IDENTICAL_PROOF.md (new proof artifact)",
+      "packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts (new; test phase0_envelopes_are_byte_identical)"
+    ],
+    "security_boundaries": [
+      "byte-for-byte equality with the R0.2 Phase-0 tuning-only capture (the pre-instrumentation baseline)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.2 is the pre-instrumentation byte-identity baseline that B8 compares against)",
+      "FT-G (G1 requires B8 per plan §7.2 exact table)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B7, R0.2. RED test (§7.6): search-execution.ranking-v3-byte-identity.test.ts — phase0_envelopes_are_byte_identical; expected failure before implementation: baseline capture differs after instrumentation; minimal passing behavior: exact bytes, order, removals, grouping, and disclosure match. The focused command targets a future file that does NOT exist at base (verified) — unverifiable-at-base; DO NOT run it in this round. Comparison authority: R0.2's tuning-only Phase-0 baseline capture (plan §6.3: 'R0.2 remains the pre-instrumentation byte-identity baseline'). B8 additionally emits BYTE_IDENTICAL_PROOF.md as its output artifact."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}
