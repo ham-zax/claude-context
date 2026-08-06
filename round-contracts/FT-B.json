@@ -1,0 +1,330 @@
+[
+  {
+    "task_id": "B1",
+    "title": "Core trace implementation (raw arm ranks + core fusion ranks)",
+    "risk": "medium",
+    "invariant": "Trace v2 records raw arm ranks and core fusion ranks without any product-output change: vector-candidate-fusion product output bytes remain equal to pre-instrumentation (B8 Phase-0 identity holds).",
+    "owners": ["B1"],
+    "production_callers": [
+      "packages/core/src/core/vector-candidate-fusion.ts (VECTOR_CANDIDATE_RRF_K_V1 = 100 at :12)",
+      "packages/core/src/core/semantic-search-service.ts (core trace emission via candidateTrace consumer path)"
+    ],
+    "test_callers": [
+      "packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts (new; RED)",
+      "packages/core/src/core/semantic-search-service.ranking-v3.test.ts (new; RED)",
+      "packages/core/src/core/vector-candidate-fusion.test.ts (existing at base; must keep passing)"
+    ],
+    "approved_files": [
+      "packages/core/src/core/vector-candidate-fusion.ts",
+      "packages/core/src/core/semantic-search-service.ts"
+    ],
+    "interface_changes": [
+      "trace v2 fields: raw arm ranks + core fusion ranks (advisory-only; no product-output change)",
+      "packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts (new)",
+      "packages/core/src/core/semantic-search-service.ranking-v3.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "trace fields are advisory-only and must never alter fusion product output (byte-identity invariant)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.2 captures pre-instrumentation fusion output bytes; B1 must not change them)"
+    ],
+    "focused_command": "node --import tsx --test packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts packages/core/src/core/semantic-search-service.ranking-v3.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-core test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A1 (A1 owns semantic-search-candidate-trace.ts parser; B1 consumes the A1 trace contract). RED test (§7.6): vector-candidate-fusion.ranking-v3.test.ts — trace_records_raw_arm_and_core_fusion_ranks_without_product_change; expected failure before implementation: new trace fields are absent or product output changes; minimal passing behavior: fields are present and product output remains equal. The focused command targets future test files that DO NOT exist at base (verified) — unverifiable-at-base; do not run until the implementation round. affected_command pnpm --filter @zokizuan/satori-core test is repo-verified (packages/core/package.json test script globs src/**/*.test.ts). Existing vector-candidate-fusion.test.ts asserts VECTOR_CANDIDATE_RRF_K_V1 === 100 and must keep passing."
+  },
+  {
+    "task_id": "B2",
+    "title": "search-pass-evidence.ts (deterministic per-pass evidence)",
+    "risk": "medium",
+    "invariant": "Pass evidence contributions are stable and exact: repeated construction yields canonical repeated output and contribution sums agree.",
+    "owners": ["B2"],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-pass-evidence.test.ts (new; RED)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "packages/mcp/src/core/search-pass-evidence.ts (new module; stable exact per-pass contribution evidence)",
+      "packages/mcp/src/core/search-pass-evidence.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "evidence holds bounded ranks/contributions only — no source text, no feature vectors, no forbidden identity fields (plan §5.2 forbidden-features list)"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A2 deterministic evidence schema/parser)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-pass-evidence.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A2. RED test (§7.6): search-pass-evidence.test.ts — pass_evidence_contributions_are_stable_and_exact; expected failure before implementation: repeated construction differs or sums disagree; minimal passing behavior: canonical repeated output and exact contribution sums. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. affected_command pnpm --filter @zokizuan/satori-mcp test is repo-verified (packages/mcp/package.json test script globs src/core/**/*.test.ts). This is a new module with no base production caller; B4/B5 are the future consumers."
+  },
+  {
+    "task_id": "B3",
+    "title": "Raw validated response retention (search-rerank-evidence-retention.ts)",
+    "risk": "medium",
+    "invariant": "One complete raw validated provider response is retained without normalization; derived fields are absent (raw authority is kept, no derived fields stored).",
+    "owners": ["B3"],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-rerank-evidence-retention.test.ts (new; RED)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "packages/mcp/src/core/search-rerank-evidence-retention.ts (new; one complete raw validated response, no normalization)",
+      "packages/mcp/src/core/search-rerank-evidence-retention.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "raw provider authority only — no derived/normalized fields stored; bounded retention schema"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A3 ValidatedRerankResponseV1 and A12 provider-request contract)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-rerank-evidence-retention.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A3, A12. RED test (§7.6): search-rerank-evidence-retention.test.ts — retains_one_complete_raw_validated_response_without_normalization; expected failure before implementation: scores are dropped or normalized fields are stored; minimal passing behavior: raw authority is retained and derived fields are absent. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. affected_command pnpm --filter @zokizuan/satori-mcp test is repo-verified."
+  },
+  {
+    "task_id": "B4",
+    "title": "Deterministic evidence assembler (search-ranking-evidence-assembler.ts)",
+    "risk": "medium",
+    "invariant": "Exactly one post-admission DeterministicRankingEvidenceV1 record per eligible candidate: no missing, duplicated, or pre-admission records.",
+    "owners": ["B4"],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-ranking-evidence-assembler.test.ts (new; RED)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "packages/mcp/src/core/search-ranking-evidence-assembler.ts (new; one post-admission record per eligible candidate)",
+      "packages/mcp/src/core/search-ranking-evidence-assembler.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "records exist only after the admission snapshot; one record per eligible candidate; never pre-admission, never duplicated"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A2 evidence schema and A4 feature extraction)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-ranking-evidence-assembler.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, A2, A4, B2, B3. RED test (§7.6): search-ranking-evidence-assembler.test.ts — assembles_one_record_per_post_eligibility_candidate; expected failure before implementation: candidates are missing, duplicated, or assembled pre-admission; minimal passing behavior: one post-admission record per eligible candidate. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. affected_command pnpm --filter @zokizuan/satori-mcp test is repo-verified."
+  },
+  {
+    "task_id": "B5",
+    "title": "search-execution.ts evidence integration (evidence hooks)",
+    "risk": "medium",
+    "invariant": "Evidence hooks never alter enabled or disabled baseline response bytes: both baseline envelopes (reranker-enabled and reranker-disabled) remain identical to pre-instrumentation.",
+    "owners": ["B5"],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (rerankResults :566, finalScore via computeSearchCandidateFinalScore :651/:1229, shouldSkipRerankForExactPin :288/:485; invoked from handlers.ts runSearchExecution ~:4857)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts (new; RED)",
+      "packages/mcp/src/core/search-execution-expansion.test.ts (existing at base)",
+      "packages/mcp/src/core/search-execution.exact-pin-rerank.test.ts (existing at base; imports shouldSkipRerankForExactPin)",
+      "packages/mcp/src/core/search-execution.must-lane.test.ts (existing at base)",
+      "packages/mcp/src/core/handlers.*.test.ts suites (existing at base)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ts"
+    ],
+    "interface_changes": [
+      "evidence hooks integrated into search-execution.ts (advisory-only; enabled+disabled envelopes unchanged)",
+      "packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts (new)"
+    ],
+    "security_boundaries": [
+      "evidence hooks never alter enabled/disabled baseline response bytes"
+    ],
+    "overlap_with": [
+      "FT-G (G1 then G2 sequentially own search-execution.ts after B5 per plan §7.1; Wave-G contracts reference B5's evidence-hook state)",
+      "FT-G0 (baseline envelopes must match the R0.2 pre-instrumentation baseline)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B1, B2, B3, B4. RED test (§7.6): search-execution.ranking-v3-evidence.test.ts — evidence_hooks_preserve_baseline_enabled_and_disabled_envelopes; expected failure before implementation: instrumentation changes response bytes; minimal passing behavior: both baseline envelopes remain identical. The focused command targets a future file that does NOT exist at base (verified) — unverifiable-at-base. Audited base fact: there is NO plain search-execution.test.ts at base; existing coverage is search-execution-expansion / search-execution.exact-pin-rerank / search-execution.must-lane plus handlers.* suites. Plan §7.1: search-execution.ts has exclusive sequential ownership B5, then G1, then G2 — B5 must leave the file in a state G1 can extend without overlap."
+  },
+  {
+    "task_id": "B6",
+    "title": "Capture survival v3 (bounded schema extension, no source payload)",
+    "risk": "medium",
+    "invariant": "B6 capture never stores source payloads; the bounded survival_v3 schema round-trips capture fields without loss.",
+    "owners": ["B6"],
+    "production_callers": [
+      "scripts/satori-search-candidate-capture.mjs (parseArgs :1220, --out :1240, usage :1257)"
+    ],
+    "test_callers": [
+      "scripts/satori-search-candidate-capture.test.mjs (EXISTS at base, 1738 lines; plan EXTENDS it with survival_v3_round_trips_without_source_payload)"
+    ],
+    "approved_files": [
+      "scripts/satori-search-candidate-capture.mjs"
+    ],
+    "interface_changes": [
+      "survival_v3 capture schema (bounded schema round-trip; no source payload)",
+      "scripts/satori-search-candidate-capture.test.mjs extended with survival_v3_round_trips_without_source_payload"
+    ],
+    "security_boundaries": [
+      "no source payload in capture — bounded schema round-trip only"
+    ],
+    "overlap_with": [],
+    "focused_command": "node --test scripts/satori-search-candidate-capture.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B5. RED test (§7.6): satori-search-candidate-capture.test.mjs — survival_v3_round_trips_without_source_payload; expected failure before implementation: capture loses fields or stores source text; minimal passing behavior: bounded schema round-trips and source payload is absent. Audited base fact: the test FILE already exists at base (1738 lines) and is EXTENDED, not created, by the plan; the specific RED test name does not exist at base (verified by grep — no survival_v3/source_payload matches in capture test/script) — new test is unverifiable-at-base. The existing file may be run at base as a state check; do not run it as RED evidence. affected_command pnpm test:scripts is repo-verified (root package.json: node --import tsx --test scripts/*.test.mjs evals/agent-discovery/*.test.mjs)."
+  },
+  {
+    "task_id": "B7",
+    "title": "Replay v3 (survival_v3 replay with digest authority)",
+    "risk": "medium",
+    "invariant": "Replay rejects unknown contract, policy, or target digests — every authority digest must match sealed sources.",
+    "owners": ["B7"],
+    "production_callers": [
+      "scripts/satori-search-candidate-replay.mjs (usage :2368, computeSearchCandidateFinalScore :908/:1827, --held-out-opening :2386, --require-neural-disabled :2390)"
+    ],
+    "test_callers": [
+      "scripts/satori-search-candidate-replay.test.mjs (EXISTS at base, 243 lines; plan EXTENDS it with replay_rejects_unknown_contract_policy_or_target_digest)",
+      "scripts/satori-search-ranking-r3.test.mjs (v3 manifest consumer, exists at base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (exists at base)"
+    ],
+    "approved_files": [
+      "scripts/satori-search-candidate-replay.mjs"
+    ],
+    "interface_changes": [
+      "survival_v3 replay schema; replay rejects unknown contract/policy/target digest",
+      "scripts/satori-search-candidate-replay.test.mjs extended with replay_rejects_unknown_contract_policy_or_target_digest"
+    ],
+    "security_boundaries": [
+      "digest authority: every authority digest (contract/policy/target) must match sealed sources; unknown digests are rejected"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A5/A6/R1.2/R1.4)",
+      "FT-G (G6B depends on B7)",
+      "FT-C (C6 depends on B7)"
+    ],
+    "focused_command": "node --test scripts/satori-search-candidate-replay.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B6, A5, A6, R1.2, R1.4. RED test (§7.6): satori-search-candidate-replay.test.mjs — replay_rejects_unknown_contract_policy_or_target_digest; expected failure before implementation: replay accepts an unsealed digest; minimal passing behavior: every authority digest must match. Audited base fact: the test FILE already exists at base (243 lines) and is EXTENDED, not created, by the plan; the specific RED test name does not exist at base — new test is unverifiable-at-base. The round-level focused command (plan-specified, unverifiable-at-base) combines the B8 and B7 future gates: node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts && node --test scripts/satori-search-candidate-replay.test.mjs. affected_command pnpm test:scripts is repo-verified."
+  },
+  {
+    "task_id": "B8",
+    "title": "Byte-identity proof (Phase-0 envelopes vs R0.2 baseline)",
+    "risk": "medium",
+    "invariant": "Instrumentation preserves baseline envelopes byte-for-byte: Phase-0 identity against the R0.2 capture bytes — exact bytes, order, removals, grouping, and disclosure match.",
+    "owners": ["B8"],
+    "production_callers": [],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts (new; RED)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "BYTE_IDENTICAL_PROOF.md (new proof artifact)",
+      "packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts (new; test phase0_envelopes_are_byte_identical)"
+    ],
+    "security_boundaries": [
+      "byte-for-byte equality with the R0.2 Phase-0 tuning-only capture (the pre-instrumentation baseline)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.2 is the pre-instrumentation byte-identity baseline that B8 compares against)",
+      "FT-G (G1 requires B8 per plan §7.2 exact table)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-byte-identity.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B7, R0.2. RED test (§7.6): search-execution.ranking-v3-byte-identity.test.ts — phase0_envelopes_are_byte_identical; expected failure before implementation: baseline capture differs after instrumentation; minimal passing behavior: exact bytes, order, removals, grouping, and disclosure match. The focused command targets a future file that does NOT exist at base (verified) — unverifiable-at-base; DO NOT run it in this round. Comparison authority: R0.2's tuning-only Phase-0 baseline capture (plan §6.3: 'R0.2 remains the pre-instrumentation byte-identity baseline'). B8 additionally emits BYTE_IDENTICAL_PROOF.md as its output artifact."
+  },
+  {
+    "task_id": "B9",
+    "title": "Authoritative tuning corpus materialization (raw provider authority only)",
+    "risk": "medium",
+    "invariant": "B9 corpus binds exactly the 50 verified tuning tasks across the 6 v3 families with raw provider authority only (no derived normalization); held-out tasks never appear.",
+    "owners": ["B9"],
+    "production_callers": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (corpus source; verified at base: 101 tasks = 50 tuning + 51 held-out; 6 tuning families: gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app)",
+      "docs/evidence/search-integrity-baseline-20260805/BASELINE.md (W-fix landed evidence)"
+    ],
+    "test_callers": [
+      "scripts/materialize-ranking-v3-corpus.test.mjs (new; RED)",
+      "scripts/satori-search-ranking-r3.test.mjs (v3 manifest consumer, exists at base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (exists at base)"
+    ],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json",
+      "docs/evidence/search-integrity-baseline-20260805/BASELINE.md"
+    ],
+    "interface_changes": [
+      "scripts/materialize-ranking-v3-corpus.mjs (new)",
+      "CORPUS_MANIFEST.json (new output; binds all tuning tasks, exact target/service class, capture count, raw validated provider authority when applicable, and a tuning-only proof)",
+      "scripts/materialize-ranking-v3-corpus.test.mjs (new)"
+    ],
+    "security_boundaries": [
+      "raw provider authority only — no percentiles, normalized margins, or any other derived neural evidence (plan §6.3: D7 derives those exclusively later during E2 and H4)",
+      "tuning-only corpus: exactly the 50 verified tuning tasks; held-out tasks must never appear"
+    ],
+    "overlap_with": [
+      "FT-A1 (consumes A12 request contract, R1.0 target, R1.2 training contract)",
+      "FT-G (G6B depends on B9; E2 consumes B9 raw authority per plan §7.2/§4.4)"
+    ],
+    "focused_command": "node --test scripts/materialize-ranking-v3-corpus.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm eval:search-quality"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Prerequisites (plan §7.2 exact table): DB, B7, B8, A12, R1.0, R1.2. RED test (§7.6): materialize-ranking-v3-corpus.test.mjs — corpus_binds_all_tuning_tasks_and_contains_raw_provider_authority_only; expected failure before implementation: tasks are missing, held-out appears, or normalized fields are stored; minimal passing behavior: exact tuning coverage, target binding, and raw-only provider evidence. The focused command targets a file that does NOT exist at base (verified) — unverifiable-at-base. Plan §6.3 fixes the raw provider authority field set: serviceClass, providerKey, rerankerIdentity, rerankerProjectionIdentity, providerConfigurationDigest, providerRequestContractSha256, baselineAdmissionSet digest, request candidate order, complete returned candidate order, finite raw scores, request/response digests, timeout/failure outcome. Corpus source verified at base: cross-repository-v3.manifest.json holds 50 tuning tasks (8/8/8/8/9/9 across the six tuning families) and 51 held-out tasks."
+  }
+]

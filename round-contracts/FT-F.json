@@ -1,0 +1,305 @@
+[
+  {
+    "task_id": "F0",
+    "title": "Trusted root-bound filesystem (F0 trusted-root descriptor-bound filesystem)",
+    "risk": "high",
+    "invariant": "Root-bound filesystem fails closed on symlink, writable, replaced, or non-regular components; where platform semantics make guarantees unimplementable, external learned-policy loading is disabled with baseline selected and a truthful diagnostic.",
+    "owners": ["F0"],
+    "production_callers": [
+      "packages/core/src/sync/root-bound-fs.ts (existing descriptor-bound primitives extended in place; existing consumers packages/core/src/sync/synchronizer.ts, packages/core/src/core/indexing-pipeline.ts, packages/core/src/core/ignore-rule-service.ts, packages/core/src/core/context.ts, packages/mcp/src/core/published-file-authorization.ts, packages/mcp/src/core/inspectable-source.ts, packages/mcp/src/core/published-source-reader.ts must remain unchanged)",
+      "packages/mcp/src/core/ranking-policy-store.ts (F1 future artifact store reads through F0)",
+      "packages/mcp/src/core/ranking-policy-qualification-store.ts (F2 future registry store reads through F0)",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9 future registry writer reads back through F0)"
+    ],
+    "test_callers": [
+      "packages/core/src/sync/root-bound-fs.ranking-v3.test.ts (future; plan-specified)",
+      "packages/core/src/sync/root-bound-fs.test.ts (existing; must stay green)"
+    ],
+    "approved_files": [
+      "packages/core/src/sync/root-bound-fs.ts",
+      "packages/core/src/sync/root-bound-fs.ranking-v3.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "packages/core/src/sync/root-bound-fs (F0 trusted-root descriptor-bound filesystem): trusted hierarchy fails closed on symlink, writable, replaced, or non-regular components, with descriptor-bound identity (O_NOFOLLOW, inode checks, opened-descriptor verification)"
+    ],
+    "security_boundaries": [
+      "Filesystem: O_NOFOLLOW, inode checks, descriptor-bound identity; any unsafe path component makes the trusted hierarchy fail closed (never partially trusted)",
+      "Platform fail-closed rule (plan section 9.2): O_NOFOLLOW/inode/atomic-rename/directory-fsync semantics differ across platforms; where guarantees are unimplementable, external learned-policy loading is disabled with baseline selected and a truthful diagnostic",
+      "Authorization: trusted-root identity established before any read; same-UID trust boundary is the accepted model per plan section 3.17 (recorded decision — file ownership and mode bits are the authority for receipts and registry state; never silent)",
+      "No repository-local learned-policy files (plan section 5.7: repository-local ranking-policy files are forbidden)"
+    ],
+    "overlap_with": [
+      "FT-E (DF -> F0 only via E_GATE_SELECTED)",
+      "FT-G (G7 depends on F0)"
+    ],
+    "focused_command": "node --import tsx --test packages/core/src/sync/root-bound-fs.ranking-v3.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-core test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement the trusted root-bound filesystem per plan sections 5.4 ('reads back through F0'), 5.7, 7.5 (Waves F and G), and the section 9.2 platform-semantics risk. §7.6 RED row: test file packages/core/src/sync/root-bound-fs.ranking-v3.test.ts, exact test name `rejects_symlink_writable_replaced_or_nonregular_components`; expected failure before implementation: unsafe path is accepted; minimal passing behavior: descriptor-bound trusted hierarchy fails closed. Exact prerequisites (§7.2): F0: DF, E_GATE_SELECTED — F0 exists only on the E_GATE_SELECTED branch; E_GATE_INSUFFICIENT and E_GATE_LEARNED_NOT_JUSTIFIED never produce F0. Verified at round_base: packages/core/src/sync/ exists with root-bound-fs.ts already providing descriptor-bound primitives (isRealPathInsideRoot, descriptorPathInsideRoot, openRegularFileInsideRootNoFollow, verifyStableFileDescriptorObservation, readFileHandleExactly) and root-bound-fs.test.ts; extend in place without changing existing sync consumers (synchronizer.ts, merkle.ts, context.ts, indexing-pipeline.ts, ignore-rule-service.ts, published-file-authorization.ts, inspectable-source.ts, published-source-reader.ts). Encode the platform-semantics fail-closed rule: wherever O_NOFOLLOW/inode/atomic-rename/directory-fsync guarantees cannot be provided, external learned-policy loading is disabled with baseline selected and a truthful diagnostic. Focused command is plan-specified (§7.5) and unverifiable-at-base: the target test file does not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the file exists. Affected command is repo-verified via packages/core/package.json. Keep the existing root-bound-fs.test.ts green. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  },
+  {
+    "task_id": "F1",
+    "title": "ranking-policy-store.ts (artifact store; hashes opened descriptor bytes, not path reread)",
+    "risk": "medium",
+    "invariant": "Artifact digest is over the opened descriptor bytes, never a path reread; a swap after open cannot change the verified bytes.",
+    "owners": ["F1"],
+    "production_callers": [
+      "packages/mcp/src/core/ranking-policy-selector.ts (F6 future selector consumes the store)",
+      "packages/mcp/src/core/ranking-policy-runtime.ts (G4 future startup/runtime construction consumes the store)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-store.test.ts (future; plan-specified)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-store.ts",
+      "packages/mcp/src/core/ranking-policy-store.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-store.ts (F1): hashes opened descriptor bytes, not path reread"
+    ],
+    "security_boundaries": [
+      "Filesystem: artifact bytes verified from the opened descriptor obtained through F0; path reread must never substitute verified bytes (swap-after-open must not change the digest)",
+      "Append-only: artifact versions content-addressed; no in-place mutation of stored artifacts",
+      "Platform fail-closed rule (plan section 9.2): external learned-policy loading disabled with baseline selected and a truthful diagnostic where guarantees are unimplementable",
+      "No repository-local ranking-policy files (plan section 5.7)"
+    ],
+    "overlap_with": [
+      "FT-A2 (F1 depends on A5 artifact-form parsing: residual descriptor vs final artifact)",
+      "FT-G (G4 and G7 depend on F1)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-store.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement ranking-policy-store.ts per plan sections 5.4 (storage contracts), 5.7, and 7.5 (Waves F and G). §7.6 RED row: test file packages/mcp/src/core/ranking-policy-store.test.ts, exact test name `hashes_opened_descriptor_bytes_not_path_reread`; expected failure before implementation: swap after open changes verified bytes; minimal passing behavior: digest is over the opened descriptor. Exact prerequisites (§7.2): F1: F0, A5 (A5 owns artifact-form parsing: residual descriptor vs final artifact; store must not conflate forms). Verified at round_base: no packages/mcp/src/core/ranking-policy-store.ts exists (new file); artifact reading must go through F0's trusted root-bound filesystem. The F1 file is a new module; implement only within approved files. Focused command is plan-specified (§7.5) and unverifiable-at-base: the target test file does not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the file exists. Affected command is repo-verified via packages/mcp/package.json. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  },
+  {
+    "task_id": "F2",
+    "title": "ranking-policy-qualification-store.ts (registry store with activation_qualified exact-scope selection)",
+    "risk": "high",
+    "invariant": "Only activation_qualified exact-scope registry entries are selectable; pending/revoked/wrong-scope entries are never selectable; registry reads are append-only and never mutate or delete.",
+    "owners": ["F2"],
+    "production_callers": [
+      "packages/mcp/src/core/ranking-policy-selector.ts (F6 future selector returns learned_v3 only for an activation_qualified entry)",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9 future writer consumes the registry store)",
+      "packages/mcp/src/core/ranking-policy-runtime.ts (G4 future startup/runtime construction; production qualification enforced at F2 registry loading per plan section 5.4)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-qualification-store.test.ts (future; plan-specified)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-qualification-store.ts",
+      "packages/mcp/src/core/ranking-policy-qualification-store.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-qualification-store.ts (F2): activation_qualified exact-scope selection; canonical entry ordering (lexicographic UTF-8 tuple (artifactSha256, serviceClass, qualificationScopeKey)) and unique logical keys enforced"
+    ],
+    "security_boundaries": [
+      "Selection: no product path can select pending, revoked, incompatible, or configuration-mismatched entries; only activation_qualified entries whose qualificationScopeKey matches the artifact mode are selectable (provider_derived additionally requires exact full identity; disabled mode requires no provider)",
+      "Registry immutability: reads are append-only under versions/receipts/current; rollback and revocation are transitions, never mutation or deletion",
+      "Registry identity: registry bytes read back through F0 (trusted root-bound filesystem); digest mismatch fails closed",
+      "Platform fail-closed rule (plan section 9.2): registry loading disabled with baseline selected and a truthful diagnostic where guarantees are unimplementable"
+    ],
+    "overlap_with": [
+      "FT-A2 (F2 consumes A6 canonical-ordering/unique-key authority and A11Q registry-receipt authority)",
+      "FT-G (G4 and G7 depend on F2)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-qualification-store.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement ranking-policy-qualification-store.ts per plan sections 5.4 (Qualification registry: schema, scope key, canonical ordering, unique logical keys, entry statuses pending_heldout/activation_qualified/revoked), 5.7, and 7.5 (Waves F and G). §7.6 RED row: test file packages/mcp/src/core/ranking-policy-qualification-store.test.ts, exact test name `selects_only_activation_qualified_exact_scope`; expected failure before implementation: pending, revoked, or mismatched scope selects; minimal passing behavior: only exact qualified entry selects. Exact prerequisites (§7.2): F2: F0, A6, A11Q (A6: duplicate logical entry keys rejected and canonical ordering; A11Q: qualification and registry receipts enforce exact fields and transition chain). Encode: qualificationScopeKey = sha256(canonicalJSON({ serviceClass, qualificationTargetSha256, selectedArtifactMode, qualifiedRerankers })); disabled mode has empty qualifiedRerankers; provider_derived has exactly one matching every field of FixedProviderTargetV1; entries sorted lexicographically by UTF-8 bytes of the tuple; duplicate keys rejected. The store reads registry bytes through F0 and must fail closed on digest mismatch. Verified at round_base: packages/mcp/src/core/ranking-policy-qualification-store.ts does not exist (new file). Focused command is plan-specified (§7.5) and unverifiable-at-base: the target test file does not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the file exists. Affected command is repo-verified via packages/mcp/package.json. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  },
+  {
+    "task_id": "F6",
+    "title": "ranking-policy-selector.ts + config wiring (learned_v3 selection surface)",
+    "risk": "high",
+    "invariant": "Only activation_qualified exact-scope entries are selectable (pending/revoked/wrong-scope/config-mismatched never); disabled learned mode requires no provider and uses canonical reranker_disabled_v1; provider_derived requires exact full identity; any mismatch falls back to baseline with reason.",
+    "owners": ["F6"],
+    "production_callers": [
+      "packages/mcp/src/config.ts (resolveRerankerProvider :235-241 is the nearest existing config authority; verified at base: config.ts has NO existing learned/rankingPolicy selection surface — grep for learned/rankingPolicy returns nothing)",
+      "packages/mcp/src/core/search-execution.ts (Wave G learned-mode execution selects through F6)",
+      "packages/mcp/src/core/ranking-policy-runtime.ts (G4 future startup/runtime construction; production qualification enforced at F6 policy selection per plan section 5.4)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-selector.test.ts (future; plan-specified)",
+      "packages/mcp/src/config.ranking-v3.test.ts (future; plan-specified)",
+      "packages/mcp/src/core/config.freshness-timing.test.ts (existing; must stay green)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-selector.ts",
+      "packages/mcp/src/config.ts",
+      "packages/mcp/src/core/ranking-policy-selector.test.ts",
+      "packages/mcp/src/config.ranking-v3.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-selector.ts + config wiring (F6): learned_v3 selection; disabled requires no provider; provider_derived requires exact full identity (active provider/model/projection/configuration/request-contract match); config.ts gains the policy-selection surface it currently lacks"
+    ],
+    "security_boundaries": [
+      "Selection: no product path can select pending, revoked, incompatible, or configuration-mismatched entries; learned_v3 is returned only for an activation_qualified registry entry whose qualified scope matches the artifact mode (plan section 3 invariant 10)",
+      "Identity: disabled learned mode uses canonical reranker_disabled_v1, never a configured provider identity (plan section 5.7; A7 owns the canonical identity)",
+      "Fail closed: any mismatch returns baseline with a truthful reason; no partial learned mode",
+      "Provider_derived requires exact active provider/model/projection/configuration/request-contract match; disabled mode requires no active provider identity"
+    ],
+    "overlap_with": [
+      "FT-G (G4 depends on F6; G7 depends on F6)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-selector.test.ts packages/mcp/src/config.ranking-v3.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement ranking-policy-selector.ts and the config wiring per plan sections 4.2 (learned modes: disabled and provider_derived), 5.4, 5.7, 7.5 (Waves F and G), and 8.8 (Wave F module gate). §7.6 RED row: test file packages/mcp/src/core/ranking-policy-selector.test.ts, exact test name `disabled_requires_no_provider_and_provider_mode_requires_exact_full_identity`; expected failure before implementation: disabled requires provider or provider mismatch selects; minimal passing behavior: mode-specific selection is enforced. Exact prerequisites (§7.2): F6: F1, F2, A7 (A7 owns ranking-policy-identity.ts and the canonical reranker_disabled_v1). Verified facts to encode: config.ts currently has NO learned/policy-selection surface (search for learned/rankingPolicy returns nothing at base); resolveRerankerProvider (config.ts:235-241) is the nearest existing config authority; F6 introduces the learned_v3 selection surface and may wire it near resolveRerankerProvider without changing baseline reranker resolution behavior. config.ts is exclusively owned by F6 per plan section 7.1. Selection must implement plan section 3 invariant 10: learned_v3 only for an activation_qualified entry whose qualified scope matches the artifact mode; provider_derived additionally requires exact provider/model/projection/configuration/request-contract match; disabled requires no active provider identity. Focused command is plan-specified (§7.5) and unverifiable-at-base: both target test files do not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the files exist. Affected command is repo-verified via packages/mcp/package.json. Keep the existing config.freshness-timing.test.ts green. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  },
+  {
+    "task_id": "F7",
+    "title": "Ranked-set identity: composite rankingPolicyIdentity search_ranking_policy_v3:<artifact-sha256>",
+    "risk": "medium",
+    "invariant": "Composite policy identity search_ranking_policy_v3:<artifact-sha256> is carried by the existing rankingPolicyIdentity field of the ranked-set binding; policy or reranker identity change stales the continuation (SEARCH_RESULT_SET_STALE); disabled learned mode uses canonical reranker_disabled_v1, never a configured provider identity.",
+    "owners": ["F7"],
+    "production_callers": [
+      "packages/mcp/src/core/handlers.ts (SEARCH_RESULT_SET_STALE revalidation :5260-5478; binding construction :406 rankingPolicyIdentity: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID — the identity value feeding the binding changes to the composite)",
+      "packages/mcp/src/core/search-execution.ts (binding consumer)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts (future; plan-specified)",
+      "packages/mcp/src/core/search-result-set-identity.test.ts (existing; must stay green)",
+      "packages/mcp/src/core/handlers.golden.test.ts (existing; binding envelope must remain stable)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-result-set-identity.ts",
+      "packages/mcp/src/core/handlers.ts",
+      "packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "search-result-set-identity rankingPolicyIdentity composite search_ranking_policy_v3:<artifact-sha256> (F7): the binding's rankingPolicyIdentity carries the composite; continuation created under another artifact becomes stale via the existing revalidation"
+    ],
+    "security_boundaries": [
+      "Identity: composite policy identity in the existing rankingPolicyIdentity field of the ranked-set binding; a continuation created under another artifact becomes stale via existing revalidation (plan section 5.7)",
+      "Identity: disabled learned mode uses canonical reranker_disabled_v1; the reranker identity is never copied from an unrelated configured provider",
+      "Disclosure: policy hash appears in startup diagnostics, search diagnostics, and ranked-set bindings — never in index publication receipts (plan section 5.7)",
+      "Continuation performs no new retrieval, scoring, or reranking; pagination exposes one immutable ranked set; policy identity changes invalidate continuation handles (plan section 3 invariant 14)"
+    ],
+    "overlap_with": [
+      "FT-G (G5 depends on F7; G7 depends on F7)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement the ranked-set identity change per plan sections 5.7 (Storage and identity), 7.5 (Waves F and G), and 8.8 (Wave F module gate). §7.6 RED row: test file packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts, exact test name `policy_or_reranker_identity_change_stales_continuation`; expected failure before implementation: continuation survives identity change; minimal passing behavior: stale result is returned. Exact prerequisites (§7.2): F7: F6, A7. Verified anchors at round_base: packages/mcp/src/core/search-result-set-identity.ts has rankingPolicyIdentity fields at :37 and :51, requireIdentityText defined at :106 with the ranking-policy call at :136, and rankingPolicyIdentity assignment at :156; packages/mcp/src/core/handlers.ts has the SEARCH_RESULT_SET_STALE failure sites at :5260-5478 and the binding construction at :406 (rankingPolicyIdentity: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID, imported at :133); packages/mcp/src/core/search-execution.ts is the binding consumer. search-result-set-identity.ts is exclusively owned by F7 per plan section 7.1. The composite identity is search_ranking_policy_v3:<artifact-sha256>; the existing revalidation (requireIdentityText + SEARCH_RESULT_SET_STALE) must make a continuation created under another artifact stale. Disabled learned mode binding identity is the canonical reranker_disabled_v1 (A7-owned value); never copy a configured provider identity. Policy hash must not appear in index publication receipts. Focused command is plan-specified (§7.5) and unverifiable-at-base: the target test file does not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the file exists. Affected command is repo-verified via packages/mcp/package.json. Keep existing search-result-set-identity.test.ts and handlers.golden.test.ts green. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  },
+  {
+    "task_id": "F8",
+    "title": "ranking-shadow.ts (bounded evaluation sink)",
+    "risk": "medium",
+    "invariant": "The shadow sink never persists query, source, or feature-vector content; only bounded hashes, ranks, and reasons are accepted.",
+    "owners": ["F8"],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (learned-mode evaluation hooks — Wave G; sink receives only bounded evaluation observations)",
+      "packages/mcp/src/core/search-types.ts (G3 diagnostics — bounded truthful projection of score and final rank, no feature dump)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-shadow.test.ts (future; plan-specified)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-shadow.ts",
+      "packages/mcp/src/core/ranking-shadow.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-shadow.ts (F8 bounded evaluation sink): accepts only bounded hashes/ranks/reasons; never query, source, or feature-vector content"
+    ],
+    "security_boundaries": [
+      "Disclosure: sink accepts only bounded hashes, ranks, and reasons — never query, source, or feature-vector content (plan section 7.6 F8 RED row)",
+      "No production shadow selector (plan section 3 invariant 16: no production shadow selector); the sink is an evaluation-only boundary",
+      "Diagnostics remain a bounded truthful projection: score and final rank exposed without feature dump (plan G3 adjacent contract)",
+      "Shadow content must not enter ranked-set bindings, continuation handles, or index publication receipts"
+    ],
+    "overlap_with": [
+      "FT-G (G7 depends on F8)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-shadow.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement ranking-shadow.ts per plan sections 7.3 (Wave F: shadow sink), 7.5 (Waves F and G), 8.8 (Wave F module gate), and section 3 invariant 16 (no production shadow selector). §7.6 RED row: test file packages/mcp/src/core/ranking-shadow.test.ts, exact test name `sink_never_persists_query_source_or_feature_vector`; expected failure before implementation: forbidden content reaches sink; minimal passing behavior: only bounded hashes/ranks/reasons are accepted. Exact prerequisites (§7.2): F8: F6, A7. The sink is a bounded evaluation sink, NOT a production shadow selector — invariant 16 forbids a production shadow selector; the sink must never leak query text, source content, or feature vectors into any persisted form (files, logs, receipts, bindings). Bound the accepted payload to hashes, ranks, and reasons; reject anything else. Verified at round_base: packages/mcp/src/core/ranking-shadow.ts does not exist (new file). Focused command is plan-specified (§7.5) and unverifiable-at-base: the target test file does not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the file exists. Affected command is repo-verified via packages/mcp/package.json. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  },
+  {
+    "task_id": "F9",
+    "title": "ranking-policy-qualification-writer.ts (registry transition writer; exact APIs of plan section 5.4)",
+    "risk": "high",
+    "invariant": "Same-previous-digest allows exactly one CAS writer and preserves the transition chain; registry is append-only under versions/receipts with atomic current pointer; rollback and revocation are transitions, never mutation or deletion; every transition replaces exactly one logical entry in a new snapshot.",
+    "owners": ["F9"],
+    "production_callers": [
+      "scripts/ranking-v3-heldout-activation.mjs (G6C future CLI; H0/H10/I entrypoints use the F9 writer)",
+      "H10 pending transition (FT-H; create_pending_heldout)",
+      "I4 activate / I3R reject transitions (FT-I; activatePendingVersion / rejectPendingVersion)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-qualification-writer.test.ts (future; plan-specified)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.test.ts",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.7, 7.5 Waves F and G)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9): initializeQualificationRegistry, createPendingHeldoutVersion, activatePendingVersion, rejectPendingVersion, revokeArtifact",
+      "RegistryWriterRootV1: trustedRootAbsolutePath, contractSealSha256, implementationSealSha256, issuerIdentity",
+      "Inputs: RegistryInitializationInputV1 (expectedRootState: \"empty\"), CreatePendingHeldoutInputV1, ActivatePendingInputV1, RejectPendingInputV1, RevokeArtifactInputV1 (all with expectedRegistrySha256); Results: RegistryInitializationResult / RegistryTransitionResult (registry, registrySha256, receipt, receiptSha256)"
+    ],
+    "security_boundaries": [
+      "Registry immutability: append-only under versions/, receipts/, and the atomic current pointer; rollback and revocation are transitions, never mutation or deletion; pending_heldout -> activation_qualified, pending_heldout -> revoked, activation_qualified -> revoked replace exactly one logical entry in a new snapshot; requalifying a revoked artifact/scope requires a new artifact hash",
+      "Filesystem: content-addressed writes with O_CREAT|O_EXCL, fsync, atomic current replacement, read-back through F0; every transition verifies the expected registry digest, logical key, target binding, and exact parsed triggering receipt",
+      "CAS concurrency: same-previous-digest (expectedRegistrySha256) allows exactly one writer; concurrency, live-lock, crashed-owner, malformed-lock, directory-replacement, and same-previous-digest races are focused-test requirements (plan section 5.4)",
+      "Authorization: trusted-root identity via RegistryWriterRootV1 (trustedRootAbsolutePath, contractSealSha256, implementationSealSha256, issuerIdentity); same-UID trust boundary accepted per plan section 3.17",
+      "Platform fail-closed rule (plan section 9.2): registry mutation disabled with baseline selected and a truthful diagnostic where guarantees are unimplementable",
+      "Genesis: canonical empty genesis snapshot {\"schemaVersion\":\"ranking_policy_qualification_registry_v1\",\"entries\":[]}; initializeQualificationRegistry runs only in an empty trusted root, otherwise verifies the existing snapshot"
+    ],
+    "overlap_with": [
+      "FT-A2 (F9 consumes A6/A11Q/A11H; F9 needs R1.4)",
+      "FT-G (G6C and G7 depend on F9)",
+      "FT-H (H0/H10 use the F9 writer)",
+      "FT-I (I4 uses the F9 writer)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-qualification-writer.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement ranking-policy-qualification-writer.ts per plan section 5.4 (Qualification registry — exact interfaces and transition semantics), 5.5 (receipt schemas: RegistryInitializationReceiptV1, RegistryTransitionReceiptV1 with transitionChainSha256, RevocationAuthorizationReceiptV1, HeldoutAcceptanceReceiptV1, HeldoutRejectionReceiptV1, OfflineQualificationReceiptV1), 7.5 (Waves F and G), and 8.8 (Wave F module gate). §7.6 RED row: test file packages/mcp/src/core/ranking-policy-qualification-writer.test.ts, exact test name `same_previous_digest_allows_exactly_one_writer_and_preserves_chain`; expected failure before implementation: concurrent writers both succeed or transition chain is not bound; minimal passing behavior: one CAS succeeds and receipt chain is exact. Exact prerequisites (§7.2): F9: F0, F2, A6, A11Q, A11H, R1.4 (R1.4 binds the target digest; A11Q/A11H own registry and held-out receipt schemas). Encode: genesis snapshot is the canonical empty registry {\"schemaVersion\":\"ranking_policy_qualification_registry_v1\",\"entries\":[]} initialized ONLY in an empty trusted root, otherwise the existing snapshot is verified; RegistryWriterRootV1 carries trustedRootAbsolutePath/contractSealSha256/implementationSealSha256/issuerIdentity; every transition verifies expected registry digest, logical key, target binding, and exact parsed triggering receipt, performs the deterministic add/replacement, writes content-addressed files with O_CREAT|O_EXCL, fsyncs, atomically replaces current, and reads back through F0; RegistryTransitionReceiptV1 binds previousRegistrySha256/newRegistrySha256/entryKey/transitionChainSha256. Concurrency focused-test requirements (plan section 5.4): CAS (same-previous-digest allows exactly one writer), live-lock, crashed-owner, malformed-lock, directory-replacement, and same-previous-digest races. Pending entry termination on both acceptance and rejection (plan section 3 invariant 12); pending can never block a later qualification cycle for its scope. Verified at round_base: packages/mcp/src/core/ranking-policy-qualification-writer.ts does not exist (new file). Focused command is plan-specified (§7.5) and unverifiable-at-base: the target test file does not exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18; do not run it until the file exists. Affected command is repo-verified via packages/mcp/package.json. RED demonstration (expected-failure-then-pass) is required at implementation time per §7.6 even though red_evidence_required is false for this round."
+  }
+]

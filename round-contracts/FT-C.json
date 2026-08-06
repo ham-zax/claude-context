@@ -1,0 +1,368 @@
+[
+  {
+    "task_id": "C1",
+    "title": "Build RANKING_JUDGMENT_PACKET_MANIFEST.json: exact packet partition of the 50 tuning tasks (scripts/build-ranking-judgment-packets.mjs)",
+    "risk": "medium",
+    "invariant": "Every tuning task is covered exactly once by RANKING_JUDGMENT_PACKET_MANIFEST.json; the packet partition derives from the sealed B9 tuning corpus (the 50 tuning tasks in the 6 tuning-split families of cross-repository-v3.manifest.json) and never includes any held-out task.",
+    "owners": [
+      "scripts/build-ranking-judgment-packets.mjs"
+    ],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs expand (C1G; consumes $PACKET_MANIFEST for graph expansion)",
+      "scripts/ranking-judgments.mjs verify-pool (C2.<packetId>; packet/task binding comes from the packet manifest)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (source partition: 50 tuning tasks, 6 tuning families; 51 held-out tasks must be excluded)"
+    ],
+    "test_callers": [
+      "scripts/build-ranking-judgment-packets.test.mjs (future; §7.6 RED test packet_manifest_covers_each_tuning_task_exactly_once)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-convention precedent)"
+    ],
+    "approved_files": [
+      "scripts/build-ranking-judgment-packets.mjs",
+      "scripts/build-ranking-judgment-packets.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/build-ranking-judgment-packets.mjs (new CLI emitting RANKING_JUDGMENT_PACKET_MANIFEST.json; binds $PACKET_MANIFEST substitution authority)"
+    ],
+    "security_boundaries": [
+      "Tuning-only partitioning: the 51 held_out tasks of cross-repository-v3.manifest.json must never appear in any packet",
+      "Packet manifest binds task digests so packet agents cannot substitute or swap tasks",
+      "Held-out discipline: no held-out tasks, queries, captures, or outcomes enter packet design or construction"
+    ],
+    "overlap_with": [
+      "FT-G1 (C1G consumes C1's packet manifest via $PACKET_MANIFEST)",
+      "FT-B (B9 corpus binds the exact 50 tuning tasks that C1 partitions; capture digests flow through B6)"
+    ],
+    "focused_command": "node --test scripts/build-ranking-judgment-packets.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Code-change card per §7.5 Wave C and §7.6 code-change table. focused_command targets the future test file scripts/build-ranking-judgment-packets.test.mjs which does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and will cover this test once created. §7.6 RED row: expected failure before implementation is 'missing or duplicate task appears'; minimal passing behavior is 'exact task partition is produced' — every one of the 50 tuning tasks appears in exactly one packet, zero held-out tasks appear. Prerequisites per §7.2: C1: DC0, A8, B9. Do not confuse the 6 tuning-split (LOFO) families (gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app — repositoryIds gitnexus-r0/bookmark-ai-organizer-r0/duas-r0/vox-infinity-r0/rpc-r0/edge-tts-app-r0, 50 tasks) with leakage.tuningOnlyRepositoryFamilies which has 11 entries including non-LOFO families. Output: RANKING_JUDGMENT_PACKET_MANIFEST.json (becomes $PACKET_MANIFEST)."
+  },
+  {
+    "task_id": "C1G",
+    "title": "Wave-C graph expansion: write append-only TASK_GRAPH_EXPANSION_C.json via R1.T1 expand against the sealed template",
+    "risk": "medium",
+    "invariant": "Packet IDs are the only post-seal graph expansion; expanded IDs must match the sealed template regex and may introduce only template-declared edges; TASK_GRAPH_EXPANSION_C.json is append-only and every packet appears exactly once.",
+    "owners": [
+      "TASK_GRAPH_EXPANSION_C.json (expansion output; the expand tool is owned by R1.T1's scripts/ranking-v3-task-graph.mjs)"
+    ],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs expand (R1.T1 tool invoked by C1G; validates against the sealed template with expansionAuthority c1_packet_manifest)",
+      "scripts/ranking-v3-dispatch-cards.mjs verify (DC1 card generator binds expansion receipts; every card generator validates base graph plus applicable expansion receipts)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (R1.T1 tool test, future; C1G relies on expand being seal-validated)"
+    ],
+    "approved_files": [
+      "$TASK_OUTPUT/TASK_GRAPH_EXPANSION_C.json (task output; no tracked source file exists at base — the tool is R1.T1-owned)"
+    ],
+    "interface_changes": [
+      "TASK_GRAPH_EXPANSION_C.json (via R1.T1 expand --graph --packet-manifest --out; expanded IDs must match the sealed template regex and introduce only template-declared edges)"
+    ],
+    "security_boundaries": [
+      "Post-seal expansion is the ONLY graph mutation allowed; cycles, unknown nodes, undeclared IDs, and unresolved hard dependencies block dispatch",
+      "Sealed template regex enforcement: expansion cannot introduce undeclared task IDs or held-out tasks (packet manifest is tuning-only)",
+      "Append-only expansion receipt: TASK_GRAPH_EXPANSION_C.json is never rewritten after emission"
+    ],
+    "overlap_with": [
+      "FT-G1 (C1G invokes R1.T1 expand against sealed templates)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs expand --graph \"$TASK_GRAPH\" --packet-manifest \"$PACKET_MANIFEST\" --out \"$TASK_OUTPUT/TASK_GRAPH_EXPANSION_C.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Evidence/execution card per §7.5 Wave C (output column 'graph expansion') and §7.6 evidence-card table. focused_command is the §7.5 exact command with plan substitution variables ($TASK_GRAPH, $PACKET_MANIFEST, $TASK_OUTPUT); scripts/ranking-v3-task-graph.mjs does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (R1.T1 future file) — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and only meaningfully covers this card after Gate 1 (R1.T1's scripts/ranking-v3-task-graph.test.mjs lands). §7.6 row: unmet precondition 'packet manifest from C1 receipt is absent'; validating assertion 'expansion IDs match template regex and every packet exactly once'. Prerequisites per §7.2: C1G: C1, R1.T1. DC1 then binds the expansion receipt. §7.2: 'Wave-C packet identities are the only post-seal graph expansion'; expanded IDs may introduce only template-declared edges."
+  },
+  {
+    "task_id": "C2.<packetId>",
+    "title": "Candidate pool for one packet: verify candidate-pool.json binds packet/task/capture/tree digests with no grades",
+    "risk": "medium",
+    "invariant": "The candidate pool binds packet/task/capture/tree digests and contains no grades; unjudged candidates stay explicit and excluded from pair generation.",
+    "owners": [
+      "candidate-pool.json (schema enforced by scripts/ranking-judgments.mjs verify-pool, A8-owned tool)"
+    ],
+    "production_callers": [
+      "scripts/ranking-judgments.mjs verify-pool (A8 tool; future file at base)",
+      "C3A.<packetId>/C3B.<packetId> (proposals are produced from this packet's pool)"
+    ],
+    "test_callers": [
+      "scripts/ranking-judgments.test.mjs (A8 tool test, future; A8 §7.6 RED: unjudged_candidate_never_becomes_grade_zero)"
+    ],
+    "approved_files": [
+      "$TASK_OUTPUT/candidate-pool.json (task output; no tracked source file exists at base)"
+    ],
+    "interface_changes": [
+      "candidate-pool schema (C2.<packetId> via ranking-judgments.mjs verify-pool --input)"
+    ],
+    "security_boundaries": [
+      "Pool stage contains no grades — grade assignment is deferred to proposals/adjudication",
+      "Pool binds capture digests (B6 capture survival v3, tuning-only) and tree digests so candidates cannot be swapped",
+      "Packet agent independence: the pool producer is a distinct packet agent from the two proposal agents"
+    ],
+    "overlap_with": [
+      "FT-B (pool binds B6 capture digests; C2.<packetId> runs after DC1/C1 per §7.2)"
+    ],
+    "focused_command": "node scripts/ranking-judgments.mjs verify-pool --input \"$TASK_OUTPUT/candidate-pool.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Evidence/execution card per §7.5 Wave C ('candidate pool') and §7.6 evidence-card table. focused_command is the §7.5 exact command; scripts/ranking-judgments.mjs (A8) does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and only meaningfully covers this card after Wave A (A8's scripts/ranking-judgments.test.mjs lands). §7.6 row: unmet precondition 'candidate pool file does not exist'; validating assertion 'pool parser binds packet/task/capture/tree digests and contains no grades'. Prerequisites per §7.2: C2.<packetId>: DC1, C1. <packetId> is a template placeholder expanded by C1G; each expanded packet gets exactly one C2, one C3A, one C3B task."
+  },
+  {
+    "task_id": "C3A.<packetId>",
+    "title": "Proposal A for one packet: verify proposal-a.json source rationale and agent independence from counterpart",
+    "risk": "medium",
+    "invariant": "Each task gets two independent proposals from different agents; proposal A validates source rationale and its agent differs from proposal B's agent.",
+    "owners": [
+      "proposal-a.json (schema enforced by scripts/ranking-judgments.mjs verify-proposal, A8-owned tool)"
+    ],
+    "production_callers": [
+      "scripts/ranking-judgments.mjs verify-proposal (A8 tool; future file at base)",
+      "scripts/assemble-ranking-proposals.mjs (C3S consumes proposal-a.json for all packets)"
+    ],
+    "test_callers": [
+      "scripts/ranking-judgments.test.mjs (A8 tool test, future)"
+    ],
+    "approved_files": [
+      "$TASK_OUTPUT/proposal-a.json (task output; no tracked source file exists at base)"
+    ],
+    "interface_changes": [
+      "proposal-a schema (C3A.<packetId> via ranking-judgments.mjs verify-proposal --input)"
+    ],
+    "security_boundaries": [
+      "Packet agent independence: proposal-A agent must differ from proposal-B agent (parser enforces agent differs from counterpart)",
+      "Source-bound rationale: every proposed grade carries an explicit source rationale (raw provider evidence, per §6.2)",
+      "Held-out discipline: proposals only over tuning-task candidates from the packet pool"
+    ],
+    "overlap_with": [
+      "C3B.<packetId> (sibling proposal over the same packet pool; agents must differ)"
+    ],
+    "focused_command": "node scripts/ranking-judgments.mjs verify-proposal --input \"$TASK_OUTPUT/proposal-a.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Evidence/execution card per §7.5 Wave C ('proposal A') and §7.6 evidence-card table. focused_command is the §7.5 exact command; scripts/ranking-judgments.mjs (A8) does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and only meaningfully covers this card after Wave A. §7.6 row: unmet precondition 'assigned independent proposal is absent'; validating assertion 'proposal parser validates source rationale and agent differs from counterpart'. Prerequisites per §7.2: C3A.<packetId>: C2.<packetId>. Two separate packet agents produce C3A and C3B; C3S rejects same-agent pairs."
+  },
+  {
+    "task_id": "C3B.<packetId>",
+    "title": "Proposal B for one packet: verify proposal-b.json source rationale and agent independence from counterpart",
+    "risk": "medium",
+    "invariant": "Each task gets two independent proposals from different agents; proposal B validates source rationale and its agent differs from proposal A's agent.",
+    "owners": [
+      "proposal-b.json (schema enforced by scripts/ranking-judgments.mjs verify-proposal, A8-owned tool)"
+    ],
+    "production_callers": [
+      "scripts/ranking-judgments.mjs verify-proposal (A8 tool; future file at base)",
+      "scripts/assemble-ranking-proposals.mjs (C3S consumes proposal-b.json for all packets)"
+    ],
+    "test_callers": [
+      "scripts/ranking-judgments.test.mjs (A8 tool test, future)"
+    ],
+    "approved_files": [
+      "$TASK_OUTPUT/proposal-b.json (task output; no tracked source file exists at base)"
+    ],
+    "interface_changes": [
+      "proposal-b schema (C3B.<packetId> via ranking-judgments.mjs verify-proposal --input)"
+    ],
+    "security_boundaries": [
+      "Packet agent independence: proposal-B agent must differ from proposal-A agent (parser enforces agent differs from counterpart)",
+      "Source-bound rationale: every proposed grade carries an explicit source rationale (raw provider evidence, per §6.2)",
+      "Held-out discipline: proposals only over tuning-task candidates from the packet pool"
+    ],
+    "overlap_with": [
+      "C3A.<packetId> (sibling proposal over the same packet pool; agents must differ)"
+    ],
+    "focused_command": "node scripts/ranking-judgments.mjs verify-proposal --input \"$TASK_OUTPUT/proposal-b.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Evidence/execution card per §7.5 Wave C ('proposal B') and §7.6 evidence-card table. focused_command is the §7.5 exact command; scripts/ranking-judgments.mjs (A8) does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and only meaningfully covers this card after Wave A. §7.6 row: unmet precondition 'assigned independent proposal is absent'; validating assertion 'proposal parser validates source rationale and agent differs from counterpart'. Prerequisites per §7.2: C3B.<packetId>: C2.<packetId>. Two separate packet agents produce C3A and C3B; C3S rejects same-agent pairs."
+  },
+  {
+    "task_id": "C3S",
+    "title": "Assemble all packet proposals: scripts/assemble-ranking-proposals.mjs rejects missing, duplicate, or same-agent proposals",
+    "risk": "medium",
+    "invariant": "Each tuning task is covered by exactly two proposals from different agents; C3S rejects missing, duplicate, or same-agent proposals and requires complete coverage.",
+    "owners": [
+      "scripts/assemble-ranking-proposals.mjs"
+    ],
+    "production_callers": [
+      "scripts/assemble-ranking-proposals.mjs (assembly tool; consumed by C4 adjudication)",
+      "scripts/ranking-judgments.mjs verify-adjudicated (C4; consumes the assembled proposal set)"
+    ],
+    "test_callers": [
+      "scripts/assemble-ranking-proposals.test.mjs (future; §7.6 RED test rejects_missing_duplicate_or_same_agent_proposals)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-convention precedent)"
+    ],
+    "approved_files": [
+      "scripts/assemble-ranking-proposals.mjs",
+      "scripts/assemble-ranking-proposals.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/assemble-ranking-proposals.mjs (new CLI validating complete two-agent coverage across all packets)"
+    ],
+    "security_boundaries": [
+      "Agent independence enforcement: same-agent proposal pairs are rejected",
+      "Complete coverage: a task with a missing or duplicate proposal blocks assembly",
+      "Held-out discipline: assembly spans only tuning-task packets from the sealed packet manifest"
+    ],
+    "overlap_with": [
+      "All C3A.<packetId>/C3B.<packetId> (C3S: all C3A.<packetId>, all C3B.<packetId> per §7.2)"
+    ],
+    "focused_command": "node --test scripts/assemble-ranking-proposals.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Code-change card per §7.5 Wave C and §7.6 code-change table. focused_command targets the future test file scripts/assemble-ranking-proposals.test.mjs which does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and will cover this test once created. §7.6 RED row: expected failure before implementation is 'incomplete or non-independent proposals assemble'; minimal passing behavior is 'two different agents per task and complete coverage are required'. Prerequisites per §7.2: C3S: all C3A.<packetId>, all C3B.<packetId>."
+  },
+  {
+    "task_id": "C4",
+    "title": "Human adjudication card: resolve proposal pairs into judgments.json (every judged grade has source rationale; unresolved stay unjudged)",
+    "risk": "medium",
+    "invariant": "Unjudged candidates never become grade 0; every judged grade has source rationale; unresolved candidates remain unjudged and excluded from pair generation.",
+    "owners": [
+      "judgments.json (schema enforced by scripts/ranking-judgments.mjs verify-adjudicated, A8-owned tool)"
+    ],
+    "production_callers": [
+      "scripts/ranking-judgments.mjs verify-adjudicated (A8 tool; future file at base)",
+      "scripts/build-cross-repository-v4-tuning-manifest.mjs (C5 consumes adjudicated judgments)"
+    ],
+    "test_callers": [
+      "scripts/ranking-judgments.test.mjs (A8 tool test, future; A8 §7.6 RED: unjudged_candidate_never_becomes_grade_zero)"
+    ],
+    "approved_files": [
+      "$TASK_OUTPUT/judgments.json (task output; no tracked source file exists at base)"
+    ],
+    "interface_changes": [
+      "judgments schema (C4 via ranking-judgments.mjs verify-adjudicated --input; grades 3/2/1/0 with explicit judged status)"
+    ],
+    "security_boundaries": [
+      "Human-adjudicator resolution: one human/adjudicator resolves the two proposals per task (per §6.2); unresolved candidates remain unjudged — never defaulted to grade 0",
+      "Source-bound rationale required for every judged grade",
+      "Held-out discipline: adjudication covers only tuning tasks; no held-out queries, captures, or judgments are used for grading"
+    ],
+    "overlap_with": [
+      "FT-E (adjudicated judgments flow into the C5 tuning manifest which feeds E-family training)"
+    ],
+    "focused_command": "node scripts/ranking-judgments.mjs verify-adjudicated --input \"$TASK_OUTPUT/judgments.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Human-decision/evidence card per §7.5 Wave C ('adjudicated judgments') and §7.6 evidence-card table. focused_command is the §7.5 exact command; scripts/ranking-judgments.mjs (A8) does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and only meaningfully covers this card after Wave A. §7.6 row: unmet precondition 'C3S assembly receipt is absent'; validating assertion 'every judged grade has source rationale; unresolved candidates remain unjudged'. Prerequisites per §7.2: C4: C3S. Grading effort is the critical path (§9.2): packet bounds and the two-proposal protocol keep it tractable."
+  },
+  {
+    "task_id": "C5",
+    "title": "Build the v4 tuning manifest: scripts/build-cross-repository-v4-tuning-manifest.mjs is tuning-only and binds adjudicated judgments",
+    "risk": "medium",
+    "invariant": "The v4 tuning manifest is tuning-only and binds adjudicated judgments; it never rewrites held-out authority; only tuning tasks and exact judgment digests are included.",
+    "owners": [
+      "scripts/build-cross-repository-v4-tuning-manifest.mjs"
+    ],
+    "production_callers": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (source partition: the 50 verified tuning tasks; 51 held-out tasks excluded)",
+      "scripts/train-ranking-residual.mjs (D2/E1 train jobs consume $TRAINING_MANIFEST)",
+      "scripts/build-ranking-policy-v3-artifact.mjs (D8 binds trainingManifestSha256 into the final artifact)"
+    ],
+    "test_callers": [
+      "scripts/build-cross-repository-v4-tuning-manifest.test.mjs (future; §7.6 RED test manifest_is_tuning_only_and_binds_adjudicated_judgments)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-convention precedent)"
+    ],
+    "approved_files": [
+      "scripts/build-cross-repository-v4-tuning-manifest.mjs",
+      "scripts/build-cross-repository-v4-tuning-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/build-cross-repository-v4-tuning-manifest.mjs (new CLI; v4 tuning manifest output carries the leakage contract and binds adjudicated judgment digests; bound as $TRAINING_MANIFEST)"
+    ],
+    "security_boundaries": [
+      "Tuning-only: held-out authority is never rewritten and held-out tasks never enter the manifest",
+      "Leakage contract carried from the sealed v3 manifest (tuningOnlyRepositoryFamilies, tuningOnlyRevisions, tuningOnlyTaskIds, tuningOnlyQuerySha256); do not confuse the 11-entry leakage family list with the 6 LOFO families",
+      "Exact judgment-digest binding: unbound or hand-edited judgments are rejected"
+    ],
+    "overlap_with": [
+      "FT-E (C5 tuning manifest feeds E-family training)"
+    ],
+    "focused_command": "node --test scripts/build-cross-repository-v4-tuning-manifest.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Code-change card per §7.5 Wave C and §7.6 code-change table. focused_command targets the future test file scripts/build-cross-repository-v4-tuning-manifest.test.mjs which does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and will cover this test once created. §7.6 RED row: expected failure before implementation is 'held-out or unbound judgments enter the manifest'; minimal passing behavior is 'only tuning tasks and exact judgment digests are included'. Prerequisites per §7.2: C5: C4, A8. The v4 manifest derives from the 50 verified tuning tasks in cross-repository-v3.manifest.json (6 tuning-split families: gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app) and binds adjudicated judgment digests from C4. §6.2: the v4 tuning manifest carries the leakage contract and never rewrites held-out authority."
+  },
+  {
+    "task_id": "C6",
+    "title": "Graded-stage scorer integration: one evaluator authority for graded stage and legacy metrics (byte-compatible) + score adapter",
+    "risk": "medium",
+    "invariant": "C6 shares one evaluator authority for the graded stage and legacy metrics; legacy owner metrics remain byte-compatible (A10 invariant); the scorer cannot disagree with the evaluator or change legacy metric bytes.",
+    "owners": [
+      "evals/search-quality/search-quality-evaluation.ts (graded stage metrics; ownership R0.1A -> A10 -> C6 sequential)",
+      "scripts/satori-search-candidate-score.mjs (score adapter)"
+    ],
+    "production_callers": [
+      "evals/search-quality/search-quality-evaluation.ts (C6 authority: FIXED_NOW constant, REQUIRED_LIMITS [1,3,5,10,20], hash-bound fixture)",
+      "scripts/satori-search-candidate-score.mjs (usage at line 360; flags --capture/--replay/--split/--split-prefix/--held-out-opening/--out)",
+      "scripts/satori-search-candidate-replay.mjs (C6 input path; replay v3 outputs feed the scorer)",
+      "scripts/satori-search-ranking-r3-score.mjs (existing graded-scorer precedent)"
+    ],
+    "test_callers": [
+      "evals/search-quality/search-quality-evaluation.test.ts (RED at base; C6 contracts must preserve the eval test authority)",
+      "scripts/satori-search-candidate-score.test.mjs (EXISTS at base; C6 extends it)",
+      "evals/search-quality/ranking-v3-scorer-integration.test.ts (future; §7.6 RED test graded_stage_and_legacy_metrics_share_one_authority)",
+      "scripts/satori-search-ranking-r3-score.test.mjs (existing precedent)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (manifest convention)"
+    ],
+    "approved_files": [
+      "evals/search-quality/search-quality-evaluation.ts",
+      "scripts/satori-search-candidate-score.mjs",
+      "scripts/satori-search-candidate-replay.mjs",
+      "scripts/satori-search-candidate-score.test.mjs (extend)",
+      "evals/search-quality/ranking-v3-scorer-integration.test.ts (create)"
+    ],
+    "interface_changes": [
+      "ranking-v3-scorer integration (graded stage metrics in the evaluator + score adapter in scripts/satori-search-candidate-score.mjs)",
+      "search-quality-evaluation.ts gains graded stage metrics (stage survival, judged-pool nDCG@10 with coverage, conditional graded pair accuracy, end-to-end miss accounting) while legacy outputs stay byte-identical"
+    ],
+    "security_boundaries": [
+      "Held-out discipline: scoring held-out or mixed splits requires --held-out-opening (existing score.mjs enforcement at line 396); graded judgments are tuning-only",
+      "Legacy byte-compatibility: adding graded metrics must not change legacy metric bytes (A10 §7.6 RED: legacy_owner_metrics_remain_byte_compatible)",
+      "Sealed manifest digests readable only for opening verification; no held-out queries/captures/outputs used for scoring design or debugging"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.1A -> A10 -> C6 sequential ownership of search-quality-evaluation.ts)",
+      "FT-B (C6 depends on B7 replay v3; replay.mjs is the C6 input path)",
+      "FT-D (D1/D2/D4/D6 depend on C6)",
+      "FT-E (C5 tuning manifest feeds E-family training; C6 consumes C5)"
+    ],
+    "focused_command": "node --import tsx --test evals/search-quality/ranking-v3-scorer-integration.test.ts && node --test scripts/satori-search-candidate-score.test.mjs",
+    "affected_command": "pnpm eval:search-quality",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Code-change card per §7.5 Wave C ('evaluator + score adapter') and §7.6 code-change table. focused_command is the §7.5 exact command; the first target evals/search-quality/ranking-v3-scorer-integration.test.ts does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (plan-specified, unverifiable-at-base; do not run at base); the second target scripts/satori-search-candidate-score.test.mjs EXISTS at base and C6 extends it (it already imports compareCandidateScores, main, scoreBaselineCapture, scoreContenderReplay). affected_command pnpm eval:search-quality is repo-verified (package.json) and is RED at base — recorded state (plan §10: 'Fixture RED at base | pnpm eval:search-quality -> source_state_unverified chain (R0.1A resolves)'); the search-quality-evaluation.test.ts RED fixture authority must be preserved by C6. §7.6 RED row: expected failure before implementation is 'scorer disagrees with evaluator or changes legacy metrics'; minimal passing behavior is 'one evaluator authority produces all metrics'. Prerequisites per §7.2: C6: C5, A10, B7. One evaluator authority (search-quality-evaluation.ts) produces both graded stage metrics and legacy metrics; the score adapter (satori-search-candidate-score.mjs) must not diverge from it."
+  }
+]

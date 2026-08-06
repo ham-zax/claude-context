@@ -1,0 +1,415 @@
+[
+  {
+    "task_id": "D1",
+    "title": "Grouped-comparator tuning tool (diagnostic only)",
+    "risk": "low",
+    "invariant": "D1 produces the grouped tuned baseline comparator, which is diagnostic only and never deployable through V3. Its receipt digest (or 'groupedComparator: unavailable') is consumed at the section 6.5 E3_INPUT_SEAL barrier: if a valid D1 receipt exists at that barrier, E3 must consume it even when the comparator is optional; a material grouped win yields terminal 'learned_not_justified'. A late D1 receipt is diagnostic only and cannot retroactively change selection. Tuning must be reproducible with the sealed grid seed and tiebreak (section 7.6 RED row: search_is_reproducible_with_sealed_grid_seed_and_tiebreak).",
+    "owners": [
+      "scripts/tune-ranking-groups.mjs",
+      "scripts/tune-ranking-groups.test.mjs"
+    ],
+    "production_callers": [
+      "E3_INPUT_SEAL (D6 adjudicate-ranking-lofo.mjs seal-inputs) consumes the D1 receipt digest at the section 6.5 barrier; valid receipt -> groupedComparator: available (must be consumed even if optional)",
+      "H2 (later Wave H: diagnostic grouped output only; never blocks qualification and cannot retroactively change selection)"
+    ],
+    "test_callers": [
+      "scripts/tune-ranking-groups.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/tune-ranking-groups.mjs",
+      "scripts/tune-ranking-groups.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/tune-ranking-groups.mjs: grouped comparator tool producing a D1 receipt with sealed grid seed and tiebreak; diagnostic, never deployable via V3"
+    ],
+    "security_boundaries": [
+      "D1 receipt may never enter the V3 product path; only E3_INPUT_SEAL/E3 may consume it",
+      "Repeatability: same sealed grid seed + tiebreak must reproduce the same selection",
+      "At the E3_INPUT_SEAL barrier: valid receipt present -> must be consumed even when comparator is optional; absent + optional -> groupedComparator: unavailable_optional; absent + required -> unavailable_required and E3 returns insufficient_evidence (D6 boundary)",
+      "Material grouped win yields terminal 'learned_not_justified'; late receipts are diagnostic only"
+    ],
+    "overlap_with": [
+      "FT-C (prerequisite C6 graded scorer/evaluator authority)",
+      "FT-E (E3_INPUT_SEAL/E3 consume the D1 receipt digest)",
+      "FT-D sibling D6 (adjudicator enforces the seal-barrier semantics)"
+    ],
+    "focused_command": "node --test scripts/tune-ranking-groups.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D1: owns scripts/tune-ranking-groups.mjs; exact command 'node --test scripts/tune-ranking-groups.test.mjs'. Section 7.6 RED: test 'search_is_reproducible_with_sealed_grid_seed_and_tiebreak' - expected failure before implementation: repeat run selects different result; minimal passing behavior: exact repeatability is proven. Prerequisites (section 7.2 exact table): DD, C6, R1.2, R1.3. Deadline semantics (section 6.5): R1.3 seals groupedComparatorPolicy required|optional and the E3_INPUT_SEAL availability barrier; a valid D1 receipt at the barrier must be consumed; a late D1 receipt is diagnostic only and cannot retroactively change selection (H2 output is diagnostic only). D1 is NOT part of D_GATE (gate prerequisite list is D2..D8). The focused command targets a future test file and is unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script); the repo-verified script suite 'pnpm test:scripts' (node --import tsx --test scripts/*.test.mjs ...) additionally covers scripts/*.test.mjs once they exist."
+  },
+  {
+    "task_id": "D2",
+    "title": "Mode-neutral residual trainer (ResidualModelV1)",
+    "risk": "medium",
+    "invariant": "D2/E1 produce mode-neutral ResidualModelV1 artifacts (schema 'ranking_residual_model_v1', featureSchema 'search_features_v1') binding createdFromCommit, trainingFoldManifestSha256, trainingCodeSha256, trainingContractSha256, normalization (NormalizationContractV1), weights, and residualBounds.maximumResidual. Mode-neutrality: one model, never interpreted under two modes. Zero-residual equals the pre-rerank baseline score: a zero-weight residual must leave every score unchanged at scorer level (section 7.6 RED: zero_residual_equals_pre_rerank_baseline_scores). preRerankBaselineScore is the deterministic score computed by computeSearchCandidateFinalScore (packages/mcp/src/core/search-ranking-policy.ts:392).",
+    "owners": [
+      "scripts/train-ranking-residual.mjs",
+      "scripts/train-ranking-residual.test.mjs"
+    ],
+    "production_callers": [
+      "E1.<familyId> (executes D2: node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\")",
+      "E4 (all-tuning refit: node scripts/train-ranking-residual.mjs refit --job \"$REFIT_JOB\" --out \"$TASK_OUTPUT/refit\")",
+      "D3 (verify-ranking-policy-artifact.mjs independently verifies the residual-model form)",
+      "D8 (buildRankingPolicyV3Artifact consumes ResidualModelV1)",
+      "D_GATE (gate prerequisite row: D2)"
+    ],
+    "test_callers": [
+      "scripts/train-ranking-residual.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/train-ranking-residual.mjs",
+      "scripts/train-ranking-residual.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/train-ranking-residual.mjs: ResidualModelV1 trainer with 'train' and 'refit' entrypoints; mode-neutral"
+    ],
+    "security_boundaries": [
+      "Mode neutrality: the same residual model must never be interpreted as two different final-artifact modes (section 5.3)",
+      "Zero-residual invariance: zero weights must reproduce exact pre-rerank baseline scores (scorer-level equality)",
+      "Provenance binding: createdFromCommit, trainingFoldManifestSha256, trainingCodeSha256, trainingContractSha256 must be sealed",
+      "residualBounds.maximumResidual bounds any residual magnitude",
+      "Invariant 16: no environment-variable learning, no online/click learning, no automatic coefficient updates"
+    ],
+    "overlap_with": [
+      "FT-A1 (prerequisites A4 extractRankingFeaturesV1, A5 ResidualModelV1 parsers/canonicalizers)",
+      "FT-C (prerequisite C6 scorer authority)",
+      "FT-E (E1 executes D2 train; E4 refits through D2)",
+      "FT-D siblings D3/D8 (consume ResidualModelV1)"
+    ],
+    "focused_command": "node --test scripts/train-ranking-residual.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D2: owns scripts/train-ranking-residual.mjs exporting ResidualModelV1 (mode-neutral); exact command 'node --test scripts/train-ranking-residual.test.mjs'. Section 7.6 RED: test 'zero_residual_equals_pre_rerank_baseline_scores' - expected failure before implementation: zero weights change some score; minimal passing behavior: scorer-level equality holds. Prerequisites (section 7.2): DD, A4, A5, C6, R1.2. Artifact schema is fixed in section 5.3. The focused command targets a future test file and is unverifiable-at-base; affected command is repo-verified; 'pnpm test:scripts' additionally covers scripts/*.test.mjs once they exist."
+  },
+  {
+    "task_id": "D3",
+    "title": "Independent residual/final-artifact verifier",
+    "risk": "medium",
+    "invariant": "D3 independently verifies both the residual-model form (ResidualModelV1) and the final-artifact form (RankingPolicyV3Artifact) without cross-form leakage and without accepting unreproducible bytes; each form is reproduced and checked independently (section 7.6 RED: verifies_residual_and_final_forms_independently). D3 is the independent check backing D7's zero-residual and final-sequence contracts.",
+    "owners": [
+      "scripts/verify-ranking-policy-artifact.mjs",
+      "scripts/verify-ranking-policy-artifact.test.mjs"
+    ],
+    "production_callers": [
+      "E4 (verify step: node scripts/verify-ranking-policy-artifact.mjs --artifact \"$TASK_OUTPUT/RANKING_POLICY_V3.json\" --activation-contract-index \"$ACTIVATION_CONTRACT_INDEX\")",
+      "G6B (offline qualification toolchain depends on D3 for artifact verification)",
+      "D_GATE (gate prerequisite row: D3)"
+    ],
+    "test_callers": [
+      "scripts/verify-ranking-policy-artifact.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/verify-ranking-policy-artifact.mjs",
+      "scripts/verify-ranking-policy-artifact.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/verify-ranking-policy-artifact.mjs: independent verifier for residual-model and final-artifact forms (--artifact, --activation-contract-index)"
+    ],
+    "security_boundaries": [
+      "Form separation: residual verification must not be satisfiable by final-artifact bytes or vice versa",
+      "Reproducibility: verification rejects unreproducible bytes; canonical byte-level reproduction required",
+      "E4's final artifact must agree with the activation-contract index digest"
+    ],
+    "overlap_with": [
+      "FT-A1 (prerequisite A5 artifact parsers/canonicalizers)",
+      "FT-E (E4 verifies the built artifact through D3)",
+      "FT-D siblings D2/D8 (forms that D3 verifies)",
+      "FT-G1 (prerequisite R1.4 activation contract)"
+    ],
+    "focused_command": "node --test scripts/verify-ranking-policy-artifact.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D3: owns scripts/verify-ranking-policy-artifact.mjs; exact command 'node --test scripts/verify-ranking-policy-artifact.test.mjs'. Section 7.6 RED: test 'verifies_residual_and_final_forms_independently' - expected failure before implementation: verifier accepts cross-form or unreproducible bytes; minimal passing behavior: each form is independently reproduced and checked. Prerequisites (section 7.2): DD, A5, D2, R1.4. Section 5.3: D3 independently verifies both residual-model and final-artifact forms. The focused command targets a future test file and is unverifiable-at-base; affected command is repo-verified; 'pnpm test:scripts' additionally covers scripts/*.test.mjs once they exist."
+  },
+  {
+    "task_id": "D4",
+    "title": "Synthetic shortcut-policy counterfactuals",
+    "risk": "medium",
+    "invariant": "Protected-control counterfactual evaluation: a known synthetic shortcut policy must fail the counterfactual check while legitimate policies pass (section 7.6 RED: synthetic_shortcut_policy_fails). This prevents macro-only optimization, repository-local shortcuts, and unsealed feature shortcuts (normative invariants 15 and 16).",
+    "owners": [
+      "scripts/ranking-counterfactuals.mjs",
+      "scripts/ranking-counterfactuals.test.mjs"
+    ],
+    "production_callers": [
+      "E2.<familyId> (counterfactual guard precedes descriptor scoring; E2 prerequisite D4)",
+      "H7 (later Wave H: counterfactual receipt per qualification cycle)",
+      "D_GATE (gate prerequisite row: D4)"
+    ],
+    "test_callers": [
+      "scripts/ranking-counterfactuals.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/ranking-counterfactuals.mjs",
+      "scripts/ranking-counterfactuals.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/ranking-counterfactuals.mjs: protected-control counterfactual checker"
+    ],
+    "security_boundaries": [
+      "Known shortcut policies (e.g., pure macro/owner-frequency shortcuts) must be rejected",
+      "No repository-name/task-ID/absolute-path/user-identity/owner-family-identity-hash features may act as scoring shortcuts (invariant 15)",
+      "No environment-variable learning, no macro-only optimization (invariant 16)"
+    ],
+    "overlap_with": [
+      "FT-C (prerequisite C6)",
+      "FT-G (H7 executes D4 counterfactual receipts)",
+      "FT-E (E2 requires D4)",
+      "FT-D sibling D2 (counterfactuals run over residual models)"
+    ],
+    "focused_command": "node --test scripts/ranking-counterfactuals.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D4: owns scripts/ranking-counterfactuals.mjs; exact command 'node --test scripts/ranking-counterfactuals.test.mjs'. Section 7.6 RED: test 'synthetic_shortcut_policy_fails' - expected failure before implementation: known shortcut policy passes; minimal passing behavior: protected-control counterfactual rejects it. Prerequisites (section 7.2): DD, C6, D2, R1.3. The focused command targets a future test file and is unverifiable-at-base; affected command is repo-verified; 'pnpm test:scripts' additionally covers scripts/*.test.mjs once they exist."
+  },
+  {
+    "task_id": "D5",
+    "title": "Sealed resource contract and verifier",
+    "risk": "medium",
+    "invariant": "D5 seals the resource contract (evals/search-ranking/ranking-v3-resource-contract.json) and the resource-corpus manifest (RESOURCE_CORPUS_MANIFEST.json): all workload, threshold, and environment inputs must match sealed digests; any modified resource input is rejected (section 7.6 RED: rejects_unsealed_workload_threshold_or_environment).",
+    "owners": [
+      "scripts/verify-ranking-v3-resource-contract.mjs",
+      "scripts/verify-ranking-v3-resource-contract.test.mjs",
+      "evals/search-ranking/ranking-v3-resource-contract.json"
+    ],
+    "production_callers": [
+      "H8 (later Wave H: resource receipt per qualification cycle)",
+      "G6A (resource harness measures the actual loaded policy path against the contract)",
+      "D_GATE (gate prerequisite row: D5)"
+    ],
+    "test_callers": [
+      "scripts/verify-ranking-v3-resource-contract.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/verify-ranking-v3-resource-contract.mjs",
+      "scripts/verify-ranking-v3-resource-contract.test.mjs",
+      "evals/search-ranking/ranking-v3-resource-contract.json"
+    ],
+    "interface_changes": [
+      "scripts/verify-ranking-v3-resource-contract.mjs (--contract / --corpus interface)",
+      "evals/search-ranking/ranking-v3-resource-contract.json (sealed workload/threshold/environment contract)"
+    ],
+    "security_boundaries": [
+      "Unsealed workload, threshold, or environment input must be rejected",
+      "Corpus binding: resource corpus manifest must bind the tuning corpus without held-out leakage",
+      "All corpus and threshold digests must match the sealed contract exactly"
+    ],
+    "overlap_with": [
+      "FT-A1 (prerequisites A4/A5)",
+      "FT-G (H8 and G6A consume D5)",
+      "FT-G1 (prerequisite R1.4 activation contract)"
+    ],
+    "focused_command": "node --test scripts/verify-ranking-v3-resource-contract.test.mjs && node scripts/verify-ranking-v3-resource-contract.mjs --contract evals/search-ranking/ranking-v3-resource-contract.json --corpus \"$TASK_OUTPUT/RESOURCE_CORPUS_MANIFEST.json\"",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D5: resource contract/corpus plus scripts/verify-ranking-v3-resource-contract.mjs + test; exact command combines the unit test with an execution step whose --corpus argument is substituted with $TASK_OUTPUT/RESOURCE_CORPUS_MANIFEST.json at execution-card time. Section 7.6 RED: test 'rejects_unsealed_workload_threshold_or_environment' - expected failure before implementation: modified resource input verifies; minimal passing behavior: all corpus and threshold digests must match. Prerequisites (section 7.2): DD, A4, A5, R1.4. The focused command targets future files and is unverifiable-at-base (the execution half requires the $TASK_OUTPUT substitution authority); affected command is repo-verified; 'pnpm test:scripts' additionally covers scripts/*.test.mjs once they exist."
+  },
+  {
+    "task_id": "D6",
+    "title": "LOFO executables (runner, fold scorer, adjudicator)",
+    "risk": "medium",
+    "invariant": "D6 owns the LOFO execution toolchain: run-ranking-lofo.mjs (fold train/score job manifests), score-ranking-fold.mjs (fold scoring), and adjudicate-ranking-lofo.mjs (E3_INPUT_SEAL sealing and E3 decision). The input seal is the terminal barrier: when a required grouped comparator is unavailable it records 'groupedComparator: unavailable_required' and E3 alone emits exactly one E3InsufficientEvidenceReceiptV1 (section 7.6 RED: required_comparator_unavailable_is_sealed_then_decided_only_by_e3). D6 owns exact-key parsers and canonicalizers for all E3OutcomeReceiptV1 variants (section 5.3).",
+    "owners": [
+      "scripts/run-ranking-lofo.mjs",
+      "scripts/score-ranking-fold.mjs",
+      "scripts/adjudicate-ranking-lofo.mjs",
+      "scripts/run-ranking-lofo.test.mjs",
+      "scripts/score-ranking-fold.test.mjs",
+      "scripts/adjudicate-ranking-lofo.test.mjs"
+    ],
+    "production_callers": [
+      "E1.<familyId> (LOFO train descriptor $FOLD_TRAIN_JOB)",
+      "E2.<familyId> (score descriptor: node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\")",
+      "E3_INPUT_SEAL (seal-inputs: node scripts/adjudicate-ranking-lofo.mjs seal-inputs --job \"$E3_INPUT_JOB\" --out \"$TASK_OUTPUT/E3_INPUT_SEAL.json\")",
+      "E3 (decide: node scripts/adjudicate-ranking-lofo.mjs decide --job \"$E3_DECISION_JOB\" --input-seal \"$E3_INPUT_SEAL\" --out \"$TASK_OUTPUT\")",
+      "E4 ($REFIT_JOB all-tuning refit descriptor)",
+      "D_GATE (gate prerequisite row: D6)"
+    ],
+    "test_callers": [
+      "scripts/run-ranking-lofo.test.mjs (future; section 7.6 RED row)",
+      "scripts/score-ranking-fold.test.mjs (future; section 7.6 RED row)",
+      "scripts/adjudicate-ranking-lofo.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/run-ranking-lofo.mjs",
+      "scripts/score-ranking-fold.mjs",
+      "scripts/adjudicate-ranking-lofo.mjs",
+      "scripts/run-ranking-lofo.test.mjs",
+      "scripts/score-ranking-fold.test.mjs",
+      "scripts/adjudicate-ranking-lofo.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/run-ranking-lofo.mjs (LOFO_JOB_MANIFEST.json train descriptor)",
+      "scripts/score-ranking-fold.mjs (score descriptor)",
+      "scripts/adjudicate-ranking-lofo.mjs (seal-inputs/decide entrypoints and E3OutcomeReceiptV1 parsers/canonicalizers)"
+    ],
+    "security_boundaries": [
+      "Input-seal barrier is terminal: after E3_INPUT_SEAL, no new E2 receipts or comparator-status changes may alter the decision",
+      "E3 alone emits exactly one outcome receipt (one of selected_disabled / selected_provider_derived / insufficient_evidence / learned_not_justified)",
+      "unavailable_required must produce exactly one E3InsufficientEvidenceReceiptV1",
+      "Fold family atomicity: related repository families never cross a fold boundary (A9)",
+      "E3_INPUT_SEAL lists every E2 receipt digest; missing prerequisite digests are rejected"
+    ],
+    "overlap_with": [
+      "FT-A1 (prerequisites A9 fold builder, A10 metric primitives)",
+      "FT-C (prerequisite C6)",
+      "FT-E (E1/E2/E3_INPUT_SEAL/E3/E4 all execute D6 entrypoints)",
+      "FT-D sibling D1 (comparator receipt digest consumed at the seal barrier)",
+      "FT-D sibling D2/D3 (train and verify entrypoints invoked by E1/E4)"
+    ],
+    "focused_command": "node --test scripts/run-ranking-lofo.test.mjs scripts/score-ranking-fold.test.mjs scripts/adjudicate-ranking-lofo.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D6: owns scripts/run-ranking-lofo.mjs, scripts/score-ranking-fold.mjs, scripts/adjudicate-ranking-lofo.mjs + tests; exact command 'node --test scripts/run-ranking-lofo.test.mjs scripts/score-ranking-fold.test.mjs scripts/adjudicate-ranking-lofo.test.mjs'. Section 7.6 RED: test 'required_comparator_unavailable_is_sealed_then_decided_only_by_e3' - expected failure before implementation: input seal emits a terminal receipt or E3 proceeds as selected; minimal passing behavior: input seal records 'unavailable_required'; E3 alone emits one E3InsufficientEvidenceReceiptV1. Prerequisites (section 7.2): DD, A9, D2, D3, C6, R1.3. Sections 5.3/6.5/6.6 fix the receipt schemas and selection semantics. The focused command targets future test files and is unverifiable-at-base; affected command is repo-verified; 'pnpm test:scripts' additionally covers scripts/*.test.mjs once they exist."
+  },
+  {
+    "task_id": "D7",
+    "title": "Shared ranking-policy application library (ranking-policy-v3, neural evidence, gate, permutation)",
+    "risk": "high",
+    "invariant": "D7 (packages/mcp/src/core/ranking-policy-v3.ts, neural-ranking-evidence.ts, neural-ranking-gate.ts, provider-slot-permutation.ts) is the ONLY implementation of residual scoring, neural evidence normalization, pure gate evaluation, admitted-slot permutation, and final sequence construction - no eval/runtime duplicate is permitted; E2, G1/G2, and G6B import it unchanged, and H3/H4 execute it through G6B's sealed replay entrypoints. Zero-residual equals preRerankBaselineScore (the deterministic score from computeSearchCandidateFinalScore, packages/mcp/src/core/search-ranking-policy.ts:392); D3 independently verifies both residual-model and final-artifact forms. applyProviderSlotPermutation emits a complete permutation of baselineAdmissionIds only with contiguous one-based postPolicyRank 1..N; duplicates, omissions, foreign IDs, and rank gaps are rejected; the provider-derived permutation is final and no downstream score-sort can undo it. The neural gate is pure: disabled mode returns 'mode_disabled' without reading provider evidence; skip/fallback reasons are exact (section 4.5).",
+    "owners": [
+      "packages/mcp/src/core/ranking-policy-v3.ts",
+      "packages/mcp/src/core/neural-ranking-evidence.ts",
+      "packages/mcp/src/core/neural-ranking-gate.ts",
+      "packages/mcp/src/core/provider-slot-permutation.ts",
+      "packages/mcp/src/core/ranking-policy-v3.test.ts",
+      "packages/mcp/src/core/neural-ranking-evidence.test.ts",
+      "packages/mcp/src/core/neural-ranking-gate.test.ts",
+      "packages/mcp/src/core/provider-slot-permutation.test.ts"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-ranking-policy.ts:392 computeSearchCandidateFinalScore (preRerankBaselineScore anchor)",
+      "packages/mcp/src/core/search-execution.ts:649-650 (rerank RRF blend 1/(SEARCH_RERANK_RRF_K+rank) * SEARCH_RERANK_WEIGHT - baseline-mode compatibility bucket only)",
+      "packages/mcp/src/core/search-constants.ts:1 SEARCH_RRF_K=60, :21 SEARCH_RERANK_RRF_K=10, :22 SEARCH_RERANK_WEIGHT=1.0",
+      "packages/core/src/core/vector-candidate-fusion.ts:12 VECTOR_CANDIDATE_RRF_K_V1=100",
+      "packages/mcp/src/core/search-policy.ts:11 SEARCH_MIN_CANDIDATES=32, :12 SEARCH_CANDIDATE_MULTIPLIER=8, clamp :67",
+      "packages/mcp/src/core/search-query-planning.ts:649-657 lexical weights (quoted 1.35, identifier 1.35, mixed 0.10/0.30, uncertain 0.60, semantic 0.00/0.18)",
+      "packages/mcp/src/core/search-result-set-identity.ts:37/:51/:136/:156 rankingPolicyIdentity binding"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-ranking-policy.test.ts (existing; must remain passing)",
+      "packages/mcp/src/core/search-query-planning.test.ts (existing; must remain passing)",
+      "packages/mcp/src/core/search-policy.test.ts (existing; must remain passing)",
+      "packages/mcp/src/core/ranking-policy-v3.test.ts (future; section 7.6 RED row)",
+      "packages/mcp/src/core/neural-ranking-evidence.test.ts (future)",
+      "packages/mcp/src/core/neural-ranking-gate.test.ts (future)",
+      "packages/mcp/src/core/provider-slot-permutation.test.ts (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-v3.ts",
+      "packages/mcp/src/core/neural-ranking-evidence.ts",
+      "packages/mcp/src/core/neural-ranking-gate.ts",
+      "packages/mcp/src/core/provider-slot-permutation.ts",
+      "packages/mcp/src/core/ranking-policy-v3.test.ts",
+      "packages/mcp/src/core/neural-ranking-evidence.test.ts",
+      "packages/mcp/src/core/neural-ranking-gate.test.ts",
+      "packages/mcp/src/core/provider-slot-permutation.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-v3.ts: scoreDeterministicV3(DeterministicV3ScoreInput): DeterministicV3ScoreResult; DeterministicV3ScoreInput { preRerankBaselineScore, normalizedFeatures, weights, maximumResidual }",
+      "packages/mcp/src/core/neural-ranking-evidence.ts: buildNeuralRankingEvidence(ValidatedRerankResponseV1): readonly NeuralRankingEvidenceV1[]; NeuralRankingEvidenceV1 { candidateId, providerKey, rank, rawScore, withinQueryPercentile, candidateToTopMargin, topToSecondMargin }",
+      "packages/mcp/src/core/neural-ranking-gate.ts: evaluateNeuralGate(NeuralGateInput): NeuralGateDecision; NeuralGateDecision { apply | skip(mode_disabled|exact_control|insufficient_margin|insufficient_candidates) | fallback_deterministic(provider_mismatch|invalid_response|identity_mismatch|non_finite_score) }",
+      "packages/mcp/src/core/provider-slot-permutation.ts: applyProviderSlotPermutation(ProviderSlotPermutationInput { deterministicOrder, baselineAdmissionIds, providerOrder }): RankedCandidateV3[]; RankedCandidateV3 carries contiguous one-based postPolicyRank",
+      "Exported type surface: RankedCandidateV3, postPolicyRank, NeuralGateDecision, NeuralRankingEvidenceV1 (section 4.4)"
+    ],
+    "security_boundaries": [
+      "Permutation finality: complete permutation of baselineAdmissionIds only; duplicates, omissions, foreign IDs, and rank gaps are rejected",
+      "postPolicyRank is contiguous 1..N; downstream components must not re-sort by score (G2 RED: provider_failure_preserves_deterministic_sequence_and_no_resort_occurs)",
+      "Pure gate: mode_disabled returns without reading provider evidence; provider_mismatch/invalid_response/identity_mismatch/non_finite_score -> fallback_deterministic; exact_control/insufficient_margin/insufficient_candidates -> skip",
+      "No eval/runtime duplicate of residual scoring, evidence normalization, gate evaluation, permutation, or final sequence construction",
+      "B9 raw provider evidence is an E2 input, not a D7 build dependency; D7 tests use synthetic exact-contract fixtures",
+      "D7 must not modify any existing file; it is the exclusive owner of its four source files"
+    ],
+    "overlap_with": [
+      "FT-A1 (D7 depends on A3 rerank-evidence parsing, A4 feature extraction, A5 artifact parsers, A12 provider-request construction)",
+      "FT-G1 (D7 depends on R1.0 qualification target, R1.1 feature contract, R1.2 training/request contract, R1.4 activation contract)",
+      "FT-G (G1/G2 import D7 unchanged; G6B/G6A execute D7 via sealed entrypoints)",
+      "FT-E (E2 scores D7 descriptors; E2 prerequisite D7)",
+      "FT-D siblings (D3 verifies forms; D4 counterfactuals; D8 builds the artifact D7 consumes at runtime)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-v3.test.ts packages/mcp/src/core/neural-ranking-evidence.test.ts packages/mcp/src/core/neural-ranking-gate.test.ts packages/mcp/src/core/provider-slot-permutation.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D7: four source files in section 4.4 plus matching exact-file tests; exact focused command 'node --import tsx --test packages/mcp/src/core/ranking-policy-v3.test.ts packages/mcp/src/core/neural-ranking-evidence.test.ts packages/mcp/src/core/neural-ranking-gate.test.ts packages/mcp/src/core/provider-slot-permutation.test.ts'. Section 7.6 RED: provider-slot-permutation.test.ts 'provider_permutation_is_final_complete_and_rank_contiguous' - expected failure before implementation: incomplete permutation or later score sort is accepted; minimal passing behavior: complete admitted permutation and contiguous final ranks. Dependencies (section 7.2 exact table): DD, A3, A4, A5, A12, R1.0, R1.1, R1.2, R1.4. Tests use synthetic exact-contract fixtures; B9 raw evidence is an E2 input, not a D7 build dependency. Interfaces and purity constraints are fixed in sections 4.4 and 4.5. The focused command targets future test files and is unverifiable-at-base (none of the four test files exist at round_base); the affected command is repo-verified (packages/mcp/package.json test script glob src/core/**/*.test.ts will collect the future D7 tests once they exist). Existing test files search-ranking-policy.test.ts, search-query-planning.test.ts, and search-policy.test.ts must remain passing unchanged."
+  },
+  {
+    "task_id": "D8",
+    "title": "Final RankingPolicyV3Artifact builder",
+    "risk": "medium",
+    "invariant": "D8 builds only the E3-selected mode into the final RankingPolicyV3Artifact from the refit residual model and sealed authorities; unselected provider behavior is never retained and provenance fields are always bound (section 7.6 RED: builds_only_selected_mode_from_refit_and_sealed_authorities). The builder is reproducible: identical inputs produce exact artifact bytes via the fixed interface (section 7.5).",
+    "owners": [
+      "scripts/build-ranking-policy-v3-artifact.mjs",
+      "scripts/build-ranking-policy-v3-artifact.test.mjs"
+    ],
+    "production_callers": [
+      "E4 (build step: node scripts/build-ranking-policy-v3-artifact.mjs build --residual-model \"$TASK_OUTPUT/refit/RESIDUAL_MODEL.json\" --selection-receipt \"$E3_SELECTION_RECEIPT\" --qualification-target \"$QUALIFICATION_TARGET\" --feature-contract-index \"$FEATURE_CONTRACT_INDEX\" --training-manifest \"$TRAINING_MANIFEST\" --contract-seal \"$CONTRACT_SEAL\" --out \"$TASK_OUTPUT/RANKING_POLICY_V3.json\")",
+      "D_GATE (gate prerequisite row: D8)"
+    ],
+    "test_callers": [
+      "scripts/build-ranking-policy-v3-artifact.test.mjs (future; section 7.6 RED row)"
+    ],
+    "approved_files": [
+      "scripts/build-ranking-policy-v3-artifact.mjs",
+      "scripts/build-ranking-policy-v3-artifact.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/build-ranking-policy-v3-artifact.mjs: exports buildRankingPolicyV3Artifact(input: { residualModel: ResidualModelV1; selectedModeReceipt: E3SelectionReceiptV1; qualificationTarget: QualificationTargetV1; featureContractSha256: string; runtimeScoringContractId: string; retrievalContractId: string; trainingManifestSha256: string; trainingCodeSha256: string; trainingContractSha256: string }): RankingPolicyV3Artifact"
+    ],
+    "security_boundaries": [
+      "Only the E3-selected mode is serialized; disabled mode contains no provider fields even when it binds a fixed provider-target digest for provenance",
+      "Provider-derived mode must exactly match the sealed target's provider/projection/configuration plus the separately sealed R1.2 request-contract digest",
+      "The artifact contains no self-hash and no quality receipt; runtime SHA-256 is computed over canonical bytes",
+      "Provenance fields must bind sealed authorities (feature contract, training manifest, training code, training contract digests)"
+    ],
+    "overlap_with": [
+      "FT-A1 (prerequisite A5 parsers/canonicalizers for all three artifact forms)",
+      "FT-G1 (prerequisites R1.0, R1.1, R1.2, R1.4)",
+      "FT-E (E4 builds through D8 and verifies through D3)",
+      "FT-D siblings D2/D3 (residual model input; independent verification)"
+    ],
+    "focused_command": "node --test scripts/build-ranking-policy-v3-artifact.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Section 7.5 row D8: owns scripts/build-ranking-policy-v3-artifact.mjs + test; exports buildRankingPolicyV3Artifact with the exact interface reproduced in the catalog; exact command 'node --test scripts/build-ranking-policy-v3-artifact.test.mjs'. Section 7.6 RED: test 'builds_only_selected_mode_from_refit_and_sealed_authorities' - expected failure before implementation: builder retains unselected provider behavior or omits provenance; minimal passing behavior: exact selected artifact bytes are produced. Prerequisites (section 7.2): DD, A5, D2, D3, R1.0, R1.1, R1.2, R1.4. Artifact schema fixed in section 5.3. The focused command targets a future test file and is unverifiable-at-base; affected command is repo-verified; 'pnpm test:scripts' additionally covers scripts/*.test.mjs once they exist."
+  }
+]

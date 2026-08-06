@@ -1,0 +1,499 @@
+[
+  {
+    "task_id": "H0",
+    "title": "H0: Trusted registry root readiness via RegistryReadyReceiptV1 (G6C registry-ready)",
+    "risk": "high",
+    "invariant": "H0 runs first on G7-sealed F9/G6C tooling driven by PreHeldoutCycleManifestV1 and validates the trusted registry root: it creates the canonical genesis snapshot ONLY when the root is empty (expectedRootState 'empty' via F9 initializeQualificationRegistry), otherwise it verifies the existing current snapshot; it emits exactly one RegistryReadyReceiptV1 binding trustedRootIdentitySha256, currentRegistrySha256, optional initializationReceiptSha256 (present only when genesis was created), and platformCapabilityDecisionSha256.",
+    "owners": ["H0"],
+    "production_callers": [
+      "scripts/ranking-v3-heldout-activation.mjs (G6C registry-ready entrypoint; future, plan-specified)",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9 initializeQualificationRegistry; future, plan-specified)",
+      "scripts/verify-ranking-v3-implementation-seal.mjs (G7 seal covers H0 entrypoint; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-heldout-activation.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-registry-cycle.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-heldout-adjudication.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-heldout-activation.mjs",
+      "scripts/ranking-v3-registry-cycle.mjs",
+      "scripts/ranking-v3-heldout-activation.test.mjs",
+      "scripts/ranking-v3-registry-cycle.test.mjs"
+    ],
+    "interface_changes": [
+      "RegistryReadyReceiptV1 extends PostG7ReceiptBaseV1 {trustedRootIdentitySha256, currentRegistrySha256, initializationReceiptSha256?, platformCapabilityDecisionSha256}; receiptType 'registry_ready'; plan §5.5"
+    ],
+    "security_boundaries": [
+      "Trusted-root validation: canonical genesis ONLY in an empty trusted root; non-empty root verifies the existing current snapshot (plan §6.7, §5.4)",
+      "Same-UID trust boundary accepted: file ownership and mode bits are the authority for receipts and registry state (plan §3.17)",
+      "Held-out closure: H0 precedes and gates held-out opening; no held-out queries/captures/outputs during qualification"
+    ],
+    "overlap_with": [
+      "FT-F (F9 initializeQualificationRegistry + G6C registry-cycle)",
+      "FT-G (G6C sealed entrypoints)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-heldout-activation.test.mjs scripts/ranking-v3-registry-cycle.test.mjs scripts/ranking-v3-heldout-adjudication.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-heldout-activation.mjs registry-ready --pre-heldout-cycle \"$PRE_HELDOUT_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Unmet precondition (plan §7.6 H0/H10 row): required pre-held-out command-input descriptor is absent -> abort before writing a receipt. Validating assertion: output receipt parses and binds the pre-held-out manifest, artifact, seals, registry authority, and predecessor authorities. Encoding requirements: genesis snapshot written ONLY when the trusted root is empty (canonical genesis {\"schemaVersion\":\"ranking_policy_qualification_registry_v1\",\"entries\":[]}); otherwise verify the existing current snapshot; PreHeldoutCycleManifestV1.expectedPendingRegistrySha256 stays null (no future H10 digest at DH time, plan §5.6). First-RED tooling test (future): scripts/ranking-v3-heldout-activation.test.mjs -- activation_cycle_binds_h10_pending_digest_and_terminal_chain (G6C card; expected failure before implementation: Wave I accepts a null/pre-H10 manifest, wrong H10 receipt, or unrelated I3 digest). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H1",
+    "title": "H1: Baseline replay receipt (G6B baseline) with productEnvelopeSha256 full identity",
+    "risk": "medium",
+    "invariant": "H1 replays the baseline envelope on G7-sealed G6B tooling from QualificationCycleManifestV1 and emits exactly one BaselineReplayReceiptV1 binding replayManifestSha256, replayResultsSha256, and productEnvelopeSha256 (full envelope identity); held-out closure holds: no held-out queries, captures, or outputs during qualification and sealed manifest digests are read-only.",
+    "owners": ["H1"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B baseline entrypoint; future, plan-specified)",
+      "scripts/satori-search-candidate-replay.mjs (existing replay substrate, verified at base: computeSearchCandidateFinalScore :908/:1827; --held-out-opening :2386; held-out/mixed-split replay requires --held-out-opening :2405)",
+      "packages/mcp/src/core/search-execution.ts (existing replay-envelope parity anchor, verified at base: rerankResults :566, finalScore :651/:1229)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (existing held-out denial boundary, verified at base: leakage.tuningOnly* plus 6 tuning/6 held_out repositories, 51 held-out tasks)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-replay.mjs",
+      "scripts/ranking-v3-offline-qualification.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "BaselineReplayReceiptV1 extends ArtifactReceiptBaseV1 {replayManifestSha256, replayResultsSha256, productEnvelopeSha256}; receiptType 'baseline_replay'; productEnvelopeSha256 is the full envelope identity; plan §5.5"
+    ],
+    "security_boundaries": [
+      "Held-out closure: no held-out queries/captures/outputs during qualification; sealed manifest digests read-only (plan §6.2, §6.7)"
+    ],
+    "overlap_with": [
+      "FT-G (every H card executes G6B/G6C sealed entrypoints)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs baseline --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: baseline replay must reuse the existing replay substrate semantics (computeSearchCandidateFinalScore :908/:1827) without altering the frozen envelope; productEnvelopeSha256 must equal the full byte identity of the product envelope. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card; expected failure before implementation: two normative receipts or missing H0 binding is accepted). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H2",
+    "title": "H2: Diagnostic grouped comparator receipt (G6B grouped) — never blocks",
+    "risk": "low",
+    "invariant": "H2 emits the diagnostic grouped receipt and NEVER blocks qualification: it records groupedComparator availability (available | unavailable | not_required) per the R1.3/D1 policy; for provider_derived artifacts it behaves as a diagnostic ablation that never gates; no normative receipt exclusivity applies to H2.",
+    "owners": ["H2"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B grouped entrypoint; future, plan-specified)",
+      "packages/mcp/src/core/search-execution.ts (existing replay-envelope parity anchor, verified at base: finalScore :651/:1229)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (existing held-out denial boundary, verified at base)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-replay.mjs",
+      "scripts/ranking-v3-offline-qualification.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "Diagnostic grouped receipt carrying groupedComparator: available | unavailable | not_required per R1.3 policy; consumed by H9's groupedComparator field; never a blocking gate (plan §6.7)"
+    ],
+    "security_boundaries": [
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints)",
+      "FT-D (D1 grouped comparator availability feeds groupedComparator)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs grouped --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: H2 is diagnostic-only and never blocks qualification; the H3 ablation for provider_derived artifacts also never blocks (plan §6.7). First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H3",
+    "title": "H3: Disabled selected-mode replay receipt (G6B selected --expected-mode disabled)",
+    "risk": "medium",
+    "invariant": "H3 is the SOLE normative selected-mode replay receipt when E4 neuralReorderPolicy.mode == disabled; exactly one normative SelectedModeReplayReceiptV1 exists per qualification cycle (H3 for disabled, H4 for provider_derived); for provider_derived artifacts H3 may run only as a deterministic ablation that NEVER blocks qualification; qualifiedRerankers in the receipt are mode-consistent (disabled -> empty).",
+    "owners": ["H3"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B selected entrypoint; future, plan-specified)",
+      "scripts/satori-search-candidate-replay.mjs (existing replay substrate, verified at base: --require-neural-disabled :2390; computeSearchCandidateFinalScore :908/:1827)",
+      "packages/mcp/src/core/search-execution.ts (existing replay-envelope parity anchor, verified at base: finalScore :651/:1229)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-replay.mjs",
+      "scripts/ranking-v3-offline-qualification.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "SelectedModeReplayReceiptV1 extends ArtifactReceiptBaseV1 {mode: 'disabled', replayManifestSha256, replayResultsSha256, derivedNeuralEvidenceSha256: string | null}; receiptType 'selected_mode_replay'; exactly one normative receipt per qualification cycle (plan §5.5, §6.7)"
+    ],
+    "security_boundaries": [
+      "Mode-consistent qualifiedRerankers: disabled mode -> empty qualifiedRerankers with canonical identity reranker_disabled_v1, never inheriting a configured provider identity (plan §5.7, §8.8)",
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints)",
+      "FT-E (E4 mode selection contract_condition)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs selected --expected-mode disabled --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Dispatch edge (plan §7.2): contract_condition on E4 neuralReorderPolicy.mode == 'disabled'; for provider_derived the H3 card is inactive (absent, not a failed dependency). Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: for disabled E4, H3 emits the ONE normative selected-mode receipt; for provider_derived, H3 is a deterministic diagnostic ablation that never blocks; qualifiedRerankers must be empty for disabled mode. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card; expected failure before implementation: two normative receipts or missing H0 binding is accepted). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H4",
+    "title": "H4: Provider-derived selected-mode replay receipt (G6B selected --expected-mode provider_derived; A12-bound)",
+    "risk": "medium",
+    "invariant": "H4 is the SOLE normative selected-mode replay receipt when E4 neuralReorderPolicy.mode == provider_derived; it does NOT run for disabled artifacts because no provider policy exists; exactly one normative SelectedModeReplayReceiptV1 exists per qualification cycle; the A12 provider request contract is bound and qualifiedRerankers contains exactly one reranker matching the sealed target.",
+    "owners": ["H4"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B selected entrypoint; future, plan-specified)",
+      "packages/mcp/src/core/ranking-provider-request-v1.ts (A12 provider request contract; future, plan-specified)",
+      "scripts/satori-search-candidate-replay.mjs (existing replay substrate, verified at base: --held-out-opening :2386; computeSearchCandidateFinalScore :908/:1827)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-replay.mjs",
+      "scripts/ranking-v3-offline-qualification.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "SelectedModeReplayReceiptV1 extends ArtifactReceiptBaseV1 {mode: 'provider_derived', replayManifestSha256, replayResultsSha256, derivedNeuralEvidenceSha256}; receiptType 'selected_mode_replay'; one normative receipt per cycle; binds A12 provider request contract (plan §5.5, §6.7)"
+    ],
+    "security_boundaries": [
+      "Mode-consistent qualifiedRerankers: provider_derived -> exactly one qualified reranker matching the sealed target identity (plan §6.7)",
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints)",
+      "FT-A (A12 provider request contract)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs selected --expected-mode provider_derived --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Dispatch edge (plan §7.2): contract_condition on E4 neuralReorderPolicy.mode == 'provider_derived'; H4 is absent (not failed) for disabled artifacts. Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: for provider_derived E4, H4 emits the ONE normative selected-mode receipt; the H3 ablation (if run) never blocks; qualifiedRerankers contains exactly one reranker matching the sealed target; A12 request contract digest must be bound. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card; expected failure before implementation: two normative receipts or missing H0 binding is accepted). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H6",
+    "title": "H6: Slice gate receipt (G6B slices) consuming only the selected-mode receipt",
+    "risk": "medium",
+    "invariant": "H6 consumes ONLY the selected-mode replay receipt (selectedModeReplayReceiptSha256) and emits SliceGateReceiptV1 with sliceResultSha256, passed, and failedSliceCodes; exactly one conditional predecessor (H3 for disabled, H4 for provider_derived) is active via contract_condition on selectedArtifactMode (plan §7.2); inactive conditional edges are absent, not failed hard dependencies.",
+    "owners": ["H6"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B slices entrypoint; future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.mjs (G6B module; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-gates.mjs",
+      "scripts/ranking-v3-offline-gates.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "SliceGateReceiptV1 extends ArtifactReceiptBaseV1 {selectedModeReplayReceiptSha256, sliceResultSha256, passed, failedSliceCodes}; receiptType 'slice_gate'; plan §5.5"
+    ],
+    "security_boundaries": [
+      "Mode-consistent qualifiedRerankers in receipts (disabled = empty; provider_derived = exactly one matching the sealed target)",
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints; G6B owns ranking-v3-offline-gates.mjs)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs slices --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Dispatch edges (plan §7.2): contract_condition on H3 selectedArtifactMode == 'disabled' OR on H4 selectedArtifactMode == 'provider_derived'; exactly one predecessor is active per E4 artifact mode. Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: selectedModeReplayReceiptSha256 must reference the ONE normative selected-mode receipt of the cycle; failedSliceCodes enumerates every failing slice. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H7",
+    "title": "H7: Counterfactual gate receipt (G6B counterfactual) consuming only the selected-mode receipt",
+    "risk": "medium",
+    "invariant": "H7 consumes ONLY the selected-mode replay receipt (selectedModeReplayReceiptSha256) and emits CounterfactualGateReceiptV1 with counterfactualResultSha256, passed, and failureCodes; exactly one conditional predecessor (H3 for disabled, H4 for provider_derived) is active via contract_condition on selectedArtifactMode (plan §7.2); D4 counterfactual authority is bound.",
+    "owners": ["H7"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B counterfactual entrypoint; future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.mjs (G6B module; future, plan-specified)",
+      "scripts/ranking-counterfactuals.mjs (D4 counterfactual authority; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-gates.mjs",
+      "scripts/ranking-v3-offline-gates.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "CounterfactualGateReceiptV1 extends ArtifactReceiptBaseV1 {selectedModeReplayReceiptSha256, counterfactualResultSha256, passed, failureCodes}; receiptType 'counterfactual_gate'; plan §5.5"
+    ],
+    "security_boundaries": [
+      "Mode-consistent qualifiedRerankers in receipts (disabled = empty; provider_derived = exactly one matching the sealed target)",
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints)",
+      "FT-D (D4 counterfactual execution)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs counterfactual --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Dispatch edges (plan §7.2): contract_condition on H3 selectedArtifactMode == 'disabled' OR on H4 selectedArtifactMode == 'provider_derived'; exactly one predecessor is active per E4 artifact mode. Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: selectedModeReplayReceiptSha256 must reference the ONE normative selected-mode receipt of the cycle; failureCodes enumerates every failing counterfactual check; D4 result digest is bound. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H8",
+    "title": "H8: Resource gate receipt (G6B resources) consuming only the selected-mode receipt",
+    "risk": "medium",
+    "invariant": "H8 consumes ONLY the selected-mode replay receipt (selectedModeReplayReceiptSha256) and emits ResourceGateReceiptV1 with resourceHarnessResultSha256, environmentIdentitySha256, passed, and failureCodes; exactly one conditional predecessor (H3 for disabled, H4 for provider_derived) is active via contract_condition on selectedArtifactMode (plan §7.2); G6A harness and D5 resource contract are bound.",
+    "owners": ["H8"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B resources entrypoint; future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.mjs (G6B module; future, plan-specified)",
+      "scripts/verify-ranking-v3-resource-contract.mjs (D5 resource contract; future, plan-specified)",
+      "evals/search-ranking/ranking-v3-resource-harness.test.mjs (G6A harness; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-gates.mjs",
+      "scripts/ranking-v3-offline-gates.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs"
+    ],
+    "interface_changes": [
+      "ResourceGateReceiptV1 extends ArtifactReceiptBaseV1 {selectedModeReplayReceiptSha256, resourceHarnessResultSha256, environmentIdentitySha256, passed, failureCodes}; receiptType 'resource_gate'; plan §5.5"
+    ],
+    "security_boundaries": [
+      "Mode-consistent qualifiedRerankers in receipts (disabled = empty; provider_derived = exactly one matching the sealed target)",
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints; G6A harness)",
+      "FT-D (D5 resource contract)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs resources --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Dispatch edges (plan §7.2): contract_condition on H3 selectedArtifactMode == 'disabled' OR on H4 selectedArtifactMode == 'provider_derived'; exactly one predecessor is active per E4 artifact mode. Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: selectedModeReplayReceiptSha256 must reference the ONE normative selected-mode receipt of the cycle; environmentIdentitySha256 binds the loaded runtime path and environment identity (G6A); failureCodes enumerates every failing resource check; D5 resource-contract digests are read-only. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H9",
+    "title": "H9: Offline qualification verdict (G6B verdict) — exactly one outcome binding H0",
+    "risk": "high",
+    "invariant": "H9 emits exactly ONE verdict for the exact E4 artifact in its selected mode: offline_qualified | rejected | insufficient_evidence; it binds H0's RegistryReadyReceiptV1 (registryReadyReceiptSha256) and the expected current registry digest (expectedRegistrySha256); qualifiedRerankers are mode-consistent (disabled = empty; provider_derived = exactly one matching the sealed target); groupedComparator is available | unavailable | not_required per the R1.3 policy; rejected/insufficient_evidence terminate without H10 and retain baseline.",
+    "owners": ["H9"],
+    "production_callers": [
+      "scripts/ranking-v3-offline-qualification.mjs (G6B verdict entrypoint; future, plan-specified)",
+      "scripts/ranking-v3-offline-verdict.mjs (G6B module; future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.mjs (G6B module; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-offline-qualification.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-cycle-manifest.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-offline-gates.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-offline-verdict.mjs",
+      "scripts/ranking-v3-offline-qualification.test.mjs",
+      "scripts/ranking-v3-cycle-manifest.test.mjs",
+      "scripts/ranking-v3-offline-gates.test.mjs"
+    ],
+    "interface_changes": [
+      "OfflineQualificationReceiptV1 {verdict: 'offline_qualified', registryReadyReceiptSha256, expectedRegistrySha256, groupedComparator, selectedModeReplayReceiptSha256, baselineReplayReceiptSha256, sliceGateReceiptSha256, counterfactualGateReceiptSha256, resourceGateReceiptSha256, tuningManifestSha256, corpusManifestSha256}",
+      "OfflineQualificationRejectionReceiptV1 {verdict: 'rejected', registryReadyReceiptSha256, expectedRegistrySha256, groupedComparator, selectedModeReplayReceiptSha256, failedGateReceiptSha256}",
+      "OfflineQualificationInsufficientEvidenceReceiptV1 {verdict: 'insufficient_evidence', registryReadyReceiptSha256, expectedRegistrySha256, groupedComparator, selectedModeReplayReceiptSha256: string | null, missingEvidenceCodes}; plan §5.5"
+    ],
+    "security_boundaries": [
+      "Cross-session registry state: H9's expectedRegistrySha256 becomes the CAS anchor for H10's create_pending_heldout transition",
+      "Mode-consistent qualifiedRerankers (disabled = empty; provider_derived = exactly one matching the sealed target)",
+      "Held-out closure: no held-out queries/captures/outputs during qualification (plan §6.2)"
+    ],
+    "overlap_with": [
+      "FT-G (G6B sealed entrypoints)",
+      "FT-D (D1 groupedComparator availability per R1.3)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-offline-qualification.mjs verdict --cycle \"$QUALIFICATION_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Unmet precondition (plan §7.6 H1-H9 row): required qualification-cycle command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the qualification cycle, artifact, seals, and predecessor authorities. Encoding: emit EXACTLY one verdict receipt; offline_qualified MUST bind H0's RegistryReadyReceiptV1 digest (registryReadyReceiptSha256) and expectedRegistrySha256 (the H10 CAS anchor); rejected -> OfflineQualificationRejectionReceiptV1 with failedGateReceiptSha256; insufficient_evidence -> OfflineQualificationInsufficientEvidenceReceiptV1 with missingEvidenceCodes (selectedModeReplayReceiptSha256 may be null); groupedComparator per R1.3; qualifiedRerankers mode-consistent. First-RED tooling test (future): scripts/ranking-v3-offline-qualification.test.mjs -- selected_mode_emits_one_receipt_and_h9_binds_registry_context (G6B card; expected failure before implementation: two normative receipts or missing H0 binding is accepted). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H10",
+    "title": "H10: Pending held-out registry transition (G6C pending; F9 create_pending_heldout)",
+    "risk": "high",
+    "invariant": "H10 runs ONLY when H9's verdict is offline_qualified (receipt_outcome edge on OfflineQualificationReceiptV1); it uses the H9-bound expected registry digest (CAS via F9 createPendingHeldoutVersion) to create the pending_heldout registry version; ANY intervening registry change aborts H10 and retains baseline; the emitted RegistryTransitionReceiptV1 has transitionKind 'create_pending_heldout', previousReceiptSha256 null, and trigger = the H9 offline-qualification receipt; DI later binds newRegistrySha256 as the Wave-I authority (ActivationCycleManifestV1.expectedPendingRegistrySha256).",
+    "owners": ["H10"],
+    "production_callers": [
+      "scripts/ranking-v3-heldout-activation.mjs (G6C pending entrypoint; future, plan-specified)",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9 createPendingHeldoutVersion; future, plan-specified)",
+      "scripts/ranking-v3-heldout-activation.mjs build-activation-cycle (DI consumes the H10 transition receipt; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-heldout-activation.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-registry-cycle.test.mjs (future, plan-specified)",
+      "scripts/ranking-v3-heldout-adjudication.test.mjs (future, plan-specified)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-heldout-activation.mjs",
+      "scripts/ranking-v3-registry-cycle.mjs",
+      "scripts/ranking-v3-heldout-activation.test.mjs",
+      "scripts/ranking-v3-registry-cycle.test.mjs"
+    ],
+    "interface_changes": [
+      "RegistryTransitionReceiptV1 {transitionKind: 'create_pending_heldout', previousRegistrySha256, newRegistrySha256, entryKey, entryBeforeSha256, entryAfterSha256, triggeringReceiptSha256 (= H9 receipt), previousReceiptSha256: null, previousTransitionReceiptSha256, transitionChainSha256}; plan §5.5",
+      "PreHeldoutCycleManifestV1.expectedPendingRegistrySha256 remains null (no future H10 digest at DH time; plan §5.6, §7.5); ActivationCycleManifestV1.expectedPendingRegistrySha256 = H10 newRegistrySha256 (Wave-I authority)"
+    ],
+    "security_boundaries": [
+      "Cross-session registry state: CAS against the H9-bound expected digest; any intervening registry change aborts H10 retaining baseline (plan §6.7, §9.2)",
+      "Append-only registry: versions/, receipts/, atomic 'current' pointer; genesis only in empty root; transitions replace exactly one logical entry (plan §5.4)",
+      "Same-UID trust boundary accepted for receipts and registry state (plan §3.17)"
+    ],
+    "overlap_with": [
+      "FT-F (F9 writer createPendingHeldoutVersion + G6C registry-cycle)",
+      "FT-I (newRegistrySha256 is the Wave-I authority via DI ActivationCycleManifestV1)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-heldout-activation.test.mjs scripts/ranking-v3-registry-cycle.test.mjs scripts/ranking-v3-heldout-adjudication.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute: node scripts/ranking-v3-heldout-activation.mjs pending --pre-heldout-cycle \"$PRE_HELDOUT_CYCLE\" --out \"$TASK_OUTPUT\" (plan §7.5 Waves H and I table). Dispatch edge (plan §7.2): receipt_outcome on H9 OfflineQualificationReceiptV1 verdict == 'offline_qualified'; rejected/insufficient_evidence never reach H10. Unmet precondition (plan §7.6 H0/H10 row): required pre-held-out command-input descriptor is absent -> abort. Validating assertion: output receipt parses and binds the pre-held-out manifest, artifact, seals, registry authority, and predecessor authorities. Encoding: expectedRegistrySha256 comes from H9; transitionKind exactly create_pending_heldout; previousReceiptSha256 null; triggeringReceiptSha256 = H9 receipt digest; any intervening registry change (CAS mismatch) aborts and retains baseline; DI (build-activation-cycle) must parse the H10 transition receipt, verify create_pending_heldout, and copy newRegistrySha256 into expectedPendingRegistrySha256 before any Wave-I card. First-RED tooling test (future): scripts/ranking-v3-heldout-activation.test.mjs -- activation_cycle_binds_h10_pending_digest_and_terminal_chain (G6C card; expected failure before implementation: Wave I accepts a null/pre-H10 manifest, wrong H10 receipt, or unrelated I3 digest). Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H_GATE_QUALIFIED",
+    "title": "H_GATE_QUALIFIED: Wave-H qualified gate (R1.T1 verify-ready; prerequisite H10)",
+    "risk": "medium",
+    "invariant": "H_GATE_QUALIFIED requires H10 (hard edge) and resolves the H9 receipt_outcome edge verdict == offline_qualified; it emits GateReceiptV1 with verdict 'ready' listing every resolved edge (hard | contract_condition | receipt_outcome); it is the ONLY Wave-H gate that dispatches DI; rejected/insufficient are terminal and never reach it; the verifier checks edge kind and parsed contract/receipt outcome and never infers a branch from filenames.",
+    "owners": ["H_GATE_QUALIFIED"],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs (R1.T1 verify-ready tool; future, plan-specified)",
+      "scripts/ranking-v3-dispatch-cards.mjs (R0.1B; DI card generation depends on this gate; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; R1.T1 card)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "GateReceiptV1 {gateId: 'H_GATE_QUALIFIED', taskGraphSha256, prerequisiteReceiptIndexSha256, resolvedConditions, verdict: 'ready'}; R1.T1-owned (plan §5.6)"
+    ],
+    "security_boundaries": [
+      "Cross-session registry state: gate verifies the H10 transition receipt exists and H9 verdict is offline_qualified before DI may build the activation manifest",
+      "Held-out closure: Wave-I opening never starts before this gate (plan §6.8, §8.10)"
+    ],
+    "overlap_with": [
+      "FT-I (DI depends on H_GATE_QUALIFIED + H10)",
+      "FT-G (R1.T1 graph tooling)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute the R1.T1 verify-ready gate command (plan §7.5 gate-node catalog) with $GATE_NODE=H_GATE_QUALIFIED. Unmet precondition (plan §7.6 gate row): at least one required edge authority is absent or mismatched -> GateReceiptV1 verdict 'blocked'. Validating assertion: GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Encoding: hard edge H10 plus the receipt_outcome edge on OfflineQualificationReceiptV1 verdict == offline_qualified must both resolve; verdict 'ready' is the sole dispatch authority for DI; terminal H9 outcomes never reach this gate. The gate card is evidence-only (no production file changes); if verify-ready tooling is defective, escalate to R1.T1 ownership (scripts/ranking-v3-task-graph.mjs) before editing. Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H_GATE_REJECTED",
+    "title": "H_GATE_REJECTED: Wave-H terminal rejection gate (R1.T1 verify-ready)",
+    "risk": "low",
+    "invariant": "H_GATE_REJECTED is TERMINAL: it fires only via the receipt_outcome edge on H9 OfflineQualificationRejectionReceiptV1 verdict == 'rejected'; GateReceiptV1 verdict is 'terminal'; no H10 runs, no held-out opening occurs, and baseline is retained; the verifier never infers a branch from filenames.",
+    "owners": ["H_GATE_REJECTED"],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs (R1.T1 verify-ready tool; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; R1.T1 card)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "GateReceiptV1 {gateId: 'H_GATE_REJECTED', taskGraphSha256, prerequisiteReceiptIndexSha256, resolvedConditions, verdict: 'terminal'}; R1.T1-owned (plan §5.6)"
+    ],
+    "security_boundaries": [
+      "Terminal outcome: rejected terminates the qualification cycle without H10 or held-out opening; baseline retained (plan §6.7, §8.10, §9.1)"
+    ],
+    "overlap_with": [
+      "FT-G (R1.T1 graph tooling)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute the R1.T1 verify-ready gate command (plan §7.5 gate-node catalog) with $GATE_NODE=H_GATE_REJECTED. Unmet precondition (plan §7.6 gate row): at least one required edge authority is absent or mismatched -> GateReceiptV1 verdict 'blocked'. Validating assertion: GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Encoding: receipt_outcome edge on OfflineQualificationRejectionReceiptV1 verdict == 'rejected' resolves; verdict 'terminal'; the gate never dispatches H10 or DI; baseline retained. The gate card is evidence-only (no production file changes); if verify-ready tooling is defective, escalate to R1.T1 ownership (scripts/ranking-v3-task-graph.mjs) before editing. Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  },
+  {
+    "task_id": "H_GATE_INSUFFICIENT",
+    "title": "H_GATE_INSUFFICIENT: Wave-H terminal insufficient-evidence gate (R1.T1 verify-ready)",
+    "risk": "low",
+    "invariant": "H_GATE_INSUFFICIENT is TERMINAL: it fires only via the receipt_outcome edge on H9 OfflineQualificationInsufficientEvidenceReceiptV1 verdict == 'insufficient_evidence'; GateReceiptV1 verdict is 'terminal'; no H10 runs, no held-out opening occurs, and baseline is retained; the verifier never infers a branch from filenames.",
+    "owners": ["H_GATE_INSUFFICIENT"],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs (R1.T1 verify-ready tool; future, plan-specified)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; R1.T1 card)",
+      "scripts/satori-search-ranking-r3.test.mjs (existing offline-replay precedent, verified at base)"
+    ],
+    "approved_files": [],
+    "interface_changes": [
+      "GateReceiptV1 {gateId: 'H_GATE_INSUFFICIENT', taskGraphSha256, prerequisiteReceiptIndexSha256, resolvedConditions, verdict: 'terminal'}; R1.T1-owned (plan §5.6)"
+    ],
+    "security_boundaries": [
+      "Terminal outcome: insufficient_evidence terminates the qualification cycle without H10 or held-out opening; baseline retained (plan §6.7, §8.10, §9.1)"
+    ],
+    "overlap_with": [
+      "FT-G (R1.T1 graph tooling)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": ["pnpm test:scripts", "pnpm --filter @zokizuan/satori-mcp test"],
+    "red_evidence_required": false,
+    "instructions": "Execute the R1.T1 verify-ready gate command (plan §7.5 gate-node catalog) with $GATE_NODE=H_GATE_INSUFFICIENT. Unmet precondition (plan §7.6 gate row): at least one required edge authority is absent or mismatched -> GateReceiptV1 verdict 'blocked'. Validating assertion: GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Encoding: receipt_outcome edge on OfflineQualificationInsufficientEvidenceReceiptV1 verdict == 'insufficient_evidence' resolves; verdict 'terminal'; the gate never dispatches H10 or DI; baseline retained. The gate card is evidence-only (no production file changes); if verify-ready tooling is defective, escalate to R1.T1 ownership (scripts/ranking-v3-task-graph.mjs) before editing. Focused command and test files are plan-specified and unverifiable at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (target files do not exist at base); affected command pnpm test:scripts is repo-verified (exists in package.json)."
+  }
+]
