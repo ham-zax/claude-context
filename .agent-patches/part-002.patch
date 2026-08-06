@@ -1,0 +1,387 @@
+parseRankingPolicyQualificationRegistryV1,
++    qualificationScopeKeyV1,
++    type QualificationRegistryEntryV1,
++    type RankingPolicyQualificationRegistryV1,
++} from './ranking-policy-qualification.js';
++import {
++    compareAndSwapQualificationRegistryV1,
++    validateQualificationRegistryTransitionV1,
++} from './ranking-policy-qualification-writer.js';
++
++const sha = (character: string): string => character.repeat(64);
++const rawSha = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
++
++function pending(): QualificationRegistryEntryV1 {
++    const scope = {
++        serviceClass: 'online' as const,
++        qualificationTargetSha256: sha('b'),
++        selectedArtifactMode: 'disabled' as const,
++        qualifiedRerankers: [],
++    };
++    return {
++        artifactSha256: sha('a'),
++        ...scope,
++        qualificationScopeKey: qualificationScopeKeyV1(scope),
++        offlineQualificationReceiptSha256: sha('c'),
++        status: 'pending_heldout',
++    };
++}
++
++function registry(entry: QualificationRegistryEntryV1): RankingPolicyQualificationRegistryV1 {
++    return parseRankingPolicyQualificationRegistryV1({
++        schemaVersion: 'ranking_policy_qualification_registry_v1',
++        entries: [entry],
++    });
++}
++
++test('registry_writer_is_single_winner_compare_and_swap', async () => {
++    const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'satori-registry-'));
++    await fsp.chmod(root, 0o700);
++    const registryPath = path.join(root, 'registry.json');
++    const current = registry(pending());
++    const currentBytes = canonicalizeRankingPolicyQualificationRegistryV1(current);
++    await fsp.writeFile(registryPath, currentBytes, { mode: 0o600 });
++    const active = registry({
++        ...pending(),
++        status: 'activation_qualified',
++        heldoutAcceptanceReceiptSha256: sha('d'),
++    });
++    try {
++        const attempts = await Promise.allSettled([
++            compareAndSwapQualificationRegistryV1({
++                rootDir: root,
++                registryPath,
++                expectedPreviousBytesSha256: rawSha(currentBytes),
++                nextRegistry: active,
++            }),
++            compareAndSwapQualificationRegistryV1({
++                rootDir: root,
++                registryPath,
++                expectedPreviousBytesSha256: rawSha(currentBytes),
++                nextRegistry: active,
++            }),
++        ]);
++        assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
++        assert.equal(attempts.filter((attempt) => attempt.status === 'rejected').length, 1);
++        const stored = await fsp.readFile(registryPath, 'utf8');
++        assert.equal(stored, canonicalizeRankingPolicyQualificationRegistryV1(active));
++    } finally {
++        await fsp.rm(root, { recursive: true, force: true });
++    }
++});
++
++test('registry_transition_changes_exactly_one_logical_entry', () => {
++    const current = registry(pending());
++    const active = registry({
++        ...pending(),
++        status: 'activation_qualified',
++        heldoutAcceptanceReceiptSha256: sha('d'),
++    });
++    assert.doesNotThrow(() => validateQualificationRegistryTransitionV1(current, active));
++    assert.throws(() => validateQualificationRegistryTransitionV1(current, current), /exactly one/i);
++    const illegal = registry({
++        ...pending(),
++        status: 'revoked',
++        terminalEvidence: {
++            reason: 'heldout_rejected',
++            heldoutRejectionReceiptSha256: sha('e'),
++        },
++    });
++    assert.doesNotThrow(() => validateQualificationRegistryTransitionV1(current, illegal));
++});
+diff --git a/packages/mcp/src/core/ranking-policy-qualification-writer.ts b/packages/mcp/src/core/ranking-policy-qualification-writer.ts
+new file mode 100644
+index 0000000..b81cbcc
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-qualification-writer.ts
+@@ -0,0 +1,140 @@
++import crypto from 'node:crypto';
++import * as fsp from 'node:fs/promises';
++import * as fsSync from 'node:fs';
++import path from 'node:path';
++import {
++    openTrustedRegularFileInsideRootV1,
++    readFileHandleExactly,
++    verifyTrustedPathHierarchyV1,
++} from '@zokizuan/satori-core';
++import {
++    canonicalizeRankingPolicyQualificationRegistryV1,
++    parseRankingPolicyQualificationRegistryV1,
++    qualificationRegistryLogicalKeyV1,
++    type QualificationRegistryEntryV1,
++    type RankingPolicyQualificationRegistryV1,
++} from './ranking-policy-qualification.js';
++
++const SHA256 = /^[a-f0-9]{64}$/;
++
++function rawSha256(bytes: Uint8Array | string): string {
++    return crypto.createHash('sha256').update(bytes).digest('hex');
++}
++
++function entryBytes(entry: QualificationRegistryEntryV1): string {
++    return JSON.stringify(entry);
++}
++
++function allowedReplacement(
++    current: QualificationRegistryEntryV1,
++    next: QualificationRegistryEntryV1,
++): boolean {
++    if (current.status === 'pending_heldout') {
++        return next.status === 'activation_qualified' || next.status === 'revoked';
++    }
++    if (current.status === 'activation_qualified') {
++        return next.status === 'revoked';
++    }
++    return false;
++}
++
++export function validateQualificationRegistryTransitionV1(
++    current: RankingPolicyQualificationRegistryV1,
++    next: RankingPolicyQualificationRegistryV1,
++): void {
++    const currentByKey = new Map(current.entries.map((entry) => [qualificationRegistryLogicalKeyV1(entry), entry]));
++    const nextByKey = new Map(next.entries.map((entry) => [qualificationRegistryLogicalKeyV1(entry), entry]));
++
++    let changes = 0;
++    for (const [key, currentEntry] of currentByKey) {
++        const nextEntry = nextByKey.get(key);
++        if (!nextEntry) throw new Error('Qualification registry transitions may not delete logical entries.');
++        if (entryBytes(currentEntry) !== entryBytes(nextEntry)) {
++            changes += 1;
++            if (!allowedReplacement(currentEntry, nextEntry)) {
++                throw new Error(`Invalid qualification registry status transition for '${key}'.`);
++            }
++        }
++    }
++    for (const [key, nextEntry] of nextByKey) {
++        if (!currentByKey.has(key)) {
++            changes += 1;
++            if (nextEntry.status !== 'pending_heldout') {
++                throw new Error('A new qualification registry logical key must begin pending_heldout.');
++            }
++        }
++    }
++    if (changes !== 1) {
++        throw new Error('Qualification registry update must add or replace exactly one logical entry.');
++    }
++}
++
++export async function compareAndSwapQualificationRegistryV1(input: {
++    rootDir: string;
++    registryPath: string;
++    expectedPreviousBytesSha256: string;
++    nextRegistry: unknown;
++}): Promise<{ previousBytesSha256: string; registryBytesSha256: string }> {
++    if (!SHA256.test(input.expectedPreviousBytesSha256)) {
++        throw new Error('expectedPreviousBytesSha256 must be a lowercase SHA-256 digest.');
++    }
++    const absolutePath = path.isAbsolute(input.registryPath)
++        ? path.normalize(input.registryPath)
++        : path.resolve(input.rootDir, input.registryPath);
++    const opened = await openTrustedRegularFileInsideRootV1(absolutePath, input.rootDir);
++    const lockPath = `${absolutePath}.lock`;
++    const tempPath = `${absolutePath}.tmp-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
++    let lockHandle: fsp.FileHandle | undefined;
++    let tempHandle: fsp.FileHandle | undefined;
++    try {
++        const noFollow = fsSync.constants.O_NOFOLLOW ?? 0;
++        lockHandle = await fsp.open(
++            lockPath,
++            fsSync.constants.O_CREAT | fsSync.constants.O_EXCL | fsSync.constants.O_WRONLY | noFollow,
++            0o600,
++        ).catch((error: NodeJS.ErrnoException) => {
++            if (error.code === 'EEXIST') throw new Error('Qualification registry compare-and-swap lock is already held.');
++            throw error;
++        });
++        await verifyTrustedPathHierarchyV1(opened);
++        const currentBytes = await readFileHandleExactly(opened.handle, opened.observedStat.size);
++        const previousBytesSha256 = rawSha256(currentBytes);
++        if (previousBytesSha256 !== input.expectedPreviousBytesSha256) {
++            throw new Error('Qualification registry compare-and-swap previous digest mismatch.');
++        }
++        const current = parseRankingPolicyQualificationRegistryV1(JSON.parse(currentBytes.toString('utf8')));
++        const next = parseRankingPolicyQualificationRegistryV1(input.nextRegistry);
++        validateQualificationRegistryTransitionV1(current, next);
++        const serialized = canonicalizeRankingPolicyQualificationRegistryV1(next);
++
++        tempHandle = await fsp.open(
++            tempPath,
++            fsSync.constants.O_CREAT | fsSync.constants.O_EXCL | fsSync.constants.O_WRONLY | noFollow,
++            0o600,
++        );
++        await tempHandle.writeFile(serialized, 'utf8');
++        await tempHandle.sync();
++        await tempHandle.close();
++        tempHandle = undefined;
++        await verifyTrustedPathHierarchyV1(opened);
++        await fsp.rename(tempPath, absolutePath);
++        const directoryHandle = await fsp.open(path.dirname(absolutePath), fsSync.constants.O_RDONLY);
++        try {
++            await directoryHandle.sync();
++        } finally {
++            await directoryHandle.close();
++        }
++        return {
++            previousBytesSha256,
++            registryBytesSha256: rawSha256(serialized),
++        };
++    } finally {
++        await tempHandle?.close().catch(() => undefined);
++        await opened.handle.close().catch(() => undefined);
++        if (lockHandle) {
++            await lockHandle.close().catch(() => undefined);
++            await fsp.unlink(lockPath).catch(() => undefined);
++        }
++        await fsp.unlink(tempPath).catch(() => undefined);
++    }
++}
+diff --git a/packages/mcp/src/core/ranking-policy-qualification.ts b/packages/mcp/src/core/ranking-policy-qualification.ts
+index bfbad87..04a0024 100644
+--- a/packages/mcp/src/core/ranking-policy-qualification.ts
++++ b/packages/mcp/src/core/ranking-policy-qualification.ts
+@@ -181,3 +181,17 @@ export function parseRankingPolicyQualificationRegistryV1(value: unknown): Ranki
+     }
+     return { schemaVersion: 'ranking_policy_qualification_registry_v1', entries };
+ }
++
++export function qualificationRegistryLogicalKeyV1(entry: QualificationEntryKeyV1): string {
++    return logicalKey(entry);
++}
++
++export function canonicalizeRankingPolicyQualificationRegistryV1(value: unknown): string {
++    return `${canonicalJson(parseRankingPolicyQualificationRegistryV1(value))}\n`;
++}
++
++export function canonicalRankingPolicyQualificationRegistrySha256V1(value: unknown): string {
++    return crypto.createHash('sha256')
++        .update(canonicalizeRankingPolicyQualificationRegistryV1(value), 'utf8')
++        .digest('hex');
++}
+diff --git a/packages/mcp/src/core/ranking-policy-selector.test.ts b/packages/mcp/src/core/ranking-policy-selector.test.ts
+new file mode 100644
+index 0000000..e1ed565
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-selector.test.ts
+@@ -0,0 +1,26 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { DISABLED_RERANKER_IDENTITY_V1 } from './ranking-policy-identity.js';
++import { selectRankingPolicyV1 } from './ranking-policy-selector.js';
++
++const sha = (c: string): string => c.repeat(64);
++const artifact = {
++    schemaVersion: 'ranking_policy_v3' as const, policyId: 'search_ranking_policy_v3' as const, featureSchema: 'search_features_v1' as const,
++    createdFromCommit: 'a'.repeat(40), trainingManifestSha256: sha('b'), trainingCodeSha256: sha('c'), trainingContractSha256: sha('d'),
++    qualificationTargetSha256: sha('e'), residualModelSha256: sha('f'),
++    normalization: { schemaVersion: 'ranking_normalization_contract_v1' as const, featureOrder: ['x'], means: [0], scales: [1], missingValuePolicy: 'indicator_zero_fill' as const },
++    weights: [0], residualBounds: { maximumResidual: 0.1 }, neuralReorderPolicy: { mode: 'disabled' as const },
++    applicability: { mode: 'disabled' as const, baselinePolicyIdentity: 'search_candidate_final_score_v2' as const, featureContractSha256: sha('1'), runtimeScoringContractId: 'score-v3', retrievalContractId: 'retrieval-v3', supportedProviderKeys: [] as [] },
++};
++const entry = {
++    artifactSha256: sha('2'), serviceClass: 'online' as const, qualificationScopeKey: sha('3'), qualificationTargetSha256: sha('e'),
++    selectedArtifactMode: 'disabled' as const, qualifiedRerankers: [], offlineQualificationReceiptSha256: sha('4'),
++    status: 'activation_qualified' as const, heldoutAcceptanceReceiptSha256: sha('5'),
++};
++
++test('disabled_mode_requires_no_provider_and_uses_disabled_identity', () => {
++    const selected = selectRankingPolicyV1({ requestedMode: 'learned', artifactSha256: sha('2'), artifact, activationEntry: entry });
++    assert.equal(selected.mode, 'disabled');
++    assert.equal(selected.rerankerIdentity, DISABLED_RERANKER_IDENTITY_V1);
++    assert.throws(() => selectRankingPolicyV1({ requestedMode: 'learned', artifactSha256: sha('2'), artifact, activationEntry: entry, configuredReranker: { providerKey:'p', rerankerIdentity:'m', rerankerProjectionIdentity:'proj', providerConfigurationDigest:sha('6'), providerRequestContractSha256:sha('7') } }), /requires no provider/i);
++});
+diff --git a/packages/mcp/src/core/ranking-policy-selector.ts b/packages/mcp/src/core/ranking-policy-selector.ts
+new file mode 100644
+index 0000000..4d0630b
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-selector.ts
+@@ -0,0 +1,98 @@
++import {
++    BASELINE_RANKING_POLICY_IDENTITY,
++    DISABLED_RERANKER_IDENTITY_V1,
++    LEARNED_RANKING_POLICY_IDENTITY,
++} from './ranking-policy-identity.js';
++import type { RankingPolicyV3Artifact } from './ranking-policy-artifact.js';
++import type {
++    QualifiedRerankerV1,
++    QualificationRegistryEntryV1,
++} from './ranking-policy-qualification.js';
++
++export type RankingPolicySelectionV1 =
++    | {
++        mode: 'baseline';
++        policyIdentity: typeof BASELINE_RANKING_POLICY_IDENTITY;
++        artifactSha256: null;
++        rerankerIdentity: 'deterministic_baseline';
++        rerankerProjectionIdentity: 'not_applicable';
++    }
++    | {
++        mode: 'disabled';
++        policyIdentity: typeof LEARNED_RANKING_POLICY_IDENTITY;
++        artifactSha256: string;
++        rerankerIdentity: typeof DISABLED_RERANKER_IDENTITY_V1;
++        rerankerProjectionIdentity: 'not_applicable';
++        artifact: RankingPolicyV3Artifact;
++    }
++    | {
++        mode: 'provider_derived';
++        policyIdentity: typeof LEARNED_RANKING_POLICY_IDENTITY;
++        artifactSha256: string;
++        rerankerIdentity: string;
++        rerankerProjectionIdentity: string;
++        configuredReranker: QualifiedRerankerV1;
++        artifact: RankingPolicyV3Artifact;
++    };
++
++function sameReranker(left: QualifiedRerankerV1, right: QualifiedRerankerV1): boolean {
++    return left.providerKey === right.providerKey
++        && left.rerankerIdentity === right.rerankerIdentity
++        && left.rerankerProjectionIdentity === right.rerankerProjectionIdentity
++        && left.providerConfigurationDigest === right.providerConfigurationDigest
++        && left.providerRequestContractSha256 === right.providerRequestContractSha256;
++}
++
++export function selectRankingPolicyV1(input: {
++    requestedMode: 'baseline' | 'learned';
++    artifactSha256?: string;
++    artifact?: RankingPolicyV3Artifact;
++    activationEntry?: Extract<QualificationRegistryEntryV1, { status: 'activation_qualified' }>;
++    configuredReranker?: QualifiedRerankerV1;
++}): RankingPolicySelectionV1 {
++    if (input.requestedMode === 'baseline') {
++        return {
++            mode: 'baseline', policyIdentity: BASELINE_RANKING_POLICY_IDENTITY, artifactSha256: null,
++            rerankerIdentity: 'deterministic_baseline', rerankerProjectionIdentity: 'not_applicable',
++        };
++    }
++    const artifact = input.artifact;
++    const entry = input.activationEntry;
++    const artifactSha256 = input.artifactSha256;
++    if (!artifact || !entry || !artifactSha256 || entry.artifactSha256 !== artifactSha256) {
++        throw new Error('Learned ranking requires one exact activation-qualified artifact entry.');
++    }
++    if (entry.selectedArtifactMode !== artifact.neuralReorderPolicy.mode) {
++        throw new Error('Activation entry mode does not match the artifact mode.');
++    }
++    if (artifact.neuralReorderPolicy.mode === 'disabled') {
++        if (input.configuredReranker || entry.qualifiedRerankers.length !== 0) {
++            throw new Error('Disabled learned mode requires no provider or qualified reranker.');
++        }
++        return {
++            mode: 'disabled', policyIdentity: LEARNED_RANKING_POLICY_IDENTITY, artifactSha256,
++            rerankerIdentity: DISABLED_RERANKER_IDENTITY_V1, rerankerProjectionIdentity: 'not_applicable', artifact,
++        };
++    }
++    const configured = input.configuredReranker;
++    const qualified = entry.qualifiedRerankers[0];
++    const applicability = artifact.applicability;
++    if (!configured || !qualified || applicability.mode !== 'provider_derived' || !sameReranker(configured, qualified)) {
++        throw new Error('Provider-derived mode requires the exact qualified reranker identity.');
++    }
++    if (
++        configured.providerKey !== artifact.neuralReorderPolicy.providerKey
++        || configured.providerKey !== applicability.supportedProviderKeys[0]
++        || configured.rerankerProjectionIdentity !== applicability.rerankerProjectionIdentity
++        || configured.providerConfigurationDigest !== applicability.providerConfigurationDigest
++        || configured.providerRequestContractSha256 !== applicability.providerRequestContractSha256
++    ) {
++        throw new Error('Configured provider does not match artifa
