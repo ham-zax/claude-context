@@ -107,26 +107,45 @@ function boundResponseBody(
     const reader = response.body.getReader();
     let bytesRead = 0;
     let settled = false;
+    let attemptAbortHandler: (() => void) | undefined;
+
+    // The abort listener registered in `start` is owned by this wrapper:
+    // every terminal path must drop it, otherwise a completed attempt keeps
+    // the listener (and the response graph it captures) alive until the
+    // attempt deadline fires.
+    const removeAttemptAbortHandler = (): void => {
+        if (attemptAbortHandler !== undefined) {
+            attemptSignal.removeEventListener("abort", attemptAbortHandler);
+            attemptAbortHandler = undefined;
+        }
+    };
 
     const stream = new ReadableStream<Uint8Array>({
         start(controller) {
-            attemptSignal.addEventListener("abort", () => {
+            const onAttemptAbort = () => {
                 if (settled) {
                     return;
                 }
                 settled = true;
-                if (callerSignal?.aborted) {
-                    // Caller cancellation is never wrapped.
-                    controller.error(callerSignal.reason ?? new DOMException("The operation was aborted", "AbortError"));
-                } else {
-                    controller.error(new BoundedHttpError(
+                removeAttemptAbortHandler();
+                const error = callerSignal?.aborted
+                    ? (callerSignal.reason ?? new DOMException("The operation was aborted", "AbortError"))
+                    : new BoundedHttpError(
                         "timeout",
                         null,
                         attempts,
                         "HTTP response body consumption timed out after the attempt deadline",
-                    ));
-                }
-            }, { once: true });
+                    );
+                // Release the original reader on the timeout/cancellation
+                // path so a stalled body does not keep its socket parked
+                // with unread data. The `settled` guard makes this the only
+                // reader release; cancel rejects when the reader is already
+                // errored or released, which is expected and swallowed.
+                void reader.cancel(error).catch(() => undefined);
+                controller.error(error);
+            };
+            attemptAbortHandler = onAttemptAbort;
+            attemptSignal.addEventListener("abort", onAttemptAbort, { once: true });
         },
         async pull(controller) {
             if (settled) {
@@ -140,40 +159,54 @@ function boundResponseBody(
                     return;
                 }
                 settled = true;
-                if (callerSignal?.aborted) {
-                    // Caller cancellation is never wrapped.
-                    controller.error(callerSignal.reason ?? error);
-                } else if (isAbortLikeError(error)) {
-                    controller.error(new BoundedHttpError(
-                        "timeout",
-                        null,
-                        attempts,
-                        `HTTP response body consumption timed out: ${errorMessage(error)}`,
-                    ));
-                } else {
-                    controller.error(new BoundedHttpError(
-                        "invalid_response",
-                        null,
-                        attempts,
-                        `HTTP response body read failed: ${errorMessage(error)}`,
-                    ));
-                }
+                removeAttemptAbortHandler();
+                const bodyError = callerSignal?.aborted
+                    ? (callerSignal.reason ?? error)
+                    : isAbortLikeError(error)
+                        ? new BoundedHttpError(
+                            "timeout",
+                            null,
+                            attempts,
+                            `HTTP response body consumption timed out: ${errorMessage(error)}`,
+                        )
+                        : new BoundedHttpError(
+                            "invalid_response",
+                            null,
+                            attempts,
+                            `HTTP response body read failed: ${errorMessage(error)}`,
+                        );
+                // The body is not consumable, so release the reader rather
+                // than retaining its socket; rejects on an already-errored
+                // reader are expected and swallowed.
+                await reader.cancel(bodyError).catch(() => undefined);
+                controller.error(bodyError);
                 return;
             }
             if (chunk.done) {
+                if (settled) {
+                    return;
+                }
                 settled = true;
+                removeAttemptAbortHandler();
                 controller.close();
                 return;
             }
             bytesRead += chunk.value.byteLength;
             if (bytesRead > maxResponseBytes) {
                 settled = true;
-                controller.error(new BoundedHttpError(
+                removeAttemptAbortHandler();
+                const error = new BoundedHttpError(
                     "response_too_large",
                     null,
                     attempts,
                     `HTTP response body exceeded ${maxResponseBytes} bytes`,
-                ));
+                );
+                // The remaining body exceeds the caller's limit and will
+                // never be consumed: cancel the original reader so the
+                // socket is released instead of staying parked with unread
+                // data until GC finalization.
+                await reader.cancel(error).catch(() => undefined);
+                controller.error(error);
                 return;
             }
             controller.enqueue(chunk.value);
