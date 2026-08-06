@@ -1,0 +1,403 @@
+ct applicability.');
++    }
++    return {
++        mode: 'provider_derived', policyIdentity: LEARNED_RANKING_POLICY_IDENTITY, artifactSha256,
++        rerankerIdentity: configured.rerankerIdentity,
++        rerankerProjectionIdentity: configured.rerankerProjectionIdentity,
++        configuredReranker: configured, artifact,
++    };
++}
+diff --git a/packages/mcp/src/core/ranking-policy-store.test.ts b/packages/mcp/src/core/ranking-policy-store.test.ts
+new file mode 100644
+index 0000000..6c00929
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-store.test.ts
+@@ -0,0 +1,40 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import crypto from 'node:crypto';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { loadRankingPolicyV3FromTrustedStore } from './ranking-policy-store.js';
++
++const sha = (character: string): string => character.repeat(64);
++function artifact(): object {
++    return {
++        schemaVersion: 'ranking_policy_v3', policyId: 'search_ranking_policy_v3', featureSchema: 'search_features_v1',
++        createdFromCommit: 'a'.repeat(40), trainingManifestSha256: sha('b'), trainingCodeSha256: sha('c'),
++        trainingContractSha256: sha('d'), qualificationTargetSha256: sha('e'), residualModelSha256: sha('f'),
++        normalization: { schemaVersion: 'ranking_normalization_contract_v1', featureOrder: ['x'], means: [0], scales: [1], missingValuePolicy: 'indicator_zero_fill' },
++        weights: [0], residualBounds: { maximumResidual: 0.1 }, neuralReorderPolicy: { mode: 'disabled' },
++        applicability: { mode: 'disabled', baselinePolicyIdentity: 'search_candidate_final_score_v2', featureContractSha256: sha('1'), runtimeScoringContractId: 'score-v3', retrievalContractId: 'retrieval-v3', supportedProviderKeys: [] },
++    };
++}
++
++test('loader_hashes_the_opened_descriptor_bytes', async () => {
++    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-policy-store-'));
++    try {
++        const file = path.join(root, 'policy.json');
++        const bytes = Buffer.from(`${JSON.stringify(artifact(), null, 4)}\n`, 'utf8');
++        fs.writeFileSync(file, bytes, { mode: 0o600 });
++        const rawDigest = crypto.createHash('sha256').update(bytes).digest('hex');
++        const loaded = await loadRankingPolicyV3FromTrustedStore({ rootDir: root, artifactPath: file, expectedArtifactSha256: rawDigest });
++        assert.equal(loaded.artifactSha256, rawDigest);
++        assert.deepEqual(loaded.artifactBytes, bytes);
++        const differentSerialization = Buffer.from(JSON.stringify(artifact()), 'utf8');
++        const wrongDigest = crypto.createHash('sha256').update(differentSerialization).digest('hex');
++        await assert.rejects(
++            () => loadRankingPolicyV3FromTrustedStore({ rootDir: root, artifactPath: file, expectedArtifactSha256: wrongDigest }),
++            /opened.*bytes.*digest/i,
++        );
++    } finally {
++        fs.rmSync(root, { recursive: true, force: true });
++    }
++});
+diff --git a/packages/mcp/src/core/ranking-policy-store.ts b/packages/mcp/src/core/ranking-policy-store.ts
+new file mode 100644
+index 0000000..a6ef3f5
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-store.ts
+@@ -0,0 +1,48 @@
++import crypto from 'node:crypto';
++import path from 'node:path';
++import {
++    openTrustedRegularFileInsideRootV1,
++    readFileHandleExactly,
++    verifyTrustedPathHierarchyV1,
++} from '@zokizuan/satori-core';
++import {
++    parseRankingPolicyV3Artifact,
++    type ParseArtifactOptions,
++    type RankingPolicyV3Artifact,
++} from './ranking-policy-artifact.js';
++
++const SHA256 = /^[a-f0-9]{64}$/;
++
++export interface LoadedRankingPolicyV3 {
++    artifactPath: string;
++    artifactSha256: string;
++    artifactBytes: Buffer;
++    artifact: RankingPolicyV3Artifact;
++}
++
++export async function loadRankingPolicyV3FromTrustedStore(input: {
++    rootDir: string;
++    artifactPath: string;
++    expectedArtifactSha256: string;
++    parseOptions?: ParseArtifactOptions;
++}): Promise<LoadedRankingPolicyV3> {
++    if (!SHA256.test(input.expectedArtifactSha256)) {
++        throw new Error('expectedArtifactSha256 must be a lowercase SHA-256 digest.');
++    }
++    const absolutePath = path.isAbsolute(input.artifactPath)
++        ? path.normalize(input.artifactPath)
++        : path.resolve(input.rootDir, input.artifactPath);
++    const opened = await openTrustedRegularFileInsideRootV1(absolutePath, input.rootDir);
++    try {
++        const bytes = await readFileHandleExactly(opened.handle, opened.observedStat.size);
++        const artifactSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
++        if (artifactSha256 !== input.expectedArtifactSha256) {
++            throw new Error('Opened ranking-policy descriptor bytes do not match the expected artifact digest.');
++        }
++        const artifact = parseRankingPolicyV3Artifact(JSON.parse(bytes.toString('utf8')), input.parseOptions);
++        await verifyTrustedPathHierarchyV1(opened);
++        return { artifactPath: absolutePath, artifactSha256, artifactBytes: bytes, artifact };
++    } finally {
++        await opened.handle.close().catch(() => undefined);
++    }
++}
+diff --git a/packages/mcp/src/core/ranking-policy-v3.test.ts b/packages/mcp/src/core/ranking-policy-v3.test.ts
+new file mode 100644
+index 0000000..8224a5e
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-v3.test.ts
+@@ -0,0 +1,24 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { scoreDeterministicV3 } from './ranking-policy-v3.js';
++
++test('bounded_residual_preserves_baseline_plus_clamped_dot_product', () => {
++    assert.deepEqual(scoreDeterministicV3({
++        preRerankBaselineScore: 10,
++        normalizedFeatures: [2, -1],
++        weights: [0.5, 3],
++        maximumResidual: 1,
++    }), { residual: -1, deterministicV3Score: 9 });
++    assert.throws(() => scoreDeterministicV3({
++        preRerankBaselineScore: 0,
++        normalizedFeatures: [1],
++        weights: [1, 2],
++        maximumResidual: 1,
++    }), /length/i);
++    assert.throws(() => scoreDeterministicV3({
++        preRerankBaselineScore: 0,
++        normalizedFeatures: [Number.NaN],
++        weights: [1],
++        maximumResidual: 1,
++    }), /finite/i);
++});
+diff --git a/packages/mcp/src/core/ranking-policy-v3.ts b/packages/mcp/src/core/ranking-policy-v3.ts
+new file mode 100644
+index 0000000..4ce22a9
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-policy-v3.ts
+@@ -0,0 +1,38 @@
++export interface RankedCandidateV3 {
++    candidateId: string;
++    deterministicV3Score: number;
++    postPolicyRank: number;
++}
++
++export interface DeterministicV3ScoreInput {
++    preRerankBaselineScore: number;
++    normalizedFeatures: readonly number[];
++    weights: readonly number[];
++    maximumResidual: number;
++}
++
++export interface DeterministicV3ScoreResult {
++    residual: number;
++    deterministicV3Score: number;
++}
++
++function finite(value: number, label: string): number {
++    if (!Number.isFinite(value)) throw new Error(`${label} must be finite.`);
++    return value;
++}
++
++export function scoreDeterministicV3(input: DeterministicV3ScoreInput): DeterministicV3ScoreResult {
++    finite(input.preRerankBaselineScore, 'preRerankBaselineScore');
++    finite(input.maximumResidual, 'maximumResidual');
++    if (input.maximumResidual < 0) throw new Error('maximumResidual must be non-negative.');
++    if (input.normalizedFeatures.length !== input.weights.length) throw new Error('Feature and weight lengths must match.');
++    let rawResidual = 0;
++    for (let index = 0; index < input.weights.length; index += 1) {
++        rawResidual += finite(input.normalizedFeatures[index], `normalizedFeatures[${index}]`)
++            * finite(input.weights[index], `weights[${index}]`);
++    }
++    const residual = Math.max(-input.maximumResidual, Math.min(input.maximumResidual, rawResidual));
++    const deterministicV3Score = input.preRerankBaselineScore + residual;
++    finite(deterministicV3Score, 'deterministicV3Score');
++    return { residual, deterministicV3Score };
++}
+diff --git a/packages/mcp/src/core/ranking-shadow.test.ts b/packages/mcp/src/core/ranking-shadow.test.ts
+new file mode 100644
+index 0000000..aac4255
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-shadow.test.ts
+@@ -0,0 +1,48 @@
++import assert from 'node:assert/strict';
++import * as fsp from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import {
++    appendRankingShadowRecordV1,
++    parseRankingShadowRecordV1,
++    serializeRankingShadowRecordV1,
++} from './ranking-shadow.js';
++
++const sha = (character: string): string => character.repeat(64);
++const record = {
++    schemaVersion: 'ranking_shadow_record_v1' as const,
++    querySha256: sha('a'),
++    candidateSetSha256: sha('b'),
++    baselineOrderSha256: sha('c'),
++    deterministicOrderSha256: sha('d'),
++    providerOrderSha256: null,
++    artifactSha256: sha('e'),
++    qualificationScopeKey: sha('f'),
++    outcome: 'deterministic_applied' as const,
++};
++
++test('shadow_sink_is_hashed_only_and_rejects_raw_text_fields', async () => {
++    const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'satori-shadow-'));
++    const filePath = path.join(root, 'shadow.jsonl');
++    const secretQuery = 'secret query text must never be written';
++    const secretSource = 'secret source body must never be written';
++    try {
++        assert.deepEqual(parseRankingShadowRecordV1(record), record);
++        assert.throws(() => parseRankingShadowRecordV1({
++            ...record,
++            queryText: secretQuery,
++        }), /exact hashed-only keys/i);
++        assert.throws(() => parseRankingShadowRecordV1({
++            ...record,
++            sourceText: secretSource,
++        }), /exact hashed-only keys/i);
++        await appendRankingShadowRecordV1(filePath, record);
++        const stored = await fsp.readFile(filePath, 'utf8');
++        assert.equal(stored, serializeRankingShadowRecordV1(record));
++        assert.equal(stored.includes(secretQuery), false);
++        assert.equal(stored.includes(secretSource), false);
++    } finally {
++        await fsp.rm(root, { recursive: true, force: true });
++    }
++});
+diff --git a/packages/mcp/src/core/ranking-shadow.ts b/packages/mcp/src/core/ranking-shadow.ts
+new file mode 100644
+index 0000000..9dbd83c
+--- /dev/null
++++ b/packages/mcp/src/core/ranking-shadow.ts
+@@ -0,0 +1,108 @@
++import * as fsp from 'node:fs/promises';
++import path from 'node:path';
++
++export type RankingShadowOutcomeV1 =
++    | 'baseline_only'
++    | 'deterministic_applied'
++    | 'provider_applied'
++    | 'provider_skipped'
++    | 'provider_fallback';
++
++export interface RankingShadowRecordV1 {
++    schemaVersion: 'ranking_shadow_record_v1';
++    querySha256: string;
++    candidateSetSha256: string;
++    baselineOrderSha256: string;
++    deterministicOrderSha256: string;
++    providerOrderSha256: string | null;
++    artifactSha256: string | null;
++    qualificationScopeKey: string | null;
++    outcome: RankingShadowOutcomeV1;
++}
++
++const SHA256 = /^[a-f0-9]{64}$/;
++const KEYS = [
++    'artifactSha256',
++    'baselineOrderSha256',
++    'candidateSetSha256',
++    'deterministicOrderSha256',
++    'outcome',
++    'providerOrderSha256',
++    'qualificationScopeKey',
++    'querySha256',
++    'schemaVersion',
++] as const;
++
++function asRecord(value: unknown): Record<string, unknown> {
++    if (!value || typeof value !== 'object' || Array.isArray(value)) {
++        throw new Error('Ranking shadow record must be an object.');
++    }
++    return value as Record<string, unknown>;
++}
++
++function exactKeys(input: Record<string, unknown>): void {
++    const actual = Object.keys(input).sort();
++    const expected = [...KEYS].sort();
++    if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
++        throw new Error('Ranking shadow record must contain exact hashed-only keys.');
++    }
++}
++
++function digest(value: unknown, label: string, nullable = false): string | null {
++    if (nullable && value === null) return null;
++    if (typeof value !== 'string' || !SHA256.test(value)) {
++        throw new Error(`${label} must be a lowercase SHA-256 digest${nullable ? ' or null' : ''}.`);
++    }
++    return value;
++}
++
++function outcome(value: unknown): RankingShadowOutcomeV1 {
++    if (
++        value !== 'baseline_only'
++        && value !== 'deterministic_applied'
++        && value !== 'provider_applied'
++        && value !== 'provider_skipped'
++        && value !== 'provider_fallback'
++    ) {
++        throw new Error('Ranking shadow outcome is invalid.');
++    }
++    return value;
++}
++
++export function parseRankingShadowRecordV1(value: unknown): RankingShadowRecordV1 {
++    const input = asRecord(value);
++    exactKeys(input);
++    if (input.schemaVersion !== 'ranking_shadow_record_v1') {
++        throw new Error('Ranking shadow schema mismatch.');
++    }
++    return {
++        schemaVersion: 'ranking_shadow_record_v1',
++        querySha256: digest(input.querySha256, 'querySha256')!,
++        candidateSetSha256: digest(input.candidateSetSha256, 'candidateSetSha256')!,
++        baselineOrderSha256: digest(input.baselineOrderSha256, 'baselineOrderSha256')!,
++        deterministicOrderSha256: digest(input.deterministicOrderSha256, 'deterministicOrderSha256')!,
++        providerOrderSha256: digest(input.providerOrderSha256, 'providerOrderSha256', true),
++        artifactSha256: digest(input.artifactSha256, 'artifactSha256', true),
++        qualificationScopeKey: digest(input.qualificationScopeKey, 'qualificationScopeKey', true),
++        outcome: outcome(input.outcome),
++    };
++}
++
++export function serializeRankingShadowRecordV1(value: unknown): string {
++    return `${JSON.stringify(parseRankingShadowRecordV1(value))}\n`;
++}
++
++export async function appendRankingShadowRecordV1(
++    filePath: string,
++    value: unknown,
++): Promise<void> {
++    const serialized = serializeRankingShadowRecordV1(value);
++    await fsp.mkdir(path.dirname(path.resolve(filePath)), { recursive: true, mode: 0o700 });
++    const handle = await fsp.open(filePath, 'a', 0o600);
++    try {
++        await handle.writeFile(serialized, 'utf8');
++        await handle.sync();
++    } finally {
++        await handle.close();
++    }
++}
+diff --git a/packages/mcp/src/core/rerank-evidence.test.ts b/packages/mcp/src/core/rerank-evidence.test.ts
+index 43a5aa7..df913df 100644
+--- a/packages/mcp/src/core/rerank-evidence.test.ts
++++ b/packages/mcp/src/core/rerank-evidence.test.ts
+@@ -2,19 +2,31 @@ import assert from 'node:assert/strict';
+ import test from 'node:test';
+ import { parseValidatedRerankResponseV1 } from './rerank-evidence.js';
+ 
++const sha = (character: string): string => character.repeat(64);
++const base = {
++    schemaVersion: 'validated_rerank_response_v1' as const,
++    providerKey: 'provider-a',
++    rerankerIdentity: 'model-a',
++    rerankerProjectionIdentity: 'projection-a',
++    providerConfigurationDigest: sha('a'),
++    providerRequestContractSha256: sha('b'),
++    canonicalRequestSha256: sha('c'),
++    requestCandidateIds: ['a', 'b', 'c'],
++    results: [
++        { candidateId: 'b', rank: 1, rawScore: 0.8 },
++        { candidateId: 'a', rank: 2, rawScore: 0.7 },
++        { candidateId: 'c', rank: 3, rawScore: 0.1 },
++    ],
++};
++
+ test('rejects_incomplete_duplicate_foreign_or_non_finite_provider_response', () => {
+     const expected = ['a', 'b', 'c'];
+-    const parsed = parseValidatedRerankResponseV1({
+-        schemaVersion: 'validated_rerank_response_v1',
+-        orderedCandidates: [
+-            { candidateId: 'b', rawScore: 0.8 },
+-            { candidateId: 'a', rawScore: 0.7 },
+-            { candidateId: 'c', rawScore: 0.1 },
+-        ],
+-    }, expected);
+-    assert.deepEqual(parsed.orderedCandidates.map((item) => item.candidateId), ['b', 'a', 'c']);
+-    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, orderedCandidates: parsed.orderedCandidates.slice(0, 2) }, expected), /complete|missing/i);
+-    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, orderedCandidates: [parsed.orderedCandidates[0], parsed.orderedCandidates[0], parsed.orderedCandidates[2]] }, expected), /duplicate/i);
+-    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, orderedCandidates: [{ candidateId: 'foreign', rawScore: 1 }, ...parsed.orderedCandidates.slice(1)] }, expected), /foreign/i);
+-    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, orderedCandidates: [{ candidateId: 'b', rawScore: Number.NaN }, ...parsed.orderedCandidates.slice(1)] }, expected), /finite/i);
++    const parsed = parseValidatedRerankResponseV1(base, expected);
++    assert.deepEqual(parsed.results.map((item) => item.candidateId), ['b', 'a', 'c']);
++    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, results: parsed.results.slice(0, 2) }, expected), /complete|missing/i);
++    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, results: [parsed.results[0], parsed.results[0], parsed.results[2]] }, expected), /duplicate|rank/i);
++    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, results: [{ candidateId: 'foreign', rank: 1, rawScore: 1 }, ...parsed.results.slice(1)] }, expected), /foreign/i);
++    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, results: [{ candidateId: 'b', rank: 1, rawScore: Number.NaN }, ...parsed.results.slice(1)] }, expected), /finite/i);
++    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, results: [{ ...parsed.results[0], rank: 2 }, ...parsed.results.slice(1)] }, expected), /rank/i);
++    assert.throws(() => parseValidatedRerankResponseV1({ ...parsed, requestCandidateIds: ['b', 'a', 'c'] }, expected), /canonical request/i);
+ });
+diff --git a/packages/mcp/src/core/rerank-evidence.ts b/packages/mcp/src/core/rerank-evidence.ts
+index cf0fa6b..923bda1 100644
+--- a/packages/
