@@ -110,14 +110,14 @@ The search surface now satisfies the same session-workspace invariant as the res
 
 ## Disposition update
 
-The navigation surface now satisfies the same session-workspace invariant as search and read_file: tool-level denial occurs immediately after path validation and before provider resolution or handler invocation; the reader enforces the byte ceiling before allocation, reads through the bound descriptor, and verifies stability + pathname identity after the read, closing every descriptor. M2 registry: reopened at `f90f187`, re-verified with this replay, marked fixed at the closeout commit (fixed_in `ce84d94`, fix_verified_at = closeout evidence commit).
+The navigation surface now satisfies the same session-workspace invariant as search and read_file: tool-level denial occurs immediately after path validation and before provider resolution or handler invocation; the reader enforces the byte ceiling before allocation, reads through the bound descriptor, and verifies stability + pathname identity after the read, closing every descriptor. M2 registry: reopened at `f90f187`, re-verified with this replay. At this replay stage, the navigation remediation point was `ce84d94`; the later final-head closure (below) supersedes this with fixed_in `d096a68`.
 
 ---
 
 # M2 Final-Head Closure — rebuild at d096a68, both replays re-run
 
 **Date:** 2026-08-06
-**Build under test:** commit `d096a68` (final corrections: configured read ceiling propagation, mid-read FILE_REPLACED mapping, stream-cancel settle; `pnpm run build` clean rebuild; dist/index.js sha256 `56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823`)
+**Build under test:** commit `d096a68` (final corrections: configured read ceiling propagation, mid-read FILE_REPLACED mapping, stream-cancel settle; `pnpm run build` clean rebuild; dist/index.js sha256 `56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823`); packed tarball zokizuan-satori-mcp-6.8.2.tgz sha256 `015991e924d4894ca97dcfb3b0a304d5ba6fac56084b2223c4234827be28c975` (deterministic across two packs)
 **Replay re-runs at the final head:**
 - `replay-search.mjs` (Finding 1 surface): ALL PASS — search denial on unauthorized grouped/raw/live-path roots, no provider/telemetry/handler, cross-session isolation, canonical-path substitution, no continuation handle on denial, zero secret bytes
 - `replay-navigation.mjs` (Findings 3/4 surface): ALL PASS — 30/30 checks (8 scenarios + 4 positive controls): file_outline/call_graph cross-session denial before provider/handler, oversized (64 MiB sparse) published file denial with zero content for both tools, same-size replacement denial with zero secret bytes for both tools, search on another session's dirty root denied, mid-read same-size race denied (FILE_REPLACED), canonical-path positive controls
