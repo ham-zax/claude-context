@@ -21,7 +21,9 @@ findings:
     fix_verified_at: "b7da4e6190340d172d6e30df521959fec5f0b73d"
     resolution: "same-UID processes are inside the documented trust boundary; protocol v2 states this honestly (challengeNonce is a freshness challenge, ownershipToken is lifecycle-only)"
   - id: M2
-    status: open
-    verified_at: "f90f187c0509413bcaf615fc75990214244a39af"
-    fixed_in: ""
+    status: fixed
+    verified_at: "0983a3ff62a682639be47e61997019b2a7a7939c"
+    fixed_in: "ce84d943ec5b63a27be0397a2c97b5da2e0c114a"
+    fix_verified_at: "0983a3ff62a682639be47e61997019b2a7a7939c"
+    resolution: "arbitrary root registration and root-wide read authorization remediated by Tasks 4-7 (17831852); M2 search-inclusive replay at ea9099d added the search surface (7 scenarios/22 checks); navigation-inclusive replay at the closeout evidence commit added file_outline/call_graph oversized + replacement + cross-session dirty-root search (8 scenarios + 4 positive controls, 30 checks, 0 secret bytes) against the rebuilt dist (commit 9aa7b84); M2 reopened at f90f187 and re-verified fixed at this commit; evidence: docs/evidence/security-hardening-20260805/M2-REPLAY.md"
     resolution: "REOPENED 2026-08-06 pending the navigation-inclusive rebuilt-artifact replay: the review of 2bdd1fd requires the M2 replay to include the new navigation scenarios (file_outline/call_graph oversized published files and path replacement, search on another session's dirty root) before the fixed disposition stands. Remediation commits present (Tasks 4-7 = 17831852, search gate = ea9099d, navigation gate + bounded reader = ce84d94) but replay evidence was incomplete; re-verify with the navigation replay and mark fixed with the new evidence commit."
