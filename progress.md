@@ -77,3 +77,5 @@ Rolling multi-round ledger. Each round appends its own `## Round <id>` section. 
 | 2026-08-06T07:00:00Z | dedup_scan | All 7 findings verified present on master (workflow file, gates dir, dual survival_v3 forms, rawProviderEvidence requirement, no B2-B4 callers, BYTE_IDENTICAL_PROOF.md disclaimer). No PRE_EXISTING_FIX_VERIFIED entries. |
 | 2026-08-06T07:05:00Z | capability_gate | node "$HOME/.pi/agent/tests/test-mcp-hash-compat.ts" → MATCH: YES |
 | 2026-08-06T07:05:00Z | scout_dispatched | structure-scout run 7b20175c-7044-4d66-9397-02ad8f9c2c46, async, fresh, round_audit schema, full review + 14-step instruction |
+| 2026-08-06T07:15:00Z | audit_completed | structure-scout 7b20175c returned ready=true, round_risk=high, 10 tasks (T01-T10), 5 blocking notes (runtime-blocked T09/T10 with stop conditions; C1G `expand` alias folded into T02; head drift docs-only; Wave D not counted; gates revoked-by-removal). Recorded as round_audit.json. |
+| 2026-08-06T07:15:00Z | worktrees_provisioned | T01-T06 worktrees at ~/repo/satori-worktrees/REM-{T01..T06}, detached at round_base 10e6e75, node_modules symlinked. |
