@@ -1,0 +1,145 @@
+# agent-parent-sha: 8bf587835b67c96950aeb70091698bd128be9fb1
+# agent-commit-message: test(eval): bind fixture repair to exact owner ranks
+diff --git a/evals/search-quality/ranking-v3-fixture-repair.test.ts b/evals/search-quality/ranking-v3-fixture-repair.test.ts
+index e9c257b4..060bb827 100644
+--- a/evals/search-quality/ranking-v3-fixture-repair.test.ts
++++ b/evals/search-quality/ranking-v3-fixture-repair.test.ts
+@@ -1,4 +1,5 @@
+ import assert from 'node:assert/strict';
++import { spawnSync } from 'node:child_process';
+ import crypto from 'node:crypto';
+ import fs from 'node:fs';
+ import path from 'node:path';
+@@ -10,28 +11,70 @@ function workspaceRoot(): string {
+     return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+ }
+ 
++const EXPECTED_LIMITS = [1, 3, 5, 10, 20] as const;
++
++type OwnerRankVector = readonly [
++    number | null,
++    number | null,
++    number | null,
++    number | null,
++    number | null,
++];
++
++const EXPECTED_OWNER_RANKS: Readonly<Record<string, OwnerRankVector>> = {
++    architecture_discovery: [1, 1, 1, 1, 1],
++    caller_discovery: [1, 1, 1, 1, 1],
++    common_noisy_term: [1, 1, 1, 1, 1],
++    conceptual_behavior: [null, 2, 2, 2, 2],
++    conceptual_where_is: [1, 1, 1, 1, 1],
++    configuration_lookup: [1, 1, 1, 1, 1],
++    exact_literal: [1, 1, 1, 1, 1],
++    generated_interference: [1, 1, 1, 1, 1],
++    known_exact_identifier: [1, 1, 1, 1, 1],
++    known_file_owner: [1, 1, 1, 1, 1],
++    lexical_semantic_disagreement: [1, 1, 1, 1, 1],
++    mixed_identifier_concept: [1, 1, 1, 1, 1],
++    multiple_plausible_owners: [1, 1, 1, 1, 1],
++    partial_identifier: [1, 1, 1, 1, 1],
++    rerank_helps: [1, 1, 1, 1, 1],
++    rerank_should_skip: [1, 1, 1, 1, 1],
++    split_owner_relevant_body: [1, 1, 1, 1, 1],
++    symbol_ownership: [1, 1, 1, 1, 1],
++    test_runtime_ambiguity: [1, 1, 1, 1, 1],
++};
++
+ function readWorkingTreeState(root: string): string {
+-    const paths = [
++    const trackedPaths = [
+         'packages',
+         'scripts',
+         'fixtures/search-quality/v1',
+     ];
++    const result = spawnSync('git', [
++        'ls-files',
++        '--cached',
++        '--others',
++        '--exclude-standard',
++        '-z',
++        '--',
++        ...trackedPaths,
++    ], {
++        cwd: root,
++        maxBuffer: 16 * 1024 * 1024,
++    });
++    assert.equal(result.status, 0, result.stderr?.toString('utf8'));
++
++    const files = (result.stdout ?? Buffer.alloc(0))
++        .toString('utf8')
++        .split('\0')
++        .filter((relativePath) => relativePath.length > 0)
++        .sort();
+     const digest = crypto.createHash('sha256');
+-    const visit = (relativePath: string): void => {
+-        const absolutePath = path.join(root, relativePath);
+-        const stat = fs.statSync(absolutePath);
+-        if (stat.isDirectory()) {
+-            for (const entry of fs.readdirSync(absolutePath).sort()) {
+-                visit(path.join(relativePath, entry));
+-            }
+-            return;
+-        }
++    for (const relativePath of files) {
+         digest.update(relativePath, 'utf8');
+         digest.update('\0', 'utf8');
+-        digest.update(fs.readFileSync(absolutePath));
++        digest.update(fs.readFileSync(path.join(root, relativePath)));
+         digest.update('\n', 'utf8');
+-    };
+-    for (const relativePath of paths) visit(relativePath);
++    }
+     return digest.digest('hex');
+ }
+ 
+@@ -43,7 +86,8 @@ test('repairs_all_three_stale_fixture_seams_without_product_changes', async () =
+         excludeRepositoryPaths: ['evals/search-quality/ranking-v3-fixture-repair.test.ts'],
+     });
+ 
+-    assert.equal(artifact.results.length, artifact.workloadCount * artifact.limits.length);
++    assert.deepEqual(artifact.limits, [...EXPECTED_LIMITS], 'fixture limits changed');
++    assert.equal(artifact.results.length, artifact.workloadCount * EXPECTED_LIMITS.length);
+     assert.deepEqual(
+         [...new Set(artifact.results.map((result) => result.status))],
+         ['ok'],
+@@ -54,19 +98,31 @@ test('repairs_all_three_stale_fixture_seams_without_product_changes', async () =
+         false,
+         'the repaired fixture must establish a verified source state',
+     );
++    assert.deepEqual(
++        [...new Set(artifact.results.map((result) => result.workloadId))].sort(),
++        Object.keys(EXPECTED_OWNER_RANKS).sort(),
++        'the fixed owner-rank authority must cover every workload exactly',
++    );
++    const observedPairs = new Set<string>();
+     for (const result of artifact.results) {
+-        assert.notEqual(
++        const pairKey = `${result.workloadId}:${result.limit}`;
++        assert.equal(observedPairs.has(pairKey), false, `duplicate fixture result ${pairKey}`);
++        observedPairs.add(pairKey);
++        const limitIndex = EXPECTED_LIMITS.indexOf(result.limit as (typeof EXPECTED_LIMITS)[number]);
++        assert.notEqual(limitIndex, -1, `unknown result limit ${result.limit}`);
++        assert.equal(
+             result.ownerRank,
+-            null,
+-            `expected owner missing for ${result.workloadId} at limit ${result.limit}`,
+-        );
+-        assert.ok(
+-            (result.ownerRank ?? Number.POSITIVE_INFINITY) <= result.limit,
+-            `expected owner rank exceeds requested limit for ${result.workloadId} at limit ${result.limit}`,
++            EXPECTED_OWNER_RANKS[result.workloadId]?.[limitIndex],
++            `owner rank changed for ${result.workloadId} at limit ${result.limit}`,
+         );
+         assert.equal(result.budgetChecks.toolCalls, true);
+         assert.equal(result.budgetChecks.responseBytes, true);
+     }
++    assert.equal(
++        observedPairs.size,
++        Object.keys(EXPECTED_OWNER_RANKS).length * EXPECTED_LIMITS.length,
++        'every workload/limit pair must appear exactly once',
++    );
+ 
+     assert.equal(readWorkingTreeState(root), before, 'evaluation must not modify product or fixture files');
+ });
