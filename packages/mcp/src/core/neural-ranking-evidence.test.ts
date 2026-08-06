@@ -43,7 +43,9 @@ test('all_equal_scores_do_not_divide_by_zero', () => {
 });
 
 test('rejects_malformed_responses', () => {
-    assert.throws(() => buildNeuralRankingEvidence({ schemaVersion: 'wrong', orderedCandidates: [] }));
+    assert.throws(() => buildNeuralRankingEvidence(
+        { schemaVersion: 'wrong', orderedCandidates: [] } as unknown as ValidatedRerankResponseV1,
+    ));
     assert.throws(() => buildNeuralRankingEvidence({
         schemaVersion: 'validated_rerank_response_v1',
         orderedCandidates: [],

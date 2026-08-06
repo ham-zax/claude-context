@@ -64,20 +64,25 @@ function normalizedTopToSecondMargin(response: ValidatedRerankResponseV1): numbe
  * and baseline-admission membership. It never reads the qualification
  * registry and never requires an activation receipt.
  */
+type ProviderDerivedGateInput = Extract<NeuralGateInput, { policy: { mode: 'provider_derived' } }>;
+
 export function evaluateNeuralGate(input: NeuralGateInput): NeuralGateDecision {
     if (input.policy.mode === 'disabled') {
         return { decision: 'skip', reason: 'mode_disabled' };
     }
-    if (input.exactControlOwnsResult) {
+    // TypeScript cannot narrow the union through the nested policy discriminant,
+    // so narrow once explicitly after the disabled early return.
+    const providerInput = input as ProviderDerivedGateInput;
+    if (providerInput.exactControlOwnsResult) {
         return { decision: 'skip', reason: 'exact_control' };
     }
-    if (input.policy.providerKey !== input.target.providerKey) {
+    if (providerInput.policy.providerKey !== providerInput.target.providerKey) {
         return { decision: 'fallback_deterministic', reason: 'identity_mismatch' };
     }
-    if (!identityMatches(input.suppliedIdentity, input.target)) {
+    if (!identityMatches(providerInput.suppliedIdentity, providerInput.target)) {
         return { decision: 'fallback_deterministic', reason: 'provider_mismatch' };
     }
-    const response = input.response;
+    const response = providerInput.response;
     if (!response || response.schemaVersion !== 'validated_rerank_response_v1') {
         return { decision: 'fallback_deterministic', reason: 'invalid_response' };
     }
@@ -85,21 +90,21 @@ export function evaluateNeuralGate(input: NeuralGateInput): NeuralGateDecision {
     if (candidateIds.length !== new Set(candidateIds).size) {
         return { decision: 'fallback_deterministic', reason: 'invalid_response' };
     }
-    const admissionIds = new Set(input.baselineAdmissionIds);
+    const admissionIds = new Set(providerInput.baselineAdmissionIds);
     if (candidateIds.some((candidateId) => !admissionIds.has(candidateId))) {
         return { decision: 'fallback_deterministic', reason: 'invalid_response' };
     }
     if (response.orderedCandidates.some((candidate) => !Number.isFinite(candidate.rawScore))) {
         return { decision: 'fallback_deterministic', reason: 'non_finite_score' };
     }
-    if (candidateIds.length < input.policy.minimumCandidates) {
+    if (candidateIds.length < providerInput.policy.minimumCandidates) {
         return { decision: 'skip', reason: 'insufficient_candidates' };
     }
     const margin = normalizedTopToSecondMargin(response);
     if (margin === null) {
         return { decision: 'fallback_deterministic', reason: 'non_finite_score' };
     }
-    if (margin < input.policy.minimumNormalizedTopToSecondMargin) {
+    if (margin < providerInput.policy.minimumNormalizedTopToSecondMargin) {
         return { decision: 'skip', reason: 'insufficient_margin' };
     }
     return { decision: 'apply' };
