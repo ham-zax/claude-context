@@ -26,6 +26,7 @@ const MCP_PACKAGE_VERSION = (
 const CORE_PACKAGE_VERSION = (
     JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "..", "core", "package.json"), "utf8")) as { version: string }
 ).version;
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const [CLI_MAJOR, CLI_MINOR] = CLI_PACKAGE_VERSION.split(".").map((part) => Number.parseInt(part, 10));
 const FUTURE_CLI_VERSION = `${CLI_MAJOR}.${CLI_MINOR + 1}.0`;
 const SOURCE_SERVER_ENTRY = path.resolve(PACKAGE_ROOT, "..", "mcp", "src", "index.ts");
@@ -396,8 +397,8 @@ test("runCli version shows both runtimes when only Core differs", async () => {
     });
     assert.equal(exitCode, 0);
     const stdout = io.read().stdout;
-    assert.match(stdout, /Bundled release: MCP 6\.8\.1 · Core 3\.6\.0/);
-    assert.match(stdout, /Active managed runtime: MCP 6\.8\.1 · Core 3\.5\.0/);
+    assert.match(stdout, new RegExp(`Bundled release: MCP ${escapeRegExp(MCP_PACKAGE_VERSION)} · Core ${escapeRegExp(CORE_PACKAGE_VERSION)}`));
+    assert.match(stdout, new RegExp(`Active managed runtime: MCP ${escapeRegExp(MCP_PACKAGE_VERSION)} · Core ${escapeRegExp("3.5.0")}`));
     assert.match(stdout, /CLI-bundled release and active managed runtime differ\./);
 });
 
