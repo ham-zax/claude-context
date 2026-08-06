@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "ranking_v3_gate_receipt_v1",
+  "gateId": "A_GATE",
+  "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
+  "prerequisiteReceiptIndexSha256": "421ffbd5549b6808fa88ce1f8af4d7a591f16ed1048e232b6c615a2d6fd70409",
+  "resolvedConditions": [
+    {
+      "edgeKind": "hard",
+      "requires": "A1",
+      "authoritySha256": "16a36e86f6fed5d465ff332511a0ce1a863b55d364b25a7cdaa25db19abf9648",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A10",
+      "authoritySha256": "ad0608725cbbdbc36406d149067a32b0a77a524b5fff5183cc76c0d6b7f935b5",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A11H",
+      "authoritySha256": "dab4795bbaffd55a5e327feff273e77f701cf0f516a1830ede550afd2a0947a8",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A11Q",
+      "authoritySha256": "a27a2df37fc070d6aa64b381df0d11b6d51b0e93d5f77c482d1c559a8d40db7f",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A12",
+      "authoritySha256": "91bec90d2f59a91f2e7c08d17b5334af65f58b47672600b8bdb4a44a8b0d81c8",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A2",
+      "authoritySha256": "c8361f9b468e68c86da024270e0949ce139cb704b8d7cce586681b99f3a7ea56",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A3",
+      "authoritySha256": "1398b376fdcce25c5a5399367e76891e85121c010ec919cc243b1a519d95bbc6",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A4",
+      "authoritySha256": "4e808094851fc2eac7a386fc7d64677b34bda5e41d366ec4943233f9e6f2cd63",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A5",
+      "authoritySha256": "ea644b359f0b0abde72ab7dbdc03c7d630537bdd0fd7ca1bbb99d41e7f446eea",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A6",
+      "authoritySha256": "d94791a85f88d5f49c3cc06d5557316cf743d60149820c594f389a1b301ff021",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A7",
+      "authoritySha256": "724f7bdf7e74a5fe64337203fb8b6ccf4adfc2919665e67a81f02e81752c1c97",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A8",
+      "authoritySha256": "553a0fddbb387723578263570e63a83955482ae44f45bac9a90c65ddc058329f",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "A9",
+      "authoritySha256": "06663975f75f189f1d70bd14d8f22df264cd6a5c7575d6875183d0ec76432fbb",
+      "matchedValue": null
+    }
+  ],
+  "verdict": "ready",
+  "receiptSha256": "6a22e1454065ed019b233981fa852a2b8c9d4bd9a6eb3b64bcbd3198e71d3ec9"
+}

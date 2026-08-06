@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "ranking_v3_gate_receipt_v1",
+  "gateId": "B_GATE",
+  "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
+  "prerequisiteReceiptIndexSha256": "421ffbd5549b6808fa88ce1f8af4d7a591f16ed1048e232b6c615a2d6fd70409",
+  "resolvedConditions": [
+    {
+      "edgeKind": "hard",
+      "requires": "B1",
+      "authoritySha256": "5b950e77941d01cdf246d00b1ece546bc95234b77d98b44c9187e2733afa696a",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B2",
+      "authoritySha256": "abdbc2b5cc2c7a519b72bf7a164c58ebf892ab0c2df6468213705cc2f0da8561",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B3",
+      "authoritySha256": "0cd20d37dbaa799d1d2f6f04adbab0b9e958b083f38e06512cdefadd20863f98",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B4",
+      "authoritySha256": "239fd09dd1c48679b74cec2120cd5e448b002c728c05e9b10f2c19f298fbdd57",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B5",
+      "authoritySha256": "5ba2c833c5d65e649e4b4fa4d426223f3300650f874e32c4451d9346ce6469e2",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B6",
+      "authoritySha256": "9d574e1d3c5ed212edee33e2478e5a62cdecc5b5cb365479c4eb99e9d342aa38",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B7",
+      "authoritySha256": "f86ae46d947e2215ce53b1ae840af949b5f686e69ea2f6b7eaf3725619d4303e",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B8",
+      "authoritySha256": "0e1ef51633293b35ad3d62b4e963902899ed8420ddd37063f26b64217e66ad75",
+      "matchedValue": null
+    },
+    {
+      "edgeKind": "hard",
+      "requires": "B9",
+      "authoritySha256": "3ded92c4648c479ce74d18b838a651e02940569dc5840edd87a7d52216256359",
+      "matchedValue": null
+    }
+  ],
+  "verdict": "ready",
+  "receiptSha256": "0ccca13e5f4ab77b055b633a7fd5b1109018baddbedaf06d0f189765e614329e"
+}
