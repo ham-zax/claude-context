@@ -88,11 +88,11 @@ export interface SearchExecutionSemanticCandidateTraceV2 {
 export interface SearchExecutionRankingV3EvidenceEnvelopeV1 {
     schemaVersion: 'search_execution_ranking_v3_evidence_v1';
     mode: 'enabled' | 'disabled';
-    admittedCandidateIds: string[];
-    semanticPasses: Array<{
+    admittedCandidateIds: readonly string[];
+    semanticPasses: readonly {
         passId: string;
-        candidateTraces: SearchExecutionSemanticCandidateTraceV2[];
-    }>;
+        candidateTraces: readonly SearchExecutionSemanticCandidateTraceV2[];
+    }[];
 }
 
 export function deliverSearchExecutionRankingV3Evidence<T>(
