@@ -24,7 +24,6 @@ import {
     bindTrackOHeldOutOpening,
     readTrackOHeldOutOpeningRecord,
 } from "./satori-track-o-heldout-opening.mjs";
-import { roundTripSurvivalV3Record } from "./satori-search-candidate-capture.mjs";
 
 const CORE_RRF_K = 100;
 const SCORE_TOLERANCE = 1e-12;
@@ -2367,40 +2366,13 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
 }
 
 function usage() {
-    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--held-out-opening <opening.json>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
-}
-
-const SURVIVAL_V3_AUTHORITY_KEYS = ['contractSha256', 'policySha256', 'targetSha256'].sort();
-
-/**
- * B7: survival-v3 replay entry. Every authority digest (training-contract,
- * policy, qualification-target) must match the sealed value supplied by the
- * caller; an unknown, missing, or mismatched digest rejects the replay before
- * any sequence is produced (plan §7.6 B7, §5.6 digest authority).
- */
-export function replaySurvivalV3WithAuthority(recordValue, authorities) {
-    const record = roundTripSurvivalV3Record(recordValue);
-    const authority = requireRecord(authorities, 'SurvivalV3 authorities');
-    requireExactKeys(authority, SURVIVAL_V3_AUTHORITY_KEYS, 'SurvivalV3 authorities');
-    const expected = {
-        contractSha256: requireSha256(authority.contractSha256, 'contractSha256'),
-        policySha256: requireSha256(authority.policySha256, 'policySha256'),
-        targetSha256: requireSha256(authority.targetSha256, 'targetSha256'),
-    };
-    return {
-        schemaVersion: 'search_candidate_survival_v3_replay_v1',
-        candidateId: record.candidateId,
-        queryId: record.queryId,
-        admissionRank: record.admissionRank,
-        authorities: expected,
-        sequence: [record.candidateId],
-        sourcePayloadAbsent: true,
-    };
+    return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--authorities <authorities.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--held-out-opening <opening.json>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
 }
 
 export function main(argv = process.argv.slice(2)) {
     let captureFile;
     let policyFile;
+    let authoritiesFile;
     let split;
     let taskPrefix;
     let heldOutOpeningFile;
@@ -2410,6 +2382,7 @@ export function main(argv = process.argv.slice(2)) {
     for (let index = 0; index < argv.length; index += 1) {
         if (argv[index] === "--capture") captureFile = path.resolve(argv[++index]);
         else if (argv[index] === "--policy-file") policyFile = path.resolve(argv[++index]);
+        else if (argv[index] === "--authorities") authoritiesFile = path.resolve(argv[++index]);
         else if (argv[index] === "--split") split = argv[++index];
         else if (argv[index] === "--task-prefix") taskPrefix = argv[++index];
         else if (argv[index] === "--held-out-opening") {
@@ -2454,10 +2427,28 @@ export function main(argv = process.argv.slice(2)) {
     const replay = heldOutOpening
         ? bindTrackOHeldOutOpening(builtReplay, heldOutOpening)
         : builtReplay;
-    const serialized = `${JSON.stringify(replay, null, 2)}\n`;
+    let replayReceipt = replay;
+    if (authoritiesFile) {
+        // B7 digest authority: the sealed vector must be exact-key and
+        // sha256-shaped (unknown digests reject) and the sealed policy digest
+        // must match the digest of the policy actually replayed.
+        const supplied = parseRankingV3ReplayAuthorities(
+            JSON.parse(fs.readFileSync(authoritiesFile, "utf8")),
+        );
+        const observed = parseRankingV3ReplayAuthorities({
+            contractSha256: supplied.contractSha256,
+            policySha256: replay.policySha256,
+            qualificationTargetSha256: supplied.qualificationTargetSha256,
+        });
+        assertRankingV3ReplayAuthorities(observed, supplied);
+        replayReceipt = { ...replay, authorities: supplied };
+        const { sha256: _ignored, ...unsigned } = replayReceipt;
+        replayReceipt.sha256 = sha256Canonical(unsigned);
+    }
+    const serialized = `${JSON.stringify(replayReceipt, null, 2)}\n`;
     if (outFile) fs.writeFileSync(outFile, serialized);
     else process.stdout.write(serialized);
-    return replay;
+    return replayReceipt;
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
@@ -2470,25 +2461,25 @@ if (invokedPath === REPLAY_SCRIPT_PATH) {
     }
 }
 
-export function assertRankingV3ReplayAuthorities(value, expected) {
+export function parseRankingV3ReplayAuthorities(value) {
     const input = requireRecord(value, "Ranking V3 replay authorities");
     requireExactKeys(input, [
         "contractSha256", "policySha256", "qualificationTargetSha256",
     ], "Ranking V3 replay authorities");
-    const expectedInput = requireRecord(expected, "Expected Ranking V3 replay authorities");
-    requireExactKeys(expectedInput, [
-        "contractSha256", "policySha256", "qualificationTargetSha256",
-    ], "Expected Ranking V3 replay authorities");
+    return {
+        contractSha256: requireSha256(input.contractSha256, "Ranking V3 replay authorities.contractSha256"),
+        policySha256: requireSha256(input.policySha256, "Ranking V3 replay authorities.policySha256"),
+        qualificationTargetSha256: requireSha256(input.qualificationTargetSha256, "Ranking V3 replay authorities.qualificationTargetSha256"),
+    };
+}
+
+export function assertRankingV3ReplayAuthorities(value, expected) {
+    const input = parseRankingV3ReplayAuthorities(value);
+    const expectedInput = parseRankingV3ReplayAuthorities(expected);
     for (const field of ["contractSha256", "policySha256", "qualificationTargetSha256"]) {
-        const actualDigest = requireSha256(input[field], `Ranking V3 replay authorities.${field}`);
-        const expectedDigest = requireSha256(expectedInput[field], `Expected Ranking V3 replay authorities.${field}`);
-        if (actualDigest !== expectedDigest) {
+        if (input[field] !== expectedInput[field]) {
             throw new Error(`Ranking V3 replay ${field} does not match the sealed authority.`);
         }
     }
-    return {
-        contractSha256: input.contractSha256,
-        policySha256: input.policySha256,
-        qualificationTargetSha256: input.qualificationTargetSha256,
-    };
+    return input;
 }

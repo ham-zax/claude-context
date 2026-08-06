@@ -1578,6 +1578,65 @@ test("replay CLI binds the exact policy-file bytes and executable manifest", () 
     }
 });
 
+test("replay CLI rejects unknown or mismatched sealed authority digests", () => {
+    const suite = taskSuite();
+    suite.tasks[0].workload.invocations[0].args.debugCandidateLimit = 160;
+    const capture = buildSearchCandidateCapture(
+        suite,
+        replayReadyObservationSet(suite),
+        { requireReplayReady: true },
+    );
+    const sha = (character) => character.repeat(64);
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "satori-replay-authority-"));
+    try {
+        const captureFile = path.join(temp, "capture.json");
+        const policyFile = path.join(temp, "contender.json");
+        const outputFile = path.join(temp, "replay.json");
+        const policyBytes = Buffer.from(`${JSON.stringify(contenderPolicy(), null, 2)}\n`, "utf8");
+        fs.writeFileSync(captureFile, JSON.stringify(capture));
+        fs.writeFileSync(policyFile, policyBytes);
+        const sealed = {
+            contractSha256: sha("a"),
+            policySha256: sha256Canonical(JSON.parse(policyBytes.toString("utf8"))),
+            qualificationTargetSha256: sha("c"),
+        };
+        const invoke = (authoritiesFile) => spawnSync(process.execPath, [
+            "--import", "tsx",
+            REPLAY_SCRIPT_PATH,
+            "--capture", captureFile,
+            "--policy-file", policyFile,
+            "--authorities", authoritiesFile,
+            "--out", outputFile,
+        ], { encoding: "utf8" });
+
+        const mismatched = path.join(temp, "authorities-mismatch.json");
+        fs.writeFileSync(mismatched, JSON.stringify({ ...sealed, policySha256: sha("d") }));
+        const mismatchRun = invoke(mismatched);
+        assert.equal(mismatchRun.status, 1);
+        assert.match(mismatchRun.stderr, /sealed authority/);
+
+        const unknown = path.join(temp, "authorities-unknown.json");
+        fs.writeFileSync(unknown, JSON.stringify({ ...sealed, extra: sha("e") }));
+        const unknownRun = invoke(unknown);
+        assert.equal(unknownRun.status, 1);
+
+        const malformed = path.join(temp, "authorities-malformed.json");
+        fs.writeFileSync(malformed, JSON.stringify({ ...sealed, contractSha256: "not-a-digest" }));
+        const malformedRun = invoke(malformed);
+        assert.equal(malformedRun.status, 1);
+
+        const valid = path.join(temp, "authorities.json");
+        fs.writeFileSync(valid, JSON.stringify(sealed));
+        const validRun = invoke(valid);
+        assert.equal(validRun.status, 0, validRun.stderr);
+        const replay = JSON.parse(fs.readFileSync(outputFile, "utf8"));
+        assert.deepEqual(replay.authorities, sealed);
+        assert.match(replay.sha256, /^[0-9a-f]{64}$/);
+    } finally {
+        fs.rmSync(temp, { recursive: true, force: true });
+    }
+});
+
 test("replay executable routes direct invocation through the pinned TypeScript loader", () => {
     const executed = spawnSync(REPLAY_SCRIPT_PATH, ["--help"], {
         encoding: "utf8",
@@ -1738,25 +1797,37 @@ test("candidate capture CLI rejects evaluation artifacts inside the indexed repo
 });
 
 test("survival_v3_round_trips_without_source_payload", async () => {
-    const { buildSearchCandidateSurvivalV3, parseSearchCandidateSurvivalV3 } = await import("./satori-search-candidate-capture.mjs");
-    const sha = (character) => character.repeat(64);
+    const { buildSurvivalV3Record, roundTripSurvivalV3Record } = await import("./satori-search-candidate-capture.mjs");
+    // The canonical structure for schemaVersion 'search_candidate_survival_v3'
+    // is the per-candidate bounded record with sourcePayloadAbsent: true.
     const value = {
-        schemaVersion: "search_candidate_survival_v3",
         queryId: "q1",
-        candidateIds: ["c1", "c2"],
-        evidenceSha256: sha("a"),
-        authorities: {
-            contractSha256: sha("b"),
-            policySha256: sha("c"),
-            qualificationTargetSha256: sha("d"),
-        },
-        stages: [
-            { stage: "post_eligibility", candidateIds: ["c1", "c2"] },
-            { stage: "post_admission", candidateIds: ["c1", "c2"] },
+        candidateId: "c1",
+        admissionRank: 1,
+        baselineScore: 0.5,
+        finalScore: 0.75,
+        passes: [
+            { passId: "attempt:1/primary", rank: 1, contribution: 0.75 },
+            { passId: "attempt:2/primary", rank: 2, contribution: 0.5 },
         ],
     };
-    const captured = buildSearchCandidateSurvivalV3(value);
-    assert.deepEqual(parseSearchCandidateSurvivalV3(JSON.parse(JSON.stringify(captured))), captured);
-    assert.equal(JSON.stringify(captured).includes("source"), false);
-    assert.throws(() => buildSearchCandidateSurvivalV3({ ...value, content: "secret" }), /exactly|source/i);
+    const captured = buildSurvivalV3Record(value);
+    assert.equal(captured.schemaVersion, "search_candidate_survival_v3");
+    assert.equal(captured.sourcePayloadAbsent, true);
+    assert.deepEqual(Object.keys(captured).sort(), [
+        "schemaVersion", "queryId", "candidateId", "admissionRank",
+        "baselineScore", "finalScore", "passes", "sourcePayloadAbsent",
+    ].sort());
+    assert.deepEqual(
+        roundTripSurvivalV3Record(JSON.parse(JSON.stringify(captured))),
+        captured,
+    );
+    assert.throws(
+        () => roundTripSurvivalV3Record({ ...captured, content: "secret" }),
+        /contain exactly/,
+    );
+    assert.throws(
+        () => roundTripSurvivalV3Record({ ...captured, sourcePayloadAbsent: false }),
+        /sourcePayloadAbsent must be true/,
+    );
 });

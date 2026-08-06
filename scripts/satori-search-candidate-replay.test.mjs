@@ -243,7 +243,7 @@ test("candidate replay CLI rejects held-out material without an opening record",
 });
 
 test("replay_rejects_unknown_contract_policy_or_target_digest", async () => {
-    const { assertRankingV3ReplayAuthorities } = await import("./satori-search-candidate-replay.mjs");
+    const { assertRankingV3ReplayAuthorities, parseRankingV3ReplayAuthorities } = await import("./satori-search-candidate-replay.mjs");
     const sha = (character) => character.repeat(64);
     const expected = {
         contractSha256: sha("a"),
@@ -251,10 +251,20 @@ test("replay_rejects_unknown_contract_policy_or_target_digest", async () => {
         qualificationTargetSha256: sha("c"),
     };
     assert.deepEqual(assertRankingV3ReplayAuthorities(expected, expected), expected);
+    assert.deepEqual(parseRankingV3ReplayAuthorities(expected), expected);
     for (const field of Object.keys(expected)) {
         assert.throws(
             () => assertRankingV3ReplayAuthorities({ ...expected, [field]: sha("d") }, expected),
             /sealed authority/i,
         );
     }
+    assert.throws(
+        () => parseRankingV3ReplayAuthorities({ ...expected, extra: sha("e") }),
+        /contain exactly/i,
+    );
+    assert.throws(
+        () => parseRankingV3ReplayAuthorities({ ...expected, contractSha256: "not-a-digest" }),
+        /SHA-256/i,
+    );
+    assert.throws(() => parseRankingV3ReplayAuthorities(null), /must be an object/i);
 });
