@@ -3,7 +3,7 @@ import {
     MANAGE_INDEX_ACTIONS,
     MANAGE_INDEX_STATUS_DETAILS,
 } from "../core/manage-types.js";
-import { WorkspaceAuthorizationError } from "../core/session-workspace-policy.js";
+import { AuthorizedWorkspacePath, WorkspaceAuthorizationError } from "../core/session-workspace-policy.js";
 import { requireAbsoluteFilesystemPath } from "../utils.js";
 import {
     McpTool,
@@ -84,8 +84,9 @@ export const manageIndexTool: McpTool = {
                 message: "Tool context has not been bound to an MCP session workspace policy.",
             });
         }
+        let authorizedRoot: AuthorizedWorkspacePath;
         try {
-            workspacePolicy.authorizeRoot(absolutePathResult.absolutePath);
+            authorizedRoot = workspacePolicy.authorizeRoot(absolutePathResult.absolutePath);
         } catch (error) {
             if (error instanceof WorkspaceAuthorizationError) {
                 return manageIndexWorkspaceDenial({
@@ -100,7 +101,7 @@ export const manageIndexTool: McpTool = {
         const statusDetail = parsed.data.detail ?? "summary";
         const input = {
             ...parsed.data,
-            path: absolutePathResult.absolutePath,
+            path: authorizedRoot.canonicalPath,
             ...(parsed.data.action === "status"
                 ? { detail: statusDetail }
                 : {}),

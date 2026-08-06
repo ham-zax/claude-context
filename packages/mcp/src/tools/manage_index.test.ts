@@ -797,3 +797,48 @@ test("symlinked root escape is denied", async () => {
         fs.rmSync(base, { recursive: true, force: true });
     }
 });
+
+test("manage_index passes authorizedRoot.canonicalPath to handlers when path is a symlink inside authorized root", async () => {
+    const capabilities = new CapabilityResolver(buildConfig());
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "satori-manage-canonical-"));
+    const realDir = path.join(base, "real_repo");
+    const linkDir = path.join(base, "symlink_repo");
+    fs.mkdirSync(realDir);
+    fs.symlinkSync(realDir, linkDir);
+    const canonicalRealDir = fs.realpathSync.native(realDir);
+    try {
+        let receivedPath: string | null = null;
+        const ctx = {
+            capabilities,
+            workspacePolicy: buildWorkspacePolicy([base]),
+            toolHandlers: {
+                handleGetIndexingStatus: async (input: { path: string }) => {
+                    receivedPath = input.path;
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify({
+                                tool: "manage_index",
+                                version: 1,
+                                action: "status",
+                                path: input.path,
+                                status: "not_indexed",
+                                reason: "not_indexed",
+                            }),
+                        }],
+                    };
+                },
+            },
+        } as unknown as ToolContext;
+
+        const response = await manageIndexTool.execute({
+            action: "status",
+            path: linkDir,
+        }, ctx);
+
+        assert.equal(response.isError, undefined);
+        assert.equal(receivedPath, canonicalRealDir);
+    } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+    }
+});
