@@ -7,8 +7,15 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 const SHA=/^[a-f0-9]{64}$/;
 const BOUNDARIES=new Set(['R1.0B','R1.6','DB','DC0','DC1','DD','DE','DF','DG','DH','DI']);
-const canonical=v=>Array.isArray(v)?`[${v.map(canonical).join(',')}]`:v&&typeof v==='object'?`{${Object.keys(v).sort().map(k=>`${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`:JSON.stringify(v);
-const digest=v=>crypto.createHash('sha256').update(typeof v==='string'||Buffer.isBuffer(v)?v:canonical(v)).digest('hex');
+export const canonical=v=>Array.isArray(v)?`[${v.map(canonical).join(',')}]`:v&&typeof v==='object'?`{${Object.keys(v).sort().map(k=>`${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`:JSON.stringify(v);
+export const digest=v=>crypto.createHash('sha256').update(typeof v==='string'||Buffer.isBuffer(v)?v:canonical(v)).digest('hex');
+// ONE task-graph digest convention: sha256 over the canonical JSON of the graph object
+// minus its own taskGraphSha256 field (same convention as sealTaskGraphV1/expandPacketGraphV1).
+export function canonicalTaskGraphDigest(graphObject){
+  if(!graphObject||typeof graphObject!=='object'||Array.isArray(graphObject))throw new Error('Task graph must be an object.');
+  const{taskGraphSha256,...unsigned}=graphObject;
+  return digest(unsigned);
+}
 const fieldValue=(obj,field)=>field.split('.').reduce((v,k)=>v?.[k],obj);
 function region(planText){const begin='<!-- BEGIN RANKING_V3_TASK_GRAPH_DECLARATION_V1 -->',end='<!-- END RANKING_V3_TASK_GRAPH_DECLARATION_V1 -->';const a=planText.indexOf(begin),b=planText.indexOf(end);if(a<0||b<0||planText.indexOf(begin,a+1)>=0||planText.indexOf(end,b+1)>=0)throw new Error('Sealed plan must contain exactly one marked graph declaration region.');return planText.slice(a+begin.length,b);}
 function parseTable(marked){const block=/```text\n([\s\S]*?)\n```/.exec(marked)?.[1];if(!block)throw new Error('Marked graph region has no prerequisite table.');const logical=[];for(const raw of block.split(/\r?\n/)){if(!raw.trim())continue;if(/^\s+/.test(raw)&&logical.length){logical[logical.length-1]+=` ${raw.trim()}`;}else logical.push(raw.trim());}return logical.map(line=>{const i=line.indexOf(':');if(i<1)throw new Error(`Invalid prerequisite line: ${line}`);const taskId=line.slice(0,i).trim();const rhs=line.slice(i+1).trim();const requires=rhs==='none'?[]:rhs.split(',').map(v=>v.trim()).filter(Boolean);return{taskId,requires};});}

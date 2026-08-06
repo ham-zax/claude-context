@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildTaskGraphDeclarationV1, activeConditionalPredecessors, validateTaskGraphDeclarationV1, verifyReadyV1 } from './ranking-v3-task-graph.mjs';
+import { buildTaskGraphDeclarationV1, activeConditionalPredecessors, canonicalTaskGraphDigest, validateTaskGraphDeclarationV1, verifyReadyV1 } from './ranking-v3-task-graph.mjs';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const PLAN=path.join(ROOT,'docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md');
 test('declaration_rehashes_plan_and_selected_replay_edges_are_exclusive',()=>{
@@ -19,7 +20,7 @@ test('declaration_rehashes_plan_and_selected_replay_edges_are_exclusive',()=>{
 // (plan SATORI_RANKING_POLICY_V3_PLAN.md, TASK_GRAPH.json taskGraphSha256, CONTRACT_SEAL.json).
 const PLAN_SHA='694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78';
 const GRAPH_SHA='59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511';
-const SEAL_SHA='34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e';
+const SEAL_SHA='9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444';
 const HEAD_SHA='fa3442599f3f6d27bcfba75cade9e599a73d158b';
 const TREE_SHA='d5e230db2d2eaff903b94e9f778bf33263148151';
 const ZERO64='0'.repeat(64);
@@ -52,4 +53,21 @@ test('gate_with_valid_receipts_is_ready_and_binds_index',()=>{
  assert.equal(out.resolvedConditions.length,A_TASKS.length);
  for(const resolved of out.resolvedConditions)assert.equal(resolved.authoritySha256,index[resolved.requires].sha256);
  assert.equal(out.prerequisiteReceiptIndexSha256,digest(index));
+});
+test('canonical_task_graph_digest_matches_committed_graph_self_digest',()=>{
+ const graph=JSON.parse(fs.readFileSync(path.join(ROOT,'evals/search-ranking/ranking-v3-authorities/TASK_GRAPH.json'),'utf8'));
+ assert.equal(canonicalTaskGraphDigest(graph),GRAPH_SHA);
+ assert.equal(canonicalTaskGraphDigest(graph),graph.taskGraphSha256);
+});
+test('canonical_task_graph_digest_differs_from_raw_file_bytes_representation',()=>{
+ const bytes=fs.readFileSync(path.join(ROOT,'evals/search-ranking/ranking-v3-authorities/TASK_GRAPH.json'));
+ const graph=JSON.parse(bytes.toString('utf8'));
+ assert.notEqual(canonicalTaskGraphDigest(graph),digest(bytes));
+});
+test('gate_rejects_receipt_bound_to_file_bytes_task_graph_digest',()=>{
+ const graphPath=path.join(ROOT,'evals/search-ranking/ranking-v3-authorities/TASK_GRAPH.json');
+ const fileBytesDigest=digest(fs.readFileSync(graphPath));
+ assert.notEqual(fileBytesDigest,GRAPH_SHA);
+ const index=validIndex(); index.A1=makeReceipt('A1',{taskGraphSha256:fileBytesDigest});
+ assert.equal(verifyReadyV1({graph:aGateGraph(),nodeId:'A_GATE',receiptIndex:index,contractSealSha256:SEAL_SHA}).verdict,'blocked');
 });

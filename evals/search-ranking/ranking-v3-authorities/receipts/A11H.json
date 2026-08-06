@@ -3,11 +3,11 @@
   "taskId": "A11H",
   "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
   "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-  "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+  "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
   "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
   "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
   "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-heldout-receipts.test.ts",
   "result": "passed",
   "artifactSha256": "812ca109df8475dd4de7ab727824b2ae23ce9feeee4897b63cbe21ddc9300212",
-  "sha256": "42b9720ac7587990fc25a3439e8c1bfcbf57f47a8462f219a103021df035f018"
+  "sha256": "dafbea93b99aab26f262f3a3dde1b2dcf0e1ca6d0563a64c8bd8fca3ab0bf3f5"
 }

@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { canonicalTaskGraphDigest, digest } from './ranking-v3-task-graph.mjs';
 
 const COMMIT = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -36,6 +38,26 @@ function canonicalJson(value) {
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function canonicalSha(value) { return sha256(Buffer.from(canonicalJson(value), 'utf8')); }
 function fileSha(file) { return sha256(fs.readFileSync(file)); }
+// Dispatch-tree digest convention: deterministic function of the dispatch commit only.
+// `git ls-tree -r -z --full-tree <commit>` yields the full tree; each NUL-terminated
+// record is parsed into {mode,type,sha,path} and digested with the R1.T1 canonical digest.
+export function dispatchTreeSha256ForCommit(commit) {
+  requireCommit(commit, 'dispatchCommit');
+  let out;
+  try {
+    out = execFileSync('git', ['ls-tree', '-r', '-z', '--full-tree', commit], { encoding: 'utf8', maxBuffer: 1 << 28 });
+  } catch (error) {
+    throw new Error(`Cannot resolve dispatch commit ${commit}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+  }
+  const records = out.split('\0').filter(Boolean).map((line) => {
+    const tab = line.indexOf('\t');
+    if (tab < 0) throw new Error(`Invalid git ls-tree record: ${line}`);
+    const [mode, type, sha] = line.slice(0, tab).split(' ');
+    if (!mode || !type || !sha) throw new Error(`Invalid git ls-tree record: ${line}`);
+    return { mode, type, sha, path: line.slice(tab + 1) };
+  });
+  return digest(records);
+}
 function assertExactKeys(value, keys, label) {
   const actual = Object.keys(value).sort();
   if (actual.length !== keys.length || actual.some((key,index)=>key!==keys[index])) {
@@ -89,11 +111,15 @@ function resolvedScope(input) {
 export function buildCardManifest(input) {
   requireCommit(input.baselineCommit,'baselineCommit');
   requireCommit(input.dispatchCommit,'dispatchCommit');
-  requireSha(input.dispatchTreeSha256,'dispatchTreeSha256');
+  const dispatchTreeSha256 = input.dispatchTreeSha256 ?? dispatchTreeSha256ForCommit(input.dispatchCommit);
+  requireSha(dispatchTreeSha256,'dispatchTreeSha256');
+  const taskGraphSha256 = input.taskGraphPath
+    ? canonicalTaskGraphDigest(JSON.parse(fs.readFileSync(input.taskGraphPath,'utf8')))
+    : input.taskGraphSha256;
   for (const [key,value] of [
     ['qualificationTargetSha256',input.qualificationTargetSha256],
     ['contractSealSha256',input.contractSealSha256],
-    ['taskGraphSha256',input.taskGraphSha256],
+    ['taskGraphSha256',taskGraphSha256],
     ['previousManifestSha256',input.previousManifestSha256],
   ]) requireSha(value,key,true);
   if (!(input.catalog instanceof Map)) throw new Error('catalog must be a loaded task Map.');
@@ -125,10 +151,10 @@ export function buildCardManifest(input) {
     planSha256: sha256(planBytes),
     baselineCommit: input.baselineCommit,
     dispatchCommit: input.dispatchCommit,
-    dispatchTreeSha256: input.dispatchTreeSha256,
+    dispatchTreeSha256,
     qualificationTargetSha256: input.qualificationTargetSha256,
     contractSealSha256: input.contractSealSha256,
-    taskGraphSha256: input.taskGraphSha256,
+    taskGraphSha256,
     taskGraphExpansionReceipts: structuredClone(input.taskGraphExpansionReceipts ?? []),
     prerequisiteReceipts: structuredClone(input.prerequisiteReceipts ?? []),
     previousManifestSha256: input.previousManifestSha256,
@@ -138,12 +164,16 @@ export function buildCardManifest(input) {
   return { ...unsigned, manifestSha256: canonicalSha(unsigned) };
 }
 
-export function validateCardManifest(manifest,{planPath,catalog}) {
+export function validateCardManifest(manifest,{planPath,catalog,taskGraphPath}={}) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('Card manifest must be an object.');
   const { manifestSha256, ...unsigned } = manifest;
   requireSha(manifestSha256,'manifestSha256');
   if (canonicalSha(unsigned) !== manifestSha256) throw new Error('Card manifest digest mismatch.');
+  requireCommit(manifest.dispatchCommit,'dispatchCommit');
+  requireSha(manifest.dispatchTreeSha256,'dispatchTreeSha256');
+  if (manifest.dispatchTreeSha256 !== dispatchTreeSha256ForCommit(manifest.dispatchCommit)) throw new Error('Card manifest dispatch tree digest mismatch.');
   if (manifest.planSha256 !== fileSha(planPath)) throw new Error('Card manifest plan digest mismatch.');
+  if (taskGraphPath && manifest.taskGraphSha256 !== canonicalTaskGraphDigest(JSON.parse(fs.readFileSync(taskGraphPath,'utf8')))) throw new Error('Card manifest task graph digest mismatch.');
   if (!Array.isArray(manifest.cards) || manifest.cards.length === 0) throw new Error('Card manifest has no cards.');
   const seen = new Set();
   for (const card of manifest.cards) {
@@ -175,17 +205,15 @@ export function main(argv=process.argv.slice(2)) {
   const catalog=loadTaskCatalog(path.resolve(options['catalog-dir']??path.join(root,'round-contracts')));
   const planPath=path.resolve(options.plan??path.join(root,'docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md'));
   if(command==='build'){
-    for(const key of ['scope','baseline-commit','dispatch-commit','dispatch-tree-manifest','out']) if(!options[key]) throw new Error(`build requires --${key}.`);
-    const treeManifestPath=path.resolve(options['dispatch-tree-manifest']);
+    for(const key of ['scope','baseline-commit','dispatch-commit','out']) if(!options[key]) throw new Error(`build requires --${key}.`);
     const expansion=readIndex(options['expansion-receipts']);
     const manifest=buildCardManifest({
       scopeId:options.scope,
       baselineCommit:options['baseline-commit'],
       dispatchCommit:options['dispatch-commit'],
-      dispatchTreeSha256:fileSha(treeManifestPath),
       qualificationTargetSha256:optionalFileDigest(options['qualification-target']),
       contractSealSha256:optionalFileDigest(options['contract-seal']),
-      taskGraphSha256:optionalFileDigest(options['task-graph']),
+      taskGraphPath:options['task-graph']?path.resolve(options['task-graph']):undefined,
       taskGraphExpansionReceipts:expansion,
       prerequisiteReceipts:readIndex(options['prerequisite-receipts']),
       previousManifestSha256:optionalFileDigest(options['previous-manifest']),
@@ -200,7 +228,7 @@ export function main(argv=process.argv.slice(2)) {
   if(command==='verify'){
     if(!options.manifest)throw new Error('verify requires --manifest.');
     const manifest=JSON.parse(fs.readFileSync(path.resolve(options.manifest),'utf8'));
-    validateCardManifest(manifest,{planPath,catalog}); return manifest;
+    validateCardManifest(manifest,{planPath,catalog,taskGraphPath:options['task-graph']?path.resolve(options['task-graph']):undefined}); return manifest;
   }
   throw new Error(`Unknown command '${command??''}'.`);
 }

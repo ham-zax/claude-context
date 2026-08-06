@@ -3,11 +3,11 @@
   "taskId": "A12",
   "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
   "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
-  "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+  "contractSealSha256": "9777e09625b182d1cfbd4711920920dcb3ae3ac49bac4e70a003d1453d385444",
   "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
   "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
   "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-provider-request-v1.test.ts",
   "result": "passed",
   "artifactSha256": "5c2669393a1c844bbbd44ccd4ec4abeaf5172132d2d4f20383e27434cb4c64f7",
-  "sha256": "6eb5ce126c5476c4c3393c7cb812406f1aebf1bce12d289e760e7478bc27778c"
+  "sha256": "847c423f82ec735b6e61de02aec97ce0f6cc580827aae59bf26653d08b8665aa"
 }
