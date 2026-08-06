@@ -1,0 +1,11 @@
+{
+  "evidenceSha256": "89ecec946446f0aeca661c5dbc34a15790243f78a6ccd38c032cc7eb40b3333e",
+  "expectedRedFailure": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/t08-red-base3/scripts/materialize-ranking-v3-corpus.mjs' imported from /tmp/t08-red-base3/scripts/materialize-ranking-v3-corpus.test.mjs",
+  "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+  "observedGreenExitCode": 0,
+  "observedRedExitCode": 1,
+  "redBaseCommit": "b1b6798aeb922d4ab7efd4769b26e4c2d086fd82",
+  "taskId": "B9",
+  "testCommand": "node --test scripts/materialize-ranking-v3-corpus.test.mjs",
+  "testOutputSha256": "22d17c68f7fbc71ad960b8a4f5d0022275049e1a4b9cccc2d676f69fce40d336"
+}

@@ -1,0 +1,11 @@
+{
+  "evidenceSha256": "8d3747af0010c0776e607666aad347f1f427cf1e1b0f3c1e8db9e008e3f8b88f",
+  "expectedRedFailure": "TypeError: (0 , import_semantic_search_service.buildSemanticSearchCandidateTracesV2) is not a function",
+  "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+  "observedGreenExitCode": 0,
+  "observedRedExitCode": 1,
+  "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+  "taskId": "B1",
+  "testCommand": "node --import tsx --test packages/core/src/core/vector-candidate-fusion.ranking-v3.test.ts packages/core/src/core/semantic-search-service.ranking-v3.test.ts",
+  "testOutputSha256": "e08b913d2dc541f9180b72300678f7bc6bbd384a95fd78c66862ac980e815f6e"
+}

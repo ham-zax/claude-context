@@ -1,0 +1,11 @@
+{
+  "evidenceSha256": "c47aefdf315179c873c490e6d56bda49a7015f11a951814e11f541330683ca7b",
+  "expectedRedFailure": "SyntaxError: The requested module './search-execution.js' does not provide an export named 'deliverSearchExecutionRankingV3Evidence'",
+  "greenHeadCommit": "ec8123c63693d7ca59ea93314c5ef75bb7947a3d",
+  "observedGreenExitCode": 0,
+  "observedRedExitCode": 1,
+  "redBaseCommit": "29ee1bc9b8962bbe110b25f7948f37583b105fdf",
+  "taskId": "B5",
+  "testCommand": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-evidence.test.ts",
+  "testOutputSha256": "dbd7fbe4ca72a8a17a2cf1f6df014a6fe66a5df889fbd5a087f317bd643dbd83"
+}
