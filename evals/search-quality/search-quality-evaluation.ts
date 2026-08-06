@@ -14,6 +14,7 @@ import {
     type SymbolRegistryManifest,
 } from '../../packages/core/src/index.js';
 import { ToolHandlers } from '../../packages/mcp/src/core/handlers.js';
+import { MutationLeaseCoordinator } from '../../packages/mcp/src/core/mutation-lease.js';
 import { CapabilityResolver } from '../../packages/mcp/src/core/capabilities.js';
 import type { IndexFingerprint } from '../../packages/mcp/src/config.js';
 
@@ -346,6 +347,7 @@ async function buildNavigationSidecars(input: {
             hash: fileHash,
             language,
             symbolCount: records.length,
+            definitionStatus: 'definitions_present',
         });
         for (const candidate of fileCandidates) {
             const record = records.find((item) => (
@@ -532,6 +534,14 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
     const context = {
         getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
         getTrackedRelativePaths: () => manifest.files.map((file) => file.path),
+        // Hermetic publication authority: the fixture repo has no real index,
+        // so the source-barrier observation is a fixed deterministic identity
+        // (the search pipeline only compares before/after equality of this
+        // value, never its content).
+        getIndexAuthorityObservations: () => ({
+            vector: 'hermetic-vector-authority',
+            navigation: 'hermetic-navigation-authority',
+        }),
         semanticSearch: async (request: { query?: string; retrievalMode?: string; topK?: number }) => runSemanticSearch(request),
         semanticSearchInProvenGeneration: async (
             _receipt: unknown,
@@ -554,20 +564,37 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
             checkedAt: FIXED_NOW,
             thresholdMs: 180_000,
         }),
+        // Hermetic watcher observation: reports the fixture repo as watched
+        // and stable so the search source barrier resolves (the observation
+        // value is only compared for before/after equality, never read).
+        getPreparedReadObservation: () => ({
+            available: true,
+            observation: {
+                freshnessEpoch: 0,
+                watcherState: 'ready',
+            },
+        }),
     } as unknown as EvaluationSyncManager;
 
     const capabilities = new CapabilityResolver({
         name: 'search-quality-evaluation',
         version: '1.0.0',
+        // Hermetic fixture posture: Voyage reranking is considered available
+        // (matches the hermetic voyageKey below); no real network calls are
+        // made because semanticSearch is stubbed by runSemanticSearch.
+        executionProfile: 'connected',
+        networkPolicy: { kind: 'remote-allowed' },
         encoderProvider: 'VoyageAI',
         encoderModel: 'voyage-4-large',
         voyageKey: 'hermetic-test-key',
+        vectorStoreProvider: 'LanceDB',
+        lanceDbPath: '<hermetic-lancedb>',
     });
 
     const sidecarNodes = [...symbolByCandidateId.values()].map((record) => ({
         symbolId: record.symbolInstanceId,
         symbolLabel: record.label,
-        file: record.relativePath,
+        file: record.file,
         language: record.language,
         span: {
             startLine: record.span.startLine,
@@ -629,6 +656,16 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
         () => Date.parse(FIXED_NOW),
         callGraphManager,
         reranker,
+        undefined,
+        undefined,
+        undefined,
+        // Hermetic mutation lease: no lease file exists in the temp state
+        // root, so observe() reports no active mutation and generation 0,
+        // letting the prepared-read authority observation resolve.
+        new MutationLeaseCoordinator({
+            stateDir: path.join(stateRoot, 'mutation-leases'),
+            now: () => Date.parse(FIXED_NOW),
+        }),
     );
     (handlers as unknown as HandlerOverrides).validateCompletionProof = async () => ({
         outcome: 'valid',
