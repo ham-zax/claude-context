@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "ranking_v3_frozen_base_receipt_v1",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "baselineTreeSha256": "1c09b1f2490a155c2f377ead0a73ca760dd4efffd17996dc6dc41e778e3e3781",
+  "evidenceFiles": {
+    "SOURCE_ANCHORS.json": "462d9ae5f42cf983c11e5229e9d7ee304eeee4896e320df5f478ba32cb5369e1",
+    "RUNTIME_CONSTRUCTION_SITES.json": "19d6a76f43d4178ccb04739b69123e3c05b5e355d43fb1360d32d70d9a349fa6",
+    "CONTINUATION_SITES.json": "8b8beebaf9415bd41b9a09f40bf19ad6de8bab217f732aef473456915d040529",
+    "LOCKFILE_AUTHORITY.json": "d89d6bbf2bc9ab2bce74e4698fccbfdbc0ea475e421f86a35be27673fdef5188"
+  },
+  "receiptSha256": "24f8fc3b25a507f2fb218536c25304909474d7160d823fca3bb6feb1357cdd83"
+}

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "ranking_v3_source_anchors_v1",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "baselineTreeSha256": "1c09b1f2490a155c2f377ead0a73ca760dd4efffd17996dc6dc41e778e3e3781",
+  "anchors": [
+    {
+      "file": "packages/mcp/src/core/search-ranking-policy.ts",
+      "symbol": "computeSearchCandidateFinalScore",
+      "line": 392
+    },
+    {
+      "file": "packages/mcp/src/core/search-ranking-policy.ts",
+      "symbol": "SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID",
+      "line": 22
+    },
+    {
+      "file": "packages/mcp/src/core/search-execution.ts",
+      "symbol": "rerankResults",
+      "line": 566
+    },
+    {
+      "file": "packages/mcp/src/core/search-execution.ts",
+      "symbol": "shouldSkipRerankForExactPin",
+      "line": 288
+    },
+    {
+      "file": "packages/core/src/core/vector-candidate-fusion.ts",
+      "symbol": "VECTOR_CANDIDATE_RRF_K_V1",
+      "line": 12
+    },
+    {
+      "file": "packages/mcp/src/core/search-constants.ts",
+      "symbol": "SEARCH_RRF_K",
+      "line": 1
+    },
+    {
+      "file": "packages/mcp/src/core/search-constants.ts",
+      "symbol": "SEARCH_RERANK_RRF_K",
+      "line": 21
+    },
+    {
+      "file": "packages/mcp/src/core/search-constants.ts",
+      "symbol": "SEARCH_RERANK_WEIGHT",
+      "line": 22
+    },
+    {
+      "file": "packages/mcp/src/core/search-policy.ts",
+      "symbol": "SEARCH_MIN_CANDIDATES",
+      "line": 11
+    },
+    {
+      "file": "packages/mcp/src/core/search-policy.ts",
+      "symbol": "SEARCH_CANDIDATE_MULTIPLIER",
+      "line": 12
+    },
+    {
+      "file": "packages/mcp/src/core/search-result-set-identity.ts",
+      "symbol": "rankingPolicyIdentity",
+      "line": 37
+    },
+    {
+      "file": "packages/mcp/src/core/handlers.ts",
+      "symbol": "SEARCH_RESULT_SET_STALE",
+      "line": 5260
+    },
+    {
+      "file": "packages/mcp/src/core/handlers.ts",
+      "symbol": "runSearchFrontDoor",
+      "line": 3915
+    },
+    {
+      "file": "packages/mcp/src/config.ts",
+      "symbol": "resolveRerankerProvider",
+      "line": 235
+    },
+    {
+      "file": "packages/mcp/src/core/capabilities.ts",
+      "symbol": "CapabilityResolver",
+      "line": 27
+    },
+    {
+      "file": "packages/mcp/src/core/entrypoint-owner-evidence.ts",
+      "symbol": "entrypointOwnerEvidence",
+      "line": 1
+    },
+    {
+      "file": "packages/mcp/src/core/search-query-planning.ts",
+      "symbol": "buildSearchQueryPlan",
+      "line": 516
+    }
+  ],
+  "sealedAt": "2026-08-06T04:40:00.000Z"
+}

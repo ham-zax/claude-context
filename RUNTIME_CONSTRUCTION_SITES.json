@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "ranking_v3_runtime_construction_sites_v1",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "baselineTreeSha256": "1c09b1f2490a155c2f377ead0a73ca760dd4efffd17996dc6dc41e778e3e3781",
+  "sites": [
+    {
+      "file": "packages/mcp/src/core/handlers.ts",
+      "symbol": "ToolHandlers.constructor",
+      "line": 850
+    },
+    {
+      "file": "packages/mcp/src/core/capabilities.ts",
+      "symbol": "CapabilityResolver.constructor",
+      "line": 33
+    },
+    {
+      "file": "packages/mcp/src/config.ts",
+      "symbol": "resolveRerankerProvider",
+      "line": 235
+    },
+    {
+      "file": "packages/mcp/src/core/search-execution.ts",
+      "symbol": "runSearchFrontDoor",
+      "line": 3915
+    }
+  ],
+  "sealedAt": "2026-08-06T04:40:00.000Z"
+}
