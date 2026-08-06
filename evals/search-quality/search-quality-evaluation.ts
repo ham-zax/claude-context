@@ -348,6 +348,7 @@ async function buildNavigationSidecars(input: {
             hash: fileHash,
             language,
             symbolCount: records.length,
+            definitionStatus: 'definitions_present',
         });
         for (const candidate of fileCandidates) {
             const record = records.find((item) => (

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,7 +16,7 @@ function readWorkingTreeState(root: string): string {
         'scripts',
         'fixtures/search-quality/v1',
     ];
-    const records: string[] = [];
+    const digest = crypto.createHash('sha256');
     const visit = (relativePath: string): void => {
         const absolutePath = path.join(root, relativePath);
         const stat = fs.statSync(absolutePath);
@@ -25,10 +26,13 @@ function readWorkingTreeState(root: string): string {
             }
             return;
         }
-        records.push(`${relativePath}\0${fs.readFileSync(absolutePath).toString('base64')}`);
+        digest.update(relativePath, 'utf8');
+        digest.update('\0', 'utf8');
+        digest.update(fs.readFileSync(absolutePath));
+        digest.update('\n', 'utf8');
     };
     for (const relativePath of paths) visit(relativePath);
-    return records.join('\n');
+    return digest.digest('hex');
 }
 
 test('repairs_all_three_stale_fixture_seams_without_product_changes', async () => {
