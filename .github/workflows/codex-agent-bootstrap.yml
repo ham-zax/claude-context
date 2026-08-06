@@ -114,7 +114,7 @@ jobs:
       - name: Build workspace core package
         run: pnpm --filter @zokizuan/satori-core build
 
-      - name: Run R0.1A verification and capture logs
+      - name: Run Ranking V3 verification and capture logs
         id: verify
         shell: bash
         run: |
@@ -124,14 +124,33 @@ jobs:
           node --import tsx --test \
             evals/search-quality/ranking-v3-fixture-repair.test.ts \
             2>&1 | tee r0-1a-focused.log
-          focused_status=${PIPESTATUS[0]}
+          fixture_status=${PIPESTATUS[0]}
+
+          script_tests=()
+          while IFS= read -r test_file; do
+            script_tests+=("$test_file")
+          done < <(find scripts -maxdepth 1 -type f \
+            \( -name 'ranking-v3*.test.mjs' -o -name 'verify-ranking-v3*.test.mjs' -o -name 'run-ranking-v3*.test.mjs' \) \
+            -print | sort)
+          if (( ${#script_tests[@]} > 0 )); then
+            node --test "${script_tests[@]}" 2>&1 | tee ranking-v3-script-tests.log
+            script_status=${PIPESTATUS[0]}
+          else
+            : > ranking-v3-script-tests.log
+            script_status=0
+          fi
 
           pnpm eval:search-quality \
             2>&1 | tee r0-1a-eval.log
           eval_status=${PIPESTATUS[0]}
 
+          focused_status=0
+          if [[ "$fixture_status" != "0" || "$script_status" != "0" ]]; then
+            focused_status=1
+          fi
           printf '%s\n' "$focused_status" > r0-1a-focused.status
           printf '%s\n' "$eval_status" > r0-1a-eval.status
+          printf '%s\n' "$script_status" > ranking-v3-script-tests.status
           printf 'focused_status=%s\n' "$focused_status" >> "$GITHUB_OUTPUT"
           printf 'eval_status=%s\n' "$eval_status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -150,6 +169,8 @@ jobs:
             r0-1a-eval.log
             r0-1a-focused.status
             r0-1a-eval.status
+            ranking-v3-script-tests.log
+            ranking-v3-script-tests.status
 
       - name: Publish bootstrap run locator
         if: always()
