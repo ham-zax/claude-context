@@ -3,14 +3,9 @@ import path from "node:path";
 import { z } from "zod";
 import ignore from "ignore";
 import {
-    RootBoundFileError,
-    beginSourceMeasurementObservation,
-    finishSourceMeasurementObservation,
     isLanguageCapabilitySupportedForExtension,
     isLanguageCapabilitySupportedForFilename,
-    recordSourceIo,
     recordSourceProcessing,
-    verifyStableFileObservation,
 } from "@zokizuan/satori-core";
 import {
     McpTool,
@@ -21,10 +16,13 @@ import {
 import { resolveVectorBackedToolContext } from "./provider-context.js";
 import { requireAbsoluteFilesystemPath } from "../utils.js";
 import {
-    openAuthorizedPublishedFile,
     PublishedFileAuthorizationError,
-    type AuthorizedPublishedFile,
 } from "../core/published-file-authorization.js";
+import {
+    AuthorizedSourceReadError,
+    READ_FILE_MAX_BYTES_DEFAULT,
+    readAuthorizedPublishedSource,
+} from "../core/published-source-reader.js";
 import { WorkspaceAuthorizationError } from "../core/session-workspace-policy.js";
 import {
     getChangedFilesForCodebase,
@@ -878,14 +876,34 @@ export const readFileTool: McpTool = {
                 publishedRelativePaths.add(requestedRelativePath);
             }
 
-            let authorized: AuthorizedPublishedFile;
+            const maxBytes = Math.max(1, ctx.readFileMaxBytes ?? READ_FILE_MAX_BYTES_DEFAULT);
+            let sourceBytes: Buffer;
+            let sourceObservation: import("@zokizuan/satori-core").SourceMeasurementObservation | undefined;
             try {
-                authorized = await openAuthorizedPublishedFile({
+                // Publication-bound read through the shared bounded reader: the
+                // same open, byte-ceiling, descriptor read, and stability
+                // verification every navigation tool uses. The reader performs
+                // the source-measurement bookkeeping (observation, io, outcome)
+                // so the read_file ledger contract is unchanged.
+                const sourceRead = await readAuthorizedPublishedSource({
                     workspacePolicy: ctx.workspacePolicy,
                     codebaseRoot: allowedRoot,
                     requestedPath: absolutePath,
                     publishedRelativePaths,
+                    maxBytes,
+                    sourceMeasurement: {
+                        owner: "validation",
+                        filePath: absolutePath,
+                        scanKind: "complete",
+                    },
+                    // Touch the resolved codebase only after the authorized open
+                    // and byte check, so a watcher callback that observes the
+                    // working tree cannot be used to influence the authorization
+                    // decision; the touch still runs before the content read.
+                    onAuthorized: () => touchResolvedCodebaseRoot(absolutePath, ctx),
                 });
+                sourceBytes = sourceRead.bytes;
+                sourceObservation = sourceRead.sourceMeasurementObservation;
             } catch (error) {
                 if (error instanceof PublishedFileAuthorizationError) {
                     return publishedFileAuthorizationDenial(error, absolutePath);
@@ -902,75 +920,27 @@ export const readFileTool: McpTool = {
                         message: error.message,
                     });
                 }
-                throw error;
-            }
-
-            const { handle, codebaseRoot, observedStat } = authorized;
-            const maxBytes = Math.max(1, ctx.readFileMaxBytes ?? 8 * 1024 * 1024);
-            try {
-                // Hard pre-read byte ceiling: deny before allocating a
-                // whole-file buffer or reading any content.
-                if (observedStat.size > maxBytes) {
-                    return readFileAuthorizationDenial({
-                        reason: "file_too_large",
-                        code: "FILE_TOO_LARGE",
-                        path: absolutePath,
-                        maxBytes,
-                        message: `File size ${observedStat.size} exceeds READ_FILE_MAX_BYTES (${maxBytes}).`,
-                    });
-                }
-
-                // Touch the resolved codebase only after the authorized open, so
-                // a watcher callback that observes the working tree cannot be
-                // used to influence the authorization decision.
-                await touchResolvedCodebaseRoot(absolutePath, ctx);
-
-                const sourceObservation = beginSourceMeasurementObservation({
-                    owner: "validation",
-                    filePath: absolutePath,
-                    logicalBytesRequested: observedStat.size,
-                    scanKind: "complete",
-                });
-                let sourceBytes: Buffer;
-                try {
-                    // Read through the authorized descriptor, never by reopening
-                    // the pathname; the handle is bound to the verified file.
-                    sourceBytes = await handle.readFile();
-                    recordSourceIo({
-                        observation: sourceObservation,
-                        startByte: 0,
-                        endByte: sourceBytes.length,
-                        basis: "descriptor_read",
-                    });
-                    finishSourceMeasurementObservation({
-                        observation: sourceObservation,
-                        status: sourceBytes.length === observedStat.size ? "completed" : "partial",
-                    });
-                } catch (error) {
-                    finishSourceMeasurementObservation({
-                        observation: sourceObservation,
-                        status: "failed",
-                    });
-                    throw error;
-                }
-
-                // Verify the stable descriptor/path observation after the read
-                // and before returning content: replacement or truncation during
-                // the read fails closed instead of serving mixed content.
-                try {
-                    await verifyStableFileObservation(handle, absolutePath, codebaseRoot, observedStat);
-                } catch (error) {
-                    if (error instanceof RootBoundFileError) {
+                if (error instanceof AuthorizedSourceReadError) {
+                    if (error.code === "FILE_TOO_LARGE") {
                         return readFileAuthorizationDenial({
-                            reason: "file_replaced",
-                            code: "FILE_REPLACED",
+                            reason: "file_too_large",
+                            code: "FILE_TOO_LARGE",
                             path: absolutePath,
+                            maxBytes,
                             message: error.message,
                         });
                     }
-                    throw error;
+                    return readFileAuthorizationDenial({
+                        reason: "file_replaced",
+                        code: "FILE_REPLACED",
+                        path: absolutePath,
+                        message: error.message,
+                    });
                 }
+                throw error;
+            }
 
+            {
                 const selectorStartedAt = performance.now();
                 let selectorOutcome: "success" | "failed" = "failed";
                 let content: string;
@@ -1135,10 +1105,6 @@ export const readFileTool: McpTool = {
                     text: JSON.stringify(payload, null, 2)
                 }]
             };
-            } finally {
-                // The authorized descriptor is caller-owned; every path after a
-                // successful open must release it (success, denial, and error).
-                await handle.close().catch(() => undefined);
             }
         } catch (error) {
             if (exactRequest) {

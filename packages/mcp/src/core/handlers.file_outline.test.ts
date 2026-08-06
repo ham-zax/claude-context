@@ -3012,3 +3012,89 @@ test('handleFileOutline detects replacement during the read and fails closed', a
         assert.equal(JSON.stringify(payload).includes('REPLACED-SECRET'), false);
     }));
 });
+
+test('handleFileOutline fails closed when the published file exceeds the byte ceiling', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const hugePath = path.join(repoPath, 'src', 'huge.ts');
+        const original = 'export function run() { return true; }\n';
+        fs.writeFileSync(hugePath, original, 'utf8');
+        const symbol = createTestSymbol({
+            file: 'src/huge.ts',
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(original),
+            language: 'typescript',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+        // Enlarge the published file beyond the navigation byte ceiling
+        // (READ_FILE_MAX_BYTES default 8 MiB) as a sparse file: the request
+        // must deny before any allocation or content read.
+        fs.truncateSync(hugePath, 64 * 1024 * 1024);
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/huge.ts',
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(response.isError, true);
+        assert.equal(payload.status, 'not_found');
+        assert.equal(payload.outline, null);
+        assert.equal(payload.hasMore, false);
+        assert.equal(payload.file, 'src/huge.ts');
+        assert.match(payload.message, /not readable/i);
+    }));
+});
+
+test('handleFileOutline fails closed when the published file is replaced with same-size content', async () => {
+    await withTempStateRoot(async () => withTempRepo(async (repoPath) => {
+        const filePath = path.join(repoPath, 'src', 'runtime.ts');
+        const original = 'export const A = "AAAA";\n';
+        const sameSize = 'export const B = "BBBB";\n';
+        assert.equal(Buffer.byteLength(original), Buffer.byteLength(sameSize));
+        const symbol = createTestSymbol({
+            file: 'src/runtime.ts',
+            label: 'function run()',
+            name: 'run',
+            qualifiedName: 'run',
+            startLine: 1,
+            endLine: 1,
+            fileHash: sha256Content(original),
+            language: 'typescript',
+            kind: 'function',
+        });
+        await writeTestSymbolRegistry(repoPath, [symbol]);
+        // Same-size rewrite: the registry hash no longer matches the current
+        // source, so the outline must fail closed without serving either the
+        // registry snapshot or the replaced bytes.
+        fs.writeFileSync(filePath, sameSize, 'utf8');
+
+        const handlers = new ToolHandlers(
+            baseContext(),
+            baseSnapshotManager(repoPath) as unknown as HandlerSnapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const response = await handlers.handleFileOutline({
+            path: repoPath,
+            file: 'src/runtime.ts',
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'requires_reindex');
+        assert.equal(payload.reason, 'stale_symbol_ref');
+        assert.equal(payload.outline, null);
+        assert.equal(JSON.stringify(payload).includes('AAAA'), false);
+        assert.equal(JSON.stringify(payload).includes('BBBB'), false);
+    }));
+});

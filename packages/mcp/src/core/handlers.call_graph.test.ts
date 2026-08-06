@@ -3260,3 +3260,130 @@ test('handleCallGraph ordinary published files retain existing graph results', a
         assert.equal(payload.nodes[0]?.symbolId, symbol.symbolInstanceId);
     });
 });
+
+test('handleCallGraph fails closed when the published symbol file exceeds the byte ceiling', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const source = 'export function run() { return true; }\n';
+        const fileHash = sha256Content(source);
+        const symbol = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'run',
+            qualifiedName: 'src.runtime.run',
+            label: 'function run()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [symbol],
+            records: [],
+        });
+        // Enlarge the published symbol file beyond the navigation byte
+        // ceiling (READ_FILE_MAX_BYTES default 8 MiB) as a sparse file: the
+        // request must deny before any allocation or content read.
+        fs.truncateSync(path.join(repoPath, 'src', 'runtime.ts'), 64 * 1024 * 1024);
+
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            getVectorStore: () => ({ listCollections: async () => [] })
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getIndexedCodebases: () => [repoPath],
+            getCodebaseInfo: () => undefined,
+            getCodebaseCallGraphSidecar: () => undefined,
+            ensureFingerprintCompatibilityOnAccess: () => ({
+                allowed: true,
+                changed: false
+            }),
+            saveCodebaseSnapshot: () => undefined,
+            getAllCodebases: () => []
+        } as unknown as HandlerSnapshotManager;
+        const handlers = new ToolHandlers(context, snapshotManager, {} as unknown as HandlerSyncManager, RUNTIME_FINGERPRINT, CAPABILITIES);
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({ outcome: 'valid' });
+
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: symbol.symbolInstanceId,
+                symbolLabel: symbol.label,
+                span: { startLine: 1, endLine: 1 },
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'not_found');
+        assert.equal(payload.supported, false);
+        assert.equal(payload.reason, 'stale_symbol_ref');
+        assert.equal(JSON.stringify(payload).includes(source), false);
+    }));
+});
+
+test('handleCallGraph fails closed when the published symbol file is replaced with same-size content', async () => {
+    await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
+        const original = 'export const A = "AAAA";\n';
+        const sameSize = 'export const B = "BBBB";\n';
+        assert.equal(Buffer.byteLength(original), Buffer.byteLength(sameSize));
+        const fileHash = sha256Content(original);
+        const symbol = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'run',
+            qualifiedName: 'src.runtime.run',
+            label: 'function run()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        await writeTestNavigation({
+            stateRoot,
+            repoPath,
+            symbols: [symbol],
+            records: [],
+        });
+        // Same-size rewrite: the registry hash no longer matches the current
+        // source, so exact call graph navigation must fail closed without
+        // serving either the registry snapshot or the replaced bytes.
+        fs.writeFileSync(path.join(repoPath, 'src', 'runtime.ts'), sameSize, 'utf8');
+
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            getVectorStore: () => ({ listCollections: async () => [] })
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getIndexedCodebases: () => [repoPath],
+            getCodebaseInfo: () => undefined,
+            getCodebaseCallGraphSidecar: () => undefined,
+            ensureFingerprintCompatibilityOnAccess: () => ({
+                allowed: true,
+                changed: false
+            }),
+            saveCodebaseSnapshot: () => undefined,
+            getAllCodebases: () => []
+        } as unknown as HandlerSnapshotManager;
+        const handlers = new ToolHandlers(context, snapshotManager, {} as unknown as HandlerSyncManager, RUNTIME_FINGERPRINT, CAPABILITIES);
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({ outcome: 'valid' });
+
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: symbol.symbolInstanceId,
+                symbolLabel: symbol.label,
+                span: { startLine: 1, endLine: 1 },
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'not_found');
+        assert.equal(payload.supported, false);
+        assert.equal(payload.reason, 'stale_symbol_ref');
+        assert.equal(JSON.stringify(payload).includes('AAAA'), false);
+        assert.equal(JSON.stringify(payload).includes('BBBB'), false);
+    }));
+});

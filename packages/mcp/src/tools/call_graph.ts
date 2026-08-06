@@ -3,11 +3,16 @@ import { requireAbsoluteFilesystemPath } from '../utils.js';
 import {
     McpTool,
     ToolContext,
+    ToolResponse,
     absoluteFilesystemPathSchema,
     formatZodError,
     repoRelativeFilePathSchema,
 } from './types.js';
 import { resolveVectorBackedToolContext } from './provider-context.js';
+import {
+    WorkspaceAuthorizationError,
+    type AuthorizedWorkspacePath,
+} from '../core/session-workspace-policy.js';
 import type { CallGraphSymbolRef } from '../core/search-types.js';
 
 export const callGraphSymbolRefSchema: z.ZodType<CallGraphSymbolRef> = z.object({
@@ -27,6 +32,40 @@ export const callGraphInputSchema = z.object({
     depth: z.number().int().min(1).max(3).default(1).optional().describe('Traversal depth (max 3).'),
     limit: z.number().int().positive().default(20).optional().describe('Maximum number of returned edges.'),
 });
+
+/**
+ * Structured workspace denial per the security hardening contract. The
+ * `reason` is the snake_case form of the policy's authorization code, so the
+ * common rejection (ROOT_NOT_AUTHORIZED) renders exactly as documented while
+ * BROAD_ROOT_NOT_ALLOWED / INVALID_WORKSPACE_ROOT / WORKSPACE_POLICY_NOT_BOUND
+ * stay distinguishable to callers. The envelope never carries continuation
+ * handles or frozen result sets from an unauthorized request.
+ */
+function formatWorkspaceAuthorizationError(
+    toolName: string,
+    path: string,
+    error: unknown,
+): ToolResponse {
+    const code = error instanceof WorkspaceAuthorizationError
+        ? error.code
+        : 'WORKSPACE_POLICY_NOT_BOUND';
+    const message = error instanceof Error
+        ? error.message
+        : `${toolName}: ${String(error)}`;
+    return {
+        content: [{
+            type: 'text',
+            text: JSON.stringify({
+                status: 'error',
+                reason: code.toLowerCase(),
+                code,
+                path,
+                message,
+            }),
+        }],
+        isError: true,
+    };
+}
 
 export const callGraphTool: McpTool = {
     name: 'call_graph',
@@ -63,9 +102,39 @@ export const callGraphTool: McpTool = {
             };
         }
 
+        // Session workspace gate: the requested path must be authorized before
+        // provider resolution, telemetry, or the navigation pipeline can run.
+        // An unbound policy fails closed with WORKSPACE_POLICY_NOT_BOUND. The
+        // authorized canonical path is the only path that reaches the
+        // downstream request.
+        const workspacePolicy = ctx.workspacePolicy;
+        if (!workspacePolicy) {
+            return formatWorkspaceAuthorizationError(
+                'call_graph',
+                absolutePathResult.absolutePath,
+                new WorkspaceAuthorizationError(
+                    'WORKSPACE_POLICY_NOT_BOUND',
+                    'Tool context has not been bound to an MCP session workspace policy.',
+                ),
+            );
+        }
+        let authorized: AuthorizedWorkspacePath;
+        try {
+            authorized = workspacePolicy.authorizePath(absolutePathResult.absolutePath);
+        } catch (error) {
+            if (error instanceof WorkspaceAuthorizationError) {
+                return formatWorkspaceAuthorizationError(
+                    'call_graph',
+                    absolutePathResult.absolutePath,
+                    error,
+                );
+            }
+            throw error;
+        }
+
         const input = {
             ...parsed.data,
-            path: absolutePathResult.absolutePath,
+            path: authorized.canonicalPath,
         };
 
         const executionContext = await resolveVectorBackedToolContext(ctx, {

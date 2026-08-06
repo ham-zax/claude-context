@@ -3,11 +3,16 @@ import { requireAbsoluteFilesystemPath } from '../utils.js';
 import {
     McpTool,
     ToolContext,
+    ToolResponse,
     absoluteFilesystemPathSchema,
     formatZodError,
     repoRelativeFilePathSchema,
 } from './types.js';
 import { resolveVectorBackedToolContext } from './provider-context.js';
+import {
+    WorkspaceAuthorizationError,
+    type AuthorizedWorkspacePath,
+} from '../core/session-workspace-policy.js';
 
 const fileOutlineInputSchema = z.object({
     path: absoluteFilesystemPathSchema('ABSOLUTE filesystem path to the indexed codebase root (relative paths are rejected).'),
@@ -41,6 +46,40 @@ const fileOutlineInputSchema = z.object({
     }
 });
 
+/**
+ * Structured workspace denial per the security hardening contract. The
+ * `reason` is the snake_case form of the policy's authorization code, so the
+ * common rejection (ROOT_NOT_AUTHORIZED) renders exactly as documented while
+ * BROAD_ROOT_NOT_ALLOWED / INVALID_WORKSPACE_ROOT / WORKSPACE_POLICY_NOT_BOUND
+ * stay distinguishable to callers. The envelope never carries continuation
+ * handles or frozen result sets from an unauthorized request.
+ */
+function formatWorkspaceAuthorizationError(
+    toolName: string,
+    path: string,
+    error: unknown,
+): ToolResponse {
+    const code = error instanceof WorkspaceAuthorizationError
+        ? error.code
+        : 'WORKSPACE_POLICY_NOT_BOUND';
+    const message = error instanceof Error
+        ? error.message
+        : `${toolName}: ${String(error)}`;
+    return {
+        content: [{
+            type: 'text',
+            text: JSON.stringify({
+                status: 'error',
+                reason: code.toLowerCase(),
+                code,
+                path,
+                message,
+            }),
+        }],
+        isError: true,
+    };
+}
+
 export const fileOutlineTool: McpTool = {
     name: 'file_outline',
     description: () => 'Return a sidecar-backed symbol outline for one file, including call_graph jump handles. Use detail=\"analysis\" for on-demand Python structural metrics or detail=\"relationships\" for generation-bound direct relationship metadata; both require exact canonical symbol identity.',
@@ -65,9 +104,39 @@ export const fileOutlineTool: McpTool = {
             };
         }
 
+        // Session workspace gate: the requested path must be authorized before
+        // provider resolution, telemetry, or the navigation pipeline can run.
+        // An unbound policy fails closed with WORKSPACE_POLICY_NOT_BOUND. The
+        // authorized canonical path is the only path that reaches the
+        // downstream request.
+        const workspacePolicy = ctx.workspacePolicy;
+        if (!workspacePolicy) {
+            return formatWorkspaceAuthorizationError(
+                'file_outline',
+                absolutePathResult.absolutePath,
+                new WorkspaceAuthorizationError(
+                    'WORKSPACE_POLICY_NOT_BOUND',
+                    'Tool context has not been bound to an MCP session workspace policy.',
+                ),
+            );
+        }
+        let authorized: AuthorizedWorkspacePath;
+        try {
+            authorized = workspacePolicy.authorizePath(absolutePathResult.absolutePath);
+        } catch (error) {
+            if (error instanceof WorkspaceAuthorizationError) {
+                return formatWorkspaceAuthorizationError(
+                    'file_outline',
+                    absolutePathResult.absolutePath,
+                    error,
+                );
+            }
+            throw error;
+        }
+
         const input = {
             ...parsed.data,
-            path: absolutePathResult.absolutePath,
+            path: authorized.canonicalPath,
         };
 
         const executionContext = await resolveVectorBackedToolContext(ctx, {
