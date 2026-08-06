@@ -1,0 +1,324 @@
+mcp/src/core/rerank-evidence.ts
++++ b/packages/mcp/src/core/rerank-evidence.ts
+@@ -1,9 +1,27 @@
+ export interface ValidatedRerankResponseV1 {
+     schemaVersion: 'validated_rerank_response_v1';
+-    orderedCandidates: Array<{ candidateId: string; rawScore: number }>;
++    providerKey: string;
++    rerankerIdentity: string;
++    rerankerProjectionIdentity: string;
++    providerConfigurationDigest: string;
++    providerRequestContractSha256: string;
++    canonicalRequestSha256: string;
++    requestCandidateIds: readonly string[];
++    results: readonly {
++        candidateId: string;
++        rank: number;
++        rawScore: number;
++    }[];
+ }
+ 
+-function assertExactKeys(value: Record<string, unknown>, expected: string[], label: string): void {
++const SHA256 = /^[a-f0-9]{64}$/;
++
++function record(value: unknown, label: string): Record<string, unknown> {
++    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object.`);
++    return value as Record<string, unknown>;
++}
++
++function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+     const actual = Object.keys(value).sort();
+     const sorted = [...expected].sort();
+     if (actual.length !== sorted.length || actual.some((key, index) => key !== sorted[index])) {
+@@ -11,27 +29,66 @@ function assertExactKeys(value: Record<string, unknown>, expected: string[], lab
+     }
+ }
+ 
+-export function parseValidatedRerankResponseV1(value: unknown, expectedCandidateIds: readonly string[]): ValidatedRerankResponseV1 {
+-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('ValidatedRerankResponseV1 must be an object.');
+-    const input = value as Record<string, unknown>;
+-    assertExactKeys(input, ['schemaVersion','orderedCandidates'], 'ValidatedRerankResponseV1');
++function text(value: unknown, label: string): string {
++    if (typeof value !== 'string' || value.length === 0) throw new Error(`${label} must be non-empty.`);
++    return value;
++}
++
++function digest(value: unknown, label: string): string {
++    if (typeof value !== 'string' || !SHA256.test(value)) throw new Error(`${label} must be a lowercase SHA-256 digest.`);
++    return value;
++}
++
++export function parseValidatedRerankResponseV1(
++    value: unknown,
++    expectedCandidateIds: readonly string[],
++): ValidatedRerankResponseV1 {
++    if (new Set(expectedCandidateIds).size !== expectedCandidateIds.length || expectedCandidateIds.length === 0) {
++        throw new Error('Expected candidate IDs must be a non-empty duplicate-free sequence.');
++    }
++    const input = record(value, 'ValidatedRerankResponseV1');
++    exactKeys(input, [
++        'schemaVersion', 'providerKey', 'rerankerIdentity', 'rerankerProjectionIdentity',
++        'providerConfigurationDigest', 'providerRequestContractSha256', 'canonicalRequestSha256',
++        'requestCandidateIds', 'results',
++    ], 'ValidatedRerankResponseV1');
+     if (input.schemaVersion !== 'validated_rerank_response_v1') throw new Error('ValidatedRerankResponseV1 schema mismatch.');
+-    if (!Array.isArray(input.orderedCandidates)) throw new Error('orderedCandidates must be an array.');
+-    if (new Set(expectedCandidateIds).size !== expectedCandidateIds.length) throw new Error('Expected candidate IDs contain duplicates.');
+-    if (input.orderedCandidates.length !== expectedCandidateIds.length) throw new Error('Provider response must be a complete permutation; candidates are missing.');
++    if (!Array.isArray(input.requestCandidateIds)) throw new Error('requestCandidateIds must be an array.');
++    const requestCandidateIds = input.requestCandidateIds.map((entry, index) => text(entry, `requestCandidateIds[${index}]`));
++    if (requestCandidateIds.length !== expectedCandidateIds.length
++        || requestCandidateIds.some((candidateId, index) => candidateId !== expectedCandidateIds[index])) {
++        throw new Error('requestCandidateIds must equal the canonical request candidate sequence.');
++    }
++    if (!Array.isArray(input.results) || input.results.length !== expectedCandidateIds.length) {
++        throw new Error('Provider response must be a complete permutation; candidates are missing.');
++    }
+     const expected = new Set(expectedCandidateIds);
+     const seen = new Set<string>();
+-    const orderedCandidates = input.orderedCandidates.map((item) => {
+-        if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Provider candidate must be an object.');
+-        const candidate = item as Record<string, unknown>;
+-        assertExactKeys(candidate, ['candidateId','rawScore'], 'Provider candidate');
+-        if (typeof candidate.candidateId !== 'string' || candidate.candidateId.length === 0) throw new Error('candidateId must be non-empty.');
+-        if (!expected.has(candidate.candidateId)) throw new Error(`Foreign provider candidate '${candidate.candidateId}'.`);
+-        if (seen.has(candidate.candidateId)) throw new Error(`Duplicate provider candidate '${candidate.candidateId}'.`);
+-        if (typeof candidate.rawScore !== 'number' || !Number.isFinite(candidate.rawScore)) throw new Error('Provider rawScore must be finite.');
+-        seen.add(candidate.candidateId);
+-        return { candidateId: candidate.candidateId, rawScore: candidate.rawScore };
++    const results = input.results.map((entry, index) => {
++        const result = record(entry, `results[${index}]`);
++        exactKeys(result, ['candidateId', 'rank', 'rawScore'], `results[${index}]`);
++        const candidateId = text(result.candidateId, `results[${index}].candidateId`);
++        if (!expected.has(candidateId)) throw new Error(`Foreign provider candidate '${candidateId}'.`);
++        if (seen.has(candidateId)) throw new Error(`Duplicate provider candidate '${candidateId}'.`);
++        if (!Number.isSafeInteger(result.rank) || result.rank !== index + 1) {
++            throw new Error('Provider result ranks must be one-based, contiguous, and agree with array position.');
++        }
++        if (typeof result.rawScore !== 'number' || !Number.isFinite(result.rawScore)) {
++            throw new Error('Provider rawScore must be finite.');
++        }
++        seen.add(candidateId);
++        return { candidateId, rank: result.rank, rawScore: result.rawScore };
+     });
+     if (seen.size !== expected.size) throw new Error('Provider response is incomplete.');
+-    return { schemaVersion: 'validated_rerank_response_v1', orderedCandidates };
++    return {
++        schemaVersion: 'validated_rerank_response_v1',
++        providerKey: text(input.providerKey, 'providerKey'),
++        rerankerIdentity: text(input.rerankerIdentity, 'rerankerIdentity'),
++        rerankerProjectionIdentity: text(input.rerankerProjectionIdentity, 'rerankerProjectionIdentity'),
++        providerConfigurationDigest: digest(input.providerConfigurationDigest, 'providerConfigurationDigest'),
++        providerRequestContractSha256: digest(input.providerRequestContractSha256, 'providerRequestContractSha256'),
++        canonicalRequestSha256: digest(input.canonicalRequestSha256, 'canonicalRequestSha256'),
++        requestCandidateIds,
++        results,
++    };
+ }
+diff --git a/packages/mcp/src/core/search-execution.ts b/packages/mcp/src/core/search-execution.ts
+index 9b77bf1..ba03b56 100644
+--- a/packages/mcp/src/core/search-execution.ts
++++ b/packages/mcp/src/core/search-execution.ts
+@@ -793,7 +793,10 @@ export async function runSearchExecution(
+     let attemptsUsed = 0;
+     const searchWarningsSet = new Set<string>();
+     const semanticPassFailures: SemanticPassFailureDiagnostic[] = [];
+-    const rankingV3SemanticPasses: SearchExecutionRankingV3EvidenceEnvelopeV1['semanticPasses'] = [];
++    const rankingV3SemanticPasses: Array<{
++        passId: string;
++        candidateTraces: SearchExecutionSemanticCandidateTraceV2[];
++    }> = [];
+     const suppressedDirtyPaths = new Set<string>();
+     const representedDirtyPaths = new Set<string>();
+     const passesUsed = new Set<string>();
+diff --git a/packages/mcp/src/core/search-rerank-evidence-retention.test.ts b/packages/mcp/src/core/search-rerank-evidence-retention.test.ts
+index 4be8eed..cb8a287 100644
+--- a/packages/mcp/src/core/search-rerank-evidence-retention.test.ts
++++ b/packages/mcp/src/core/search-rerank-evidence-retention.test.ts
+@@ -18,19 +18,26 @@ test('retains_one_complete_raw_validated_response_without_normalization', () =>
+         requestCandidateIds: ['c1', 'c2', 'c3'],
+         response: {
+             schemaVersion: 'validated_rerank_response_v1',
+-            orderedCandidates: [
+-                { candidateId: 'c2', rawScore: 10 },
+-                { candidateId: 'c1', rawScore: 8 },
+-                { candidateId: 'c3', rawScore: -1 },
++            providerKey: 'provider-a',
++            rerankerIdentity: 'reranker-a',
++            rerankerProjectionIdentity: 'projection-a',
++            providerConfigurationDigest: sha('a'),
++            providerRequestContractSha256: sha('b'),
++            canonicalRequestSha256: sha('d'),
++            requestCandidateIds: ['c1', 'c2', 'c3'],
++            results: [
++                { candidateId: 'c2', rank: 1, rawScore: 10 },
++                { candidateId: 'c1', rank: 2, rawScore: 8 },
++                { candidateId: 'c3', rank: 3, rawScore: -1 },
+             ],
+         },
+         outcome: { status: 'complete', timeoutMs: 5000, attempts: 1 },
+     });
+ 
+-    assert.deepEqual(retained.response.orderedCandidates, [
+-        { candidateId: 'c2', rawScore: 10 },
+-        { candidateId: 'c1', rawScore: 8 },
+-        { candidateId: 'c3', rawScore: -1 },
++    assert.deepEqual(retained.response.results, [
++        { candidateId: 'c2', rank: 1, rawScore: 10 },
++        { candidateId: 'c1', rank: 2, rawScore: 8 },
++        { candidateId: 'c3', rank: 3, rawScore: -1 },
+     ]);
+     assert.deepEqual(retained.requestCandidateIds, ['c1', 'c2', 'c3']);
+     const serialized = JSON.stringify(retained);
+diff --git a/packages/mcp/src/core/search-rerank-evidence-retention.ts b/packages/mcp/src/core/search-rerank-evidence-retention.ts
+index c74d457..bfa49ab 100644
+--- a/packages/mcp/src/core/search-rerank-evidence-retention.ts
++++ b/packages/mcp/src/core/search-rerank-evidence-retention.ts
+@@ -11,7 +11,7 @@ export interface RawValidatedRerankEvidenceV1 {
+     baselineAdmissionSetSha256: string;
+     canonicalRequestSha256: string;
+     canonicalResponseSha256: string;
+-    requestCandidateIds: string[];
++    requestCandidateIds: readonly string[];
+     response: ValidatedRerankResponseV1;
+     outcome: { status: 'complete'; timeoutMs: number; attempts: number };
+ }
+@@ -65,6 +65,14 @@ export function retainRawValidatedRerankEvidenceV1(value: unknown): RawValidated
+     const requestCandidateIds = input.requestCandidateIds.map((entry, index) => text(entry, `requestCandidateIds[${index}]`));
+     if (new Set(requestCandidateIds).size !== requestCandidateIds.length) throw new Error('requestCandidateIds contains duplicates.');
+     const response = parseValidatedRerankResponseV1(input.response, requestCandidateIds);
++    if (response.providerKey !== input.providerKey
++        || response.rerankerIdentity !== input.rerankerIdentity
++        || response.rerankerProjectionIdentity !== input.rerankerProjectionIdentity
++        || response.providerConfigurationDigest !== input.providerConfigurationDigest
++        || response.providerRequestContractSha256 !== input.providerRequestContractSha256
++        || response.canonicalRequestSha256 !== input.canonicalRequestSha256) {
++        throw new Error('Validated response identities must match retained raw authority fields.');
++    }
+     const outcome = record(input.outcome, 'outcome');
+     exactKeys(outcome, ['attempts', 'status', 'timeoutMs'], 'outcome');
+     if (outcome.status !== 'complete') throw new Error('Only a complete validated response may be retained.');
+diff --git a/packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts b/packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts
+new file mode 100644
+index 0000000..59f8242
+--- /dev/null
++++ b/packages/mcp/src/core/search-result-set-identity.ranking-v3.test.ts
+@@ -0,0 +1,55 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {
++    buildSearchRankedSetBinding,
++    verifySearchRankedSetBinding,
++    type SearchRankedSetBindingInput,
++} from './search-result-set-identity.js';
++
++function input(): SearchRankedSetBindingInput {
++    return {
++        queryPolicyDigest: 'a'.repeat(64),
++        rankingPolicyIdentity: 'search_ranking_policy_v3',
++        rankingPolicyArtifactSha256: 'b'.repeat(64),
++        disclosurePolicyVersion: 'search_disclosure_v1',
++        publicationIdentity: {
++            collectionName: 'repo-generation',
++            marker: { runId: 'run-1' },
++            policyDocumentDigest: 'c'.repeat(64),
++            navigation: { status: 'not_bound' },
++        },
++        preparedObservation: 'prepared-1',
++        sourceObservation: null,
++        rerankerIdentity: { kind: 'disabled', identity: 'reranker_disabled_v1' },
++        rerankerProjectionIdentity: 'not_applicable',
++        orderedResults: [{
++            target: { file: 'src/owner.ts', span: { startLine: 1, endLine: 3 } },
++            displayLabel: 'src/owner.ts',
++            language: 'typescript',
++            score: 1,
++            quality: { owner: 'high', semantic: 'high' },
++            preview: 'export const owner = true;',
++            navigation: { graph: 'missing_symbol' },
++        }],
++        recommendedActions: [null],
++    };
++}
++
++test('continuation_identity_binds_artifact_and_disabled_reranker_identity', () => {
++    const original = input();
++    const binding = buildSearchRankedSetBinding(original);
++    assert.equal(binding.rankingPolicyArtifactSha256, 'b'.repeat(64));
++    assert.equal(verifySearchRankedSetBinding(binding, original), true);
++    assert.equal(verifySearchRankedSetBinding(binding, {
++        ...original,
++        rankingPolicyArtifactSha256: 'd'.repeat(64),
++    }), false);
++    assert.equal(verifySearchRankedSetBinding(binding, {
++        ...original,
++        rerankerIdentity: { kind: 'provider', provider: 'p', model: 'm', profile: 'q' },
++    }), false);
++    assert.throws(() => buildSearchRankedSetBinding({
++        ...original,
++        rankingPolicyArtifactSha256: 'not-a-digest',
++    }), /artifact/i);
++});
+diff --git a/packages/mcp/src/core/search-result-set-identity.ts b/packages/mcp/src/core/search-result-set-identity.ts
+index 212c073..ba50b70 100644
+--- a/packages/mcp/src/core/search-result-set-identity.ts
++++ b/packages/mcp/src/core/search-result-set-identity.ts
+@@ -16,6 +16,10 @@ export type SearchRerankerBindingIdentity =
+         kind: "deterministic_baseline";
+         policy: "B";
+     }>
++    | Readonly<{
++        kind: "disabled";
++        identity: "reranker_disabled_v1";
++    }>
+     | Readonly<{
+         kind: "provider";
+         provider: string;
+@@ -35,6 +39,7 @@ export type SearchPublicationBindingIdentity = Readonly<{
+ export type SearchRankedSetBindingInput = Readonly<{
+     queryPolicyDigest: string;
+     rankingPolicyIdentity: string;
++    rankingPolicyArtifactSha256?: string | null;
+     disclosurePolicyVersion: string;
+     publicationIdentity: SearchPublicationBindingIdentity;
+     preparedObservation: string;
+@@ -49,6 +54,7 @@ export type SearchRankedSetBinding = Readonly<{
+     version: typeof SEARCH_RANKED_SET_BINDING_VERSION;
+     queryPolicyDigest: string;
+     rankingPolicyIdentity: string;
++    rankingPolicyArtifactSha256: string | null;
+     disclosurePolicyVersion: string;
+     publicationIdentity: JsonValue;
+     preparedObservation: string;
+@@ -134,9 +140,15 @@ export function buildSearchRankedSetBinding(
+     }
+     requireIdentityText(input.queryPolicyDigest, "query policy");
+     requireIdentityText(input.rankingPolicyIdentity, "ranking policy");
++    if (input.rankingPolicyArtifactSha256 != null && !/^[a-f0-9]{64}$/.test(input.rankingPolicyArtifactSha256)) {
++        throw new Error("Ranked-set ranking policy artifact identity must be a lowercase SHA-256 digest.");
++    }
+     requireIdentityText(input.disclosurePolicyVersion, "disclosure policy");
+     requireIdentityText(input.preparedObservation, "prepared observation");
+     requireIdentityText(input.rerankerProjectionIdentity, "reranker projection");
++    if (input.rerankerIdentity.kind === "disabled" && input.rerankerIdentity.identity !== "reranker_disabled_v1") {
++        throw new Error("Ranked-set disabled reranker identity is invalid.");
++    }
+     if (input.rerankerIdentity.kind === "provider") {
+         requireIdentityText(input.rerankerIdentity.provider, "reranker provider");
+         requireIdentityText(input.rerankerIdentity.model, "reranker model");
+@@ -154,6 +166,7 @@ export function buildSearchRankedSetBinding(
+         version: SEARCH_RANKED_SET_BINDING_VERSION,
+         queryPolicyDigest: input.queryPolicyDigest,
+         rankingPolicyIdentity: input.rankingPolicyIdentity,
++        rankingPolicyArtifactSha256: input.rankingPolicyArtifactSha256 ?? null,
+         disclosurePolicyVersion: input.disclosurePolicyVersion,
+         publicationIdentity: normalizeJson(input.publicationIdentity),
+         preparedObservation: input.preparedObservation,
+diff --git a/scripts/adjudicate-ranking-lofo.mjs b/scripts/adjudicate-ranking-lofo.mjs
+new file mode 100644
+index 0000000..7db577f
+--- /dev/null
++++ b/scripts/adjudicate-ranking-lofo.mjs
+@@ -0,0 +1,5 @@
++#!/usr/bin/env node
++import crypto from'node:crypto';import fs from'node:fs';import path from'node:path';import process from'node:process';import{fileURLToPath}from'node:url';const canonical=v=>Array.isArray(v)?`[${v.map(canonical).join(',')}]`:v&&typeof v==='object'?`{${Object.keys(v).sort().map(k=>`${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`:JSON.stringify(v);const sha=v=>crypto.createHash('sha2
