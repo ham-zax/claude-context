@@ -1,0 +1,795 @@
+[
+  {
+    "task_id": "E1.gitnexus",
+    "title": "Train LOFO fold residual model for family gitnexus (execute D2 train entrypoint)",
+    "risk": "low",
+    "invariant": "E1.gitnexus executes D2's train entrypoint for exactly one $FOLD_TRAIN_JOB descriptor and emits one mode-neutral ResidualModelV1 whose canonical digest the D3 receipt agrees on; the model never embeds a selected mode.",
+    "owners": [
+      "E1.gitnexus"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2225 (exact command), §7.6 row line 2421 (unmet-precondition/validating assertion), prerequisite edge line 1799 (E1.<familyId>: DE, D6)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "D6 LOFO_JOB_MANIFEST.json $FOLD_TRAIN_JOB train descriptor (future D6 artifact, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "ResidualModelV1 mode-neutral schema (plan §5.3 lines 685-695): schemaVersion ranking_residual_model_v1; no mode/provider fields; produced by D2/E1",
+      "train subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2225): --job $FOLD_TRAIN_JOB --out $TASK_OUTPUT",
+      "$FOLD_TRAIN_JOB: D6 LOFO_JOB_MANIFEST.json train descriptor (plan §7.5 line 2102)"
+    ],
+    "security_boundaries": [
+      "Sealed job barrier: the train entrypoint accepts only the D6-sealed $FOLD_TRAIN_JOB descriptor; missing job or prerequisite digests block the card (plan §7.6 line 2421)",
+      "Mode neutrality: ResidualModelV1 carries no mode or provider fields and is never interpreted as one final artifact under two modes (plan §5.3 lines 603-605)",
+      "Held-out stays closed through Wave E: training consumes the tuning split only; no held-out corpus entry is used"
+    ],
+    "overlap_with": [
+      "FT-D (D2 owns scripts/train-ranking-residual.mjs and ResidualModelV1; D6 emits $FOLD_TRAIN_JOB; E1 executes D2)",
+      "FT-G1 (R1.3 LOFO_FAMILIES.json supplies the six family IDs; R1.5 r1_5_lofo_families graph expansion creates the concrete E1.<familyId> node, plan §7.2 lines 1646-1651)",
+      "FT-G0 (DE dispatch CLI builds the Wave-E card set containing this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2225 (E1.<familyId> | execute D2 | node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2421 (unmet-precondition check: fold train job or prerequisite digests absent; validating assertion: residual model and D3 receipt agree on canonical digest); §5.3 lines 685-695 (ResidualModelV1 mode-neutral); §6.6 lines 1543-1545 (D2/E1 produce mode-neutral ResidualModelV1); §8.7 lines 2472-2477 (every fold has a verified residual model).\nPrerequisite edges (exact prerequisite table, plan line 1799): E1.<familyId>: DE, D6.\nThe concrete node E1.gitnexus is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family gitnexus; no later E-family expansion exists. The six family IDs are gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app (verified in cross-repository-v3.manifest.json repositories[].family for split tuning).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D2 tool test (scripts/train-ranking-residual.test.mjs, plan §7.6 line 2380) is FT-D's RED anchor, not this card's."
+  },
+  {
+    "task_id": "E2.gitnexus",
+    "title": "Score fold contender descriptors for family gitnexus (execute D6 scorer with D7/A12/B9)",
+    "risk": "low",
+    "invariant": "E2.gitnexus executes the D6 fold scorer over exactly one $FOLD_SCORE_JOB descriptor; it seals one disabled FoldContenderDescriptorV1 and, only when R1.0 permits (providerTarget: \"fixed\"), one provider_derived descriptor over the same residual-model digest; every target-permitted descriptor has exactly one score receipt and a derived evidence digest.",
+    "owners": [
+      "E2.gitnexus"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2226 (exact command), §7.6 row line 2422 (unmet-precondition/validating assertion), prerequisite edge line 1800 (E2.<familyId>: E1.<familyId>, B9, D4, D7, A12)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "B9 CORPUS_MANIFEST.json raw provider authority (future B9 artifact, unverifiable-at-base); D7 scorer executable digest (future D7 module, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "FoldContenderDescriptorV1 (plan §5.3 lines 697-713): disabled always; provider_derived only when R1.0 permits; both bind residualModelSha256 + qualificationTargetSha256 (+ providerRequestContractSha256 for provider_derived)",
+      "score subcommand of scripts/score-ranking-fold.mjs (D6-owned executable, plan §7.5 lines 2222/2226): --job $FOLD_SCORE_JOB --out $TASK_OUTPUT",
+      "$FOLD_SCORE_JOB: D6 LOFO_JOB_MANIFEST.json score descriptor (plan §7.5 line 2103)",
+      "Fold score receipt + derived evidence digest per target-permitted descriptor (plan §7.6 line 2422)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: only $FOLD_SCORE_JOB, the B9 raw-provider corpus authority, and the D7 executable digest are accepted; any mismatch blocks the card (plan §7.6 line 2422)",
+      "Provider-derived gating: the provider_derived descriptor is emitted only when R1.0's sealed target has providerTarget: \"fixed\" (plan §6.5 line 1531; §5.3 lines 697-713)",
+      "Descriptors bind the same residual-model digest within the fold; no cross-fold or cross-family descriptor reuse"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/score-ranking-fold.mjs; D7 scorer and its executable digest are prerequisites, plan §7.2 line 1800)",
+      "FT-B (B9 raw provider authority is a prerequisite input, plan §7.2 line 1800)",
+      "FT-G1 (R1.0 providerTarget: \"fixed\" permits the provider_derived descriptor; R1.3 family list supplies ${fid})",
+      "FT-G0 (DE dispatch CLI includes this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2226 (E2.<familyId> | execute D6 scorer with D7/A12/B9 | node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2422 (unmet-precondition check: fold score job, B9 raw authority, or D7 executable digest absent; validating assertion: all target-permitted descriptors have one score receipt and derived evidence digest); §5.3 lines 697-713 (FoldContenderDescriptorV1: disabled + provider_derived only when R1.0 permits); §6.6 lines 1545-1547 (E2 creates and seals one disabled descriptor and, when permitted, one provider-derived descriptor over the same residual-model digest; scores through D7).\nPrerequisite edges (exact prerequisite table, plan line 1800): E2.<familyId>: E1.<familyId>, B9, D4, D7, A12.\nThe concrete node E2.gitnexus is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family gitnexus; no later E-family expansion exists.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/score-ranking-fold.mjs; scripts/score-ranking-fold.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6/D7 tool tests (scripts/score-ranking-fold.test.mjs, plan §7.6 line 2383; provider-slot-permutation.test.ts) are FT-D's RED anchors, not this card's."
+  },
+  {
+    "task_id": "E1.bookmark_ai_organizer",
+    "title": "Train LOFO fold residual model for family bookmark_ai_organizer (execute D2 train entrypoint)",
+    "risk": "low",
+    "invariant": "E1.bookmark_ai_organizer executes D2's train entrypoint for exactly one $FOLD_TRAIN_JOB descriptor and emits one mode-neutral ResidualModelV1 whose canonical digest the D3 receipt agrees on; the model never embeds a selected mode.",
+    "owners": [
+      "E1.bookmark_ai_organizer"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2225 (exact command), §7.6 row line 2421 (unmet-precondition/validating assertion), prerequisite edge line 1799 (E1.<familyId>: DE, D6)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "D6 LOFO_JOB_MANIFEST.json $FOLD_TRAIN_JOB train descriptor (future D6 artifact, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "ResidualModelV1 mode-neutral schema (plan §5.3 lines 685-695): schemaVersion ranking_residual_model_v1; no mode/provider fields; produced by D2/E1",
+      "train subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2225): --job $FOLD_TRAIN_JOB --out $TASK_OUTPUT",
+      "$FOLD_TRAIN_JOB: D6 LOFO_JOB_MANIFEST.json train descriptor (plan §7.5 line 2102)"
+    ],
+    "security_boundaries": [
+      "Sealed job barrier: the train entrypoint accepts only the D6-sealed $FOLD_TRAIN_JOB descriptor; missing job or prerequisite digests block the card (plan §7.6 line 2421)",
+      "Mode neutrality: ResidualModelV1 carries no mode or provider fields and is never interpreted as one final artifact under two modes (plan §5.3 lines 603-605)",
+      "Held-out stays closed through Wave E: training consumes the tuning split only; no held-out corpus entry is used"
+    ],
+    "overlap_with": [
+      "FT-D (D2 owns scripts/train-ranking-residual.mjs and ResidualModelV1; D6 emits $FOLD_TRAIN_JOB; E1 executes D2)",
+      "FT-G1 (R1.3 LOFO_FAMILIES.json supplies the six family IDs; R1.5 r1_5_lofo_families graph expansion creates the concrete E1.<familyId> node, plan §7.2 lines 1646-1651)",
+      "FT-G0 (DE dispatch CLI builds the Wave-E card set containing this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2225 (E1.<familyId> | execute D2 | node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2421 (unmet-precondition check: fold train job or prerequisite digests absent; validating assertion: residual model and D3 receipt agree on canonical digest); §5.3 lines 685-695 (ResidualModelV1 mode-neutral); §6.6 lines 1543-1545 (D2/E1 produce mode-neutral ResidualModelV1); §8.7 lines 2472-2477 (every fold has a verified residual model).\nPrerequisite edges (exact prerequisite table, plan line 1799): E1.<familyId>: DE, D6.\nThe concrete node E1.bookmark_ai_organizer is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family bookmark_ai_organizer; no later E-family expansion exists. The six family IDs are gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app (verified in cross-repository-v3.manifest.json repositories[].family for split tuning).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D2 tool test (scripts/train-ranking-residual.test.mjs, plan §7.6 line 2380) is FT-D's RED anchor, not this card's."
+  },
+  {
+    "task_id": "E2.bookmark_ai_organizer",
+    "title": "Score fold contender descriptors for family bookmark_ai_organizer (execute D6 scorer with D7/A12/B9)",
+    "risk": "low",
+    "invariant": "E2.bookmark_ai_organizer executes the D6 fold scorer over exactly one $FOLD_SCORE_JOB descriptor; it seals one disabled FoldContenderDescriptorV1 and, only when R1.0 permits (providerTarget: \"fixed\"), one provider_derived descriptor over the same residual-model digest; every target-permitted descriptor has exactly one score receipt and a derived evidence digest.",
+    "owners": [
+      "E2.bookmark_ai_organizer"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2226 (exact command), §7.6 row line 2422 (unmet-precondition/validating assertion), prerequisite edge line 1800 (E2.<familyId>: E1.<familyId>, B9, D4, D7, A12)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "B9 CORPUS_MANIFEST.json raw provider authority (future B9 artifact, unverifiable-at-base); D7 scorer executable digest (future D7 module, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "FoldContenderDescriptorV1 (plan §5.3 lines 697-713): disabled always; provider_derived only when R1.0 permits; both bind residualModelSha256 + qualificationTargetSha256 (+ providerRequestContractSha256 for provider_derived)",
+      "score subcommand of scripts/score-ranking-fold.mjs (D6-owned executable, plan §7.5 lines 2222/2226): --job $FOLD_SCORE_JOB --out $TASK_OUTPUT",
+      "$FOLD_SCORE_JOB: D6 LOFO_JOB_MANIFEST.json score descriptor (plan §7.5 line 2103)",
+      "Fold score receipt + derived evidence digest per target-permitted descriptor (plan §7.6 line 2422)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: only $FOLD_SCORE_JOB, the B9 raw-provider corpus authority, and the D7 executable digest are accepted; any mismatch blocks the card (plan §7.6 line 2422)",
+      "Provider-derived gating: the provider_derived descriptor is emitted only when R1.0's sealed target has providerTarget: \"fixed\" (plan §6.5 line 1531; §5.3 lines 697-713)",
+      "Descriptors bind the same residual-model digest within the fold; no cross-fold or cross-family descriptor reuse"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/score-ranking-fold.mjs; D7 scorer and its executable digest are prerequisites, plan §7.2 line 1800)",
+      "FT-B (B9 raw provider authority is a prerequisite input, plan §7.2 line 1800)",
+      "FT-G1 (R1.0 providerTarget: \"fixed\" permits the provider_derived descriptor; R1.3 family list supplies ${fid})",
+      "FT-G0 (DE dispatch CLI includes this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2226 (E2.<familyId> | execute D6 scorer with D7/A12/B9 | node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2422 (unmet-precondition check: fold score job, B9 raw authority, or D7 executable digest absent; validating assertion: all target-permitted descriptors have one score receipt and derived evidence digest); §5.3 lines 697-713 (FoldContenderDescriptorV1: disabled + provider_derived only when R1.0 permits); §6.6 lines 1545-1547 (E2 creates and seals one disabled descriptor and, when permitted, one provider-derived descriptor over the same residual-model digest; scores through D7).\nPrerequisite edges (exact prerequisite table, plan line 1800): E2.<familyId>: E1.<familyId>, B9, D4, D7, A12.\nThe concrete node E2.bookmark_ai_organizer is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family bookmark_ai_organizer; no later E-family expansion exists.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/score-ranking-fold.mjs; scripts/score-ranking-fold.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6/D7 tool tests (scripts/score-ranking-fold.test.mjs, plan §7.6 line 2383; provider-slot-permutation.test.ts) are FT-D's RED anchors, not this card's."
+  },
+  {
+    "task_id": "E1.duas",
+    "title": "Train LOFO fold residual model for family duas (execute D2 train entrypoint)",
+    "risk": "low",
+    "invariant": "E1.duas executes D2's train entrypoint for exactly one $FOLD_TRAIN_JOB descriptor and emits one mode-neutral ResidualModelV1 whose canonical digest the D3 receipt agrees on; the model never embeds a selected mode.",
+    "owners": [
+      "E1.duas"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2225 (exact command), §7.6 row line 2421 (unmet-precondition/validating assertion), prerequisite edge line 1799 (E1.<familyId>: DE, D6)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "D6 LOFO_JOB_MANIFEST.json $FOLD_TRAIN_JOB train descriptor (future D6 artifact, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "ResidualModelV1 mode-neutral schema (plan §5.3 lines 685-695): schemaVersion ranking_residual_model_v1; no mode/provider fields; produced by D2/E1",
+      "train subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2225): --job $FOLD_TRAIN_JOB --out $TASK_OUTPUT",
+      "$FOLD_TRAIN_JOB: D6 LOFO_JOB_MANIFEST.json train descriptor (plan §7.5 line 2102)"
+    ],
+    "security_boundaries": [
+      "Sealed job barrier: the train entrypoint accepts only the D6-sealed $FOLD_TRAIN_JOB descriptor; missing job or prerequisite digests block the card (plan §7.6 line 2421)",
+      "Mode neutrality: ResidualModelV1 carries no mode or provider fields and is never interpreted as one final artifact under two modes (plan §5.3 lines 603-605)",
+      "Held-out stays closed through Wave E: training consumes the tuning split only; no held-out corpus entry is used"
+    ],
+    "overlap_with": [
+      "FT-D (D2 owns scripts/train-ranking-residual.mjs and ResidualModelV1; D6 emits $FOLD_TRAIN_JOB; E1 executes D2)",
+      "FT-G1 (R1.3 LOFO_FAMILIES.json supplies the six family IDs; R1.5 r1_5_lofo_families graph expansion creates the concrete E1.<familyId> node, plan §7.2 lines 1646-1651)",
+      "FT-G0 (DE dispatch CLI builds the Wave-E card set containing this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2225 (E1.<familyId> | execute D2 | node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2421 (unmet-precondition check: fold train job or prerequisite digests absent; validating assertion: residual model and D3 receipt agree on canonical digest); §5.3 lines 685-695 (ResidualModelV1 mode-neutral); §6.6 lines 1543-1545 (D2/E1 produce mode-neutral ResidualModelV1); §8.7 lines 2472-2477 (every fold has a verified residual model).\nPrerequisite edges (exact prerequisite table, plan line 1799): E1.<familyId>: DE, D6.\nThe concrete node E1.duas is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family duas; no later E-family expansion exists. The six family IDs are gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app (verified in cross-repository-v3.manifest.json repositories[].family for split tuning).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D2 tool test (scripts/train-ranking-residual.test.mjs, plan §7.6 line 2380) is FT-D's RED anchor, not this card's."
+  },
+  {
+    "task_id": "E2.duas",
+    "title": "Score fold contender descriptors for family duas (execute D6 scorer with D7/A12/B9)",
+    "risk": "low",
+    "invariant": "E2.duas executes the D6 fold scorer over exactly one $FOLD_SCORE_JOB descriptor; it seals one disabled FoldContenderDescriptorV1 and, only when R1.0 permits (providerTarget: \"fixed\"), one provider_derived descriptor over the same residual-model digest; every target-permitted descriptor has exactly one score receipt and a derived evidence digest.",
+    "owners": [
+      "E2.duas"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2226 (exact command), §7.6 row line 2422 (unmet-precondition/validating assertion), prerequisite edge line 1800 (E2.<familyId>: E1.<familyId>, B9, D4, D7, A12)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "B9 CORPUS_MANIFEST.json raw provider authority (future B9 artifact, unverifiable-at-base); D7 scorer executable digest (future D7 module, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "FoldContenderDescriptorV1 (plan §5.3 lines 697-713): disabled always; provider_derived only when R1.0 permits; both bind residualModelSha256 + qualificationTargetSha256 (+ providerRequestContractSha256 for provider_derived)",
+      "score subcommand of scripts/score-ranking-fold.mjs (D6-owned executable, plan §7.5 lines 2222/2226): --job $FOLD_SCORE_JOB --out $TASK_OUTPUT",
+      "$FOLD_SCORE_JOB: D6 LOFO_JOB_MANIFEST.json score descriptor (plan §7.5 line 2103)",
+      "Fold score receipt + derived evidence digest per target-permitted descriptor (plan §7.6 line 2422)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: only $FOLD_SCORE_JOB, the B9 raw-provider corpus authority, and the D7 executable digest are accepted; any mismatch blocks the card (plan §7.6 line 2422)",
+      "Provider-derived gating: the provider_derived descriptor is emitted only when R1.0's sealed target has providerTarget: \"fixed\" (plan §6.5 line 1531; §5.3 lines 697-713)",
+      "Descriptors bind the same residual-model digest within the fold; no cross-fold or cross-family descriptor reuse"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/score-ranking-fold.mjs; D7 scorer and its executable digest are prerequisites, plan §7.2 line 1800)",
+      "FT-B (B9 raw provider authority is a prerequisite input, plan §7.2 line 1800)",
+      "FT-G1 (R1.0 providerTarget: \"fixed\" permits the provider_derived descriptor; R1.3 family list supplies ${fid})",
+      "FT-G0 (DE dispatch CLI includes this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2226 (E2.<familyId> | execute D6 scorer with D7/A12/B9 | node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2422 (unmet-precondition check: fold score job, B9 raw authority, or D7 executable digest absent; validating assertion: all target-permitted descriptors have one score receipt and derived evidence digest); §5.3 lines 697-713 (FoldContenderDescriptorV1: disabled + provider_derived only when R1.0 permits); §6.6 lines 1545-1547 (E2 creates and seals one disabled descriptor and, when permitted, one provider-derived descriptor over the same residual-model digest; scores through D7).\nPrerequisite edges (exact prerequisite table, plan line 1800): E2.<familyId>: E1.<familyId>, B9, D4, D7, A12.\nThe concrete node E2.duas is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family duas; no later E-family expansion exists.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/score-ranking-fold.mjs; scripts/score-ranking-fold.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6/D7 tool tests (scripts/score-ranking-fold.test.mjs, plan §7.6 line 2383; provider-slot-permutation.test.ts) are FT-D's RED anchors, not this card's."
+  },
+  {
+    "task_id": "E1.vox_infinity",
+    "title": "Train LOFO fold residual model for family vox_infinity (execute D2 train entrypoint)",
+    "risk": "low",
+    "invariant": "E1.vox_infinity executes D2's train entrypoint for exactly one $FOLD_TRAIN_JOB descriptor and emits one mode-neutral ResidualModelV1 whose canonical digest the D3 receipt agrees on; the model never embeds a selected mode.",
+    "owners": [
+      "E1.vox_infinity"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2225 (exact command), §7.6 row line 2421 (unmet-precondition/validating assertion), prerequisite edge line 1799 (E1.<familyId>: DE, D6)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "D6 LOFO_JOB_MANIFEST.json $FOLD_TRAIN_JOB train descriptor (future D6 artifact, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "ResidualModelV1 mode-neutral schema (plan §5.3 lines 685-695): schemaVersion ranking_residual_model_v1; no mode/provider fields; produced by D2/E1",
+      "train subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2225): --job $FOLD_TRAIN_JOB --out $TASK_OUTPUT",
+      "$FOLD_TRAIN_JOB: D6 LOFO_JOB_MANIFEST.json train descriptor (plan §7.5 line 2102)"
+    ],
+    "security_boundaries": [
+      "Sealed job barrier: the train entrypoint accepts only the D6-sealed $FOLD_TRAIN_JOB descriptor; missing job or prerequisite digests block the card (plan §7.6 line 2421)",
+      "Mode neutrality: ResidualModelV1 carries no mode or provider fields and is never interpreted as one final artifact under two modes (plan §5.3 lines 603-605)",
+      "Held-out stays closed through Wave E: training consumes the tuning split only; no held-out corpus entry is used"
+    ],
+    "overlap_with": [
+      "FT-D (D2 owns scripts/train-ranking-residual.mjs and ResidualModelV1; D6 emits $FOLD_TRAIN_JOB; E1 executes D2)",
+      "FT-G1 (R1.3 LOFO_FAMILIES.json supplies the six family IDs; R1.5 r1_5_lofo_families graph expansion creates the concrete E1.<familyId> node, plan §7.2 lines 1646-1651)",
+      "FT-G0 (DE dispatch CLI builds the Wave-E card set containing this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2225 (E1.<familyId> | execute D2 | node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2421 (unmet-precondition check: fold train job or prerequisite digests absent; validating assertion: residual model and D3 receipt agree on canonical digest); §5.3 lines 685-695 (ResidualModelV1 mode-neutral); §6.6 lines 1543-1545 (D2/E1 produce mode-neutral ResidualModelV1); §8.7 lines 2472-2477 (every fold has a verified residual model).\nPrerequisite edges (exact prerequisite table, plan line 1799): E1.<familyId>: DE, D6.\nThe concrete node E1.vox_infinity is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family vox_infinity; no later E-family expansion exists. The six family IDs are gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app (verified in cross-repository-v3.manifest.json repositories[].family for split tuning).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D2 tool test (scripts/train-ranking-residual.test.mjs, plan §7.6 line 2380) is FT-D's RED anchor, not this card's."
+  },
+  {
+    "task_id": "E2.vox_infinity",
+    "title": "Score fold contender descriptors for family vox_infinity (execute D6 scorer with D7/A12/B9)",
+    "risk": "low",
+    "invariant": "E2.vox_infinity executes the D6 fold scorer over exactly one $FOLD_SCORE_JOB descriptor; it seals one disabled FoldContenderDescriptorV1 and, only when R1.0 permits (providerTarget: \"fixed\"), one provider_derived descriptor over the same residual-model digest; every target-permitted descriptor has exactly one score receipt and a derived evidence digest.",
+    "owners": [
+      "E2.vox_infinity"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2226 (exact command), §7.6 row line 2422 (unmet-precondition/validating assertion), prerequisite edge line 1800 (E2.<familyId>: E1.<familyId>, B9, D4, D7, A12)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "B9 CORPUS_MANIFEST.json raw provider authority (future B9 artifact, unverifiable-at-base); D7 scorer executable digest (future D7 module, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "FoldContenderDescriptorV1 (plan §5.3 lines 697-713): disabled always; provider_derived only when R1.0 permits; both bind residualModelSha256 + qualificationTargetSha256 (+ providerRequestContractSha256 for provider_derived)",
+      "score subcommand of scripts/score-ranking-fold.mjs (D6-owned executable, plan §7.5 lines 2222/2226): --job $FOLD_SCORE_JOB --out $TASK_OUTPUT",
+      "$FOLD_SCORE_JOB: D6 LOFO_JOB_MANIFEST.json score descriptor (plan §7.5 line 2103)",
+      "Fold score receipt + derived evidence digest per target-permitted descriptor (plan §7.6 line 2422)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: only $FOLD_SCORE_JOB, the B9 raw-provider corpus authority, and the D7 executable digest are accepted; any mismatch blocks the card (plan §7.6 line 2422)",
+      "Provider-derived gating: the provider_derived descriptor is emitted only when R1.0's sealed target has providerTarget: \"fixed\" (plan §6.5 line 1531; §5.3 lines 697-713)",
+      "Descriptors bind the same residual-model digest within the fold; no cross-fold or cross-family descriptor reuse"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/score-ranking-fold.mjs; D7 scorer and its executable digest are prerequisites, plan §7.2 line 1800)",
+      "FT-B (B9 raw provider authority is a prerequisite input, plan §7.2 line 1800)",
+      "FT-G1 (R1.0 providerTarget: \"fixed\" permits the provider_derived descriptor; R1.3 family list supplies ${fid})",
+      "FT-G0 (DE dispatch CLI includes this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2226 (E2.<familyId> | execute D6 scorer with D7/A12/B9 | node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2422 (unmet-precondition check: fold score job, B9 raw authority, or D7 executable digest absent; validating assertion: all target-permitted descriptors have one score receipt and derived evidence digest); §5.3 lines 697-713 (FoldContenderDescriptorV1: disabled + provider_derived only when R1.0 permits); §6.6 lines 1545-1547 (E2 creates and seals one disabled descriptor and, when permitted, one provider-derived descriptor over the same residual-model digest; scores through D7).\nPrerequisite edges (exact prerequisite table, plan line 1800): E2.<familyId>: E1.<familyId>, B9, D4, D7, A12.\nThe concrete node E2.vox_infinity is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family vox_infinity; no later E-family expansion exists.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/score-ranking-fold.mjs; scripts/score-ranking-fold.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6/D7 tool tests (scripts/score-ranking-fold.test.mjs, plan §7.6 line 2383; provider-slot-permutation.test.ts) are FT-D's RED anchors, not this card's."
+  },
+  {
+    "task_id": "E1.rpc_learner_engine",
+    "title": "Train LOFO fold residual model for family rpc_learner_engine (execute D2 train entrypoint)",
+    "risk": "low",
+    "invariant": "E1.rpc_learner_engine executes D2's train entrypoint for exactly one $FOLD_TRAIN_JOB descriptor and emits one mode-neutral ResidualModelV1 whose canonical digest the D3 receipt agrees on; the model never embeds a selected mode.",
+    "owners": [
+      "E1.rpc_learner_engine"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2225 (exact command), §7.6 row line 2421 (unmet-precondition/validating assertion), prerequisite edge line 1799 (E1.<familyId>: DE, D6)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "D6 LOFO_JOB_MANIFEST.json $FOLD_TRAIN_JOB train descriptor (future D6 artifact, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "ResidualModelV1 mode-neutral schema (plan §5.3 lines 685-695): schemaVersion ranking_residual_model_v1; no mode/provider fields; produced by D2/E1",
+      "train subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2225): --job $FOLD_TRAIN_JOB --out $TASK_OUTPUT",
+      "$FOLD_TRAIN_JOB: D6 LOFO_JOB_MANIFEST.json train descriptor (plan §7.5 line 2102)"
+    ],
+    "security_boundaries": [
+      "Sealed job barrier: the train entrypoint accepts only the D6-sealed $FOLD_TRAIN_JOB descriptor; missing job or prerequisite digests block the card (plan §7.6 line 2421)",
+      "Mode neutrality: ResidualModelV1 carries no mode or provider fields and is never interpreted as one final artifact under two modes (plan §5.3 lines 603-605)",
+      "Held-out stays closed through Wave E: training consumes the tuning split only; no held-out corpus entry is used"
+    ],
+    "overlap_with": [
+      "FT-D (D2 owns scripts/train-ranking-residual.mjs and ResidualModelV1; D6 emits $FOLD_TRAIN_JOB; E1 executes D2)",
+      "FT-G1 (R1.3 LOFO_FAMILIES.json supplies the six family IDs; R1.5 r1_5_lofo_families graph expansion creates the concrete E1.<familyId> node, plan §7.2 lines 1646-1651)",
+      "FT-G0 (DE dispatch CLI builds the Wave-E card set containing this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2225 (E1.<familyId> | execute D2 | node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2421 (unmet-precondition check: fold train job or prerequisite digests absent; validating assertion: residual model and D3 receipt agree on canonical digest); §5.3 lines 685-695 (ResidualModelV1 mode-neutral); §6.6 lines 1543-1545 (D2/E1 produce mode-neutral ResidualModelV1); §8.7 lines 2472-2477 (every fold has a verified residual model).\nPrerequisite edges (exact prerequisite table, plan line 1799): E1.<familyId>: DE, D6.\nThe concrete node E1.rpc_learner_engine is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family rpc_learner_engine; no later E-family expansion exists. The six family IDs are gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app (verified in cross-repository-v3.manifest.json repositories[].family for split tuning).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D2 tool test (scripts/train-ranking-residual.test.mjs, plan §7.6 line 2380) is FT-D's RED anchor, not this card's."
+  },
+  {
+    "task_id": "E2.rpc_learner_engine",
+    "title": "Score fold contender descriptors for family rpc_learner_engine (execute D6 scorer with D7/A12/B9)",
+    "risk": "low",
+    "invariant": "E2.rpc_learner_engine executes the D6 fold scorer over exactly one $FOLD_SCORE_JOB descriptor; it seals one disabled FoldContenderDescriptorV1 and, only when R1.0 permits (providerTarget: \"fixed\"), one provider_derived descriptor over the same residual-model digest; every target-permitted descriptor has exactly one score receipt and a derived evidence digest.",
+    "owners": [
+      "E2.rpc_learner_engine"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2226 (exact command), §7.6 row line 2422 (unmet-precondition/validating assertion), prerequisite edge line 1800 (E2.<familyId>: E1.<familyId>, B9, D4, D7, A12)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "B9 CORPUS_MANIFEST.json raw provider authority (future B9 artifact, unverifiable-at-base); D7 scorer executable digest (future D7 module, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "FoldContenderDescriptorV1 (plan §5.3 lines 697-713): disabled always; provider_derived only when R1.0 permits; both bind residualModelSha256 + qualificationTargetSha256 (+ providerRequestContractSha256 for provider_derived)",
+      "score subcommand of scripts/score-ranking-fold.mjs (D6-owned executable, plan §7.5 lines 2222/2226): --job $FOLD_SCORE_JOB --out $TASK_OUTPUT",
+      "$FOLD_SCORE_JOB: D6 LOFO_JOB_MANIFEST.json score descriptor (plan §7.5 line 2103)",
+      "Fold score receipt + derived evidence digest per target-permitted descriptor (plan §7.6 line 2422)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: only $FOLD_SCORE_JOB, the B9 raw-provider corpus authority, and the D7 executable digest are accepted; any mismatch blocks the card (plan §7.6 line 2422)",
+      "Provider-derived gating: the provider_derived descriptor is emitted only when R1.0's sealed target has providerTarget: \"fixed\" (plan §6.5 line 1531; §5.3 lines 697-713)",
+      "Descriptors bind the same residual-model digest within the fold; no cross-fold or cross-family descriptor reuse"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/score-ranking-fold.mjs; D7 scorer and its executable digest are prerequisites, plan §7.2 line 1800)",
+      "FT-B (B9 raw provider authority is a prerequisite input, plan §7.2 line 1800)",
+      "FT-G1 (R1.0 providerTarget: \"fixed\" permits the provider_derived descriptor; R1.3 family list supplies ${fid})",
+      "FT-G0 (DE dispatch CLI includes this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2226 (E2.<familyId> | execute D6 scorer with D7/A12/B9 | node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2422 (unmet-precondition check: fold score job, B9 raw authority, or D7 executable digest absent; validating assertion: all target-permitted descriptors have one score receipt and derived evidence digest); §5.3 lines 697-713 (FoldContenderDescriptorV1: disabled + provider_derived only when R1.0 permits); §6.6 lines 1545-1547 (E2 creates and seals one disabled descriptor and, when permitted, one provider-derived descriptor over the same residual-model digest; scores through D7).\nPrerequisite edges (exact prerequisite table, plan line 1800): E2.<familyId>: E1.<familyId>, B9, D4, D7, A12.\nThe concrete node E2.rpc_learner_engine is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family rpc_learner_engine; no later E-family expansion exists.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/score-ranking-fold.mjs; scripts/score-ranking-fold.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6/D7 tool tests (scripts/score-ranking-fold.test.mjs, plan §7.6 line 2383; provider-slot-permutation.test.ts) are FT-D's RED anchors, not this card's."
+  },
+  {
+    "task_id": "E1.edge_tts_app",
+    "title": "Train LOFO fold residual model for family edge_tts_app (execute D2 train entrypoint)",
+    "risk": "low",
+    "invariant": "E1.edge_tts_app executes D2's train entrypoint for exactly one $FOLD_TRAIN_JOB descriptor and emits one mode-neutral ResidualModelV1 whose canonical digest the D3 receipt agrees on; the model never embeds a selected mode.",
+    "owners": [
+      "E1.edge_tts_app"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2225 (exact command), §7.6 row line 2421 (unmet-precondition/validating assertion), prerequisite edge line 1799 (E1.<familyId>: DE, D6)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "D6 LOFO_JOB_MANIFEST.json $FOLD_TRAIN_JOB train descriptor (future D6 artifact, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "ResidualModelV1 mode-neutral schema (plan §5.3 lines 685-695): schemaVersion ranking_residual_model_v1; no mode/provider fields; produced by D2/E1",
+      "train subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2225): --job $FOLD_TRAIN_JOB --out $TASK_OUTPUT",
+      "$FOLD_TRAIN_JOB: D6 LOFO_JOB_MANIFEST.json train descriptor (plan §7.5 line 2102)"
+    ],
+    "security_boundaries": [
+      "Sealed job barrier: the train entrypoint accepts only the D6-sealed $FOLD_TRAIN_JOB descriptor; missing job or prerequisite digests block the card (plan §7.6 line 2421)",
+      "Mode neutrality: ResidualModelV1 carries no mode or provider fields and is never interpreted as one final artifact under two modes (plan §5.3 lines 603-605)",
+      "Held-out stays closed through Wave E: training consumes the tuning split only; no held-out corpus entry is used"
+    ],
+    "overlap_with": [
+      "FT-D (D2 owns scripts/train-ranking-residual.mjs and ResidualModelV1; D6 emits $FOLD_TRAIN_JOB; E1 executes D2)",
+      "FT-G1 (R1.3 LOFO_FAMILIES.json supplies the six family IDs; R1.5 r1_5_lofo_families graph expansion creates the concrete E1.<familyId> node, plan §7.2 lines 1646-1651)",
+      "FT-G0 (DE dispatch CLI builds the Wave-E card set containing this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2225 (E1.<familyId> | execute D2 | node scripts/train-ranking-residual.mjs train --job \"$FOLD_TRAIN_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2421 (unmet-precondition check: fold train job or prerequisite digests absent; validating assertion: residual model and D3 receipt agree on canonical digest); §5.3 lines 685-695 (ResidualModelV1 mode-neutral); §6.6 lines 1543-1545 (D2/E1 produce mode-neutral ResidualModelV1); §8.7 lines 2472-2477 (every fold has a verified residual model).\nPrerequisite edges (exact prerequisite table, plan line 1799): E1.<familyId>: DE, D6.\nThe concrete node E1.edge_tts_app is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family edge_tts_app; no later E-family expansion exists. The six family IDs are gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app (verified in cross-repository-v3.manifest.json repositories[].family for split tuning).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D2 tool test (scripts/train-ranking-residual.test.mjs, plan §7.6 line 2380) is FT-D's RED anchor, not this card's."
+  },
+  {
+    "task_id": "E2.edge_tts_app",
+    "title": "Score fold contender descriptors for family edge_tts_app (execute D6 scorer with D7/A12/B9)",
+    "risk": "low",
+    "invariant": "E2.edge_tts_app executes the D6 fold scorer over exactly one $FOLD_SCORE_JOB descriptor; it seals one disabled FoldContenderDescriptorV1 and, only when R1.0 permits (providerTarget: \"fixed\"), one provider_derived descriptor over the same residual-model digest; every target-permitted descriptor has exactly one score receipt and a derived evidence digest.",
+    "owners": [
+      "E2.edge_tts_app"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2226 (exact command), §7.6 row line 2422 (unmet-precondition/validating assertion), prerequisite edge line 1800 (E2.<familyId>: E1.<familyId>, B9, D4, D7, A12)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "B9 CORPUS_MANIFEST.json raw provider authority (future B9 artifact, unverifiable-at-base); D7 scorer executable digest (future D7 module, unverifiable-at-base)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "FoldContenderDescriptorV1 (plan §5.3 lines 697-713): disabled always; provider_derived only when R1.0 permits; both bind residualModelSha256 + qualificationTargetSha256 (+ providerRequestContractSha256 for provider_derived)",
+      "score subcommand of scripts/score-ranking-fold.mjs (D6-owned executable, plan §7.5 lines 2222/2226): --job $FOLD_SCORE_JOB --out $TASK_OUTPUT",
+      "$FOLD_SCORE_JOB: D6 LOFO_JOB_MANIFEST.json score descriptor (plan §7.5 line 2103)",
+      "Fold score receipt + derived evidence digest per target-permitted descriptor (plan §7.6 line 2422)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: only $FOLD_SCORE_JOB, the B9 raw-provider corpus authority, and the D7 executable digest are accepted; any mismatch blocks the card (plan §7.6 line 2422)",
+      "Provider-derived gating: the provider_derived descriptor is emitted only when R1.0's sealed target has providerTarget: \"fixed\" (plan §6.5 line 1531; §5.3 lines 697-713)",
+      "Descriptors bind the same residual-model digest within the fold; no cross-fold or cross-family descriptor reuse"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/score-ranking-fold.mjs; D7 scorer and its executable digest are prerequisites, plan §7.2 line 1800)",
+      "FT-B (B9 raw provider authority is a prerequisite input, plan §7.2 line 1800)",
+      "FT-G1 (R1.0 providerTarget: \"fixed\" permits the provider_derived descriptor; R1.3 family list supplies ${fid})",
+      "FT-G0 (DE dispatch CLI includes this card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2226 (E2.<familyId> | execute D6 scorer with D7/A12/B9 | node scripts/score-ranking-fold.mjs --job \"$FOLD_SCORE_JOB\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2422 (unmet-precondition check: fold score job, B9 raw authority, or D7 executable digest absent; validating assertion: all target-permitted descriptors have one score receipt and derived evidence digest); §5.3 lines 697-713 (FoldContenderDescriptorV1: disabled + provider_derived only when R1.0 permits); §6.6 lines 1545-1547 (E2 creates and seals one disabled descriptor and, when permitted, one provider-derived descriptor over the same residual-model digest; scores through D7).\nPrerequisite edges (exact prerequisite table, plan line 1800): E2.<familyId>: E1.<familyId>, B9, D4, D7, A12.\nThe concrete node E2.edge_tts_app is created by the sealed r1_5_lofo_families graph expansion (plan §7.2 lines 1646-1651) from family edge_tts_app; no later E-family expansion exists.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/score-ranking-fold.mjs; scripts/score-ranking-fold.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6/D7 tool tests (scripts/score-ranking-fold.test.mjs, plan §7.6 line 2383; provider-slot-permutation.test.ts) are FT-D's RED anchors, not this card's."
+  },
+  {
+    "task_id": "E3_INPUT_SEAL",
+    "title": "Seal the E3 input set (execute D6 input seal: E3InputSealV1 with grouped comparator state)",
+    "risk": "low",
+    "invariant": "E3_INPUT_SEAL atomically seals the exact E2 receipt set plus the D1 comparator state at its execution barrier; it always emits exactly one canonical E3InputSealV1 and never emits a terminal E3 receipt.",
+    "owners": [
+      "E3_INPUT_SEAL"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2227 (exact command), §7.6 row line 2423 (unmet-precondition/validating assertion), prerequisite edge line 1801 (E3_INPUT_SEAL: all E2.<familyId>, R1.3), barrier semantics lines 1703-1722",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "E3 consumes the emitted E3InputSealV1 as its only selection input (plan §7.2 line 1718; §7.5 line 2106)",
+      "R1.3 decision contract digest and R1.0 qualification target digest are sealed fields (plan §5.3 lines 676-683)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "E3InputSealV1 (plan §5.3 lines 676-683): schemaVersion ranking_e3_input_seal_v1; qualificationTargetSha256, decisionContractSha256, foldScoreReceiptSha256s (exact E2 receipt set), groupedComparator, sealedAt",
+      "GroupedComparatorInputStateV1 (plan §5.3 lines 664-674): available (with comparatorReceiptSha256) | unavailable_optional | unavailable_required",
+      "seal-inputs subcommand of scripts/adjudicate-ranking-lofo.mjs (D6-owned executable, plan §7.5 lines 2222/2227)",
+      "$E3_INPUT_JOB: D6 E3 input-seal descriptor (plan §7.5 line 2104)"
+    ],
+    "security_boundaries": [
+      "Sealed input barrier: E3_INPUT_SEAL locks the exact E2 receipt set and the D1 comparator state at its execution barrier; a D1 receipt appearing after the barrier is diagnostic only and cannot alter the sealed input set (plan §7.2 lines 1703-1722)",
+      "No terminal receipt: the seal-inputs command emits only E3InputSealV1; it never emits any E3OutcomeReceiptV1 variant (plan §7.2 lines 1718-1719)",
+      "Comparator state is exactly one of available | unavailable_optional | unavailable_required, derived from valid-D1-receipt presence plus the R1.3 groupedComparatorPolicy (plan §7.2 lines 1705-1717; §6.5 lines 1531-1542)"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/adjudicate-ranking-lofo.mjs seal-inputs and the E3 input-seal descriptor; D6 RED test required_comparator_unavailable_is_sealed_then_decided_only_by_e3, plan §7.6 line 2384)",
+      "FT-G1 (R1.3 seals groupedComparatorPolicy required | optional, emits LOFO_FAMILIES.json, and provides the decision contract digest sealed in E3InputSealV1)",
+      "FT-G0 (DE dispatch CLI includes the E3_INPUT_SEAL card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/adjudicate-ranking-lofo.mjs seal-inputs --job \"$E3_INPUT_JOB\" --out \"$TASK_OUTPUT/E3_INPUT_SEAL.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2227 (E3_INPUT_SEAL | execute D6 input seal | node scripts/adjudicate-ranking-lofo.mjs seal-inputs --job \"$E3_INPUT_JOB\" --out \"$TASK_OUTPUT/E3_INPUT_SEAL.json\"); §7.6 execution-card row line 2423 (unmet-precondition check: one E2 receipt absent; validating assertion: exact E2 set is sealed and grouped comparator state is exactly available, unavailable_optional, or unavailable_required; no terminal E3 receipt is emitted); §7.2 lines 1703-1722 (atomic seal semantics, D1 availability mapping, no terminal receipt, post-barrier D1 is diagnostic only); §5.3 lines 664-683 (GroupedComparatorInputStateV1 and E3InputSealV1); §6.5 lines 1531-1542 (R1.3 seals groupedComparatorPolicy; barrier consumes a valid D1 receipt even when optional).\nPrerequisite edges (exact prerequisite table, plan line 1801): E3_INPUT_SEAL: all E2.<familyId>, R1.3.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/adjudicate-ranking-lofo.mjs; scripts/adjudicate-ranking-lofo.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6 RED test required_comparator_unavailable_is_sealed_then_decided_only_by_e3 (scripts/adjudicate-ranking-lofo.test.mjs, plan §7.6 line 2384) is FT-D's anchor and proves the invariant 'input seal records unavailable_required and emits no terminal receipt'."
+  },
+  {
+    "task_id": "E3",
+    "title": "Emit exactly one E3OutcomeReceiptV1 (execute D6 decision)",
+    "risk": "low",
+    "invariant": "E3 emits exactly one of selected_disabled / selected_provider_derived / insufficient_evidence / learned_not_justified; it is the sole authority for all four E3OutcomeReceiptV1 variants and consumes only the sealed E3_INPUT_SEAL.",
+    "owners": [
+      "E3"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2228 (exact command), §7.6 row line 2424 (unmet-precondition/validating assertion), prerequisite edge line 1802 (E3: E3_INPUT_SEAL), sole-authority lines 1718-1722",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "E4 consumes the selected-outcome receipt ($E3_SELECTION_RECEIPT, plan §7.5 line 2108; §7.2 lines 1867-1875)",
+      "E_GATE_SELECTED / E_GATE_INSUFFICIENT / E_GATE_LEARNED_NOT_JUSTIFIED consume the outcome receipt via receipt_outcome edges (plan §7.2 lines 1867-1890)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "E3SelectionReceiptV1 (plan §5.3 lines 617-636): outcome selected_disabled (no providerRequestContractSha256 field) | selected_provider_derived (with providerRequestContractSha256); both carry selectedFoldContenderSha256, qualificationTargetSha256, e3InputSealSha256, decisionContractSha256",
+      "E3InsufficientEvidenceReceiptV1 (plan §5.3 lines 638-646): outcome insufficient_evidence with sealed missingEvidenceCodes entry for the required comparator",
+      "E3LearnedNotJustifiedReceiptV1 (plan §5.3 lines 648-657): outcome learned_not_justified with groupedComparatorReceiptSha256 and materialWinEvidenceSha256",
+      "E3OutcomeReceiptV1 union (plan §5.3 lines 659-662); D6 owns exact-key parsers and canonicalizers for all variants (line 715)",
+      "decide subcommand of scripts/adjudicate-ranking-lofo.mjs (D6-owned executable, plan §7.5 lines 2222/2228): --job $E3_DECISION_JOB --input-seal $E3_INPUT_SEAL --out $TASK_OUTPUT",
+      "$E3_DECISION_JOB: D6 E3 decision descriptor (plan §7.5 line 2105)"
+    ],
+    "security_boundaries": [
+      "Sole selection authority: E3 is the only task that emits any of the four E3OutcomeReceiptV1 variants (plan §7.2 line 1718)",
+      "Exactly one receipt: E3 consumes only the sealed E3_INPUT_SEAL and produces exactly one parsed E3OutcomeReceiptV1 (plan §7.6 line 2424)",
+      "unavailable_required yields E3InsufficientEvidenceReceiptV1 with a sealed missingEvidenceCodes entry (plan §7.2 lines 1720-1722); a material grouped win yields terminal learned_not_justified even when the comparator is optional (plan §6.5 lines 1537-1539)",
+      "Held-out stays closed through Wave E (plan §9.1 lines 2518-2522)"
+    ],
+    "overlap_with": [
+      "FT-D (D6 owns scripts/adjudicate-ranking-lofo.mjs decide and the exact-key parsers for all E3OutcomeReceiptV1 variants, plan §5.3 line 715; D6 RED test line 2384)",
+      "FT-G1 (R1.0 qualification target digest and R1.3 decision contract digest are sealed fields of every E3 receipt)",
+      "FT-G0 (DE dispatch CLI includes the E3 card, plan §7.5 line 2145)"
+    ],
+    "focused_command": "node scripts/adjudicate-ranking-lofo.mjs decide --job \"$E3_DECISION_JOB\" --input-seal \"$E3_INPUT_SEAL\" --out \"$TASK_OUTPUT\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2228 (E3 | execute D6 decision | node scripts/adjudicate-ranking-lofo.mjs decide --job \"$E3_DECISION_JOB\" --input-seal \"$E3_INPUT_SEAL\" --out \"$TASK_OUTPUT\"); §7.6 execution-card row line 2424 (unmet-precondition check: input seal absent; validating assertion: exactly one parsed E3OutcomeReceiptV1 is produced); §7.2 lines 1718-1722 (sole authority; unavailable_required -> E3InsufficientEvidenceReceiptV1 with sealed missingEvidenceCodes); §5.3 lines 617-662 (receipt schemas) and line 715 (D6-owned parsers); §6.5 lines 1537-1542 (material grouped win -> learned_not_justified; later H2 output is diagnostic only); §6.6 lines 1547-1551 (exactly one receipt outcome; only selected outcomes reach E4; terminal outcomes create no E4 and dispatch no Wave F).\nPrerequisite edges (exact prerequisite table, plan line 1802): E3: E3_INPUT_SEAL. Outgoing receipt_outcome edges: E4 (oneOf selected_disabled/selected_provider_derived, lines 1867-1875), E_GATE_INSUFFICIENT (equals insufficient_evidence, lines 1877-1883), E_GATE_LEARNED_NOT_JUSTIFIED (equals learned_not_justified, lines 1884-1890).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/adjudicate-ranking-lofo.mjs; scripts/adjudicate-ranking-lofo.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6 RED test required_comparator_unavailable_is_sealed_then_decided_only_by_e3 (scripts/adjudicate-ranking-lofo.test.mjs, plan §7.6 line 2384) is FT-D's anchor and proves 'E3 alone emits one E3InsufficientEvidenceReceiptV1'."
+  },
+  {
+    "task_id": "E4",
+    "title": "Refit, build through D8, verify through D3 (serialize the single selected-mode RankingPolicyV3Artifact)",
+    "risk": "low",
+    "invariant": "E4 runs only on selected outcomes (selected_disabled | selected_provider_derived) and serializes only the E3-selected mode with no unselected provider fields; held-out remains closed through Wave E.",
+    "owners": [
+      "E4"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); §7.5 row line 2229 (exact command), §7.6 row line 2425 (unmet-precondition/validating assertion), prerequisite edge line 1803 (E4: D2, D3, D8), conditional edge lines 1867-1875 (receipt_outcome oneOf selected outcomes)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "E_GATE_SELECTED requires E4 (plan §7.2 line 1804); DF dispatches Wave F only via E_GATE_SELECTED (line 1807)",
+      "H3/H4 contract_condition edges consume the artifact's neuralReorderPolicy.mode (plan §7.2 lines 1891-1900)",
+      "D3 independently verifies the final-artifact form (plan §7.5 line 2229)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "RankingPolicyV3Artifact (plan §5.3 lines 752-773): serialized only by E4; contains no self-hash and no quality receipt (lines 770-772); neuralReorderPolicy tagged union mode disabled | provider_derived",
+      "D8 buildRankingPolicyV3Artifact interface (plan §7.5 lines 2233-2245): residualModel + selectedModeReceipt: E3SelectionReceiptV1 + qualificationTarget + featureContractSha256 + runtimeScoringContractId + retrievalContractId + trainingManifestSha256 + trainingCodeSha256 + trainingContractSha256",
+      "refit subcommand of scripts/train-ranking-residual.mjs (D2-owned executable, plan §7.5 lines 2218/2229)",
+      "$REFIT_JOB: D6 all-tuning refit descriptor (plan §7.5 line 2107); $E3_SELECTION_RECEIPT: E3 selected-outcome receipt path (line 2108)"
+    ],
+    "security_boundaries": [
+      "Selected-mode-only serialization: E4 serializes only the E3-selected mode; disabled mode has no provider fields even when it binds a fixed provider target digest for provenance (plan §5.3 lines 773-775)",
+      "No self-hash: the artifact contains no self-hash and no quality receipt; runtime SHA-256 is computed over canonical bytes (plan §5.3 lines 770-772)",
+      "Held-out remains closed through Wave E; the artifact binds only tuning-derived sealed digests (trainingManifestSha256, trainingCodeSha256, trainingContractSha256, qualificationTargetSha256)"
+    ],
+    "overlap_with": [
+      "FT-D (D2 refit entrypoint, D8 builder, D3 verifier; D8 RED test builds_only_selected_mode_from_refit_and_sealed_authorities, plan §7.6 line 2386)",
+      "FT-G1 (R1.4 activation contract index consumed by D3 verification; R1.0 qualification target digest; R1.2 request-contract digest for provider-derived mode)",
+      "FT-F (DF: E_GATE_SELECTED, DE - Wave F dispatch depends on this card's gate, plan §7.2 line 1807; terminal branches stop without E4)"
+    ],
+    "focused_command": "node scripts/train-ranking-residual.mjs refit --job \"$REFIT_JOB\" --out \"$TASK_OUTPUT/refit\" && node scripts/build-ranking-policy-v3-artifact.mjs build --residual-model \"$TASK_OUTPUT/refit/RESIDUAL_MODEL.json\" --selection-receipt \"$E3_SELECTION_RECEIPT\" --qualification-target \"$QUALIFICATION_TARGET\" --feature-contract-index \"$FEATURE_CONTRACT_INDEX\" --training-manifest \"$TRAINING_MANIFEST\" --contract-seal \"$CONTRACT_SEAL\" --out \"$TASK_OUTPUT/RANKING_POLICY_V3.json\" && node scripts/verify-ranking-policy-artifact.mjs --artifact \"$TASK_OUTPUT/RANKING_POLICY_V3.json\" --activation-contract-index \"$ACTIVATION_CONTRACT_INDEX\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (execution card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 Waves D and E row line 2229 (E4 | refit, build through D8, verify through D3 | the three-stage command); §7.6 execution-card row line 2425 (unmet-precondition check: selected E3 receipt absent; validating assertion: refit model, final artifact, activation index, and D3 receipt agree); §7.2 lines 1867-1875 (receipt_outcome edge E4<-E3 with oneOf selected_disabled/selected_provider_derived; oneOf is disjunctive, plan §7.2 lines 1693-1700); §5.3 lines 752-775 (RankingPolicyV3Artifact; no self-hash; E4-only serialization; disabled mode has no provider fields); §6.6 lines 1551-1555 (only selected outcomes reach E4; one all-tuning refit; D3 verifies independently; terminal outcomes create no E4 and dispatch no Wave F); §8.7 lines 2472-2477 (selected outcomes produce a D3-verified E4 artifact and enable DF).\nPrerequisite edges (exact prerequisite table, plan line 1803): E4: D2, D3, D8 (conjunctive hard edges). Conditional receipt_outcome edge (plan §7.2 lines 1867-1875): E4 requires E3 with E3OutcomeReceiptV1 outcome oneOf [\"selected_disabled\", \"selected_provider_derived\"].\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/train-ranking-residual.mjs / scripts/build-ranking-policy-v3-artifact.mjs / scripts/verify-ranking-policy-artifact.mjs; scripts/train-ranking-residual.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nExecution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D8 RED test builds_only_selected_mode_from_refit_and_sealed_authorities (scripts/build-ranking-policy-v3-artifact.test.mjs, plan §7.6 line 2386) is FT-D's anchor and proves 'builder retains no unselected provider behavior and produces exact selected artifact bytes'."
+  },
+  {
+    "task_id": "E_GATE_SELECTED",
+    "title": "Wave-E selection gate (ready only on selected outcomes; enables DF)",
+    "risk": "low",
+    "invariant": "E_GATE_SELECTED is ready only when the E4 hard edge and the E3 receipt_outcome edge (outcome oneOf selected_disabled/selected_provider_derived) resolve; its ready GateReceiptV1 enables DF; terminal outcomes never reach it.",
+    "owners": [
+      "E_GATE_SELECTED"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); gate catalog line 2162, verify-ready command lines 2154-2163, prerequisite edge line 1804 (E_GATE_SELECTED: E4), receipt_outcome edge lines 1867-1875",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "DF (Wave-F card set) dispatches only via E_GATE_SELECTED (plan §7.2 line 1807; §7.5 line 2146)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 emitted by R1.T1 verify-ready (plan §7.5 lines 2154-2163); E_GATE_SELECTED cataloged at line 2162",
+      "receipt_outcome edge E4<-E3 with E3OutcomeReceiptV1 condition { field: \"outcome\", oneOf: [\"selected_disabled\", \"selected_provider_derived\"] } (plan §7.2 lines 1867-1875)"
+    ],
+    "security_boundaries": [
+      "Structural gate verification: verify-ready checks the edge kind and parsed contract/receipt outcome; it never infers a branch from filenames (plan §7.5 lines 2163-2165)",
+      "Branch authority: the gate is ready only when the E3 receipt_outcome edge resolves to a selected outcome AND the E4 hard edge is satisfied; terminal outcomes never make this gate ready",
+      "DF dispatch gate: Wave F is not dispatched unless this gate is ready (plan §7.2 line 1807; §8.7 lines 2475-2477)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.1B owns the dispatch-card generator; R1.T1 owns scripts/ranking-v3-task-graph.mjs verify-ready used by every gate card, plan §7.5 lines 2154-2165)",
+      "FT-D (E3 receipt parsing is D6-owned; D6 RED test line 2384 covers the insufficient branch)",
+      "FT-F (DF: E_GATE_SELECTED, DE - Wave F dispatch depends on this gate, plan §7.2 line 1807)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"E_GATE_SELECTED\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (gate/evidence card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 gate block lines 2154-2165 (gate cards are evidence cards owned by the R1.T1 graph tool; exact verify-ready command; cataloged gate IDs line 2162 include E_GATE_SELECTED, E_GATE_INSUFFICIENT, E_GATE_LEARNED_NOT_JUSTIFIED; verifier checks edge kind and parsed contract/receipt outcome, never infers a branch from filenames); §7.6 execution-card row line 2416 (A_GATE through I_GATE_*: unmet-precondition check - at least one required edge authority absent or mismatched; validating assertion - GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict); §7.2 line 1804 (prerequisite E_GATE_SELECTED: E4) and lines 1867-1875 (receipt_outcome edge from E3, oneOf selected outcomes); §7.2 lines 1693-1700 (oneOf disjunction semantics); §8.7 lines 2472-2477 (selected outcomes produce a D3-verified E4 artifact and enable DF).\nPrerequisite edges (exact prerequisite table, plan line 1804): E_GATE_SELECTED: E4 (hard), plus the conditional receipt_outcome edge E4<-E3 with outcome oneOf selected_disabled/selected_provider_derived (lines 1867-1875).\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/ranking-v3-task-graph.mjs; scripts/ranking-v3-task-graph.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nGate card, not a code-change card: readiness is proven by the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The R1.T1 graph-tool test (scripts/ranking-v3-task-graph.test.mjs, plan §7.6 line 2358) is FT-G1's anchor covering oneOf disjunction and selected-replay edge exclusivity."
+  },
+  {
+    "task_id": "E_GATE_INSUFFICIENT",
+    "title": "Wave-E terminal gate (insufficient_evidence)",
+    "risk": "low",
+    "invariant": "E_GATE_INSUFFICIENT is ready only when E3 emits E3InsufficientEvidenceReceiptV1 (outcome equals insufficient_evidence); it terminates the E branch without E4 and without dispatching Wave F.",
+    "owners": [
+      "E_GATE_INSUFFICIENT"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); gate catalog line 2162, verify-ready command lines 2154-2163, receipt_outcome edge lines 1877-1883",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "No downstream production caller: the terminal receipt stops the E branch (plan §8.7 lines 2475-2477)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 emitted by R1.T1 verify-ready (plan §7.5 lines 2154-2163); E_GATE_INSUFFICIENT cataloged at line 2162",
+      "receipt_outcome edge E_GATE_INSUFFICIENT<-E3 with E3InsufficientEvidenceReceiptV1 condition { field: \"outcome\", equals: \"insufficient_evidence\" } (plan §7.2 lines 1877-1883)"
+    ],
+    "security_boundaries": [
+      "Structural gate verification: verify-ready checks the edge kind and parsed contract/receipt outcome; it never infers a branch from filenames (plan §7.5 lines 2163-2165)",
+      "Terminal-only: hard prerequisite is none (plan §7.2 line 1805); readiness requires exactly one E3InsufficientEvidenceReceiptV1 with outcome equals insufficient_evidence",
+      "Terminal receipt creates no E4 and does not dispatch Wave F (plan §8.7 lines 2475-2477)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.1B dispatch generator; R1.T1 verify-ready tool, plan §7.5 lines 2154-2165)",
+      "FT-D (E3InsufficientEvidenceReceiptV1 parsing is D6-owned; D6 RED test required_comparator_unavailable_is_sealed_then_decided_only_by_e3, plan §7.6 line 2384)",
+      "FT-G1 (R1.3 decision contract digest sealed in the receipt)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"E_GATE_INSUFFICIENT\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (gate/evidence card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 gate block lines 2154-2165 (gate cards are evidence cards owned by the R1.T1 graph tool; exact verify-ready command; E_GATE_INSUFFICIENT cataloged at line 2162); §7.6 execution-card row line 2416 (A_GATE through I_GATE_*: unmet-precondition check - at least one required edge authority absent or mismatched; validating assertion - GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict); §7.2 line 1805 (E_GATE_INSUFFICIENT: none - no hard prerequisite; readiness comes solely from the receipt_outcome edge) and lines 1877-1883 (E3InsufficientEvidenceReceiptV1, outcome equals insufficient_evidence); §7.2 lines 1720-1722 (unavailable_required yields the sealed missingEvidenceCodes entry); §6.5 lines 1539-1542 (required comparator unavailable -> insufficient_evidence); §8.7 lines 2475-2477 (insufficient_evidence produces a terminal gate receipt and does not dispatch Wave F).\nPrerequisite edges (exact prerequisite table, plan line 1805): none (hard). Conditional receipt_outcome edge (lines 1877-1883): requires E3, receiptType E3InsufficientEvidenceReceiptV1, condition outcome equals insufficient_evidence.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/ranking-v3-task-graph.mjs; scripts/ranking-v3-task-graph.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nGate card, not a code-change card: readiness is proven by the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The D6 RED test required_comparator_unavailable_is_sealed_then_decided_only_by_e3 (plan §7.6 line 2384) and the R1.T1 graph-tool test (line 2358) are the adjacent anchors."
+  },
+  {
+    "task_id": "E_GATE_LEARNED_NOT_JUSTIFIED",
+    "title": "Wave-E terminal gate (learned_not_justified)",
+    "risk": "low",
+    "invariant": "E_GATE_LEARNED_NOT_JUSTIFIED is ready only when E3 emits E3LearnedNotJustifiedReceiptV1 (outcome equals learned_not_justified); it terminates the E branch without E4 and without dispatching Wave F.",
+    "owners": [
+      "E_GATE_LEARNED_NOT_JUSTIFIED"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; dispatch and contract authority); gate catalog line 2162, verify-ready command lines 2154-2163, receipt_outcome edge lines 1884-1890",
+      "evals/search-ranking/cross-repository-v3.manifest.json (family list authority; verified 6 tuning families, 50 tuning tasks at round_base)",
+      "package.json (round-approved; not consumed by this card)",
+      "No downstream production caller: the terminal receipt stops the E branch (plan §8.7 lines 2475-2477; §9.1 terminal outcome 3)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family-list authority - 6 tuning families, 50 tuning tasks; read-only reference for this card)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-approved; sealed source of the §7.5/§7.6 contracts; reference only, do not modify)",
+      "package.json (round-approved; pnpm test:scripts at line 26 - affected-command anchor only)"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 emitted by R1.T1 verify-ready (plan §7.5 lines 2154-2163); E_GATE_LEARNED_NOT_JUSTIFIED cataloged at line 2162",
+      "receipt_outcome edge E_GATE_LEARNED_NOT_JUSTIFIED<-E3 with E3LearnedNotJustifiedReceiptV1 condition { field: \"outcome\", equals: \"learned_not_justified\" } (plan §7.2 lines 1884-1890)"
+    ],
+    "security_boundaries": [
+      "Structural gate verification: verify-ready checks the edge kind and parsed contract/receipt outcome; it never infers a branch from filenames (plan §7.5 lines 2163-2165)",
+      "Terminal-only: hard prerequisite is none (plan §7.2 line 1806); readiness requires exactly one E3LearnedNotJustifiedReceiptV1 with outcome equals learned_not_justified",
+      "Terminal receipt creates no E4 and does not dispatch Wave F (plan §8.7 lines 2475-2477); a material grouped win is the trigger (plan §6.5 lines 1537-1539)"
+    ],
+    "overlap_with": [
+      "FT-G0 (R0.1B dispatch generator; R1.T1 verify-ready tool, plan §7.5 lines 2154-2165)",
+      "FT-D (E3LearnedNotJustifiedReceiptV1 parsing is D6-owned)",
+      "FT-G1 (R1.3 groupedComparatorPolicy and decision contract digest sealed in the receipt)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"E_GATE_LEARNED_NOT_JUSTIFIED\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement (gate/evidence card, no source files created).\nSource anchors (round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18): plan §7.5 gate block lines 2154-2165 (gate cards are evidence cards owned by the R1.T1 graph tool; exact verify-ready command; E_GATE_LEARNED_NOT_JUSTIFIED cataloged at line 2162); §7.6 execution-card row line 2416 (A_GATE through I_GATE_*: unmet-precondition check - at least one required edge authority absent or mismatched; validating assertion - GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict); §7.2 line 1806 (E_GATE_LEARNED_NOT_JUSTIFIED: none - no hard prerequisite; readiness comes solely from the receipt_outcome edge) and lines 1884-1890 (E3LearnedNotJustifiedReceiptV1, outcome equals learned_not_justified); §6.5 lines 1535-1539 (material grouped win yields terminal learned_not_justified even when the comparator is optional); §8.7 lines 2475-2477 (learned_not_justified produces a terminal gate receipt and does not dispatch Wave F); §9.1 lines 2520-2523 (tuning insufficient variant: learned ranking not justified, separate deterministic-retuning production plan).\nPrerequisite edges (exact prerequisite table, plan line 1806): none (hard). Conditional receipt_outcome edge (lines 1884-1890): requires E3, receiptType E3LearnedNotJustifiedReceiptV1, condition outcome equals learned_not_justified.\nfocused_command is plan-specified (§7.5 Waves D and E catalog) and targets the future executable(s) scripts/ranking-v3-task-graph.mjs; scripts/ranking-v3-task-graph.mjs does not exist at round_base (verified), so the command is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26); at round_base it exits 1 on two pre-existing unrelated failures (evals/agent-discovery/run-opencode.test.mjs stale task key 'known-exact-target' 189-604 vs 189-607; scripts/satori-lateon-track-o-o3.test.mjs ENOENT on packages/mcp/dist/server/lateon-reranker-worker.js), 460/462 pass; the E-family cards introduce no new suite failure.\nGate card, not a code-change card: readiness is proven by the §7.6 unmet-precondition check then the validating assertion; no first-RED test belongs to this card. The R1.T1 graph-tool test (plan §7.6 line 2358) is the adjacent anchor covering oneOf disjunction and conditional-edge resolution."
+  }
+]

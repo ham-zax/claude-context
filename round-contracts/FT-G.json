@@ -1,0 +1,465 @@
+[
+  {
+    "task_id": "G1",
+    "title": "G1: residual scoring integration into search-execution.ts (second of three sequential owners: B5 -> G1 -> G2)",
+    "risk": "high",
+    "invariant": "Residual never changes admission or exact-control ownership. shouldSkipRerankForExactPin bypass preserves the pre-rerank ordering unchanged; a residual crossing the admission cutoff neither newly enters the provider request, nor displaces a baseline-admitted candidate, nor receives neural evidence (plan invariants #2/#3/#5). deterministicV3Score = preRerankBaselineScore + clamp(dot(weights, normalizedFeatures), -maximumResidual, maximumResidual); RRF constants 100/60 stay frozen in all modes.",
+    "owners": [
+      "G1"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (runSearchExecution, called from handlers.ts:4857; shouldSkipRerankForExactPin :288, used :485; rerankResults :566; finalScore/computeSearchCandidateFinalScore :651/:1229; rerank RRF blend :649-650)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution-expansion.test.ts",
+      "packages/mcp/src/core/search-execution.exact-pin-rerank.test.ts",
+      "packages/mcp/src/core/search-execution.must-lane.test.ts",
+      "packages/mcp/src/core/handlers.golden.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ts"
+    ],
+    "interface_changes": [
+      "residual stage integrated between the frozen baselineAdmissionSet snapshot and the optional provider call (canonical order in plan 4.1)",
+      "imports D7 residual scoring unchanged; no evaluation-only or runtime-only duplicate is permitted (plan 4.4)",
+      "shouldSkipRerankForExactPin bypass short-circuits both residual scoring and provider-derived permutation",
+      "deterministic V3 sequence (pre-rerank baseline score + clamped residual) becomes the pre-provider ordering authority",
+      "RRF constants 100/60 remain frozen; the reranker RRF 10 / weight 1.0 bucket stays baseline-mode-only"
+    ],
+    "security_boundaries": [
+      "exact-control ownership: residual never changes admission or exact-pin bypass behavior; a top satisfying must: alone never skips (invariant #5)",
+      "admission parity: baselineAdmissionSet decided once on the pre-rerank baseline order; no cutoff membership change (invariant #3)",
+      "no feature-vector dumps; repository name, path, identity hashes are never scoring features (invariant #16)"
+    ],
+    "overlap_with": [
+      "FT-B (B5 -> G1 -> G2 sequential ownership of search-execution.ts: three successive contract sets with no parallel edits; G1 depends B8 byte-identity proof)",
+      "FT-D (G1 imports D7 unchanged; no duplicate implementation)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-residual.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G1: test `residual_never_changes_admission_or_exact_control`; expected failure before implementation: cutoff membership or exact result changes; minimal passing behavior: frozen admission and exact-control bypass hold. Exact prerequisites (plan 7.2): DG, F_GATE, B8, D7. Base anchors verified at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18: no plain search-execution.test.ts exists; existing suites are search-execution-expansion.test.ts, search-execution.exact-pin-rerank.test.ts, search-execution.must-lane.test.ts, handlers.golden.test.ts; shouldSkipRerankForExactPin declared at search-execution.ts:288 and used at :485; reranker RRF blend at :649-650. Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified (packages/mcp/package.json test script). Round-level focused command (packet): node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-residual.test.ts packages/mcp/src/core/search-execution.ranking-v3-provider.test.ts packages/mcp/src/core/ranking-policy-runtime.test.ts packages/mcp/src/core/search-types.ranking-v3.test.ts."
+  },
+  {
+    "task_id": "G2",
+    "title": "G2: provider request/permutation integration into search-execution.ts via A12/D7 (third and final sequential owner)",
+    "risk": "high",
+    "invariant": "Provider failure preserves the deterministic V3 sequence byte-for-byte with no partial permutation and no score-based re-sort. Any timeout, provider error, malformed response, duplicate/omitted/foreign identity, non-finite score, or gate rejection discards the detached provider result and preserves the pre-provider deterministic V3 sequence byte-for-byte; permutation occurs only within baseline-admitted positions; postPolicyRank is one-based, unique, contiguous from 1..N; no downstream component may sort the final sequence again by finalScore or deterministicV3Score (plan 4.2/4.3, invariant #4).",
+    "owners": [
+      "G2"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (runSearchExecution, called from handlers.ts:4857; shouldSkipRerankForExactPin :288, used :485; rerankResults :566; finalScore/computeSearchCandidateFinalScore :651/:1229; rerank RRF blend :649-650)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution-expansion.test.ts",
+      "packages/mcp/src/core/search-execution.exact-pin-rerank.test.ts",
+      "packages/mcp/src/core/search-execution.must-lane.test.ts",
+      "packages/mcp/src/core/handlers.golden.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-execution.ts"
+    ],
+    "interface_changes": [
+      "provider-derived slot permutation integrated via D7/A12 imports unchanged (A12 ranking-provider-request-v1 request construction; D7 provider-slot-permutation)",
+      "complete validated provider response required; identities permuted only within baseline-admitted positions; never promotes an unadmitted or filtered candidate (invariant #4)",
+      "failure path preserves the deterministic V3 sequence byte-for-byte with diagnostic reason fallback_deterministic; no partial permutation observable",
+      "internal RankedCandidateV3 representation (candidateId, deterministicV3Score, postPolicyRank) with contiguous one-based ranks; disagreement/gaps/duplicates rejected, not repaired",
+      "post-provider sequence is the final ranking authority; grouping/disclosure/replay/pagination/continuation preserve it; diagnostics must not imply the deterministic score caused the provider-derived rank",
+      "baseline mode keeps its existing failure behavior unchanged"
+    ],
+    "security_boundaries": [
+      "bounded provider behavior (A12 contract): timeoutMs/maximumRetries/maximumPayloadUtf8Bytes; all external provider requests have bounded cancellation and deadline behavior",
+      "runtime identity: provider key/model/projection/configuration/request-contract exact match against the sealed target before any provider-derived use",
+      "no partial permutation: detached provider result is validated completely before application; any invalid byte sequence discards it",
+      "no feature-vector dumps in public responses (invariant #16)"
+    ],
+    "overlap_with": [
+      "FT-B (G1 -> G2 sequential ownership of search-execution.ts: no parallel edits)",
+      "FT-D (G2 imports D7 unchanged; no duplicate implementation)",
+      "FT-A2 (G2 imports A12 ranking-provider-request-v1 unchanged)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-provider.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G2: test `provider_failure_preserves_deterministic_sequence_and_no_resort_occurs`; expected failure before implementation: partial permutation or score resort observable; minimal passing behavior: deterministic fallback or final provider sequence is preserved. Exact prerequisites (plan 7.2): G1, D7, A12. Base anchors verified at round_base: shouldSkipRerankForExactPin :288/:485, rerankResults :566, finalScore/computeSearchCandidateFinalScore :651/:1229, rerank RRF blend :649-650 in search-execution.ts; runSearchExecution called from handlers.ts:4857; no plain search-execution.test.ts at base; existing suites listed in test_callers. Tests must prove that no score-based sort can undo a provider-derived permutation (plan 4.3). Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified. Round-level focused command (packet): node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-residual.test.ts packages/mcp/src/core/search-execution.ranking-v3-provider.test.ts packages/mcp/src/core/ranking-policy-runtime.test.ts packages/mcp/src/core/search-types.ranking-v3.test.ts."
+  },
+  {
+    "task_id": "G3",
+    "title": "G3: ranking-v3 diagnostics in search-types.ts (score + final rank; bounded truthful projection)",
+    "risk": "medium",
+    "invariant": "Diagnostics expose deterministic score and final rank as a bounded truthful projection; they never imply that the deterministic score caused a provider-derived rank; no feature-vector dumps in public responses (plan 4.3, invariant #16).",
+    "owners": [
+      "G3"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-types.ts (existing diagnostics types verified at base: rerankerFailures :408, rerankerRetries :409, rerankerTimeouts :410; SearchDiagnostics operationalReason :612; SearchRerankerOperationalReason :628)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-types.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-types.ts"
+    ],
+    "interface_changes": [
+      "extend search diagnostics with deterministic score and final (post-policy) rank (bounded projection)",
+      "diagnostics must not imply the deterministic score caused a provider-derived rank",
+      "no feature-vector dumps in any public response surface",
+      "policy hash appears in startup diagnostics and search diagnostics, not in index publication receipts (plan 5.7)"
+    ],
+    "security_boundaries": [
+      "information disclosure: bounded truthful diagnostics only; no feature vectors, repository paths, task IDs, or identity hashes in public responses (invariant #16)"
+    ],
+    "overlap_with": [],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-types.ranking-v3.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G3: test `diagnostics_expose_score_and_final_rank_without_feature_dump`; expected failure before implementation: final rank missing or features leak; minimal passing behavior: bounded truthful projection only. Exact prerequisite (plan 7.2): G2 (diagnostics consume G2 final-order authority). search-types.ts is exclusively owned by G3 per plan 7.1; existing diagnostics types verified at base at :408-410/:612/:628. No overlap with other FT rounds at base (plan 7.1 lists no other owner of search-types.ts). Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified. Round-level focused command (packet): node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-residual.test.ts packages/mcp/src/core/search-execution.ranking-v3-provider.test.ts packages/mcp/src/core/ranking-policy-runtime.test.ts packages/mcp/src/core/search-types.ranking-v3.test.ts."
+  },
+  {
+    "task_id": "G4",
+    "title": "G4: startup/runtime construction (baseline default; reject target/configuration/request-contract/registry mismatch with truthful reason)",
+    "risk": "high",
+    "invariant": "Startup rejects any target/configuration/request-contract/registry mismatch with baseline fallback and truthful diagnostic; learned_v3 becomes selectable no earlier than I4; provider-derived mode additionally requires an exact active provider/model/projection/configuration/request-contract match; disabled mode requires no active provider identity (plan invariants #9/#10, 9.1).",
+    "owners": [
+      "G4"
+    ],
+    "production_callers": [
+      "packages/mcp/src/config.ts (resolveRerankerProvider :235; packet anchor cited :238 - declaration verified at :235 at base)",
+      "evals/search-quality/search-quality-evaluation.ts (evaluation envelope; fixture RED at base per plan 9.2/10)"
+    ],
+    "test_callers": [
+      "evals/search-quality/search-quality-evaluation.test.ts (RED at base)",
+      "packages/mcp/src/core/handlers.golden.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/config.ts"
+    ],
+    "interface_changes": [
+      "startup/runtime construction enforcing production qualification: F2 registry loading, F6 policy selection, G4 construction (plan 4.5)",
+      "any mismatched authority (target, configuration, request contract, registry) -> baseline fallback with truthful reason",
+      "baseline remains default; no unqualified artifact is loadable by product configuration (invariant #10)",
+      "policy hash appears in startup diagnostics (plan 5.7)",
+      "learned_v3 not selectable before I4; disabled mode emits canonical reranker identity reranker_disabled_v1 (A7/F6 authority)"
+    ],
+    "security_boundaries": [
+      "startup trust: any mismatched authority -> baseline fallback with reason; learned_v3 selectable no earlier than I4",
+      "runtime identity: provider key/model/projection/configuration/request-contract exact match against sealed target; disabled mode requires no provider identity",
+      "no environment-variable learning; no production shadow selector (invariant #16)"
+    ],
+    "overlap_with": [
+      "FT-F (G4 depends F1/F2/F6; plan 7.1 names F6 as exclusive owner of config.ts, so G4 edits to config.ts are sequential-after-F6 like B5->G1->G2)",
+      "FT-A2 (G4 imports A12 request-contract authority)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-runtime.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G4: test `startup_rejects_target_configuration_request_or_registry_mismatch`; expected failure before implementation: any mismatched authority starts learned mode; minimal passing behavior: baseline fallback with reason. Exact prerequisites (plan 7.2): F1, F2, F6, G1, A12. The runtime-construction module location is plan-open (plan 7.5 names only the test file); any new module must not duplicate F6 selector authority and must not give Context new domain logic. Base anchor verified: resolveRerankerProvider at config.ts:235. eval:search-quality fixture is RED at base (source_state_unverified chain; R0.1A resolves). Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified. Round-level focused command (packet): node --import tsx --test packages/mcp/src/core/search-execution.ranking-v3-residual.test.ts packages/mcp/src/core/search-execution.ranking-v3-provider.test.ts packages/mcp/src/core/ranking-policy-runtime.test.ts packages/mcp/src/core/search-types.ranking-v3.test.ts."
+  },
+  {
+    "task_id": "G5",
+    "title": "G5: continuation sites from CONTINUATION_SITES.json (never re-rank; stale on policy identity change)",
+    "risk": "high",
+    "invariant": "Continuation never re-ranks and stales on policy identity change: no new retrieval, scoring, or reranking on continuation; pagination exposes one immutable ranked set; policy identity changes invalidate continuation handles via existing revalidation (SEARCH_RESULT_SET_STALE); composite policy identity search_ranking_policy_v3:<artifact-sha256> carried by the ranked-set binding (plan invariant #14, 5.7).",
+    "owners": [
+      "G5"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/handlers.ts (continuation region with SEARCH_RESULT_SET_STALE :5260-5478; runSearchFrontDoor :3915)",
+      "packages/mcp/src/core/search-result-set-identity.ts (policy identity region :37-156; buildSearchRankedSetBinding ~:112)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-result-set-identity.test.ts",
+      "packages/mcp/src/core/handlers.golden.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/handlers.ts",
+      "packages/mcp/src/core/search-result-set-identity.ts"
+    ],
+    "interface_changes": [
+      "continuation revalidation through existing search-result-set-identity/handlers wiring; no new coordinator",
+      "policy identity change stales continuation handles via existing revalidation (SEARCH_RESULT_SET_STALE at handlers.ts:5260-5478)",
+      "rankingPolicyIdentity = search_ranking_policy_v3:<artifact-sha256> in the ranked-set binding; disabled mode reranker identity is canonical reranker_disabled_v1, never copied from an unrelated configured provider (plan 5.7)",
+      "continuation performs no new retrieval, scoring, or reranking (invariant #14)"
+    ],
+    "security_boundaries": [
+      "cross-session state: continuation never re-ranks; policy identity change stales handles via existing revalidation",
+      "policy hash appears in ranked-set bindings, not in index publication receipts (plan 5.7)",
+      "no feature-vector dumps in continuation/disclosure responses (invariant #16)"
+    ],
+    "overlap_with": [
+      "FT-F (G5 depends F7 ranked-set identity; plan 7.1 names F7 as exclusive owner of search-result-set-identity.ts, so G5 edits to it are sequential-after-F7)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-v3-continuation.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G5: test `continuation_never_reranks_and_stales_on_policy_change`; expected failure before implementation: continuation invokes ranking or survives change; minimal passing behavior: immutable set and stale identity behavior. Exact prerequisites (plan 7.2): F7, G2, R0.1. CONTINUATION_SITES.json (R0.1 Gate-0 manifest) is the authoritative continuation-site list; RUNTIME_CONSTRUCTION_SITES.json covers construction sites. Base anchors verified: SEARCH_RESULT_SET_STALE at handlers.ts:5260-5478 (owner_unavailable/publication/source-observation staleness paths), runSearchFrontDoor :3915, runSearchExecution call :4857; search-result-set-identity.ts binding input carries rankingPolicyIdentity/rerankerIdentity within :37-156 with buildSearchRankedSetBinding at ~:112. Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified."
+  },
+  {
+    "task_id": "G6",
+    "title": "G6: runtime matrix (pending/revoked/wrong-scope/invalid-transition evidence; every invalid case falls back)",
+    "risk": "medium",
+    "invariant": "Runtime matrix covers pending, revoked, wrong-scope, and invalid-transition evidence; every invalid case falls back; no product path can select pending, revoked, incompatible, or configuration-mismatched entries (plan 8.8, invariant #10).",
+    "owners": [
+      "G6"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/ranking-policy-selector.ts (F6; plan-specified file)",
+      "packages/mcp/src/core/ranking-policy-qualification-store.ts (F2; plan-specified file)",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9; plan-specified file)",
+      "packages/mcp/src/core/search-result-set-identity.ts (F7; base file)",
+      "G4 startup/runtime construction (subject under test)",
+      "evals/search-quality/search-quality-evaluation.ts (evaluation envelope; RED at base)"
+    ],
+    "test_callers": [
+      "evals/search-quality/search-quality-evaluation.test.ts (RED at base)",
+      "packages/mcp/src/core/handlers.golden.test.ts"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-v3-runtime-matrix.test.ts"
+    ],
+    "interface_changes": [
+      "runtime matrix test evidence: pending/revoked/wrong-scope/invalid-transition cases each fall back to baseline",
+      "one matrix dimension per registry status x scope x configuration state",
+      "no production file owned (plan 7.5 G6 row names only the test file)"
+    ],
+    "security_boundaries": [
+      "runtime identity: matrix proves selection fails closed for pending/revoked/wrong-scope entries (invariant #10, plan 8.8)",
+      "registry state: append-only versions; pending entry can never block a later qualification cycle for its scope (invariant #12)"
+    ],
+    "overlap_with": [
+      "FT-F (G6 exercises F2/F6/F8/F9 states produced by Wave F; no ownership overlap)",
+      "FT-H/FT-I (matrix validates the registry states G6B/G6C transitions produce)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-v3-runtime-matrix.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G6: test `covers_pending_revoked_wrong_scope_and_invalid_transition_evidence`; expected failure before implementation: a matrix case is selectable; minimal passing behavior: every invalid case falls back. Exact prerequisites (plan 7.2): G1, G2, G3, G4, G5. G6 owns no production file (plan 7.5 row lists only the test); it consumes F2/F6/F9 registry and selector states plus G4 runtime construction. Base anchors: search-result-set-identity.ts :37-156 exists; F-wave production files (ranking-policy-selector.ts, ranking-policy-qualification-store.ts, ranking-policy-qualification-writer.ts) are plan-specified future files absent at base. Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified."
+  },
+  {
+    "task_id": "G6A",
+    "title": "G6A: ranking-v3 resource harness in evals/search-ranking (loaded-policy path measurement + environment identity)",
+    "risk": "medium",
+    "invariant": "Resource harness measures the actual loaded-policy path and binds environment identity: the loaded runtime path and environment identity are bound, not a stub path (plan 7.5 G6A row, 9.2 calibration risk).",
+    "owners": [
+      "G6A"
+    ],
+    "production_callers": [
+      "evals/search-ranking/ (resource harness domain; exists at base with cross-repository-v3.manifest.json)",
+      "evals/search-ranking/ranking-v3-resource-contract.json (D5 resource contract; plan-specified future file)"
+    ],
+    "test_callers": [
+      "evals/search-ranking/ (existing manifests; no harness test at base)"
+    ],
+    "approved_files": [
+      "evals/search-ranking/ranking-v3-resource-harness.test.mjs"
+    ],
+    "interface_changes": [
+      "loaded-policy path measurement under actual runtime construction (G4), not a stub path",
+      "environment identity binding (platform/service class: online vs offline_linux_x64)",
+      "within-query evidence behavior measurement on graded pairs before any provider-derived use (plan 9.2)"
+    ],
+    "security_boundaries": [
+      "measurement domain only; no product behavior change and no production shadow selector (invariant #16)",
+      "resource contract sealed (D5): workload/threshold/environment digests must match"
+    ],
+    "overlap_with": [
+      "FT-D (G6A imports D7 unchanged; D5 resource contract context)"
+    ],
+    "focused_command": "node --test evals/search-ranking/ranking-v3-resource-harness.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G6A: test `measures_actual_loaded_policy_path`; expected failure before implementation: harness can measure a stub path; minimal passing behavior: loaded runtime path and environment identity are bound. Exact prerequisites (plan 7.2): G2, D5, D7. Base verified: evals/search-ranking/ exists with cross-repository-v3.manifest.json (six tuning + six held-out tasks); no harness test exists at base. Focused command targets the plan-specified future test file which is absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified."
+  },
+  {
+    "task_id": "G6B",
+    "title": "G6B: offline qualification CLI scripts/ranking-v3-offline-qualification.mjs + modules; owns DhInputIndexV1 and QualificationCycleManifestV1; H replay/gate entrypoints",
+    "risk": "high",
+    "invariant": "Offline qualification toolchain (Wave H) is sealed and deterministic: exactly one normative SelectedModeReplayReceipt per qualification cycle; H9 emits one outcome and binds H0's RegistryReadyReceiptV1 plus the expected current registry digest; DH input index and qualification-cycle manifests parse canonically; replay reproduces the deterministic V3 sequence via sealed D7 (plan 6.7, 8.10).",
+    "owners": [
+      "G6B"
+    ],
+    "production_callers": [
+      "scripts/satori-search-candidate-replay.mjs (computeSearchCandidateFinalScore :908/:1827; --require-neural-disabled and --held-out-opening: usage :2369, parsing :2386-2405)",
+      "packages/mcp/src/core/search-execution.ts finalScore authority (computeSearchCandidateFinalScore :651/:1229)"
+    ],
+    "test_callers": [
+      "scripts/satori-search-candidate-replay.test.mjs"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-offline-qualification.mjs",
+      "scripts/ranking-v3-cycle-manifest.mjs",
+      "scripts/ranking-v3-offline-replay.mjs",
+      "scripts/ranking-v3-offline-gates.mjs",
+      "scripts/ranking-v3-offline-verdict.mjs"
+    ],
+    "interface_changes": [
+      "CLI scripts/ranking-v3-offline-qualification.mjs with build-input-index, build-cycle, baseline, grouped, selected, slices, counterfactual, resources, verdict commands (plan 7.5 Waves H/I catalog)",
+      "owns DhInputIndexV1 and QualificationCycleManifestV1 schemas (plan 5.6)",
+      "H1-H4/H6-H9 replay and gate entrypoints executed by Wave-H cards; H3/H4 execute D7 through G6B sealed replay entrypoints",
+      "DH invokes build-input-index (DhInputIndexV1) then build-cycle (QualificationCycleManifestV1) before any Wave-H card (plan 7.5 DH row)",
+      "H3 selected-mode receipt (disabled) or H4 selected-mode receipt (provider_derived); only one normative receipt per cycle"
+    ],
+    "security_boundaries": [
+      "H9 binds H0's RegistryReadyReceiptV1 and the expected current registry digest; any intervening registry change aborts H10 and retains baseline (plan 6.7)",
+      "exactly one SelectedModeReplayReceipt per qualification cycle; H4 does not run for a disabled artifact; H3 under provider_derived is diagnostic and never blocks qualification",
+      "offline replay supplies the sealed provider target directly and does not claim production activation (plan 4.5)",
+      "all authorities (contract, policy, target) digests must match sealed values; unknown fields rejected (plan 5.6)"
+    ],
+    "overlap_with": [
+      "FT-B (G6B depends B7 replay and B9 corpus)",
+      "FT-D (G6B imports D7 unchanged; no duplicate implementation)",
+      "FT-A2 (G6B imports A12)",
+      "FT-H (all Wave-H cards run G6B sealed entrypoints)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-offline-qualification.test.mjs scripts/ranking-v3-cycle-manifest.test.mjs scripts/ranking-v3-offline-gates.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G6B: test `selected_mode_emits_one_receipt_and_h9_binds_registry_context`; expected failure before implementation: two normative receipts or missing H0 binding accepted; minimal passing behavior: one selected receipt and exact registry/grouped fields. Exact prerequisites (plan 7.2): B7, B9, C6, D3, D4, D5, D7, D8, G6A, A11Q, A11H, R1.2, R1.3, R1.4, A12. Base anchors verified: scripts/satori-search-candidate-replay.mjs computeSearchCandidateFinalScore :908/:1827, --require-neural-disabled/--held-out-opening flags (usage :2369, parsing :2386-2405); scripts/satori-search-candidate-replay.test.mjs exists. G6C imports DhInputIndexV1 from G6B and must reject every byte sequence G6B would reject (shared type; plan 7.5 Waves H/I preamble). Focused command targets plan-specified future test files absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified."
+  },
+  {
+    "task_id": "G6C",
+    "title": "G6C: held-out activation CLI scripts/ranking-v3-heldout-activation.mjs + modules; owns PreHeldoutCycleManifestV1 and ActivationCycleManifestV1; H0/H10 and all Wave-I entrypoints",
+    "risk": "high",
+    "invariant": "Held-out activation toolchain (Wave I) is sealed and deterministic: ActivationCycleManifestV1 binds H10's new pending registry digest and exactly one I4/I3R terminal chain; every Wave-I command consumes the activation manifest; G6C rejects every byte sequence G6B rejects (shared DhInputIndexV1); pending_heldout terminates on both acceptance and rejection (plan 6.8, 8.11, invariant #12).",
+    "owners": [
+      "G6C"
+    ],
+    "production_callers": [
+      "scripts/ranking-v3-heldout-activation.mjs (owned CLI; H0 registry-ready, H10 pending, I0 authorize, I1 open, I2 execute, I3 adjudicate, I4 activate, I3R reject, I5 rollback-drill, I6 limited-activation entrypoints)",
+      "DH boundary generator invokes build-pre-heldout-cycle; DI boundary generator invokes build-activation-cycle (plan 7.5 DH/DI rows)",
+      "scripts/satori-search-candidate-replay.mjs (computeSearchCandidateFinalScore :908/:1827 as replay authority reused by sealed execution)"
+    ],
+    "test_callers": [
+      "scripts/satori-search-candidate-replay.test.mjs"
+    ],
+    "approved_files": [
+      "scripts/ranking-v3-heldout-activation.mjs",
+      "scripts/ranking-v3-registry-cycle.mjs",
+      "scripts/ranking-v3-heldout-execution.mjs",
+      "scripts/ranking-v3-heldout-adjudication.mjs",
+      "scripts/ranking-v3-rollout.mjs"
+    ],
+    "interface_changes": [
+      "CLI scripts/ranking-v3-heldout-activation.mjs with build-pre-heldout-cycle, build-activation-cycle, registry-ready, pending, authorize, open, execute, adjudicate, activate, reject, rollback-drill, limited-activation commands (plan 7.5 Waves H/I catalog)",
+      "owns PreHeldoutCycleManifestV1 and ActivationCycleManifestV1 schemas (plan 5.6); imports G6B's DhInputIndexV1 unchanged",
+      "build-activation-cycle parses the H10 transition receipt, verifies it is create_pending_heldout, copies newRegistrySha256 into expectedPendingRegistrySha256, and binds the H10 receipt digest; pre-held-out manifest fixes expectedPendingRegistrySha256: null",
+      "every Wave-I command accepts --activation-cycle; none accepts the pre-held-out manifest as its Wave-I authority",
+      "I3 emits exactly one accepted or rejected receipt; I4/I5/I6 follow acceptance only; I3R follows rejection only"
+    ],
+    "security_boundaries": [
+      "cross-session state: pending_heldout -> activation_qualified (I4) and pending_heldout -> revoked with reason heldout_rejected (I3R) replace exactly one logical key; no append of a second state for the same key (plan 5.4)",
+      "learned_v3 selectable no earlier than I4; post-opening configuration limited to baseline and already sealed activation-qualified hashes, recorded in append-only rollout receipts (plan 6.8)",
+      "shared DhInputIndexV1: G6C must reject every byte sequence G6B would reject",
+      "H10 runs only when H9 is offline_qualified and uses that exact expected digest; any intervening registry change aborts H10 and retains baseline (plan 6.7)"
+    ],
+    "overlap_with": [
+      "FT-A2 (G6C imports A12)",
+      "FT-H (H0/H10 entrypoints run by Wave-H cards)",
+      "FT-I (G6C owns all Wave-I entrypoints I0-I6/I3R)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-heldout-activation.test.mjs scripts/ranking-v3-registry-cycle.test.mjs scripts/ranking-v3-heldout-adjudication.test.mjs",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G6C: test `activation_cycle_binds_h10_pending_digest_and_terminal_chain`; expected failure before implementation: Wave I accepts a null/pre-H10 manifest, wrong H10 receipt, or unrelated I3 digest; minimal passing behavior: activation manifest binds H10's new registry digest and exactly one I4/I3R terminal chain. Exact prerequisites (plan 7.2): G6B, F9, A11Q, A11H, R1.3, R1.4, A12. DI builds the activation cycle only after H10 and H_GATE_QUALIFIED; I5/I6 occur only after successful I4 and never after I3R (plan 6.8). G6C must reject every byte sequence G6B rejects on the shared DhInputIndexV1 type (plan 7.5 Waves H/I preamble). Base anchors: scripts/satori-search-candidate-replay.mjs computeSearchCandidateFinalScore :908/:1827. Focused command targets plan-specified future test files absent at base, so it is unverifiable-at-base (must not be run in this round); affected command is repo-verified."
+  },
+  {
+    "task_id": "G7",
+    "title": "G7: IMPLEMENTATION_SEAL.json + scripts/verify-ranking-v3-implementation-seal.mjs (lockfile authority; every H/I entrypoint named and sealed)",
+    "risk": "high",
+    "invariant": "G7 seals every H/I entrypoint against the Gate-0-resolved lockfile authority: IMPLEMENTATION_SEAL.json binds source/built outputs, exact commands/tests, Node version, and the Gate-0-resolved pnpm-lock.yaml digest (R0.1 LOCKFILE_AUTHORITY.json); every H/I entrypoint is named and sealed; the verifier fails closed on hardcoded lockfile or missing executable (plan 8.9, 7.6 G7 row).",
+    "owners": [
+      "G7"
+    ],
+    "production_callers": [
+      "scripts/verify-ranking-v3-implementation-seal.mjs (owned verifier; exact command per plan 7.5 G7 row)",
+      "IMPLEMENTATION_SEAL.json (owned artifact)",
+      "every H/I entrypoint: G6B CLI commands (H1-H4/H6-H9), G6C CLI commands (H0/H10/I0-I6/I3R), DH/DI manifest builders (build-input-index, build-cycle, build-pre-heldout-cycle, build-activation-cycle)"
+    ],
+    "test_callers": [],
+    "approved_files": [
+      "scripts/verify-ranking-v3-implementation-seal.mjs",
+      "IMPLEMENTATION_SEAL.json"
+    ],
+    "interface_changes": [
+      "create IMPLEMENTATION_SEAL.json (source/built outputs, exact commands/tests, Node version, Gate-0-resolved pnpm-lock.yaml digest)",
+      "create scripts/verify-ranking-v3-implementation-seal.mjs + test",
+      "every H/I entrypoint named and sealed; no hardcoded lockfile path or digest",
+      "seal binds R0.1 LOCKFILE_AUTHORITY.json path and digest (LOCKFILE_AUTHORITY variable, plan 7.5)"
+    ],
+    "security_boundaries": [
+      "implementation seal: sealed authority path/digest and complete executable closure (plan 8.9)",
+      "lockfile authority: Gate-0-resolved pnpm-lock.yaml digest from R0.1 LOCKFILE_AUTHORITY.json; hardcoded lockfile or missing executable must fail verification",
+      "trust chain: G7 seals the complete Wave H/I executable chain (plan 9.2); H0 runs on G7-sealed F9/G6C tooling (plan 6.7)"
+    ],
+    "overlap_with": [
+      "FT-F (G7 depends F0-F9)",
+      "FT-H (seals every Wave-H card entrypoint, including H0/H10 from G6C)",
+      "FT-I (seals every Wave-I card entrypoint I0-I6/I3R from G6C)"
+    ],
+    "focused_command": "node --test scripts/verify-ranking-v3-implementation-seal.test.mjs && node scripts/verify-ranking-v3-implementation-seal.mjs --seal \"$TASK_OUTPUT/IMPLEMENTATION_SEAL.json\" --lockfile-authority \"$LOCKFILE_AUTHORITY\"",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Plan 7.6 RED row G7: test `seal_uses_lockfile_authority_and_covers_every_h_i_entrypoint`; expected failure before implementation: hardcoded lockfile or missing executable verifies; minimal passing behavior: sealed authority path/digest and complete executable closure. Exact prerequisites (plan 7.2): G6, G6A, G6B, G6C, F0, F1, F2, F6, F7, F8, F9; G_GATE = G7. LOCKFILE_AUTHORITY is the R0.1 LOCKFILE_AUTHORITY.json path (Gate-0 manifest; plan 7.5 variable table). The verifier test file is plan-specified and absent at base, so the focused command is unverifiable-at-base (must not be run in this round); the seal verification command with $TASK_OUTPUT/$LOCKFILE_AUTHORITY is plan-specified with variables substituted at execution time. Affected command is repo-verified. No existing test caller at base (test_callers empty); scripts/satori-search-candidate-replay.test.mjs is the nearest existing replay authority but is not a caller of the seal verifier."
+  }
+]
