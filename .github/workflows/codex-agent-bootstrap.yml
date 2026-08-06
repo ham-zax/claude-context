@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   bootstrap:
@@ -22,8 +24,6 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.2
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -92,6 +92,23 @@ jobs:
             r0-1a-eval.log
             r0-1a-focused.status
             r0-1a-eval.status
+
+      - name: Publish bootstrap run locator
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(cat <<EOF
+          Agent bootstrap run ID: ${GITHUB_RUN_ID}
+          Commit: ${GITHUB_SHA}
+          Artifact: satori-agent-bundle-${GITHUB_SHA}
+          Focused status: ${{ steps.verify.outputs.focused_status || 'not-run' }}
+          Evaluation status: ${{ steps.verify.outputs.eval_status || 'not-run' }}
+          EOF
+          )
+          gh api "repos/${GITHUB_REPOSITORY}/issues/3/comments" -f body="$body"
 
       - name: Enforce R0.1A verification result
         if: always()
