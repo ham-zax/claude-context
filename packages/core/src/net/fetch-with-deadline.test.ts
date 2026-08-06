@@ -594,6 +594,10 @@ test("reuses one connection across successful responses and closes deterministic
 });
 
 test("direct response.body.cancel() sets settled state and cleans up abort listener", async (t) => {
+    // Spy fetch: the response body is a real ReadableStream whose cancel hook
+    // records how often and with which reason it was cancelled. No network is
+    // involved, so no HTTP server is needed in this test.
+    const realFetch = globalThis.fetch;
     let cancelCount = 0;
     let cancelReasonPassed: unknown;
     const underlyingStream = new ReadableStream({
@@ -601,23 +605,24 @@ test("direct response.body.cancel() sets settled state and cleans up abort liste
             controller.enqueue(new TextEncoder().encode("partial data"));
         },
         cancel(reason) {
-            cancelCount++;
+            cancelCount += 1;
             cancelReasonPassed = reason;
             return Promise.resolve();
         },
     });
-
-    const server = await startServer((_req, res) => {
-        res.writeHead(200, { "Content-Type": "text/plain" });
-        res.write("partial data");
+    globalThis.fetch = (async () => new Response(underlyingStream, {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+    })) as typeof fetch;
+    t.after(() => {
+        globalThis.fetch = realFetch;
     });
-    t.after(() => server.close());
 
     const controller = new AbortController();
     const baseline = getEventListeners(controller.signal, "abort").length;
 
     const response = await fetchWithDeadline({
-        url: `${server.url}/direct-cancel`,
+        url: "http://spy.invalid/direct-cancel",
         init: { method: "GET" },
         signal: controller.signal,
         attemptTimeoutMs: 50,
@@ -630,17 +635,28 @@ test("direct response.body.cancel() sets settled state and cleans up abort liste
     const cancelReason = new Error("direct body cancel");
     await response.body.cancel(cancelReason);
 
-    // Verify caller signal abort listener is kept clean after direct cancel
+    // The caller's reason must reach the underlying stream's cancel hook
+    // exactly once, forwarded verbatim through the wrapper's reader.
+    assert.equal(cancelCount, 1);
+    assert.equal(cancelReasonPassed, cancelReason);
+
+    // The caller signal must be back at its baseline: no abort listener may
+    // survive the direct cancel.
     assert.equal(getEventListeners(controller.signal, "abort").length, baseline);
 
-    // Verify settled state: repeated cancel returns resolved promise without error
+    // A repeated cancel on the already-settled stream resolves without
+    // invoking the underlying cancel hook a second time.
     await assert.doesNotReject(() => response.body!.cancel("second cancel"));
+    assert.equal(cancelCount, 1);
 
-    // Wait past attemptTimeoutMs (50ms) to ensure timeout deadline firing does not trigger a second cancellation
+    // Wait past the 50ms attempt deadline: its firing must not issue a second
+    // reader cancellation now that the stream is settled.
     await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(cancelCount, 1);
 
-    // Verify stream reader reflects settled state
+    // The settled stream reads as closed.
     const reader = response.body.getReader();
     const chunk = await reader.read();
+    assert.equal(chunk.value, undefined);
     assert.equal(chunk.done, true);
 });
