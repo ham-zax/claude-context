@@ -1009,6 +1009,10 @@ export class ToolHandlers {
             withProofDebugHint: this.withProofDebugHint.bind(this),
             isPartialIndexNavigationUnavailable: this.isPartialIndexNavigationUnavailable.bind(this),
             getRegistryFileFreshness: this.getRegistryFileFreshness.bind(this),
+            // Session tool contexts expose the configured READ_FILE_MAX_BYTES
+            // ceiling; when absent (as for a bare core Context), the shared
+            // reader enforces its 8 MiB default.
+            readFileMaxBytes: (this.context as unknown as { readFileMaxBytes?: number }).readFileMaxBytes,
             buildStaleSymbolRefFileOutlinePayload: buildStaleSymbolRefFileOutlinePayloadForNavigation,
             loadRegistryValidatedCallGraphSidecar: this.loadRegistryValidatedCallGraphSidecar.bind(this),
             buildRegistrySymbolCallGraphHint: this.buildRegistrySymbolCallGraphHint.bind(this),

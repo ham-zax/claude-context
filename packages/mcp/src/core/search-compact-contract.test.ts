@@ -437,6 +437,13 @@ test("documented grouped navigation mappings validate and execute through regist
 
     let dispatchedGraphInput: unknown;
     const graphResponse = await callGraphTool.execute(graphInput, {
+        // Session workspace gate: the synthetic documented root must be
+        // authorized before provider resolution can run.
+        workspacePolicy: createSessionWorkspacePolicy({
+            roots: [ROOT],
+            homeDirectory: os.homedir(),
+            stateRoot: path.join(os.homedir(), ".satori"),
+        }),
         providerRuntime: {
             requireToolContext: async () => ({
                 toolHandlers: {

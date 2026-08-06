@@ -165,7 +165,9 @@ test('read_file source instrumentation preserves output and records one acquisit
         ]);
         assert.equal(records[0].relativeFile, 'small.ts');
         assert.equal(records[1].bytesObtained, 6);
-        assert.equal(records[1].basis, 'descriptor_read');
+        // The shared bounded reader acquires the bytes through the capped
+        // descriptor stream, so the acquisition basis is stream_chunk.
+        assert.equal(records[1].basis, 'stream_chunk');
         assert.equal(records[2].status, 'completed');
         assert.equal(records[3].owner, 'selector');
         assert.equal(records[3].outcome, 'success');
@@ -1516,7 +1518,9 @@ test('read_file reads through the authorized descriptor', async () => {
             .map((line) => JSON.parse(line));
         const ioRecord = records.find((record) => record.kind === 'source_io');
         assert.ok(ioRecord, 'expected a source_io record');
-        assert.equal(ioRecord.basis, 'descriptor_read');
+        // The shared bounded reader acquires the bytes through the capped
+        // descriptor stream, so the acquisition basis is stream_chunk.
+        assert.equal(ioRecord.basis, 'stream_chunk');
     });
 });
 

@@ -13,10 +13,12 @@ import {
     type PythonSourceBackedSpanRepair,
 } from "./python-call-fallback.js";
 import {
-    openAuthorizedPublishedFile,
     PublishedFileAuthorizationError,
-    type AuthorizedPublishedFile,
 } from "./published-file-authorization.js";
+import {
+    AuthorizedSourceReadError,
+    readAuthorizedPublishedSource,
+} from "./published-source-reader.js";
 import {
     WorkspaceAuthorizationError,
     type SessionWorkspacePolicy,
@@ -103,6 +105,11 @@ type NavigationHandlersHost = {
         absoluteFile: string;
         sourceBytes: Buffer;
     }): { status: "fresh" | "stale" | "unknown" | "inconsistent"; registryHash?: string; currentHash?: string };
+    /**
+     * Whole-file byte ceiling for navigation source reads (config
+     * READ_FILE_MAX_BYTES; the reader defaults to 8 MiB when absent).
+     */
+    readFileMaxBytes?: number;
     buildStaleSymbolRefFileOutlinePayload(codebasePath: string, args: Record<string, unknown>, detail?: string): FileOutlineResponseEnvelope;
     loadRegistryValidatedCallGraphSidecar(input: {
         codebaseRoot: string;
@@ -714,14 +721,16 @@ export class NavigationHandlers {
                 const publishedRelativePaths = new Set(
                     registryState.registry.manifest.files.map((file) => file.path),
                 );
-                let authorizedFile: AuthorizedPublishedFile;
+                let sourceBytes: Buffer;
                 try {
-                    authorizedFile = await openAuthorizedPublishedFile({
+                    const sourceRead = await readAuthorizedPublishedSource({
                         workspacePolicy,
                         codebaseRoot: effectiveRoot,
                         requestedPath: absoluteFile,
                         publishedRelativePaths,
+                        maxBytes: this.host.readFileMaxBytes,
                     });
+                    sourceBytes = sourceRead.bytes;
                 } catch (error) {
                     return this.mapNavigationAuthorizationDenial({
                         error,
@@ -733,33 +742,28 @@ export class NavigationHandlers {
                         fallbackMessage: `File '${normalizedFile}' is not readable under codebase root '${effectiveRoot}'.`,
                     });
                 }
-                const sourceBytes = await authorizedFile.handle.readFile();
-                try {
-                    return await this.buildFileOutlineFromAuthorizedFile({
-                        args,
-                        effectiveRoot,
-                        normalizedFile,
-                        absoluteFile,
-                        sourceBytes,
-                        registryState,
-                        trackedRootState,
-                        proofDebugHint,
-                        limitSymbols,
-                        resolveMode,
-                        symbolIdExact,
-                        symbolLabelExact,
-                        windowStart,
-                        windowEnd,
-                        detail,
-                        analysisBarrier,
-                        preparedNavigationReadWasCurrent,
-                        navigationSourceBarrier,
-                        workspacePolicy,
-                        publishedRelativePaths,
-                    });
-                } finally {
-                    await authorizedFile.handle.close().catch(() => undefined);
-                }
+                return await this.buildFileOutlineFromAuthorizedFile({
+                    args,
+                    effectiveRoot,
+                    normalizedFile,
+                    absoluteFile,
+                    sourceBytes,
+                    registryState,
+                    trackedRootState,
+                    proofDebugHint,
+                    limitSymbols,
+                    resolveMode,
+                    symbolIdExact,
+                    symbolLabelExact,
+                    windowStart,
+                    windowEnd,
+                    detail,
+                    analysisBarrier,
+                    preparedNavigationReadWasCurrent,
+                    navigationSourceBarrier,
+                    workspacePolicy,
+                    publishedRelativePaths,
+                });
             }
 
 
@@ -1128,20 +1132,18 @@ export class NavigationHandlers {
                 relativeFilePath: string,
             ): Promise<string[] | undefined> => {
                 try {
-                    const authorized = await openAuthorizedPublishedFile({
+                    const sourceRead = await readAuthorizedPublishedSource({
                         workspacePolicy,
                         codebaseRoot,
                         requestedPath: path.resolve(codebaseRoot, relativeFilePath),
                         publishedRelativePaths,
+                        maxBytes: this.host.readFileMaxBytes,
                     });
-                    try {
-                        const sourceBytes = await authorized.handle.readFile();
-                        return sourceBytes.toString("utf8").split(/\r?\n/);
-                    } finally {
-                        await authorized.handle.close().catch(() => undefined);
-                    }
+                    return sourceRead.bytes.toString("utf8").split(/\r?\n/);
                 } catch (error) {
-                    if (error instanceof PublishedFileAuthorizationError || error instanceof WorkspaceAuthorizationError) {
+                    if (error instanceof PublishedFileAuthorizationError
+                        || error instanceof WorkspaceAuthorizationError
+                        || error instanceof AuthorizedSourceReadError) {
                         return undefined;
                     }
                     throw error;
@@ -1149,23 +1151,21 @@ export class NavigationHandlers {
             };
 
             const absoluteSymbolFile = path.resolve(effectiveRoot, normalizedSymbolFile);
-            let authorizedSymbolFile: AuthorizedPublishedFile | undefined;
             let symbolSourceBytes: Buffer | undefined;
             try {
-                authorizedSymbolFile = await openAuthorizedPublishedFile({
+                const sourceRead = await readAuthorizedPublishedSource({
                     workspacePolicy,
                     codebaseRoot: effectiveRoot,
                     requestedPath: absoluteSymbolFile,
                     publishedRelativePaths,
+                    maxBytes: this.host.readFileMaxBytes,
                 });
-                symbolSourceBytes = await authorizedSymbolFile.handle.readFile();
+                symbolSourceBytes = sourceRead.bytes;
             } catch (error) {
-                if (!(error instanceof PublishedFileAuthorizationError) && !(error instanceof WorkspaceAuthorizationError)) {
+                if (!(error instanceof PublishedFileAuthorizationError)
+                    && !(error instanceof WorkspaceAuthorizationError)
+                    && !(error instanceof AuthorizedSourceReadError)) {
                     throw error;
-                }
-            } finally {
-                if (authorizedSymbolFile) {
-                    await authorizedSymbolFile.handle.close().catch(() => undefined);
                 }
             }
 
@@ -1482,20 +1482,18 @@ export class NavigationHandlers {
             relativeFilePath: string,
         ): Promise<string[] | undefined> => {
             try {
-                const authorized = await openAuthorizedPublishedFile({
+                const sourceRead = await readAuthorizedPublishedSource({
                     workspacePolicy,
                     codebaseRoot,
                     requestedPath: path.resolve(codebaseRoot, relativeFilePath),
                     publishedRelativePaths,
+                    maxBytes: this.host.readFileMaxBytes,
                 });
-                try {
-                    const bytes = await authorized.handle.readFile();
-                    return bytes.toString("utf8").split(/\r?\n/);
-                } finally {
-                    await authorized.handle.close().catch(() => undefined);
-                }
+                return sourceRead.bytes.toString("utf8").split(/\r?\n/);
             } catch (error) {
-                if (error instanceof PublishedFileAuthorizationError || error instanceof WorkspaceAuthorizationError) {
+                if (error instanceof PublishedFileAuthorizationError
+                    || error instanceof WorkspaceAuthorizationError
+                    || error instanceof AuthorizedSourceReadError) {
                     return undefined;
                 }
                 throw error;
