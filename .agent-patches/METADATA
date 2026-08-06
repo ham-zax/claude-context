@@ -1,0 +1,5 @@
+base=ec8123c63693d7ca59ea93314c5ef75bb7947a3d
+message=fix(ranking-v3): accept immutable evidence envelopes
+encoding=gzip-base64
+patchSha256=9ff1a2b51c9e497eb91f3c0f79097d6ce5082f4cf86117ec5c01420e80624b87
+payloadSha256=3b25593464d4ba73afb41bbeaef7f5aea12ffcf81a437fe965049e922173f746
