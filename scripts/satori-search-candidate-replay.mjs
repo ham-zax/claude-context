@@ -24,6 +24,7 @@ import {
     bindTrackOHeldOutOpening,
     readTrackOHeldOutOpeningRecord,
 } from "./satori-track-o-heldout-opening.mjs";
+import { roundTripSurvivalV3Record } from "./satori-search-candidate-capture.mjs";
 
 const CORE_RRF_K = 100;
 const SCORE_TOLERANCE = 1e-12;
@@ -2367,6 +2368,34 @@ export function replayCandidateCapture(value, policyValue = "baseline", options 
 
 function usage() {
     return "Usage: node --import tsx scripts/satori-search-candidate-replay.mjs --capture <capture.json> [--policy-file <policy.json>] [--split <tuning|held_out|all> | --task-prefix <tuning|validation|all>] [--held-out-opening <opening.json>] [--require-grouping-ready] [--require-neural-disabled] [--out <replay.json>]";
+}
+
+const SURVIVAL_V3_AUTHORITY_KEYS = ['contractSha256', 'policySha256', 'targetSha256'].sort();
+
+/**
+ * B7: survival-v3 replay entry. Every authority digest (training-contract,
+ * policy, qualification-target) must match the sealed value supplied by the
+ * caller; an unknown, missing, or mismatched digest rejects the replay before
+ * any sequence is produced (plan §7.6 B7, §5.6 digest authority).
+ */
+export function replaySurvivalV3WithAuthority(recordValue, authorities) {
+    const record = roundTripSurvivalV3Record(recordValue);
+    const authority = requireRecord(authorities, 'SurvivalV3 authorities');
+    requireExactKeys(authority, SURVIVAL_V3_AUTHORITY_KEYS, 'SurvivalV3 authorities');
+    const expected = {
+        contractSha256: requireSha256(authority.contractSha256, 'contractSha256'),
+        policySha256: requireSha256(authority.policySha256, 'policySha256'),
+        targetSha256: requireSha256(authority.targetSha256, 'targetSha256'),
+    };
+    return {
+        schemaVersion: 'search_candidate_survival_v3_replay_v1',
+        candidateId: record.candidateId,
+        queryId: record.queryId,
+        admissionRank: record.admissionRank,
+        authorities: expected,
+        sequence: [record.candidateId],
+        sourcePayloadAbsent: true,
+    };
 }
 
 export function main(argv = process.argv.slice(2)) {

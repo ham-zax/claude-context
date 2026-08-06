@@ -1284,6 +1284,93 @@ function assertArtifactOutsideRepository(file, repoRoot, label, allowMissing = f
     }
 }
 
+const SURVIVAL_V3_KEYS = [
+    'schemaVersion', 'queryId', 'candidateId', 'admissionRank', 'baselineScore',
+    'finalScore', 'passes', 'sourcePayloadAbsent',
+].sort();
+const SURVIVAL_V3_PASS_KEYS = ['passId', 'rank', 'contribution'].sort();
+
+/**
+ * B6: bounded survival-v3 capture record. Carries candidate identity, ranks,
+ * and deterministic scores only — never source text, paths, or derived
+ * normalization. The invariant `sourcePayloadAbsent: true` is enforced by the
+ * exact-key schema (any source payload field would violate it).
+ */
+export function buildSurvivalV3Record(input) {
+    const record = requireRecord(input, 'SurvivalV3 input');
+    if (typeof record.queryId !== 'string' || record.queryId.length === 0) {
+        throw new Error('queryId must be non-empty.');
+    }
+    if (typeof record.candidateId !== 'string' || record.candidateId.length === 0) {
+        throw new Error('candidateId must be non-empty.');
+    }
+    if (!Number.isSafeInteger(record.admissionRank) || record.admissionRank < 1) {
+        throw new Error('admissionRank must be a positive safe integer.');
+    }
+    if (typeof record.baselineScore !== 'number' || !Number.isFinite(record.baselineScore)) {
+        throw new Error('baselineScore must be finite.');
+    }
+    if (typeof record.finalScore !== 'number' || !Number.isFinite(record.finalScore)) {
+        throw new Error('finalScore must be finite.');
+    }
+    if (!Array.isArray(record.passes) || record.passes.length === 0) {
+        throw new Error('SurvivalV3 record requires at least one pass contribution.');
+    }
+    const passes = record.passes.map((pass, index) => {
+        const entry = requireRecord(pass, `passes[${index}]`);
+        requireExactKeys(entry, SURVIVAL_V3_PASS_KEYS, `passes[${index}]`);
+        if (typeof entry.passId !== 'string' || entry.passId.length === 0) {
+            throw new Error(`passes[${index}].passId must be non-empty.`);
+        }
+        if (!Number.isSafeInteger(entry.rank) || entry.rank < 1) {
+            throw new Error(`passes[${index}].rank must be a positive safe integer.`);
+        }
+        if (typeof entry.contribution !== 'number' || !Number.isFinite(entry.contribution)) {
+            throw new Error(`passes[${index}].contribution must be finite.`);
+        }
+        return { passId: entry.passId, rank: entry.rank, contribution: entry.contribution };
+    });
+    const seen = new Set();
+    for (const pass of passes) {
+        if (seen.has(pass.passId)) throw new Error(`Duplicate pass '${pass.passId}'.`);
+        seen.add(pass.passId);
+    }
+    return {
+        schemaVersion: 'search_candidate_survival_v3',
+        queryId: record.queryId,
+        candidateId: record.candidateId,
+        admissionRank: record.admissionRank,
+        baselineScore: record.baselineScore,
+        finalScore: record.finalScore,
+        passes,
+        sourcePayloadAbsent: true,
+    };
+}
+
+/**
+ * B6: canonical round-trip of a survival-v3 record. Re-parses canonical bytes
+ * and asserts byte-stable equality; source payloads cannot survive because the
+ * exact-key schema forbids every source-bearing field.
+ */
+export function roundTripSurvivalV3Record(value) {
+    const record = requireRecord(value, 'SurvivalV3 record');
+    requireExactKeys(record, SURVIVAL_V3_KEYS, 'SurvivalV3 record');
+    if (record.schemaVersion !== 'search_candidate_survival_v3') {
+        throw new Error('SurvivalV3 schema mismatch.');
+    }
+    if (record.sourcePayloadAbsent !== true) {
+        throw new Error('SurvivalV3 invariant sourcePayloadAbsent must be true.');
+    }
+    const rebuilt = buildSurvivalV3Record(record);
+    const canonical = `${canonicalJson(rebuilt)}\n`;
+    const reparsed = JSON.parse(canonical);
+    const roundTripped = buildSurvivalV3Record(reparsed);
+    if (canonicalJson(roundTripped) !== canonicalJson(rebuilt)) {
+        throw new Error('SurvivalV3 record does not round-trip canonically.');
+    }
+    return rebuilt;
+}
+
 export function main(argv = process.argv.slice(2)) {
     const options = parseArgs(argv);
     if (options.help) {
