@@ -3,7 +3,7 @@ name: Codex Ranking V3 executor
 on:
   push:
     branches:
-      - codex/ranking-v3-r0-1a-fixture
+      - codex/ranking-v3-d-to-i
     paths:
       - .agent-patches/READY
       - .github/workflows/codex-agent-bootstrap.yml
@@ -67,15 +67,14 @@ jobs:
             echo "Multipart transport has no patch parts." >&2
             exit 1
           fi
-          cat "${patch_parts[@]}" | tr -d '\r\n' > /tmp/agent.payload.b64
 
-          if [[ "$payload_encoding" == "gzip-base64" ]]; then
+          if [[ "$payload_encoding" == "plain" ]]; then
+            cat "${patch_parts[@]}" > /tmp/agent.patch
+            actual_payload_sha=$(sha256sum /tmp/agent.patch | awk '{print $1}')
+          elif [[ "$payload_encoding" == "gzip-base64" ]]; then
+            cat "${patch_parts[@]}" | tr -d '\r\n' > /tmp/agent.payload.b64
             base64 --decode /tmp/agent.payload.b64 > /tmp/agent.payload.gz
             actual_payload_sha=$(sha256sum /tmp/agent.payload.gz | awk '{print $1}')
-            if [[ "$actual_payload_sha" != "$expected_payload_sha" ]]; then
-              echo "Payload digest mismatch: expected=$expected_payload_sha actual=$actual_payload_sha" >&2
-              exit 1
-            fi
             gzip -t /tmp/agent.payload.gz
             gzip -dc /tmp/agent.payload.gz > /tmp/agent.patch
           else
@@ -83,6 +82,10 @@ jobs:
             exit 1
           fi
 
+          if [[ "$actual_payload_sha" != "$expected_payload_sha" ]]; then
+            echo "Payload digest mismatch: expected=$expected_payload_sha actual=$actual_payload_sha" >&2
+            exit 1
+          fi
           actual_patch_sha=$(sha256sum /tmp/agent.patch | awk '{print $1}')
           if [[ "$actual_patch_sha" != "$expected_patch_sha" ]]; then
             echo "Patch digest mismatch: expected=$expected_patch_sha actual=$actual_patch_sha" >&2
@@ -120,7 +123,7 @@ jobs:
           cat > agent-bundle-metadata.json <<EOF
           {
             "repository": "ham-zax/satori",
-            "sourceBranch": "codex/ranking-v3-r0-1a-fixture",
+            "sourceBranch": "codex/ranking-v3-d-to-i",
             "sourceHead": "$(git rev-parse HEAD)",
             "sourceTree": "$(git rev-parse HEAD^{tree})",
             "masterHead": "$(git rev-parse refs/remotes/origin/master)",
@@ -145,11 +148,21 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace packages
+        shell: bash
         run: |
-          pnpm --filter @zokizuan/satori-core build
-          pnpm --filter @zokizuan/satori-mcp build
+          set +e
+          set -o pipefail
+          pnpm --filter @zokizuan/satori-core build 2>&1 | tee ranking-v3-focused.log
+          core_build=${PIPESTATUS[0]}
+          pnpm --filter @zokizuan/satori-mcp build 2>&1 | tee -a ranking-v3-focused.log
+          mcp_build=${PIPESTATUS[0]}
+          if [[ "$core_build" != "0" || "$mcp_build" != "0" ]]; then
+            printf '%s\n' 1 > ranking-v3-focused.status
+            exit 1
+          fi
 
       - name: Run Ranking V3 verification
+        if: success()
         id: verify
         shell: bash
         run: |
@@ -161,7 +174,7 @@ jobs:
               | grep -E '(ranking-v3|ranking-|search-pass-evidence|search-rerank-evidence-retention|search-ranking-evidence-assembler)' \
               | sort -u
           )
-          node --import tsx --test "${ts_tests[@]}" 2>&1 | tee ranking-v3-focused.log
+          node --import tsx --test "${ts_tests[@]}" 2>&1 | tee -a ranking-v3-focused.log
           focused_status=${PIPESTATUS[0]}
 
           mapfile -t script_tests < <(
