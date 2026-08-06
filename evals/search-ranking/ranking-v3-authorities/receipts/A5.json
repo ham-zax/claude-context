@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "ranking_v3_task_receipt_v1",
+  "taskId": "A5",
+  "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+  "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511",
+  "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+  "headSha": "fa3442599f3f6d27bcfba75cade9e599a73d158b",
+  "treeSha": "d5e230db2d2eaff903b94e9f778bf33263148151",
+  "testCommand": "node --import tsx --test packages/mcp/src/core/ranking-policy-artifact.test.ts",
+  "result": "passed",
+  "artifactSha256": "94fd8389ef8fd795f5dbfcaee29571e39b27335318fb415ba9e30694375eade4",
+  "sha256": "4cb8306b67c5bc1073cfd9a74101068f6b8e3ffd8c7bd750fe73de8b5ba3dac8"
+}
