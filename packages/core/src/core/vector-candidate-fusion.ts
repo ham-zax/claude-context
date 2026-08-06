@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 
 import type { VectorCandidate } from '../vectordb';
+import type { SemanticSearchCandidateTraceV2 } from './semantic-search-candidate-trace';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 
 type RankedCandidate = {
@@ -62,6 +63,10 @@ export function fuseVectorCandidatesWithRrf(input: {
     readonly lexical: readonly VectorCandidate[];
     readonly k: number;
     readonly limit: number;
+    /** Advisory-only trace sink for per-candidate raw arm and fusion ranks. */
+    readonly traceV2?: (trace: SemanticSearchCandidateTraceV2) => void;
+    /** When the caller substituted a fallback lexical arm, its ordered ranks by candidate id. */
+    readonly fallbackLexicalRanks?: ReadonlyMap<string, number>;
 }): VectorCandidate[] {
     if (!Number.isFinite(input.k) || input.k <= 0) {
         throw new Error('RRF k must be a positive finite number.');
@@ -71,6 +76,42 @@ export function fuseVectorCandidatesWithRrf(input: {
     }
 
     const candidatesById = new Map<string, RankedCandidate>();
+    const rawRanksByCandidateId = new Map<string, {
+        rawDenseRank: number | null;
+        rawLexicalRank: number | null;
+        rawFallbackLexicalRank: number | null;
+    }>();
+    const orderedDense = orderVectorCandidateArm(input.dense);
+    const orderedLexical = orderVectorCandidateArm(input.lexical);
+    orderedDense.forEach((candidate, index) => {
+        const prior = rawRanksByCandidateId.get(candidate.document.id) ?? {
+            rawDenseRank: null,
+            rawLexicalRank: null,
+            rawFallbackLexicalRank: null,
+        };
+        prior.rawDenseRank = index + 1;
+        rawRanksByCandidateId.set(candidate.document.id, prior);
+    });
+    orderedLexical.forEach((candidate, index) => {
+        const prior = rawRanksByCandidateId.get(candidate.document.id) ?? {
+            rawDenseRank: null,
+            rawLexicalRank: null,
+            rawFallbackLexicalRank: null,
+        };
+        prior.rawLexicalRank = index + 1;
+        rawRanksByCandidateId.set(candidate.document.id, prior);
+    });
+    if (input.fallbackLexicalRanks) {
+        for (const [candidateId, rank] of input.fallbackLexicalRanks) {
+            const prior = rawRanksByCandidateId.get(candidateId) ?? {
+                rawDenseRank: null,
+                rawLexicalRank: null,
+                rawFallbackLexicalRank: null,
+            };
+            prior.rawFallbackLexicalRank = rank;
+            rawRanksByCandidateId.set(candidateId, prior);
+        }
+    }
     const addRankedArm = (arm: readonly VectorCandidate[]): void => {
         const seenDocumentsById = new Map<string, VectorCandidate['document']>();
         const seenOwnerIds = new Set<string>();
@@ -114,5 +155,19 @@ export function fuseVectorCandidatesWithRrf(input: {
             || compareContractStrings(left.document.id, right.document.id)
         ))
         .slice(0, input.limit)
-        .map(({ document, score }) => ({ document, score }));
+        .map(({ document, score }, index) => {
+            const trace = input.traceV2;
+            if (trace) {
+                const raw = rawRanksByCandidateId.get(document.id);
+                trace({
+                    schemaVersion: 'semantic_search_candidate_trace_v2',
+                    candidateId: document.id,
+                    rawDenseRank: raw?.rawDenseRank ?? null,
+                    rawLexicalRank: raw?.rawLexicalRank ?? null,
+                    rawFallbackLexicalRank: raw?.rawFallbackLexicalRank ?? null,
+                    coreFusionRank: index + 1,
+                });
+            }
+            return { document, score };
+        });
 }

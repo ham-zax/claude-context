@@ -428,7 +428,26 @@ export type SearchExecutionInput = {
     observedChangedFilesState: ChangedFilesState;
     retrievalPolicy: ResolvedSearchPolicy;
     entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
+    /**
+     * B5: advisory ranking-evidence hooks. Absent by default; when present they
+     * observe the frozen post-admission pre-residual baseline order and never
+     * alter the produced envelopes (plan §4.1, §7.6 B5).
+     */
+    evidenceHooks?: RankingEvidenceHooksV1;
 };
+
+export interface BaselineAdmissionSnapshotV1 {
+    queryId: string;
+    candidates: Array<{
+        candidateId: string;
+        baselineScore: number;
+        admissionRank: number;
+    }>;
+}
+
+export interface RankingEvidenceHooksV1 {
+    onBaselineAdmissionSnapshot?: (snapshot: BaselineAdmissionSnapshotV1) => void;
+}
 
 type RerankPhaseResult = {
     exactMatchPinningApplied: boolean;
@@ -1350,6 +1369,14 @@ export async function runSearchExecution(
             input.parsedOperators.must.length > 0,
         ) || exactMatchPinningApplied;
         rankingProvenance.exactMatchPinningApplied = exactMatchPinningApplied;
+        input.evidenceHooks?.onBaselineAdmissionSnapshot?.({
+            queryId: input.semanticQuery,
+            candidates: scored.map((candidate, index) => ({
+                candidateId: searchCandidateIdentity(candidate.result).candidateId,
+                baselineScore: candidate.finalScore,
+                admissionRank: index + 1,
+            })),
+        });
         if (candidateSurvival) {
             appendSearchCandidateStage(
                 candidateSurvival,

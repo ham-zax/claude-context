@@ -13,6 +13,7 @@ import type {
     SemanticSearchRequest,
     SemanticSearchResult,
 } from '../types';
+import type { SemanticSearchCandidateTraceV2 } from './semantic-search-candidate-trace';
 import type {
     RetrievalMode,
     ScorePolicy,
@@ -391,6 +392,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         diagnosticCandidateArmsConsumer?: (
             arms: NonNullable<SemanticSearchExecutionResult['diagnosticCandidateArms']>,
         ) => void,
+        candidateTraceV2Consumer?: (trace: SemanticSearchCandidateTraceV2) => void,
     ): Promise<SemanticSearchResult[]> {
         const request = this.normalizeRequest(
             requestOrCodebasePath,
@@ -616,6 +618,19 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 lexical: lexicalFusionCandidates.slice(0, resolvedRequest.topK),
                 k: VECTOR_CANDIDATE_RRF_K_V1,
                 limit: resolvedRequest.topK,
+                ...(candidateTraceV2Consumer
+                    ? {
+                        traceV2: candidateTraceV2Consumer,
+                        ...(lexicalCandidates.length === 0 && lexicalFallback
+                            ? {
+                                fallbackLexicalRanks: new Map(
+                                    orderVectorCandidateArm(lexicalFallback)
+                                        .map((candidate, index) => [candidate.document.id, index + 1] as const),
+                                ),
+                            }
+                            : {}),
+                    }
+                    : {}),
             });
             diagnosticCandidateArmsConsumer?.({
                 dense: denseCandidates.map((result) => (
