@@ -594,6 +594,19 @@ test("reuses one connection across successful responses and closes deterministic
 });
 
 test("direct response.body.cancel() sets settled state and cleans up abort listener", async (t) => {
+    let cancelCount = 0;
+    let cancelReasonPassed: unknown;
+    const underlyingStream = new ReadableStream({
+        start(controller) {
+            controller.enqueue(new TextEncoder().encode("partial data"));
+        },
+        cancel(reason) {
+            cancelCount++;
+            cancelReasonPassed = reason;
+            return Promise.resolve();
+        },
+    });
+
     const server = await startServer((_req, res) => {
         res.writeHead(200, { "Content-Type": "text/plain" });
         res.write("partial data");
@@ -607,7 +620,7 @@ test("direct response.body.cancel() sets settled state and cleans up abort liste
         url: `${server.url}/direct-cancel`,
         init: { method: "GET" },
         signal: controller.signal,
-        attemptTimeoutMs: 10_000,
+        attemptTimeoutMs: 50,
         maxAttempts: 1,
         ...basePolicy,
     });
@@ -622,6 +635,9 @@ test("direct response.body.cancel() sets settled state and cleans up abort liste
 
     // Verify settled state: repeated cancel returns resolved promise without error
     await assert.doesNotReject(() => response.body!.cancel("second cancel"));
+
+    // Wait past attemptTimeoutMs (50ms) to ensure timeout deadline firing does not trigger a second cancellation
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Verify stream reader reflects settled state
     const reader = response.body.getReader();
