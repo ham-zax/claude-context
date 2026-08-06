@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.3",
+  "cardType": "evidence_or_code",
+  "contractSha256": "df89c04ec2bd764bad0b683cff619813a6ac773c53971c00a9c73b8ba378e0ba",
+  "contract": {
+    "task_id": "R1.3",
+    "title": "Create the decision contract/index and LOFO_FAMILIES.json from the sealed cross-repository-v3 tuning partition",
+    "risk": "medium",
+    "invariant": "R1.3 LOFO families derive from the sealed v3 tuning partition: exactly the six tuning family IDs (gitnexus-r0, bookmark-ai-organizer-r0, duas-r0, vox-infinity-r0, rpc-r0, edge-tts-app-r0) from evals/search-ranking/cross-repository-v3.manifest.json, not from the future C5 tuning manifest.",
+    "owners": [
+      "R1.3"
+    ],
+    "production_callers": [
+      "evals/search-ranking/cross-repository-v3.manifest.json (R1.3 family source; verified at round_base: 50 tuning tasks, 6 tuning repositories, 6 families: gitnexus-r0, bookmark-ai-organizer-r0, duas-r0, vox-infinity-r0, rpc-r0, edge-tts-app-r0; held_out partition excluded)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.2 family rule and §7.5 row)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention; manifest-parsing precedent for family extraction)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; family source - read-only at base, do not modify its sealed content)",
+      "package.json (round-level approved; not consumed by this task directly)",
+      "DECISION_CONTRACT.index.json and LOFO_FAMILIES.json (output artifacts in $TASK_OUTPUT; not tracked repo files)"
+    ],
+    "interface_changes": [
+      "DECISION_CONTRACT.index.json (kind decision contract index; plan §7.5 line 2137, variable table line 2093)",
+      "LOFO_FAMILIES.json (family-list path derived from the sealed v3 tuning split; plan §7.5 line 2137 and variable table line 2095)",
+      "$LOFO_FAMILIES entries feed template expansionAuthority r1_5_lofo_families and $FAMILY_ID substitution (plan §7.5 variable table lines 2095, 2101; §7.2 lines 1644-1647)"
+    ],
+    "security_boundaries": [
+      "The family list is derived from the already-sealed cross-repository-v3 tuning partition and its family mapping, not from the future C5 tuning manifest (§7.2, lines 1645-1647; round invariant)",
+      "LOFO_FAMILIES.json contains exactly the six exact family IDs; family grouping must remain atomic for A9 folds (no related family crosses a fold boundary; §7.6 A9 row)",
+      "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)"
+    ],
+    "overlap_with": [
+      "FT-E (LOFO_FAMILIES feeds the E-family expansion authority r1_5_lofo_families; R1.5 invokes R1.T1 expansion while sealing so E1.<familyId>/E2.<familyId> nodes already exist; round overlap declaration)",
+      "A8/A9/A10 (judgment packets, LOFO folds, evaluator primitives consume the family/tuning partition)",
+      "R1.T2 (verify-contract tool; prerequisite edge R1.3: R1.0B, R1.T2)",
+      "R1.5 (consumes DECISION_CONTRACT.index.json and LOFO_FAMILIES.json; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)"
+    ],
+    "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind decision --index \"$TASK_OUTPUT/DECISION_CONTRACT.index.json\" --families \"$TASK_OUTPUT/LOFO_FAMILIES.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2137 (create decision contract/index and LOFO_FAMILIES.json from the sealed cross-repository-v3 tuning partition; verification command; output decision/family-list digests); §7.2 lines 1644-1647 (family list derived from the already-sealed cross-repository-v3 tuning partition and its family mapping, not from the future C5 tuning manifest; R1.5 invokes the R1.T1 expansion function while sealing so concrete E1.<familyId> and E2.<familyId> nodes already exist in TASK_GRAPH.json; no later E-family expansion is needed); §7.6 evidence row line 2413; §8.2 Gate-1 acceptance.\nVerified at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 from evals/search-ranking/cross-repository-v3.manifest.json: 101 tasks total; 50 tuning tasks across 6 tuning repositories (ids gitnexus-r0, bookmark-ai-organizer-r0, duas-r0, vox-infinity-r0, rpc-r0, edge-tts-app-r0; families gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app); 51 held_out tasks (6 held_out repositories, family IDs promptready-r0, fastcontext-r0, recovery-dashboard-r0, ai-studio-prompt-library-r0, portfolio-r0, supply-chain-api-r0). The six LOFO family IDs are the tuning repository IDs with the -r0 suffix.\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.3: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nDo not add, drop, or reorder family IDs; the exact six IDs above are the sealed partition. $DECISION_CONTRACT_INDEX and $LOFO_FAMILIES are the R1.3 output paths (plan §7.5 variable table lines 2093, 2095)."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

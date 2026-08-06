@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A3",
+  "cardType": "evidence_or_code",
+  "contractSha256": "77c5cf445da4362356dcabcad190794ba2f91d3d475b6f712e1ff2ecd4db885f",
+  "contract": {
+    "task_id": "A3",
+    "title": "Wave A: rerank-evidence.ts parseValidatedRerankResponse (ValidatedRerankResponseV1)",
+    "risk": "medium",
+    "invariant": "rerank-evidence.ts owns ONLY ValidatedRerankResponseV1 parsing (parseValidatedRerankResponse). Incomplete, duplicate, foreign, or non-finite provider responses never parse; only a complete finite permutation parses. D7 consumes A3 output and never overlaps (rerank-evidence.ts is A3-owned per §7.1). Wave A changes no central runtime file.",
+    "owners": [
+      "A3"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (A3 anchor: rerankResults typed Array<{index:number}> at :566; only .index consumed at :624-625 — raw RerankResult.relevanceScore (packages/core/src/reranker/reranker.ts:1) and derived maxSimScore are discarded today; raw-score retention is B3's Wave B job, not A3's)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-execution.exact-pin-rerank.test.ts (existing, verified at base; exercises the rerank path)",
+      "packages/mcp/src/core/search-query-planning.test.ts (existing, verified at base)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/rerank-evidence.ts",
+      "packages/mcp/src/core/rerank-evidence.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/rerank-evidence.ts (new file; parseValidatedRerankResponse ONLY, producing ValidatedRerankResponseV1 — complete returned candidate order with finite raw scores per §6.3 provider-capture authority)"
+    ],
+    "security_boundaries": [
+      "Provider responses are untrusted input: reject incomplete, duplicate, foreign (identity-mismatched), or non-finite scores; only a complete finite permutation parses (§7.6 A3 RED row rejects_incomplete_duplicate_foreign_or_non_finite_provider_response)"
+    ],
+    "overlap_with": [
+      "B3 (Wave B): raw validated response retention uses A3/A12 — retention is B3, parsing is A3; never both",
+      "D7 (Wave D): requires A3 (also A4/A5/A12); D7 consumes ValidatedRerankResponseV1 in neural-ranking-evidence.ts/provider-slot-permutation.ts and must never re-parse or overlap rerank-evidence.ts ownership (§7.1, §8.3 'A3 and D7 ownership do not overlap')"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/rerank-evidence.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/mcp/src/core/rerank-evidence.ts (new file) exporting ONLY parseValidatedRerankResponse producing ValidatedRerankResponseV1. §7.5 A3 row: 'parseValidatedRerankResponse only'. §7.6 A3 RED row: test 'rejects_incomplete_duplicate_foreign_or_non_finite_provider_response'; expected failure: malformed provider responses parse successfully; minimal passing: only a complete finite permutation parses as ValidatedRerankResponseV1. Encode the A3-vs-D7 boundary: A3 parses, D7 consumes; rerank-evidence.ts is exclusively A3-owned (§7.1 central-file ownership table). Anchor context: search-execution.ts:566 declares rerankResults as Array<{index:number}> — the raw relevanceScore/maxSimScore discard is the baseline behavior; A3 does NOT change search-execution.ts and does NOT retain raw responses (B3 does, in Wave B). Focused command is plan-specified (§7.5 A3 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified (packages/mcp/package.json; .github/workflows/ci.yml:150) and must pass."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

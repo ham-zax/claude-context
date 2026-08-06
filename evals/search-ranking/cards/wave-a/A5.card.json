@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A5",
+  "cardType": "evidence_or_code",
+  "contractSha256": "c20d3981cb2d43ef77a4635ba6644d0c6d59b10d6f1b12c0b31d5e2e7eb4c22f",
+  "contract": {
+    "task_id": "A5",
+    "title": "Wave A: ranking-policy-artifact.ts residual/descriptor/final-artifact parsers and canonicalizers",
+    "risk": "medium",
+    "invariant": "Parsers distinguish ResidualModelV1, FoldContenderDescriptorV1, and RankingPolicyV3Artifact independently; final-artifact provider fields bind the sealed R1.2 request contract and R1.4 activation contract; canonical bytes round-trip; no self-hash, no quality receipt.",
+    "owners": [
+      "A5"
+    ],
+    "production_callers": [
+      "(no base runtime caller; Wave D/E consumers per §7.2: D2/D3 train+verify, D7 application library, D8 final-artifact builder, E4 serialization)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-artifact.test.ts (future — plan §7.6 A5 row)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-artifact.ts",
+      "packages/mcp/src/core/ranking-policy-artifact.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-artifact.ts (new file; exact-key parsers/canonicalizers for ResidualModelV1 (ranking_residual_model_v1), FoldContenderDescriptorV1 (ranking_fold_contender_v1), RankingPolicyV3Artifact (ranking_policy_v3, policyId search_ranking_policy_v3) per §5.3)"
+    ],
+    "security_boundaries": [
+      "Final artifact contains no self-hash and no quality receipt; runtime SHA-256 is computed over canonical bytes; provider_derived mode must exactly match the sealed fixed target plus the separately sealed R1.2 request-contract digest; disabled mode carries no provider fields (§5.3)"
+    ],
+    "overlap_with": [
+      "D2/D3/D5/D7/D8 (Waves D/E): all require A5 (exact prerequisite table)",
+      "B7 (Wave B): replay v3 requires A5 and A6",
+      "R1.2 (training/request contract) and R1.4 (artifact/activation contract) are the sealed field authorities"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-artifact.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/mcp/src/core/ranking-policy-artifact.ts (new file) with exact-key parsers and canonicalizers for all three §5.3 forms: ResidualModelV1, FoldContenderDescriptorV1 (mode disabled | provider_derived), RankingPolicyV3Artifact (schemaVersion ranking_policy_v3, policyId search_ranking_policy_v3, featureSchema search_features_v1, normalization NormalizationContractV1 with missingValuePolicy indicator_zero_fill). §7.6 A5 RED row: test 'distinguishes_residual_descriptor_and_final_artifact_and_binds_r1_2_fields'; expected failure: parser conflates forms or ignores request/gate fields; minimal passing: each form parses independently and final provider fields match R1.2. Artifact has no self-hash and no quality receipt; SHA-256 over canonical bytes. Disabled mode has no provider fields even when binding a fixed provider target digest for provenance. Focused command is plan-specified (§7.5 A5 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

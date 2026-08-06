@@ -1,0 +1,2723 @@
+{
+  "schemaVersion": "ranking_v3_task_graph_v1",
+  "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+  "nodes": [
+    {
+      "taskId": "A_GATE",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "A1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A10",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A11H",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A11Q",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A12",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A7",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A8",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "A9",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B_GATE",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "B1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B7",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B8",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "B9",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "C_GATE",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "C1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "C1G",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "C3S",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "C4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "C5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "C6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D_GATE",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "D1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D7",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "D8",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "DB",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DC0",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DC1",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DD",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DE",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DF",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DG",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DH",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "DI",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "E_GATE_INSUFFICIENT",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "E_GATE_LEARNED_NOT_JUSTIFIED",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "E_GATE_SELECTED",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "E1.bookmark_ai_organizer",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E1.duas",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E1.edge_tts_app",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E1.gitnexus",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E1.rpc_learner_engine",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E1.vox_infinity",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E2.bookmark_ai_organizer",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E2.duas",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E2.edge_tts_app",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E2.gitnexus",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E2.rpc_learner_engine",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E2.vox_infinity",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E3_INPUT_SEAL",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "E4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F_GATE",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "F0",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F7",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F8",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "F9",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G_GATE",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "G1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G6A",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G6B",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G6C",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "G7",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H_GATE_INSUFFICIENT",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "H_GATE_QUALIFIED",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "H_GATE_REJECTED",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "H0",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H10",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H7",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H8",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "H9",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I_GATE_ACCEPTED",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "I_GATE_REJECTED",
+      "taskKind": "gate"
+    },
+    {
+      "taskId": "I0",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I3R",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "I6",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R0.0",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R0.1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R0.1A",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R0.1B",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R0.1V",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R0.2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.0",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.0B",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "R1.1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.2",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.3",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.4",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.5",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.6",
+      "taskKind": "boundary_generator"
+    },
+    {
+      "taskId": "R1.T0",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.T1",
+      "taskKind": "static"
+    },
+    {
+      "taskId": "R1.T2",
+      "taskKind": "static"
+    }
+  ],
+  "taskTemplates": [
+    {
+      "templateId": "C2.<packetId>",
+      "taskIdPattern": "C2.(?<packetId>[a-z0-9][a-z0-9_-]*)",
+      "expansionAuthority": "c1_packet_manifest",
+      "hardRequires": [
+        "DC1",
+        "C1"
+      ]
+    },
+    {
+      "templateId": "C3A.<packetId>",
+      "taskIdPattern": "C3A.(?<packetId>[a-z0-9][a-z0-9_-]*)",
+      "expansionAuthority": "c1_packet_manifest",
+      "hardRequires": [
+        "C2.<packetId>"
+      ]
+    },
+    {
+      "templateId": "C3B.<packetId>",
+      "taskIdPattern": "C3B.(?<packetId>[a-z0-9][a-z0-9_-]*)",
+      "expansionAuthority": "c1_packet_manifest",
+      "hardRequires": [
+        "C2.<packetId>"
+      ]
+    },
+    {
+      "templateId": "E1.<familyId>",
+      "taskIdPattern": "E1.(?<familyId>[a-z0-9][a-z0-9_-]*)",
+      "expansionAuthority": "r1_5_lofo_families",
+      "hardRequires": [
+        "DE",
+        "D6"
+      ]
+    },
+    {
+      "templateId": "E2.<familyId>",
+      "taskIdPattern": "E2.(?<familyId>[a-z0-9][a-z0-9_-]*)",
+      "expansionAuthority": "r1_5_lofo_families",
+      "hardRequires": [
+        "E1.<familyId>",
+        "B9",
+        "D4",
+        "D7",
+        "A12"
+      ]
+    }
+  ],
+  "hardEdges": [
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A11H"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A11Q"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A_GATE",
+      "requires": "A9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A1",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A1",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A10",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A10",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11H",
+      "requires": "A11Q"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11H",
+      "requires": "A6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11H",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11H",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11H",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11Q",
+      "requires": "A6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11Q",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A11Q",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A12",
+      "requires": "R1.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A12",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A12",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A2",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A2",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A3",
+      "requires": "R1.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A3",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A3",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A4",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A4",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A5",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A5",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A5",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A5",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A6",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A6",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A7",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A7",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A8",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A8",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A9",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "A9",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B_GATE",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B1",
+      "requires": "A1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B1",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B2",
+      "requires": "A2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B2",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B3",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B3",
+      "requires": "A3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B3",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B4",
+      "requires": "A2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B4",
+      "requires": "A4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B4",
+      "requires": "B2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B4",
+      "requires": "B3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B4",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B5",
+      "requires": "B1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B5",
+      "requires": "B2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B5",
+      "requires": "B3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B5",
+      "requires": "B4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B5",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B6",
+      "requires": "B5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B6",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B7",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B7",
+      "requires": "A6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B7",
+      "requires": "B6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B7",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B7",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B7",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B8",
+      "requires": "B7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B8",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B8",
+      "requires": "R0.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B9",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B9",
+      "requires": "B7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B9",
+      "requires": "B8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B9",
+      "requires": "DB"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B9",
+      "requires": "R1.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "B9",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C_GATE",
+      "requires": "C1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C_GATE",
+      "requires": "C1G"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C_GATE",
+      "requires": "C3S"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C_GATE",
+      "requires": "C4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C_GATE",
+      "requires": "C5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C_GATE",
+      "requires": "C6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C1",
+      "requires": "A8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C1",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C1",
+      "requires": "DC0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C1G",
+      "requires": "C1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C1G",
+      "requires": "R1.T1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C4",
+      "requires": "C3S"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C5",
+      "requires": "A8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C5",
+      "requires": "C4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C6",
+      "requires": "A10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C6",
+      "requires": "B7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "C6",
+      "requires": "C5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D_GATE",
+      "requires": "D8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D1",
+      "requires": "C6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D1",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D1",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D1",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D2",
+      "requires": "A4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D2",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D2",
+      "requires": "C6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D2",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D2",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D3",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D3",
+      "requires": "D2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D3",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D3",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D4",
+      "requires": "C6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D4",
+      "requires": "D2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D4",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D4",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D5",
+      "requires": "A4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D5",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D5",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D5",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D6",
+      "requires": "A9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D6",
+      "requires": "C6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D6",
+      "requires": "D2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D6",
+      "requires": "D3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D6",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D6",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "A3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "A4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "R1.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D7",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "D2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "D3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "R1.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "D8",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DB",
+      "requires": "A_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DB",
+      "requires": "R1.6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DC0",
+      "requires": "B_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DC1",
+      "requires": "C1G"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DD",
+      "requires": "C_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DD",
+      "requires": "DC1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DE",
+      "requires": "D_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DE",
+      "requires": "DD"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DF",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DF",
+      "requires": "E_GATE_SELECTED"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DG",
+      "requires": "DF"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DG",
+      "requires": "F_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DH",
+      "requires": "DG"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DH",
+      "requires": "G_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DI",
+      "requires": "DH"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DI",
+      "requires": "H_GATE_QUALIFIED"
+    },
+    {
+      "kind": "hard",
+      "taskId": "DI",
+      "requires": "H10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E_GATE_SELECTED",
+      "requires": "E4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.bookmark_ai_organizer",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.bookmark_ai_organizer",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.duas",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.duas",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.edge_tts_app",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.edge_tts_app",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.gitnexus",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.gitnexus",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.rpc_learner_engine",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.rpc_learner_engine",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.vox_infinity",
+      "requires": "D6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E1.vox_infinity",
+      "requires": "DE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.bookmark_ai_organizer",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.bookmark_ai_organizer",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.bookmark_ai_organizer",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.bookmark_ai_organizer",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.bookmark_ai_organizer",
+      "requires": "E1.bookmark_ai_organizer"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.duas",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.duas",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.duas",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.duas",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.duas",
+      "requires": "E1.duas"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.edge_tts_app",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.edge_tts_app",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.edge_tts_app",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.edge_tts_app",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.edge_tts_app",
+      "requires": "E1.edge_tts_app"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.gitnexus",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.gitnexus",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.gitnexus",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.gitnexus",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.gitnexus",
+      "requires": "E1.gitnexus"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.rpc_learner_engine",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.rpc_learner_engine",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.rpc_learner_engine",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.rpc_learner_engine",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.rpc_learner_engine",
+      "requires": "E1.rpc_learner_engine"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.vox_infinity",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.vox_infinity",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.vox_infinity",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.vox_infinity",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E2.vox_infinity",
+      "requires": "E1.vox_infinity"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3",
+      "requires": "E3_INPUT_SEAL"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "E2.bookmark_ai_organizer"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "E2.duas"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "E2.edge_tts_app"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "E2.gitnexus"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "E2.rpc_learner_engine"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "E2.vox_infinity"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E3_INPUT_SEAL",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E4",
+      "requires": "D2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E4",
+      "requires": "D3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "E4",
+      "requires": "D8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F_GATE",
+      "requires": "F9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F0",
+      "requires": "DF"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F0",
+      "requires": "E_GATE_SELECTED"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F1",
+      "requires": "A5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F1",
+      "requires": "F0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F2",
+      "requires": "A11Q"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F2",
+      "requires": "A6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F2",
+      "requires": "F0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F6",
+      "requires": "A7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F6",
+      "requires": "F1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F6",
+      "requires": "F2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F7",
+      "requires": "A7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F7",
+      "requires": "F6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F8",
+      "requires": "A7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F8",
+      "requires": "F6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F9",
+      "requires": "A11H"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F9",
+      "requires": "A11Q"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F9",
+      "requires": "A6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F9",
+      "requires": "F0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F9",
+      "requires": "F2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "F9",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G_GATE",
+      "requires": "G7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G1",
+      "requires": "B8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G1",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G1",
+      "requires": "DG"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G1",
+      "requires": "F_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G2",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G2",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G2",
+      "requires": "G1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G3",
+      "requires": "G2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G4",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G4",
+      "requires": "F1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G4",
+      "requires": "F2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G4",
+      "requires": "F6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G4",
+      "requires": "G1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G5",
+      "requires": "F7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G5",
+      "requires": "G2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G5",
+      "requires": "R0.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6",
+      "requires": "G1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6",
+      "requires": "G2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6",
+      "requires": "G3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6",
+      "requires": "G4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6",
+      "requires": "G5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6A",
+      "requires": "D5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6A",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6A",
+      "requires": "G2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "A11H"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "A11Q"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "B7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "B9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "C6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "D3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "D5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "D7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "D8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "G6A"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6B",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "A11H"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "A11Q"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "F9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G6C",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "F9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "G6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "G6A"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "G7",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H_GATE_QUALIFIED",
+      "requires": "H10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H0",
+      "requires": "DH"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H0",
+      "requires": "G_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H0",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H1",
+      "requires": "DH"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H1",
+      "requires": "G_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H1",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H10",
+      "requires": "F9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H10",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H10",
+      "requires": "H0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H2",
+      "requires": "DH"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H2",
+      "requires": "G_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H2",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H3",
+      "requires": "DH"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H3",
+      "requires": "G_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H3",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H4",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H4",
+      "requires": "DH"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H4",
+      "requires": "G_GATE"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H4",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H6",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H6",
+      "requires": "H1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H7",
+      "requires": "D4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H7",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H7",
+      "requires": "H1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H8",
+      "requires": "D5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H8",
+      "requires": "G6A"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H8",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H8",
+      "requires": "H1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H9",
+      "requires": "G6B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H9",
+      "requires": "H0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H9",
+      "requires": "H6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H9",
+      "requires": "H7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "H9",
+      "requires": "H8"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I_GATE_ACCEPTED",
+      "requires": "I6"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I_GATE_REJECTED",
+      "requires": "I3R"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I0",
+      "requires": "DI"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I0",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I0",
+      "requires": "H_GATE_QUALIFIED"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I1",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I1",
+      "requires": "G7"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I1",
+      "requires": "H10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I1",
+      "requires": "I0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I2",
+      "requires": "A12"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I2",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I2",
+      "requires": "I1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I3",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I3",
+      "requires": "I2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I3R",
+      "requires": "F9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I3R",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I3R",
+      "requires": "H10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I3R",
+      "requires": "I1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I4",
+      "requires": "F9"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I4",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I4",
+      "requires": "H10"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I4",
+      "requires": "I1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I5",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I5",
+      "requires": "I4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I6",
+      "requires": "G6C"
+    },
+    {
+      "kind": "hard",
+      "taskId": "I6",
+      "requires": "I5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R0.1",
+      "requires": "R0.1V"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R0.1A",
+      "requires": "R0.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R0.1B",
+      "requires": "R0.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R0.1V",
+      "requires": "R0.1A"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R0.2",
+      "requires": "R0.1B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.0",
+      "requires": "R0.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.0",
+      "requires": "R1.T0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.0B",
+      "requires": "R0.1B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.0B",
+      "requires": "R1.0"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.1",
+      "requires": "R1.0B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.1",
+      "requires": "R1.T2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.2",
+      "requires": "R1.0B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.2",
+      "requires": "R1.T2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.3",
+      "requires": "R1.0B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.3",
+      "requires": "R1.T2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.4",
+      "requires": "R1.0B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.4",
+      "requires": "R1.T2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.5",
+      "requires": "R1.1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.5",
+      "requires": "R1.2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.5",
+      "requires": "R1.3"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.5",
+      "requires": "R1.4"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.5",
+      "requires": "R1.T1"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.5",
+      "requires": "R1.T2"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.6",
+      "requires": "R1.5"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.T0",
+      "requires": "R0.1B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.T1",
+      "requires": "R1.0B"
+    },
+    {
+      "kind": "hard",
+      "taskId": "R1.T2",
+      "requires": "R1.0B"
+    }
+  ],
+  "conditionalEdges": [
+    {
+      "kind": "receipt_outcome",
+      "taskId": "E4",
+      "requires": "E3",
+      "receiptType": "E3OutcomeReceiptV1",
+      "condition": {
+        "field": "outcome",
+        "oneOf": [
+          "selected_disabled",
+          "selected_provider_derived"
+        ]
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "E_GATE_INSUFFICIENT",
+      "requires": "E3",
+      "receiptType": "E3InsufficientEvidenceReceiptV1",
+      "condition": {
+        "field": "outcome",
+        "equals": "insufficient_evidence"
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "E_GATE_LEARNED_NOT_JUSTIFIED",
+      "requires": "E3",
+      "receiptType": "E3LearnedNotJustifiedReceiptV1",
+      "condition": {
+        "field": "outcome",
+        "equals": "learned_not_justified"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H3",
+      "requires": "E4",
+      "condition": {
+        "field": "neuralReorderPolicy.mode",
+        "equals": "disabled"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H4",
+      "requires": "E4",
+      "condition": {
+        "field": "neuralReorderPolicy.mode",
+        "equals": "provider_derived"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H6",
+      "requires": "H3",
+      "condition": {
+        "field": "selectedArtifactMode",
+        "equals": "disabled"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H6",
+      "requires": "H4",
+      "condition": {
+        "field": "selectedArtifactMode",
+        "equals": "provider_derived"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H7",
+      "requires": "H3",
+      "condition": {
+        "field": "selectedArtifactMode",
+        "equals": "disabled"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H7",
+      "requires": "H4",
+      "condition": {
+        "field": "selectedArtifactMode",
+        "equals": "provider_derived"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H8",
+      "requires": "H3",
+      "condition": {
+        "field": "selectedArtifactMode",
+        "equals": "disabled"
+      }
+    },
+    {
+      "kind": "contract_condition",
+      "taskId": "H8",
+      "requires": "H4",
+      "condition": {
+        "field": "selectedArtifactMode",
+        "equals": "provider_derived"
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "H10",
+      "requires": "H9",
+      "receiptType": "OfflineQualificationReceiptV1",
+      "condition": {
+        "field": "verdict",
+        "equals": "offline_qualified"
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "H_GATE_REJECTED",
+      "requires": "H9",
+      "receiptType": "OfflineQualificationRejectionReceiptV1",
+      "condition": {
+        "field": "verdict",
+        "equals": "rejected"
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "H_GATE_INSUFFICIENT",
+      "requires": "H9",
+      "receiptType": "OfflineQualificationInsufficientEvidenceReceiptV1",
+      "condition": {
+        "field": "verdict",
+        "equals": "insufficient_evidence"
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "I4",
+      "requires": "I3",
+      "receiptType": "HeldoutAcceptanceReceiptV1",
+      "condition": {
+        "field": "decision",
+        "equals": "accepted"
+      }
+    },
+    {
+      "kind": "receipt_outcome",
+      "taskId": "I3R",
+      "requires": "I3",
+      "receiptType": "HeldoutRejectionReceiptV1",
+      "condition": {
+        "field": "decision",
+        "equals": "rejected"
+      }
+    }
+  ],
+  "taskGraphSha256": "59c7786adc4157f0cefeb2a1f26edcede64140b957a230d6e60117786041f511"
+}

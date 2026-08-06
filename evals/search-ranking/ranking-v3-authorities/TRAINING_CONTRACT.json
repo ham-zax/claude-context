@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "ranking_v3_training_contract_v1",
+  "featureSchema": "search_features_v1",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "providerRequestContractSha256": "540202d40418f59b3bf10e8f9e9ae38902000b243eb7b071bab4d1bb0238fd23",
+  "reproducibility": {
+    "seeded": true,
+    "pinned": true,
+    "noEnvironmentVariableLearning": true,
+    "noOnlineOrClickLearning": true,
+    "noAutomaticCoefficientUpdates": true,
+    "noMacroOnlyOptimization": true,
+    "noLambdaMARTOrTreeRankers": true,
+    "noCrossProviderCalibrationMixing": true
+  },
+  "residualModel": {
+    "schemaVersion": "ranking_residual_model_v1",
+    "modeNeutral": true,
+    "normalization": {
+      "missingValuePolicy": "indicator_zero_fill"
+    }
+  },
+  "lofo": {
+    "familiesSource": "sealed_v3_tuning_partition",
+    "aggregationRule": "preregistered",
+    "insufficientEvidenceThreshold": "preregistered"
+  }
+}

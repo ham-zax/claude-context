@@ -1,0 +1,730 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_cards_v2",
+  "scopeId": "wave-a",
+  "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "dispatchCommit": "0c0cac29ff87b1c78675797ab76502b522d18d27",
+  "dispatchTreeSha256": "78a85066726c16c3c71fe30fdd28750db6c77b5bc5711971277be63edc7e862f",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "contractSealSha256": "34a70339b4c0afe6fc4e922fe847533443587d3f84ab4a36ebff166a3999025e",
+  "taskGraphSha256": "103623074405b295721c00c9c61f112ab04b26a7b190b9caf54cf7ee12d48b92",
+  "taskGraphExpansionReceipts": [],
+  "prerequisiteReceipts": [],
+  "previousManifestSha256": null,
+  "nextBoundaryGeneratorTaskId": "DB",
+  "cards": [
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A1",
+      "cardType": "evidence_or_code",
+      "contractSha256": "26d7ee6e913e1b32e4029ac804a6dd00cdbd1f61088d96292f6501930d50e1ac",
+      "contract": {
+        "task_id": "A1",
+        "title": "Wave A: semantic-search-candidate-trace.ts trace_v2 exact-key parser",
+        "risk": "medium",
+        "invariant": "The trace_v2 parser rejects unknown top-level keys and round-trips canonically. A1 owns the parser ONLY; B1 (Wave B) owns the trace recording implementation inside vector-candidate-fusion.ts. Wave A changes no central runtime file.",
+        "owners": [
+          "A1"
+        ],
+        "production_callers": [
+          "packages/core/src/core/vector-candidate-fusion.ts (A1 trace anchor: VECTOR_CANDIDATE_RRF_K_V1=100 at :12; B1 adds raw-arm/core-fusion trace recording in Wave B, requires A1 per §7.2)"
+        ],
+        "test_callers": [
+          "packages/core/src/core/vector-candidate-fusion.test.ts (existing, verified at base)"
+        ],
+        "approved_files": [
+          "packages/core/src/core/semantic-search-candidate-trace.ts",
+          "packages/core/src/core/semantic-search-candidate-trace.test.ts"
+        ],
+        "interface_changes": [
+          "packages/core/src/core/semantic-search-candidate-trace.ts (new file; trace_v2 exact-key parser; A1 is the parser owner, B1 is the implementation owner)"
+        ],
+        "security_boundaries": [
+          "Unknown top-level trace keys are rejected (fail-closed exact-key parsing; §7.6 A1 RED row rejects_unknown_trace_v2_keys)"
+        ],
+        "overlap_with": [
+          "B1 (Wave B): core trace implementation consumes A1 (B1 requires A1 per §7.2 exact prerequisite table)",
+          "R1.1: sealed feature contract index is the binding authority for trace fields (A1 requires R1.6, R1.1)"
+        ],
+        "focused_command": "node --import tsx --test packages/core/src/core/semantic-search-candidate-trace.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-core test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-core test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/core/src/core/semantic-search-candidate-trace.ts (does not exist at round_base) as the trace_v2 exact-key parser. §7.5 A1 row: 'trace parser'. §7.6 A1 RED row: test packages/core/src/core/semantic-search-candidate-trace.test.ts - 'rejects_unknown_trace_v2_keys'; expected failure before implementation: trace parser accepts an unknown top-level key; minimal passing behavior: exact-key parsing rejects it. Round-trip must be canonical and stable. Do NOT touch vector-candidate-fusion.ts (B1's file in Wave B). Focused command is plan-specified (§7.5) and targets a test file that does not exist at round_base: unverifiable-at-base; run only after the file exists. Affected command pnpm --filter @zokizuan/satori-core test is repo-verified (packages/core/package.json 'test' script; .github/workflows/ci.yml:147) and must pass with unchanged product output."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A2",
+      "cardType": "evidence_or_code",
+      "contractSha256": "d280272065a6908ab632d8b4c857c459ce4b092b5ddbe76895493cc0b54a3f2a",
+      "contract": {
+        "task_id": "A2",
+        "title": "Wave A: search-ranking-evidence.ts DeterministicRankingEvidenceV1 parser",
+        "risk": "medium",
+        "invariant": "DeterministicRankingEvidenceV1 (schema search_ranking_evidence_v1) parses only post-admission, pre-residual evidence with exact keys; provider fields never appear; canonical round-trip. No central runtime file changes in Wave A.",
+        "owners": [
+          "A2"
+        ],
+        "production_callers": [
+          "packages/mcp/src/core/search-ranking-policy.ts (A2 anchor: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID='search_candidate_final_score_v2' at :22; computeSearchCandidateFinalScore at :392)",
+          "scripts/satori-search-candidate-replay.mjs (imports computeSearchCandidateFinalScore at :8; consumes at :908 and :1827)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/search-ranking-policy.test.ts (existing, verified at base)",
+          "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/search-ranking-evidence.ts",
+          "packages/mcp/src/core/search-ranking-evidence.test.ts"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/search-ranking-evidence.ts (new file; DeterministicRankingEvidenceV1 parser/types per §5.1: candidateId, baselineScore=preRerankBaselineScore, retrieval stage ranks + per-pass RRF contributions, candidate, query groups)"
+        ],
+        "security_boundaries": [
+          "Evidence cannot be built before admission or with provider fields: timing and exact-key constraints are enforced (§7.6 A2 RED row parses_only_post_admission_pre_residual_evidence)"
+        ],
+        "overlap_with": [
+          "B2 (Wave B): search-pass-evidence.ts requires A2",
+          "B4 (Wave B): deterministic evidence assembler requires A2 (and A4, B2, B3)",
+          "A4: feature vector is built from deterministic evidence only (§5.1)"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/search-ranking-evidence.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/mcp/src/core/search-ranking-evidence.ts (new file) with DeterministicRankingEvidenceV1 (schema search_ranking_evidence_v1) per §5.1: available after eligibility, pre-rerank baseline scoring, and the immutable admission snapshot, but before residual scoring or any provider request/application. §7.6 A2 RED row: test 'parses_only_post_admission_pre_residual_evidence'; expected failure: evidence can be built before admission or include provider fields; minimal passing: timing and exact-key constraints enforced. The residual feature vector is built from deterministic evidence only. Baseline identity anchor SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID (search-ranking-policy.ts:22) and computeSearchCandidateFinalScore (:392, consumed by scripts/satori-search-candidate-replay.mjs at :908/:1827) must not change behavior. Focused command is plan-specified (§7.5 A2 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified (packages/mcp/package.json 'test' script; .github/workflows/ci.yml:150) and must pass."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A3",
+      "cardType": "evidence_or_code",
+      "contractSha256": "77c5cf445da4362356dcabcad190794ba2f91d3d475b6f712e1ff2ecd4db885f",
+      "contract": {
+        "task_id": "A3",
+        "title": "Wave A: rerank-evidence.ts parseValidatedRerankResponse (ValidatedRerankResponseV1)",
+        "risk": "medium",
+        "invariant": "rerank-evidence.ts owns ONLY ValidatedRerankResponseV1 parsing (parseValidatedRerankResponse). Incomplete, duplicate, foreign, or non-finite provider responses never parse; only a complete finite permutation parses. D7 consumes A3 output and never overlaps (rerank-evidence.ts is A3-owned per §7.1). Wave A changes no central runtime file.",
+        "owners": [
+          "A3"
+        ],
+        "production_callers": [
+          "packages/mcp/src/core/search-execution.ts (A3 anchor: rerankResults typed Array<{index:number}> at :566; only .index consumed at :624-625 — raw RerankResult.relevanceScore (packages/core/src/reranker/reranker.ts:1) and derived maxSimScore are discarded today; raw-score retention is B3's Wave B job, not A3's)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/search-execution.exact-pin-rerank.test.ts (existing, verified at base; exercises the rerank path)",
+          "packages/mcp/src/core/search-query-planning.test.ts (existing, verified at base)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/rerank-evidence.ts",
+          "packages/mcp/src/core/rerank-evidence.test.ts"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/rerank-evidence.ts (new file; parseValidatedRerankResponse ONLY, producing ValidatedRerankResponseV1 — complete returned candidate order with finite raw scores per §6.3 provider-capture authority)"
+        ],
+        "security_boundaries": [
+          "Provider responses are untrusted input: reject incomplete, duplicate, foreign (identity-mismatched), or non-finite scores; only a complete finite permutation parses (§7.6 A3 RED row rejects_incomplete_duplicate_foreign_or_non_finite_provider_response)"
+        ],
+        "overlap_with": [
+          "B3 (Wave B): raw validated response retention uses A3/A12 — retention is B3, parsing is A3; never both",
+          "D7 (Wave D): requires A3 (also A4/A5/A12); D7 consumes ValidatedRerankResponseV1 in neural-ranking-evidence.ts/provider-slot-permutation.ts and must never re-parse or overlap rerank-evidence.ts ownership (§7.1, §8.3 'A3 and D7 ownership do not overlap')"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/rerank-evidence.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/mcp/src/core/rerank-evidence.ts (new file) exporting ONLY parseValidatedRerankResponse producing ValidatedRerankResponseV1. §7.5 A3 row: 'parseValidatedRerankResponse only'. §7.6 A3 RED row: test 'rejects_incomplete_duplicate_foreign_or_non_finite_provider_response'; expected failure: malformed provider responses parse successfully; minimal passing: only a complete finite permutation parses as ValidatedRerankResponseV1. Encode the A3-vs-D7 boundary: A3 parses, D7 consumes; rerank-evidence.ts is exclusively A3-owned (§7.1 central-file ownership table). Anchor context: search-execution.ts:566 declares rerankResults as Array<{index:number}> — the raw relevanceScore/maxSimScore discard is the baseline behavior; A3 does NOT change search-execution.ts and does NOT retain raw responses (B3 does, in Wave B). Focused command is plan-specified (§7.5 A3 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified (packages/mcp/package.json; .github/workflows/ci.yml:150) and must pass."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A4",
+      "cardType": "evidence_or_code",
+      "contractSha256": "0ea79be8a78787edbe20a4b83568c5cc7244c48db7ccf2725970c9e76963a967",
+      "contract": {
+        "task_id": "A4",
+        "title": "Wave A: ranking-features-v1.ts extractRankingFeaturesV1",
+        "risk": "medium",
+        "invariant": "extractRankingFeaturesV1 output order and missing indicators exactly match the sealed R1.1 feature-contract index (search_features_v1); canonical round-trip. Forbidden feature identities never appear. No central runtime file changes in Wave A.",
+        "owners": [
+          "A4"
+        ],
+        "production_callers": [
+          "packages/mcp/src/core/search-constants.ts (A4 anchor: SEARCH_RRF_K=60 at :1, SEARCH_RERANK_RRF_K=10 at :21, SEARCH_RERANK_WEIGHT=1.0 at :22 — frozen baseline-mode compatibility constants per invariant 7)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/search-ranking-policy.test.ts (existing, verified at base; exercises SEARCH_RRF_K/SEARCH_RERANK_RRF_K/SEARCH_RERANK_WEIGHT semantics)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-features-v1.ts",
+          "packages/mcp/src/core/ranking-features-v1.test.ts"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-features-v1.ts (new file; extractRankingFeaturesV1 producing the fixed ordered search_features_v1 numeric vector per §5.2)"
+        ],
+        "security_boundaries": [
+          "Forbidden features: repository name, task ID, absolute path, user identity, candidate identity hash, owner-family identity hash, provider hash (§5.2, invariant 15); no feature may change deterministic eligibility (invariant 1/3)"
+        ],
+        "overlap_with": [
+          "D2/D5/D7 (Waves D): require A4 (exact prerequisite table)",
+          "B4 (Wave B): assembler requires A4",
+          "R1.1: feature contract index is the sealed authority the extractor must match"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-features-v1.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/mcp/src/core/ranking-features-v1.ts (new file) exporting extractRankingFeaturesV1 per §5.2: fixed ordered numeric vector with missing indicators, explicit one-hot and interaction features (test-path x test-intent, test-path x implementation-intent, docs-path x docs-route, generated x explicit-generated-or-path-intent), explicit stage ranks (rawDenseRank?, rawLexicalRank?, rawFallbackLexicalRank?, coreFusionRank?, mcpUnionRank?, postEligibilityRank?, rerankerAdmissionRank?), and the bounded confidence mapping from the existing 3-level intent confidence and hard booleans (never fabricated probabilities). §7.6 A4 RED row: test 'feature_order_and_missing_indicators_match_sealed_contract'; expected failure: extractor emits reordered or unsealed features; minimal passing: output order and missing indicators exactly match R1.1. Forbidden features per §5.2/invariant 15. Constants SEARCH_RRF_K=60 (search-constants.ts:1), SEARCH_RERANK_RRF_K=10 (:21), SEARCH_RERANK_WEIGHT=1.0 (:22) are frozen (invariant 7). Focused command is plan-specified (§7.5 A4 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A5",
+      "cardType": "evidence_or_code",
+      "contractSha256": "c20d3981cb2d43ef77a4635ba6644d0c6d59b10d6f1b12c0b31d5e2e7eb4c22f",
+      "contract": {
+        "task_id": "A5",
+        "title": "Wave A: ranking-policy-artifact.ts residual/descriptor/final-artifact parsers and canonicalizers",
+        "risk": "medium",
+        "invariant": "Parsers distinguish ResidualModelV1, FoldContenderDescriptorV1, and RankingPolicyV3Artifact independently; final-artifact provider fields bind the sealed R1.2 request contract and R1.4 activation contract; canonical bytes round-trip; no self-hash, no quality receipt.",
+        "owners": [
+          "A5"
+        ],
+        "production_callers": [
+          "(no base runtime caller; Wave D/E consumers per §7.2: D2/D3 train+verify, D7 application library, D8 final-artifact builder, E4 serialization)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/ranking-policy-artifact.test.ts (future — plan §7.6 A5 row)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-policy-artifact.ts",
+          "packages/mcp/src/core/ranking-policy-artifact.test.ts"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-policy-artifact.ts (new file; exact-key parsers/canonicalizers for ResidualModelV1 (ranking_residual_model_v1), FoldContenderDescriptorV1 (ranking_fold_contender_v1), RankingPolicyV3Artifact (ranking_policy_v3, policyId search_ranking_policy_v3) per §5.3)"
+        ],
+        "security_boundaries": [
+          "Final artifact contains no self-hash and no quality receipt; runtime SHA-256 is computed over canonical bytes; provider_derived mode must exactly match the sealed fixed target plus the separately sealed R1.2 request-contract digest; disabled mode carries no provider fields (§5.3)"
+        ],
+        "overlap_with": [
+          "D2/D3/D5/D7/D8 (Waves D/E): all require A5 (exact prerequisite table)",
+          "B7 (Wave B): replay v3 requires A5 and A6",
+          "R1.2 (training/request contract) and R1.4 (artifact/activation contract) are the sealed field authorities"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-artifact.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/mcp/src/core/ranking-policy-artifact.ts (new file) with exact-key parsers and canonicalizers for all three §5.3 forms: ResidualModelV1, FoldContenderDescriptorV1 (mode disabled | provider_derived), RankingPolicyV3Artifact (schemaVersion ranking_policy_v3, policyId search_ranking_policy_v3, featureSchema search_features_v1, normalization NormalizationContractV1 with missingValuePolicy indicator_zero_fill). §7.6 A5 RED row: test 'distinguishes_residual_descriptor_and_final_artifact_and_binds_r1_2_fields'; expected failure: parser conflates forms or ignores request/gate fields; minimal passing: each form parses independently and final provider fields match R1.2. Artifact has no self-hash and no quality receipt; SHA-256 over canonical bytes. Disabled mode has no provider fields even when binding a fixed provider target digest for provenance. Focused command is plan-specified (§7.5 A5 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A6",
+      "cardType": "evidence_or_code",
+      "contractSha256": "8ddbed68aa9e52dacd777c878457d471b89fa361a42eb8d9ac5db874d14d8647",
+      "contract": {
+        "task_id": "A6",
+        "title": "Wave A: ranking-policy-qualification.ts registry parser and key helpers",
+        "risk": "medium",
+        "invariant": "Registry parser enforces unique logical tuple keys (artifactSha256, serviceClass, qualificationScopeKey) and canonical lexicographic ordering by UTF-8 bytes of the tuple; canonical empty genesis snapshot is exact; canonical round-trip.",
+        "owners": [
+          "A6"
+        ],
+        "production_callers": [
+          "(no base runtime caller; Wave F consumers per §7.2: F2 qualification store, F9 qualification writer; A11Q receipts parsers)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/ranking-policy-qualification.test.ts (future — plan §7.6 A6 row)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-policy-qualification.ts",
+          "packages/mcp/src/core/ranking-policy-qualification.test.ts"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-policy-qualification.ts (new file; RankingPolicyQualificationRegistryV1 parser + QualificationEntryKeyV1/qualificationScopeKey helpers per §5.4; qualificationScopeKey = sha256(canonicalJSON({serviceClass, qualificationTargetSha256, selectedArtifactMode, qualifiedRerankers})))"
+        ],
+        "security_boundaries": [
+          "Duplicate logical keys rejected; entries sorted lexicographically by UTF-8 bytes of the tuple; exact genesis snapshot {\"schemaVersion\":\"ranking_policy_qualification_registry_v1\",\"entries\":[]}; disabled mode has empty qualifiedRerankers, provider_derived exactly one matching FixedProviderTargetV1 (§5.4)"
+        ],
+        "overlap_with": [
+          "FT-A2: A11Q requires A6; A11H requires A11Q (transitively A6)",
+          "F2 and F9 (Wave F): require A6",
+          "R1.4: activation contract index is a sealed authority input"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-qualification.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/mcp/src/core/ranking-policy-qualification.ts (new file) with the registry parser and key helpers per §5.4: RankingPolicyQualificationRegistryV1, QualificationEntryKeyV1 (artifactSha256, serviceClass, qualificationScopeKey), qualificationScopeKey = sha256(canonicalJSON({serviceClass, qualificationTargetSha256, selectedArtifactMode, qualifiedRerankers})). §7.6 A6 RED row: test 'rejects_duplicate_logical_entry_keys_and_noncanonical_order'; expected failure: duplicate or unsorted entries are accepted; minimal passing: parser enforces unique tuple keys and canonical ordering. Canonical empty genesis snapshot is exact. Entries sorted lexicographically by the UTF-8 bytes of the logical tuple. State transitions (pending_heldout -> activation_qualified, pending_heldout -> revoked, activation_qualified -> revoked) replace exactly one logical key — never append a second state for the same key. Focused command is plan-specified (§7.5 A6 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A7",
+      "cardType": "evidence_or_code",
+      "contractSha256": "cca470a8b8e55312ce0b26b7b05714c7005cc66bdf0e582bf8d45de0a97c6e2a",
+      "contract": {
+        "task_id": "A7",
+        "title": "Wave A: ranking-policy-identity.ts baseline/learned IDs and reranker_disabled_v1",
+        "risk": "medium",
+        "invariant": "Disabled learned mode uses the canonical built-in reranker identity reranker_disabled_v1 and never inherits a configured provider identity. Composite policy identity search_ranking_policy_v3:<artifact-sha256> is carried by the existing rankingPolicyIdentity field.",
+        "owners": [
+          "A7"
+        ],
+        "production_callers": [
+          "(no base runtime caller; Wave F consumers per §7.2: F6 selector+config, F7 ranked-set identity, F8 shadow sink)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/ranking-policy-identity.test.ts (future — plan §7.6 A7 row)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-policy-identity.ts",
+          "packages/mcp/src/core/ranking-policy-identity.test.ts"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-policy-identity.ts (new file; baseline/learned policy IDs and canonical built-in reranker_disabled_v1 per §5.7:1331-1338)"
+        ],
+        "security_boundaries": [
+          "Security boundary (explicit): disabled mode must emit canonical built-in reranker_disabled_v1 and NEVER inherit a configured provider identity (§5.7:1335, §7.6 A7 RED row disabled_mode_uses_reranker_disabled_v1, §8.8:2482); provider_derived mode uses the exact qualified reranker identity from the registry entry"
+        ],
+        "overlap_with": [
+          "F6/F7/F8 (Wave F): consume A7 identity (F6 requires A7; F7 requires F6, A7; F8 requires F6, A7)",
+          "R1.4: activation contract index is a sealed authority input"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-identity.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create packages/mcp/src/core/ranking-policy-identity.ts (new file) with baseline/learned policy IDs and the canonical built-in reranker identity reranker_disabled_v1. §7.5 A7 row: 'baseline/learned IDs and reranker_disabled_v1'. §7.6 A7 RED row: test 'disabled_mode_uses_reranker_disabled_v1'; expected failure: disabled mode inherits a configured provider identity; minimal passing: canonical disabled identity is emitted. Normative source: §5.7:1331-1338 — composite policy identity search_ranking_policy_v3:<artifact-sha256> carried by the existing rankingPolicyIdentity field of the ranked-set binding; for learned mode disabled, the binding's reranker identity is the canonical built-in value reranker_disabled_v1, never copied from an unrelated configured provider; for provider_derived, the exact qualified reranker identity from the registry entry. Policy hash appears in startup diagnostics, search diagnostics, and ranked-set bindings, not in index publication receipts. This is an explicit security boundary — do not weaken it. Focused command is plan-specified (§7.5 A7 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A8",
+      "cardType": "evidence_or_code",
+      "contractSha256": "e6f4c134a8d4f8cbc43d037ebf672ff907e89975faca3fc2863ffa7444e6d20e",
+      "contract": {
+        "task_id": "A8",
+        "title": "Wave A: scripts/ranking-judgments.mjs graded-judgment parser",
+        "risk": "medium",
+        "invariant": "Unjudged candidates remain explicitly unjudged (judged flag), never become grade 0, and are excluded from pair generation. Tuning-only human-authoritative grades 3/2/1/0 with source-bound rationale.",
+        "owners": [
+          "A8"
+        ],
+        "production_callers": [
+          "(no base runtime caller; Wave C consumers per §7.2: C1 judgment packets, C5 v4 tuning manifest)"
+        ],
+        "test_callers": [
+          "scripts/ranking-judgments.test.mjs (future — plan §7.6 A8 row)"
+        ],
+        "approved_files": [
+          "scripts/ranking-judgments.mjs",
+          "scripts/ranking-judgments.test.mjs"
+        ],
+        "interface_changes": [
+          "scripts/ranking-judgments.mjs (new file; judgment parser per §6.2 — grades 3/2/1/0, source-bound rationale, explicit judged status)"
+        ],
+        "security_boundaries": [
+          "Judgment integrity: missing grade is never normalized to zero; unjudged stays explicit and is excluded from pairs (§7.6 A8 RED row unjudged_candidate_never_becomes_grade_zero; §6.2 human-authoritative)"
+        ],
+        "overlap_with": [
+          "C1 (Wave C): packet manifest covers each tuning task exactly once, requires A8",
+          "C5 (Wave C): v4 tuning manifest binds adjudicated judgments, requires A8",
+          "R1.3: decision contract + LOFO_FAMILIES.json are sealed prerequisites (A8 requires R1.6, R1.3)"
+        ],
+        "focused_command": "node --test scripts/ranking-judgments.test.mjs",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create scripts/ranking-judgments.mjs (new file) with the graded-judgment parser per §6.2: tuning-only, human-authoritative grades 3/2/1/0 with source-bound rationale and explicit judged status; unjudged candidates are excluded from pair generation and never become grade 0. §7.6 A8 RED row: test 'unjudged_candidate_never_becomes_grade_zero'; expected failure: missing grade is normalized to zero; minimal passing: unjudged remains explicit and excluded from pairs. Held-out restrictions from §6.2 apply downstream (never read held-out judgments for design/grading/selection). Focused command is plan-specified (§7.5 A8 row, node --test without tsx) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm test:scripts is repo-verified (root package.json:26, runs scripts/*.test.mjs) and must stay green."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A9",
+      "cardType": "evidence_or_code",
+      "contractSha256": "001dd0650e46da5de733523991884e73d911a2a91b70752c98bf0ecf13b27748",
+      "contract": {
+        "task_id": "A9",
+        "title": "Wave A: scripts/ranking-lofo-folds.mjs LOFO fold builder",
+        "risk": "medium",
+        "invariant": "Related repository families never cross a fold boundary — family grouping is atomic; folds derive from the sealed cross-repository-v3 tuning partition only (tuning-only, held-out never enters tuning folds).",
+        "owners": [
+          "A9"
+        ],
+        "production_callers": [
+          "(no base runtime caller; Wave D consumer per §7.2: D6 LOFO runner + fold scoring/adjudication)"
+        ],
+        "test_callers": [
+          "scripts/ranking-lofo-folds.test.mjs (future — plan §7.6 A9 row)"
+        ],
+        "approved_files": [
+          "scripts/ranking-lofo-folds.mjs",
+          "scripts/ranking-lofo-folds.test.mjs"
+        ],
+        "interface_changes": [
+          "scripts/ranking-lofo-folds.mjs (new file; fold builder per §6.6, family grouping from the sealed v3 tuning partition and R1.3 LOFO_FAMILIES.json)"
+        ],
+        "security_boundaries": [
+          "Leakage control: related repository families never split between train and excluded fold; held-out tasks/repositories never enter tuning folds (invariant 13, §6.2 held-out restrictions)"
+        ],
+        "overlap_with": [
+          "D6 (Wave D): requires A9 (also A4/A5, D2, D3, C6, R1.3)",
+          "R1.3: LOFO_FAMILIES.json (six exact family IDs, §7.2:1645-1651) from the sealed cross-repository-v3 tuning partition is the family authority"
+        ],
+        "focused_command": "node --test scripts/ranking-lofo-folds.test.mjs",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Create scripts/ranking-lofo-folds.mjs (new file) with the LOFO fold builder per §6.6. §7.6 A9 RED row: test 'related_repository_families_never_cross_fold_boundary'; expected failure: related families split between train and excluded fold; minimal passing: family grouping remains atomic. Family authority: R1.3's LOFO_FAMILIES.json derived from the already-sealed cross-repository-v3 tuning partition and its family mapping (NOT the future C5 tuning manifest, §7.2:1645-1651). Verified at base: evals/search-ranking/cross-repository-v3.manifest.json has 50 tuning tasks / 51 held-out tasks (101 total), with leakage.tuningOnlyRepositoryFamilies listing 11 tuning-only repository families; repositories carry a 'family' field (e.g. gitnexus-r0 -> family gitnexus, split tuning). Note: the plan states six exact LOFO family IDs while the base manifest lists 11 tuning-only repository families — the six-family grouping is sealed by R1.3 and is not independently verifiable at round_base; the builder must consume the sealed LOFO_FAMILIES.json rather than hardcode a count. Focused command is plan-specified (§7.5 A9 row, node --test without tsx) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm test:scripts is repo-verified (root package.json:26) and must stay green."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A10",
+      "cardType": "evidence_or_code",
+      "contractSha256": "d29a039fd790c41d64c7fb03307578db73f8481a784c594df76a91f9d6a35183",
+      "contract": {
+        "task_id": "A10",
+        "title": "Wave A: evaluator graded-stage metric primitives (legacy owner metrics byte-compatible)",
+        "risk": "medium",
+        "invariant": "Adding graded stage metrics to the existing evaluator authority keeps legacy owner metrics byte-compatible — legacy outputs are byte-identical before and after the change. FIXED_NOW determinism, REQUIRED_LIMITS, and hash-bound fixture verification are preserved.",
+        "owners": [
+          "A10"
+        ],
+        "production_callers": [
+          "evals/search-quality/search-quality-evaluation.ts (A10 metric authority, verified at base: FIXED_NOW='2026-01-01T01:00:00.000Z' at :20, REQUIRED_LIMITS=[1,3,5,10,20] at :22, sha256 at :248-249, hash-bound fixture verification at :266-269; runSearchQualityEvaluation entry at :809)"
+        ],
+        "test_callers": [
+          "evals/search-quality/search-quality-evaluation.test.ts (existing at base; RED at base per task packet — do not rely on it passing pre-change)",
+          "evals/search-quality/ranking-v3-metrics.test.ts (future — plan §7.6 A10 row)"
+        ],
+        "approved_files": [
+          "evals/search-quality/search-quality-evaluation.ts",
+          "evals/search-quality/ranking-v3-metrics.test.ts",
+          "(graded metric primitive module to be created under evals/search-quality/ — exact module name is plan-defined at implementation time)"
+        ],
+        "interface_changes": [
+          "evals/search-quality/search-quality-evaluation.ts (modify: add graded stage metric primitives per §6.1 — stage survival, judged-pool nDCG@10 with coverage, conditional graded pair accuracy, end-to-end miss accounting; existing owner metrics stay byte-compatible)"
+        ],
+        "security_boundaries": [
+          "Legacy owner metric bytes must not change (byte-identical legacy outputs, §7.6 A10 RED row legacy_owner_metrics_remain_byte_compatible); deterministic FIXED_NOW timestamps and hash-bound fixtures preserved (invariants 2 and 13)"
+        ],
+        "overlap_with": [
+          "FT-G0: R0.1A owns evals/search-quality/search-quality-evaluation.ts before A10 (fixture repair — A10 must land after R0.1A and preserve its fix)",
+          "FT-C: C6 owns evals/search-quality/search-quality-evaluation.ts after A10 (graded scorer integration, C6 requires A10)",
+          "C6 (Wave C): ranking-v3-scorer-integration.test.ts asserts graded stage and legacy metrics share one authority"
+        ],
+        "focused_command": "node --import tsx --test evals/search-quality/ranking-v3-metrics.test.ts",
+        "affected_command": "node --import tsx --test evals/search-quality/search-quality-evaluation.test.ts",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test",
+          "pnpm --filter @zokizuan/satori-core test",
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Add graded stage metric primitives to the existing evaluator authority evals/search-quality/search-quality-evaluation.ts per §6.1: four stage observations per task (knownRelevantInRawArms, knownRelevantAfterCoreFusion, knownRelevantInMcpUnion, knownRelevantAfterEligibility), two quality tracks (end-to-end miss accounting; conditional ranking graded metrics only where a grade >= 2 result survives eligibility), judged-pool nDCG@10 with coverage, conditional graded pair accuracy. §7.6 A10 RED row: test 'legacy_owner_metrics_remain_byte_compatible'; expected failure: adding graded metrics changes legacy bytes; minimal passing: legacy outputs are byte-identical. Preserve FIXED_NOW (:20), REQUIRED_LIMITS [1,3,5,10,20] (:22), and hash-bound fixture verification (:248-269). Ownership chain (sequential, non-overlapping): R0.1A (FT-G0) -> A10 -> C6 (FT-C) per §7.1 central-file ownership — coordinate with FT-G0 before and FT-C after. Focused command is plan-specified (§7.5 A10 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command node --import tsx --test evals/search-quality/search-quality-evaluation.test.ts is repo-verified as an existing test file (same invocation pattern as the plan's R0.1A/C6 rows for evals/search-quality tests); it is RED at base per the task packet, so a pre-change failure is expected and not evidence of regression."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A11Q",
+      "cardType": "evidence_or_code",
+      "contractSha256": "a37d663e164ca9f31aaa500e92599014bc6614c7b84330f16ae12d0e9a36f0f9",
+      "contract": {
+        "task_id": "A11Q",
+        "title": "A11Q — qualification/registry receipt schemas and parsers (packages/mcp/src/core/ranking-qualification-receipts.ts)",
+        "risk": "medium",
+        "invariant": "A11Q receipts enforce exact fields AND transition-specific digest relationships (previousReceiptSha256/triggeringReceiptSha256 per §5.5), not merely syntactic hashes: create_pending_heldout has previousReceiptSha256 null with the H9 offline-qualification receipt as trigger; activate_pending and reject_pending have BOTH previousReceiptSha256 and triggeringReceiptSha256 equal to the accepted or rejected I3 receipt digest; administrative revocation has previousReceiptSha256 equal to the revocation-authorization receipt digest; transitionChainSha256 is computed exactly as sha256(canonicalJSON({previousTransitionReceiptSha256, transitionKind, previousRegistrySha256, newRegistrySha256, triggeringReceiptSha256})); unknown keys are rejected and canonical round trips are stable.",
+        "owners": [
+          "A11Q"
+        ],
+        "production_callers": [
+          "packages/mcp/src/core/ranking-policy-qualification-store.ts (F2, future — consumes A6/A11Q; not present at base)",
+          "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9, future — consumes A6/A11Q/A11H; not present at base)",
+          "scripts/ranking-v3-offline-qualification.test.mjs (G6B, future — H9 binds registry context and one selected-mode receipt)",
+          "scripts/ranking-v3-heldout-activation.test.mjs (G6C, future — activation cycle binds H10 pending-registry digest)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/ranking-qualification-receipts.test.ts (future; none existing at base — RED row test name: qualification_and_registry_receipts_enforce_exact_fields_and_transition_chain)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-qualification-receipts.ts (new interface file, future)",
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.5 — schema authority)"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-qualification-receipts.ts: PostG7ReceiptBaseV1, ArtifactReceiptBaseV1, SelectedModeReplayReceiptV1, BaselineReplayReceiptV1, SliceGateReceiptV1, CounterfactualGateReceiptV1, ResourceGateReceiptV1, OfflineQualificationReceiptV1, OfflineQualificationRejectionReceiptV1, OfflineQualificationInsufficientEvidenceReceiptV1, RegistryInitializationReceiptV1, RegistryReadyReceiptV1, RegistryTransitionReceiptV1, RevocationAuthorizationReceiptV1",
+          "QualifiedRerankerV1 / QualificationRegistryEntryV1 key tuple (artifactSha256, serviceClass, qualificationScopeKey) appears in A11Q receipt fields (ArtifactReceiptBaseV1.qualificationScopeKey, RegistryTransitionReceiptV1.entryKey); the registry parser/key helpers themselves are A6-owned per §7.5"
+        ],
+        "security_boundaries": [
+          "Receipt chain integrity I0→I1→I2→I3→(I4|I3R) enforced by exact previousReceiptSha256 equality — the field must equal the actual predecessor digest, not a syntactically valid hash",
+          "create_pending_heldout: previousReceiptSha256 must be null and triggeringReceiptSha256 must be the H9 offline-qualification receipt digest",
+          "activate_pending/reject_pending: both previousReceiptSha256 and triggeringReceiptSha256 must equal the accepted or rejected I3 receipt digest",
+          "administrative_revoke: previousReceiptSha256 must equal the revocation-authorization receipt digest",
+          "transitionChainSha256 must equal the exact canonical formula from §5.5",
+          "RegistryInitializationReceiptV1: previousRegistrySha256 null and transitionKind initialize_genesis",
+          "Acceptance and rejection are mutually exclusive for one opening record; unknown receipt keys are rejected"
+        ],
+        "overlap_with": [
+          "FT-A1 (A11Q requires A6 — ranking-policy-qualification.ts registry parser/key helpers; prerequisite row A11Q: R1.6, A6, R1.4)",
+          "FT-F (F2/F9 consume A6/A11Q receipts)",
+          "FT-G (G6B/G6C bind A11Q receipts: H9 registry context, H10 transition digest)"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-qualification-receipts.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test",
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Implement the A11Q receipt schemas in packages/mcp/src/core/ranking-qualification-receipts.ts exactly per plan §5.4/§5.5 (selected-mode, baseline, slice-gate, counterfactual-gate, resource-gate, offline-qualification and its rejection/insufficient variants, registry initialization/ready/transition, revocation-authorization receipts; both seal digests required on all A11-managed post-G7 receipts per §5.5). Parsers must reject unknown keys and produce stable canonical round trips. First-RED test (plan §7.6): packages/mcp/src/core/ranking-qualification-receipts.test.ts — 'qualification_and_registry_receipts_enforce_exact_fields_and_transition_chain'; expected failure before implementation is that missing registry-ready/grouped fields or a mismatched I3 transition digest is accepted; minimal passing behavior is that all exact fields and transition-specific digest relationships validate. Tests must verify the transition-specific relationships (create_pending_heldout previousReceiptSha256 null + H9 trigger; activate/reject I3 digests; administrative revocation authorization digest; transitionChainSha256 exact formula), NOT merely that both fields are syntactically valid hashes. Do not widen scope into A6-owned registry parser/key-helper behavior (duplicate logical-key rejection and canonical tuple ordering are A6). Do not modify the parent integration checkout. NOTE: the focused command is plan-specified (§7.5) and targets a future test file that does not exist at round_base — unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script exists) but cannot exercise A11Q code until the file exists."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A11H",
+      "cardType": "evidence_or_code",
+      "contractSha256": "9d39fce57aa267f0d63164f86462ac974d5304d6efd267785ad0100ba30053b6",
+      "contract": {
+        "task_id": "A11H",
+        "title": "A11H — held-out/rollout receipt schemas and parsers (packages/mcp/src/core/ranking-heldout-receipts.ts)",
+        "risk": "medium",
+        "invariant": "A11H held-out/rollout receipts enforce exact fields AND the I0→I1→I2→I3→(I4|I3R) chain by exact previousReceiptSha256 equality — a foreign predecessor digest must be rejected, not merely accepted as a syntactically valid hash; acceptance and rejection are mutually exclusive for one opening record.",
+        "owners": [
+          "A11H"
+        ],
+        "production_callers": [
+          "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9, future — consumes A6/A11Q/A11H held-out acceptance/rejection receipts for activation/revocation transitions; not present at base)",
+          "scripts/ranking-v3-heldout-activation.test.mjs (G6C, future — activation cycle binds H10 pending-registry digest and exactly one I4/I3R terminal chain)",
+          "H10/H1–H9 execution cards (future — pre-held-out and qualification-cycle receipts bind A11H/A11Q predecessor authorities)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/ranking-heldout-receipts.test.ts (future; none existing at base — RED row test name: heldout_chain_rejects_foreign_previous_receipt_digest)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-heldout-receipts.ts (new interface file, future)",
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (section 5.5 — schema authority)"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-heldout-receipts.ts: OwnerAuthorizationReceiptV1, HeldoutOpeningRecordV1, HeldoutExecutionReceiptV1, HeldoutAcceptanceReceiptV1, HeldoutRejectionReceiptV1, RolloutSelectionReceiptV1, RollbackDrillReceiptV1, LimitedActivationReceiptV1"
+        ],
+        "security_boundaries": [
+          "Exact predecessor equality: I0→I1→I2→I3→(I4|I3R) chain enforced by previousReceiptSha256; for I4 and I3R it must equal the accepted or rejected I3 receipt digest — a chain with a foreign predecessor must fail to parse (plan §7.6 RED row)",
+          "Acceptance and rejection are mutually exclusive for one opening record (HeldoutAcceptanceReceiptV1 decision 'accepted' vs HeldoutRejectionReceiptV1 decision 'rejected' on the same executionReceiptSha256)",
+          "I4/I3R terminal chain binds the H10 pending-registry digest (per G6C activation-cycle row)",
+          "Unknown keys are rejected for every held-out/rollout/rollback/activation authority (§5.6 closing rule)"
+        ],
+        "overlap_with": [
+          "FT-A1 (A11H requires A6 and A11Q; prerequisite row A11H: R1.6, A6, A11Q, R1.3, R1.4)",
+          "FT-F (F9 consumes A11H held-out acceptance/rejection receipts)",
+          "FT-G (G6C binds A11H I4/I3R terminal chain)"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-heldout-receipts.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test",
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Implement the A11H receipt schemas in packages/mcp/src/core/ranking-heldout-receipts.ts exactly per plan §5.5 (owner-authorization, held-out opening record, held-out execution, held-out acceptance, held-out rejection, rollout selection, rollback drill, limited activation). Parsers must reject unknown keys and produce stable canonical round trips. First-RED test (plan §7.6): packages/mcp/src/core/ranking-heldout-receipts.test.ts — 'heldout_chain_rejects_foreign_previous_receipt_digest'; expected failure before implementation is that an I2/I3/I4 chain with a foreign predecessor parses; minimal passing behavior is that exact predecessor digest equality is required. Tests must verify exact digest equality and acceptance/rejection exclusivity for one opening record, not merely syntactic hash validity. Do not widen scope into A11Q-owned qualification/registry envelopes or A6-owned registry types. Do not modify the parent integration checkout. NOTE: the focused command is plan-specified (§7.5) and targets a future test file that does not exist at round_base — unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script exists) but cannot exercise A11H code until the file exists."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A12",
+      "cardType": "evidence_or_code",
+      "contractSha256": "d85c3a7acdc20c302efe95654c18268c709b5bec8aa5fd0faa27c1db2103c6cd",
+      "contract": {
+        "task_id": "A12",
+        "title": "A12 — provider request contract authority (packages/mcp/src/core/ranking-provider-request-v1.ts)",
+        "risk": "medium",
+        "invariant": "A12 canonicalizes and hashes the supplied request contract itself; the returned providerRequestContractSha256 must equal the canonical hash of the supplied contract AND the sealed R1.2 index digest; the builder rejects any expectedProviderRequestContractSha256 mismatch; provider identity/configuration fields exactly match FixedProviderTargetV1; candidates are accepted only in frozen baseline-admission order. Every G6B-parsed byte sequence must be rejected identically by G6C.",
+        "owners": [
+          "A12"
+        ],
+        "production_callers": [
+          "packages/mcp/src/core/search-execution.ts (A12 future consumer via G2: rerankResults :566; runSearchExecution called from handlers.ts:4857)",
+          "scripts/satori-search-candidate-replay.mjs (provider response handling; --require-neural-disabled option exists at base, usage line 2369, parse line 2390)",
+          "evals/search-ranking/lateon/offline-quality-d32-v2.authority.json (existing provider authority contract)",
+          "evals/search-ranking/lateon/c0-contract.json (existing contract authority)"
+        ],
+        "test_callers": [
+          "packages/mcp/src/core/ranking-provider-request-v1.test.ts (future; none existing at base — RED row test name: builder_hashes_contract_and_rejects_expected_digest_mismatch)"
+        ],
+        "approved_files": [
+          "packages/mcp/src/core/ranking-provider-request-v1.ts (new interface file, future)",
+          "packages/mcp/src/core/search-execution.ts (G2 future consumer — rerankResults :566)",
+          "scripts/satori-search-candidate-replay.mjs (provider response handling; --require-neural-disabled)",
+          "evals/search-ranking/lateon/offline-quality-d32-v2.authority.json (existing provider authority contract)",
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (section 6.4 — schema authority)"
+        ],
+        "interface_changes": [
+          "packages/mcp/src/core/ranking-provider-request-v1.ts: ProviderRequestContractV1 (schemaVersion 'ranking_provider_request_contract_v1', projectionIdentity, candidateOrder 'baseline_admission_order', documentSerializationIdentity, identityMappingIdentity, maximumCandidateCount, maximumPayloadUtf8Bytes, timeoutMs, maximumRetries, canonicalizationIdentity), SearchCandidateForProviderV1, parseProviderRequestContractV1(value: unknown), buildRankingProviderRequestV1(input: {contract, expectedProviderRequestContractSha256, baselineAdmissionCandidates, target: FixedProviderTargetV1}) returning {providerRequestContractSha256, orderedCandidateIds, requestPayload, canonicalRequestSha256}"
+        ],
+        "security_boundaries": [
+          "Provider request contract fields bounding external provider behavior: canonicalizationIdentity, timeoutMs, maximumRetries, maximumPayloadUtf8Bytes",
+          "Provider identity fields (providerKey, rerankerIdentity, rerankerProjectionIdentity, providerConfigurationDigest) must exactly match FixedProviderTargetV1",
+          "providerRequestContractSha256 returned by the builder must equal the canonical hash of the supplied contract AND the sealed R1.2 index digest; expectedProviderRequestContractSha256 mismatch is rejected",
+          "No caller recalculates or copies an independent expected value — B9, E2, G2, G6B/H4, G6C/I2 import the A12 implementation unchanged and receive the expected digest only from the sealed R1.2 training-contract index (§6.4)",
+          "Candidates accepted only in frozen baseline-admission order; payload size and identity/configuration/contract digest mismatches are rejected"
+        ],
+        "overlap_with": [
+          "FT-G1 (A12 binds the sealed R1.2 digest; no independent recalculation)",
+          "FT-G (G4/G6B/G6C import A12 unchanged)"
+        ],
+        "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-provider-request-v1.test.ts",
+        "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+        "full_suite_triggers": [
+          "pnpm --filter @zokizuan/satori-mcp test",
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "Implement ProviderRequestContractV1, SearchCandidateForProviderV1, parseProviderRequestContractV1, and buildRankingProviderRequestV1 in packages/mcp/src/core/ranking-provider-request-v1.ts exactly per plan §6.4. The builder must canonicalize and hash the supplied contract itself, return that digest, and reject unless it equals expectedProviderRequestContractSha256; the returned digest must equal the canonical hash of the supplied contract AND the sealed R1.2 index digest — no caller recalculates the expected value (B9, E2, G2, G6B/H4, G6C/I2 import this implementation unchanged and receive the expected digest only from the sealed R1.2 training-contract index). First-RED test (plan §7.6): packages/mcp/src/core/ranking-provider-request-v1.test.ts — 'builder_hashes_contract_and_rejects_expected_digest_mismatch'; expected failure before implementation is that a structurally valid contract whose canonical digest differs from expectedProviderRequestContractSha256 is accepted; minimal passing behavior is that the returned contract digest equals the canonical supplied contract and must equal the sealed R1.2 digest. Tests must also cover exact identity/configuration matching to FixedProviderTargetV1, frozen baseline-admission order, and payload bounds. Do not modify the parent integration checkout. NOTE: the focused command is plan-specified (§7.5) and targets a future test file that does not exist at round_base — unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script exists) but cannot exercise A12 code until the file exists."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "A_GATE",
+      "cardType": "gate_evidence",
+      "contractSha256": "c5131f66413282ca3d47ea701050c0d259efd196bead59be2ac4384ba7cd321a",
+      "contract": {
+        "task_id": "A_GATE",
+        "title": "Gate evidence card A_GATE (requires A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11Q, A11H, A12)",
+        "risk": "medium",
+        "invariant": "A_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (§7.5); the next boundary generator stays nondispatchable until this gate receipt exists (§7.4).",
+        "owners": [
+          "A_GATE",
+          "R1.T1"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (§7.2 exact prerequisite table, §7.5 gate-node block)",
+          "TASK_GRAPH.json (R1.5 sealed graph)",
+          "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+        ],
+        "test_callers": [
+          "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+        ],
+        "approved_files": [
+          "A_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+        ],
+        "interface_changes": [
+          "GateReceiptV1 for A_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+        ],
+        "security_boundaries": [
+          "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+          "Next boundary generator is nondispatchable until this gate receipt exists — prevents meta-dispatch deadlock"
+        ],
+        "overlap_with": [
+          "FT-G1 (R1.T1 owns the gate tool; A_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+        ],
+        "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=A_GATE. §7.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11Q, A11H, A12. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per §7.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "DB",
+      "cardType": "boundary_generator",
+      "contractSha256": "cf84ec7363f6354ddf90a2b7b688c5e5d759138b622919701e73237b1767a2cb",
+      "contract": {
+        "task_id": "DB",
+        "title": "Boundary-generator card DB (dispatch scope wave-b, next DC0)",
+        "risk": "medium",
+        "invariant": "DB binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DC0; every card resolves to a §7.5/§7.6 catalog row; no executing agent chooses an argument or discovers a file.",
+        "owners": [
+          "DB",
+          "R0.1B",
+          "R0.1V"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (§7.4 dispatch-card generation, §7.5 catalog)",
+          "TASK_GRAPH.json (R1.5 sealed graph)",
+          "CONTRACT_SEAL.json (R1.5)"
+        ],
+        "test_callers": [
+          "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+          "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+        ],
+        "approved_files": [
+          "DB: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+        ],
+        "interface_changes": [
+          "card-set manifest for scope wave-b (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+          "next generator DC0 present but nondispatchable until the current scope's gate receipt exists"
+        ],
+        "security_boundaries": [
+          "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+          "Next generator DC0 is nondispatchable until the current scope gate receipt exists — prevents meta-dispatch deadlock",
+          "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+        ],
+        "overlap_with": [
+          "FT-G1 (R1.0B/R1.6 contract covers the same §7.4 CLI shape; this card extends it to later wave boundaries)",
+          "FT-G0 (R0.1B owns the dispatch tool)"
+        ],
+        "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts"
+        ],
+        "red_evidence_required": false,
+        "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DB (scope wave-b, next DC0). Exact §7.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-b and $NEXT_GENERATOR_ID_OR_NONE=DC0 as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: Wave-B card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+      },
+      "isBoundaryGenerator": true,
+      "dispatchable": false
+    }
+  ],
+  "manifestSha256": "a43e69a2c501b6f4e497558849699714ed5ba30feab875b2ceda2a46132a8c6f"
+}

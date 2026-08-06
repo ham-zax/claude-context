@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A11H",
+  "cardType": "evidence_or_code",
+  "contractSha256": "9d39fce57aa267f0d63164f86462ac974d5304d6efd267785ad0100ba30053b6",
+  "contract": {
+    "task_id": "A11H",
+    "title": "A11H — held-out/rollout receipt schemas and parsers (packages/mcp/src/core/ranking-heldout-receipts.ts)",
+    "risk": "medium",
+    "invariant": "A11H held-out/rollout receipts enforce exact fields AND the I0→I1→I2→I3→(I4|I3R) chain by exact previousReceiptSha256 equality — a foreign predecessor digest must be rejected, not merely accepted as a syntactically valid hash; acceptance and rejection are mutually exclusive for one opening record.",
+    "owners": [
+      "A11H"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9, future — consumes A6/A11Q/A11H held-out acceptance/rejection receipts for activation/revocation transitions; not present at base)",
+      "scripts/ranking-v3-heldout-activation.test.mjs (G6C, future — activation cycle binds H10 pending-registry digest and exactly one I4/I3R terminal chain)",
+      "H10/H1–H9 execution cards (future — pre-held-out and qualification-cycle receipts bind A11H/A11Q predecessor authorities)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-heldout-receipts.test.ts (future; none existing at base — RED row test name: heldout_chain_rejects_foreign_previous_receipt_digest)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-heldout-receipts.ts (new interface file, future)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (section 5.5 — schema authority)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-heldout-receipts.ts: OwnerAuthorizationReceiptV1, HeldoutOpeningRecordV1, HeldoutExecutionReceiptV1, HeldoutAcceptanceReceiptV1, HeldoutRejectionReceiptV1, RolloutSelectionReceiptV1, RollbackDrillReceiptV1, LimitedActivationReceiptV1"
+    ],
+    "security_boundaries": [
+      "Exact predecessor equality: I0→I1→I2→I3→(I4|I3R) chain enforced by previousReceiptSha256; for I4 and I3R it must equal the accepted or rejected I3 receipt digest — a chain with a foreign predecessor must fail to parse (plan §7.6 RED row)",
+      "Acceptance and rejection are mutually exclusive for one opening record (HeldoutAcceptanceReceiptV1 decision 'accepted' vs HeldoutRejectionReceiptV1 decision 'rejected' on the same executionReceiptSha256)",
+      "I4/I3R terminal chain binds the H10 pending-registry digest (per G6C activation-cycle row)",
+      "Unknown keys are rejected for every held-out/rollout/rollback/activation authority (§5.6 closing rule)"
+    ],
+    "overlap_with": [
+      "FT-A1 (A11H requires A6 and A11Q; prerequisite row A11H: R1.6, A6, A11Q, R1.3, R1.4)",
+      "FT-F (F9 consumes A11H held-out acceptance/rejection receipts)",
+      "FT-G (G6C binds A11H I4/I3R terminal chain)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-heldout-receipts.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement the A11H receipt schemas in packages/mcp/src/core/ranking-heldout-receipts.ts exactly per plan §5.5 (owner-authorization, held-out opening record, held-out execution, held-out acceptance, held-out rejection, rollout selection, rollback drill, limited activation). Parsers must reject unknown keys and produce stable canonical round trips. First-RED test (plan §7.6): packages/mcp/src/core/ranking-heldout-receipts.test.ts — 'heldout_chain_rejects_foreign_previous_receipt_digest'; expected failure before implementation is that an I2/I3/I4 chain with a foreign predecessor parses; minimal passing behavior is that exact predecessor digest equality is required. Tests must verify exact digest equality and acceptance/rejection exclusivity for one opening record, not merely syntactic hash validity. Do not widen scope into A11Q-owned qualification/registry envelopes or A6-owned registry types. Do not modify the parent integration checkout. NOTE: the focused command is plan-specified (§7.5) and targets a future test file that does not exist at round_base — unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script exists) but cannot exercise A11H code until the file exists."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

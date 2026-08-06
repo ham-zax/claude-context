@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.5",
+  "cardType": "evidence_or_code",
+  "contractSha256": "0744c7d072049ead34cb1e353c330346b964b18904bfc3268150e87c83f0ceda",
+  "contract": {
+    "task_id": "R1.5",
+    "title": "Seal TASK_GRAPH.json and CONTRACT_SEAL.json: build the canonical declaration from the sealed plan, verify it, create the contract index, seal the concrete graph, then seal contracts",
+    "risk": "high",
+    "invariant": "R1.5 writes TASK_GRAPH.json before CONTRACT_SEAL.json; the graph contains no seal digest (no self-referential digests, no graph/seal digest cycle); the declaration rehashes the marked plan region and binds planSha256; the contract index has exactly four entries.",
+    "owners": [
+      "R1.5"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; $SEALED_PLAN/$PLAN_SHA256 from the card-set manifest)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family source consumed indirectly via $LOFO_FAMILIES from R1.3)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify; declaration source region lines 1726-1980)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed directly by this task)",
+      "package.json (round-level approved; not consumed directly by this task)",
+      "TASK_GRAPH_DECLARATION.json, CONTRACT_INDEX.json, TASK_GRAPH.json, CONTRACT_SEAL.json (output artifacts in $TASK_OUTPUT, written in this order; not tracked repo files)"
+    ],
+    "interface_changes": [
+      "TASK_GRAPH_DECLARATION.json (canonical build-declaration output; plan §7.5 line 2139)",
+      "CONTRACT_INDEX.json (four-entry index from R1.T2 build-index; plan §7.5 line 2139)",
+      "TASK_GRAPH.json (concrete sealed graph including E1.<familyId>/E2.<familyId> nodes from R1.T1 seal with --families; plan §7.5 line 2139)",
+      "CONTRACT_SEAL.json (ContractSealV1, schemaVersion ranking_v3_contract_seal_v1; plan §7.5 line 2139 and §5.6 lines 1227-1237)"
+    ],
+    "security_boundaries": [
+      "Seal integrity: no self-referential digests - the graph contains no seal digest, avoiding self-reference; TASK_GRAPH.json is written first, then CONTRACT_SEAL.json (plan §7.2 lines 1988-1990; round invariant)",
+      "Graph validates, contract index has four entries, and the seal rehashes the plan (§7.6 line 2414; §8.2: no graph/seal digest cycle exists)",
+      "Every card generator validates the base graph plus applicable expansion receipts; cycles, unknown nodes, undeclared IDs, unresolved hard dependencies, or missing branch receipts block dispatch (§7.2 lines 1990-1992)"
+    ],
+    "overlap_with": [
+      "R1.T1 (build-declaration, verify-declaration, seal; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)",
+      "R1.T2 (build-index, seal; same prerequisite edge)",
+      "R1.1-R1.4 (contract indexes and LOFO_FAMILIES inputs; prerequisite edges R1.1-R1.4: R1.0B, R1.T2)",
+      "FT-D (D7 depends on R1.0/R1.1/R1.2/R1.4 per round overlap declaration; the sealed contract seal and task graph are consumed by A12/D7/D8/G7/E4 downstream)",
+      "R1.6 (consumes $CONTRACT_SEAL and $TASK_GRAPH; prerequisite edge R1.6: R1.5)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs build-declaration --plan \"$SEALED_PLAN\" --expected-plan-sha256 \"$PLAN_SHA256\" --out \"$TASK_OUTPUT/TASK_GRAPH_DECLARATION.json\" && node scripts/ranking-v3-task-graph.mjs verify-declaration --declaration \"$TASK_OUTPUT/TASK_GRAPH_DECLARATION.json\" --expected-plan-sha256 \"$PLAN_SHA256\" && node scripts/ranking-v3-contract-seal.mjs build-index --feature \"$FEATURE_CONTRACT_INDEX\" --training \"$TRAINING_CONTRACT_INDEX\" --decision \"$DECISION_CONTRACT_INDEX\" --activation \"$ACTIVATION_CONTRACT_INDEX\" --out \"$TASK_OUTPUT/CONTRACT_INDEX.json\" && node scripts/ranking-v3-task-graph.mjs seal --declaration \"$TASK_OUTPUT/TASK_GRAPH_DECLARATION.json\" --families \"$LOFO_FAMILIES\" --out \"$TASK_OUTPUT/TASK_GRAPH.json\" && node scripts/ranking-v3-contract-seal.mjs seal --plan-sha256 \"$PLAN_SHA256\" --contract-index \"$TASK_OUTPUT/CONTRACT_INDEX.json\" --task-graph \"$TASK_OUTPUT/TASK_GRAPH.json\" --out \"$TASK_OUTPUT/CONTRACT_SEAL.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2139 (build the canonical declaration from the sealed plan, verify it, create the contract index, seal the concrete graph, then seal contracts; output declaration, CONTRACT_INDEX.json, graph, and plan-bound contract seal); §7.6 evidence row line 2414 (unmet precondition: graph declaration, family list, or one contract index is absent; validating assertion: graph validates, contract index has four entries, and seal rehashes); §7.2 lines 1639-1647 and 1988-1992 (seal order and no-self-reference rule); §8.2 Gate-1 acceptance (R1.5 creates CONTRACT_INDEX.json and seals the base task graph with templates, request contract, and contracts; no graph/seal digest cycle exists).\nPrerequisite edge (exact prerequisite table, plan line 1739): R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4.\nfocused_command is the plan-specified §7.5 chained command; it depends on scripts/ranking-v3-task-graph.mjs and scripts/ranking-v3-contract-seal.mjs (R1.T1/R1.T2-owned, neither exists at round_base) and on sealed contract indexes from R1.1-R1.4, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an execution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nExecution order is normative and must not be reordered: build-declaration, then verify-declaration, then build-index, then seal the graph (which expands E1.<familyId>/E2.<familyId> from $LOFO_FAMILIES via the R1.T1 expansion function), then seal contracts. The seal binds planSha256 and taskGraphSha256 but the graph never contains a seal digest. $CONTRACT_INDEX/$CONTRACT_SEAL/$TASK_GRAPH are the R1.5 output paths (plan §7.5 variable table lines 2096-2098)."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

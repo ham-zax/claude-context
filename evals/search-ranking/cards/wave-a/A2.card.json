@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A2",
+  "cardType": "evidence_or_code",
+  "contractSha256": "d280272065a6908ab632d8b4c857c459ce4b092b5ddbe76895493cc0b54a3f2a",
+  "contract": {
+    "task_id": "A2",
+    "title": "Wave A: search-ranking-evidence.ts DeterministicRankingEvidenceV1 parser",
+    "risk": "medium",
+    "invariant": "DeterministicRankingEvidenceV1 (schema search_ranking_evidence_v1) parses only post-admission, pre-residual evidence with exact keys; provider fields never appear; canonical round-trip. No central runtime file changes in Wave A.",
+    "owners": [
+      "A2"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-ranking-policy.ts (A2 anchor: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID='search_candidate_final_score_v2' at :22; computeSearchCandidateFinalScore at :392)",
+      "scripts/satori-search-candidate-replay.mjs (imports computeSearchCandidateFinalScore at :8; consumes at :908 and :1827)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-ranking-policy.test.ts (existing, verified at base)",
+      "scripts/satori-search-candidate-replay.test.mjs (existing, verified at base)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/search-ranking-evidence.ts",
+      "packages/mcp/src/core/search-ranking-evidence.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/search-ranking-evidence.ts (new file; DeterministicRankingEvidenceV1 parser/types per §5.1: candidateId, baselineScore=preRerankBaselineScore, retrieval stage ranks + per-pass RRF contributions, candidate, query groups)"
+    ],
+    "security_boundaries": [
+      "Evidence cannot be built before admission or with provider fields: timing and exact-key constraints are enforced (§7.6 A2 RED row parses_only_post_admission_pre_residual_evidence)"
+    ],
+    "overlap_with": [
+      "B2 (Wave B): search-pass-evidence.ts requires A2",
+      "B4 (Wave B): deterministic evidence assembler requires A2 (and A4, B2, B3)",
+      "A4: feature vector is built from deterministic evidence only (§5.1)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/search-ranking-evidence.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/mcp/src/core/search-ranking-evidence.ts (new file) with DeterministicRankingEvidenceV1 (schema search_ranking_evidence_v1) per §5.1: available after eligibility, pre-rerank baseline scoring, and the immutable admission snapshot, but before residual scoring or any provider request/application. §7.6 A2 RED row: test 'parses_only_post_admission_pre_residual_evidence'; expected failure: evidence can be built before admission or include provider fields; minimal passing: timing and exact-key constraints enforced. The residual feature vector is built from deterministic evidence only. Baseline identity anchor SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID (search-ranking-policy.ts:22) and computeSearchCandidateFinalScore (:392, consumed by scripts/satori-search-candidate-replay.mjs at :908/:1827) must not change behavior. Focused command is plan-specified (§7.5 A2 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified (packages/mcp/package.json 'test' script; .github/workflows/ci.yml:150) and must pass."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

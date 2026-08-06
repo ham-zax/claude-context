@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "ranking_v3_contract_index_v1",
+  "entries": [
+    {
+      "kind": "feature",
+      "contractPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/FEATURE_CONTRACT.json",
+      "indexPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/FEATURE_CONTRACT.index.json",
+      "contractSha256": "42bca801fab0a38ca87b1225576d1dbc13eaf8f645b9be9433d0dbf3777f12f2",
+      "indexSha256": "7fc2a2bad968e659cbbf537a0c54463460a56b259612ae7ad2a02ddf77e80f0f",
+      "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4"
+    },
+    {
+      "kind": "training",
+      "contractPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/TRAINING_CONTRACT.json",
+      "indexPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/TRAINING_CONTRACT.index.json",
+      "contractSha256": "30e89eb2c852fcbd679ddedd143b4bf803578a75c97c179217a9923e64ed7863",
+      "indexSha256": "a5da1c5e3c6f832db8c7a84cf9817af22915aa9375a222035d2f1058c181ab39",
+      "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4"
+    },
+    {
+      "kind": "decision",
+      "contractPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/DECISION_CONTRACT.json",
+      "indexPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/DECISION_CONTRACT.index.json",
+      "contractSha256": "be6186537cdc75eaf102d1d3b152bd5ad266cd72dd11fd27e42513e0e7b8fd13",
+      "indexSha256": "d79620bf0c36eb8b1c8f905564a8fc04a4cb9ae776e58099d92069611e62ebfa",
+      "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4"
+    },
+    {
+      "kind": "activation",
+      "contractPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/ARTIFACT_ACTIVATION_CONTRACT.json",
+      "indexPath": "/home/hamza/repo/satori/evals/search-ranking/ranking-v3-authorities/ARTIFACT_ACTIVATION_CONTRACT.index.json",
+      "contractSha256": "fe89ead69cbc6414c59f3cce3b4720d70a0eb575daf1909b9bc9243bd4ced161",
+      "indexSha256": "5c92f91a75a36caca95cc12ef6619dcf40e030c54cbe578e5303e3b6bf4f2c78",
+      "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4"
+    }
+  ]
+}

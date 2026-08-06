@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A7",
+  "cardType": "evidence_or_code",
+  "contractSha256": "cca470a8b8e55312ce0b26b7b05714c7005cc66bdf0e582bf8d45de0a97c6e2a",
+  "contract": {
+    "task_id": "A7",
+    "title": "Wave A: ranking-policy-identity.ts baseline/learned IDs and reranker_disabled_v1",
+    "risk": "medium",
+    "invariant": "Disabled learned mode uses the canonical built-in reranker identity reranker_disabled_v1 and never inherits a configured provider identity. Composite policy identity search_ranking_policy_v3:<artifact-sha256> is carried by the existing rankingPolicyIdentity field.",
+    "owners": [
+      "A7"
+    ],
+    "production_callers": [
+      "(no base runtime caller; Wave F consumers per §7.2: F6 selector+config, F7 ranked-set identity, F8 shadow sink)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-identity.test.ts (future — plan §7.6 A7 row)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-identity.ts",
+      "packages/mcp/src/core/ranking-policy-identity.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-identity.ts (new file; baseline/learned policy IDs and canonical built-in reranker_disabled_v1 per §5.7:1331-1338)"
+    ],
+    "security_boundaries": [
+      "Security boundary (explicit): disabled mode must emit canonical built-in reranker_disabled_v1 and NEVER inherit a configured provider identity (§5.7:1335, §7.6 A7 RED row disabled_mode_uses_reranker_disabled_v1, §8.8:2482); provider_derived mode uses the exact qualified reranker identity from the registry entry"
+    ],
+    "overlap_with": [
+      "F6/F7/F8 (Wave F): consume A7 identity (F6 requires A7; F7 requires F6, A7; F8 requires F6, A7)",
+      "R1.4: activation contract index is a sealed authority input"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-identity.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/mcp/src/core/ranking-policy-identity.ts (new file) with baseline/learned policy IDs and the canonical built-in reranker identity reranker_disabled_v1. §7.5 A7 row: 'baseline/learned IDs and reranker_disabled_v1'. §7.6 A7 RED row: test 'disabled_mode_uses_reranker_disabled_v1'; expected failure: disabled mode inherits a configured provider identity; minimal passing: canonical disabled identity is emitted. Normative source: §5.7:1331-1338 — composite policy identity search_ranking_policy_v3:<artifact-sha256> carried by the existing rankingPolicyIdentity field of the ranked-set binding; for learned mode disabled, the binding's reranker identity is the canonical built-in value reranker_disabled_v1, never copied from an unrelated configured provider; for provider_derived, the exact qualified reranker identity from the registry entry. Policy hash appears in startup diagnostics, search diagnostics, and ranked-set bindings, not in index publication receipts. This is an explicit security boundary — do not weaken it. Focused command is plan-specified (§7.5 A7 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

@@ -1,0 +1,469 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_cards_v2",
+  "scopeId": "gate1-target-bound",
+  "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "dispatchCommit": "0c0cac29ff87b1c78675797ab76502b522d18d27",
+  "dispatchTreeSha256": "78a85066726c16c3c71fe30fdd28750db6c77b5bc5711971277be63edc7e862f",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "contractSealSha256": null,
+  "taskGraphSha256": null,
+  "taskGraphExpansionReceipts": [],
+  "prerequisiteReceipts": [],
+  "previousManifestSha256": null,
+  "nextBoundaryGeneratorTaskId": "R1.6",
+  "cards": [
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.T1",
+      "cardType": "code_change",
+      "contractSha256": "ee1e265ad47bbbc92ef2a661d420568552332eaae281715ee3aa30d06b08ddfd",
+      "contract": {
+        "task_id": "R1.T1",
+        "title": "Implement/seal task-graph schema, validator, and expansion tooling (scripts/ranking-v3-task-graph.mjs)",
+        "risk": "high",
+        "invariant": "R1.T1 build-declaration rehashes the uniquely marked RANKING_V3_TASK_GRAPH_DECLARATION_V1 plan region (plan file lines 1726-1980) and binds planSha256; no edge is invented; oneOf conditions are disjunctive and H6/H7/H8 activate exactly one of H3/H4.",
+        "owners": [
+          "R1.T1"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; marked declaration region lines 1726-1980 and §5.6 gate schema)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family source for R1.3, consumed indirectly via LOFO_FAMILIES at seal time)",
+          "package.json (round-approved; plan path binding in card manifest, $SEALED_PLAN/$PLAN_SHA256 source)"
+        ],
+        "test_callers": [
+          "scripts/ranking-v3-task-graph.test.mjs (plan-specified future test file; does not exist at round_base)",
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+          "package.json (round-level approved; not consumed by this task directly)",
+          "scripts/ranking-v3-task-graph.mjs (new file, to create - §7.1 exclusive owner R1.T1)",
+          "scripts/ranking-v3-task-graph.test.mjs (new file, to create - §7.6 RED row)"
+        ],
+        "interface_changes": [
+          "TaskGraphDeclarationV1 (schemaVersion ranking_v3_task_graph_declaration_v1; planSha256; staticNodes; taskTemplates; hardEdges; conditionalEdges) (plan §7.2, lines 1657-1670)",
+          "TaskGraphNodeV1 / TaskGraphTemplateV1 / TaskGraphEdgeV1 / ReceiptConditionV1 (plan §7.2, lines 1648-1702)",
+          "GateReceiptV1 (schemaVersion ranking_v3_gate_receipt_v1; gateId; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions; verdict ready|blocked|terminal) (plan §5.6, lines 1195-1210)",
+          "scripts/ranking-v3-task-graph.mjs commands: build-declaration, verify-declaration, seal, expand, verify-ready (plan §7.5 rows lines 2133 and 2160-2165; C1G row line 2175)"
+        ],
+        "security_boundaries": [
+          "build-declaration reads only the uniquely marked RANKING_V3_TASK_GRAPH_DECLARATION_V1 region of the sealed plan, parses the exact prerequisite DSL and conditional-edge array, binds planSha256, and emits canonical TASK_GRAPH_DECLARATION.json; any unmarked task or edge, duplicate node, unknown reference, or plan-digest mismatch fails (§7.2, lines 1639-1647)",
+          "oneOf is disjunctive: one matching value satisfies the edge; multiple ordinary hard edges remain conjunctive; contract-conditioned and receipt-outcome branches remain present in the sealed graph, become dispatchable only when the named parsed authority exists, and are never rewritten after evaluation (§7.2, lines 1703-1710)",
+          "Gate verifier checks the edge kind and parsed contract/receipt outcome; it never infers a branch from filenames (§7.5, line 2166)",
+          "Wave-C packet identities are the only post-seal graph expansion; expanded IDs must match the sealed template regex and may introduce only template-declared edges (§7.2, lines 1982-1986)"
+        ],
+        "overlap_with": [
+          "R1.5 (invokes build-declaration, verify-declaration, and seal while sealing the graph; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)",
+          "C1G (graph expansion; C1G: C1, R1.T1)",
+          "Gate nodes A_GATE through I_GATE_* (verify-ready command owned by R1.T1)",
+          "FT-E (LOFO_FAMILIES feeds template expansionAuthority r1_5_lofo_families; E1.<familyId>/E2.<familyId> nodes are created by R1.5's seal invocation)"
+        ],
+        "focused_command": "node --test scripts/ranking-v3-task-graph.test.mjs",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": true,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2133 (owns TaskGraphDeclarationV1, build-declaration, verify-declaration, parse/canonicalize/validate/seal/expand); §7.6 code-change RED row line 2351 (test declaration_rehashes_plan_and_selected_replay_edges_are_exclusive: expected failure before implementation is that the declaration is invented outside the marked plan region, plan digest mismatches, or H6/H7/H8 require both H3 and H4; minimal passing behavior is that the canonical declaration rehashes the sealed plan and exactly one selected replay predecessor activates); §7.2 lines 1637-1722 (authority and schemas); §5.6 lines 1195-1210 (GateReceiptV1); §8.2 Gate-1 acceptance (graph tests prove oneOf disjunction, reject deadline edges, canonicalize the marked declaration source, bind planSha256, and prove H6/H7/H8 activate exactly one of H3/H4).\nMarked declaration region: the uniquely marked region is between <!-- BEGIN RANKING_V3_TASK_GRAPH_DECLARATION_V1 --> (line 1726) and <!-- END RANKING_V3_TASK_GRAPH_DECLARATION_V1 --> (line 1980). Note: the round task packet estimated lines ~1649-1855; the verified marker lines at round_base are 1726-1980 - use the markers, not the estimate.\nPrerequisite edge (exact prerequisite table, plan line 1733): R1.T1: R1.0B.\nfocused_command is a plan-specified future-gate tool test command; its target file scripts/ranking-v3-task-graph.test.mjs does not exist at round_base, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nRequired first-RED evidence: implement the test first, confirm it fails at base state (declaration invented outside the marked region or mixed H3/H4 requirements accepted), then implement scripts/ranking-v3-task-graph.mjs until the focused test passes.\nThe tool validates the declared semantics; it does not invent edges. R1.5 invokes the R1.T1 expansion function while sealing the graph, so concrete E1.<familyId> and E2.<familyId> nodes already exist in TASK_GRAPH.json; no later E-family expansion is needed (§7.2, lines 1644-1647)."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.T2",
+      "cardType": "code_change",
+      "contractSha256": "c0a5cae7fbbb803a87b5e5a97f7fb87121d06832098070eca15f916bf7398eb3",
+      "contract": {
+        "task_id": "R1.T2",
+        "title": "Implement/seal contract validation and sealing tooling (scripts/ranking-v3-contract-seal.mjs)",
+        "risk": "high",
+        "invariant": "R1.T2 seal binds planSha256 with no graph/seal digest cycle; the contract index has exactly four ordered entries (feature, training, decision, activation) binding one qualification target digest.",
+        "owners": [
+          "R1.T2"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §5.6 schemas and §7.5 catalog rows)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task directly)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/ranking-v3-contract-seal.test.mjs (plan-specified future test file; does not exist at round_base)",
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+          "package.json (round-level approved; not consumed by this task directly)",
+          "scripts/ranking-v3-contract-seal.mjs (new file, to create - §7.1 exclusive owner R1.T2)",
+          "scripts/ranking-v3-contract-seal.test.mjs (new file, to create - §7.6 RED row)"
+        ],
+        "interface_changes": [
+          "ContractIndexEntryV1 (kind feature|training|decision|activation; contractPath; indexPath; contractSha256; indexSha256; qualificationTargetSha256) (plan §5.6, lines 1213-1220)",
+          "ContractIndexV1 (schemaVersion ranking_v3_contract_index_v1; entries) (plan §5.6, lines 1222-1225)",
+          "ContractSealV1 (schemaVersion ranking_v3_contract_seal_v1; planSha256; qualificationTargetSha256; contractIndexSha256; taskGraphSha256; baselineCommit; baselineTreeSha256; sealedAt) (plan §5.6, lines 1227-1237)",
+          "scripts/ranking-v3-contract-seal.mjs exported buildContractIndex/verifyContractIndex/sealContracts and commands build-index, verify-contract, seal (plan §7.5 row line 2134)"
+        ],
+        "security_boundaries": [
+          "Seal binds planSha256 with no graph/seal digest cycle; the graph contains no seal digest, avoiding self-reference (plan §7.2, lines 1988-1990; round invariant)",
+          "builds_canonical_contract_index_and_rejects_target_digest_mismatch: exactly four ordered entries bind one target and seal successfully; missing index entries or mixed target digests are rejected (§7.6 line 2352)",
+          "R1.2 request-contract digest authority is enforced downstream: expected digests flow only from the sealed training-contract index; no caller may recalculate (round security boundary; §6.4 lines 1478-1486)"
+        ],
+        "overlap_with": [
+          "R1.1-R1.4 (consume verify-contract with kinds feature/training/decision/activation; prerequisite edges R1.1-R1.4: R1.0B, R1.T2)",
+          "R1.5 (consumes build-index and seal; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)",
+          "FT-A2 (A12 consumes the sealed R1.2 digest via the training contract; D7/D8/A3/A12 depend on R1.2 per exact prerequisite table)"
+        ],
+        "focused_command": "node --test scripts/ranking-v3-contract-seal.test.mjs",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": true,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2134 (owns buildContractIndex, verifyContractIndex, sealContracts); §7.6 code-change RED row line 2352 (test builds_canonical_contract_index_and_rejects_target_digest_mismatch: expected failure before implementation is that the seal tool accepts missing index entries or mixed target digests; minimal passing behavior is that exactly four ordered entries bind one target and seal successfully); §5.6 lines 1211-1237 (normative schemas; unknown fields are rejected for every authority above); §8.2 Gate-1 acceptance (R1.T2 contract-tool tests pass).\nPrerequisite edge (exact prerequisite table, plan line 1734): R1.T2: R1.0B.\nfocused_command is a plan-specified future-gate tool test command; its target file scripts/ranking-v3-contract-seal.test.mjs does not exist at round_base, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nRequired first-RED evidence: implement the test first, confirm it fails at base state, then implement scripts/ranking-v3-contract-seal.mjs until the focused test passes.\nThe four kinds are fixed: feature, training, decision, activation (ContractIndexEntryV1). The seal never contains or hashes a future seal; ContractSealV1 binds planSha256, qualificationTargetSha256, contractIndexSha256, taskGraphSha256, baselineCommit, baselineTreeSha256, sealedAt - no self-referential digest is permitted."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.1",
+      "cardType": "evidence_or_code",
+      "contractSha256": "a6dd2f8f13cc334c20ccdd55e9d1cd49d8834d9be912efa795a3af0857eee2e5",
+      "contract": {
+        "task_id": "R1.1",
+        "title": "Create the feature contract and index (FEATURE_CONTRACT.index.json)",
+        "risk": "low",
+        "invariant": "R1.1-R1.4 bind the exact R1.0 qualification-target digest; the feature contract index parses, its canonical hash matches, and the target digest is exact (§7.6 R1.1-R1.4 row).",
+        "owners": [
+          "R1.1"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.5 row and §7.6 evidence row)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task)",
+          "package.json (round-level approved; not consumed by this task)",
+          "FEATURE_CONTRACT.index.json (output artifact in $TASK_OUTPUT; not a tracked repo file)"
+        ],
+        "interface_changes": [
+          "FEATURE_CONTRACT.index.json (kind feature contract index consumed by R1.T2 verify-contract --kind feature; plan §7.5 line 2135, variable table line 2091)",
+          "Feature contract content consumed by A4 (feature order and missing indicators must match the sealed R1.1 contract; §7.6 A4 row)"
+        ],
+        "security_boundaries": [
+          "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)",
+          "Contract entries are normative: unknown fields are rejected for every authority (plan §5.6 closing note)"
+        ],
+        "overlap_with": [
+          "R1.T2 (verify-contract tool; prerequisite edge R1.1: R1.0B, R1.T2)",
+          "A4 (ranking-features-v1 feature order and missing indicators must match the sealed R1.1 contract; Wave-A gate requires parsers reject unknown fields)",
+          "FT-D (D7/D8 depend on R1.1 per exact prerequisite table: D7: DD, A3, A4, A5, A12, R1.0, R1.1, R1.2, R1.4; D8: DD, A5, D2, D3, R1.0, R1.1, R1.2, R1.4)"
+        ],
+        "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind feature --index \"$TASK_OUTPUT/FEATURE_CONTRACT.index.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": false,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2135 (create feature contract and index; verification command; output feature-contract digest); §7.6 evidence row line 2413 (R1.1-R1.4 shared row: unmet precondition - target digest or required input index is absent; validating assertion - contract index parses, canonical hash matches, and target digest is exact); §8.2 Gate-1 acceptance (R1.1-R1.4 bind the exact target digest).\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.1: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nThe feature contract content itself is authored by this task but must be stable and canonical; A4 later verifies feature order and missing indicators match the sealed R1.1 contract (§7.6 A4 row). $FEATURE_CONTRACT_INDEX is the R1.1 output path (plan §7.5 variable table line 2091)."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.2",
+      "cardType": "evidence_or_code",
+      "contractSha256": "3b354d9277ff37bdc4dbc3b9cc24abfa67c48119e33fc939f4ecd68f7591a404",
+      "contract": {
+        "task_id": "R1.2",
+        "title": "Create the training contract/index and PROVIDER_REQUEST_CONTRACT.json",
+        "risk": "medium",
+        "invariant": "R1.2 seals ProviderRequestContractV1 and the training contract index; expected request-contract digests flow only from the sealed training-contract index and no caller may recalculate them.",
+        "owners": [
+          "R1.2"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §6.4 schema authority and §7.5 row)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task directly)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+          "package.json (round-level approved; not consumed by this task directly)",
+          "TRAINING_CONTRACT.index.json and PROVIDER_REQUEST_CONTRACT.json (output artifacts in $TASK_OUTPUT; not tracked repo files)"
+        ],
+        "interface_changes": [
+          "ProviderRequestContractV1 (schemaVersion ranking_provider_request_contract_v1; projectionIdentity; candidateOrder baseline_admission_order; documentSerializationIdentity; identityMappingIdentity; maximumCandidateCount; maximumPayloadUtf8Bytes; timeoutMs; maximumRetries; canonicalizationIdentity) (plan §6.4, lines 1454-1466)",
+          "TRAINING_CONTRACT.index.json (kind training contract index; plan §7.5 line 2136, variable table line 2092)",
+          "PROVIDER_REQUEST_CONTRACT.json (plan §7.5 line 2136 output)"
+        ],
+        "security_boundaries": [
+          "Request-contract digest authority: expected digests flow only from the sealed training-contract index; no caller may recalculate or copy an independent expected value (round security boundary; §6.4 lines 1478-1486)",
+          "The provider request contract is a separate R1.2 authority and cannot be part of the R1.0 target because its digest does not exist yet (§6.4, lines 1445-1447)",
+          "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)"
+        ],
+        "overlap_with": [
+          "FT-A2 (A12 consumes the sealed R1.2 digest: builder rejects unless returned digest equals expectedProviderRequestContractSha256 which must equal the sealed R1.2 digest; §6.4 and §7.6 A12 row)",
+          "R1.T2 (verify-contract tool; prerequisite edge R1.2: R1.0B, R1.T2)",
+          "B9/E2/G2/G6B-H4/G6C-I2 (import parseProviderRequestContractV1/buildRankingProviderRequestV1 unchanged and receive the expected digest only from the sealed R1.2 training-contract index; §6.4)",
+          "FT-D (D7/D8 depend on R1.2 per exact prerequisite table)"
+        ],
+        "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind training --index \"$TASK_OUTPUT/TRAINING_CONTRACT.index.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": false,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2136 (create training contract/index and PROVIDER_REQUEST_CONTRACT.json; verification command; output training/request digests); §6.4 lines 1451-1486 (ProviderRequestContractV1 schema, parseProviderRequestContractV1, buildRankingProviderRequestV1; digest authority rule); §7.6 evidence row line 2413 (R1.1-R1.4 shared row); §8.2 Gate-1 acceptance (R1.1-R1.4 bind the exact target digest).\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.2: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nA12 is the sole shared implementation authority for the request contract (parse/build); R1.2 seals the contract and its digest but must not duplicate the A12 implementation. $TRAINING_CONTRACT_INDEX is the R1.2 output path (plan §7.5 variable table line 2092)."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.3",
+      "cardType": "evidence_or_code",
+      "contractSha256": "df89c04ec2bd764bad0b683cff619813a6ac773c53971c00a9c73b8ba378e0ba",
+      "contract": {
+        "task_id": "R1.3",
+        "title": "Create the decision contract/index and LOFO_FAMILIES.json from the sealed cross-repository-v3 tuning partition",
+        "risk": "medium",
+        "invariant": "R1.3 LOFO families derive from the sealed v3 tuning partition: exactly the six tuning family IDs (gitnexus-r0, bookmark-ai-organizer-r0, duas-r0, vox-infinity-r0, rpc-r0, edge-tts-app-r0) from evals/search-ranking/cross-repository-v3.manifest.json, not from the future C5 tuning manifest.",
+        "owners": [
+          "R1.3"
+        ],
+        "production_callers": [
+          "evals/search-ranking/cross-repository-v3.manifest.json (R1.3 family source; verified at round_base: 50 tuning tasks, 6 tuning repositories, 6 families: gitnexus-r0, bookmark-ai-organizer-r0, duas-r0, vox-infinity-r0, rpc-r0, edge-tts-app-r0; held_out partition excluded)",
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.2 family rule and §7.5 row)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention; manifest-parsing precedent for family extraction)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; family source - read-only at base, do not modify its sealed content)",
+          "package.json (round-level approved; not consumed by this task directly)",
+          "DECISION_CONTRACT.index.json and LOFO_FAMILIES.json (output artifacts in $TASK_OUTPUT; not tracked repo files)"
+        ],
+        "interface_changes": [
+          "DECISION_CONTRACT.index.json (kind decision contract index; plan §7.5 line 2137, variable table line 2093)",
+          "LOFO_FAMILIES.json (family-list path derived from the sealed v3 tuning split; plan §7.5 line 2137 and variable table line 2095)",
+          "$LOFO_FAMILIES entries feed template expansionAuthority r1_5_lofo_families and $FAMILY_ID substitution (plan §7.5 variable table lines 2095, 2101; §7.2 lines 1644-1647)"
+        ],
+        "security_boundaries": [
+          "The family list is derived from the already-sealed cross-repository-v3 tuning partition and its family mapping, not from the future C5 tuning manifest (§7.2, lines 1645-1647; round invariant)",
+          "LOFO_FAMILIES.json contains exactly the six exact family IDs; family grouping must remain atomic for A9 folds (no related family crosses a fold boundary; §7.6 A9 row)",
+          "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)"
+        ],
+        "overlap_with": [
+          "FT-E (LOFO_FAMILIES feeds the E-family expansion authority r1_5_lofo_families; R1.5 invokes R1.T1 expansion while sealing so E1.<familyId>/E2.<familyId> nodes already exist; round overlap declaration)",
+          "A8/A9/A10 (judgment packets, LOFO folds, evaluator primitives consume the family/tuning partition)",
+          "R1.T2 (verify-contract tool; prerequisite edge R1.3: R1.0B, R1.T2)",
+          "R1.5 (consumes DECISION_CONTRACT.index.json and LOFO_FAMILIES.json; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)"
+        ],
+        "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind decision --index \"$TASK_OUTPUT/DECISION_CONTRACT.index.json\" --families \"$TASK_OUTPUT/LOFO_FAMILIES.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": false,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2137 (create decision contract/index and LOFO_FAMILIES.json from the sealed cross-repository-v3 tuning partition; verification command; output decision/family-list digests); §7.2 lines 1644-1647 (family list derived from the already-sealed cross-repository-v3 tuning partition and its family mapping, not from the future C5 tuning manifest; R1.5 invokes the R1.T1 expansion function while sealing so concrete E1.<familyId> and E2.<familyId> nodes already exist in TASK_GRAPH.json; no later E-family expansion is needed); §7.6 evidence row line 2413; §8.2 Gate-1 acceptance.\nVerified at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 from evals/search-ranking/cross-repository-v3.manifest.json: 101 tasks total; 50 tuning tasks across 6 tuning repositories (ids gitnexus-r0, bookmark-ai-organizer-r0, duas-r0, vox-infinity-r0, rpc-r0, edge-tts-app-r0; families gitnexus, bookmark_ai_organizer, duas, vox_infinity, rpc_learner_engine, edge_tts_app); 51 held_out tasks (6 held_out repositories, family IDs promptready-r0, fastcontext-r0, recovery-dashboard-r0, ai-studio-prompt-library-r0, portfolio-r0, supply-chain-api-r0). The six LOFO family IDs are the tuning repository IDs with the -r0 suffix.\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.3: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nDo not add, drop, or reorder family IDs; the exact six IDs above are the sealed partition. $DECISION_CONTRACT_INDEX and $LOFO_FAMILIES are the R1.3 output paths (plan §7.5 variable table lines 2093, 2095)."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.4",
+      "cardType": "evidence_or_code",
+      "contractSha256": "523437a65b20ee0de8a12f9884b428cafc07638a928af08c2cd24d7849b66c62",
+      "contract": {
+        "task_id": "R1.4",
+        "title": "Create the artifact/activation contract and index (ARTIFACT_ACTIVATION_CONTRACT.index.json)",
+        "risk": "low",
+        "invariant": "R1.1-R1.4 bind the exact R1.0 qualification-target digest; the activation contract index parses, its canonical hash matches, and the target digest is exact (§7.6 R1.1-R1.4 row).",
+        "owners": [
+          "R1.4"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.5 row and §7.6 evidence row)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task)",
+          "package.json (round-level approved; not consumed by this task)",
+          "ARTIFACT_ACTIVATION_CONTRACT.index.json (output artifact in $TASK_OUTPUT; not a tracked repo file)"
+        ],
+        "interface_changes": [
+          "ARTIFACT_ACTIVATION_CONTRACT.index.json (kind activation contract index; plan §7.5 line 2138, variable table line 2094)",
+          "Activation contract consumed by A5/D8 (final artifact provider fields match R1.2/R1.4) and by D8/E4 (--activation-contract-index argument; plan §7.5 E4 row)"
+        ],
+        "security_boundaries": [
+          "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)",
+          "Contract entries are normative: unknown fields are rejected for every authority (plan §5.6 closing note)"
+        ],
+        "overlap_with": [
+          "R1.T2 (verify-contract tool; prerequisite edge R1.4: R1.0B, R1.T2)",
+          "A5/D8/F9 (final artifact and registry writers bind the activation contract index; D8 builds only the selected mode from refit and sealed authorities)",
+          "FT-D (D7/D8 depend on R1.4 per exact prerequisite table: D7: DD, A3, A4, A5, A12, R1.0, R1.1, R1.2, R1.4; D8: DD, A5, D2, D3, R1.0, R1.1, R1.2, R1.4)"
+        ],
+        "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind activation --index \"$TASK_OUTPUT/ARTIFACT_ACTIVATION_CONTRACT.index.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": false,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2138 (create artifact/activation contract and index; verification command; output activation-contract digest); §7.6 evidence row line 2413 (R1.1-R1.4 shared row); §8.2 Gate-1 acceptance (R1.1-R1.4 bind the exact target digest).\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.4: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\n$ACTIVATION_CONTRACT_INDEX is the R1.4 output path (plan §7.5 variable table line 2094). Downstream consumers (D8/E4/F9) receive this index path only from prerequisite receipts."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.5",
+      "cardType": "evidence_or_code",
+      "contractSha256": "0744c7d072049ead34cb1e353c330346b964b18904bfc3268150e87c83f0ceda",
+      "contract": {
+        "task_id": "R1.5",
+        "title": "Seal TASK_GRAPH.json and CONTRACT_SEAL.json: build the canonical declaration from the sealed plan, verify it, create the contract index, seal the concrete graph, then seal contracts",
+        "risk": "high",
+        "invariant": "R1.5 writes TASK_GRAPH.json before CONTRACT_SEAL.json; the graph contains no seal digest (no self-referential digests, no graph/seal digest cycle); the declaration rehashes the marked plan region and binds planSha256; the contract index has exactly four entries.",
+        "owners": [
+          "R1.5"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; $SEALED_PLAN/$PLAN_SHA256 from the card-set manifest)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family source consumed indirectly via $LOFO_FAMILIES from R1.3)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify; declaration source region lines 1726-1980)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed directly by this task)",
+          "package.json (round-level approved; not consumed directly by this task)",
+          "TASK_GRAPH_DECLARATION.json, CONTRACT_INDEX.json, TASK_GRAPH.json, CONTRACT_SEAL.json (output artifacts in $TASK_OUTPUT, written in this order; not tracked repo files)"
+        ],
+        "interface_changes": [
+          "TASK_GRAPH_DECLARATION.json (canonical build-declaration output; plan §7.5 line 2139)",
+          "CONTRACT_INDEX.json (four-entry index from R1.T2 build-index; plan §7.5 line 2139)",
+          "TASK_GRAPH.json (concrete sealed graph including E1.<familyId>/E2.<familyId> nodes from R1.T1 seal with --families; plan §7.5 line 2139)",
+          "CONTRACT_SEAL.json (ContractSealV1, schemaVersion ranking_v3_contract_seal_v1; plan §7.5 line 2139 and §5.6 lines 1227-1237)"
+        ],
+        "security_boundaries": [
+          "Seal integrity: no self-referential digests - the graph contains no seal digest, avoiding self-reference; TASK_GRAPH.json is written first, then CONTRACT_SEAL.json (plan §7.2 lines 1988-1990; round invariant)",
+          "Graph validates, contract index has four entries, and the seal rehashes the plan (§7.6 line 2414; §8.2: no graph/seal digest cycle exists)",
+          "Every card generator validates the base graph plus applicable expansion receipts; cycles, unknown nodes, undeclared IDs, unresolved hard dependencies, or missing branch receipts block dispatch (§7.2 lines 1990-1992)"
+        ],
+        "overlap_with": [
+          "R1.T1 (build-declaration, verify-declaration, seal; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)",
+          "R1.T2 (build-index, seal; same prerequisite edge)",
+          "R1.1-R1.4 (contract indexes and LOFO_FAMILIES inputs; prerequisite edges R1.1-R1.4: R1.0B, R1.T2)",
+          "FT-D (D7 depends on R1.0/R1.1/R1.2/R1.4 per round overlap declaration; the sealed contract seal and task graph are consumed by A12/D7/D8/G7/E4 downstream)",
+          "R1.6 (consumes $CONTRACT_SEAL and $TASK_GRAPH; prerequisite edge R1.6: R1.5)"
+        ],
+        "focused_command": "node scripts/ranking-v3-task-graph.mjs build-declaration --plan \"$SEALED_PLAN\" --expected-plan-sha256 \"$PLAN_SHA256\" --out \"$TASK_OUTPUT/TASK_GRAPH_DECLARATION.json\" && node scripts/ranking-v3-task-graph.mjs verify-declaration --declaration \"$TASK_OUTPUT/TASK_GRAPH_DECLARATION.json\" --expected-plan-sha256 \"$PLAN_SHA256\" && node scripts/ranking-v3-contract-seal.mjs build-index --feature \"$FEATURE_CONTRACT_INDEX\" --training \"$TRAINING_CONTRACT_INDEX\" --decision \"$DECISION_CONTRACT_INDEX\" --activation \"$ACTIVATION_CONTRACT_INDEX\" --out \"$TASK_OUTPUT/CONTRACT_INDEX.json\" && node scripts/ranking-v3-task-graph.mjs seal --declaration \"$TASK_OUTPUT/TASK_GRAPH_DECLARATION.json\" --families \"$LOFO_FAMILIES\" --out \"$TASK_OUTPUT/TASK_GRAPH.json\" && node scripts/ranking-v3-contract-seal.mjs seal --plan-sha256 \"$PLAN_SHA256\" --contract-index \"$TASK_OUTPUT/CONTRACT_INDEX.json\" --task-graph \"$TASK_OUTPUT/TASK_GRAPH.json\" --out \"$TASK_OUTPUT/CONTRACT_SEAL.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": false,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2139 (build the canonical declaration from the sealed plan, verify it, create the contract index, seal the concrete graph, then seal contracts; output declaration, CONTRACT_INDEX.json, graph, and plan-bound contract seal); §7.6 evidence row line 2414 (unmet precondition: graph declaration, family list, or one contract index is absent; validating assertion: graph validates, contract index has four entries, and seal rehashes); §7.2 lines 1639-1647 and 1988-1992 (seal order and no-self-reference rule); §8.2 Gate-1 acceptance (R1.5 creates CONTRACT_INDEX.json and seals the base task graph with templates, request contract, and contracts; no graph/seal digest cycle exists).\nPrerequisite edge (exact prerequisite table, plan line 1739): R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4.\nfocused_command is the plan-specified §7.5 chained command; it depends on scripts/ranking-v3-task-graph.mjs and scripts/ranking-v3-contract-seal.mjs (R1.T1/R1.T2-owned, neither exists at round_base) and on sealed contract indexes from R1.1-R1.4, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an execution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nExecution order is normative and must not be reordered: build-declaration, then verify-declaration, then build-index, then seal the graph (which expands E1.<familyId>/E2.<familyId> from $LOFO_FAMILIES via the R1.T1 expansion function), then seal contracts. The seal binds planSha256 and taskGraphSha256 but the graph never contains a seal digest. $CONTRACT_INDEX/$CONTRACT_SEAL/$TASK_GRAPH are the R1.5 output paths (plan §7.5 variable table lines 2096-2098)."
+      },
+      "isBoundaryGenerator": false,
+      "dispatchable": true
+    },
+    {
+      "schemaVersion": "ranking_v3_dispatch_card_v2",
+      "taskId": "R1.6",
+      "cardType": "boundary_generator",
+      "contractSha256": "cc6825c793504f88dce9029c9b7095f2db770a3162e0a2ef379ff070bbcdac17",
+      "contract": {
+        "task_id": "R1.6",
+        "title": "Execute the §7.4 dispatch CLI with scope wave-a and next generator DB (Wave-A card set)",
+        "risk": "medium",
+        "invariant": "R1.6 generates the Wave-A card set after R1.5's gate receipt; cards bind the qualification target, task graph, contract seal, baselineCommit, and current dispatchCommit (§8.2).",
+        "owners": [
+          "R1.6"
+        ],
+        "production_callers": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.4 CLI and §7.5/§7.6 catalogs for Wave-A cards A1-A12/A11Q/A11H)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task directly)",
+          "package.json (round-approved; plan path binding in card manifest)"
+        ],
+        "test_callers": [
+          "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+          "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+        ],
+        "approved_files": [
+          "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+          "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+          "package.json (round-level approved; plan path binding in card manifest)",
+          "Wave-A card set directory with cards.manifest.json (schemaVersion ranking_v3_dispatch_cards_v2), written to $CARD_SET_DIR per §7.4; not a tracked repo file"
+        ],
+        "interface_changes": [
+          "Card-set manifest schemaVersion ranking_v3_dispatch_cards_v2 (plan §7.4, lines 2039-2052)",
+          "Scope ID wave-a and next generator DB (plan §7.5 row line 2140)",
+          "Wave-A card set covering A1-A10, A11Q, A11H, A12 (plan §7.3 Wave A contents; §7.5 Wave A table lines 2167-2184)"
+        ],
+        "security_boundaries": [
+          "Dispatch authority comes only from the latest unrevoked card-set manifest (§1.4)",
+          "No executing agent chooses a CLI argument or discovers a file: target, seal, graph, expansion, and previous-manifest arguments come from named prerequisite receipts (§7.4)",
+          "R1.6 cards bind the target, graph, contract seal, baselineCommit, and current dispatchCommit (§8.2)",
+          "Prerequisite gate/expansion/outcome receipt absent is the unmet precondition; card-set manifest includes target scope plus next generator and binds the current dispatch tree (§7.6 line 2415)"
+        ],
+        "overlap_with": [
+          "FT-G0 (R1.6 generates the Wave-A card set; round overlap declaration; R1.6 card set comes from the R1.0B-generated cards)",
+          "FT-A (Wave-A tasks A1-A12 are the target tasks of this card set; A12 consumes the sealed R1.2 digest; A3/A12 prerequisite edges include R1.6 per exact prerequisite table)",
+          "R0.1V (dispatch CLI first binds the wave-boundary tree through scripts/verify-ranking-v3-rebase.mjs snapshot-tree)",
+          "R1.5 (consumes $CONTRACT_SEAL/$TASK_GRAPH; prerequisite edge R1.6: R1.5)"
+        ],
+        "focused_command": "node scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\" && node scripts/ranking-v3-dispatch-cards.mjs build --scope \"wave-a\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET\" --contract-seal \"$CONTRACT_SEAL\" --task-graph \"$TASK_GRAPH\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"DB\" --out \"$CARD_SET_DIR\" && node scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"",
+        "affected_command": "pnpm test:scripts",
+        "full_suite_triggers": [
+          "pnpm test:scripts",
+          "pnpm check"
+        ],
+        "red_evidence_required": false,
+        "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2140 (dispatch CLI, scope wave-a, next DB; output Wave-A card set); §7.4 lines 2015-2071 (exact CLI shape and manifest shape); §1.1 bootstrap order (R1.6 generates Wave-A cards and the DB boundary-generator card); §1.4 dispatch authority; §8.2 Gate-1 acceptance (R1.6 cards bind the target, graph, contract seal, baselineCommit, and current dispatchCommit); §7.3 Wave A contents (A1-A10, A11Q, A11H, A12).\nPrerequisite edge (exact prerequisite table, plan line 1740): R1.6: R1.5.\nfocused_command is the plan-specified §7.4 command; it depends on R0.1V-owned scripts/verify-ranking-v3-rebase.mjs and R0.1B-owned scripts/ranking-v3-dispatch-cards.mjs, neither of which exists at round_base, and on the R1.5 seal/graph, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an execution card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nThe next generator DB is nondispatchable until A_GATE exists. The Wave-A card set contains its target tasks (A1-A12/A11Q/A11H) and the next boundary-generator card (DB); every card must resolve to a §7.5/§7.6 catalog row."
+      },
+      "isBoundaryGenerator": true,
+      "dispatchable": false
+    }
+  ],
+  "manifestSha256": "225652483d61bb34cd8ba0600790f93b30e75ace6e10493c9a547ec3c55fd182"
+}

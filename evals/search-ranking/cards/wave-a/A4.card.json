@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A4",
+  "cardType": "evidence_or_code",
+  "contractSha256": "0ea79be8a78787edbe20a4b83568c5cc7244c48db7ccf2725970c9e76963a967",
+  "contract": {
+    "task_id": "A4",
+    "title": "Wave A: ranking-features-v1.ts extractRankingFeaturesV1",
+    "risk": "medium",
+    "invariant": "extractRankingFeaturesV1 output order and missing indicators exactly match the sealed R1.1 feature-contract index (search_features_v1); canonical round-trip. Forbidden feature identities never appear. No central runtime file changes in Wave A.",
+    "owners": [
+      "A4"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-constants.ts (A4 anchor: SEARCH_RRF_K=60 at :1, SEARCH_RERANK_RRF_K=10 at :21, SEARCH_RERANK_WEIGHT=1.0 at :22 — frozen baseline-mode compatibility constants per invariant 7)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/search-ranking-policy.test.ts (existing, verified at base; exercises SEARCH_RRF_K/SEARCH_RERANK_RRF_K/SEARCH_RERANK_WEIGHT semantics)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-features-v1.ts",
+      "packages/mcp/src/core/ranking-features-v1.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-features-v1.ts (new file; extractRankingFeaturesV1 producing the fixed ordered search_features_v1 numeric vector per §5.2)"
+    ],
+    "security_boundaries": [
+      "Forbidden features: repository name, task ID, absolute path, user identity, candidate identity hash, owner-family identity hash, provider hash (§5.2, invariant 15); no feature may change deterministic eligibility (invariant 1/3)"
+    ],
+    "overlap_with": [
+      "D2/D5/D7 (Waves D): require A4 (exact prerequisite table)",
+      "B4 (Wave B): assembler requires A4",
+      "R1.1: feature contract index is the sealed authority the extractor must match"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-features-v1.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/mcp/src/core/ranking-features-v1.ts (new file) exporting extractRankingFeaturesV1 per §5.2: fixed ordered numeric vector with missing indicators, explicit one-hot and interaction features (test-path x test-intent, test-path x implementation-intent, docs-path x docs-route, generated x explicit-generated-or-path-intent), explicit stage ranks (rawDenseRank?, rawLexicalRank?, rawFallbackLexicalRank?, coreFusionRank?, mcpUnionRank?, postEligibilityRank?, rerankerAdmissionRank?), and the bounded confidence mapping from the existing 3-level intent confidence and hard booleans (never fabricated probabilities). §7.6 A4 RED row: test 'feature_order_and_missing_indicators_match_sealed_contract'; expected failure: extractor emits reordered or unsealed features; minimal passing: output order and missing indicators exactly match R1.1. Forbidden features per §5.2/invariant 15. Constants SEARCH_RRF_K=60 (search-constants.ts:1), SEARCH_RERANK_RRF_K=10 (:21), SEARCH_RERANK_WEIGHT=1.0 (:22) are frozen (invariant 7). Focused command is plan-specified (§7.5 A4 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

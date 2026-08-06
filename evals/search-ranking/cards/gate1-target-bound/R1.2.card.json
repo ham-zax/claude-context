@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.2",
+  "cardType": "evidence_or_code",
+  "contractSha256": "3b354d9277ff37bdc4dbc3b9cc24abfa67c48119e33fc939f4ecd68f7591a404",
+  "contract": {
+    "task_id": "R1.2",
+    "title": "Create the training contract/index and PROVIDER_REQUEST_CONTRACT.json",
+    "risk": "medium",
+    "invariant": "R1.2 seals ProviderRequestContractV1 and the training contract index; expected request-contract digests flow only from the sealed training-contract index and no caller may recalculate them.",
+    "owners": [
+      "R1.2"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §6.4 schema authority and §7.5 row)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task directly)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+      "package.json (round-level approved; not consumed by this task directly)",
+      "TRAINING_CONTRACT.index.json and PROVIDER_REQUEST_CONTRACT.json (output artifacts in $TASK_OUTPUT; not tracked repo files)"
+    ],
+    "interface_changes": [
+      "ProviderRequestContractV1 (schemaVersion ranking_provider_request_contract_v1; projectionIdentity; candidateOrder baseline_admission_order; documentSerializationIdentity; identityMappingIdentity; maximumCandidateCount; maximumPayloadUtf8Bytes; timeoutMs; maximumRetries; canonicalizationIdentity) (plan §6.4, lines 1454-1466)",
+      "TRAINING_CONTRACT.index.json (kind training contract index; plan §7.5 line 2136, variable table line 2092)",
+      "PROVIDER_REQUEST_CONTRACT.json (plan §7.5 line 2136 output)"
+    ],
+    "security_boundaries": [
+      "Request-contract digest authority: expected digests flow only from the sealed training-contract index; no caller may recalculate or copy an independent expected value (round security boundary; §6.4 lines 1478-1486)",
+      "The provider request contract is a separate R1.2 authority and cannot be part of the R1.0 target because its digest does not exist yet (§6.4, lines 1445-1447)",
+      "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)"
+    ],
+    "overlap_with": [
+      "FT-A2 (A12 consumes the sealed R1.2 digest: builder rejects unless returned digest equals expectedProviderRequestContractSha256 which must equal the sealed R1.2 digest; §6.4 and §7.6 A12 row)",
+      "R1.T2 (verify-contract tool; prerequisite edge R1.2: R1.0B, R1.T2)",
+      "B9/E2/G2/G6B-H4/G6C-I2 (import parseProviderRequestContractV1/buildRankingProviderRequestV1 unchanged and receive the expected digest only from the sealed R1.2 training-contract index; §6.4)",
+      "FT-D (D7/D8 depend on R1.2 per exact prerequisite table)"
+    ],
+    "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind training --index \"$TASK_OUTPUT/TRAINING_CONTRACT.index.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2136 (create training contract/index and PROVIDER_REQUEST_CONTRACT.json; verification command; output training/request digests); §6.4 lines 1451-1486 (ProviderRequestContractV1 schema, parseProviderRequestContractV1, buildRankingProviderRequestV1; digest authority rule); §7.6 evidence row line 2413 (R1.1-R1.4 shared row); §8.2 Gate-1 acceptance (R1.1-R1.4 bind the exact target digest).\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.2: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\nA12 is the sole shared implementation authority for the request contract (parse/build); R1.2 seals the contract and its digest but must not duplicate the A12 implementation. $TRAINING_CONTRACT_INDEX is the R1.2 output path (plan §7.5 variable table line 2092)."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.4",
+  "cardType": "evidence_or_code",
+  "contractSha256": "523437a65b20ee0de8a12f9884b428cafc07638a928af08c2cd24d7849b66c62",
+  "contract": {
+    "task_id": "R1.4",
+    "title": "Create the artifact/activation contract and index (ARTIFACT_ACTIVATION_CONTRACT.index.json)",
+    "risk": "low",
+    "invariant": "R1.1-R1.4 bind the exact R1.0 qualification-target digest; the activation contract index parses, its canonical hash matches, and the target digest is exact (§7.6 R1.1-R1.4 row).",
+    "owners": [
+      "R1.4"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §7.5 row and §7.6 evidence row)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task)",
+      "package.json (round-level approved; not consumed by this task)",
+      "ARTIFACT_ACTIVATION_CONTRACT.index.json (output artifact in $TASK_OUTPUT; not a tracked repo file)"
+    ],
+    "interface_changes": [
+      "ARTIFACT_ACTIVATION_CONTRACT.index.json (kind activation contract index; plan §7.5 line 2138, variable table line 2094)",
+      "Activation contract consumed by A5/D8 (final artifact provider fields match R1.2/R1.4) and by D8/E4 (--activation-contract-index argument; plan §7.5 E4 row)"
+    ],
+    "security_boundaries": [
+      "Target digest or required input index absent is the unmet precondition; contract index parses, canonical hash matches, and target digest is exact (§7.6 line 2413)",
+      "Contract entries are normative: unknown fields are rejected for every authority (plan §5.6 closing note)"
+    ],
+    "overlap_with": [
+      "R1.T2 (verify-contract tool; prerequisite edge R1.4: R1.0B, R1.T2)",
+      "A5/D8/F9 (final artifact and registry writers bind the activation contract index; D8 builds only the selected mode from refit and sealed authorities)",
+      "FT-D (D7/D8 depend on R1.4 per exact prerequisite table: D7: DD, A3, A4, A5, A12, R1.0, R1.1, R1.2, R1.4; D8: DD, A5, D2, D3, R1.0, R1.1, R1.2, R1.4)"
+    ],
+    "focused_command": "node scripts/ranking-v3-contract-seal.mjs verify-contract --kind activation --index \"$TASK_OUTPUT/ARTIFACT_ACTIVATION_CONTRACT.index.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": false,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2138 (create artifact/activation contract and index; verification command; output activation-contract digest); §7.6 evidence row line 2413 (R1.1-R1.4 shared row); §8.2 Gate-1 acceptance (R1.1-R1.4 bind the exact target digest).\nPrerequisite edges (exact prerequisite table, plan lines 1735-1738): R1.4: R1.0B, R1.T2.\nfocused_command is a plan-specified §7.5 command; it depends on scripts/ranking-v3-contract-seal.mjs (R1.T2-owned, does not exist at round_base), so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nThis is an evidence card, not a code-change card: verification uses the §7.6 unmet-precondition check then the validating assertion; no first-RED test is required.\n$ACTIVATION_CONTRACT_INDEX is the R1.4 output path (plan §7.5 variable table line 2094). Downstream consumers (D8/E4/F9) receive this index path only from prerequisite receipts."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

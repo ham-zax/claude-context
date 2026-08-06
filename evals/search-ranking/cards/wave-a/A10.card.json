@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A10",
+  "cardType": "evidence_or_code",
+  "contractSha256": "d29a039fd790c41d64c7fb03307578db73f8481a784c594df76a91f9d6a35183",
+  "contract": {
+    "task_id": "A10",
+    "title": "Wave A: evaluator graded-stage metric primitives (legacy owner metrics byte-compatible)",
+    "risk": "medium",
+    "invariant": "Adding graded stage metrics to the existing evaluator authority keeps legacy owner metrics byte-compatible — legacy outputs are byte-identical before and after the change. FIXED_NOW determinism, REQUIRED_LIMITS, and hash-bound fixture verification are preserved.",
+    "owners": [
+      "A10"
+    ],
+    "production_callers": [
+      "evals/search-quality/search-quality-evaluation.ts (A10 metric authority, verified at base: FIXED_NOW='2026-01-01T01:00:00.000Z' at :20, REQUIRED_LIMITS=[1,3,5,10,20] at :22, sha256 at :248-249, hash-bound fixture verification at :266-269; runSearchQualityEvaluation entry at :809)"
+    ],
+    "test_callers": [
+      "evals/search-quality/search-quality-evaluation.test.ts (existing at base; RED at base per task packet — do not rely on it passing pre-change)",
+      "evals/search-quality/ranking-v3-metrics.test.ts (future — plan §7.6 A10 row)"
+    ],
+    "approved_files": [
+      "evals/search-quality/search-quality-evaluation.ts",
+      "evals/search-quality/ranking-v3-metrics.test.ts",
+      "(graded metric primitive module to be created under evals/search-quality/ — exact module name is plan-defined at implementation time)"
+    ],
+    "interface_changes": [
+      "evals/search-quality/search-quality-evaluation.ts (modify: add graded stage metric primitives per §6.1 — stage survival, judged-pool nDCG@10 with coverage, conditional graded pair accuracy, end-to-end miss accounting; existing owner metrics stay byte-compatible)"
+    ],
+    "security_boundaries": [
+      "Legacy owner metric bytes must not change (byte-identical legacy outputs, §7.6 A10 RED row legacy_owner_metrics_remain_byte_compatible); deterministic FIXED_NOW timestamps and hash-bound fixtures preserved (invariants 2 and 13)"
+    ],
+    "overlap_with": [
+      "FT-G0: R0.1A owns evals/search-quality/search-quality-evaluation.ts before A10 (fixture repair — A10 must land after R0.1A and preserve its fix)",
+      "FT-C: C6 owns evals/search-quality/search-quality-evaluation.ts after A10 (graded scorer integration, C6 requires A10)",
+      "C6 (Wave C): ranking-v3-scorer-integration.test.ts asserts graded stage and legacy metrics share one authority"
+    ],
+    "focused_command": "node --import tsx --test evals/search-quality/ranking-v3-metrics.test.ts",
+    "affected_command": "node --import tsx --test evals/search-quality/search-quality-evaluation.test.ts",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm --filter @zokizuan/satori-core test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Add graded stage metric primitives to the existing evaluator authority evals/search-quality/search-quality-evaluation.ts per §6.1: four stage observations per task (knownRelevantInRawArms, knownRelevantAfterCoreFusion, knownRelevantInMcpUnion, knownRelevantAfterEligibility), two quality tracks (end-to-end miss accounting; conditional ranking graded metrics only where a grade >= 2 result survives eligibility), judged-pool nDCG@10 with coverage, conditional graded pair accuracy. §7.6 A10 RED row: test 'legacy_owner_metrics_remain_byte_compatible'; expected failure: adding graded metrics changes legacy bytes; minimal passing: legacy outputs are byte-identical. Preserve FIXED_NOW (:20), REQUIRED_LIMITS [1,3,5,10,20] (:22), and hash-bound fixture verification (:248-269). Ownership chain (sequential, non-overlapping): R0.1A (FT-G0) -> A10 -> C6 (FT-C) per §7.1 central-file ownership — coordinate with FT-G0 before and FT-C after. Focused command is plan-specified (§7.5 A10 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command node --import tsx --test evals/search-quality/search-quality-evaluation.test.ts is repo-verified as an existing test file (same invocation pattern as the plan's R0.1A/C6 rows for evals/search-quality tests); it is RED at base per the task packet, so a pre-change failure is expected and not evidence of regression."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

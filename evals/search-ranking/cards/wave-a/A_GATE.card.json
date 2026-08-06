@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A_GATE",
+  "cardType": "gate_evidence",
+  "contractSha256": "c5131f66413282ca3d47ea701050c0d259efd196bead59be2ac4384ba7cd321a",
+  "contract": {
+    "task_id": "A_GATE",
+    "title": "Gate evidence card A_GATE (requires A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11Q, A11H, A12)",
+    "risk": "medium",
+    "invariant": "A_GATE resolves only when every required edge authority exists and matches; GateReceiptV1 lists every resolved edge with the exact ready/terminal verdict; the verifier checks edge kind and parsed contract/receipt outcome, never inferring a branch from filenames (§7.5); the next boundary generator stays nondispatchable until this gate receipt exists (§7.4).",
+    "owners": [
+      "A_GATE",
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (§7.2 exact prerequisite table, §7.5 gate-node block)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "PREREQUISITE_RECEIPT_INDEX.json (card-generator-produced immutable receipt index)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (future, plan-specified; absent at round_base)"
+    ],
+    "approved_files": [
+      "A_GATE: evidence card; produces $TASK_OUTPUT/GATE_RECEIPT.json only; no source file ownership"
+    ],
+    "interface_changes": [
+      "GateReceiptV1 for A_GATE (schemaVersion ranking_v3_gate_receipt_v1; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions[].edgeKind hard|contract_condition|receipt_outcome; verdict ready|blocked|terminal)"
+    ],
+    "security_boundaries": [
+      "Gate readiness is evidence-only: it never infers branch from filenames; an absent or mismatched edge authority blocks dispatch (fail closed)",
+      "Next boundary generator is nondispatchable until this gate receipt exists — prevents meta-dispatch deadlock"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.T1 owns the gate tool; A_GATE prerequisites live in the waves covered by FT-A1..FT-I contracts)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY gate evidence card (execution card owned by the R1.T1 graph tool). Execute: node scripts/ranking-v3-task-graph.mjs verify-ready --graph \"$TASK_GRAPH\" --node \"$GATE_NODE\" --receipt-index \"$PREREQUISITE_RECEIPT_INDEX\" --out \"$TASK_OUTPUT/GATE_RECEIPT.json\" with $GATE_NODE=A_GATE. §7.6 gate row: unmet precondition = at least one required edge authority absent or mismatched; validating assertion = GateReceiptV1 lists every resolved edge and the exact ready/terminal verdict. Hard requires (conjunctive): A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11Q, A11H, A12. The verifier checks edge kind and parsed contract/receipt outcome; it never infers a branch from filenames. The next boundary generator (per §7.4) is nondispatchable until this gate receipt exists. Focused command targets the future R1.T1 tool test file (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

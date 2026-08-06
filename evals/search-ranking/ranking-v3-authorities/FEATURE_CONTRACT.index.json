@@ -1,0 +1,6 @@
+{
+  "kind": "feature",
+  "contractPath": "FEATURE_CONTRACT.json",
+  "contractSha256": "42bca801fab0a38ca87b1225576d1dbc13eaf8f645b9be9433d0dbf3777f12f2",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4"
+}

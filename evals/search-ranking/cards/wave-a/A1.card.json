@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A1",
+  "cardType": "evidence_or_code",
+  "contractSha256": "26d7ee6e913e1b32e4029ac804a6dd00cdbd1f61088d96292f6501930d50e1ac",
+  "contract": {
+    "task_id": "A1",
+    "title": "Wave A: semantic-search-candidate-trace.ts trace_v2 exact-key parser",
+    "risk": "medium",
+    "invariant": "The trace_v2 parser rejects unknown top-level keys and round-trips canonically. A1 owns the parser ONLY; B1 (Wave B) owns the trace recording implementation inside vector-candidate-fusion.ts. Wave A changes no central runtime file.",
+    "owners": [
+      "A1"
+    ],
+    "production_callers": [
+      "packages/core/src/core/vector-candidate-fusion.ts (A1 trace anchor: VECTOR_CANDIDATE_RRF_K_V1=100 at :12; B1 adds raw-arm/core-fusion trace recording in Wave B, requires A1 per §7.2)"
+    ],
+    "test_callers": [
+      "packages/core/src/core/vector-candidate-fusion.test.ts (existing, verified at base)"
+    ],
+    "approved_files": [
+      "packages/core/src/core/semantic-search-candidate-trace.ts",
+      "packages/core/src/core/semantic-search-candidate-trace.test.ts"
+    ],
+    "interface_changes": [
+      "packages/core/src/core/semantic-search-candidate-trace.ts (new file; trace_v2 exact-key parser; A1 is the parser owner, B1 is the implementation owner)"
+    ],
+    "security_boundaries": [
+      "Unknown top-level trace keys are rejected (fail-closed exact-key parsing; §7.6 A1 RED row rejects_unknown_trace_v2_keys)"
+    ],
+    "overlap_with": [
+      "B1 (Wave B): core trace implementation consumes A1 (B1 requires A1 per §7.2 exact prerequisite table)",
+      "R1.1: sealed feature contract index is the binding authority for trace fields (A1 requires R1.6, R1.1)"
+    ],
+    "focused_command": "node --import tsx --test packages/core/src/core/semantic-search-candidate-trace.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-core test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-core test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/core/src/core/semantic-search-candidate-trace.ts (does not exist at round_base) as the trace_v2 exact-key parser. §7.5 A1 row: 'trace parser'. §7.6 A1 RED row: test packages/core/src/core/semantic-search-candidate-trace.test.ts - 'rejects_unknown_trace_v2_keys'; expected failure before implementation: trace parser accepts an unknown top-level key; minimal passing behavior: exact-key parsing rejects it. Round-trip must be canonical and stable. Do NOT touch vector-candidate-fusion.ts (B1's file in Wave B). Focused command is plan-specified (§7.5) and targets a test file that does not exist at round_base: unverifiable-at-base; run only after the file exists. Affected command pnpm --filter @zokizuan/satori-core test is repo-verified (packages/core/package.json 'test' script; .github/workflows/ci.yml:147) and must pass with unchanged product output."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

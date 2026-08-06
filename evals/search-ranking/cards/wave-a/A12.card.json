@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A12",
+  "cardType": "evidence_or_code",
+  "contractSha256": "d85c3a7acdc20c302efe95654c18268c709b5bec8aa5fd0faa27c1db2103c6cd",
+  "contract": {
+    "task_id": "A12",
+    "title": "A12 — provider request contract authority (packages/mcp/src/core/ranking-provider-request-v1.ts)",
+    "risk": "medium",
+    "invariant": "A12 canonicalizes and hashes the supplied request contract itself; the returned providerRequestContractSha256 must equal the canonical hash of the supplied contract AND the sealed R1.2 index digest; the builder rejects any expectedProviderRequestContractSha256 mismatch; provider identity/configuration fields exactly match FixedProviderTargetV1; candidates are accepted only in frozen baseline-admission order. Every G6B-parsed byte sequence must be rejected identically by G6C.",
+    "owners": [
+      "A12"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/search-execution.ts (A12 future consumer via G2: rerankResults :566; runSearchExecution called from handlers.ts:4857)",
+      "scripts/satori-search-candidate-replay.mjs (provider response handling; --require-neural-disabled option exists at base, usage line 2369, parse line 2390)",
+      "evals/search-ranking/lateon/offline-quality-d32-v2.authority.json (existing provider authority contract)",
+      "evals/search-ranking/lateon/c0-contract.json (existing contract authority)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-provider-request-v1.test.ts (future; none existing at base — RED row test name: builder_hashes_contract_and_rejects_expected_digest_mismatch)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-provider-request-v1.ts (new interface file, future)",
+      "packages/mcp/src/core/search-execution.ts (G2 future consumer — rerankResults :566)",
+      "scripts/satori-search-candidate-replay.mjs (provider response handling; --require-neural-disabled)",
+      "evals/search-ranking/lateon/offline-quality-d32-v2.authority.json (existing provider authority contract)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (section 6.4 — schema authority)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-provider-request-v1.ts: ProviderRequestContractV1 (schemaVersion 'ranking_provider_request_contract_v1', projectionIdentity, candidateOrder 'baseline_admission_order', documentSerializationIdentity, identityMappingIdentity, maximumCandidateCount, maximumPayloadUtf8Bytes, timeoutMs, maximumRetries, canonicalizationIdentity), SearchCandidateForProviderV1, parseProviderRequestContractV1(value: unknown), buildRankingProviderRequestV1(input: {contract, expectedProviderRequestContractSha256, baselineAdmissionCandidates, target: FixedProviderTargetV1}) returning {providerRequestContractSha256, orderedCandidateIds, requestPayload, canonicalRequestSha256}"
+    ],
+    "security_boundaries": [
+      "Provider request contract fields bounding external provider behavior: canonicalizationIdentity, timeoutMs, maximumRetries, maximumPayloadUtf8Bytes",
+      "Provider identity fields (providerKey, rerankerIdentity, rerankerProjectionIdentity, providerConfigurationDigest) must exactly match FixedProviderTargetV1",
+      "providerRequestContractSha256 returned by the builder must equal the canonical hash of the supplied contract AND the sealed R1.2 index digest; expectedProviderRequestContractSha256 mismatch is rejected",
+      "No caller recalculates or copies an independent expected value — B9, E2, G2, G6B/H4, G6C/I2 import the A12 implementation unchanged and receive the expected digest only from the sealed R1.2 training-contract index (§6.4)",
+      "Candidates accepted only in frozen baseline-admission order; payload size and identity/configuration/contract digest mismatches are rejected"
+    ],
+    "overlap_with": [
+      "FT-G1 (A12 binds the sealed R1.2 digest; no independent recalculation)",
+      "FT-G (G4/G6B/G6C import A12 unchanged)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-provider-request-v1.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement ProviderRequestContractV1, SearchCandidateForProviderV1, parseProviderRequestContractV1, and buildRankingProviderRequestV1 in packages/mcp/src/core/ranking-provider-request-v1.ts exactly per plan §6.4. The builder must canonicalize and hash the supplied contract itself, return that digest, and reject unless it equals expectedProviderRequestContractSha256; the returned digest must equal the canonical hash of the supplied contract AND the sealed R1.2 index digest — no caller recalculates the expected value (B9, E2, G2, G6B/H4, G6C/I2 import this implementation unchanged and receive the expected digest only from the sealed R1.2 training-contract index). First-RED test (plan §7.6): packages/mcp/src/core/ranking-provider-request-v1.test.ts — 'builder_hashes_contract_and_rejects_expected_digest_mismatch'; expected failure before implementation is that a structurally valid contract whose canonical digest differs from expectedProviderRequestContractSha256 is accepted; minimal passing behavior is that the returned contract digest equals the canonical supplied contract and must equal the sealed R1.2 digest. Tests must also cover exact identity/configuration matching to FixedProviderTargetV1, frozen baseline-admission order, and payload bounds. Do not modify the parent integration checkout. NOTE: the focused command is plan-specified (§7.5) and targets a future test file that does not exist at round_base — unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script exists) but cannot exercise A12 code until the file exists."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

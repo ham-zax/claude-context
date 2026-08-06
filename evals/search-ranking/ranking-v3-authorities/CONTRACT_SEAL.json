@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "ranking_v3_contract_seal_v1",
+  "planSha256": "694a4ab1d2c062c29596deb9870c8008006684e9ecf54cc1bdf2d6908654eb78",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "contractIndexSha256": "b6715d14c5fd22d94aea8c742ad74b3283116b9bd80a808872d553fe1288f7b6",
+  "taskGraphSha256": "103623074405b295721c00c9c61f112ab04b26a7b190b9caf54cf7ee12d48b92",
+  "baselineCommit": "966456c947047a6c7a96f1383b45e63ed45a8545",
+  "baselineTreeSha256": "1c09b1f2490a155c2f377ead0a73ca760dd4efffd17996dc6dc41e778e3e3781",
+  "sealedAt": "2026-08-06T05:10:00.000Z"
+}

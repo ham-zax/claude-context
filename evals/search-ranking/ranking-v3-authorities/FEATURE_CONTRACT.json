@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "ranking_v3_feature_contract_v1",
+  "featureSchema": "search_features_v1",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "vector": {
+    "fixedOrder": true,
+    "missingPolicy": "indicator_zero_fill",
+    "features": [
+      {
+        "id": "missing_indicator_count",
+        "kind": "count"
+      },
+      {
+        "id": "test_path_x_test_intent",
+        "kind": "one_hot_interaction"
+      },
+      {
+        "id": "test_path_x_implementation_intent",
+        "kind": "one_hot_interaction"
+      },
+      {
+        "id": "docs_path_x_docs_route",
+        "kind": "one_hot_interaction"
+      },
+      {
+        "id": "generated_x_explicit_generated_or_path_intent",
+        "kind": "one_hot_interaction"
+      },
+      {
+        "id": "raw_dense_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "raw_lexical_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "raw_fallback_lexical_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "core_fusion_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "mcp_union_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "post_eligibility_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "reranker_admission_rank",
+        "kind": "stage_rank",
+        "nullable": true
+      },
+      {
+        "id": "intent_confidence_low",
+        "kind": "bounded_confidence",
+        "source": "3_level_intent_confidence"
+      },
+      {
+        "id": "intent_confidence_medium",
+        "kind": "bounded_confidence",
+        "source": "3_level_intent_confidence"
+      },
+      {
+        "id": "intent_confidence_high",
+        "kind": "bounded_confidence",
+        "source": "3_level_intent_confidence"
+      },
+      {
+        "id": "hard_boolean_must_query",
+        "kind": "hard_boolean"
+      },
+      {
+        "id": "hard_boolean_exact_identifier",
+        "kind": "hard_boolean"
+      },
+      {
+        "id": "hard_boolean_source_fresh",
+        "kind": "hard_boolean"
+      }
+    ]
+  },
+  "forbiddenFeatures": [
+    "repository_name",
+    "task_id",
+    "absolute_path",
+    "user_identity",
+    "candidate_identity_hash",
+    "owner_family_identity_hash",
+    "provider_hash"
+  ],
+  "constraints": {
+    "noFeatureChangesDeterministicEligibility": true,
+    "confidenceMappingIsBounded": true,
+    "neverFabricatedProbabilities": true
+  }
+}

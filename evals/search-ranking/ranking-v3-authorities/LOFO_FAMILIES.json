@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "ranking_v3_lofo_families_v1",
+  "source": "sealed_cross_repository_v3_tuning_partition",
+  "families": [
+    "gitnexus",
+    "bookmark_ai_organizer",
+    "duas",
+    "vox_infinity",
+    "rpc_learner_engine",
+    "edge_tts_app"
+  ]
+}

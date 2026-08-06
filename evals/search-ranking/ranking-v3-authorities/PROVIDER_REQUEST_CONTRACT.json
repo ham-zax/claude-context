@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "ranking_provider_request_contract_v1",
+  "projectionIdentity": "search-quality-v1-projection",
+  "candidateOrder": "baseline_admission_order",
+  "documentSerializationIdentity": "search-quality-v1-document-serialization",
+  "identityMappingIdentity": "search-quality-v1-identity-mapping",
+  "maximumCandidateCount": 80,
+  "maximumPayloadUtf8Bytes": 1048576,
+  "timeoutMs": 30000,
+  "maximumRetries": 1,
+  "canonicalizationIdentity": "ranking_v3_canonical_provider_request_v1"
+}

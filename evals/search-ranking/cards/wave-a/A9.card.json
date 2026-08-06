@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A9",
+  "cardType": "evidence_or_code",
+  "contractSha256": "001dd0650e46da5de733523991884e73d911a2a91b70752c98bf0ecf13b27748",
+  "contract": {
+    "task_id": "A9",
+    "title": "Wave A: scripts/ranking-lofo-folds.mjs LOFO fold builder",
+    "risk": "medium",
+    "invariant": "Related repository families never cross a fold boundary — family grouping is atomic; folds derive from the sealed cross-repository-v3 tuning partition only (tuning-only, held-out never enters tuning folds).",
+    "owners": [
+      "A9"
+    ],
+    "production_callers": [
+      "(no base runtime caller; Wave D consumer per §7.2: D6 LOFO runner + fold scoring/adjudication)"
+    ],
+    "test_callers": [
+      "scripts/ranking-lofo-folds.test.mjs (future — plan §7.6 A9 row)"
+    ],
+    "approved_files": [
+      "scripts/ranking-lofo-folds.mjs",
+      "scripts/ranking-lofo-folds.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/ranking-lofo-folds.mjs (new file; fold builder per §6.6, family grouping from the sealed v3 tuning partition and R1.3 LOFO_FAMILIES.json)"
+    ],
+    "security_boundaries": [
+      "Leakage control: related repository families never split between train and excluded fold; held-out tasks/repositories never enter tuning folds (invariant 13, §6.2 held-out restrictions)"
+    ],
+    "overlap_with": [
+      "D6 (Wave D): requires A9 (also A4/A5, D2, D3, C6, R1.3)",
+      "R1.3: LOFO_FAMILIES.json (six exact family IDs, §7.2:1645-1651) from the sealed cross-repository-v3 tuning partition is the family authority"
+    ],
+    "focused_command": "node --test scripts/ranking-lofo-folds.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create scripts/ranking-lofo-folds.mjs (new file) with the LOFO fold builder per §6.6. §7.6 A9 RED row: test 'related_repository_families_never_cross_fold_boundary'; expected failure: related families split between train and excluded fold; minimal passing: family grouping remains atomic. Family authority: R1.3's LOFO_FAMILIES.json derived from the already-sealed cross-repository-v3 tuning partition and its family mapping (NOT the future C5 tuning manifest, §7.2:1645-1651). Verified at base: evals/search-ranking/cross-repository-v3.manifest.json has 50 tuning tasks / 51 held-out tasks (101 total), with leakage.tuningOnlyRepositoryFamilies listing 11 tuning-only repository families; repositories carry a 'family' field (e.g. gitnexus-r0 -> family gitnexus, split tuning). Note: the plan states six exact LOFO family IDs while the base manifest lists 11 tuning-only repository families — the six-family grouping is sealed by R1.3 and is not independently verifiable at round_base; the builder must consume the sealed LOFO_FAMILIES.json rather than hardcode a count. Focused command is plan-specified (§7.5 A9 row, node --test without tsx) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm test:scripts is repo-verified (root package.json:26) and must stay green."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

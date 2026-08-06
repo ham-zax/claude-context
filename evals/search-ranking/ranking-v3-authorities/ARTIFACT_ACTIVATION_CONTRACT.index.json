@@ -1,0 +1,6 @@
+{
+  "kind": "activation",
+  "contractPath": "ARTIFACT_ACTIVATION_CONTRACT.json",
+  "contractSha256": "fe89ead69cbc6414c59f3cce3b4720d70a0eb575daf1909b9bc9243bd4ced161",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4"
+}

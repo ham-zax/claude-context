@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A8",
+  "cardType": "evidence_or_code",
+  "contractSha256": "e6f4c134a8d4f8cbc43d037ebf672ff907e89975faca3fc2863ffa7444e6d20e",
+  "contract": {
+    "task_id": "A8",
+    "title": "Wave A: scripts/ranking-judgments.mjs graded-judgment parser",
+    "risk": "medium",
+    "invariant": "Unjudged candidates remain explicitly unjudged (judged flag), never become grade 0, and are excluded from pair generation. Tuning-only human-authoritative grades 3/2/1/0 with source-bound rationale.",
+    "owners": [
+      "A8"
+    ],
+    "production_callers": [
+      "(no base runtime caller; Wave C consumers per §7.2: C1 judgment packets, C5 v4 tuning manifest)"
+    ],
+    "test_callers": [
+      "scripts/ranking-judgments.test.mjs (future — plan §7.6 A8 row)"
+    ],
+    "approved_files": [
+      "scripts/ranking-judgments.mjs",
+      "scripts/ranking-judgments.test.mjs"
+    ],
+    "interface_changes": [
+      "scripts/ranking-judgments.mjs (new file; judgment parser per §6.2 — grades 3/2/1/0, source-bound rationale, explicit judged status)"
+    ],
+    "security_boundaries": [
+      "Judgment integrity: missing grade is never normalized to zero; unjudged stays explicit and is excluded from pairs (§7.6 A8 RED row unjudged_candidate_never_becomes_grade_zero; §6.2 human-authoritative)"
+    ],
+    "overlap_with": [
+      "C1 (Wave C): packet manifest covers each tuning task exactly once, requires A8",
+      "C5 (Wave C): v4 tuning manifest binds adjudicated judgments, requires A8",
+      "R1.3: decision contract + LOFO_FAMILIES.json are sealed prerequisites (A8 requires R1.6, R1.3)"
+    ],
+    "focused_command": "node --test scripts/ranking-judgments.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create scripts/ranking-judgments.mjs (new file) with the graded-judgment parser per §6.2: tuning-only, human-authoritative grades 3/2/1/0 with source-bound rationale and explicit judged status; unjudged candidates are excluded from pair generation and never become grade 0. §7.6 A8 RED row: test 'unjudged_candidate_never_becomes_grade_zero'; expected failure: missing grade is normalized to zero; minimal passing: unjudged remains explicit and excluded from pairs. Held-out restrictions from §6.2 apply downstream (never read held-out judgments for design/grading/selection). Focused command is plan-specified (§7.5 A8 row, node --test without tsx) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm test:scripts is repo-verified (root package.json:26, runs scripts/*.test.mjs) and must stay green."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

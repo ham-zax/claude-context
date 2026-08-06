@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "ranking_v3_qualification_target_receipt_v1",
+  "decisionSha256": "e1ff60dfda0c685b2076f4e8c1fa17f5b44736514736c80955737b0604e0bfd5",
+  "targetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "decidedBy": "owner",
+  "decidedAt": "2026-08-06T05:00:00.000Z",
+  "receiptSha256": "077402eba7e7c10ffb1cc9a24a25efb001dfa07ecebd3e5d780b5361a9e9470c"
+}

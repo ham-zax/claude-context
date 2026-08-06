@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A6",
+  "cardType": "evidence_or_code",
+  "contractSha256": "8ddbed68aa9e52dacd777c878457d471b89fa361a42eb8d9ac5db874d14d8647",
+  "contract": {
+    "task_id": "A6",
+    "title": "Wave A: ranking-policy-qualification.ts registry parser and key helpers",
+    "risk": "medium",
+    "invariant": "Registry parser enforces unique logical tuple keys (artifactSha256, serviceClass, qualificationScopeKey) and canonical lexicographic ordering by UTF-8 bytes of the tuple; canonical empty genesis snapshot is exact; canonical round-trip.",
+    "owners": [
+      "A6"
+    ],
+    "production_callers": [
+      "(no base runtime caller; Wave F consumers per §7.2: F2 qualification store, F9 qualification writer; A11Q receipts parsers)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-policy-qualification.test.ts (future — plan §7.6 A6 row)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-policy-qualification.ts",
+      "packages/mcp/src/core/ranking-policy-qualification.test.ts"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-policy-qualification.ts (new file; RankingPolicyQualificationRegistryV1 parser + QualificationEntryKeyV1/qualificationScopeKey helpers per §5.4; qualificationScopeKey = sha256(canonicalJSON({serviceClass, qualificationTargetSha256, selectedArtifactMode, qualifiedRerankers})))"
+    ],
+    "security_boundaries": [
+      "Duplicate logical keys rejected; entries sorted lexicographically by UTF-8 bytes of the tuple; exact genesis snapshot {\"schemaVersion\":\"ranking_policy_qualification_registry_v1\",\"entries\":[]}; disabled mode has empty qualifiedRerankers, provider_derived exactly one matching FixedProviderTargetV1 (§5.4)"
+    ],
+    "overlap_with": [
+      "FT-A2: A11Q requires A6; A11H requires A11Q (transitively A6)",
+      "F2 and F9 (Wave F): require A6",
+      "R1.4: activation contract index is a sealed authority input"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-policy-qualification.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Create packages/mcp/src/core/ranking-policy-qualification.ts (new file) with the registry parser and key helpers per §5.4: RankingPolicyQualificationRegistryV1, QualificationEntryKeyV1 (artifactSha256, serviceClass, qualificationScopeKey), qualificationScopeKey = sha256(canonicalJSON({serviceClass, qualificationTargetSha256, selectedArtifactMode, qualifiedRerankers})). §7.6 A6 RED row: test 'rejects_duplicate_logical_entry_keys_and_noncanonical_order'; expected failure: duplicate or unsorted entries are accepted; minimal passing: parser enforces unique tuple keys and canonical ordering. Canonical empty genesis snapshot is exact. Entries sorted lexicographically by the UTF-8 bytes of the logical tuple. State transitions (pending_heldout -> activation_qualified, pending_heldout -> revoked, activation_qualified -> revoked) replace exactly one logical key — never append a second state for the same key. Focused command is plan-specified (§7.5 A6 row) and targets a test file absent at round_base: unverifiable-at-base. Affected command pnpm --filter @zokizuan/satori-mcp test is repo-verified and must pass."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

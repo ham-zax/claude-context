@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "ranking_v3_activation_contract_v1",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "selection": {
+    "learnedV3SelectableNoEarlierThan": "I4",
+    "onlyActivationQualifiedExactScopeSelectable": true,
+    "pendingAndRevokedNeverSelectable": true,
+    "postOpeningSelectionLimitedTo": [
+      "baseline",
+      "sealed_activation_qualified_hashes"
+    ],
+    "rolloutReceiptsAppendOnly": true
+  },
+  "rollback": {
+    "i5IsConfigurationOnly": true,
+    "i5NeverRevokes": true,
+    "staleContinuationProofRequired": true
+  }
+}

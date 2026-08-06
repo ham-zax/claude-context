@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.T2",
+  "cardType": "code_change",
+  "contractSha256": "c0a5cae7fbbb803a87b5e5a97f7fb87121d06832098070eca15f916bf7398eb3",
+  "contract": {
+    "task_id": "R1.T2",
+    "title": "Implement/seal contract validation and sealing tooling (scripts/ranking-v3-contract-seal.mjs)",
+    "risk": "high",
+    "invariant": "R1.T2 seal binds planSha256 with no graph/seal digest cycle; the contract index has exactly four ordered entries (feature, training, decision, activation) binding one qualification target digest.",
+    "owners": [
+      "R1.T2"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; §5.6 schemas and §7.5 catalog rows)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; not consumed by this task directly)",
+      "package.json (round-approved; plan path binding in card manifest)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-contract-seal.test.mjs (plan-specified future test file; does not exist at round_base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+      "package.json (round-level approved; not consumed by this task directly)",
+      "scripts/ranking-v3-contract-seal.mjs (new file, to create - §7.1 exclusive owner R1.T2)",
+      "scripts/ranking-v3-contract-seal.test.mjs (new file, to create - §7.6 RED row)"
+    ],
+    "interface_changes": [
+      "ContractIndexEntryV1 (kind feature|training|decision|activation; contractPath; indexPath; contractSha256; indexSha256; qualificationTargetSha256) (plan §5.6, lines 1213-1220)",
+      "ContractIndexV1 (schemaVersion ranking_v3_contract_index_v1; entries) (plan §5.6, lines 1222-1225)",
+      "ContractSealV1 (schemaVersion ranking_v3_contract_seal_v1; planSha256; qualificationTargetSha256; contractIndexSha256; taskGraphSha256; baselineCommit; baselineTreeSha256; sealedAt) (plan §5.6, lines 1227-1237)",
+      "scripts/ranking-v3-contract-seal.mjs exported buildContractIndex/verifyContractIndex/sealContracts and commands build-index, verify-contract, seal (plan §7.5 row line 2134)"
+    ],
+    "security_boundaries": [
+      "Seal binds planSha256 with no graph/seal digest cycle; the graph contains no seal digest, avoiding self-reference (plan §7.2, lines 1988-1990; round invariant)",
+      "builds_canonical_contract_index_and_rejects_target_digest_mismatch: exactly four ordered entries bind one target and seal successfully; missing index entries or mixed target digests are rejected (§7.6 line 2352)",
+      "R1.2 request-contract digest authority is enforced downstream: expected digests flow only from the sealed training-contract index; no caller may recalculate (round security boundary; §6.4 lines 1478-1486)"
+    ],
+    "overlap_with": [
+      "R1.1-R1.4 (consume verify-contract with kinds feature/training/decision/activation; prerequisite edges R1.1-R1.4: R1.0B, R1.T2)",
+      "R1.5 (consumes build-index and seal; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)",
+      "FT-A2 (A12 consumes the sealed R1.2 digest via the training contract; D7/D8/A3/A12 depend on R1.2 per exact prerequisite table)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-contract-seal.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": true,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2134 (owns buildContractIndex, verifyContractIndex, sealContracts); §7.6 code-change RED row line 2352 (test builds_canonical_contract_index_and_rejects_target_digest_mismatch: expected failure before implementation is that the seal tool accepts missing index entries or mixed target digests; minimal passing behavior is that exactly four ordered entries bind one target and seal successfully); §5.6 lines 1211-1237 (normative schemas; unknown fields are rejected for every authority above); §8.2 Gate-1 acceptance (R1.T2 contract-tool tests pass).\nPrerequisite edge (exact prerequisite table, plan line 1734): R1.T2: R1.0B.\nfocused_command is a plan-specified future-gate tool test command; its target file scripts/ranking-v3-contract-seal.test.mjs does not exist at round_base, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nRequired first-RED evidence: implement the test first, confirm it fails at base state, then implement scripts/ranking-v3-contract-seal.mjs until the focused test passes.\nThe four kinds are fixed: feature, training, decision, activation (ContractIndexEntryV1). The seal never contains or hashes a future seal; ContractSealV1 binds planSha256, qualificationTargetSha256, contractIndexSha256, taskGraphSha256, baselineCommit, baselineTreeSha256, sealedAt - no self-referential digest is permitted."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

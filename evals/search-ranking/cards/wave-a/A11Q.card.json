@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "A11Q",
+  "cardType": "evidence_or_code",
+  "contractSha256": "a37d663e164ca9f31aaa500e92599014bc6614c7b84330f16ae12d0e9a36f0f9",
+  "contract": {
+    "task_id": "A11Q",
+    "title": "A11Q — qualification/registry receipt schemas and parsers (packages/mcp/src/core/ranking-qualification-receipts.ts)",
+    "risk": "medium",
+    "invariant": "A11Q receipts enforce exact fields AND transition-specific digest relationships (previousReceiptSha256/triggeringReceiptSha256 per §5.5), not merely syntactic hashes: create_pending_heldout has previousReceiptSha256 null with the H9 offline-qualification receipt as trigger; activate_pending and reject_pending have BOTH previousReceiptSha256 and triggeringReceiptSha256 equal to the accepted or rejected I3 receipt digest; administrative revocation has previousReceiptSha256 equal to the revocation-authorization receipt digest; transitionChainSha256 is computed exactly as sha256(canonicalJSON({previousTransitionReceiptSha256, transitionKind, previousRegistrySha256, newRegistrySha256, triggeringReceiptSha256})); unknown keys are rejected and canonical round trips are stable.",
+    "owners": [
+      "A11Q"
+    ],
+    "production_callers": [
+      "packages/mcp/src/core/ranking-policy-qualification-store.ts (F2, future — consumes A6/A11Q; not present at base)",
+      "packages/mcp/src/core/ranking-policy-qualification-writer.ts (F9, future — consumes A6/A11Q/A11H; not present at base)",
+      "scripts/ranking-v3-offline-qualification.test.mjs (G6B, future — H9 binds registry context and one selected-mode receipt)",
+      "scripts/ranking-v3-heldout-activation.test.mjs (G6C, future — activation cycle binds H10 pending-registry digest)"
+    ],
+    "test_callers": [
+      "packages/mcp/src/core/ranking-qualification-receipts.test.ts (future; none existing at base — RED row test name: qualification_and_registry_receipts_enforce_exact_fields_and_transition_chain)"
+    ],
+    "approved_files": [
+      "packages/mcp/src/core/ranking-qualification-receipts.ts (new interface file, future)",
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sections 5.4, 5.5 — schema authority)"
+    ],
+    "interface_changes": [
+      "packages/mcp/src/core/ranking-qualification-receipts.ts: PostG7ReceiptBaseV1, ArtifactReceiptBaseV1, SelectedModeReplayReceiptV1, BaselineReplayReceiptV1, SliceGateReceiptV1, CounterfactualGateReceiptV1, ResourceGateReceiptV1, OfflineQualificationReceiptV1, OfflineQualificationRejectionReceiptV1, OfflineQualificationInsufficientEvidenceReceiptV1, RegistryInitializationReceiptV1, RegistryReadyReceiptV1, RegistryTransitionReceiptV1, RevocationAuthorizationReceiptV1",
+      "QualifiedRerankerV1 / QualificationRegistryEntryV1 key tuple (artifactSha256, serviceClass, qualificationScopeKey) appears in A11Q receipt fields (ArtifactReceiptBaseV1.qualificationScopeKey, RegistryTransitionReceiptV1.entryKey); the registry parser/key helpers themselves are A6-owned per §7.5"
+    ],
+    "security_boundaries": [
+      "Receipt chain integrity I0→I1→I2→I3→(I4|I3R) enforced by exact previousReceiptSha256 equality — the field must equal the actual predecessor digest, not a syntactically valid hash",
+      "create_pending_heldout: previousReceiptSha256 must be null and triggeringReceiptSha256 must be the H9 offline-qualification receipt digest",
+      "activate_pending/reject_pending: both previousReceiptSha256 and triggeringReceiptSha256 must equal the accepted or rejected I3 receipt digest",
+      "administrative_revoke: previousReceiptSha256 must equal the revocation-authorization receipt digest",
+      "transitionChainSha256 must equal the exact canonical formula from §5.5",
+      "RegistryInitializationReceiptV1: previousRegistrySha256 null and transitionKind initialize_genesis",
+      "Acceptance and rejection are mutually exclusive for one opening record; unknown receipt keys are rejected"
+    ],
+    "overlap_with": [
+      "FT-A1 (A11Q requires A6 — ranking-policy-qualification.ts registry parser/key helpers; prerequisite row A11Q: R1.6, A6, R1.4)",
+      "FT-F (F2/F9 consume A6/A11Q receipts)",
+      "FT-G (G6B/G6C bind A11Q receipts: H9 registry context, H10 transition digest)"
+    ],
+    "focused_command": "node --import tsx --test packages/mcp/src/core/ranking-qualification-receipts.test.ts",
+    "affected_command": "pnpm --filter @zokizuan/satori-mcp test",
+    "full_suite_triggers": [
+      "pnpm --filter @zokizuan/satori-mcp test",
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Implement the A11Q receipt schemas in packages/mcp/src/core/ranking-qualification-receipts.ts exactly per plan §5.4/§5.5 (selected-mode, baseline, slice-gate, counterfactual-gate, resource-gate, offline-qualification and its rejection/insufficient variants, registry initialization/ready/transition, revocation-authorization receipts; both seal digests required on all A11-managed post-G7 receipts per §5.5). Parsers must reject unknown keys and produce stable canonical round trips. First-RED test (plan §7.6): packages/mcp/src/core/ranking-qualification-receipts.test.ts — 'qualification_and_registry_receipts_enforce_exact_fields_and_transition_chain'; expected failure before implementation is that missing registry-ready/grouped fields or a mismatched I3 transition digest is accepted; minimal passing behavior is that all exact fields and transition-specific digest relationships validate. Tests must verify the transition-specific relationships (create_pending_heldout previousReceiptSha256 null + H9 trigger; activate/reject I3 digests; administrative revocation authorization digest; transitionChainSha256 exact formula), NOT merely that both fields are syntactically valid hashes. Do not widen scope into A6-owned registry parser/key-helper behavior (duplicate logical-key rejection and canonical tuple ordering are A6). Do not modify the parent integration checkout. NOTE: the focused command is plan-specified (§7.5) and targets a future test file that does not exist at round_base — unverifiable-at-base; the affected command is repo-verified (packages/mcp/package.json test script exists) but cannot exercise A11Q code until the file exists."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}

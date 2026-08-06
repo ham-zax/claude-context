@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "ranking_v3_decision_contract_v1",
+  "qualificationTargetSha256": "eb767de685c47f19d7328e69eb0b7ae8e55026f32ae15c10071af210a7ce3da4",
+  "groupedComparatorPolicy": "optional",
+  "lofoFamiliesSha256": "146eae6dee177ce61c2f3d821500a8c94443f420643d0997b5eac0416c784065",
+  "selection": {
+    "e3EmitsExactlyOne": [
+      "selected_disabled",
+      "selected_provider_derived",
+      "insufficient_evidence",
+      "learned_not_justified"
+    ],
+    "e3InputSealBarrier": "preregistered_input_set_locked_at_barrier",
+    "lateComparatorReceiptIsDiagnosticOnly": true,
+    "providerDerivedOnlyWhenTargetFixed": true,
+    "terminalOutcomesDoNotDispatchWaveF": true
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "R1.T1",
+  "cardType": "code_change",
+  "contractSha256": "ee1e265ad47bbbc92ef2a661d420568552332eaae281715ee3aa30d06b08ddfd",
+  "contract": {
+    "task_id": "R1.T1",
+    "title": "Implement/seal task-graph schema, validator, and expansion tooling (scripts/ranking-v3-task-graph.mjs)",
+    "risk": "high",
+    "invariant": "R1.T1 build-declaration rehashes the uniquely marked RANKING_V3_TASK_GRAPH_DECLARATION_V1 plan region (plan file lines 1726-1980) and binds planSha256; no edge is invented; oneOf conditions are disjunctive and H6/H7/H8 activate exactly one of H3/H4.",
+    "owners": [
+      "R1.T1"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (sealed plan; canonical digest source; marked declaration region lines 1726-1980 and §5.6 gate schema)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-approved; family source for R1.3, consumed indirectly via LOFO_FAMILIES at seal time)",
+      "package.json (round-approved; plan path binding in card manifest, $SEALED_PLAN/$PLAN_SHA256 source)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (plan-specified future test file; does not exist at round_base)",
+      "scripts/satori-ranking-benchmark-manifest.test.mjs (existing manifest-test convention)",
+      "scripts/*.test.mjs (34 existing files at round_base; node --test/--import tsx convention)"
+    ],
+    "approved_files": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (round-level approved; reference only - sealed source, do not modify)",
+      "evals/search-ranking/cross-repository-v3.manifest.json (round-level approved; not consumed by this task directly)",
+      "package.json (round-level approved; not consumed by this task directly)",
+      "scripts/ranking-v3-task-graph.mjs (new file, to create - §7.1 exclusive owner R1.T1)",
+      "scripts/ranking-v3-task-graph.test.mjs (new file, to create - §7.6 RED row)"
+    ],
+    "interface_changes": [
+      "TaskGraphDeclarationV1 (schemaVersion ranking_v3_task_graph_declaration_v1; planSha256; staticNodes; taskTemplates; hardEdges; conditionalEdges) (plan §7.2, lines 1657-1670)",
+      "TaskGraphNodeV1 / TaskGraphTemplateV1 / TaskGraphEdgeV1 / ReceiptConditionV1 (plan §7.2, lines 1648-1702)",
+      "GateReceiptV1 (schemaVersion ranking_v3_gate_receipt_v1; gateId; taskGraphSha256; prerequisiteReceiptIndexSha256; resolvedConditions; verdict ready|blocked|terminal) (plan §5.6, lines 1195-1210)",
+      "scripts/ranking-v3-task-graph.mjs commands: build-declaration, verify-declaration, seal, expand, verify-ready (plan §7.5 rows lines 2133 and 2160-2165; C1G row line 2175)"
+    ],
+    "security_boundaries": [
+      "build-declaration reads only the uniquely marked RANKING_V3_TASK_GRAPH_DECLARATION_V1 region of the sealed plan, parses the exact prerequisite DSL and conditional-edge array, binds planSha256, and emits canonical TASK_GRAPH_DECLARATION.json; any unmarked task or edge, duplicate node, unknown reference, or plan-digest mismatch fails (§7.2, lines 1639-1647)",
+      "oneOf is disjunctive: one matching value satisfies the edge; multiple ordinary hard edges remain conjunctive; contract-conditioned and receipt-outcome branches remain present in the sealed graph, become dispatchable only when the named parsed authority exists, and are never rewritten after evaluation (§7.2, lines 1703-1710)",
+      "Gate verifier checks the edge kind and parsed contract/receipt outcome; it never infers a branch from filenames (§7.5, line 2166)",
+      "Wave-C packet identities are the only post-seal graph expansion; expanded IDs must match the sealed template regex and may introduce only template-declared edges (§7.2, lines 1982-1986)"
+    ],
+    "overlap_with": [
+      "R1.5 (invokes build-declaration, verify-declaration, and seal while sealing the graph; prerequisite edge R1.5: R1.T1, R1.T2, R1.1, R1.2, R1.3, R1.4)",
+      "C1G (graph expansion; C1G: C1, R1.T1)",
+      "Gate nodes A_GATE through I_GATE_* (verify-ready command owned by R1.T1)",
+      "FT-E (LOFO_FAMILIES feeds template expansionAuthority r1_5_lofo_families; E1.<familyId>/E2.<familyId> nodes are created by R1.5's seal invocation)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-task-graph.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm check"
+    ],
+    "red_evidence_required": true,
+    "instructions": "CONTRACT-ONLY fleshing-out; do not implement.\nSource anchors: plan §7.5 row line 2133 (owns TaskGraphDeclarationV1, build-declaration, verify-declaration, parse/canonicalize/validate/seal/expand); §7.6 code-change RED row line 2351 (test declaration_rehashes_plan_and_selected_replay_edges_are_exclusive: expected failure before implementation is that the declaration is invented outside the marked plan region, plan digest mismatches, or H6/H7/H8 require both H3 and H4; minimal passing behavior is that the canonical declaration rehashes the sealed plan and exactly one selected replay predecessor activates); §7.2 lines 1637-1722 (authority and schemas); §5.6 lines 1195-1210 (GateReceiptV1); §8.2 Gate-1 acceptance (graph tests prove oneOf disjunction, reject deadline edges, canonicalize the marked declaration source, bind planSha256, and prove H6/H7/H8 activate exactly one of H3/H4).\nMarked declaration region: the uniquely marked region is between <!-- BEGIN RANKING_V3_TASK_GRAPH_DECLARATION_V1 --> (line 1726) and <!-- END RANKING_V3_TASK_GRAPH_DECLARATION_V1 --> (line 1980). Note: the round task packet estimated lines ~1649-1855; the verified marker lines at round_base are 1726-1980 - use the markers, not the estimate.\nPrerequisite edge (exact prerequisite table, plan line 1733): R1.T1: R1.0B.\nfocused_command is a plan-specified future-gate tool test command; its target file scripts/ranking-v3-task-graph.test.mjs does not exist at round_base, so it is unverifiable-at-base. affected_command pnpm test:scripts is repo-verified (package.json line 26).\nRequired first-RED evidence: implement the test first, confirm it fails at base state (declaration invented outside the marked region or mixed H3/H4 requirements accepted), then implement scripts/ranking-v3-task-graph.mjs until the focused test passes.\nThe tool validates the declared semantics; it does not invent edges. R1.5 invokes the R1.T1 expansion function while sealing the graph, so concrete E1.<familyId> and E2.<familyId> nodes already exist in TASK_GRAPH.json; no later E-family expansion is needed (§7.2, lines 1644-1647)."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}
