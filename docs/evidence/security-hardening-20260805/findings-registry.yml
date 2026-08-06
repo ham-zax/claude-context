@@ -22,6 +22,6 @@ findings:
     resolution: "same-UID processes are inside the documented trust boundary; protocol v2 states this honestly (challengeNonce is a freshness challenge, ownershipToken is lifecycle-only)"
   - id: M2
     status: open
-    verified_at: "5df3a1c4c7dedecda2c320632346cd55764bfc94"
+    verified_at: "f90f187c0509413bcaf615fc75990214244a39af"
     fixed_in: ""
     resolution: "REOPENED 2026-08-06 pending the navigation-inclusive rebuilt-artifact replay: the review of 2bdd1fd requires the M2 replay to include the new navigation scenarios (file_outline/call_graph oversized published files and path replacement, search on another session's dirty root) before the fixed disposition stands. Remediation commits present (Tasks 4-7 = 17831852, search gate = ea9099d, navigation gate + bounded reader = ce84d94) but replay evidence was incomplete; re-verify with the navigation replay and mark fixed with the new evidence commit."
