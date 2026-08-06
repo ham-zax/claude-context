@@ -241,3 +241,20 @@ test("candidate replay CLI rejects held-out material without an opening record",
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
 });
+
+test("replay_rejects_unknown_contract_policy_or_target_digest", async () => {
+    const { assertRankingV3ReplayAuthorities } = await import("./satori-search-candidate-replay.mjs");
+    const sha = (character) => character.repeat(64);
+    const expected = {
+        contractSha256: sha("a"),
+        policySha256: sha("b"),
+        qualificationTargetSha256: sha("c"),
+    };
+    assert.deepEqual(assertRankingV3ReplayAuthorities(expected, expected), expected);
+    for (const field of Object.keys(expected)) {
+        assert.throws(
+            () => assertRankingV3ReplayAuthorities({ ...expected, [field]: sha("d") }, expected),
+            /sealed authority/i,
+        );
+    }
+});

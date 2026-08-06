@@ -1,68 +1,60 @@
-import type { DeterministicRankingEvidenceV1, SemanticSearchCandidateTraceV2Like } from './search-ranking-evidence.js';
-import { parseDeterministicRankingEvidenceV1 } from './search-ranking-evidence.js';
+import { parseDeterministicRankingEvidenceV1, type DeterministicRankingEvidenceV1, type SemanticSearchCandidateTraceV2Like } from './search-ranking-evidence.js';
+import type { RankingFeatureVectorV1 } from './ranking-features-v1.js';
+import type { RawValidatedRerankEvidenceV1 } from './search-rerank-evidence-retention.js';
 import type { SearchPassEvidenceV1 } from './search-pass-evidence.js';
 
-export interface DeterministicEvidenceAssemblyInput {
-    queryId: string;
-    /** The authoritative post-admission candidate order (baseline admission set). */
-    admissionOrder: readonly string[];
-    baselineScoreByCandidateId: ReadonlyMap<string, number>;
-    candidateTraceByCandidateId: ReadonlyMap<string, SemanticSearchCandidateTraceV2Like>;
-    passEvidenceByCandidateId: ReadonlyMap<string, SearchPassEvidenceV1>;
+export interface SearchRankingEvidenceRecordV1 {
+    schemaVersion: 'search_ranking_evidence_record_v1';
+    candidateId: string;
+    deterministicEvidence: DeterministicRankingEvidenceV1;
+    features: RankingFeatureVectorV1;
+    rawRerankEvidence: RawValidatedRerankEvidenceV1 | null;
 }
 
-/**
- * B4: assemble exactly one DeterministicRankingEvidenceV1 record per
- * post-admission eligible candidate. Candidates outside the frozen admission
- * set, missing evidence, or duplicate order entries are rejected — the
- * assembler never invents or repairs membership (plan §3.1, §4.2).
- */
-export function assembleDeterministicRankingEvidenceV1(
-    input: DeterministicEvidenceAssemblyInput,
-): DeterministicRankingEvidenceV1[] {
-    if (typeof input.queryId !== 'string' || input.queryId.length === 0) {
-        throw new Error('queryId must be non-empty.');
-    }
-    if (!Array.isArray(input.admissionOrder) || input.admissionOrder.length === 0) {
-        throw new Error('Admission order must be a non-empty post-admission candidate list.');
-    }
+export function assembleSearchRankingEvidenceV1(input: {
+    queryId: string;
+    evidenceStage: 'post_admission_pre_residual';
+    candidates: readonly {
+        candidateId: string;
+        baselineScore: number;
+        admissionRank: number;
+        candidateTrace: SemanticSearchCandidateTraceV2Like;
+        passEvidence: SearchPassEvidenceV1;
+        features: RankingFeatureVectorV1;
+        rawRerankEvidence: RawValidatedRerankEvidenceV1 | null;
+    }[];
+}): SearchRankingEvidenceRecordV1[] {
+    if (input.evidenceStage !== 'post_admission_pre_residual') throw new Error('Evidence assembly is allowed only post-admission and pre-residual.');
+    if (typeof input.queryId !== 'string' || input.queryId.length === 0) throw new Error('queryId must be non-empty.');
     const seen = new Set<string>();
-    const records: DeterministicRankingEvidenceV1[] = [];
-    input.admissionOrder.forEach((candidateId, admissionIndex) => {
-        if (typeof candidateId !== 'string' || candidateId.length === 0) {
-            throw new Error('Admission order contains an empty candidate id.');
+    return input.candidates.map((candidate, index) => {
+        if (seen.has(candidate.candidateId)) throw new Error(`Duplicate candidate '${candidate.candidateId}'.`);
+        seen.add(candidate.candidateId);
+        if (candidate.admissionRank !== index + 1) throw new Error('Admission ranks must be one-based, contiguous, and match candidate order.');
+        if (candidate.passEvidence.candidateId !== candidate.candidateId) throw new Error('Pass evidence candidateId mismatch.');
+        if (candidate.features.featureSchema !== 'search_features_v1' || candidate.features.values.length !== candidate.features.featureOrder.length) {
+            throw new Error('Ranking feature vector is invalid.');
         }
-        if (seen.has(candidateId)) {
-            throw new Error(`Duplicate post-admission candidate '${candidateId}'.`);
+        if (candidate.rawRerankEvidence && !candidate.rawRerankEvidence.requestCandidateIds.includes(candidate.candidateId)) {
+            throw new Error('Raw rerank evidence does not cover the candidate.');
         }
-        seen.add(candidateId);
-        const baselineScore = input.baselineScoreByCandidateId.get(candidateId);
-        if (baselineScore === undefined || !Number.isFinite(baselineScore)) {
-            throw new Error(`Missing finite baseline score for '${candidateId}'.`);
-        }
-        const candidateTrace = input.candidateTraceByCandidateId.get(candidateId);
-        if (!candidateTrace || candidateTrace.candidateId !== candidateId) {
-            throw new Error(`Missing or mismatched candidate trace for '${candidateId}'.`);
-        }
-        const passEvidence = input.passEvidenceByCandidateId.get(candidateId);
-        if (!passEvidence || passEvidence.candidateId !== candidateId) {
-            throw new Error(`Missing or mismatched pass evidence for '${candidateId}'.`);
-        }
-        const record = parseDeterministicRankingEvidenceV1({
+        const deterministicEvidence = parseDeterministicRankingEvidenceV1({
             schemaVersion: 'deterministic_ranking_evidence_v1',
             evidenceStage: 'post_admission_pre_residual',
             queryId: input.queryId,
-            candidateId,
-            baselineScore,
-            admissionRank: admissionIndex + 1,
-            candidateTrace,
-            retrievalPasses: passEvidence.passes.map((pass) => pass.passId),
-            rrfContributions: passEvidence.passes.map((pass) => ({
-                passId: pass.passId,
-                contribution: pass.contribution,
-            })),
+            candidateId: candidate.candidateId,
+            baselineScore: candidate.baselineScore,
+            admissionRank: candidate.admissionRank,
+            candidateTrace: candidate.candidateTrace,
+            retrievalPasses: candidate.passEvidence.contributions.map((item) => item.passId),
+            rrfContributions: candidate.passEvidence.contributions.map(({ passId, contribution }) => ({ passId, contribution })),
         });
-        records.push(record);
+        return {
+            schemaVersion: 'search_ranking_evidence_record_v1',
+            candidateId: candidate.candidateId,
+            deterministicEvidence,
+            features: { ...candidate.features, featureOrder: candidate.features.featureOrder, values: [...candidate.features.values] },
+            rawRerankEvidence: candidate.rawRerankEvidence ? structuredClone(candidate.rawRerankEvidence) : null,
+        };
     });
-    return records;
 }

@@ -1736,3 +1736,27 @@ test("candidate capture CLI rejects evaluation artifacts inside the indexed repo
         fs.rmSync(temporary, { recursive: true, force: true });
     }
 });
+
+test("survival_v3_round_trips_without_source_payload", async () => {
+    const { buildSearchCandidateSurvivalV3, parseSearchCandidateSurvivalV3 } = await import("./satori-search-candidate-capture.mjs");
+    const sha = (character) => character.repeat(64);
+    const value = {
+        schemaVersion: "search_candidate_survival_v3",
+        queryId: "q1",
+        candidateIds: ["c1", "c2"],
+        evidenceSha256: sha("a"),
+        authorities: {
+            contractSha256: sha("b"),
+            policySha256: sha("c"),
+            qualificationTargetSha256: sha("d"),
+        },
+        stages: [
+            { stage: "post_eligibility", candidateIds: ["c1", "c2"] },
+            { stage: "post_admission", candidateIds: ["c1", "c2"] },
+        ],
+    };
+    const captured = buildSearchCandidateSurvivalV3(value);
+    assert.deepEqual(parseSearchCandidateSurvivalV3(JSON.parse(JSON.stringify(captured))), captured);
+    assert.equal(JSON.stringify(captured).includes("source"), false);
+    assert.throws(() => buildSearchCandidateSurvivalV3({ ...value, content: "secret" }), /exactly|source/i);
+});

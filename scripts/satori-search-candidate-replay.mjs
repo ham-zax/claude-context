@@ -2469,3 +2469,26 @@ if (invokedPath === REPLAY_SCRIPT_PATH) {
         process.exitCode = 1;
     }
 }
+
+export function assertRankingV3ReplayAuthorities(value, expected) {
+    const input = requireRecord(value, "Ranking V3 replay authorities");
+    requireExactKeys(input, [
+        "contractSha256", "policySha256", "qualificationTargetSha256",
+    ], "Ranking V3 replay authorities");
+    const expectedInput = requireRecord(expected, "Expected Ranking V3 replay authorities");
+    requireExactKeys(expectedInput, [
+        "contractSha256", "policySha256", "qualificationTargetSha256",
+    ], "Expected Ranking V3 replay authorities");
+    for (const field of ["contractSha256", "policySha256", "qualificationTargetSha256"]) {
+        const actualDigest = requireSha256(input[field], `Ranking V3 replay authorities.${field}`);
+        const expectedDigest = requireSha256(expectedInput[field], `Expected Ranking V3 replay authorities.${field}`);
+        if (actualDigest !== expectedDigest) {
+            throw new Error(`Ranking V3 replay ${field} does not match the sealed authority.`);
+        }
+    }
+    return {
+        contractSha256: input.contractSha256,
+        policySha256: input.policySha256,
+        qualificationTargetSha256: input.qualificationTargetSha256,
+    };
+}

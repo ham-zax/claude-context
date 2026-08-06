@@ -1,83 +1,32 @@
+export interface SearchPassContributionV1 {
+    passId: string;
+    rank: number;
+    rrfK: number;
+    contribution: number;
+}
 export interface SearchPassEvidenceV1 {
     schemaVersion: 'search_pass_evidence_v1';
     candidateId: string;
-    passes: Array<{
-        passId: string;
-        rank: number;
-        rrfK: number;
-        contribution: number;
-    }>;
+    contributions: SearchPassContributionV1[];
     totalContribution: number;
 }
-
-export interface SearchPassEvidenceInput {
+function text(value: string, label: string): string { if (!value) throw new Error(`${label} must be non-empty.`); return value; }
+function positive(value: number, label: string): number { if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be a positive safe integer.`); return value; }
+function finite(value: number, label: string): number { if (!Number.isFinite(value)) throw new Error(`${label} must be finite.`); return value; }
+export function buildSearchPassEvidenceV1(input: {
     candidateId: string;
-    passes: Array<{
-        passId: string;
-        rank: number;
-        rrfK: number;
-    }>;
-}
-
-export const RRF_CORE_K_V1 = 100;
-export const RRF_MCP_K_V1 = 60;
-export const RRF_RERANK_K_V1 = 10;
-export const RRF_RERANK_WEIGHT_V1 = 1;
-
-function validatePass(pass: SearchPassEvidenceInput['passes'][number]): void {
-    if (typeof pass.passId !== 'string' || pass.passId.length === 0) {
-        throw new Error('Pass id must be non-empty.');
-    }
-    if (!Number.isSafeInteger(pass.rank) || pass.rank < 1) {
-        throw new Error(`Pass '${pass.passId}' rank must be a positive safe integer.`);
-    }
-    if (!Number.isFinite(pass.rrfK) || pass.rrfK <= 0) {
-        throw new Error(`Pass '${pass.passId}' rrfK must be a positive finite number.`);
-    }
-}
-
-function roundMetric(value: number): number {
-    return Number(value.toFixed(6));
-}
-
-/**
- * Deterministic per-pass RRF contribution evidence (plan §2.2). The reranker
- * RRF bucket (k=10, weight 1.0) is a baseline-mode compatibility behavior only
- * and is never applied by learned modes (plan §4.2); callers supply the rrfK
- * per pass so the same builder serves core (100), MCP multi-pass (60), and the
- * baseline-only rerank bucket.
- */
-export function buildSearchPassEvidenceV1(input: SearchPassEvidenceInput): SearchPassEvidenceV1 {
-    if (typeof input.candidateId !== 'string' || input.candidateId.length === 0) {
-        throw new Error('candidateId must be non-empty.');
-    }
-    if (!Array.isArray(input.passes) || input.passes.length === 0) {
-        throw new Error('Pass evidence requires at least one pass.');
-    }
+    passes: readonly { passId: string; rank: number; rrfK: number }[];
+}): SearchPassEvidenceV1 {
     const seen = new Set<string>();
-    for (const pass of input.passes) {
-        validatePass(pass);
-        if (seen.has(pass.passId)) {
-            throw new Error(`Duplicate pass '${pass.passId}'.`);
-        }
-        seen.add(pass.passId);
-    }
-    const passes = input.passes.map((pass) => {
-        const contribution = roundMetric(1 / (pass.rrfK + pass.rank));
-        return {
-            passId: pass.passId,
-            rank: pass.rank,
-            rrfK: pass.rrfK,
-            contribution,
-        };
-    });
-    const totalContribution = roundMetric(
-        passes.reduce((total, pass) => total + pass.contribution, 0),
-    );
-    return {
-        schemaVersion: 'search_pass_evidence_v1',
-        candidateId: input.candidateId,
-        passes,
-        totalContribution,
-    };
+    const contributions = [...input.passes].map((pass) => {
+        const passId = text(pass.passId, 'passId');
+        if (seen.has(passId)) throw new Error(`Duplicate passId '${passId}'.`);
+        seen.add(passId);
+        const rank = positive(pass.rank, 'rank');
+        const rrfK = finite(pass.rrfK, 'rrfK');
+        if (rrfK <= 0) throw new Error('rrfK must be positive.');
+        return { passId, rank, rrfK, contribution: 1 / (rrfK + rank) };
+    }).sort((left, right) => left.passId.localeCompare(right.passId));
+    const totalContribution = contributions.reduce((sum, item) => sum + item.contribution, 0);
+    return { schemaVersion: 'search_pass_evidence_v1', candidateId: text(input.candidateId, 'candidateId'), contributions, totalContribution };
 }
