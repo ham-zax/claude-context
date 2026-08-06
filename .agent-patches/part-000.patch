@@ -1,0 +1,392 @@
+diff --git a/evals/search-quality/ranking-v3-scorer-integration.test.ts b/evals/search-quality/ranking-v3-scorer-integration.test.ts
+new file mode 100644
+index 0000000..21ee3ab
+--- /dev/null
++++ b/evals/search-quality/ranking-v3-scorer-integration.test.ts
+@@ -0,0 +1,23 @@
++import assert from 'node:assert/strict';
++import path from 'node:path';
++import test from 'node:test';
++import { fileURLToPath } from 'node:url';
++import { scoreSearchQualityArtifactV3 } from '../../scripts/satori-search-candidate-score.mjs';
++import { runSearchQualityEvaluation } from './search-quality-evaluation.js';
++
++function workspaceRoot(): string {
++    return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
++}
++
++test('graded_stage_and_legacy_metrics_share_one_authority', async () => {
++    const artifact = await runSearchQualityEvaluation(workspaceRoot(), {
++        excludeRepositoryPaths: ['evals/search-quality/ranking-v3-scorer-integration.test.ts'],
++    });
++    const scored = scoreSearchQualityArtifactV3(artifact);
++    assert.deepEqual(scored.legacySummary, artifact.summary);
++    assert.equal(scored.gradedStages.length, artifact.results.length);
++    assert.deepEqual(
++        scored.gradedStages.map((row) => [row.workloadId, row.limit, row.ownerRank]),
++        artifact.results.map((row) => [row.workloadId, row.limit, row.ownerRank]),
++    );
++});
+diff --git a/evals/search-ranking/ranking-v3-resource-contract.json b/evals/search-ranking/ranking-v3-resource-contract.json
+new file mode 100644
+index 0000000..f66288b
+--- /dev/null
++++ b/evals/search-ranking/ranking-v3-resource-contract.json
+@@ -0,0 +1,9 @@
++{
++  "schemaVersion": "ranking_v3_resource_contract_v1",
++  "environmentIdentity": "github_actions_ubuntu_24_node_22_13",
++  "thresholds": {
++    "maximumPolicyLoadMs": 250,
++    "maximumReplayMsPerQuery": 1000,
++    "maximumResidentBytes": 536870912
++  }
++}
+diff --git a/packages/core/src/sync/root-bound-fs.ranking-v3.test.ts b/packages/core/src/sync/root-bound-fs.ranking-v3.test.ts
+new file mode 100644
+index 0000000..a552718
+--- /dev/null
++++ b/packages/core/src/sync/root-bound-fs.ranking-v3.test.ts
+@@ -0,0 +1,56 @@
++import test, { type TestContext } from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {
++    openTrustedRegularFileInsideRootV1,
++    verifyTrustedPathHierarchyV1,
++} from './root-bound-fs.js';
++
++function symlinkOrSkip(t: TestContext, target: string, link: string): boolean {
++    try {
++        fs.symlinkSync(target, link, 'dir');
++        return true;
++    } catch (error) {
++        const code = (error as NodeJS.ErrnoException).code;
++        if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTSUP') {
++            t.skip(`symlinks unavailable: ${code}`);
++            return false;
++        }
++        throw error;
++    }
++}
++
++test('trusted_hierarchy_rejects_symlink_writable_or_replaced_components', async (t) => {
++    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-ranking-trust-'));
++    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-ranking-outside-'));
++    try {
++        const dir = path.join(root, 'policies');
++        const file = path.join(dir, 'ranking.json');
++        fs.mkdirSync(dir, { mode: 0o700 });
++        fs.writeFileSync(file, '{}\n', { mode: 0o600 });
++        const opened = await openTrustedRegularFileInsideRootV1(file, root);
++        await verifyTrustedPathHierarchyV1(opened);
++
++        fs.chmodSync(dir, 0o777);
++        await assert.rejects(() => openTrustedRegularFileInsideRootV1(file, root), /writable component/i);
++        fs.chmodSync(dir, 0o700);
++
++        const oldDir = path.join(root, 'policies-old');
++        fs.renameSync(dir, oldDir);
++        fs.mkdirSync(dir, { mode: 0o700 });
++        fs.writeFileSync(file, '{}\n', { mode: 0o600 });
++        await assert.rejects(() => verifyTrustedPathHierarchyV1(opened), /replaced or weakened/i);
++        await opened.handle.close();
++
++        fs.rmSync(dir, { recursive: true, force: true });
++        fs.writeFileSync(path.join(outside, 'ranking.json'), '{}\n');
++        if (symlinkOrSkip(t, outside, dir)) {
++            await assert.rejects(() => openTrustedRegularFileInsideRootV1(file, root), /symbolic-link|escapes|rejects/i);
++        }
++    } finally {
++        fs.rmSync(root, { recursive: true, force: true });
++        fs.rmSync(outside, { recursive: true, force: true });
++    }
++});
+diff --git a/packages/core/src/sync/root-bound-fs.ts b/packages/core/src/sync/root-bound-fs.ts
+index bf22ab9..c155bd8 100644
+--- a/packages/core/src/sync/root-bound-fs.ts
++++ b/packages/core/src/sync/root-bound-fs.ts
+@@ -503,3 +503,105 @@ export async function openDirectoryInsideRoot(
+         descriptorPath: descriptorLink(opened.handle),
+     };
+ }
++
++export interface TrustedPathComponentV1 {
++    absolutePath: string;
++    device: bigint;
++    inode: bigint;
++    mode: number;
++    kind: 'directory' | 'file';
++}
++
++export interface OpenedTrustedRegularFileV1 extends OpenedRootBoundRegularFile {
++    hierarchy: readonly TrustedPathComponentV1[];
++}
++
++function isUntrustedWritableMode(mode: number): boolean {
++    return (mode & 0o022) !== 0;
++}
++
++async function observeTrustedHierarchy(
++    filePath: string,
++    rootDir: string,
++): Promise<TrustedPathComponentV1[]> {
++    const root = trimTrailingSeparators(path.normalize(await fsp.realpath(rootDir)));
++    const candidate = path.normalize(path.resolve(filePath));
++    if (!isRealPathInsideRoot(candidate, root) || candidate === root) {
++        throw new RootBoundFileError('root_binding_invalid', 'Trusted file must be a descendant of the configured root.');
++    }
++    const relative = path.relative(root, candidate);
++    const segments = relative.split(path.sep).filter(Boolean);
++    const observations: TrustedPathComponentV1[] = [];
++    let current = root;
++    const rootStat = await fsp.lstat(root);
++    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
++        throw new RootBoundFileError('root_binding_invalid', 'Trusted root must be a real directory.');
++    }
++    if (isUntrustedWritableMode(rootStat.mode)) {
++        throw new RootBoundFileError('root_binding_invalid', `Trusted hierarchy contains a group/world-writable component: ${root}`);
++    }
++    observations.push({ absolutePath: root, device: BigInt(rootStat.dev), inode: BigInt(rootStat.ino), mode: rootStat.mode, kind: 'directory' });
++
++    for (let index = 0; index < segments.length; index += 1) {
++        current = path.join(current, segments[index]);
++        const stat = await fsp.lstat(current);
++        const final = index === segments.length - 1;
++        if (stat.isSymbolicLink() || (final ? !stat.isFile() : !stat.isDirectory())) {
++            throw new RootBoundFileError('root_binding_invalid', `Trusted hierarchy rejects symbolic-link or wrong-kind component: ${current}`);
++        }
++        if (isUntrustedWritableMode(stat.mode)) {
++            throw new RootBoundFileError('root_binding_invalid', `Trusted hierarchy contains a group/world-writable component: ${current}`);
++        }
++        observations.push({
++            absolutePath: current,
++            device: BigInt(stat.dev),
++            inode: BigInt(stat.ino),
++            mode: stat.mode,
++            kind: final ? 'file' : 'directory',
++        });
++    }
++    return observations;
++}
++
++export async function verifyTrustedPathHierarchyV1(
++    opened: Pick<OpenedTrustedRegularFileV1, 'handle' | 'observedStat' | 'hierarchy'>,
++): Promise<void> {
++    await verifyStableFileDescriptorObservation(
++        opened.handle,
++        opened.hierarchy[opened.hierarchy.length - 1]?.absolutePath ?? '<unknown>',
++        opened.observedStat,
++    );
++    for (const expected of opened.hierarchy) {
++        const current = await fsp.lstat(expected.absolutePath).catch(() => null);
++        if (
++            !current
++            || current.isSymbolicLink()
++            || BigInt(current.dev) !== expected.device
++            || BigInt(current.ino) !== expected.inode
++            || current.mode !== expected.mode
++            || isUntrustedWritableMode(current.mode)
++            || (expected.kind === 'directory' ? !current.isDirectory() : !current.isFile())
++        ) {
++            throw new RootBoundFileError(
++                'path_identity_changed_during_inspection',
++                `Trusted hierarchy component was replaced or weakened: ${expected.absolutePath}`,
++            );
++        }
++    }
++}
++
++export async function openTrustedRegularFileInsideRootV1(
++    filePath: string,
++    rootDir: string,
++): Promise<OpenedTrustedRegularFileV1> {
++    assertDescriptorBoundIndexingSupported();
++    const hierarchy = await observeTrustedHierarchy(filePath, rootDir);
++    const opened = await openRegularFileWithIdentityInsideRoot(filePath, rootDir);
++    try {
++        await verifyTrustedPathHierarchyV1({ ...opened, hierarchy });
++        return { ...opened, hierarchy };
++    } catch (error) {
++        await opened.handle.close().catch(() => undefined);
++        throw error;
++    }
++}
+diff --git a/packages/mcp/src/config.ranking-v3.test.ts b/packages/mcp/src/config.ranking-v3.test.ts
+new file mode 100644
+index 0000000..ad8fd93
+--- /dev/null
++++ b/packages/mcp/src/config.ranking-v3.test.ts
+@@ -0,0 +1,28 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { createMcpConfig } from './config.js';
++
++const keys = ['SATORI_RANKING_POLICY_MODE','SATORI_RANKING_POLICY_ROOT','SATORI_RANKING_POLICY_PATH','SATORI_RANKING_POLICY_SHA256','SATORI_RANKING_QUALIFICATION_REGISTRY_PATH','SATORI_RANKING_QUALIFICATION_SCOPE_KEY','SATORI_RANKING_SERVICE_CLASS'] as const;
++
++test('ranking_policy_config_defaults_baseline_and_learned_is_fully_bound', () => {
++    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
++    try {
++        for (const key of keys) delete process.env[key];
++        assert.deepEqual(createMcpConfig().rankingPolicy, { mode: 'baseline' });
++        process.env.SATORI_RANKING_POLICY_MODE = 'learned';
++        assert.throws(() => createMcpConfig(), /SATORI_RANKING_POLICY_ROOT/);
++        Object.assign(process.env, {
++            SATORI_RANKING_POLICY_ROOT: '/tmp/policies', SATORI_RANKING_POLICY_PATH: 'policy.json',
++            SATORI_RANKING_POLICY_SHA256: 'a'.repeat(64), SATORI_RANKING_QUALIFICATION_REGISTRY_PATH: 'registry.json',
++            SATORI_RANKING_QUALIFICATION_SCOPE_KEY: 'b'.repeat(64), SATORI_RANKING_SERVICE_CLASS: 'online',
++        });
++        const parsed = createMcpConfig().rankingPolicy;
++        assert.equal(parsed.mode, 'learned');
++        if (parsed.mode === 'learned') assert.equal(parsed.artifactSha256, 'a'.repeat(64));
++    } finally {
++        for (const key of keys) {
++            const value = previous[key];
++            if (value === undefined) delete process.env[key]; else process.env[key] = value;
++        }
++    }
++});
+diff --git a/packages/mcp/src/config.ts b/packages/mcp/src/config.ts
+index 0a812ed..2b734c2 100644
+--- a/packages/mcp/src/config.ts
++++ b/packages/mcp/src/config.ts
+@@ -35,6 +35,17 @@ import {
+ export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'Potion';
+ export type VectorStoreProvider = 'Milvus' | 'LanceDB';
+ export type RerankerProvider = 'none' | 'voyage' | 'lateon';
++export type RankingPolicyRuntimeConfig =
++    | { mode: 'baseline' }
++    | {
++        mode: 'learned';
++        trustedRoot: string;
++        artifactPath: string;
++        artifactSha256: string;
++        qualificationRegistryPath: string;
++        qualificationScopeKey: string;
++        serviceClass: 'online' | 'offline_linux_x64';
++    };
+ export type ResolvedVectorStoreConfig =
+     | { vectorStoreProvider: 'Milvus' }
+     | { vectorStoreProvider: 'LanceDB'; lanceDbPath: string };
+@@ -211,7 +222,8 @@ export interface ContextMcpConfig {
+     milvusEndpoint?: string; // Required for provider-backed tool calls
+     milvusApiToken?: string;
+     lanceDbPath?: string;
+-    // Reranker configuration
++    // Ranking-policy selection and reranker configuration
++    rankingPolicy?: RankingPolicyRuntimeConfig;
+     rerankerProvider?: RerankerProvider;
+     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
+     lateOnModelPath?: string;
+@@ -837,6 +849,37 @@ export function createMcpConfig(): ContextMcpConfig {
+         console.warn('[WARN] MCP_WATCH_DEBOUNCE_MS is deprecated and ignored; filesystem watching records source events but does not schedule synchronization.');
+     }
+ 
++    const rankingModeRaw = envManager.get('SATORI_RANKING_POLICY_MODE') || 'baseline';
++    if (rankingModeRaw !== 'baseline' && rankingModeRaw !== 'learned') {
++        throw new Error("SATORI_RANKING_POLICY_MODE must be 'baseline' or 'learned'.");
++    }
++    let rankingPolicy: RankingPolicyRuntimeConfig = { mode: 'baseline' };
++    if (rankingModeRaw === 'learned') {
++        const required = (name: string): string => {
++            const value = envManager.get(name);
++            if (!value) throw new Error(`${name} is required when SATORI_RANKING_POLICY_MODE=learned.`);
++            return value;
++        };
++        const artifactSha256 = required('SATORI_RANKING_POLICY_SHA256');
++        const qualificationScopeKey = required('SATORI_RANKING_QUALIFICATION_SCOPE_KEY');
++        if (!/^[a-f0-9]{64}$/.test(artifactSha256) || !/^[a-f0-9]{64}$/.test(qualificationScopeKey)) {
++            throw new Error('Ranking policy and qualification scope digests must be lowercase SHA-256 values.');
++        }
++        const serviceClassRaw = envManager.get('SATORI_RANKING_SERVICE_CLASS') || 'online';
++        if (serviceClassRaw !== 'online' && serviceClassRaw !== 'offline_linux_x64') {
++            throw new Error('SATORI_RANKING_SERVICE_CLASS is invalid.');
++        }
++        rankingPolicy = {
++            mode: 'learned',
++            trustedRoot: path.resolve(required('SATORI_RANKING_POLICY_ROOT')),
++            artifactPath: required('SATORI_RANKING_POLICY_PATH'),
++            artifactSha256,
++            qualificationRegistryPath: required('SATORI_RANKING_QUALIFICATION_REGISTRY_PATH'),
++            qualificationScopeKey,
++            serviceClass: serviceClassRaw,
++        };
++    }
++
+     const config: ContextMcpConfig = {
+         name: envManager.get('MCP_SERVER_NAME') || "Satori MCP Server",
+         version: envManager.get('MCP_SERVER_VERSION') || resolveMcpPackageVersion(),
+@@ -867,7 +910,8 @@ export function createMcpConfig(): ContextMcpConfig {
+         ...(vectorStore.vectorStoreProvider === 'LanceDB'
+             ? { lanceDbPath: vectorStore.lanceDbPath }
+             : {}),
+-        // Reranker configuration
++        // Ranking-policy and reranker configuration
++        rankingPolicy,
+         rerankerProvider,
+         rankerModel,
+         ...(lateOnModelPath ? { lateOnModelPath } : {}),
+diff --git a/packages/mcp/src/core/neural-ranking-evidence.test.ts b/packages/mcp/src/core/neural-ranking-evidence.test.ts
+new file mode 100644
+index 0000000..f7d2dda
+--- /dev/null
++++ b/packages/mcp/src/core/neural-ranking-evidence.test.ts
+@@ -0,0 +1,24 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { buildNeuralRankingEvidence } from './neural-ranking-evidence.js';
++import type { ValidatedRerankResponseV1 } from './rerank-evidence.js';
++
++const response: ValidatedRerankResponseV1 = {
++    schemaVersion: 'validated_rerank_response_v1',
++    providerKey: 'p', rerankerIdentity: 'm', rerankerProjectionIdentity: 'proj',
++    providerConfigurationDigest: 'a'.repeat(64), providerRequestContractSha256: 'b'.repeat(64),
++    canonicalRequestSha256: 'c'.repeat(64), requestCandidateIds: ['a','b','c'],
++    results: [
++        { candidateId: 'b', rank: 1, rawScore: 10 },
++        { candidateId: 'a', rank: 2, rawScore: 7 },
++        { candidateId: 'c', rank: 3, rawScore: 1 },
++    ],
++};
++
++test('normalizes_complete_provider_response_with_query_local_margins', () => {
++    assert.deepEqual(buildNeuralRankingEvidence(response), [
++        { schemaVersion:'neural_ranking_evidence_v1', candidateId:'b', providerKey:'p', rank:1, rawScore:10, withinQueryPercentile:1, candidateToTopMargin:0, topToSecondMargin:3 },
++        { schemaVersion:'neural_ranking_evidence_v1', candidateId:'a', providerKey:'p', rank:2, rawScore:7, withinQueryPercentile:0.5, candidateToTopMargin:3, topToSecondMargin:3 },
++        { schemaVersion:'neural_ranking_evidence_v1', candidateId:'c', providerKey:'p', rank:3, rawScore:1, withinQueryPercentile:0, candidateToTopMargin:9, topToSecondMargin:3 },
++    ]);
++});
+diff --git a/packages/mcp/src/core/neural-ranking-evidence.ts b/packages/mcp/src/core/neural-ranking-evidence.ts
+new file mode 100644
+index 0000000..723e1fb
+--- /dev/null
++++ b/packages/mcp/src/core/neural-ranking-evidence.ts
+@@ -0,0 +1,33 @@
++import type { ValidatedRerankResponseV1 } from './rerank-evidence.js';
++
++export interface NeuralRankingEvidenceV1 {
++    schemaVersion: 'neural_ranking_evidence_v1';
++    candidateId: string;
++    providerKey: string;
++    rank: number;
++    rawScore: number;
++    withinQueryPercentile: number;
++    candidateToTopMargin: number;
++    topToSecondMargin: number;
++}
++
++const rounded = (value: number): number => Number(value.toFixed(12));
++
++export function buildNeuralRankingEvidence(
++    response: ValidatedRerankResponseV1,
++): readonly NeuralRankingEvidenceV1[] {
++    if (response.results.length === 0) throw new Error('Provider response must contain candidates.');
++    const topScore = response.results[0].rawScore;
++    const secondScore = response.results[1]?.rawScore ?? topScore;
++    const denominator = Math.max(1, response.results.length - 1);
++    return response.results.map((result, index) => ({
++        schemaVersion: 'neural_ranking_evidence_v1',
++        candidateId: result.candidateId,
++        providerKey: response.pr
