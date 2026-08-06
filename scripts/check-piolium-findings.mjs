@@ -42,7 +42,11 @@ import { execFileSync } from 'node:child_process';
  *   validated instead. When the drafts are present (developer worktree) the
  *   registry and draft may disagree without hard-failing (the registry is the
  *   tracked gate; the drafts are ignored scratch). IDs must not duplicate
- *   tracked draft IDs or each other.
+ *   tracked draft IDs or each other. Registry entries carry the same ancestry
+ *   gates as drafts, plus: fixed_in must be an ancestor of the audited head;
+ *   status 'fixed' additionally requires fix_verified_at resolving to an
+ *   ancestor of the audited head; and verified_at must be at or after the
+ *   fix point (commit order) for status 'fixed'.
  */
 
 const FINDING_STATUSES = new Set(['open', 'mitigated', 'fixed', 'accepted']);
@@ -147,6 +151,7 @@ export function collectDraftPaths(root) {
  *       status: accepted
  *       verified_at: "<sha>"
  *       fixed_in: "<sha or empty>"
+ *       fix_verified_at: "<sha or empty>"
  *       resolution: "..."
  *
  * This is intentionally not a general YAML parser: the registry is a
@@ -230,49 +235,83 @@ const REGISTRY_STATUSES = new Set(['open', 'mitigated', 'fixed', 'accepted']);
  */
 export function validateRegistryEntry(entry, headSha, repoRoot) {
   const errors = [];
+  const label = entry.id ?? '<unknown>';
   if (entry.id !== undefined && /[^A-Za-z0-9._-]/.test(entry.id)) {
     errors.push(`registry id '${entry.id}' contains characters outside [A-Za-z0-9._-]`);
   }
   if (entry.status !== undefined && !REGISTRY_STATUSES.has(entry.status)) {
-    errors.push(`registry entry '${entry.id ?? '<unknown>'}': unknown status '${entry.status}'`);
+    errors.push(`registry entry '${label}': unknown status '${entry.status}'`);
   }
   if (entry.verified_at === undefined || entry.verified_at === '') {
-    errors.push(
-      `registry entry '${entry.id ?? '<unknown>'}': verified_at must be a non-empty commit SHA`,
-    );
+    errors.push(`registry entry '${label}': verified_at must be a non-empty commit SHA`);
   } else {
     try {
       resolveCommit(entry.verified_at, repoRoot);
       if (!isAncestor(entry.verified_at, headSha, repoRoot)) {
         errors.push(
-          `registry entry '${entry.id ?? '<unknown>'}': verified_at '${entry.verified_at}' ` +
+          `registry entry '${label}': verified_at '${entry.verified_at}' ` +
             'is not an ancestor of audited head; must be labeled historical/unverified, not current',
         );
       }
     } catch {
       errors.push(
-        `registry entry '${entry.id ?? '<unknown>'}': verified_at references unknown commit '${entry.verified_at}'`,
+        `registry entry '${label}': verified_at references unknown commit '${entry.verified_at}'`,
       );
     }
   }
   if (entry.fixed_in !== undefined && entry.fixed_in !== '') {
     try {
       resolveCommit(entry.fixed_in, repoRoot);
+      if (!isAncestor(entry.fixed_in, headSha, repoRoot)) {
+        errors.push(
+          `registry entry '${label}': fixed_in '${entry.fixed_in}' is not an ancestor of audited head`,
+        );
+      }
     } catch {
       errors.push(
-        `registry entry '${entry.id ?? '<unknown>'}': fixed_in references unknown commit '${entry.fixed_in}'`,
+        `registry entry '${label}': fixed_in references unknown commit '${entry.fixed_in}'`,
+      );
+    }
+  }
+  if (entry.fix_verified_at !== undefined && entry.fix_verified_at !== '') {
+    try {
+      resolveCommit(entry.fix_verified_at, repoRoot);
+      if (!isAncestor(entry.fix_verified_at, headSha, repoRoot)) {
+        errors.push(
+          `registry entry '${label}': fix_verified_at '${entry.fix_verified_at}' is not an ancestor of audited head`,
+        );
+      }
+    } catch {
+      errors.push(
+        `registry entry '${label}': fix_verified_at references unknown commit '${entry.fix_verified_at}'`,
       );
     }
   }
   if (entry.status === 'accepted' || entry.status === 'fixed') {
     if (!entry.fixed_in) {
       errors.push(
-        `registry entry '${entry.id ?? '<unknown>'}': status '${entry.status}' requires non-empty fixed_in`,
+        `registry entry '${label}': status '${entry.status}' requires non-empty fixed_in`,
       );
     }
   }
+  if (entry.status === 'fixed') {
+    if (!entry.fix_verified_at) {
+      errors.push(`registry entry '${label}': status 'fixed' requires non-empty fix_verified_at`);
+    }
+    if (entry.fixed_in && entry.verified_at) {
+      try {
+        if (!isAncestor(entry.fixed_in, entry.verified_at, repoRoot)) {
+          errors.push(
+            `registry entry '${label}': verified_at '${entry.verified_at}' must be at or after the fix point fixed_in '${entry.fixed_in}'`,
+          );
+        }
+      } catch {
+        // One of the two SHAs already failed to resolve; do not duplicate that error.
+      }
+    }
+  }
   if (entry.status === 'open' && entry.fixed_in) {
-    errors.push(`registry entry '${entry.id ?? '<unknown>'}': status 'open' requires empty fixed_in`);
+    errors.push(`registry entry '${label}': status 'open' requires empty fixed_in`);
   }
   return errors;
 }
