@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "DC1",
+  "cardType": "boundary_generator",
+  "contractSha256": "f25bb30d48a4a4d2931ea4503257be413c27d03e1aa6e43a293f20a0f7f955ba",
+  "contract": {
+    "task_id": "DC1",
+    "title": "Boundary-generator card DC1 (dispatch scope wave-c-expanded, next DD)",
+    "risk": "medium",
+    "invariant": "DC1 binds the wave-boundary tree through the R0.1V-owned verifier, then invokes the one R0.1B-owned dispatch CLI with literals fixed by the boundary card; the card-set manifest (schemaVersion ranking_v3_dispatch_cards_v2) contains the target scope plus the next boundary-generator card DD; every card resolves to a §7.5/§7.6 catalog row; no executing agent chooses an argument or discovers a file.",
+    "owners": [
+      "DC1",
+      "R0.1B",
+      "R0.1V"
+    ],
+    "production_callers": [
+      "docs/plans/SATORI_RANKING_POLICY_V3_PLAN.md (§7.4 dispatch-card generation, §7.5 catalog)",
+      "TASK_GRAPH.json (R1.5 sealed graph)",
+      "CONTRACT_SEAL.json (R1.5)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-dispatch-cards.test.mjs (future, plan-specified; absent at round_base)",
+      "scripts/verify-ranking-v3-rebase.test.mjs (future, plan-specified)"
+    ],
+    "approved_files": [
+      "DC1: card-generation task; produces the card-set directory $CARD_SET_DIR only; no source file ownership"
+    ],
+    "interface_changes": [
+      "card-set manifest for scope wave-c-expanded (schemaVersion ranking_v3_dispatch_cards_v2; baselineCommit frozen; dispatchCommit + dispatchTreeSha256 bound; prerequisiteReceipts; cards[])",
+      "next generator DD present but nondispatchable until the current scope's gate receipt exists"
+    ],
+    "security_boundaries": [
+      "Dispatch authority comes only from the latest unrevoked card-set manifest; a new manifest revokes only overlapping unexecuted cards",
+      "Next generator DD is nondispatchable until the current scope gate receipt exists — prevents meta-dispatch deadlock",
+      "No executing agent chooses a CLI argument or discovers a file; all arguments come from named prerequisite receipts"
+    ],
+    "overlap_with": [
+      "FT-G1 (R1.0B/R1.6 contract covers the same §7.4 CLI shape; this card extends it to later wave boundaries)",
+      "FT-G0 (R0.1B owns the dispatch tool)"
+    ],
+    "focused_command": "node --test scripts/ranking-v3-dispatch-cards.test.mjs scripts/verify-ranking-v3-rebase.test.mjs",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts"
+    ],
+    "red_evidence_required": false,
+    "instructions": "READ-ONLY fleshing-out of the dispatch contract for boundary generator DC1 (scope wave-c-expanded, next DD). Exact §7.4 command shape:\nnode scripts/verify-ranking-v3-rebase.mjs snapshot-tree --head \"$DISPATCH_COMMIT\" --out \"$TASK_OUTPUT/DISPATCH_TREE.json\"\nnode scripts/ranking-v3-dispatch-cards.mjs build --scope \"$SCOPE_ID\" --baseline-commit \"$BASELINE_COMMIT\" --dispatch-commit \"$DISPATCH_COMMIT\" --dispatch-tree-manifest \"$DISPATCH_TREE_MANIFEST\" --qualification-target \"$QUALIFICATION_TARGET_OR_NONE\" --contract-seal \"$CONTRACT_SEAL_OR_NONE\" --task-graph \"$TASK_GRAPH_OR_NONE\" --expansion-receipts \"$EXPANSION_RECEIPT_INDEX\" --previous-manifest \"$PREVIOUS_CARD_MANIFEST_OR_NONE\" --include-next-generator \"$NEXT_GENERATOR_ID_OR_NONE\" --out \"$CARD_SET_DIR\"\nnode scripts/ranking-v3-dispatch-cards.mjs verify --manifest \"$CARD_SET_DIR/cards.manifest.json\"\nwith $SCOPE_ID=wave-c-expanded and $NEXT_GENERATOR_ID_OR_NONE=DD as literals fixed by the boundary card; $DISPATCH_COMMIT is the integration HEAD named by the preceding gate receipt. Output: expanded Wave-C card set. Focused command targets future tool test files (plan-specified, unverifiable-at-base); affected command is repo-verified."
+  },
+  "isBoundaryGenerator": true,
+  "dispatchable": false
+}

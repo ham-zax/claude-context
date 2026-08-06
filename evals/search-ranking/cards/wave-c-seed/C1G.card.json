@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "ranking_v3_dispatch_card_v2",
+  "taskId": "C1G",
+  "cardType": "evidence_or_code",
+  "contractSha256": "0f6ef3b79e01e093d1895559819f223c78f5468f4f4aa39b6e0a15aabbfc758d",
+  "contract": {
+    "task_id": "C1G",
+    "title": "Wave-C graph expansion: write append-only TASK_GRAPH_EXPANSION_C.json via R1.T1 expand against the sealed template",
+    "risk": "medium",
+    "invariant": "Packet IDs are the only post-seal graph expansion; expanded IDs must match the sealed template regex and may introduce only template-declared edges; TASK_GRAPH_EXPANSION_C.json is append-only and every packet appears exactly once.",
+    "owners": [
+      "TASK_GRAPH_EXPANSION_C.json (expansion output; the expand tool is owned by R1.T1's scripts/ranking-v3-task-graph.mjs)"
+    ],
+    "production_callers": [
+      "scripts/ranking-v3-task-graph.mjs expand (R1.T1 tool invoked by C1G; validates against the sealed template with expansionAuthority c1_packet_manifest)",
+      "scripts/ranking-v3-dispatch-cards.mjs verify (DC1 card generator binds expansion receipts; every card generator validates base graph plus applicable expansion receipts)"
+    ],
+    "test_callers": [
+      "scripts/ranking-v3-task-graph.test.mjs (R1.T1 tool test, future; C1G relies on expand being seal-validated)"
+    ],
+    "approved_files": [
+      "$TASK_OUTPUT/TASK_GRAPH_EXPANSION_C.json (task output; no tracked source file exists at base — the tool is R1.T1-owned)"
+    ],
+    "interface_changes": [
+      "TASK_GRAPH_EXPANSION_C.json (via R1.T1 expand --graph --packet-manifest --out; expanded IDs must match the sealed template regex and introduce only template-declared edges)"
+    ],
+    "security_boundaries": [
+      "Post-seal expansion is the ONLY graph mutation allowed; cycles, unknown nodes, undeclared IDs, and unresolved hard dependencies block dispatch",
+      "Sealed template regex enforcement: expansion cannot introduce undeclared task IDs or held-out tasks (packet manifest is tuning-only)",
+      "Append-only expansion receipt: TASK_GRAPH_EXPANSION_C.json is never rewritten after emission"
+    ],
+    "overlap_with": [
+      "FT-G1 (C1G invokes R1.T1 expand against sealed templates)"
+    ],
+    "focused_command": "node scripts/ranking-v3-task-graph.mjs expand --graph \"$TASK_GRAPH\" --packet-manifest \"$PACKET_MANIFEST\" --out \"$TASK_OUTPUT/TASK_GRAPH_EXPANSION_C.json\"",
+    "affected_command": "pnpm test:scripts",
+    "full_suite_triggers": [
+      "pnpm test:scripts",
+      "pnpm --filter @zokizuan/satori-mcp test"
+    ],
+    "red_evidence_required": false,
+    "instructions": "Evidence/execution card per §7.5 Wave C (output column 'graph expansion') and §7.6 evidence-card table. focused_command is the §7.5 exact command with plan substitution variables ($TASK_GRAPH, $PACKET_MANIFEST, $TASK_OUTPUT); scripts/ranking-v3-task-graph.mjs does NOT exist at round_base 652ec82c287fd3a05cc650f6a9eb51bf66bbbc18 (R1.T1 future file) — plan-specified, unverifiable-at-base; do not run at base. affected_command pnpm test:scripts is repo-verified (package.json) and only meaningfully covers this card after Gate 1 (R1.T1's scripts/ranking-v3-task-graph.test.mjs lands). §7.6 row: unmet precondition 'packet manifest from C1 receipt is absent'; validating assertion 'expansion IDs match template regex and every packet exactly once'. Prerequisites per §7.2: C1G: C1, R1.T1. DC1 then binds the expansion receipt. §7.2: 'Wave-C packet identities are the only post-seal graph expansion'; expanded IDs may introduce only template-declared edges."
+  },
+  "isBoundaryGenerator": false,
+  "dispatchable": true
+}
