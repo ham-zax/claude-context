@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "ranking_v3_resource_contract_v1",
+  "workloads": {
+    "search_candidate_survival_v3": {
+      "maxCandidatesPerQuery": 80,
+      "maxQueryBytes": 8192,
+      "maxPassesPerQuery": 4
+    },
+    "provider_request": {
+      "maximumCandidateCount": 80,
+      "maximumPayloadUtf8Bytes": 1048576,
+      "timeoutMs": 30000,
+      "maximumRetries": 1
+    }
+  },
+  "thresholds": {
+    "maxReplayWallMs": 600000,
+    "maxCorpusBytes": 1073741824,
+    "maxReceiptChainDepth": 1000
+  },
+  "environment": {
+    "nodeMajor": 24,
+    "platforms": ["linux"],
+    "architectures": ["x64"],
+    "processCount": 1
+  },
+  "sealedAt": "2026-08-06T06:00:00.000Z"
+}
