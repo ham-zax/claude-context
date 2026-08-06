@@ -46,7 +46,7 @@ jobs:
           if [[ -f "$single_patch" ]]; then
             expected_parent=$(sed -n 's/^# agent-parent-sha: //p' "$single_patch" | head -n 1)
             commit_message=$(sed -n 's/^# agent-commit-message: //p' "$single_patch" | head -n 1)
-            sed '/^# agent-parent-sha: /d; /^# agent-commit-message: /d' "$single_patch" > /tmp/agent.patch
+            sed '/^# agent-parent-sha: /d; /^# agent-commit-message: /d'               "$single_patch" > /tmp/agent.patch
           else
             if [[ ! -f "$metadata" ]]; then
               echo "Multipart patch transport is missing METADATA." >&2
@@ -54,12 +54,21 @@ jobs:
             fi
             expected_parent=$(sed -n 's/^parent=//p' "$metadata" | head -n 1)
             commit_message=$(sed -n 's/^message=//p' "$metadata" | head -n 1)
+            payload_encoding=$(sed -n 's/^encoding=//p' "$metadata" | head -n 1)
             mapfile -t patch_parts < <(find "$patch_dir" -maxdepth 1 -type f -name 'part-*.patch' -print | sort)
             if (( ${#patch_parts[@]} == 0 )); then
               echo "Multipart patch transport has no patch parts." >&2
               exit 1
             fi
-            cat "${patch_parts[@]}" > /tmp/agent.patch
+            cat "${patch_parts[@]}" > /tmp/agent.payload
+            if [[ "$payload_encoding" == "gzip" ]]; then
+              gzip -dc /tmp/agent.payload > /tmp/agent.patch
+            elif [[ -z "$payload_encoding" || "$payload_encoding" == "plain" ]]; then
+              cp /tmp/agent.payload /tmp/agent.patch
+            else
+              echo "Unsupported multipart payload encoding: $payload_encoding" >&2
+              exit 1
+            fi
           fi
 
           actual_parent=$(git rev-parse HEAD^)
