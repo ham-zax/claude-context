@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { LexicalRetrievalModeUnsupportedError } from '@zokizuan/satori-core';
 import { parseSearchOperators, buildSearchQueryPlan } from './search-query-planning.js';
 import { resolveSearchAnswerFocus } from './search-answer-focus.js';
 import {
@@ -90,7 +91,11 @@ function buildInput(overrides: Partial<SearchExecutionInput> = {}): SearchExecut
     return { ...base, ...overrides };
 }
 
-function buildHost(primaryResults: MockResult[], laneResults: MockResult[]) {
+function buildHost(
+    primaryResults: MockResult[],
+    laneResults: MockResult[],
+    laneBehavior: 'results' | 'unsupported' | 'failed' = 'results',
+) {
     const semanticSearchCalls: Array<{
         query: string;
         topK: number;
@@ -107,6 +112,12 @@ function buildHost(primaryResults: MockResult[], laneResults: MockResult[]) {
             const isLaneCall = request.retrievalMode === 'lexical'
                 && request.topK === 80
                 && request.query === 'tzinfo None';
+            if (isLaneCall && laneBehavior === 'unsupported') {
+                throw new LexicalRetrievalModeUnsupportedError('conjunctive lexical retrieval is not supported');
+            }
+            if (isLaneCall && laneBehavior === 'failed') {
+                throw new Error('mock must lane failure');
+            }
             return isLaneCall ? laneResults : primaryResults;
         },
         reranker: null,
@@ -242,4 +253,164 @@ test('queries without must: produce no extra lexical call and unchanged ranked c
         : [];
     assert.deepEqual(identityOf(firstOutcome), identityOf(secondOutcome));
     assert.equal(firstOutcome.kind === 'ok' && firstOutcome.searchWarnings.length, 0);
+});
+
+test('must: coverage reports complete recall when the lane examined fewer candidates than its budget', async () => {
+    const laneMatch = result({
+        relativePath: 'src/rules/veto.ts',
+        content: 'export function veto() { const local = tzinfo; local.replace(None); }',
+    });
+    const { host } = buildHost(
+        [result({ relativePath: 'src/a.ts', content: 'export function first() {}' })],
+        [laneMatch],
+    );
+    const outcome = await run(buildInput(), host);
+
+    assert.equal(outcome.kind, 'ok');
+    assert.deepEqual(outcome.mustCoverage, {
+        semantics: 'case_sensitive_raw_substring_all',
+        status: 'complete_within_examined_candidates',
+        laneAttempted: true,
+        candidatesExamined: 1,
+        candidateBudget: 80,
+        moreMayExist: false,
+    });
+    assert.equal(
+        outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+        false,
+        'a fully examined lane budget must not claim results may be incomplete',
+    );
+});
+
+test('must: coverage reports partial recall when the lane budget is exhausted', async () => {
+    const laneMatches = Array.from({ length: 80 }, (_, index) => (
+        result({
+            relativePath: `src/lane/${index}.ts`,
+            content: `export function lane${index}() { const x = tzinfo; x.replace(None); }`,
+        })
+    ));
+    const { host } = buildHost(
+        [result({ relativePath: 'src/a.ts', content: 'export function first() {}' })],
+        laneMatches,
+    );
+    const outcome = await run(buildInput(), host);
+
+    assert.equal(outcome.kind, 'ok');
+    assert.deepEqual(outcome.mustCoverage, {
+        semantics: 'case_sensitive_raw_substring_all',
+        status: 'partial_candidate_budget',
+        laneAttempted: true,
+        candidatesExamined: 80,
+        candidateBudget: 80,
+        moreMayExist: true,
+    });
+    assert.equal(
+        outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+        true,
+        'an exhausted lane budget must publish the incomplete-results warning',
+    );
+});
+
+test('must: coverage reports a skipped lane when the primary results already fill the limit', async () => {
+    const primary = Array.from({ length: 3 }, (_, index) => (
+        result({
+            relativePath: `src/filled/${index}.ts`,
+            content: `export function filled${index}() { const x = tzinfo; x.replace(None); }`,
+        })
+    ));
+    const { host, semanticSearchCalls } = buildHost(primary, []);
+    const input = buildInput({
+        limit: 2,
+        retrievalPolicy: resolveSearchPolicy({ resultLimit: 2, hasMustOperators: true }),
+    });
+    const outcome = await run(input, host);
+
+    assert.equal(outcome.kind, 'ok');
+    assert.equal(outcome.scored.length >= 2, true);
+    assert.equal(
+        semanticSearchCalls.some((call) => call.query === 'tzinfo None'),
+        false,
+        'a filled primary limit must skip the dedicated lane call',
+    );
+    assert.deepEqual(outcome.mustCoverage, {
+        semantics: 'case_sensitive_raw_substring_all',
+        status: 'lane_skipped_primary_limit_filled',
+        laneAttempted: false,
+        candidatesExamined: 0,
+        candidateBudget: 80,
+        moreMayExist: true,
+    });
+    assert.equal(
+        outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+        true,
+        'a skipped lane must still publish the incomplete-results warning',
+    );
+});
+
+test('must: coverage reports an unavailable lane without claiming the budget was examined', async () => {
+    const { host } = buildHost(
+        [result({ relativePath: 'src/a.ts', content: 'export function first() {}' })],
+        [],
+        'unsupported',
+    );
+    const outcome = await run(buildInput(), host);
+
+    assert.equal(outcome.kind, 'ok');
+    assert.deepEqual(outcome.mustCoverage, {
+        semantics: 'case_sensitive_raw_substring_all',
+        status: 'lane_unavailable',
+        laneAttempted: false,
+        candidatesExamined: 0,
+        candidateBudget: 80,
+        moreMayExist: true,
+    });
+    assert.equal(outcome.searchWarnings.includes('MUST_CONJUNCTIVE_RETRIEVAL_UNAVAILABLE'), true);
+    assert.equal(
+        outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+        true,
+        'an unavailable lane cannot guarantee recall and must publish the incomplete-results warning',
+    );
+});
+
+test('must: coverage reports a failed lane as incomplete', async () => {
+    const { host } = buildHost(
+        [result({ relativePath: 'src/a.ts', content: 'export function first() {}' })],
+        [],
+        'failed',
+    );
+    const outcome = await run(buildInput(), host);
+
+    assert.equal(outcome.kind, 'ok');
+    assert.deepEqual(outcome.mustCoverage, {
+        semantics: 'case_sensitive_raw_substring_all',
+        status: 'lane_failed',
+        laneAttempted: true,
+        candidatesExamined: 0,
+        candidateBudget: 80,
+        moreMayExist: true,
+    });
+    assert.equal(outcome.searchWarnings.includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
+    assert.equal(
+        outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+        true,
+        'a failed lane cannot guarantee recall and must publish the incomplete-results warning',
+    );
+});
+
+test('queries without must: publish no coverage object', async () => {
+    const parsed = parseSearchOperators('where is naive utc handling');
+    const input = buildInput({
+        semanticQuery: parsed.semanticQuery,
+        parsedOperators: parsed,
+        queryPlan: buildSearchQueryPlan(parsed.semanticQuery, true, parsed),
+        retrievalPolicy: resolveSearchPolicy({ resultLimit: 10, hasMustOperators: false }),
+    });
+    const { host } = buildHost(
+        [result({ relativePath: 'src/a.ts', content: 'utc handling' })],
+        [],
+    );
+    const outcome = await run(input, host);
+
+    assert.equal(outcome.kind, 'ok');
+    assert.equal(outcome.mustCoverage, null);
 });

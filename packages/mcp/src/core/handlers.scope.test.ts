@@ -6841,6 +6841,14 @@ test('handleSearchCode attaches must-constraint budget metadata when the dedicat
             candidatesExamined: 40,
             budgetExhausted: false,
         });
+        assert.deepEqual(payload.hints?.mustCoverage, {
+            semantics: 'case_sensitive_raw_substring_all',
+            status: 'complete_within_examined_candidates',
+            laneAttempted: true,
+            candidatesExamined: 40,
+            candidateBudget: 80,
+            moreMayExist: false,
+        });
     });
 });
 
@@ -13423,14 +13431,14 @@ test('handleSearchCode reports a failed conjunctive lane without claiming the bu
         assert.equal(zeroSurvivors.results.length, 0);
         assert.equal(warningCodes(zeroSurvivors).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
         assert.equal(warningCodes(zeroSurvivors).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'), false);
-        assert.equal(warningCodes(zeroSurvivors).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(warningCodes(zeroSurvivors).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), true);
         assert.equal(zeroSurvivors.hints?.mustConstraint?.status, 'failed');
 
         const oneSurvivor = await runCase('NEEDLE_OK');
         assert.equal(oneSurvivor.status, 'ok');
         assert.equal(oneSurvivor.results.length, 1);
         assert.equal(warningCodes(oneSurvivor).includes('MUST_CONJUNCTIVE_RETRIEVAL_FAILED'), true);
-        assert.equal(warningCodes(oneSurvivor).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), false);
+        assert.equal(warningCodes(oneSurvivor).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'), true);
         assert.equal(oneSurvivor.hints?.mustConstraint?.status, 'failed');
     });
 });
@@ -13475,6 +13483,59 @@ test('raw search results carry the must-constraint hint contract', async () => {
             candidatesExamined: 40,
             budgetExhausted: false,
         });
+        assert.deepEqual(payload.hints?.mustCoverage, {
+            semantics: 'case_sensitive_raw_substring_all',
+            status: 'complete_within_examined_candidates',
+            laneAttempted: true,
+            candidatesExamined: 40,
+            candidateBudget: 80,
+            moreMayExist: false,
+        });
+    });
+});
+
+test('handleSearchCode publishes skipped-lane coverage when the primary results fill the limit', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 5 }, (_, idx) => ({
+            content: `export function filled${idx}() { const x = FILLED_TOKEN; x.replace(SECOND_TOKEN); }`,
+            relativePath: `src/filled-${idx}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_filled_${idx}`,
+            symbolLabel: `function filled${idx}()`,
+        }));
+        const handlers = createHandlers(repoPath, denseResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'must:FILLED_TOKEN must:SECOND_TOKEN runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 2,
+            debugMode: 'full',
+        });
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.results.length, 2);
+        assert.deepEqual(payload.hints?.mustCoverage, {
+            semantics: 'case_sensitive_raw_substring_all',
+            status: 'lane_skipped_primary_limit_filled',
+            laneAttempted: false,
+            candidatesExamined: 0,
+            candidateBudget: 80,
+            moreMayExist: true,
+        });
+        assert.equal(
+            warningCodes(payload).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+            true,
+            'a skipped lane must still publish the incomplete-results warning',
+        );
     });
 });
 

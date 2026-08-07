@@ -706,9 +706,24 @@ export type SearchMustConstraintHint =
         candidatesExamined: number;
     };
 
+export type SearchMustCoverage = Readonly<{
+    semantics: "case_sensitive_raw_substring_all";
+    status:
+        | "complete_within_examined_candidates"
+        | "partial_candidate_budget"
+        | "lane_skipped_primary_limit_filled"
+        | "lane_unavailable"
+        | "lane_failed";
+    laneAttempted: boolean;
+    candidatesExamined: number;
+    candidateBudget: number;
+    moreMayExist: boolean;
+}>;
+
 export interface SearchResponseHints extends Record<string, unknown> {
     version?: 1;
     mustConstraint?: SearchMustConstraintHint;
+    mustCoverage?: SearchMustCoverage;
     noiseMitigation?: SearchNoiseMitigationHint;
     debugSearch?: SearchDebugHint | SearchRankingDebugHint | SearchFreshnessDebugHint | SearchPassFailureDebugHint;
     debugSummary?: {

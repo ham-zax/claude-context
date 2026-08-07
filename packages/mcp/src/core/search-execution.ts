@@ -22,6 +22,7 @@ import type {
     SearchCandidateSurvivalOccurrence,
     SearchDebugMode,
     SearchFreshnessSummary,
+    SearchMustCoverage,
     SearchOperatorSummary,
     SearchProviderWorkDebugHint,
     SearchRerankProjectionSummary,
@@ -342,6 +343,7 @@ export type SearchExecutionOutcome =
         semanticPassFailures: SemanticPassFailureDiagnostic[];
         mustConstraintRetrievalOutcome: MustConstraintRetrievalOutcome | null;
         mustConstraintMustTokens: readonly string[];
+        mustCoverage: SearchMustCoverage | null;
     }
     | {
         kind: "vector_backend_unavailable";
@@ -375,6 +377,62 @@ export type MustConstraintRetrievalOutcome =
         candidateBudget: number;
         budgetExhausted: true;
     };
+
+function buildSearchMustCoverage(
+    outcome: MustConstraintRetrievalOutcome | null,
+    laneSkippedByPrimaryLimit: boolean,
+    candidateBudget: number,
+): SearchMustCoverage | null {
+    if (!outcome && !laneSkippedByPrimaryLimit) {
+        return null;
+    }
+    const base = {
+        semantics: "case_sensitive_raw_substring_all" as const,
+        candidateBudget,
+    };
+    if (!outcome) {
+        return {
+            ...base,
+            status: "lane_skipped_primary_limit_filled",
+            laneAttempted: false,
+            candidatesExamined: 0,
+            moreMayExist: true,
+        };
+    }
+    if (outcome.status === "unsupported") {
+        return {
+            ...base,
+            status: "lane_unavailable",
+            laneAttempted: false,
+            candidatesExamined: 0,
+            moreMayExist: true,
+        };
+    }
+    if (outcome.status === "failed") {
+        return {
+            ...base,
+            status: "lane_failed",
+            laneAttempted: true,
+            candidatesExamined: outcome.candidatesExamined,
+            moreMayExist: true,
+        };
+    }
+    return outcome.budgetExhausted
+        ? {
+            ...base,
+            status: "partial_candidate_budget",
+            laneAttempted: true,
+            candidatesExamined: outcome.candidatesExamined,
+            moreMayExist: true,
+        }
+        : {
+            ...base,
+            status: "complete_within_examined_candidates",
+            laneAttempted: true,
+            candidatesExamined: outcome.candidatesExamined,
+            moreMayExist: false,
+        };
+}
 
 export type SearchExecutionHost = {
     searchQuerySupport: SearchQuerySupport;
@@ -891,6 +949,7 @@ export async function runSearchExecution(
     const backendScoreKinds = new Set<BackendScoreKind>();
     let scored: SearchCandidate[] = [];
     let mustConstraintRetrievalOutcome: MustConstraintRetrievalOutcome | null = null;
+    let mustLaneSkippedByPrimaryLimit = false;
     let exactMatchPinningApplied = false;
     const rankingProvenance: SearchExecutionRankingProvenance = {
         semanticPassesUsed: [],
@@ -1371,6 +1430,15 @@ export async function runSearchExecution(
         const mustTokens = input.parsedOperators.must;
         if (
             mustTokens.length > 0
+            && scoredAttempt.length >= input.retrievalPolicy.retrievalResultLimit
+        ) {
+            // The primary lanes already filled the caller's result limit, so
+            // the dedicated lane is skipped; recall beyond the limit is
+            // unexamined and must be reported honestly.
+            mustLaneSkippedByPrimaryLimit = true;
+        }
+        if (
+            mustTokens.length > 0
             && scoredAttempt.length < input.retrievalPolicy.retrievalResultLimit
         ) {
             const mustLaneBudget = retrievalPolicy.maxCandidateLimit;
@@ -1642,23 +1710,26 @@ export async function runSearchExecution(
     rankingProvenance.exactMatchPinningApplied = exactMatchPinningApplied;
     const mustApplied = input.parsedOperators.must.length > 0;
     const mustSatisfied = !mustApplied || scored.length > 0;
+    const mustCoverage = buildSearchMustCoverage(
+        mustConstraintRetrievalOutcome,
+        mustLaneSkippedByPrimaryLimit,
+        retrievalPolicy.maxCandidateLimit,
+    );
     if (mustApplied && !mustSatisfied) {
         searchWarnings.push("FILTER_MUST_UNSATISFIED");
     }
     if (mustApplied && mustConstraintRetrievalOutcome?.status === "failed") {
-        // The lane failed before examining its budget: matches may be
-        // incomplete, but the budget was never exhausted.
         searchWarnings.push(WARNING_CODES.MUST_CONJUNCTIVE_RETRIEVAL_FAILED);
     }
-    if (mustApplied && mustConstraintRetrievalOutcome?.status === "attempted") {
-        if (!mustSatisfied) {
-            searchWarnings.push(WARNING_CODES.MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET);
-        } else if (
-            mustConstraintRetrievalOutcome.budgetExhausted
-            && scored.length < input.retrievalPolicy.retrievalResultLimit
-        ) {
-            searchWarnings.push(WARNING_CODES.MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET);
-        }
+    if (
+        mustApplied
+        && mustConstraintRetrievalOutcome?.status === "attempted"
+        && !mustSatisfied
+    ) {
+        searchWarnings.push(WARNING_CODES.MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET);
+    }
+    if (mustApplied && mustCoverage?.moreMayExist) {
+        searchWarnings.push(WARNING_CODES.MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET);
     }
     if (candidateSurvival) {
         appendSearchCandidateStage(candidateSurvival, "mcp_ranked", scored);
@@ -1734,5 +1805,6 @@ export async function runSearchExecution(
         ...(candidateSurvival ? { candidateSurvival } : {}),
         mustConstraintRetrievalOutcome,
         mustConstraintMustTokens: [...input.parsedOperators.must],
+        mustCoverage,
     };
 }

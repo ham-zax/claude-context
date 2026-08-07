@@ -222,6 +222,7 @@ export async function finalizeSearchResults(
         rerankerByteBudgetOmittedCandidates,
         mustConstraintRetrievalOutcome,
         mustConstraintMustTokens,
+        mustCoverage,
         semanticExpansion,
         providerWork,
         candidateSurvival,
@@ -529,6 +530,7 @@ export async function finalizeSearchResults(
                 noiseMitigationHint,
                 generatedArtifactsHint,
                 mustConstraintHint,
+                mustCoverageHint: mustCoverage ?? undefined,
                 results: rawResults,
             }),
         };
@@ -720,6 +722,7 @@ export async function finalizeSearchResults(
                 noiseMitigationHint,
                 generatedArtifactsHint,
                 mustConstraintHint,
+                mustCoverageHint: mustCoverage ?? undefined,
                 resultCounts,
                 ...(disclosure ? { disclosure } : {}),
                 results: [...results],

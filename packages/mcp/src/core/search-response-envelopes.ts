@@ -16,7 +16,7 @@ import type {
     SearchResponseEnvelope,
 } from "./search-types.js";
 import { SEARCH_RESPONSE_FORMAT_VERSION } from "./search-types.js";
-import type { SearchMustConstraintHint } from "./search-types.js";
+import type { SearchMustConstraintHint, SearchMustCoverage } from "./search-types.js";
 import type { CompletionProbeDebugHint } from "./tracked-root-readiness.js";
 import {
     buildSearchWarningDetails,
@@ -42,6 +42,7 @@ type SearchResponseCommonInput = {
     noiseMitigationHint?: unknown;
     generatedArtifactsHint?: unknown;
     mustConstraintHint?: SearchMustConstraintHint;
+    mustCoverageHint?: SearchMustCoverage;
 };
 
 function buildSearchResponseHints(input: SearchResponseCommonInput): { hints?: Record<string, unknown> } {
@@ -57,6 +58,9 @@ function buildSearchResponseHints(input: SearchResponseCommonInput): { hints?: R
     }
     if (input.mustConstraintHint) {
         responseHints.mustConstraint = input.mustConstraintHint;
+    }
+    if (input.mustCoverageHint) {
+        responseHints.mustCoverage = input.mustCoverageHint;
     }
     if (input.debugSummary) {
         responseHints.debugSummary = input.debugSummary;
