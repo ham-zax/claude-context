@@ -10,6 +10,7 @@ import {
     POTION_INFERENCE_CONTRACT_DIGEST,
     POTION_MODEL_ID,
     PotionEmbedding,
+    restoreVerifiedOwnerExecutableBit,
 } from './potion-embedding.js';
 import { EmbeddingProviderError } from './base-embedding.js';
 
@@ -220,6 +221,114 @@ test('Potion artifact verification fails closed before worker startup', async ()
             && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE'
             && !error.message.includes(os.tmpdir()),
     );
+});
+
+test('repairs only the owner execute bit after exact helper verification', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potion-mode-'));
+    try {
+        const helper = path.join(root, 'satori-potion');
+        fs.writeFileSync(helper, Buffer.from('trusted-helper'));
+        fs.chmodSync(helper, 0o644);
+        const expected = crypto.createHash('sha256').update('trusted-helper').digest('hex');
+
+        await restoreVerifiedOwnerExecutableBit({
+            filePath: helper,
+            expectedSha256: expected,
+            label: 'helper',
+        });
+
+        assert.equal(fs.statSync(helper).mode & 0o777, 0o744);
+        fs.accessSync(helper, fs.constants.X_OK);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('checksum mismatch does not chmod the helper', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potion-mode-'));
+    try {
+        const helper = path.join(root, 'satori-potion');
+        fs.writeFileSync(helper, Buffer.from('trusted-helper'));
+        fs.chmodSync(helper, 0o644);
+
+        await assert.rejects(
+            restoreVerifiedOwnerExecutableBit({
+                filePath: helper,
+                expectedSha256: '0'.repeat(64),
+                label: 'helper',
+            }),
+            (error: unknown) => error instanceof EmbeddingProviderError
+                && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+        );
+        assert.equal(fs.statSync(helper).mode & 0o777, 0o644);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('symlink helper is rejected before any mode repair', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potion-mode-'));
+    try {
+        const target = path.join(root, 'target');
+        fs.writeFileSync(target, Buffer.from('trusted-helper'));
+        fs.chmodSync(target, 0o644);
+        const helper = path.join(root, 'satori-potion');
+        fs.symlinkSync(target, helper);
+        const expected = crypto.createHash('sha256').update('trusted-helper').digest('hex');
+
+        await assert.rejects(
+            restoreVerifiedOwnerExecutableBit({
+                filePath: helper,
+                expectedSha256: expected,
+                label: 'helper',
+            }),
+            (error: unknown) => error instanceof EmbeddingProviderError
+                && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+        );
+        assert.equal(fs.statSync(target).mode & 0o777, 0o644);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('directory helper is rejected', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potion-mode-'));
+    try {
+        const helper = path.join(root, 'satori-potion');
+        fs.mkdirSync(helper);
+        await assert.rejects(
+            restoreVerifiedOwnerExecutableBit({
+                filePath: helper,
+                expectedSha256: '0'.repeat(64),
+                label: 'helper',
+            }),
+            (error: unknown) => error instanceof EmbeddingProviderError
+                && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+        );
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('an already executable helper keeps its exact mode', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potion-mode-'));
+    try {
+        const helper = path.join(root, 'satori-potion');
+        fs.writeFileSync(helper, Buffer.from('trusted-helper'));
+        fs.chmodSync(helper, 0o744);
+        const expected = crypto.createHash('sha256').update('trusted-helper').digest('hex');
+
+        await restoreVerifiedOwnerExecutableBit({
+            filePath: helper,
+            expectedSha256: expected,
+            label: 'helper',
+        });
+
+        assert.equal(fs.statSync(helper).mode & 0o777, 0o744);
+        fs.accessSync(helper, fs.constants.X_OK);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
 });
 
 const realHelperPath = process.env.SATORI_POTION_TEST_HELPER;

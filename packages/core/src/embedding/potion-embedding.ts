@@ -118,6 +118,56 @@ async function assertFileDigest(filePath: string, expected: string, label: strin
     }
 }
 
+/**
+ * Restore the owner execute bit on a pinned artifact only after exact byte
+ * verification. The repair is limited to the owner execute bit; group and
+ * world modes are never widened.
+ */
+export async function restoreVerifiedOwnerExecutableBit(input: {
+    filePath: string;
+    expectedSha256: string;
+    label: string;
+}): Promise<void> {
+    let stats: fs.Stats;
+    try {
+        stats = await fs.promises.lstat(input.filePath);
+    } catch {
+        throw providerError({
+            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+            retryable: false,
+            message: `Pinned Potion ${input.label} is unavailable.`,
+        });
+    }
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+        throw providerError({
+            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+            retryable: false,
+            message: `Pinned Potion ${input.label} must be a regular file.`,
+        });
+    }
+    await assertFileDigest(input.filePath, input.expectedSha256, input.label);
+    if ((stats.mode & 0o100) === 0) {
+        try {
+            await fs.promises.chmod(input.filePath, stats.mode | 0o100);
+        } catch {
+            throw providerError({
+                code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+                retryable: false,
+                message: `Pinned Potion ${input.label} execute permission could not be repaired.`,
+            });
+        }
+    }
+    try {
+        await fs.promises.access(input.filePath, fs.constants.X_OK);
+    } catch {
+        throw providerError({
+            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+            retryable: false,
+            message: `Pinned Potion ${input.label} is not executable.`,
+        });
+    }
+}
+
 /** Verify the exact L1 artifact closure before any source text reaches native code. */
 export async function verifyPinnedPotionArtifacts(
     config: Readonly<PotionEmbeddingConfig>,
@@ -142,15 +192,11 @@ export async function verifyPinnedPotionArtifacts(
         assertFileDigest(path.join(config.modelPath, 'tokenizer.json'), POTION_TOKENIZER_SHA256, 'tokenizer'),
         assertFileDigest(path.join(config.modelPath, 'config.json'), POTION_CONFIG_SHA256, 'configuration'),
     ]);
-    try {
-        await fs.promises.access(config.helperPath, fs.constants.X_OK);
-    } catch {
-        throw providerError({
-            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
-            retryable: false,
-            message: 'Pinned Potion helper is not executable.',
-        });
-    }
+    await restoreVerifiedOwnerExecutableBit({
+        filePath: config.helperPath,
+        expectedSha256: POTION_HELPER_SHA256,
+        label: 'helper',
+    });
 }
 
 export class PotionEmbedding extends Embedding {
