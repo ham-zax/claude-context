@@ -7,6 +7,8 @@ All observations below were reproduced with production JS builds, not tsx.
 
 ## 1. Published npm tarball ships the pinned Potion helper without the exec bit
 
+- **Status (2026-08-07 master rollout)**: fixed — the owner execute bit is restored only after exact checksum verification of the pinned helper, and the packed direct-install release smoke asserts the closure. Exec-bit regression is covered by core tests and release smoke.
+
 - **Symptom**: every `manage_index`/`search_codebase` call on a plain
   `npm install @zokizuan/satori-mcp@6.8.1` fails with
   `Pinned Potion helper is not executable.` The server keeps running and
@@ -31,6 +33,8 @@ All observations below were reproduced with production JS builds, not tsx.
   well — the gap is only that nothing prevents shipping the broken tarball).
 
 ## 2. Runtime-owner registry is global, not state-root scoped
+
+- **Status (2026-08-07 master rollout)**: fixed — the registry is now scoped to the backend authority root: LanceDB state roots get `<stateRoot>/runtime-owner`, Milvus endpoints get an endpoint-hash directory under `~/.satori/runtime-owner/milvus/`, and the conflict message prints both the registry and lock paths.
 
 - **Symptom**: `manage_index create/reindex/sync/clear` fail closed with
   `runtime_owner_conflict` even when every runtime uses a fully isolated
@@ -61,6 +65,8 @@ All observations below were reproduced with production JS builds, not tsx.
 
 ## 3. Reranker input projection diverges between 6.8.1 and 6.8.2
 
+- **Status (2026-08-07 master rollout)**: superseded by exact per-document observability — full-debug candidate survival now records per-document UTF-8 bytes and SHA-256 for every reranker input, so projection drift is provable per document and root cause is no longer inferred from aggregate bytes.
+
 - **Symptom**: for the identical query, index corpus, and 32 selected
   candidates, telemetry shows different reranker input sizes:
   6.8.1 `reranker_input_bytes=48114` vs master `reranker_input_bytes=36383`.
@@ -80,6 +86,8 @@ All observations below were reproduced with production JS builds, not tsx.
 
 ## 5. First search after server boot races the startup sync (`not_ready: indexing`)
 
+- **Status (2026-08-07 master rollout)**: fixed with bounded retry semantics — a cold-start search joins one transient same-root sync (bounded by `retryAfterMs`) and succeeds when it completes; non-joinable operations return `not_ready` with `retryAfterMs=2000` and the active `indexingOperation`.
+
 - **Symptom**: a freshly spawned server against an already-completed index
   returns `{"status":"not_ready","reason":"indexing"}` for the first
   `search_codebase` call when the workspace has dirty files. In this run
@@ -96,6 +104,8 @@ All observations below were reproduced with production JS builds, not tsx.
   `expectedReadyMs`/retry-after hint so drivers can wait deterministically.
 
 ## 6. LateOn execution timeout is reproducible under CPU contention (both versions)
+
+- **Status (2026-08-07 master rollout)**: observability fixed; adaptive timeout explicitly rejected — terminal rerank executions now report qualified deadline diagnostics (attempts, retries, timeouts, effective deadline, observed wall, deadline lateness) alongside the frozen retrieval order. Deadlines remain fixed by plan; a contention-adaptive timeout was explicitly not adopted.
 
 - **Symptom**: query q14 failed LateOn with `lateon_execution_timeout` on
   both 6.8.1 and master (reproduced twice), falling back to
@@ -122,6 +132,8 @@ All observations below were reproduced with production JS builds, not tsx.
   record since it cost debugging time during this experiment.
 
 ## 8. No per-document rerank-input observability anywhere in master diagnostics
+
+- **Status (2026-08-07 master rollout)**: fixed — under `debugMode=full`, the `reranker_input` candidate-survival stage records per-document UTF-8 bytes, SHA-256, factual candidate role, and projection identities (never source text), and projection failures appear as typed removals.
 
 - **Symptom**: while building the controlled same-input native-vs-legacy
   evaluation (2026-08-07), the exact documents handed to LateOn could not be
@@ -151,6 +163,8 @@ All observations below were reproduced with production JS builds, not tsx.
   would also make projection-contract drift provable across versions.
 
 ## 9. Reranker input carries no factual candidate role or query-intent signal (controlled same-input evidence)
+
+- **Status (2026-08-07 master rollout)**: fixed by projection v3 context — the rerank query now carries the exact question once plus a deterministic answer focus, and projection-v3 documents carry a factual `candidate_role`; the provider order remains final and no score multipliers or global test/docs penalties were added.
 
 - **Symptom**: on implementation-seeking conceptual queries, native
   (reranker-order-authoritative) output can lead with test results ahead of
@@ -185,6 +199,8 @@ All observations below were reproduced with production JS builds, not tsx.
   facts affect relevance; do not encode them as score multipliers.
 
 ## 10. Rerank dies all-or-nothing at `document_projection` for some queries; LateOn never called
+
+- **Status (2026-08-07 master rollout)**: fixed by typed/partial projection — projections return typed failure reasons per candidate; unprojectable candidates are omitted individually (`RERANKER_INPUT_DEGRADED`), zero projectable documents skip the provider without `RERANKER_FAILED` (`RERANKER_SKIPPED_INPUT`), and failure counts/first failure are published in the rerank projection summary.
 
 - **Symptom**: on master (6.8.2, this tree), some queries on a warm,
   fully-synced index fail reranking with `failurePhase: "document_projection"`,

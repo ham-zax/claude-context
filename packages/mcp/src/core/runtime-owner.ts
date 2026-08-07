@@ -296,7 +296,6 @@ export function formatRuntimeOwnerConflictNextStep(
     paths: { registryPath?: string; lockPath?: string } = {},
 ): string {
     const registryPath = paths.registryPath || path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME);
-    const lockPath = paths.lockPath || path.join(defaultRuntimeStateDir(), OWNER_LOCK_NAME);
     if (conflictingOwners.length === 0) {
         return [
             "Stop every other Satori MCP client (IDE/agent sessions) so only one package version and config remain.",

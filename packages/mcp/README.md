@@ -97,21 +97,35 @@ In a fresh two-task OpenCode comparison where both arms answered correctly, Sato
   navigation-only damage uses graph-only activation. V3, missing, corrupt,
   changed, or ambiguous source authority requires reindexing.
 - Provider, model, dimensions, projection, and vector backend are persisted compatibility identities; changing them requires a reindex.
-- Multiple incompatible live Satori runtimes are blocked from mutating the same publication.
+- Multiple incompatible live Satori runtimes are blocked from mutating the same publication. Mutation ownership is scoped to the backend authority root: each LanceDB state root has its own owner registry, and Milvus runtimes are keyed by endpoint.
+- Rerank context v3 sends the exact question once plus a deterministic answer
+  focus, and each projected document carries a factual `candidate_role`. The
+  reranker's published order is final; there are no ranking weights, score
+  multipliers, or global test/documentation penalties. Partial projection
+  reranks the projectable candidates and reports `RERANKER_INPUT_DEGRADED`;
+  zero projectable candidates skip the provider with `RERANKER_SKIPPED_INPUT`
+  (never `RERANKER_FAILED`); terminal provider failures report
+  `RERANKER_FAILED` with qualified deadline and lateness diagnostics while the
+  frozen retrieval order is published.
+- Under `debugMode=full`, candidate survival records per-document rerank input
+  provenance — UTF-8 bytes, SHA-256, candidate role, and projection identities —
+  never source text.
 - Managed offline Potion + LanceDB clients on Linux x64/WSL2 share one private
   local host. Connected providers, Milvus, and explicit Ollama runtimes keep
   the direct per-client lifecycle.
-- LateOn D32 is the default profile whenever LateOn reranking is selected.
-  Managed offline installs select it automatically; the default is enabled
-  through an explicit owner activation decision scoped to Linux x64/WSL2 managed
-  offline installations, and D32 is operationally qualified but not held-out
-  qualified. Direct runtimes enable it when `SATORI_RERANKER_PROVIDER=lateon`
-  and an absolute `SATORI_LATEON_MODEL_PATH` are configured. The model directory
-  is shared outside versioned MCP runtimes, artifact digests are verified,
-  inference runs in a killable worker, and every failure falls back atomically
-  to exact + BM25 + single-vector ordering.
-  `SATORI_LATEON_PROFILE` may explicitly select `lateon_projection_v1_d16_legacy`,
-  `lateon_projection_v2_d16_v1`, or `lateon_offline_quality_projection_v2_d32_v2`;
+- LateOn projection-v3 D32 is the default profile whenever LateOn reranking is
+  selected. Managed offline installs select it automatically; the default is
+  enabled through an explicit owner activation decision scoped to Linux
+  x64/WSL2 managed offline installations, and D32 is operationally qualified
+  but not held-out qualified. Direct runtimes enable it when
+  `SATORI_RERANKER_PROVIDER=lateon` and an absolute `SATORI_LATEON_MODEL_PATH`
+  are configured. The model directory is shared outside versioned MCP runtimes,
+  artifact digests are verified, inference runs in a killable worker, and every
+  failure falls back atomically to exact + BM25 + single-vector ordering.
+  `SATORI_LATEON_PROFILE` may explicitly select
+  `lateon_offline_quality_projection_v3_d32_v1` (the default),
+  `lateon_offline_quality_projection_v2_d32_v2`,
+  `lateon_projection_v1_d16_legacy`, or `lateon_projection_v2_d16_v1`;
   the runtime never substitutes one depth for the other.
   `SATORI_RERANKER_PROVIDER=none` is the explicit opt-out: with Ollama embeddings
   it means the selected embedding provider plus baseline ordering, not

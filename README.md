@@ -218,7 +218,7 @@ Public paths are absolute. `read_file` is restricted to tracked searchable roots
 6. use continue_search only when the frozen result has more useful evidence
 ```
 
-If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
+If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes. A search that arrives during a transient same-root sync joins it once and proceeds when it completes; other in-flight indexing returns `not_ready` with `retryAfterMs` and the active indexing operation so drivers can retry deterministically. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
 
 ## Index Profiles
 
@@ -264,7 +264,7 @@ MILVUS_ADDRESS
 MILVUS_TOKEN
 ```
 
-Run `doctor` after changing runtime configuration. Restart every Satori MCP client before mutating an index under a new provider, model, backend, dimension, or package version; incompatible live runtime owners are blocked instead of racing one publication.
+Run `doctor` after changing runtime configuration. Restart every Satori MCP client before mutating an index under a new provider, model, backend, dimension, or package version; incompatible live runtime owners are blocked instead of racing one publication. Mutation ownership is scoped to the backend authority root: each LanceDB state root carries its own owner registry, and Milvus runtimes are keyed by endpoint, so isolated state roots do not block one another.
 
 ## How Publication Works
 
@@ -281,7 +281,7 @@ compatible publication.
 ## Offline Local Reranking
 
 Offline install defaults to reranking eligible candidates with the Apache-2.0
-`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint at projection-v2 depth 32.
+`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint at projection-v3 depth 32.
 D32 is operationally qualified but not held-out qualified; it became the
 managed offline default through an explicit owner activation decision scoped to
 Linux x64/WSL2 managed offline installations. Model weights are not bundled in
@@ -310,28 +310,44 @@ SATORI_LATEON_MODEL_PATH=/absolute/path/to/LateOn-Code-edge
 The default profile is:
 
 ```text
-SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2
+SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v3_d32_v1
 ```
 
-Explicit D16 choices remain available for compatible developer
-configurations:
+Explicit D16 and projection-v2 D32 choices remain available for compatible
+developer configurations:
 
 ```text
 SATORI_LATEON_PROFILE=lateon_projection_v1_d16_legacy
 SATORI_LATEON_PROFILE=lateon_projection_v2_d16_v1
+SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2
 ```
 
 D16 and D32 are distinct identity-bearing profiles. Satori never switches
 between them automatically; an unavailable, overloaded, timed-out, cancelled,
 or invalid neural run restores the deterministic baseline order.
 
+Projection-v3 rerank context sends the exact question once, plus a
+deterministic answer focus derived from explicit query cues (tests,
+documentation, configuration, references, implementation, or neutral), and
+each projected document carries a factual `candidate_role` derived from path
+classification (never a preference value). The reranker's published order
+remains final: Satori applies no ranking weights, score multipliers, or
+global test/documentation penalties. When only some candidates project,
+Satori reranks the projectable ones, keeps the failed candidate in its
+retrieval slot, and reports `RERANKER_INPUT_DEGRADED`; when none project, it
+skips the provider, preserves retrieval order, and reports
+`RERANKER_SKIPPED_INPUT` instead of `RERANKER_FAILED`.
+
 The runtime verifies the pinned revision's artifact digests before use, performs
 ONNX inference in a killable child process, and preserves the complete
 deterministic baseline when model loading, scoring, validation, or the request
-deadline fails. Projection-v2 profiles freeze model, projection, depth, thread,
+deadline fails. Projection profiles freeze model, projection, depth, thread,
 and batching behavior. Operators may only reduce their request deadline, queue
 wait, reranker-stage deadline, or active/queued capacity using the corresponding
-variables listed above. The resulting effective profile remains part of the
+variables listed above; deadlines are never increased. A terminal rerank
+execution reports qualified diagnostics — attempts, retries, timeouts, the
+effective deadline, observed wall time, and deadline lateness — alongside the
+frozen retrieval order. The resulting effective profile remains part of the
 shared-runtime and frozen-result identity.
 
 LateOn is query-time ranking evidence only. It does not control candidate

@@ -216,8 +216,7 @@ test("provider order stays authoritative when tests outrank implementation", asy
     const question = "how does Shariah compliance checking block trades";
     const reranker: Reranker = {
         getIdentity: () => ({ provider: "lateon", model: "test", profile: "context-v3" }),
-        rerank: async (_query, documents, options) => {
-            const identities = options?.identities ?? [];
+        rerank: async (_query, documents) => {
             // Provider puts the test document first for an implementation query.
             const order = [1, 0].slice(0, documents.length);
             return order.map((index, rank) => ({

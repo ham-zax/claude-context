@@ -1645,7 +1645,7 @@ test("managed launcher closes the real postflight runtime on stdin EOF and unreg
     }
 
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-cli-real-postflight-close-"));
-    const ownersPath = path.join(homeDir, ".satori", "runtime", "owners.json");
+    const ownersPath = path.join(homeDir, ".satori", "runtime-owner", "owners.json");
     let runtimePid: number | undefined;
     let session: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;
     try {
@@ -1890,6 +1890,10 @@ test("managed offline Ollama launcher preserves the direct runtime lifecycle", (
         fs.copyFileSync(
             sourceIdentityModule,
             path.join(serverDirectory, "shared-runtime-identity.js"),
+        );
+        fs.copyFileSync(
+            path.resolve(PACKAGE_ROOT, "..", "mcp", "dist", "server", "lateon-reranker-protocol.js"),
+            path.join(serverDirectory, "lateon-reranker-protocol.js"),
         );
         fs.writeFileSync(
             runtimeEntry,

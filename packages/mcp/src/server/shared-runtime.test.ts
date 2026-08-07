@@ -35,6 +35,7 @@ function config(): ContextMcpConfig {
         executionProfile: "connected",
         networkPolicy: { kind: "remote-allowed" },
         vectorStoreProvider: "Milvus",
+        milvusEndpoint: "localhost:19530",
         encoderProvider: "VoyageAI",
         encoderModel: "voyage-code-3",
         encoderOutputDimension: 1024,
