@@ -65,6 +65,16 @@ export function isFixturePath(normalizedPath: string): boolean {
         || hasPathSegment(normalizedPath, "__fixtures__");
 }
 
+const CONFIGURATION_PATH_EXTENSIONS = [
+    ".json", ".jsonc", ".yaml", ".yml", ".toml", ".ini", ".xml", ".properties", ".env",
+];
+
+export function isConfigurationPath(normalizedPath: string): boolean {
+    const baseName = normalizedPath.split("/").pop() || "";
+    return baseName === "dockerfile"
+        || CONFIGURATION_PATH_EXTENSIONS.some((extension) => normalizedPath.endsWith(extension));
+}
+
 function isArtifactPath(normalizedPath: string): boolean {
     return hasLeadingPathSegment(normalizedPath, "reports")
         || hasLeadingPathSegment(normalizedPath, "report")
