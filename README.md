@@ -281,13 +281,15 @@ compatible publication.
 ## Offline Local Reranking
 
 Offline install defaults to reranking eligible candidates with the Apache-2.0
-`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint at projection-v3 depth 32.
+`lightonai/LateOn-Code-edge` FP32 ONNX checkpoint at projection-v4 depth 32.
 D32 is operationally qualified but not held-out qualified; it became the
 managed offline default through an explicit owner activation decision scoped to
 Linux x64/WSL2 managed offline installations. Model weights are not bundled in
 each versioned MCP runtime. The CLI downloads the roughly 72 MB pinned closure
 once into `~/.satori/models/`, verifies every artifact, and reuses it across
-upgrades. Disable neural reranking explicitly with:
+upgrades. `satori upgrade` migrates previous managed combinations (context-v3
+activated profile or the historical v3 rollout) to the context-v4 default
+atomically. Disable neural reranking explicitly with:
 
 ```bash
 satori install --runtime offline --reranker none
@@ -310,11 +312,13 @@ SATORI_LATEON_MODEL_PATH=/absolute/path/to/LateOn-Code-edge
 The default profile is:
 
 ```text
-SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v3_d32_v1
+SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v4_d32_v1
+SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v4_d32_owner_default_v1
 ```
 
-Explicit D16 and projection-v2 D32 choices remain available for compatible
-developer configurations:
+Explicit D16, projection-v2, and projection-v3 D32 choices remain available for
+compatible developer configurations (the v3 activated combination is admitted
+and migrated to the v4 default by `satori upgrade`):
 
 ```text
 SATORI_LATEON_PROFILE=lateon_projection_v1_d16_legacy
@@ -326,17 +330,19 @@ D16 and D32 are distinct identity-bearing profiles. Satori never switches
 between them automatically; an unavailable, overloaded, timed-out, cancelled,
 or invalid neural run restores the deterministic baseline order.
 
-Projection-v3 rerank context sends the exact question once, plus a
-deterministic answer focus derived from explicit query cues (tests,
-documentation, configuration, references, implementation, or neutral), and
-each projected document carries a factual `candidate_role` derived from path
-classification (never a preference value). The reranker's published order
-remains final: Satori applies no ranking weights, score multipliers, or
-global test/documentation penalties. When only some candidates project,
-Satori reranks the projectable ones, keeps the failed candidate in its
-retrieval slot, and reports `RERANKER_INPUT_DEGRADED`; when none project, it
-skips the provider, preserves retrieval order, and reports
-`RERANKER_SKIPPED_INPUT` instead of `RERANKER_FAILED`.
+Projection-v4 rerank context sends the exact question once plus a
+positive-only answer-type line (the implementation focus never names
+competing artifact classes), and each projected document is a bounded answer
+packet: factual `candidate_role` derived from path classification plus trusted
+structural context (direct callers, callees, and supporting tests resolved to
+exact instance identities in the same sealed navigation generation; sorted and
+capped; never a preference value). The reranker's published order remains
+final: Satori applies no ranking weights, score multipliers, or global
+test/documentation penalties. When only some candidates project, Satori
+reranks the projectable ones, keeps the failed candidate in its retrieval
+slot, and reports `RERANKER_INPUT_DEGRADED`; when none project, it skips the
+provider, preserves retrieval order, and reports `RERANKER_SKIPPED_INPUT`
+instead of `RERANKER_FAILED`.
 
 The runtime verifies the pinned revision's artifact digests before use, performs
 ONNX inference in a killable child process, and preserves the complete

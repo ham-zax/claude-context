@@ -1,5 +1,15 @@
 # Satori Search Reliability and Reranker Context Master Implementation Plan
 
+> **STATUS (2026-08-08): IMPLEMENTED / HISTORICAL.** Superseded by the
+> context-v4 plan (`docs/plans/2026-08-08-satori-search-contracts-focus-rerank-v4-master-plan.md`),
+> which repaired the remaining contract/identity regressions (v1/v2 query
+> compatibility, complete request identity, activation-policy truthfulness,
+> subdirectory scope, must-recall disclosure, projection diagnostics,
+> continuation/retry semantics, navigation-generation attribution, aggregated
+> exact-symbol validation) and replaced the v3 rerank context with the
+> positive-only query-v2 + answer-packet document-v4 context activated as the
+> managed default. This document is retained for historical record only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan strictly one task at a time. Do not parallelize tasks, do not use subagents, and do not begin a later task until the current task is committed and its focused verification is green. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the production reliability and observability defects found during the TradingView runs, then improve the reranker input contract so LateOn receives the user's exact question, a deterministic answer-focus signal, and factual candidate roles—without reintroducing hardcoded ranking weights or local score-based reordering.

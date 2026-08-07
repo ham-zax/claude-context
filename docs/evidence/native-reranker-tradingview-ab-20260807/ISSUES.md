@@ -5,6 +5,14 @@ master (6.8.2, `e43ff3f`) over raw MCP stdio against
 `~/repo/tradingview_ratio` with isolated `SATORI_STATE_ROOT`s.
 All observations below were reproduced with production JS builds, not tsx.
 
+## Context-v4 Rollout Status (2026-08-08, plan 2026-08-08-satori-search-contracts-focus-rerank-v4)
+
+All entries 11–18 below were closed by the context-v4 rollout; each entry's
+status line cites the fixing task/commit. Acceptance mapping (owner-frozen F-1…F-8
+gate): F-1 → Task 6, F-2 → Task 5, F-3 → Task 8, F-4 → Task 1, F-5 → Task 7,
+F-6 → Task 8, F-7 → Task 9, F-8 → Task 10. Production receipt:
+`docs/evidence/search-contracts-focus-v4-production-20260808/PRODUCTION_RECEIPT.md`.
+
 ## 1. Published npm tarball ships the pinned Potion helper without the exec bit
 
 - **Status (2026-08-07 master rollout)**: fixed — the owner execute bit is restored only after exact checksum verification of the pinned helper, and the packed direct-install release smoke asserts the closure. Exec-bit regression is covered by core tests and release smoke.
@@ -275,6 +283,7 @@ against the live index. Entry 18 (F-4) was investigated after entries 11–17
 were written and is appended at the end.
 
 ## 11. `must:` recall is rank-limited by design and the semantics are undocumented (F-1)
+- **Status (2026-08-08 context-v4)**: fixed — Task 6 (`405388b`). `must:` now publishes honest bounded-recall coverage (`hints.mustCoverage` with `moreMayExist`, five statuses including `lane_skipped_primary_limit_filled`) and the `MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET` warning fires on every incomplete path; exact case-sensitive substring semantics are documented in the tool description. No exhaustive scan was added (explicit non-goal).
 
 - **Symptom (reported)**: `must:tzinfo must:replace` found the gate test and
   helpers but only one of the known violators; `cache_repo.py` never appeared
@@ -308,6 +317,7 @@ were written and is appended at the end.
   settles it).
 
 ## 12. `path` argument is authorization-only — subdirectory scope is silently dropped (F-2)
+- **Status (2026-08-08 context-v4)**: fixed — Task 5 (`fa2676a`). The requested subdirectory is now a hard candidate scope applied before reranker admission across every retrieval arm plus the exact fast path (`removedByRequestedSubdirectory` in the filter summary); sibling subdirectories return disjoint pools.
 
 - **Symptom (reported)**: searches scoped to two different subdirectories
   returned essentially the same global pool, including files outside both
@@ -333,6 +343,7 @@ were written and is appended at the end.
   description. Do not inject it into the reranker query.
 
 ## 13. `continue_search` handle semantics misread by callers — "complete" vs caller-limit omissions (F-3)
+- **Status (2026-08-08 context-v4)**: fixed — Task 8 (`68a259b`). Grouped envelopes now publish `omittedBeyondLimitGroupCount` (available − caller-bounded frozen set) whenever positive, and `continuation: "complete"` explicitly means complete for the caller-bounded frozen set only (documented on the envelope type, both tool descriptions, and READMEs).
 
 - **Symptom (reported)**: no continuation handle on 6.8.1; on 6.8.2
   `continuation: "complete"` while `omittedGroupCount: 19` of 27.
@@ -360,6 +371,7 @@ were written and is appended at the end.
   that "complete" refers to the caller-bounded frozen set.
 
 ## 14. Rerank degradation concentrates on `must:`-heavy queries via unprojectable live-disk candidates (F-5)
+- **Status (2026-08-08 context-v4)**: fixed — Task 7 (`66cb96b`). Typed local projection degradation (`hints.debugSearch.rerankerProjection` with `skippedCandidates`, `failureCounts`, `firstFailure`) is published in ranking/full debug and dedicated warning details explicitly distinguish local projection degradation from provider failure.
 
 - **Symptom (reported)**: 5/7 degraded-ranking queries were `must:`-heavy;
   non-`must:` queries ranked cleanly on both versions.
@@ -395,6 +407,7 @@ were written and is appended at the end.
   behavior is fixed by this rollout).
 
 ## 15. Post-100% reindex finalization still blocks searches — now with bounded retry (F-6)
+- **Status (2026-08-08 context-v4)**: fixed — Task 8 (`68a259b`). Every `not_ready` reason="indexing" path carries `retryAfterMs: 2000` plus the active `indexingOperation {action,phase,generation}` when known, including the freshness `skipped_indexing` path.
 
 - **Symptom (reported)**: on 6.8.1, after `progressPct: 100.0` /
   `phase: writing`, searches returned `not_ready` for ~30–60s until the
@@ -424,6 +437,7 @@ were written and is appended at the end.
   contract.
 
 ## 16. `sidecar.builtAt` semantics correct on master; reported staleness needs live attribution (F-7)
+- **Status (2026-08-08 context-v4)**: fixed — Task 9 (`5613b6c`). Ok call-graph traversals publish `navigationAuthority {generationId, navigationSealSha256, relationshipManifestSha256, builtAt}` from the exact serving navigation generation (receipt marker or source-backed binding), distinct from the call-graph sidecar `builtAt`.
 
 - **Symptom (reported)**: after a full reindex (gen 4185, Aug 7–8),
   `call_graph` still reported `sidecar.builtAt: 2026-08-04T23:20:47.090Z`.
@@ -453,6 +467,7 @@ were written and is appended at the end.
   `relationships/manifest.json` `builtAt` on disk.
 
 ## 17. `read_file` exact-symbol validation reveals errors one round trip at a time (F-8)
+- **Status (2026-08-08 context-v4)**: fixed — Task 10 (`121a4f5`/`d95d3a7`). `open_symbol` is validated as one unit: missing version, conflicting identities, missing operation, missing `mode`, and inner shape violations all appear in one response at stable field paths; union sub-issues are flattened by `formatZodError`.
 
 - **Symptom (reported)**: mixing `symbolId` + `symbolLabel` and omitting
   `mode` produced two sequential validation errors instead of one complete
@@ -479,6 +494,7 @@ were written and is appended at the end.
   the full required set in the field description.
 
 ## 18. Cross-module constructor callers: extraction fixed on master, but stale sidecars are never invalidated (F-4)
+- **Status (2026-08-08 context-v4)**: fixed — Task 1 (`3a26a11`). `RELATIONSHIP_BUILDER_VERSION` bumped to `relationship-v10+python-cross-module-constructors+python-native-resolution-v1`; stale pre-fix sidecars are rejected with `requires_reindex`; fresh builds emit the `TradingCore.__init__` constructor-caller edge (fixture + compatibility tests).
 
 - **Symptom (reported)**: `call_graph(TradingEntryVetoes, direction=callers)`
   returned 0 edges with `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and

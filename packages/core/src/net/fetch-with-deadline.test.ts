@@ -278,25 +278,40 @@ test("times out a stalled response body after the headers", async (t) => {
     );
 });
 
-test("retries a listed retryable network error up to maxAttempts", async (_t) => {
-    const port = await closedPort();
+test("retries a listed retryable network error up to maxAttempts", async () => {
+    // Deterministic injection: a stub fetch that always fails with a listed
+    // retryable network code, so the retry count never depends on how the
+    // environment classifies a real ECONNREFUSED.
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+        calls += 1;
+        const error = new Error("injected deterministic retryable network failure");
+        (error as NodeJS.ErrnoException).code = "ECONNREFUSED";
+        throw error;
+    }) as typeof fetch;
 
-    await assert.rejects(
-        fetchWithDeadline({
-            url: `http://127.0.0.1:${port}/refused`,
-            init: { method: "GET" },
-            attemptTimeoutMs: 1000,
-            maxAttempts: 2,
-            ...basePolicy,
-        }),
-        (error: unknown) => {
-            assert.ok(error instanceof BoundedHttpError);
-            assert.equal(error.kind, "network");
-            assert.equal(error.status, null);
-            assert.equal(error.attempts, 2);
-            return true;
-        },
-    );
+    try {
+        await assert.rejects(
+            fetchWithDeadline({
+                url: "http://injected.test/unused",
+                init: { method: "GET" },
+                attemptTimeoutMs: 1000,
+                maxAttempts: 2,
+                ...basePolicy,
+            }),
+            (error: unknown) => {
+                assert.ok(error instanceof BoundedHttpError);
+                assert.equal(error.kind, "network");
+                assert.equal(error.status, null);
+                assert.equal(error.attempts, 2);
+                assert.equal(calls, 2);
+                return true;
+            },
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
 });
 
 test("does not retry an unlisted network error", async (_t) => {

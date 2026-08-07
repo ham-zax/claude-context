@@ -1405,7 +1405,7 @@ test("managed runtime upgrade migrates the previous managed context-v3 default c
                 preflightDependencies: {
                     probeCandidateRuntime: async () => {},
                 },
-                preflightRunner: async (input) => {
+                preflightRunner: async () => {
                     const staleLauncher = readFile(launcherPath(homeDir));
                     if (staleLauncher !== originalLauncher) {
                         throw new Error("launcher changed before the preflight failure");

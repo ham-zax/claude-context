@@ -24,8 +24,8 @@
         "ownerFile": "packages/mcp/src/core/search-exact-fast-path.ts",
         "ownerSymbol": "runExactRegistryFastPath",
         "ownerSpan": {
-          "startLine": 189,
-          "endLine": 604
+          "startLine": 188,
+          "endLine": 606
         },
         "requiredRelations": [
           {
@@ -68,8 +68,8 @@
         "ownerFile": "packages/mcp/src/core/search-frontdoor.ts",
         "ownerSymbol": "runSearchFrontDoor",
         "ownerSpan": {
-          "startLine": 229,
-          "endLine": 392
+          "startLine": 238,
+          "endLine": 430
         },
         "requiredRelations": [
           {
@@ -82,8 +82,8 @@
             "symbol": "freshnessDecisionPreservesAuthority",
             "file": "packages/mcp/src/core/search-frontdoor.ts",
             "span": {
-              "startLine": 135,
-              "endLine": 138
+              "startLine": 139,
+              "endLine": 142
             }
           },
           {
