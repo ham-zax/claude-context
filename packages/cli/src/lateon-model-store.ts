@@ -6,8 +6,8 @@ import path from "node:path";
  * Managed D32 profile identity used for planning and migration checks.
  * Real installation still binds the target MCP package's frozen authority.
  */
-export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v2";
-export const LATEON_D32_ACTIVATION_POLICY = "lateon_context_v3_d32_owner_default_v1";
+export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v4_d32_v1";
+export const LATEON_D32_ACTIVATION_POLICY = "lateon_context_v4_d32_owner_default_v1";
 /**
  * Historical context-v3 rollout artifact. Its managed combination with the
  * historical `lateon_d32_owner_default_v1` policy is migratable by
@@ -15,9 +15,16 @@ export const LATEON_D32_ACTIVATION_POLICY = "lateon_context_v3_d32_owner_default
  */
 export const HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v1";
 export const HISTORICAL_LATEON_D32_ACTIVATION_POLICY = "lateon_d32_owner_default_v1";
+/**
+ * Previous managed default (context-v3 activated profile + its owner policy).
+ * The managed combination is admitted and migrated to the context-v4 default
+ * by `satori upgrade`; historical meaning stays immutable.
+ */
+export const PREVIOUS_LATEON_CONTEXT_V3_ACTIVATED_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v2";
+export const PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY = "lateon_context_v3_d32_owner_default_v1";
 
-const LATEON_PROFILE_FILE = "runtime-profile-v3-d32-v2.json";
-const LATEON_ACQUISITION_FILE = "runtime-profile-v3-d32-v2.acquisition.json";
+const LATEON_PROFILE_FILE = "runtime-profile-v4-d32.json";
+const LATEON_ACQUISITION_FILE = "runtime-profile-v4-d32.acquisition.json";
 const ACQUISITION_SCHEMA_VERSION = "satori_lateon_acquisition_v1";
 // 71,577,202 bytes at approximately 128 KiB/s takes about 546 seconds, leaving
 // roughly 54 seconds of the ten-minute deadline for requests and redirects.
@@ -27,7 +34,7 @@ const DISK_HEADROOM_FRACTION = 0.1;
 const DISK_HEADROOM_FORMULA =
     "totalExpectedArtifactBytes + ceil(totalExpectedArtifactBytes * diskHeadroomFraction)";
 const FROZEN_LATEON_D32_PROFILE_SHA256 =
-    "d0e5c33e1a8281f61d95563cf5af29b82896e15127fab92fadfadcf4c2b8db79";
+    "250d57c41d2f63d2302397a7ccc098918c43cb6c29874040e35aad34b283ac40";
 const DEFAULT_LATEON_REPOSITORY = "lightonai/LateOn-Code-edge";
 const DEFAULT_LATEON_REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
 
@@ -39,7 +46,7 @@ type LateOnProfileArtifact = Readonly<{
 }>;
 
 type LateOnRuntimeProfile = Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v3";
+    schemaVersion: "satori_lateon_runtime_profile_v3" | "satori_lateon_runtime_profile_v4";
     profileId: string;
     qualificationStatus?: string;
     identity: Readonly<{
@@ -211,7 +218,8 @@ export function loadAcquisitionAuthority(runtimePackageRoot: string): LateOnAcqu
 
     const runtimeProfileSha256 = sha256Bytes(profileBytes);
     if (
-        profile.schemaVersion !== "satori_lateon_runtime_profile_v3"
+        (profile.schemaVersion !== "satori_lateon_runtime_profile_v3"
+            && profile.schemaVersion !== "satori_lateon_runtime_profile_v4")
         || typeof profile.profileId !== "string"
         || profile.profileId.length === 0
         || profile.identity?.repository !== DEFAULT_LATEON_REPOSITORY

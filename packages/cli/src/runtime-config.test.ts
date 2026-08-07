@@ -103,11 +103,11 @@ test("static runtime config exposes the bound LateOn activation policy", () => {
         POTION_MODEL_PATH: "/opt/satori/potion/model",
         SATORI_RERANKER_PROVIDER: "lateon",
         SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
-        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v3_d32_owner_default_v1",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v4_d32_owner_default_v1",
     });
     const boundCheck = bound.find((check) => check.name === "lateon_activation_policy");
     assert.equal(boundCheck?.status, "ok");
-    assert.match(boundCheck?.message || "", /LateOn activation policy: lateon_context_v3_d32_owner_default_v1\./);
+    assert.match(boundCheck?.message || "", /LateOn activation policy: lateon_context_v4_d32_owner_default_v1\./);
 
     const unbound = evaluateStaticRuntimeConfig({
         SATORI_RUNTIME_PROFILE: "offline",
@@ -175,13 +175,13 @@ test("static runtime config rejects the context-v3 policy without the activated 
         SATORI_RERANKER_PROVIDER: "lateon",
         SATORI_LATEON_MODEL_PATH: "/opt/satori/models/lateon-code-edge",
         SATORI_LATEON_PROFILE: "lateon_projection_v2_d16_v1",
-        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v3_d32_owner_default_v1",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v4_d32_owner_default_v1",
     });
     const policy = checks.find((check) => check.name === "lateon_activation_policy");
     assert.equal(policy?.status, "error");
     assert.match(
         policy?.message || "",
-        /SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v3_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v3_d32_v2; received lateon_projection_v2_d16_v1\./,
+        /SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v4_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v4_d32_v1; received lateon_projection_v2_d16_v1\./,
     );
 });
 

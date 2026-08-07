@@ -790,6 +790,22 @@ export function createMcpConfig(): ContextMcpConfig {
             + `received ${lateOnProfileId}.`,
         );
     }
+    if (
+        lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4
+        && lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.contextV4D32
+    ) {
+        const isContextV3Profile = lateOnProfileId === LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+            || lateOnProfileId === LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated;
+        throw new Error(
+            `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4} `
+            + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV4D32}; `
+            + `received ${lateOnProfileId}.`
+            + (isContextV3Profile
+                ? ` Run \`satori upgrade\` to migrate to SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV4D32} `
+                    + `with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4}.`
+                : ''),
+        );
+    }
     const lateOnActivationPolicy = lateOnActivationPolicyRaw as LateOnActivationPolicyId | undefined;
     const lateOnMaximumQueueWaitMs = rerankerProvider === 'lateon'
         ? parseOptionalPositiveInteger('SATORI_LATEON_MAX_QUEUE_WAIT_MS', 300_000)

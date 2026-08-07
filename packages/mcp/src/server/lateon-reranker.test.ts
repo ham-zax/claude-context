@@ -150,6 +150,33 @@ test("LateOn activated context-v3 profile carries truthful qualification with id
     assert.deepEqual(activated.inference, historical.inference);
 });
 
+test("LateOn context-v4 profile advertises query-v2 and document-v4 projections with identical operational bounds", () => {
+    const v4 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.contextV4D32);
+    const v3 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated);
+    assert.equal(v4.schemaVersion, "satori_lateon_runtime_profile_v4");
+    if (v4.schemaVersion !== "satori_lateon_runtime_profile_v4") {
+        throw new Error("expected the v4 runtime profile");
+    }
+    assert.equal(v4.profileId, "lateon_offline_quality_projection_v4_d32_v1");
+    assert.equal(
+        v4.qualificationStatus,
+        "owner_activated_operationally_qualified_not_held_out",
+    );
+    assert.equal(v4.identity.projectionVersion, "search_rerank_document_v4");
+    assert.equal(v4.identity.queryProjectionVersion, "search_rerank_query_v2");
+    assert.equal(
+        v4.identity.projectionSha256,
+        "de52c67d3ce423ee0d063d9916b62d8197530cc593e0bbac37831246f93be33e",
+    );
+    if (v3.schemaVersion !== "satori_lateon_runtime_profile_v3") {
+        throw new Error("expected the v3 activated runtime profile");
+    }
+    assert.deepEqual(v4.artifacts, v3.artifacts);
+    assert.deepEqual(v4.execution, v3.execution);
+    assert.deepEqual(v4.operationalBounds, v3.operationalBounds);
+    assert.deepEqual(v4.inference, v3.inference);
+});
+
 test("LateOn reranker defaults to the V3 profile and reports qualified projection identities", async (t) => {
     const workerPath = createFakeWorker(t);
     const defaulted = new LateOnReranker({ modelDirectory: "/unused", workerPath });
@@ -163,10 +190,16 @@ test("LateOn reranker defaults to the V3 profile and reports qualified projectio
         profileId: LATEON_RUNTIME_PROFILE_IDS.legacyD16,
         workerPath,
     });
+    const contextV4 = new LateOnReranker({
+        modelDirectory: "/unused",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
+        workerPath,
+    });
     t.after(async () => Promise.all([
         defaulted.close(),
         explicitV2D32.close(),
         legacy.close(),
+        contextV4.close(),
     ]).then(() => undefined));
 
     assert.equal(defaulted.getProfileId(), LATEON_RUNTIME_PROFILE_IDS.contextV3D32);
@@ -177,6 +210,10 @@ test("LateOn reranker defaults to the V3 profile and reports qualified projectio
     assert.equal(explicitV2D32.getQueryProjectionVersion(), "semantic_query_raw_v1");
     assert.equal(legacy.getDocumentProjectionVersion(), "search_rerank_document_v1");
     assert.equal(legacy.getQueryProjectionVersion(), "semantic_query_raw_v1");
+    assert.equal(contextV4.getProfileId(), LATEON_RUNTIME_PROFILE_IDS.contextV4D32);
+    assert.equal(contextV4.getMaxDocuments(), 32);
+    assert.equal(contextV4.getDocumentProjectionVersion(), "search_rerank_document_v4");
+    assert.equal(contextV4.getQueryProjectionVersion(), "search_rerank_query_v2");
 });
 
 test("LateOn advertised query identities route to the promised query projection", async (t) => {

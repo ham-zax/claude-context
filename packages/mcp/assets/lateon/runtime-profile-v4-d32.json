@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "satori_lateon_runtime_profile_v4",
+  "profileId": "lateon_offline_quality_projection_v4_d32_v1",
+  "qualificationStatus": "owner_activated_operationally_qualified_not_held_out",
+  "identity": {
+    "repository": "lightonai/LateOn-Code-edge",
+    "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
+    "license": "Apache-2.0",
+    "projectionVersion": "search_rerank_document_v4",
+    "projectionSha256": "de52c67d3ce423ee0d063d9916b62d8197530cc593e0bbac37831246f93be33e",
+    "queryProjectionVersion": "search_rerank_query_v2"
+  },
+  "artifacts": [
+    {
+      "path": "model.onnx",
+      "sha256": "ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef"
+    },
+    {
+      "path": "tokenizer.json",
+      "sha256": "a388b94942e98e5c661c6c23f919842285738bfd123a0d148dea0c56287505d0"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "sha256": "1621afee1f3dbc2c42901841ca46016c83102a8e070d32b90f80f80b214172a4"
+    },
+    {
+      "path": "onnx_config.json",
+      "sha256": "fa4fef89820dcdc33c5504c62c1d5efc19603cfbfebf02368a70d51a4dbe6651"
+    },
+    {
+      "path": "special_tokens_map.json",
+      "sha256": "6edfb9d64c0d7e5cbaa53516e90280fe1f42ba5ea7923d005a5f9b6e082142cf"
+    }
+  ],
+  "runtime": {
+    "transformersJs": "3.0.2",
+    "onnxruntimeNode": "1.19.2",
+    "executionProvider": "cpu"
+  },
+  "inference": {
+    "modelPath": "model.onnx",
+    "inputIdsName": "input_ids",
+    "attentionMaskName": "attention_mask",
+    "outputName": "output",
+    "embeddingDimensions": 48,
+    "queryPrefix": "[Q] ",
+    "documentPrefix": "[D] ",
+    "padTokenId": 50284,
+    "queryTokenLimit": 256,
+    "documentTokenLimit": 2048,
+    "lowercase": true,
+    "documentSkipTokenIds": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      92,
+      93,
+      94,
+      95
+    ],
+    "candidateDepth": 32,
+    "documentBatchSize": 1,
+    "profileIntraOpThreads": 8,
+    "interOpThreads": 1
+  },
+  "execution": {
+    "workerProcesses": 1,
+    "activeModelSessions": 1,
+    "executionMode": "sequential",
+    "graphOptimizationLevel": "all",
+    "queryBatchSize": 1,
+    "documentEncoding": "serial",
+    "tokenizerParallelism": false,
+    "aggregateRequestTokenLimit": 65792,
+    "padding": "none_single_sequence",
+    "truncationSide": "right",
+    "truncationStrategy": "longest_suffix_discarded",
+    "warmupRequests": 2
+  },
+  "operationalBounds": {
+    "maximumActiveReranks": 1,
+    "maximumQueuedReranks": 1,
+    "maximumQueueWaitMilliseconds": 250,
+    "maximumReadinessMilliseconds": 2000,
+    "maximumScoreMilliseconds": 2000,
+    "maximumRerankerStageMilliseconds": 2500,
+    "maximumProcessPeakRssBytes": 1073741824,
+    "maximumProcessRetainedRssBytes": 671088640
+  }
+}

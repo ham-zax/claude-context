@@ -1304,18 +1304,118 @@ test("legacy no-provider upgrade defaults to LateOn D32", async () => {
         });
 
         assert.equal(observedReranker, "lateon");
-        assert.equal(observedProfile, "lateon_offline_quality_projection_v3_d32_v2");
-        assert.equal(observedPolicy, "lateon_context_v3_d32_owner_default_v1");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v4_d32_v1");
+        assert.equal(observedPolicy, "lateon_context_v4_d32_owner_default_v1");
         const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v3_d32_v2",
+            "lateon_offline_quality_projection_v4_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v3_d32_owner_default_v1",
+            "lateon_context_v4_d32_owner_default_v1",
         );
+    });
+});
+
+test("managed runtime upgrade migrates the previous managed context-v3 default combination atomically", async () => {
+    const previousManagedEnvironmentFor = (homeDir: string) => ({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        LANCEDB_PATH: path.join(homeDir, "lancedb"),
+        EMBEDDING_PROVIDER: "Potion",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: path.join(homeDir, "lateon-model"),
+        SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v3_d32_v2",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_context_v3_d32_owner_default_v1",
+    });
+
+    await withTempHome(async (homeDir) => {
+        await installUpgradeSourceRuntime(homeDir, previousManagedEnvironmentFor(homeDir));
+        writeLateOnModelDirectory(path.join(homeDir, "lateon-model"), LATEON_FIXTURE_ARTIFACTS);
+        let observedProfile: string | undefined;
+        let observedPolicy: string | undefined;
+
+        await executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+            homeDir,
+            env: {},
+            platform: "linux",
+            architecture: "x64",
+            lateOnModelPath: path.join(homeDir, "lateon-model"),
+            lateOnAuthorityLoader: loadAcquisitionAuthority,
+            execFileSyncImpl: installRuntimePackageStub(
+                "dist/target-runtime.mjs",
+                UPGRADE_TARGET.mcpPackageSpecifier,
+                UPGRADE_TARGET.mcpVersion,
+                UPGRADE_TARGET.coreVersion,
+            ) as never,
+            preflightDependencies: {
+                probeCandidateRuntime: async () => {},
+            },
+            preflightRunner: async (input) => {
+                observedProfile = input.lateOnProfileId;
+                observedPolicy = input.lateOnActivationPolicy;
+                return {
+                    runtimeEnvironment: Object.freeze({
+                        SATORI_RUNTIME_PROFILE: "offline",
+                        VECTOR_STORE_PROVIDER: "LanceDB",
+                        EMBEDDING_PROVIDER: "Potion",
+                        SATORI_RERANKER_PROVIDER: input.reranker ?? "",
+                        SATORI_LATEON_MODEL_PATH: input.lateOnModelPath ?? "",
+                        SATORI_LATEON_PROFILE: input.lateOnProfileId ?? "",
+                        SATORI_LATEON_ACTIVATION_POLICY: input.lateOnActivationPolicy ?? "",
+                    }),
+                };
+            },
+        });
+
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v4_d32_v1");
+        assert.equal(observedPolicy, "lateon_context_v4_d32_owner_default_v1");
+        const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_PROFILE,
+            "lateon_offline_quality_projection_v4_d32_v1",
+        );
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
+            "lateon_context_v4_d32_owner_default_v1",
+        );
+    });
+
+    await withTempHome(async (homeDir) => {
+        await installUpgradeSourceRuntime(homeDir, previousManagedEnvironmentFor(homeDir));
+        writeLateOnModelDirectory(path.join(homeDir, "lateon-model"), LATEON_FIXTURE_ARTIFACTS);
+        const originalLauncher = readFile(launcherPath(homeDir));
+
+        await assert.rejects(
+            executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+                homeDir,
+                env: {},
+                platform: "linux",
+                architecture: "x64",
+                lateOnModelPath: path.join(homeDir, "lateon-model"),
+                lateOnAuthorityLoader: loadAcquisitionAuthority,
+                execFileSyncImpl: installRuntimePackageStub(
+                    "dist/target-runtime.mjs",
+                    UPGRADE_TARGET.mcpPackageSpecifier,
+                    UPGRADE_TARGET.mcpVersion,
+                    UPGRADE_TARGET.coreVersion,
+                ) as never,
+                preflightDependencies: {
+                    probeCandidateRuntime: async () => {},
+                },
+                preflightRunner: async (input) => {
+                    const staleLauncher = readFile(launcherPath(homeDir));
+                    if (staleLauncher !== originalLauncher) {
+                        throw new Error("launcher changed before the preflight failure");
+                    }
+                    throw new Error("probe failure");
+                },
+            }),
+            /probe failure/,
+        );
+        assert.equal(readFile(launcherPath(homeDir)), originalLauncher);
     });
 });
 
@@ -1370,16 +1470,16 @@ test("managed runtime upgrade migrates the historical context-v3 activation comb
             },
         });
 
-        assert.equal(observedProfile, "lateon_offline_quality_projection_v3_d32_v2");
-        assert.equal(observedPolicy, "lateon_context_v3_d32_owner_default_v1");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v4_d32_v1");
+        assert.equal(observedPolicy, "lateon_context_v4_d32_owner_default_v1");
         const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
-            "lateon_offline_quality_projection_v3_d32_v2",
+            "lateon_offline_quality_projection_v4_d32_v1",
         );
         assert.equal(
             launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
-            "lateon_context_v3_d32_owner_default_v1",
+            "lateon_context_v4_d32_owner_default_v1",
         );
     });
 

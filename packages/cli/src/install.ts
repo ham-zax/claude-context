@@ -51,6 +51,9 @@ import {
 import {
     DEFAULT_LATEON_PROFILE_ID,
     HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID,
+    HISTORICAL_LATEON_D32_ACTIVATION_POLICY,
+    PREVIOUS_LATEON_CONTEXT_V3_ACTIVATED_PROFILE_ID,
+    PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY,
     LATEON_D32_ACTIVATION_POLICY,
     ensureDefaultLateOnModel,
     resolveDefaultLateOnModelDirectory,
@@ -1747,7 +1750,17 @@ function historicalManagedLateOnProfile(
 ): string | null {
     const managed = managedEnvironment.SATORI_RERANKER_PROVIDER;
     const profile = managedEnvironment.SATORI_LATEON_PROFILE?.trim();
+    const policy = managedEnvironment.SATORI_LATEON_ACTIVATION_POLICY?.trim();
     if (profile === HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID) {
+        return null;
+    }
+    if (
+        profile === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATED_PROFILE_ID
+        && (policy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY
+            || policy === HISTORICAL_LATEON_D32_ACTIVATION_POLICY)
+    ) {
+        // Previous managed default combination; `satori upgrade` migrates it
+        // to the context-v4 default instead of rejecting it as D16 history.
         return null;
     }
     if (managed === "lateon" && profile !== DEFAULT_LATEON_PROFILE_ID) {
@@ -1814,9 +1827,14 @@ function resolveOfflineReranker(
         if (managed === "none") return "none";
         if (managed === "lateon") {
             const profile = managedEnvironment.SATORI_LATEON_PROFILE?.trim();
+            const policy = managedEnvironment.SATORI_LATEON_ACTIVATION_POLICY?.trim();
+            const previousManagedCombination = profile === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATED_PROFILE_ID
+                && (policy === PREVIOUS_LATEON_CONTEXT_V3_ACTIVATION_POLICY
+                    || policy === HISTORICAL_LATEON_D32_ACTIVATION_POLICY);
             if (
                 profile !== DEFAULT_LATEON_PROFILE_ID
                 && profile !== HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID
+                && !previousManagedCombination
             ) {
                 throw migrationGuidance(profile || "(missing)");
             }

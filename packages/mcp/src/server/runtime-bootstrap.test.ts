@@ -346,7 +346,25 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
             createMcpConfig,
             /requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v3_d32_v2; received lateon_offline_quality_projection_v3_d32_v1/,
         );
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v4_d32_v1';
+        process.env.SATORI_LATEON_ACTIVATION_POLICY = 'lateon_context_v4_d32_owner_default_v1';
+        assert.equal(
+            createMcpConfig().lateOnActivationPolicy,
+            'lateon_context_v4_d32_owner_default_v1',
+        );
+
         process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v3_d32_v2';
+        assert.throws(
+            createMcpConfig,
+            /SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v4_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v4_d32_v1; received lateon_offline_quality_projection_v3_d32_v2[\s\S]*satori upgrade/,
+        );
+
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v2_d32_v2';
+        assert.throws(
+            createMcpConfig,
+            /SATORI_LATEON_ACTIVATION_POLICY=lateon_context_v4_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v4_d32_v1; received lateon_offline_quality_projection_v2_d32_v2/,
+        );
+        process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v4_d32_v1';
 
         process.env.SATORI_LATEON_ACTIVATION_POLICY = 'untrusted_policy_v1';
         assert.throws(createMcpConfig, /Invalid SATORI_LATEON_ACTIVATION_POLICY/);

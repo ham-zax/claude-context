@@ -4,6 +4,7 @@ export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
     offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v2",
     contextV3D32: "lateon_offline_quality_projection_v3_d32_v1",
     contextV3D32Activated: "lateon_offline_quality_projection_v3_d32_v2",
+    contextV4D32: "lateon_offline_quality_projection_v4_d32_v1",
 } as const);
 
 export type LateOnRuntimeProfileId =
@@ -12,6 +13,7 @@ export type LateOnRuntimeProfileId =
 export const LATEON_ACTIVATION_POLICY_IDS = Object.freeze({
     ownerDefaultD32V2: "lateon_d32_owner_default_v1",
     ownerDefaultContextV3: "lateon_context_v3_d32_owner_default_v1",
+    ownerDefaultContextV4: "lateon_context_v4_d32_owner_default_v1",
 } as const);
 
 export type LateOnActivationPolicyId =
@@ -30,7 +32,8 @@ type LateOnRuntimeProfileBase = Readonly<{
         projectionVersion:
             | "search_rerank_document_v1"
             | "search_rerank_document_v2"
-            | "search_rerank_document_v3";
+            | "search_rerank_document_v3"
+            | "search_rerank_document_v4";
         projectionSha256?: string;
     }>;
     artifacts: readonly LateOnArtifactContract[];
@@ -129,10 +132,25 @@ export type LateOnRuntimeProfileV3 = Omit<
     }>;
 }>;
 
+export type LateOnRuntimeProfileV4 = Omit<
+    LateOnRuntimeProfileV3,
+    "schemaVersion" | "profileId" | "qualificationStatus" | "identity"
+> & Readonly<{
+    schemaVersion: "satori_lateon_runtime_profile_v4";
+    profileId: typeof LATEON_RUNTIME_PROFILE_IDS.contextV4D32;
+    qualificationStatus: "owner_activated_operationally_qualified_not_held_out";
+    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
+        projectionVersion: "search_rerank_document_v4";
+        projectionSha256: string;
+        queryProjectionVersion: "search_rerank_query_v2";
+    }>;
+}>;
+
 export type LateOnRuntimeProfile =
     | LateOnRuntimeProfileV1
     | LateOnRuntimeProfileV2
-    | LateOnRuntimeProfileV3;
+    | LateOnRuntimeProfileV3
+    | LateOnRuntimeProfileV4;
 
 export type LateOnEffectiveOperationalBounds = Readonly<{
     maximumActiveReranks: 0 | 1;
