@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     collapseDuplicateDeclarationGroups,
     scoresNearlyEqual,
+    sortNativeGroupedSearchResults,
     sortGroupedSearchResults,
 } from "./search-group-ordering.js";
 import type { SearchGroupResult } from "./search-types.js";
@@ -39,6 +40,9 @@ function group(partial: GroupInput): Sortable {
         ...(partial.__symbolKey ? { __symbolKey: partial.__symbolKey } : {}),
         ...(partial.__symbolInstanceId ? { __symbolInstanceId: partial.__symbolInstanceId } : {}),
         __exactLexicalMatch: partial.__exactLexicalMatch || false,
+        ...(partial.__authoritativeRank !== undefined
+            ? { __authoritativeRank: partial.__authoritativeRank }
+            : {}),
         ...(partial.debug ? { debug: partial.debug } : {}),
     };
 }
@@ -185,4 +189,54 @@ test("collapseDuplicateDeclarationGroups keeps tighter near-tie winner", () => {
     const collapsed = collapseDuplicateDeclarationGroups(groups);
     assert.equal(collapsed.length, 1);
     assert.equal(collapsed[0].target.span.endLine, 5);
+});
+
+test("native grouped ordering follows authoritative rank instead of score heuristics", () => {
+    const results: Sortable[] = [
+        group({
+            file: "score-first.ts",
+            displayLabel: "class ScoreFirst",
+            symbolKind: "class",
+            score: 0.99,
+            __authoritativeRank: 4,
+        }),
+        group({
+            file: "provider-first.ts",
+            displayLabel: "function ProviderFirst()",
+            symbolKind: "function",
+            score: 0.10,
+            __authoritativeRank: 1,
+        }),
+    ];
+
+    sortNativeGroupedSearchResults(results, false);
+    assert.deepEqual(results.map((result) => result.target.file), [
+        "provider-first.ts",
+        "score-first.ts",
+    ]);
+});
+
+test("native duplicate declaration collapse keeps the earliest authoritative group", () => {
+    const groups = [
+        group({
+            file: "a.ts",
+            displayLabel: "function foo()",
+            symbolKind: "function",
+            __symbolKey: "k1",
+            score: 0.99,
+            __authoritativeRank: 8,
+        }),
+        group({
+            file: "a.ts",
+            displayLabel: "function foo()",
+            symbolKind: "function",
+            __symbolKey: "k1",
+            score: 0.01,
+            __authoritativeRank: 2,
+        }),
+    ];
+
+    const collapsed = collapseDuplicateDeclarationGroups(groups, "reranker_order");
+    assert.equal(collapsed.length, 1);
+    assert.equal(collapsed[0].__authoritativeRank, 2);
 });

@@ -213,6 +213,8 @@ export interface SearchGroupResult extends SearchGroupedResultV2 {
     __symbolInstanceId?: string;
     __candidateIds: string[];
     __exactLexicalMatch: boolean;
+    /** Internal immutable order position assigned before grouping. */
+    __authoritativeRank?: number;
 }
 
 export type SearchCandidateSurvivalStageName =

@@ -614,6 +614,7 @@ export async function finalizeSearchResults(
         resolveOwner: (result) => input.navigationAuthority === "valid"
             ? host.resolveSearchOwnerFromRegistry(result as SearchResultLike, searchSymbolRegistry, input.queryPlan)
             : {},
+        orderAuthority: input.execution.orderAuthority,
     });
 
     if (candidateSurvival) {

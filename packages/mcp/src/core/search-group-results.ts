@@ -15,8 +15,10 @@ import {
 } from "./search-grouping.js";
 import {
     collapseDuplicateDeclarationGroups,
+    sortNativeGroupedSearchResults,
     sortGroupedSearchResults,
 } from "./search-group-ordering.js";
+import type { SearchOrderAuthority } from "./search-order-policy.js";
 import {
     buildSearchCandidateProvenance,
     classifyPathCategory,
@@ -78,6 +80,7 @@ type SearchCandidateLike = {
     retrievalPasses: string[];
     backendScoreKindsSeen: Array<"dense_similarity" | "lexical_rank" | "rrf_fusion" | "unknown">;
     lexicalScore: number;
+    authoritativeRank?: number;
 };
 
 type SearchOwnerSource = "owner_metadata" | "registry_repair" | "fallback";
@@ -139,6 +142,7 @@ export function rankAndDiversifySearchGroups<
     exactMatchPinningEnabled: boolean;
     limit: number;
     groupBy: SearchGroupBy;
+    orderAuthority?: SearchOrderAuthority;
 }): {
     visibleResults: T[];
     rankedResults: T[];
@@ -150,13 +154,13 @@ export function rankAndDiversifySearchGroups<
     diversitySummary: SearchDiversitySummary;
     exactMatchPinningApplied: boolean;
 } {
+    const orderAuthority = input.orderAuthority ?? "legacy_score";
     const rankedResults = input.collapseDuplicateDeclarations
-        ? collapseDuplicateDeclarationGroups(input.groupedResults)
+        ? collapseDuplicateDeclarationGroups(input.groupedResults, orderAuthority)
         : input.groupedResults;
-    const exactMatchPinningApplied = sortGroupedSearchResults(
-        rankedResults,
-        input.exactMatchPinningEnabled,
-    );
+    const exactMatchPinningApplied = orderAuthority === "legacy_score"
+        ? sortGroupedSearchResults(rankedResults, input.exactMatchPinningEnabled)
+        : sortNativeGroupedSearchResults(rankedResults, input.exactMatchPinningEnabled);
     const diversityApplied = applyGroupDiversity(
         rankedResults,
         input.limit,
@@ -428,6 +432,7 @@ export function buildGroupedSymbolSearchResult(input: {
     spanValidation: SearchSpanValidation;
     ownershipValidated?: boolean;
     candidateIds: string[];
+    authoritativeRank?: number;
 }): SearchGroupResult | undefined {
     const supportBoost = computeSearchGroupSupportBoost(input.chunkCount);
     const symbolScore = input.representative.finalScore + supportBoost;
@@ -525,6 +530,9 @@ export function buildGroupedSymbolSearchResult(input: {
         ),
         __groupId: groupId,
         __candidateIds: [...input.candidateIds],
+        ...(input.authoritativeRank !== undefined
+            ? { __authoritativeRank: input.authoritativeRank }
+            : {}),
         ...(registrySymbol?.symbolKey ? { __symbolKey: registrySymbol.symbolKey } : {}),
         ...(registrySymbol?.symbolInstanceId ? { __symbolInstanceId: registrySymbol.symbolInstanceId } : {}),
         __exactLexicalMatch: input.representative.exactLexicalMatch,
@@ -577,6 +585,7 @@ export function buildVisibleGroupedSearchResults(input: {
     navigationHelpers: SearchNavigationHelpers;
     parseIndexedAtMs: (indexedAt?: string) => number | undefined;
     resolveOwner: (result: SearchResultLike) => SearchOwnerResolution;
+    orderAuthority?: SearchOrderAuthority;
 }): {
     visibleResults: Array<SearchGroupResult & { __exactLexicalMatch: boolean }>;
     rankedResults: Array<SearchGroupResult & { __exactLexicalMatch: boolean }>;
@@ -665,13 +674,29 @@ export function buildVisibleGroupedSearchResults(input: {
     let registryRepairGroupCount = 0;
 
     for (const group of groups.values()) {
-        exactMatchPinningApplied = sortSearchCandidates(
-            group.chunks,
-            input.queryPlan.exactMatchPinningEnabled,
-            input.mustMatchesFirst,
-        ) || exactMatchPinningApplied;
+        const nativeOrder = input.orderAuthority !== undefined && input.orderAuthority !== "legacy_score";
+        const orderedChunks = nativeOrder
+            ? [...group.chunks].sort((a, b) => {
+                if (
+                    input.queryPlan.exactMatchPinningEnabled
+                    && a.exactLexicalMatch !== b.exactLexicalMatch
+                ) {
+                    return a.exactLexicalMatch ? -1 : 1;
+                }
+                return (a.authoritativeRank ?? Number.POSITIVE_INFINITY)
+                    - (b.authoritativeRank ?? Number.POSITIVE_INFINITY);
+            })
+            : (sortSearchCandidates(
+                group.chunks,
+                input.queryPlan.exactMatchPinningEnabled,
+                input.mustMatchesFirst,
+            ), group.chunks);
 
-        const representative = group.chunks[0];
+        if (!nativeOrder && orderedChunks[0]?.exactMatchPinned) {
+            exactMatchPinningApplied = true;
+        }
+
+        const representative = orderedChunks[0];
         const chunkSpanStart = Math.min(...group.chunks.map((chunk) => (chunk.result as SearchResultLike).startLine || 0));
         const chunkSpanEnd = Math.max(...group.chunks.map((chunk) => (chunk.result as SearchResultLike).endLine || 0));
         const previewSpan: SearchSpan = { startLine: chunkSpanStart, endLine: chunkSpanEnd };
@@ -742,6 +767,7 @@ export function buildVisibleGroupedSearchResults(input: {
             candidateIds: group.chunks.map((chunk) => searchCandidateIdentity(
                 chunk.result as SearchResultLike,
             ).candidateId),
+            authoritativeRank: representative?.authoritativeRank,
         });
         if (groupedResult) {
             groupedResults.push(groupedResult);
@@ -757,6 +783,7 @@ export function buildVisibleGroupedSearchResults(input: {
         exactMatchPinningEnabled: input.queryPlan.exactMatchPinningEnabled,
         limit: input.limit,
         groupBy: input.groupBy,
+        orderAuthority: input.orderAuthority,
     });
     if (rankedGroups.exactMatchPinningApplied) {
         exactMatchPinningApplied = true;

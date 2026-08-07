@@ -4,7 +4,7 @@ import { Context, type Reranker } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
-import { IndexFingerprint } from "../config.js";
+import { IndexFingerprint, type RerankApplicationMode } from "../config.js";
 import { ToolHandlers } from "../core/handlers.js";
 import type { RuntimeOwnerMutationGate } from "../core/runtime-owner.js";
 import type { SessionWorkspacePolicy } from "../core/session-workspace-policy.js";
@@ -42,6 +42,8 @@ export interface ToolContext {
     readFileMaxLines: number;
     /** Whole-file byte ceiling for read_file (config READ_FILE_MAX_BYTES). */
     readFileMaxBytes?: number;
+    /** Ranking application semantics used by this runtime. */
+    rerankApplicationMode?: RerankApplicationMode;
     /** Immutable per-session workspace authorization policy. */
     workspacePolicy: SessionWorkspacePolicy;
     /** Optional: live multi-runtime owner diagnostics for list_codebases / status. */

@@ -1,4 +1,5 @@
 import type { SearchGroupResult } from "./search-types.js";
+import type { SearchOrderAuthority } from "./search-order-policy.js";
 
 /** Relative score gap treated as a near-tie for tight-owner preference. */
 export const GROUPED_SCORE_NEAR_TIE_RATIO = 0.05;
@@ -175,7 +176,38 @@ export function sortGroupedSearchResults<T extends SearchGroupResult & { __exact
     return applied;
 }
 
-export function collapseDuplicateDeclarationGroups<T extends SearchGroupResult>(groups: T[]): T[] {
+function compareAuthoritativeRanks(a: SearchGroupResult, b: SearchGroupResult): number {
+    const left = a.__authoritativeRank ?? Number.POSITIVE_INFINITY;
+    const right = b.__authoritativeRank ?? Number.POSITIVE_INFINITY;
+    return left - right;
+}
+
+export function sortNativeGroupedSearchResults<
+    T extends SearchGroupResult & { __exactLexicalMatch: boolean },
+>(results: T[], exactMatchPinningEnabled: boolean): boolean {
+    const topWithoutPinning = results[0];
+    results.sort((a, b) => {
+        if (exactMatchPinningEnabled && a.__exactLexicalMatch !== b.__exactLexicalMatch) {
+            return a.__exactLexicalMatch ? -1 : 1;
+        }
+        return compareAuthoritativeRanks(a, b);
+    });
+    const applied = Boolean(
+        exactMatchPinningEnabled
+        && topWithoutPinning
+        && results.length > 0
+        && topWithoutPinning.__exactLexicalMatch !== results[0].__exactLexicalMatch,
+    );
+    if (applied && results[0].debug?.provenance) {
+        results[0].debug.provenance.exactMatchPinned = true;
+    }
+    return applied;
+}
+
+export function collapseDuplicateDeclarationGroups<T extends SearchGroupResult>(
+    groups: T[],
+    orderAuthority: SearchOrderAuthority = "legacy_score",
+): T[] {
     const deduped = new Map<string, T>();
     for (const group of groups) {
         const key = normalizeDeclarationGroupKey(group);
@@ -194,7 +226,9 @@ export function collapseDuplicateDeclarationGroups<T extends SearchGroupResult>(
             ...existing.__candidateIds,
             ...group.__candidateIds,
         ])).sort();
-        const winner = compareGroupedSearchResults(group, existing) < 0 ? group : existing;
+        const winner = orderAuthority === "legacy_score"
+            ? (compareGroupedSearchResults(group, existing) < 0 ? group : existing)
+            : (compareAuthoritativeRanks(group, existing) < 0 ? group : existing);
         deduped.set(key, { ...winner, __candidateIds: candidateIds });
     }
 

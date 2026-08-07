@@ -41,6 +41,7 @@ import {
     SEARCH_FRESHNESS_THRESHOLD_MS,
     summarizeIndexFingerprint,
     type CodebaseInfo,
+    type RerankApplicationMode,
 } from "../config.js";
 import {
     SEARCH_CHANGED_FILES_CACHE_TTL_MS,
@@ -130,9 +131,12 @@ import {
     isTestPath as isSearchTestPath,
     isWriterActionTerm as isWriterActionTermHelper,
     normalizeSearchPath as normalizeSearchPathHelper,
-    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
     shouldIncludeCategoryInScope,
 } from "./search-ranking-policy.js";
+import {
+    resolveSearchRankingPolicyIdentity,
+    type SearchOrderAuthority,
+} from "./search-order-policy.js";
 import { SearchQuerySupport } from "./search-query-support.js";
 import {
     TrackedRootReadiness,
@@ -398,12 +402,13 @@ function buildFrozenSearchRankedSetBindingInput(input: {
     queryPolicyDigest: string;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
+    rankingPolicyIdentity: string;
     orderedResults: readonly SearchGroupedResultV2[];
     recommendedActions: readonly (SearchRecommendedNextAction | null)[];
 }): SearchRankedSetBindingInput {
     return {
         queryPolicyDigest: input.queryPolicyDigest,
-        rankingPolicyIdentity: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
+        rankingPolicyIdentity: input.rankingPolicyIdentity,
         disclosurePolicyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
         publicationIdentity: {
             collectionName: input.vectorReceipt.collectionName,
@@ -829,6 +834,7 @@ export class ToolHandlers {
     private readonly now: () => number;
     private readonly callGraphManager: CallGraphSidecarManager;
     private readonly reranker: Reranker | null;
+    private readonly rerankApplicationMode: RerankApplicationMode;
     private readonly navigationStore: NavigationStore;
     private readonly canonicalNavigationAuthorityAvailable: boolean;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
@@ -861,7 +867,10 @@ export class ToolHandlers {
         private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null = null,
         private readonly mutationLeaseCoordinator: MutationLeaseCoordinator | null = null,
         searchContinuationCoordinator?: SearchContinuationCoordinator,
-        options?: { readFileMaxBytes?: number },
+        options?: {
+            readFileMaxBytes?: number;
+            rerankApplicationMode?: RerankApplicationMode;
+        },
     ) {
         this.context = context;
         this.snapshotManager = snapshotManager;
@@ -872,6 +881,7 @@ export class ToolHandlers {
         this.now = now;
         this.callGraphManager = callGraphManager || new CallGraphSidecarManager(runtimeFingerprint, { now });
         this.reranker = reranker || null;
+        this.rerankApplicationMode = options?.rerankApplicationMode ?? "legacy_rrf";
         this.searchContinuationCoordinator = searchContinuationCoordinator
             ?? new SearchContinuationCoordinator();
         this.searchContinuationCoordinator.registerOwner(this);
@@ -4443,6 +4453,7 @@ export class ToolHandlers {
                 envelope: SearchGroupedResponseEnvelope,
                 resultSet: FinalizedSearchResultSet | undefined,
                 rerankerApplied: boolean,
+                orderAuthority: SearchOrderAuthority,
             ): SearchGroupedResponseEnvelope => {
                 if (!resultSet) return envelope;
                 if (!vectorReceipt) {
@@ -4491,6 +4502,10 @@ export class ToolHandlers {
                     queryPolicyDigest,
                     rerankerIdentity,
                     rerankerProjectionIdentity,
+                    rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
+                        orderAuthority,
+                        rerankApplicationMode: this.rerankApplicationMode,
+                    }),
                     orderedResults: resultSet.orderedResults,
                     recommendedActions: resultSet.recommendedActions,
                 });
@@ -4718,6 +4733,9 @@ export class ToolHandlers {
                             exactEnvelope,
                             exactFastPath.finalized.resultSet,
                             false,
+                            this.rerankApplicationMode === "native_order"
+                                ? "retrieval_order"
+                                : "legacy_score",
                         );
                     } else if (exactFastPath.finalized.resultSet) {
                         const unboundEnvelope = { ...exactEnvelope };
@@ -4869,6 +4887,7 @@ export class ToolHandlers {
                 observedChangedFilesState: initialObservedChangedFilesState,
                 retrievalPolicy,
                 entrypointOwnerEvidence,
+                rerankApplicationMode: this.rerankApplicationMode,
             }, {
                 searchQuerySupport: this.searchQuerySupport,
                 semanticSearch: (request) => {
@@ -5122,6 +5141,7 @@ export class ToolHandlers {
                     envelope,
                     finalized.resultSet,
                     searchDiagnostics.rerankerUsed,
+                    execution.orderAuthority,
                 );
             }
 
@@ -5288,6 +5308,17 @@ export class ToolHandlers {
                         queryPolicyDigest: entry.queryPolicyDigest,
                         rerankerIdentity,
                         rerankerProjectionIdentity,
+                        rankingPolicyIdentity: this.rerankApplicationMode === "legacy_rrf"
+                            ? resolveSearchRankingPolicyIdentity({
+                                orderAuthority: "legacy_score",
+                                rerankApplicationMode: this.rerankApplicationMode,
+                            })
+                            : resolveSearchRankingPolicyIdentity({
+                                orderAuthority: entry.rankedSetBinding.rerankerIdentity.kind === "provider"
+                                    ? "reranker_order"
+                                    : "retrieval_order",
+                                rerankApplicationMode: this.rerankApplicationMode,
+                            }),
                         orderedResults: entry.orderedResults,
                         recommendedActions: entry.recommendedActions,
                     }),
