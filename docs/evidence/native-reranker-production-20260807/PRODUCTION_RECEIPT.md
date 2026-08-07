@@ -29,8 +29,10 @@ historical). Baseline before implementation:
 - A missing or unconfigured reranker means retrieval order
   (`search_native_retrieval_order_v1`).
 - Any reranker failure (timeout, thrown error, invalid output, projection
-  failure, zero-byte admission) publishes the exact frozen pre-rerank
-  retrieval order with truthful `RERANKER_FAILED` diagnostics.
+  failure) publishes the exact frozen pre-rerank retrieval order with
+  truthful `RERANKER_FAILED` diagnostics. If the byte budget admits zero
+  candidates, no provider attempt happens, retrieval order is published, and
+  no `RERANKER_FAILED` warning is emitted.
 - Grouping, diversity, disclosure, and frozen pagination preserve the
   authoritative order; continuation serves the frozen ranked set and performs
   zero new reranker calls, relevance decisions, or sorts.
