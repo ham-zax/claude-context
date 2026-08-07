@@ -42,16 +42,21 @@ function compareAuthoritativeRanks(a: SearchGroupResult, b: SearchGroupResult): 
 
 export function sortNativeGroupedSearchResults<
     T extends SearchGroupResult & { __exactLexicalMatch: boolean },
->(results: T[], exactMatchPinningEnabled: boolean): boolean {
+>(
+    results: T[],
+    exactMatchPinningEnabled: boolean,
+    orderAuthority: SearchOrderAuthority = "retrieval_order",
+): boolean {
+    const shouldPinExactMatch = exactMatchPinningEnabled && orderAuthority !== "reranker_order";
     const topWithoutPinning = results[0];
     results.sort((a, b) => {
-        if (exactMatchPinningEnabled && a.__exactLexicalMatch !== b.__exactLexicalMatch) {
+        if (shouldPinExactMatch && a.__exactLexicalMatch !== b.__exactLexicalMatch) {
             return a.__exactLexicalMatch ? -1 : 1;
         }
         return compareAuthoritativeRanks(a, b);
     });
     const applied = Boolean(
-        exactMatchPinningEnabled
+        shouldPinExactMatch
         && topWithoutPinning
         && results.length > 0
         && topWithoutPinning.__exactLexicalMatch !== results[0].__exactLexicalMatch,
@@ -64,7 +69,6 @@ export function sortNativeGroupedSearchResults<
 
 export function collapseDuplicateDeclarationGroups<T extends SearchGroupResult>(
     groups: T[],
-    orderAuthority: SearchOrderAuthority = "retrieval_order",
 ): T[] {
     const deduped = new Map<string, T>();
     for (const group of groups) {

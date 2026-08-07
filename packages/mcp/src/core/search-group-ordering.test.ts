@@ -4,6 +4,7 @@ import {
     collapseDuplicateDeclarationGroups,
     sortNativeGroupedSearchResults,
 } from "./search-group-ordering.js";
+import { applyGroupDiversity } from "./search-grouping.js";
 import type { SearchGroupResult } from "./search-types.js";
 
 type Sortable = SearchGroupResult & { __exactLexicalMatch: boolean };
@@ -88,6 +89,43 @@ test("exact ownership remains a deterministic grouped control", () => {
     assert.equal(results[0].target.file, "exact.ts");
 });
 
+test("native grouped ordering does not repin a lower-ranked exact group", () => {
+    const results: Sortable[] = [
+        group({
+            file: "provider.ts",
+            displayLabel: "function Provider()",
+            score: 0.01,
+            __authoritativeRank: 1,
+        }),
+        group({
+            file: "exact.ts",
+            displayLabel: "function Exact()",
+            score: 0.99,
+            __authoritativeRank: 2,
+            __exactLexicalMatch: true,
+        }),
+    ];
+
+    const applied = sortNativeGroupedSearchResults(results, true, "reranker_order");
+    assert.equal(applied, false);
+    assert.deepEqual(results.map((result) => result.target.file), [
+        "provider.ts",
+        "exact.ts",
+    ]);
+});
+
+test("diversity omissions preserve the authoritative sequence across relaxed passes", () => {
+    const results: Sortable[] = [
+        group({ file: "file-1.ts", displayLabel: "function A()", score: 1, __groupId: "a" }),
+        group({ file: "file-1.ts", displayLabel: "function B()", score: 1, __groupId: "b" }),
+        group({ file: "file-1.ts", displayLabel: "function C()", score: 1, __groupId: "c" }),
+        group({ file: "file-2.ts", displayLabel: "function D()", score: 1, __groupId: "d" }),
+    ];
+
+    const applied = applyGroupDiversity(results, results.length, "file");
+    assert.deepEqual(applied.selected.map((result) => result.__groupId), ["a", "b", "c", "d"]);
+});
+
 test("native duplicate declaration collapse keeps the earliest authoritative group", () => {
     const groups = [
         group({
@@ -108,7 +146,7 @@ test("native duplicate declaration collapse keeps the earliest authoritative gro
         }),
     ];
 
-    const collapsed = collapseDuplicateDeclarationGroups(groups, "reranker_order");
+    const collapsed = collapseDuplicateDeclarationGroups(groups);
     assert.equal(collapsed.length, 1);
     assert.equal(collapsed[0].__authoritativeRank, 2);
 });

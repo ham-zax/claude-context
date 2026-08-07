@@ -144,11 +144,12 @@ export function rankAndDiversifySearchGroups<
 } {
     const orderAuthority = input.orderAuthority ?? "retrieval_order";
     const rankedResults = input.collapseDuplicateDeclarations
-        ? collapseDuplicateDeclarationGroups(input.groupedResults, orderAuthority)
+        ? collapseDuplicateDeclarationGroups(input.groupedResults)
         : input.groupedResults;
     const exactMatchPinningApplied = sortNativeGroupedSearchResults(
         rankedResults,
         input.exactMatchPinningEnabled,
+        orderAuthority,
     );
     const diversityApplied = applyGroupDiversity(
         rankedResults,
@@ -158,10 +159,16 @@ export function rankAndDiversifySearchGroups<
     const completeDiversityApplied = input.limit >= rankedResults.length
         ? diversityApplied
         : applyGroupDiversity(rankedResults, rankedResults.length, input.groupBy);
+    const visibleIds = new Set(diversityApplied.selected.map((group) => group.__groupId));
+    const disclosureOrder = completeDiversityApplied.selected.filter(
+        (group) => visibleIds.has(group.__groupId),
+    ).concat(
+        completeDiversityApplied.selected.filter((group) => !visibleIds.has(group.__groupId)),
+    );
     return {
         visibleResults: diversityApplied.selected,
         rankedResults,
-        disclosureOrder: completeDiversityApplied.selected,
+        disclosureOrder,
         diversityOmissions: diversityApplied.omitted,
         diversitySummary: diversityApplied.summary,
         exactMatchPinningApplied,
@@ -662,9 +669,11 @@ export function buildVisibleGroupedSearchResults(input: {
     let registryRepairGroupCount = 0;
 
     for (const group of groups.values()) {
+        const exactMatchPinningApplies = input.queryPlan.exactMatchPinningEnabled
+            && input.orderAuthority !== "reranker_order";
         const orderedChunks = [...group.chunks].sort((a, b) => {
             if (
-                input.queryPlan.exactMatchPinningEnabled
+                exactMatchPinningApplies
                 && a.exactLexicalMatch !== b.exactLexicalMatch
             ) {
                 return a.exactLexicalMatch ? -1 : 1;

@@ -4,9 +4,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { withSourceMeasurementOperation } from '@zokizuan/satori-core';
+import type { CapabilityResolver } from './capabilities.js';
 import { SearchQuerySupport } from './search-query-support.js';
 import type { SearchQuerySupportHost } from './search-query-support.js';
 import { buildSearchQueryPlan, parseSearchOperators } from './search-query-planning.js';
+
+function buildTrackedLexicalSupport(trackedPaths: string[]): SearchQuerySupport {
+    return new SearchQuerySupport({
+        normalizeSearchPath: (value) => value,
+        hasPathSegment: () => false,
+        isGeneratedPath: () => false,
+        isTestPath: () => false,
+        isFixturePath: () => false,
+        isDocPath: () => false,
+        getContextActiveIgnorePatterns: () => [],
+        getContextTrackedRelativePaths: () => trackedPaths,
+        classifyPathCategory: () => 'srcRuntime',
+        shouldIncludeCategoryInScope: () => true,
+        getSyncWatchDebounceMs: () => 0,
+        capabilities: {} as CapabilityResolver,
+        runtimeFingerprint: {} as never,
+        reranker: null,
+        rootGitignoreMatcherCache: new Map(),
+        gitignoreForceReloadEveryN: 25,
+    });
+}
 
 test('normalizeRelativePathForIgnoreCheck enforces canonical repo-relative identity', () => {
     const support = new SearchQuerySupport({} as SearchQuerySupportHost);
@@ -20,6 +42,45 @@ test('normalizeRelativePathForIgnoreCheck enforces canonical repo-relative ident
     assert.equal(support.normalizeRelativePathForIgnoreCheck('src/./service.ts'), 'src/service.ts');
     assert.equal(support.normalizeRelativePathForIgnoreCheck('src//service.ts'), 'src/service.ts');
     assert.equal(support.normalizeRelativePathForIgnoreCheck('src\\service.ts'), 'src/service.ts');
+});
+
+test('tracked lexical fallback anchors the window on the first line with lexical evidence', async () => {
+    const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-tracked-lexical-'));
+    const relativePath = 'src/match.ts';
+    try {
+        fs.mkdirSync(path.join(repositoryRoot, 'src'), { recursive: true });
+        const lines = [
+            ...Array.from({ length: 79 }, (_, index) => `const filler${index} = true;`),
+            'const TARGETCODE = true;',
+            'export const after = TARGETCODE;',
+        ];
+        fs.writeFileSync(path.join(repositoryRoot, relativePath), lines.join('\n'));
+
+        const parsedOperators = parseSearchOperators('where does TARGETCODE get used');
+        const queryPlan = buildSearchQueryPlan(
+            parsedOperators.semanticQuery,
+            true,
+            parsedOperators,
+        );
+        const support = buildTrackedLexicalSupport([relativePath]);
+        const response = await support.buildTrackedLexicalSearchResults({
+            effectiveRoot: repositoryRoot,
+            parsedOperators,
+            queryPlan,
+            scope: 'runtime',
+            limit: 8,
+            exactRegistryFallback: true,
+        });
+
+        assert.equal(response.results.length, 1);
+        assert.deepEqual(
+            [response.results[0]?.startLine, response.results[0]?.endLine],
+            [78, 81],
+        );
+        assert.match(response.results[0]?.content || '', /TARGETCODE/);
+    } finally {
+        fs.rmSync(repositoryRoot, { recursive: true, force: true });
+    }
 });
 
 test('buildSearchQueryPlan classifies explicit routes without changing legacy retrieval policy', () => {

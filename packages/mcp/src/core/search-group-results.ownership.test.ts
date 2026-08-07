@@ -16,12 +16,22 @@ const navigationHelpers = {
     getOutlineStatusForLanguage: () => "ok" as const,
 };
 
-function candidate(file: string, startLine: number, endLine: number, score: number) {
+function candidate(
+    file: string,
+    startLine: number,
+    endLine: number,
+    score: number,
+    overrides: Partial<{
+        exactLexicalMatch: boolean;
+        authoritativeRank: number;
+        symbolLabel: string;
+    }> = {},
+) {
     return {
         result: {
             relativePath: file,
             language: "typescript",
-            symbolLabel: "function staleOwner()",
+            symbolLabel: overrides.symbolLabel || "function staleOwner()",
             symbolKind: "function",
             content: `return ${file};`,
             startLine,
@@ -34,7 +44,7 @@ function candidate(file: string, startLine: number, endLine: number, score: numb
         agentFitMultiplier: 1,
         agentFitReason: "implementation_symbol",
         passesMatchedMust: true,
-        exactLexicalMatch: false,
+        exactLexicalMatch: overrides.exactLexicalMatch || false,
         exactMatchPinned: false,
         rerankAdjusted: false,
         retrievalPasses: ["primary"],
@@ -42,6 +52,9 @@ function candidate(file: string, startLine: number, endLine: number, score: numb
         entrypointOwnerScoreBoost: 0,
         entrypointOwnerScoreReason: "not_applicable",
         lexicalScore: 0,
+        ...(overrides.authoritativeRank !== undefined
+            ? { authoritativeRank: overrides.authoritativeRank }
+            : {}),
     };
 }
 
@@ -391,6 +404,47 @@ test("cross-file stale owner metadata cannot merge evidence before scoring", () 
         assert.equal(group.debug?.representativeChunkCount, 1);
         assert.equal(group.debug?.symbolAggregation?.evidenceChunkCount, 1);
     }
+});
+
+test("native grouping chooses the representative by authoritative rank, not exactness", () => {
+    const result = buildVisibleGroupedSearchResults({
+        scored: [
+            candidate("src/owner.ts", 10, 15, 0.1, {
+                authoritativeRank: 1,
+                symbolLabel: "function providerOwned()",
+            }),
+            candidate("src/owner.ts", 20, 25, 0.9, {
+                authoritativeRank: 2,
+                exactLexicalMatch: true,
+                symbolLabel: "function exactButLowerRanked()",
+            }),
+        ],
+        codebaseRoot: "/repo",
+        groupBy: "symbol",
+        limit: 5,
+        queryPlan: {
+            intent: "semantic",
+            referenceSeeking: false,
+            exactMatchPinningEnabled: true,
+        },
+        mustMatchesFirst: false,
+        navigationState: { relationshipReady: false },
+        debugMode: "none",
+        now: navigationHelpers.now,
+        previewMaxBytes: 200,
+        navigationHelpers,
+        parseIndexedAtMs: () => undefined,
+        resolveOwner: () => ({
+            ownerSymbolKey: "owner-key",
+            ownerSymbolInstanceId: "owner-instance",
+            symbolKind: "function",
+            ownerSource: "owner_metadata",
+        }),
+        orderAuthority: "reranker_order",
+    });
+
+    assert.equal(result.visibleResults.length, 1);
+    assert.equal(result.visibleResults[0]?.displayLabel, "function providerOwned()");
 });
 
 test("ordinary grouped evidence publishes a bounded deterministic window", () => {

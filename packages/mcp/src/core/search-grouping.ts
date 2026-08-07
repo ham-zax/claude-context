@@ -90,8 +90,13 @@ export function applyGroupDiversity<T extends SearchGroupResult>(
         applyPass(SEARCH_DIVERSITY_RELAXED_FILE_CAP);
     }
 
-    const finalSelected = selected.slice(0, limit);
-    const finalSelectedIds = new Set(finalSelected.map((group) => group.__groupId));
+    // The passes decide which groups survive the caps. They must not decide
+    // the output sequence: authoritative retrieval/reranker order remains the
+    // only relevance order after diversity omits groups.
+    const finalSelectedIds = new Set(selected.slice(0, limit).map((group) => group.__groupId));
+    const finalSelected = grouped
+        .filter((group) => finalSelectedIds.has(group.__groupId))
+        .slice(0, limit);
     const finalFileCounts = new Map<string, number>();
     const finalSymbolCounts = new Map<string, number>();
     for (const group of finalSelected) {
