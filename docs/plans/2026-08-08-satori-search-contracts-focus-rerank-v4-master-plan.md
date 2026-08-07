@@ -1180,3 +1180,10 @@ The project is complete when:
 - The read_file `mode` requirement now fires for any exact-symbol-marked request (previously only when the exact schema already parsed), so missing `mode` is reported together with the other violations. `formatZodError` now flattens `invalid_union` sub-issues into explicit `path: message` lines instead of a single opaque "Invalid input".
 - All 9 frozen Phase-0 wire-contract discrimination vectors keep their accept/reject classification (regression-tested by the frozen suite).
 - Verification: RED proved (single opaque `invalid_union`, mode hidden); GREEN — 5 new tests (3 contract unit + 2 read_file end-to-end) + contract/read_file/registry/outline/call_graph/search/golden 139/139 + full mcp suite 1467/1467 (was 1462), mcp typecheck clean. Note: first commit 121a4f5 missed the contract test file via pathspec; corrected by d95d3a7 (same message, mirroring Task 2's follow-up pattern).
+
+### Task 11 — Add Positive-Only Query Projection v2 — DONE (afb08af)
+
+- Added: `search-rerank-query-v2.ts` owns `SEARCH_RERANK_QUERY_PROJECTION_V2 = "search_rerank_query_v2"` and `buildSearchRerankQueryV2` — the positive-only `Question: <exact semantic question>` + `Requested answer type: <one positive description>` projection. The implementation description (`production implementation, control flow, and integration path`) never names competing artifact classes; no guidance, no focus labels, no numbers/paths/providers/scores.
+- The routing module now imports the canonical identity from the v2 module (single source of truth), and `handleSearchCode` supplies `focusedQueryV2` to the resolver so v2 profiles receive the v2 bytes (fail-closed `search_rerank_query_v2_projection_unavailable` unchanged).
+- The request-contract fixture set now binds `queryProjectionV2` bytes for every focus; manifest regenerated (digest `f9f07b1e…` → `c9b3d407…`), parser key list and drift coverage updated.
+- Verification: RED proved (module missing); GREEN — 4 new exact-byte unit tests + contract fixture assertion + focused routing/contract/integration/lateon 43/43 + full mcp suite 1471/1471 (was 1467), contract:check + typecheck clean.
