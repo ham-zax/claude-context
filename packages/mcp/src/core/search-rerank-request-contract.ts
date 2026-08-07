@@ -7,6 +7,7 @@ import { serializeCanonicalJson } from "./canonical-json.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY, buildSearchRerankDocumentV3 } from "./search-rerank-document-v3.js";
+import { buildSearchRerankDocumentV4 } from "./search-rerank-document-v4.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
@@ -50,6 +51,7 @@ export type SearchRerankRequestContractFixtures = Readonly<{
     queryProjectionV2: Record<string, string>;
     candidateRoleClassification: Record<string, string>;
     documentProjectionV3: string;
+    documentProjectionV4: string;
     sourceSelectionPolicyIdentity: string;
     canonicalJsonIdentity: string;
     structuralContext: typeof SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY;
@@ -122,6 +124,7 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         queryProjectionV2,
         candidateRoleClassification,
         documentProjectionV3: buildSearchRerankDocumentV3(DOCUMENT_PROJECTION_FIXTURE).text,
+        documentProjectionV4: buildSearchRerankDocumentV4(DOCUMENT_PROJECTION_FIXTURE).text,
         sourceSelectionPolicyIdentity: serializeCanonicalJson(SEARCH_RERANK_DOCUMENT_V3_POLICY),
         canonicalJsonIdentity: serializeCanonicalJson({ b: 1, a: [2, { d: "x", c: null }] }),
         structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
@@ -183,6 +186,7 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
         "candidateRoleClassification",
         "canonicalJsonIdentity",
         "documentProjectionV3",
+        "documentProjectionV4",
         "partialProjectionSemantics",
         "queryProjectionV1",
         "queryProjectionV2",
@@ -218,6 +222,9 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
     if (typeof fixturesRecord.documentProjectionV3 !== "string") {
         throw new Error("Rerank request contract document projection fixture must be a string.");
     }
+    if (typeof fixturesRecord.documentProjectionV4 !== "string") {
+        throw new Error("Rerank request contract document projection v4 fixture must be a string.");
+    }
     if (typeof fixturesRecord.sourceSelectionPolicyIdentity !== "string") {
         throw new Error("Rerank request contract source-selection identity must be a string.");
     }
@@ -245,6 +252,7 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
                 "fixtures.candidateRoleClassification",
             ),
             documentProjectionV3: fixturesRecord.documentProjectionV3,
+            documentProjectionV4: fixturesRecord.documentProjectionV4,
             sourceSelectionPolicyIdentity: fixturesRecord.sourceSelectionPolicyIdentity,
             canonicalJsonIdentity: fixturesRecord.canonicalJsonIdentity,
             structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,

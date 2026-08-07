@@ -222,11 +222,13 @@ import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-docum
 import {
     projectPublicationBoundSearchRerankDocumentV2,
     projectPublicationBoundSearchRerankDocumentV3,
+    projectPublicationBoundSearchRerankDocumentV4,
     searchRerankCandidateId,
 } from "./search-rerank-projection.js";
 import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
+import { SEARCH_RERANK_DOCUMENT_V4_POLICY } from "./search-rerank-document-v4.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
@@ -4998,7 +5000,7 @@ export class ToolHandlers {
             });
             const rerankerDocumentProjectionVersion: string | undefined = this.reranker?.getDocumentProjectionVersion?.();
             const wantsV4StructuralContext = rerankerDocumentProjectionVersion
-                === "search_rerank_document_v4";
+                === SEARCH_RERANK_DOCUMENT_V4_POLICY.id;
             const execution = await runSearchExecution({
                 effectiveRoot,
                 scope: input.scope,
@@ -5049,6 +5051,7 @@ export class ToolHandlers {
                 reranker: this.reranker,
                 ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
                     || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
+                    || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
                     ? {
                         buildRerankDocument: async (
                             rerankQuery: string,
@@ -5121,9 +5124,11 @@ export class ToolHandlers {
                                 }
                                 searchRelationshipRecords = compatibility.relationships.records;
                             }
-                            return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
-                                ? projectPublicationBoundSearchRerankDocumentV3
-                                : projectPublicationBoundSearchRerankDocumentV2)({
+                            return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
+                                ? projectPublicationBoundSearchRerankDocumentV4
+                                : rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
+                                    ? projectPublicationBoundSearchRerankDocumentV3
+                                    : projectPublicationBoundSearchRerankDocumentV2)({
                                 candidateId,
                                 codebaseRoot: effectiveRoot,
                                 semanticQuery: rerankQuery,

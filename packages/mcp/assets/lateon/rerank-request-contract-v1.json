@@ -1,6 +1,6 @@
 {
   "schemaVersion": "satori_rerank_request_contract_v1",
-  "contractSha256": "c9b3d4072dca395a7c83e560bf5c60b8cc8adc27a5f5155dcd44e8f5bbfc453b",
+  "contractSha256": "d5aa4a07e4f4251955e320c7a3f8f3ea4d1fdfbc22708a98a9cbdfab200c05f5",
   "fixtures": {
     "answerFocusResolution": {
       "how does Shariah compliance checking block trades": "implementation",
@@ -33,6 +33,7 @@
       "config/risk.toml|toml": "configuration"
     },
     "documentProjectionV3": "{\"candidate_role\":\"implementation\",\"canonical_symbol_label\":\"validate_order\",\"documentation_excerpt\":\"\",\"language\":\"typescript\",\"query_relevant_source_excerpt\":\"function validate_order(order) {\\n    return check_shariah_compliance(order);\\n}\",\"repository_relative_path\":\"src/core/veto.ts\",\"required_owner_siblings\":[],\"signature_or_declaration\":\"function validate_order(order) {\",\"symbol_kind\":\"function\"}",
+    "documentProjectionV4": "{\"candidate_role\":\"implementation\",\"canonical_symbol_label\":\"validate_order\",\"query_relevant_source_excerpt\":\"function validate_order(order) {\\n    return check_shariah_compliance(order);\\n}\",\"repository_relative_path\":\"src/core/veto.ts\",\"signature_or_declaration\":\"function validate_order(order) {\",\"structural_context\":{\"direct_callees\":[],\"direct_callers\":[],\"supporting_tests\":[]},\"symbol_kind\":\"function\"}",
     "sourceSelectionPolicyIdentity": "{\"addedField\":\"candidate_role\",\"id\":\"search_rerank_document_v3\",\"maximumUtf8Bytes\":4000,\"previousVersion\":\"search_rerank_document_v2\",\"serialization\":\"canonical_json_utf8\",\"serializedKeyOrder\":\"lexicographic_recursive_canonical_json_v1\"}",
     "canonicalJsonIdentity": "{\"a\":[2,{\"c\":null,\"d\":\"x\"}],\"b\":1}",
     "structuralContext": {

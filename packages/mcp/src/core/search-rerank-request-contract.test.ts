@@ -53,6 +53,12 @@ test("request contract fixtures bind focus, query, role, and document projection
     );
     assert.equal(fixtures.candidateRoleClassification["tests/veto.test.ts|typescript"], "test");
     assert.ok(fixtures.documentProjectionV3.includes('"candidate_role":"implementation"'));
+    assert.ok(
+        fixtures.documentProjectionV4.includes(
+            '"structural_context":{"direct_callees":[],"direct_callers":[],"supporting_tests":[]}',
+        ),
+        "v4 fixture must carry the empty answer-packet structural context",
+    );
     assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("search_rerank_document_v3"));
     assert.equal(fixtures.structuralContext.maxDirectCallers, 3);
     assert.equal(fixtures.structuralContext.maxDirectCallees, 3);
