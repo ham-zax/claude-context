@@ -50,7 +50,7 @@ test('offline static config preserves the installer-resolved Ollama dimension', 
     }
 });
 
-test('legacy reranker application mode is no longer part of MCP configuration', () => {
+test('retired reranker application mode fails clearly before MCP configuration is built', () => {
     const keys = [
         'SATORI_RUNTIME_PROFILE',
         'VECTOR_STORE_PROVIDER',
@@ -68,9 +68,12 @@ test('legacy reranker application mode is no longer part of MCP configuration', 
             EMBEDDING_PROVIDER: 'Potion',
             POTION_HELPER_PATH: '/opt/satori/potion-helper',
             POTION_MODEL_PATH: '/opt/satori/potion-model',
+            SATORI_RERANK_APPLICATION_MODE: 'legacy_rrf',
         });
-        const config = createMcpConfig();
-        assert.equal("rerankApplicationMode" in config, false);
+        assert.throws(
+            () => createMcpConfig(),
+            /SATORI_RERANK_APPLICATION_MODE has been removed/,
+        );
     } finally {
         for (const key of keys) {
             const value = previous[key];

@@ -5,11 +5,12 @@ import {
     verifySearchRankedSetBinding,
     type SearchRankedSetBindingInput,
 } from "./search-result-set-identity.js";
+import { SEARCH_NATIVE_RERANKER_ORDER_POLICY_ID } from "./search-order-policy.js";
 
 function input(): SearchRankedSetBindingInput {
     return {
         queryPolicyDigest: "a".repeat(64),
-        rankingPolicyIdentity: "search_candidate_final_score_v2",
+        rankingPolicyIdentity: SEARCH_NATIVE_RERANKER_ORDER_POLICY_ID,
         disclosurePolicyVersion: "search_disclosure_v1",
         publicationIdentity: {
             collectionName: "repo-generation",

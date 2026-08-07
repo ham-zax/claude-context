@@ -338,6 +338,11 @@ LateOn is query-time ranking evidence only. It does not control candidate
 eligibility, source freshness, publication authority, or baseline search
 availability.
 
+Search result `score` fields retain bounded retrieval evidence for diagnostics
+and compatibility; they are not the final relevance order. Consumers should
+preserve the returned sequence, or request `includeResultIndex` when they need
+an explicit authoritative rank.
+
 ## Language Support
 
 Search and bounded reads work across the indexed text and language catalog. Rich symbol navigation depends on parser evidence. TypeScript, JavaScript, and Python currently have the strongest call-graph support; other supported languages may provide symbols without authoritative graph traversal. Inspect `manage_index status` instead of assuming every indexed language is graph-ready.

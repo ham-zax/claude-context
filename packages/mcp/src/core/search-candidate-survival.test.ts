@@ -41,6 +41,8 @@ test("candidate-survival identities distinguish persisted chunks from collision-
 
 test("candidate-survival stages are bounded and never retain source content", () => {
     const trace = createSearchCandidateSurvivalTrace();
+    assert.equal(trace.schemaVersion, "search_candidate_survival_v3");
+    assert.equal(trace.orderAuthority, "retrieval_then_validated_reranker");
     const candidates = Array.from({ length: 170 }, (_, index) => ({
         result: {
             candidateId: `stored-${index}`,
@@ -155,7 +157,7 @@ test("grouped and disclosed stages retain underlying candidate identities", () =
     });
 });
 
-test("MCP pass membership, weights, and fusion scores remain replayable", () => {
+test("MCP pass membership, weights, and retrieval evidence remain observable", () => {
     const trace = createSearchCandidateSurvivalTrace();
     const result = {
         candidateId: "stored-1",

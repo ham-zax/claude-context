@@ -559,9 +559,14 @@ async function createEvaluationEnvironment(workspaceRoot: string): Promise<Evalu
     const capabilities = new CapabilityResolver({
         name: 'search-quality-evaluation',
         version: '1.0.0',
+        executionProfile: 'connected',
+        networkPolicy: { kind: 'remote-allowed' },
         encoderProvider: 'VoyageAI',
         encoderModel: 'voyage-4-large',
         voyageKey: 'hermetic-test-key',
+        vectorStoreProvider: 'Milvus',
+        rerankerProvider: 'voyage',
+        rankerModel: 'rerank-2.5',
     });
 
     const sidecarNodes = [...symbolByCandidateId.values()].map((record) => ({
@@ -779,7 +784,10 @@ function getRepositoryIdentity(
         .sort();
     const workingTreeContent = files.map((relativePath) => {
         const absolutePath = path.join(workspaceRoot, relativePath);
-        return `${relativePath}\0${sha256(fs.readFileSync(absolutePath))}`;
+        const contentDigest = fs.existsSync(absolutePath)
+            ? sha256(fs.readFileSync(absolutePath))
+            : 'deleted';
+        return `${relativePath}\0${contentDigest}`;
     }).join('\n');
     return {
         head: gitValue(workspaceRoot, ['rev-parse', 'HEAD']),

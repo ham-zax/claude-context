@@ -586,6 +586,11 @@ export async function resolveMcpRuntimeBootstrap(
 }
 
 export function createMcpConfig(): ContextMcpConfig {
+    if (envManager.get('SATORI_RERANK_APPLICATION_MODE') !== undefined) {
+        throw new Error(
+            'SATORI_RERANK_APPLICATION_MODE has been removed; unset it or roll back to the previous Satori release for legacy_rrf behavior.',
+        );
+    }
     const executionPolicy = resolveExecutionPolicy(envManager.get('SATORI_RUNTIME_PROFILE'));
     const defaultProvider = (envManager.get('EMBEDDING_PROVIDER') as EmbeddingProvider) || 'VoyageAI';
     const defaultReadFileMaxLines = 1000;

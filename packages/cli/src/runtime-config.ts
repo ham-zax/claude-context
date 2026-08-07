@@ -76,6 +76,14 @@ function requiredEmbeddingEnv(provider: string): string | null {
 }
 
 export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConfigCheck[] {
+    if (env.SATORI_RERANK_APPLICATION_MODE !== undefined) {
+        return [{
+            name: "rerank_application_mode",
+            status: "error",
+            message: "SATORI_RERANK_APPLICATION_MODE has been removed; the native reranker order is now mandatory.",
+            nextStep: "Unset SATORI_RERANK_APPLICATION_MODE or roll back to the previous Satori release for legacy_rrf behavior.",
+        }];
+    }
     const executionProfile = selectedExecutionProfile(env);
     if (executionProfile !== "connected" && executionProfile !== "offline") {
         return [{

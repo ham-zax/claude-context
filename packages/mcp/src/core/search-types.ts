@@ -93,6 +93,7 @@ export interface SearchChunkResult {
     span: SearchSpan;
     language: string;
     content: string;
+    /** Retrieval evidence only; final relevance is the response sequence, not this number. */
     score: number;
     indexedAt?: string;
     stalenessBucket: StalenessBucket;
@@ -193,6 +194,11 @@ export interface SearchGroupedResultV2 {
     displayLabel: string;
     language: string;
     symbolKind?: string;
+    /**
+     * Retrieval evidence retained for compatibility and diagnostics. It is
+     * not an authoritative relevance score; consumers must preserve the
+     * response sequence (or use resultIndex.rank) instead of sorting by it.
+     */
     score: number;
     quality: {
         owner: "high" | "medium" | "low";
@@ -244,20 +250,6 @@ export interface SearchCandidateSurvivalOccurrence {
     rank: number;
     score?: number;
     passId?: string;
-    replay?: {
-        lexicalScore: number;
-        pathMultiplier: number;
-        changedFilesMultiplier: number;
-        agentFitMultiplier: number;
-        entrypointOwnerScoreBoost: number;
-        entrypointOwnerScoreReason: string;
-        exactLexicalMatch: boolean;
-        passesMatchedMust: boolean;
-        rerankFamilyId: string;
-        rerankDocumentUtf8Bytes: number;
-        symbolLabel: string | null;
-        symbolId: string | null;
-    };
     groupReplay?: {
         displayLabel: string;
         symbolKind: string | null;
@@ -299,11 +291,14 @@ export interface SearchCandidateSurvivalRemoval {
         | "visible_limit";
 }
 
+/**
+ * Version 3 is intentional: the removed v2 replay fields described local
+ * relevance scores that are no longer ranking authority. Consumers must
+ * migrate to the bounded retrieval/evidence stages and orderAuthority.
+ */
 export interface SearchCandidateSurvivalDebug {
-    schemaVersion: "search_candidate_survival_v2";
-    scorePolicy: {
-        orderAuthority: "retrieval_then_validated_reranker";
-    };
+    schemaVersion: "search_candidate_survival_v3";
+    orderAuthority: "retrieval_then_validated_reranker";
     maxEntriesPerStage: number;
     maxRemovalEntries: number;
     corePasses: Array<{
@@ -783,6 +778,7 @@ export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelop
         remainingGroupCount: number;
     };
     pagination?: SearchPaginationEvidence;
+    /** Results are already in authoritative relevance order. */
     results: SearchGroupedResultV2[];
 }
 

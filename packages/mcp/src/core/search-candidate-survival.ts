@@ -30,16 +30,6 @@ type TraceableCandidate = {
     result: SearchResultLike;
     fusionScore?: number;
     finalScore?: number;
-    lexicalScore?: number;
-    pathMultiplier?: number;
-    changedFilesMultiplier?: number;
-    agentFitMultiplier?: number;
-    entrypointOwnerScoreBoost?: number;
-    entrypointOwnerScoreReason?: string;
-    exactLexicalMatch?: boolean;
-    passesMatchedMust?: boolean;
-    rerankFamilyId?: string;
-    rerankDocumentUtf8Bytes?: number;
 };
 
 export function searchCandidateIdentity(result: CandidateIdentityInput): {
@@ -85,36 +75,6 @@ function buildCandidateOccurrence(input: {
 }): SearchCandidateSurvivalOccurrence {
     const { candidateId, candidateIdKind } = searchCandidateIdentity(input.candidate.result);
     const score = candidateScoreForStage(input.candidate, input.stage);
-    const replay = input.stage === "mcp_replay_signals"
-        && Number.isFinite(input.candidate.lexicalScore)
-        && Number.isFinite(input.candidate.pathMultiplier)
-        && Number.isFinite(input.candidate.changedFilesMultiplier)
-        && Number.isFinite(input.candidate.agentFitMultiplier)
-        && Number.isFinite(input.candidate.entrypointOwnerScoreBoost)
-        && typeof input.candidate.entrypointOwnerScoreReason === "string"
-        && typeof input.candidate.exactLexicalMatch === "boolean"
-        && typeof input.candidate.passesMatchedMust === "boolean"
-        && typeof input.candidate.rerankFamilyId === "string"
-        && Number.isSafeInteger(input.candidate.rerankDocumentUtf8Bytes)
-        ? {
-            lexicalScore: input.candidate.lexicalScore as number,
-            pathMultiplier: input.candidate.pathMultiplier as number,
-            changedFilesMultiplier: input.candidate.changedFilesMultiplier as number,
-            agentFitMultiplier: input.candidate.agentFitMultiplier as number,
-            entrypointOwnerScoreBoost: input.candidate.entrypointOwnerScoreBoost as number,
-            entrypointOwnerScoreReason: input.candidate.entrypointOwnerScoreReason,
-            exactLexicalMatch: input.candidate.exactLexicalMatch,
-            passesMatchedMust: input.candidate.passesMatchedMust,
-            rerankFamilyId: input.candidate.rerankFamilyId,
-            rerankDocumentUtf8Bytes: input.candidate.rerankDocumentUtf8Bytes as number,
-            symbolLabel: typeof input.candidate.result.symbolLabel === "string"
-                ? input.candidate.result.symbolLabel
-                : null,
-            symbolId: typeof input.candidate.result.symbolId === "string"
-                ? input.candidate.result.symbolId
-                : null,
-        }
-        : undefined;
     return {
         candidateId,
         candidateIdKind,
@@ -132,7 +92,6 @@ function buildCandidateOccurrence(input: {
         rank: input.rank,
         ...(score !== undefined ? { score } : {}),
         ...(input.passId ? { passId: input.passId } : {}),
-        ...(replay ? { replay } : {}),
     };
 }
 
@@ -163,10 +122,8 @@ function appendStage(
 
 export function createSearchCandidateSurvivalTrace(): SearchCandidateSurvivalDebug {
     return {
-        schemaVersion: "search_candidate_survival_v2",
-        scorePolicy: {
-            orderAuthority: "retrieval_then_validated_reranker",
-        },
+        schemaVersion: "search_candidate_survival_v3",
+        orderAuthority: "retrieval_then_validated_reranker",
         maxEntriesPerStage: SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
         maxRemovalEntries: SEARCH_CANDIDATE_SURVIVAL_MAX_REMOVAL_ENTRIES,
         corePasses: [],
