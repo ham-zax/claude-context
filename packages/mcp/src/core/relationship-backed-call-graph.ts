@@ -54,6 +54,42 @@ export type RelationshipBackedCallGraphInput = {
     readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
 };
 
+export type CallGraphNavigationAuthority = Readonly<{
+    generationId: string;
+    navigationSealSha256: string;
+    relationshipManifestSha256: string;
+    builtAt: string;
+}>;
+
+/**
+ * Resolve the serving navigation generation attribution for a call-graph
+ * traversal. Attribution is emitted only when the complete authority is
+ * known: generation identity, navigation seal, relationship manifest, and
+ * build time. Partial evidence yields no attribution rather than a guessed
+ * one.
+ */
+export function resolveCallGraphNavigationAuthority(input: {
+    generationId: string | undefined;
+    navigationSealHash: string | undefined;
+    relationshipManifestHash: string | undefined;
+    builtAt: string | undefined;
+}): CallGraphNavigationAuthority | null {
+    if (
+        !input.generationId
+        || !input.navigationSealHash
+        || !input.relationshipManifestHash
+        || !input.builtAt
+    ) {
+        return null;
+    }
+    return Object.freeze({
+        generationId: input.generationId,
+        navigationSealSha256: input.navigationSealHash,
+        relationshipManifestSha256: input.relationshipManifestHash,
+        builtAt: input.builtAt,
+    });
+}
+
 export type RelationshipBackedCallGraphResult = {
     supported: true;
     direction: CallGraphDirection;

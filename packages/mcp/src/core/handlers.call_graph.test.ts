@@ -3262,6 +3262,289 @@ test('handleCallGraph ordinary published files retain existing graph results', a
     });
 });
 
+test('handleCallGraph attributes source-backed serving navigation authority from the sealed marker', async () => {
+    await withTempRepo(async (repoPath) => {
+        const source = 'export function run() { return true; }\n';
+        const fileHash = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+        const symbol = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'run',
+            qualifiedName: 'src.runtime.run',
+            label: 'function run()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            getVectorStore: () => ({ listCollections: async () => [] }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getAllCodebases: () => [{
+                path: repoPath,
+                info: {
+                    status: 'indexed',
+                    indexedFiles: 1,
+                    totalChunks: 1,
+                    indexStatus: 'completed',
+                    lastUpdated: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+                }
+            }],
+            getIndexedCodebases: () => [repoPath],
+            getIndexingCodebases: () => [],
+            getCodebaseInfo: () => undefined,
+            getCodebaseStatus: () => 'indexed',
+            ensureFingerprintCompatibilityOnAccess: () => ({
+                allowed: false,
+                changed: false,
+                reason: 'fingerprint_mismatch',
+                message: 'Index fingerprint mismatch.',
+            }),
+            saveCodebaseSnapshot: () => undefined,
+        } as unknown as HandlerSnapshotManager;
+        const navigationStore = {
+            getSymbolsByFile: async () => ({
+                status: 'ok',
+                symbols: [symbol],
+                manifestHash: 'symbol-manifest-a',
+                warnings: [],
+                registry: buildSymbolRegistry({
+                    manifest: navigationManifest([{ path: 'src/runtime.ts', hash: fileHash, language: 'typescript', symbolCount: 1, definitionStatus: 'definitions_present' }]),
+                    symbols: [symbol],
+                }),
+            }),
+            getCompatibilityState: async () => ({
+                registry: {
+                    status: 'ok',
+                    rootPath: repoPath,
+                    manifestHash: 'symbol-manifest-a',
+                    registryManifestHash: 'symbol-manifest-a',
+                    registry: {} as never,
+                    warnings: [],
+                },
+                relationships: {
+                    status: 'ok',
+                    rootPath: repoPath,
+                    manifestHash: 'relationship-manifest-b',
+                    manifest: { builtAt: new Date('2026-01-01T00:00:00.000Z').toISOString() },
+                    records: [],
+                    warnings: [],
+                },
+            }),
+        } as unknown as HandlerNavigationStore;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+            () => Date.parse('2026-01-01T01:00:00.000Z'),
+            undefined,
+            undefined,
+            undefined,
+            navigationStore,
+        );
+        const completedAt = '2026-06-17T00:00:00.000Z';
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+            outcome: 'valid',
+            navigationStatus: 'valid',
+            collectionName: 'committed-v3',
+            marker: {
+                kind: 'satori_index_completion_v3',
+                codebasePath: repoPath,
+                fingerprint: {} as never,
+                indexedFiles: 1,
+                totalChunks: 1,
+                completedAt,
+                runId: 'run-9',
+                indexPolicyHash: 'policy-9',
+                indexStatus: 'completed',
+                navigation: {
+                    status: 'sealed',
+                    generationId: 'generation-42',
+                    symbolRegistryManifestHash: 'symbol-manifest-a',
+                    relationshipManifestHash: 'relationship-manifest-b',
+                    sealHash: 'navigation-seal-c',
+                },
+            },
+            exactPayloadRecounts: 1,
+        });
+        (handlers as unknown as ToolHandlersTestOverrides).buildRelationshipBackedCallGraph = async () => ({
+            supported: true,
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+            nodes: [{ symbolId: symbol.symbolInstanceId, symbolLabel: symbol.label, file: symbol.file, language: symbol.language, span: symbol.span }],
+            edges: [],
+            notes: [],
+            notesTruncated: false,
+            totalNoteCount: 0,
+            returnedNoteCount: 0,
+        });
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: symbol.symbolInstanceId,
+                symbolLabel: symbol.label,
+                span: { startLine: 1, endLine: 1 },
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.deepEqual(payload.navigationAuthority, {
+            generationId: 'generation-42',
+            navigationSealSha256: 'navigation-seal-c',
+            relationshipManifestSha256: 'relationship-manifest-b',
+            builtAt: completedAt,
+        });
+    });
+});
+
+test('handleCallGraph attributes the exact serving navigation generation authority', async () => {
+    await withTempRepo(async (repoPath) => {
+        const source = 'export function run() { return true; }\n';
+        const fileHash = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+        const symbol = createFunctionSymbol({
+            file: 'src/runtime.ts',
+            name: 'run',
+            qualifiedName: 'src.runtime.run',
+            label: 'function run()',
+            startLine: 1,
+            endLine: 1,
+            fileHash,
+        });
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            getVectorStore: () => ({ listCollections: async () => [] }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getAllCodebases: () => [{
+                path: repoPath,
+                info: {
+                    status: 'indexed',
+                    indexedFiles: 1,
+                    totalChunks: 1,
+                    indexStatus: 'completed',
+                    lastUpdated: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+                }
+            }],
+            getIndexedCodebases: () => [repoPath],
+            getIndexingCodebases: () => [],
+            getCodebaseInfo: () => undefined,
+            getCodebaseStatus: () => 'indexed',
+            ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false }),
+            saveCodebaseSnapshot: () => undefined,
+        } as unknown as HandlerSnapshotManager;
+        const navigationStore = {
+            getSymbolsByFile: async () => ({
+                status: 'ok',
+                symbols: [symbol],
+                manifestHash: 'manifest-hash',
+                warnings: [],
+                registry: buildSymbolRegistry({
+                    manifest: navigationManifest([{ path: 'src/runtime.ts', hash: fileHash, language: 'typescript', symbolCount: 1, definitionStatus: 'definitions_present' }]),
+                    symbols: [symbol],
+                }),
+            }),
+            getCompatibilityState: async () => ({
+                relationships: {
+                    status: 'ok',
+                    manifest: { builtAt: new Date('2026-01-01T00:00:00.000Z').toISOString() },
+                },
+            }),
+        } as unknown as HandlerNavigationStore;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            {} as unknown as HandlerSyncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+            () => Date.parse('2026-01-01T01:00:00.000Z'),
+            undefined,
+            undefined,
+            undefined,
+            navigationStore,
+        );
+        const completedAt = '2026-06-17T00:00:00.000Z';
+        const sealedMarker = {
+            kind: 'satori_index_completion_v3',
+            codebasePath: repoPath,
+            fingerprint: {} as never,
+            indexedFiles: 1,
+            totalChunks: 1,
+            completedAt,
+            runId: 'run-9',
+            indexPolicyHash: 'policy-9',
+            indexStatus: 'completed',
+            navigation: {
+                status: 'sealed',
+                generationId: 'generation-42',
+                symbolRegistryManifestHash: 'symbol-manifest-a',
+                relationshipManifestHash: 'relationship-manifest-b',
+                sealHash: 'navigation-seal-c',
+            },
+        };
+        (handlers as unknown as ToolHandlersTestOverrides).validateCompletionProof = async () => ({
+            outcome: 'valid',
+            navigationStatus: 'valid',
+            collectionName: 'committed-v3',
+            marker: sealedMarker,
+            generationReceipt: {
+                collectionName: 'committed-v3',
+                marker: sealedMarker,
+                policy: {} as never,
+                policyDocumentDigest: 'policy-digest',
+                exactPayloadCount: 1,
+                navigation: {
+                    generationId: 'generation-42',
+                    generationRoot: repoPath,
+                    symbolRegistryManifestHash: 'symbol-manifest-a',
+                    relationshipManifestHash: 'relationship-manifest-b',
+                    navigationSealHash: 'navigation-seal-c',
+                },
+                observations: { profileFileToken: null, policyFileToken: 'p', navigationToken: 'n' },
+            },
+            exactPayloadRecounts: 1,
+        });
+        (handlers as unknown as ToolHandlersTestOverrides).buildRelationshipBackedCallGraph = async () => ({
+            supported: true,
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+            nodes: [{ symbolId: symbol.symbolInstanceId, symbolLabel: symbol.label, file: symbol.file, language: symbol.language, span: symbol.span }],
+            edges: [],
+            notes: [],
+            notesTruncated: false,
+            totalNoteCount: 0,
+            returnedNoteCount: 0,
+        });
+        const response = await handlers.handleCallGraph({
+            path: repoPath,
+            symbolRef: {
+                file: 'src/runtime.ts',
+                symbolId: symbol.symbolInstanceId,
+                symbolLabel: symbol.label,
+                span: { startLine: 1, endLine: 1 },
+            },
+            direction: 'callers',
+            depth: 1,
+            limit: 5,
+        }, fixtureWorkspacePolicy(repoPath));
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'ok');
+        assert.deepEqual(payload.navigationAuthority, {
+            generationId: 'generation-42',
+            navigationSealSha256: 'navigation-seal-c',
+            relationshipManifestSha256: 'relationship-manifest-b',
+            builtAt: completedAt,
+        });
+    });
+});
+
 test('handleCallGraph fails closed when the published symbol file exceeds the byte ceiling', async () => {
     await withTempStateRoot(async (stateRoot) => withTempRepo(async (repoPath) => {
         const source = 'export function run() { return true; }\n';

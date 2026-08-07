@@ -1082,6 +1082,13 @@ export interface CallGraphTraversalResponseEnvelope {
         /** Count of edges returned in this traversal response, not total edges stored for the codebase sidecar. */
         edgeCount: number;
     };
+    /** The exact serving navigation generation this traversal was resolved against (generation id, navigation seal, relationship manifest, build time). */
+    navigationAuthority?: {
+        generationId: string;
+        navigationSealSha256: string;
+        relationshipManifestSha256: string;
+        builtAt: string;
+    };
     freshnessDecision?: FreshnessDecision | { mode: "skipped_requires_reindex" | "skipped_indexing" };
     message?: string;
     hints?: NavigationToolHints;

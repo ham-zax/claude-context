@@ -41,6 +41,7 @@ import type {
     CallGraphSymbolRef,
     CallGraphTestReference,
 } from "./call-graph.js";
+import { resolveCallGraphNavigationAuthority } from "./relationship-backed-call-graph.js";
 import type {
     CallGraphHint,
     CallGraphResponseEnvelope,
@@ -1318,10 +1319,21 @@ export class NavigationHandlers {
             }
 
             await this.host.touchWatchedCodebase(effectiveRoot);
+            const navigationAuthority = resolveCallGraphNavigationAuthority({
+                generationId: trackedRootState.generationReceipt?.navigation.generationId
+                    ?? trackedRootState.sourceBackedNavigationBinding?.generationId,
+                navigationSealHash: trackedRootState.generationReceipt?.navigation.navigationSealHash
+                    ?? trackedRootState.sourceBackedNavigationBinding?.navigationSealHash,
+                relationshipManifestHash: trackedRootState.generationReceipt?.navigation.relationshipManifestHash
+                    ?? trackedRootState.sourceBackedNavigationBinding?.relationshipManifestHash,
+                builtAt: trackedRootState.generationReceipt?.marker?.completedAt
+                    ?? trackedRootState.sourceBackedNavigationBinding?.builtAt,
+            });
             const payload = this.host.withProofDebugHint({
                 status: "ok" as const,
                 path: effectiveRoot,
                 symbolRef,
+                ...(navigationAuthority ? { navigationAuthority } : {}),
                 ...relationshipBackedGraph,
             } satisfies CallGraphResponseEnvelope, proofDebugHint);
             const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);

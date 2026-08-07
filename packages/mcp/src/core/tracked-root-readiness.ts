@@ -84,6 +84,7 @@ export type TrackedRootReadinessState =
             symbolRegistryManifestHash: string;
             relationshipManifestHash: string;
             navigationSealHash: string;
+            builtAt: string;
         };
         sourceBackedNavigationBindingValidated?: true;
         proofDebugHint?: CompletionProbeDebugHint;
@@ -569,6 +570,7 @@ export class TrackedRootReadiness {
                         relationshipManifestHash:
                             completionProof.marker.navigation.relationshipManifestHash,
                         navigationSealHash: completionProof.marker.navigation.sealHash,
+                        builtAt: completionProof.marker.completedAt,
                     },
                 }
                 : {}),
