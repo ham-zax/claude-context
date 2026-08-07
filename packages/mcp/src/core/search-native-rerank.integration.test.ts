@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 import {
     RerankerRequestError,
@@ -806,5 +807,131 @@ test("candidate survival records the exact reranker input and output suffix", as
     assert.deepEqual(
         outcome.scored.map((entry) => entry.result.candidateId),
         ["exact", "tail-c", "tail-b", "tail-a"],
+    );
+});
+
+function typedOkProjection(result: { relativePath: string }) {
+    const document = `focused rerank body ${result.relativePath}`;
+    return {
+        ok: true as const,
+        document,
+        utf8Bytes: Buffer.byteLength(document, "utf8"),
+        sha256: crypto.createHash("sha256").update(document, "utf8").digest("hex"),
+        candidateRole: "unknown" as const,
+        projectionIdentity: "search_rerank_document_v2",
+    };
+}
+
+test("full debug records bounded per-document rerank input provenance without text", async () => {
+    const providerDocuments: string[][] = [];
+    const reranker = buildReranker((documents) => reverseResults(documents), (documents) => {
+        providerDocuments.push([...documents]);
+    });
+    const results = [candidate("a", "src/a.ts", 0.9), candidate("b", "src/b.ts", 0.8)];
+    const buildRerankDocument = async (
+        _query: string,
+        result: { relativePath: string },
+    ) => typedOkProjection(result);
+    const outcome = await run(
+        buildInput(undefined, { debugMode: "full" }),
+        buildHost(results, reranker, { buildRerankDocument }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(outcome.candidateSurvival?.schemaVersion, "search_candidate_survival_v4");
+    const stages = outcome.candidateSurvival?.stages ?? [];
+    const inputStage = stages.find((stage) => stage.stage === "reranker_input");
+    assert.ok(inputStage, "reranker_input stage must be recorded");
+    assert.equal(providerDocuments.length, 1);
+    for (const occurrence of inputStage.candidates) {
+        const providerDocument = providerDocuments[0]![occurrence.rank - 1]!;
+        assert.equal(providerDocument, `focused rerank body ${occurrence.relativePath}`);
+        assert.deepEqual(occurrence.rerankInput, {
+            documentUtf8Bytes: Buffer.byteLength(providerDocument, "utf8"),
+            documentSha256: crypto.createHash("sha256")
+                .update(providerDocument, "utf8")
+                .digest("hex"),
+            candidateRole: "unknown",
+            projectionIdentity: "search_rerank_document_v2",
+        });
+    }
+    for (const stage of stages) {
+        if (stage.stage === "reranker_input") continue;
+        for (const occurrence of stage.candidates) {
+            assert.equal(occurrence.rerankInput, undefined, stage.stage);
+        }
+    }
+    assert.equal(JSON.stringify(outcome.candidateSurvival).includes("focused rerank body"), false);
+
+    const nonFull = await run(buildInput(), buildHost(results, reranker, { buildRerankDocument }));
+    assert.equal(nonFull.kind, "ok");
+    if (nonFull.kind !== "ok") return;
+    assert.equal(nonFull.candidateSurvival, undefined);
+});
+
+test("projection failures appear as removals with candidate identity and no source text", async () => {
+    const reranker = buildReranker((documents) => reverseResults(documents));
+    const results = [
+        candidate("a", "src/a.ts", 0.9),
+        candidate("b", "src/b.ts", 0.8),
+        candidate("c", "src/c.ts", 0.7),
+    ];
+    const outcome = await run(
+        buildInput(undefined, { debugMode: "full" }),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => (
+                result.relativePath === "src/c.ts"
+                    ? {
+                        ok: false,
+                        candidateId: searchRerankCandidateId(result),
+                        reason: "source_hash_mismatch",
+                    }
+                    : typedOkProjection(result)
+            ),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    const removals = outcome.candidateSurvival?.removals ?? [];
+    assert.deepEqual(
+        removals.filter((removal) => removal.reason === "reranker_document_projection_failed"),
+        [{
+            candidateId: "src/c.ts:1:4",
+            afterStage: "mcp_ranked",
+            reason: "reranker_document_projection_failed",
+        }],
+    );
+    assert.equal(JSON.stringify(outcome.candidateSurvival).includes("focused rerank body"), false);
+});
+
+test("insufficient projectable documents record reranker_input_insufficient removals", async () => {
+    const reranker = buildReranker(() => []);
+    const results = [candidate("a", "src/a.ts", 0.9), candidate("b", "src/b.ts", 0.8)];
+    const outcome = await run(
+        buildInput(undefined, { debugMode: "full" }),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => (
+                result.relativePath === "src/b.ts"
+                    ? {
+                        ok: false,
+                        candidateId: searchRerankCandidateId(result),
+                        reason: "owner_not_found",
+                    }
+                    : typedOkProjection(result)
+            ),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    const removals = outcome.candidateSurvival?.removals ?? [];
+    assert.deepEqual(
+        removals.map((removal) => [removal.candidateId, removal.reason]),
+        [
+            ["src/b.ts:1:4", "reranker_document_projection_failed"],
+            ["a", "reranker_input_insufficient"],
+        ],
     );
 });

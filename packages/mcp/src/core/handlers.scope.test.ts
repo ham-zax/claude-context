@@ -1031,7 +1031,7 @@ function assertClosedDebugProjection(
             queryEmbeddings?: unknown[];
             stages?: Array<{ stage: string }>;
         } | undefined;
-        assert.equal(survival?.schemaVersion, 'search_candidate_survival_v3');
+        assert.equal(survival?.schemaVersion, 'search_candidate_survival_v4');
         const queryEmbeddings = survival?.queryEmbeddings ?? [];
         assert.ok(Array.isArray(queryEmbeddings));
         if (survival?.stages?.some(

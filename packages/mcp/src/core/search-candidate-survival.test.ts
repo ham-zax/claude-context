@@ -41,7 +41,7 @@ test("candidate-survival identities distinguish persisted chunks from collision-
 
 test("candidate-survival stages are bounded and never retain source content", () => {
     const trace = createSearchCandidateSurvivalTrace();
-    assert.equal(trace.schemaVersion, "search_candidate_survival_v3");
+    assert.equal(trace.schemaVersion, "search_candidate_survival_v4");
     assert.equal(trace.orderAuthority, "retrieval_then_validated_reranker");
     const candidates = Array.from({ length: 170 }, (_, index) => ({
         result: {
@@ -180,4 +180,40 @@ test("MCP pass membership, weights, and retrieval evidence remain observable", (
     assert.equal(trace.stages[0]?.candidates[0]?.rank, 1);
     assert.equal(trace.stages[1]?.candidates[0]?.score, 0.125);
     assert.equal(JSON.stringify(trace).includes("not retained"), false);
+});
+
+test("reranker input occurrence metadata attaches only to matching candidate ids", () => {
+    const trace = createSearchCandidateSurvivalTrace();
+    const candidates = ["stored-1", "stored-2"].map((candidateId, index) => ({
+        result: {
+            candidateId,
+            relativePath: `src/file-${index}.ts`,
+            startLine: 1,
+            endLine: 2,
+            language: "typescript",
+            score: 1 - index / 10,
+            content: "secret-source",
+        },
+    }));
+    const metadata = new Map([[
+        "stored-1",
+        {
+            documentUtf8Bytes: 42,
+            documentSha256: "a".repeat(64),
+            candidateRole: "unknown" as const,
+            projectionIdentity: "search_rerank_document_v2",
+        },
+    ]]);
+
+    appendSearchCandidateStage(trace, "reranker_input", candidates, undefined, metadata);
+
+    const [first, second] = trace.stages[0]?.candidates ?? [];
+    assert.deepEqual(first?.rerankInput, {
+        documentUtf8Bytes: 42,
+        documentSha256: "a".repeat(64),
+        candidateRole: "unknown",
+        projectionIdentity: "search_rerank_document_v2",
+    });
+    assert.equal(second?.rerankInput, undefined);
+    assert.equal(JSON.stringify(trace).includes("secret-source"), false);
 });

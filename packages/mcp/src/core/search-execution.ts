@@ -19,6 +19,7 @@ import {
 } from "./search-constants.js";
 import type {
     SearchCandidateSurvivalDebug,
+    SearchCandidateSurvivalOccurrence,
     SearchDebugMode,
     SearchFreshnessSummary,
     SearchOperatorSummary,
@@ -502,6 +503,10 @@ async function rerankSearchCandidates(
             let rerankDocuments: string[];
             let byteBudgetOmittedCandidatesList: SearchCandidate[];
             let byteSelectionInputBytes = 0;
+            let rerankInputMetadataMap: ReadonlyMap<
+                string,
+                NonNullable<SearchCandidateSurvivalOccurrence["rerankInput"]>
+            > | undefined;
             if (host.buildRerankDocument) {
                 const buildProjection = host.buildRerankDocument;
                 const projectionRows = await Promise.all(providerBoundedSelection.map(async (candidate) => ({
@@ -510,6 +515,7 @@ async function rerankSearchCandidates(
                 })));
                 const failureCounts: Partial<Record<SearchRerankProjectionFailureReason, number>> = {};
                 let firstFailure: SearchRerankProjectionSummary["firstFailure"];
+                const failedCandidateIds: string[] = [];
                 const projectableRows: Array<{
                     candidate: SearchCandidate;
                     projection: Extract<SearchRerankProjectionResult, { ok: true }>;
@@ -530,8 +536,18 @@ async function rerankSearchCandidates(
                         ? searchCandidateIdentity(row.candidate.result).candidateId
                         : row.projection.candidateId;
                     failureCounts[reason] = (failureCounts[reason] ?? 0) + 1;
+                    failedCandidateIds.push(failedCandidateId);
                     if (!firstFailure) {
                         firstFailure = { candidateId: failedCandidateId, reason };
+                    }
+                }
+                if (candidateSurvival) {
+                    for (const failedCandidateId of failedCandidateIds) {
+                        appendSearchCandidateRemoval(candidateSurvival, {
+                            candidateId: failedCandidateId,
+                            afterStage: "mcp_ranked",
+                            reason: "reranker_document_projection_failed",
+                        });
                     }
                 }
                 projectionSummary = {
@@ -546,6 +562,15 @@ async function rerankSearchCandidates(
                     // and preserve retrieval order without counting a
                     // provider failure.
                     phaseWarnings.push(WARNING_CODES.RERANKER_SKIPPED_INPUT);
+                    if (candidateSurvival) {
+                        for (const row of projectableRows) {
+                            appendSearchCandidateRemoval(candidateSurvival, {
+                                candidateId: searchCandidateIdentity(row.candidate.result).candidateId,
+                                afterStage: "mcp_ranked",
+                                reason: "reranker_input_insufficient",
+                            });
+                        }
+                    }
                     return {
                         exactMatchPinningApplied,
                         rerankerAttempted,
@@ -578,6 +603,20 @@ async function rerankSearchCandidates(
                 byteBudgetOmittedCandidatesList = projectableCandidates.slice(byteSelection.candidates.length);
                 byteSelectionInputBytes = byteSelection.inputBytes;
                 rerankerByteBudgetOmittedCandidates = byteSelection.omittedCandidateCount;
+                rerankInputMetadataMap = new Map(
+                    rerankSlice.map((candidate, index) => {
+                        const row = projectableRows[index]!;
+                        return [
+                            searchCandidateIdentity(candidate.result).candidateId,
+                            {
+                                documentUtf8Bytes: row.projection.utf8Bytes,
+                                documentSha256: row.projection.sha256,
+                                candidateRole: row.projection.candidateRole,
+                                projectionIdentity: row.projection.projectionIdentity,
+                            },
+                        ] as const;
+                    }),
+                );
             } else {
                 let selectedDocuments: string[];
                 try {
@@ -606,7 +645,13 @@ async function rerankSearchCandidates(
             const rerankCount = rerankSlice.length;
             rerankerCandidatesReranked = rerankCount;
             if (candidateSurvival) {
-                appendSearchCandidateStage(candidateSurvival, "reranker_input", rerankSlice);
+                appendSearchCandidateStage(
+                    candidateSurvival,
+                    "reranker_input",
+                    rerankSlice,
+                    undefined,
+                    rerankInputMetadataMap,
+                );
                 for (const candidate of byteBudgetOmittedCandidatesList) {
                     appendSearchCandidateRemoval(candidateSurvival, {
                         candidateId: searchCandidateIdentity(candidate.result).candidateId,

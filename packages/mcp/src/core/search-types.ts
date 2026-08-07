@@ -14,6 +14,7 @@ import type { SearchRouteContract } from "./search-lexical-scoring.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
 import type { InboundCoverageEvidence } from "./relationship-backed-call-graph.js";
 import type { RerankBudgetReason } from "./search-rerank-policy.js";
+import type { SearchAnswerFocus, SearchCandidateRole } from "./search-rerank-context.js";
 import type { SearchRerankProjectionFailureReason } from "./search-rerank-projection-result.js";
 import type { SemanticPassFailureDiagnostic } from "./backend-diagnostics.js";
 
@@ -251,6 +252,14 @@ export interface SearchCandidateSurvivalOccurrence {
     rank: number;
     score?: number;
     passId?: string;
+    rerankInput?: {
+        documentUtf8Bytes: number;
+        documentSha256: string;
+        candidateRole: SearchCandidateRole;
+        answerFocus?: SearchAnswerFocus;
+        projectionIdentity: string;
+        queryProjectionIdentity?: string;
+    };
     groupReplay?: {
         displayLabel: string;
         symbolKind: string | null;
@@ -285,6 +294,8 @@ export interface SearchCandidateSurvivalRemoval {
         | "must_filter"
         | "exclude_filter"
         | "reranker_input_byte_budget"
+        | "reranker_document_projection_failed"
+        | "reranker_input_insufficient"
         | "invalid_group_target"
         | "duplicate_group"
         | "file_diversity_cap"
@@ -293,12 +304,14 @@ export interface SearchCandidateSurvivalRemoval {
 }
 
 /**
- * Version 3 is intentional: the removed v2 replay fields described local
- * relevance scores that are no longer ranking authority. Consumers must
- * migrate to the bounded retrieval/evidence stages and orderAuthority.
+ * Version 4 adds bounded per-document rerank input provenance
+ * (bytes/hash/role/projection identity, never document text) and
+ * projection-failure removal reasons. Version 3 removed the v2 replay
+ * fields that described local relevance scores no longer ranking
+ * authority.
  */
 export interface SearchCandidateSurvivalDebug {
-    schemaVersion: "search_candidate_survival_v3";
+    schemaVersion: "search_candidate_survival_v4";
     orderAuthority: "retrieval_then_validated_reranker";
     maxEntriesPerStage: number;
     maxRemovalEntries: number;

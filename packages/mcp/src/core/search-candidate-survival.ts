@@ -122,7 +122,7 @@ function appendStage(
 
 export function createSearchCandidateSurvivalTrace(): SearchCandidateSurvivalDebug {
     return {
-        schemaVersion: "search_candidate_survival_v3",
+        schemaVersion: "search_candidate_survival_v4",
         orderAuthority: "retrieval_then_validated_reranker",
         maxEntriesPerStage: SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
         maxRemovalEntries: SEARCH_CANDIDATE_SURVIVAL_MAX_REMOVAL_ENTRIES,
@@ -191,17 +191,25 @@ export function appendSearchCandidateStage(
     stage: SearchCandidateSurvivalStageName,
     candidates: readonly TraceableCandidate[],
     passId?: string,
+    occurrenceMetadata?: ReadonlyMap<
+        string,
+        NonNullable<SearchCandidateSurvivalOccurrence["rerankInput"]>
+    >,
 ): void {
     appendStage(trace, {
         stage,
         ...(passId ? { passId } : {}),
         totalOccurrences: candidates.length,
-        occurrences: candidates.map((candidate, index) => buildCandidateOccurrence({
-            candidate,
-            stage,
-            rank: index + 1,
-            ...(passId ? { passId } : {}),
-        })),
+        occurrences: candidates.map((candidate, index) => {
+            const occurrence = buildCandidateOccurrence({
+                candidate,
+                stage,
+                rank: index + 1,
+                ...(passId ? { passId } : {}),
+            });
+            const metadata = occurrenceMetadata?.get(occurrence.candidateId);
+            return metadata ? { ...occurrence, rerankInput: metadata } : occurrence;
+        }),
     });
 }
 
