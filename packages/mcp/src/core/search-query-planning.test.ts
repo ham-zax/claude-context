@@ -36,3 +36,14 @@ test('query plans do not carry a numeric lexical relevance weight', () => {
 
     assert.equal('lexicalWeight' in plan, false);
 });
+
+test('query plans flag documentation-seeking queries', () => {
+    assert.equal(buildSearchQueryPlan('where is trade veto documented', true).documentationSeeking, true);
+    assert.equal(buildSearchQueryPlan('readme for the reranker contract', true).documentationSeeking, true);
+    assert.equal(buildSearchQueryPlan('guide to index rebuilds', true).documentationSeeking, true);
+});
+
+test('query plans do not flag documentation-seeking for unrelated queries', () => {
+    assert.equal(buildSearchQueryPlan('how does regime filtering gate entry decisions', true).documentationSeeking, false);
+    assert.equal(buildSearchQueryPlan('who calls validate_order', true).documentationSeeking, false);
+});

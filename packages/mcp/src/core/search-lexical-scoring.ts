@@ -62,6 +62,7 @@ export type SearchQueryPlan = {
     quotedLiteralPhrases: string[];
     referenceSeeking: boolean;
     testSeeking: boolean;
+    documentationSeeking: boolean;
     implementationSeeking: boolean;
     writerSeeking: boolean;
     entrypointIntent: EntrypointQueryIntent;

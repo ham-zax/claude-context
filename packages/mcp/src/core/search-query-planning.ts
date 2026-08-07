@@ -564,6 +564,7 @@ export function buildSearchQueryPlan(
     );
     const testSeeking = rawTestSeeking
         && !entrypointIntent.kinds.includes("development_execution");
+    const documentationSeeking = /\b(doc|docs|documentation|documented|readme|guide|manual)\b/.test(normalizedQuery);
     const writerSeeking = /\b(writes?|writing|written|updates?|updated|updating|creates?|created|creating|generates?|generated|generating|emits?|emitted|emitting|persists?|persisted|persisting|configures?|configured|configuring|installs?|installed|installing)\b/.test(normalizedQuery);
     const implementationCue = /\b(implement|implements|implemented|implementation|owner|owning|built|build|builds|builder|construct|constructed|create|creates|created|install|installs|installed|emit|emits|emitted|producer|produces|normalize|normalizes|normalized|cap|caps|capped|script|scripts|check|checks|checked|wire|wired|assemble|assembles|assembled|decide|decides|decided|deciding|freshness|reconcile|reconciles|reconciled|reconciliation|control)\b/.test(normalizedQuery);
     const ownerWhereSeeking = identifierTokens.length > 0
@@ -638,6 +639,7 @@ export function buildSearchQueryPlan(
         quotedLiteralPhrases,
         referenceSeeking,
         testSeeking,
+        documentationSeeking,
         implementationSeeking,
         writerSeeking,
         entrypointIntent,
