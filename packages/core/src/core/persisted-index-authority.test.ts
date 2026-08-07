@@ -202,6 +202,31 @@ test('checkpoint native Python relationship fingerprint requires reindex under t
     });
 });
 
+test('pre-cross-module relationship-v9 fingerprint is incompatible with the post-fix runtime', () => {
+    const runtime = {
+        ...fingerprint(),
+        relationshipVersion: RELATIONSHIP_BUILDER_VERSION,
+    };
+    const staleSidecar = {
+        ...runtime,
+        relationshipVersion: 'relationship-v9+python-constructor-receivers+python-native-resolution-v1',
+    };
+
+    assert.notEqual(
+        RELATIONSHIP_BUILDER_VERSION,
+        staleSidecar.relationshipVersion,
+        'the cross-module constructor fix must carry a bumped relationship-builder identity',
+    );
+    assert.deepEqual(compareIndexCompatibility(staleSidecar, runtime), {
+        status: 'requires_reindex',
+        differingFields: ['relationshipVersion'],
+    });
+    assert.deepEqual(classifyRepairIndexCompatibility(staleSidecar, runtime), {
+        status: 'relationship_only_upgrade',
+        differingFields: ['relationshipVersion'],
+    });
+});
+
 test('repair compatibility admits only a relationship-version-only upgrade', () => {
     const current = fingerprint();
     assert.deepEqual(classifyRepairIndexCompatibility(current, current), {

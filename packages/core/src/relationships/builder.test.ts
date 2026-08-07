@@ -1160,6 +1160,29 @@ test('buildCallRelationshipsForRegistry resolves cross-module constructor caller
     assert.equal(edge?.resolutionAuthority, 'direct_binding');
 });
 
+test('buildCallRelationshipsForRegistry emits the TradingCore.__init__ constructor caller edge', async () => {
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
+        'src/rules.py': [
+            'class TradingEntryVetoes:',
+            '    pass',
+        ].join('\n'),
+        'src/core.py': [
+            'from rules import TradingEntryVetoes',
+            '',
+            'class TradingCore:',
+            '    def __init__(self):',
+            '        self.vetoes = TradingEntryVetoes()',
+        ].join('\n'),
+    });
+    const records = buildCallRelationshipsForRegistry({ registry, analysisByFile });
+    const edge = records.find((record) => (
+        record.type === 'CALLS'
+        && registry.symbolsByInstanceId.get(record.sourceInstanceId ?? '')?.qualifiedName === 'TradingCore.__init__'
+        && registry.symbolsByInstanceId.get(record.targetInstanceId ?? '')?.name === 'TradingEntryVetoes'
+    ));
+    assert.ok(edge, 'expected a TradingCore.__init__ constructor CALLS edge for the imported TradingEntryVetoes');
+});
+
 test('buildCallRelationshipsForRegistry resolves cross-module constructor callers via import aliases', async () => {
     const { registry, analysisByFile } = await buildAnalyzedPythonRegistry({
         'src/rules.py': [
