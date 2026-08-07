@@ -348,7 +348,15 @@ test("projection failure falls back without calling the provider", async () => {
     assert.equal(outcome.kind, "ok");
     if (outcome.kind !== "ok") return;
     assert.equal(providerCalls, 0);
-    assert.equal(outcome.rerankerFailurePhase, "document_projection");
+    assert.equal(outcome.rerankerFailurePhase, undefined);
+    assert.equal(outcome.rerankerAttempted, false);
+    assert.ok(outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"));
+    assert.ok(!outcome.searchWarnings.includes("RERANKER_FAILED"));
+    assert.deepEqual(
+        outcome.rerankerProjection?.failureCounts,
+        { projection_contract_failed: 2 },
+    );
+    assert.equal(outcome.rerankerProjection?.omittedCandidates, 2);
     assert.deepEqual(outcome.scored.map((entry) => entry.result.candidateId), ["a", "b"]);
 });
 
@@ -386,13 +394,203 @@ test("every typed projection failure reason falls back before provider admission
         if (outcome.kind !== "ok") continue;
         assert.equal(providerCalls, 0, reason);
         assert.equal(outcome.rerankerApplied, false, reason);
-        assert.equal(outcome.rerankerFailurePhase, "document_projection", reason);
+        assert.equal(outcome.rerankerFailurePhase, undefined, reason);
+        assert.ok(outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"), reason);
+        assert.ok(!outcome.searchWarnings.includes("RERANKER_FAILED"), reason);
+        assert.deepEqual(outcome.rerankerProjection?.failureCounts, { [reason]: 2 }, reason);
+        assert.equal(outcome.rerankerProjection?.firstFailure?.reason, reason, reason);
         assert.deepEqual(
             outcome.scored.map((entry) => entry.result.candidateId),
             ["a", "b"],
             reason,
         );
     }
+});
+
+test("one projection failure degrades input and reranks only the projectable slots", async () => {
+    const providerCandidateIds: string[][] = [];
+    const reranker = buildReranker((documents) => reverseResults(documents), (_documents, candidateIds) => {
+        providerCandidateIds.push([...candidateIds]);
+    });
+    const results = [
+        candidate("a", "src/a.ts", 0.9),
+        candidate("b", "src/b.ts", 0.8),
+        candidate("c", "src/c.ts", 0.7),
+        candidate("d", "src/d.ts", 0.6),
+    ];
+    const outcome = await run(
+        buildInput(),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => (
+                result.relativePath === "src/c.ts"
+                    ? {
+                        ok: false,
+                        candidateId: searchRerankCandidateId(result),
+                        reason: "source_hash_mismatch",
+                    }
+                    : {
+                        ok: true,
+                        document: `document ${result.relativePath}`,
+                        utf8Bytes: Buffer.byteLength(`document ${result.relativePath}`, "utf8"),
+                        sha256: "0".repeat(64),
+                        candidateRole: "unknown",
+                        projectionIdentity: "search_rerank_document_v2",
+                    }
+            ),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.deepEqual(providerCandidateIds, [["a", "b", "d"]]);
+    assert.ok(outcome.searchWarnings.includes("RERANKER_INPUT_DEGRADED"));
+    assert.ok(!outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"));
+    assert.equal(outcome.rerankerApplied, true);
+    assert.equal(outcome.orderAuthority, "reranker_order");
+    assert.equal(outcome.rerankerProjection?.requestedCandidates, 4);
+    assert.equal(outcome.rerankerProjection?.projectedCandidates, 3);
+    assert.equal(outcome.rerankerProjection?.omittedCandidates, 1);
+    assert.deepEqual(outcome.rerankerProjection?.failureCounts, { source_hash_mismatch: 1 });
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["d", "b", "c", "a"],
+    );
+});
+
+test("a single surviving projection skips the provider and preserves retrieval order", async () => {
+    let providerCalls = 0;
+    const reranker = buildReranker(() => {
+        providerCalls += 1;
+        return [];
+    });
+    const results = [candidate("a", "src/a.ts", 0.9), candidate("b", "src/b.ts", 0.8)];
+    const outcome = await run(
+        buildInput(),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => (
+                result.relativePath === "src/b.ts"
+                    ? {
+                        ok: false,
+                        candidateId: searchRerankCandidateId(result),
+                        reason: "owner_not_found",
+                    }
+                    : {
+                        ok: true,
+                        document: "document a",
+                        utf8Bytes: 10,
+                        sha256: "0".repeat(64),
+                        candidateRole: "unknown",
+                        projectionIdentity: "search_rerank_document_v2",
+                    }
+            ),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(providerCalls, 0);
+    assert.equal(outcome.rerankerAttempted, false);
+    assert.equal(outcome.rerankerApplied, false);
+    assert.equal(outcome.rerankerFailurePhase, undefined);
+    assert.ok(outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"));
+    assert.ok(!outcome.searchWarnings.includes("RERANKER_FAILED"));
+    assert.equal(outcome.rerankerProjection?.projectedCandidates, 1);
+    assert.equal(outcome.rerankerProjection?.omittedCandidates, 1);
+    assert.deepEqual(outcome.scored.map((entry) => entry.result.candidateId), ["a", "b"]);
+});
+
+test("a shared-authority mass failure records every failure without RERANKER_FAILED", async () => {
+    let providerCalls = 0;
+    const reranker = buildReranker(() => {
+        providerCalls += 1;
+        return [];
+    });
+    const results = [
+        candidate("a", "src/a.ts", 0.9),
+        candidate("b", "src/b.ts", 0.8),
+        candidate("c", "src/c.ts", 0.7),
+    ];
+    const outcome = await run(
+        buildInput(),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => ({
+                ok: false,
+                candidateId: searchRerankCandidateId(result),
+                reason: "registry_manifest_mismatch",
+            }),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(providerCalls, 0);
+    assert.equal(outcome.rerankerFailurePhase, undefined);
+    assert.ok(!outcome.searchWarnings.includes("RERANKER_FAILED"));
+    assert.ok(outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"));
+    assert.equal(outcome.rerankerProjection?.requestedCandidates, 3);
+    assert.equal(outcome.rerankerProjection?.projectedCandidates, 0);
+    assert.equal(outcome.rerankerProjection?.omittedCandidates, 3);
+    assert.deepEqual(
+        outcome.rerankerProjection?.failureCounts,
+        { registry_manifest_mismatch: 3 },
+    );
+    assert.equal(
+        outcome.rerankerProjection?.firstFailure?.reason,
+        "registry_manifest_mismatch",
+    );
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["a", "b", "c"],
+    );
+});
+
+test("a provider timeout after partial projection keeps the full frozen retrieval order", async () => {
+    const reranker = buildReranker(() => {
+        throw new RerankerRequestError(
+            "timeout",
+            null,
+            2,
+            "reranker request timed out",
+        );
+    });
+    const results = [
+        candidate("a", "src/a.ts", 0.9),
+        candidate("b", "src/b.ts", 0.8),
+        candidate("c", "src/c.ts", 0.7),
+    ];
+    const outcome = await run(
+        buildInput(),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => (
+                result.relativePath === "src/c.ts"
+                    ? {
+                        ok: false,
+                        candidateId: searchRerankCandidateId(result),
+                        reason: "source_unavailable",
+                    }
+                    : {
+                        ok: true,
+                        document: `document ${result.relativePath}`,
+                        utf8Bytes: 20,
+                        sha256: "0".repeat(64),
+                        candidateRole: "unknown",
+                        projectionIdentity: "search_rerank_document_v2",
+                    }
+            ),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.ok(outcome.searchWarnings.includes("RERANKER_INPUT_DEGRADED"));
+    assert.ok(outcome.searchWarnings.includes("RERANKER_FAILED"));
+    assert.equal(outcome.rerankerFailurePhase, "api_call");
+    assert.equal(outcome.rerankerApplied, false);
+    assert.equal(outcome.rerankerProjection?.omittedCandidates, 1);
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["a", "b", "c"],
+    );
 });
 
 test("zero-byte reranker admission falls back to the frozen retrieval order", async () => {

@@ -14,6 +14,7 @@ import type { SearchRouteContract } from "./search-lexical-scoring.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
 import type { InboundCoverageEvidence } from "./relationship-backed-call-graph.js";
 import type { RerankBudgetReason } from "./search-rerank-policy.js";
+import type { SearchRerankProjectionFailureReason } from "./search-rerank-projection-result.js";
 import type { SemanticPassFailureDiagnostic } from "./backend-diagnostics.js";
 
 export type StalenessBucket = "fresh" | "aging" | "stale" | "unknown";
@@ -633,6 +634,17 @@ export type SearchRerankerOperationalReason =
     | "lateon_cancelled"
     | "lateon_invalid_output"
     | "lateon_worker_failure";
+
+export type SearchRerankProjectionSummary = Readonly<{
+    requestedCandidates: number;
+    projectedCandidates: number;
+    omittedCandidates: number;
+    failureCounts: Partial<Record<SearchRerankProjectionFailureReason, number>>;
+    firstFailure?: {
+        candidateId: string;
+        reason: SearchRerankProjectionFailureReason;
+    };
+}>;
 
 export type SearchRankingDebugHint = Pick<SearchDebugHint,
     | "route"
