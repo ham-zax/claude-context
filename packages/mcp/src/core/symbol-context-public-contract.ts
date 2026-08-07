@@ -126,10 +126,142 @@ export const directSpanOpenRequestSchema = z.object({
     }
 });
 
-export const openSymbolRequestSchema = z.union([
-    exactSymbolOpenRequestSchema,
-    directSpanOpenRequestSchema,
-]);
+const symbolIdentityFieldSchema = z.string().trim().min(1).max(512);
+
+export function hasExactSymbolMarker(value: unknown): boolean {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+    const record = value as Record<string, unknown>;
+    return record.contractVersion !== undefined
+        || record.symbolId !== undefined
+        || record.symbolLabel !== undefined
+        || record.context !== undefined
+        || record.continuation !== undefined;
+}
+
+function flattenZodIssues(issues: readonly z.ZodIssue[]): z.ZodIssue[] {
+    const flattened: z.ZodIssue[] = [];
+    for (const issue of issues) {
+        const unionErrors = (issue as { unionErrors?: readonly z.ZodError[] }).unionErrors;
+        if (issue.code === z.ZodIssueCode.invalid_union && unionErrors && unionErrors.length > 0) {
+            for (const unionError of unionErrors) {
+                flattened.push(...flattenZodIssues(unionError.issues));
+            }
+        } else {
+            flattened.push(issue);
+        }
+    }
+    return flattened;
+}
+
+/**
+ * `open_symbol` is validated as one unit. Any exact-symbol marker
+ * (`contractVersion`, `symbolId`, `symbolLabel`, `context`, `continuation`)
+ * commits the whole object to exact-symbol validation; every actionable
+ * violation — missing version, conflicting identity, missing operation,
+ * inner shape errors — is reported at a stable field path in one response.
+ * Objects without any exact-symbol marker are direct spans and remain
+ * exempt from the exact-symbol contract.
+ */
+export const openSymbolRequestSchema = z.object({
+    contractVersion: z.unknown().optional(),
+    symbolId: z.unknown().optional(),
+    symbolLabel: z.unknown().optional(),
+    context: z.unknown().optional(),
+    continuation: z.unknown().optional(),
+    startLine: z.number().int().positive().optional(),
+    endLine: z.number().int().positive().optional(),
+}).strict().superRefine((value, ctx) => {
+    if (hasExactSymbolMarker(value)) {
+        if (value.contractVersion !== SYMBOL_CONTEXT_FORMAT_VERSION) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["contractVersion"],
+                message: `contractVersion ${SYMBOL_CONTEXT_FORMAT_VERSION} is required for exact-symbol requests.`,
+            });
+        }
+        if (Number(Boolean(value.symbolId)) + Number(Boolean(value.symbolLabel)) !== 1) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["symbolId"],
+                message: "exactly one of symbolId or symbolLabel is required.",
+            });
+        }
+        if (Number(Boolean(value.context)) + Number(Boolean(value.continuation)) !== 1) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["context"],
+                message: "exactly one of context or continuation is required.",
+            });
+        }
+        if (value.startLine !== undefined || value.endLine !== undefined) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["startLine"],
+                message: "direct span fields cannot be combined with an exact-symbol request.",
+            });
+        }
+        if (value.symbolId !== undefined) {
+            const identity = symbolIdentityFieldSchema.safeParse(value.symbolId);
+            if (!identity.success) {
+                for (const issue of flattenZodIssues(identity.error.issues)) {
+                    ctx.addIssue({ ...issue, path: ["symbolId", ...issue.path] });
+                }
+            }
+        }
+        if (value.symbolLabel !== undefined) {
+            const identity = symbolIdentityFieldSchema.safeParse(value.symbolLabel);
+            if (!identity.success) {
+                for (const issue of flattenZodIssues(identity.error.issues)) {
+                    ctx.addIssue({ ...issue, path: ["symbolLabel", ...issue.path] });
+                }
+            }
+        }
+        if (value.context !== undefined) {
+            const inner = symbolContextRequestSchema.safeParse(value.context);
+            if (!inner.success) {
+                for (const issue of flattenZodIssues(inner.error.issues)) {
+                    ctx.addIssue({ ...issue, path: ["context", ...issue.path] });
+                }
+            }
+        }
+        if (value.continuation !== undefined) {
+            const inner = symbolContextContinuationSchema.safeParse(value.continuation);
+            if (!inner.success) {
+                for (const issue of flattenZodIssues(inner.error.issues)) {
+                    ctx.addIssue({ ...issue, path: ["continuation", ...issue.path] });
+                }
+            }
+        }
+        return;
+    }
+    if (value.startLine === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["startLine"],
+            message: "startLine is required for direct-span requests.",
+        });
+    }
+    if (value.endLine === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["endLine"],
+            message: "endLine is required for direct-span requests.",
+        });
+    }
+    if (
+        value.startLine !== undefined
+        && value.endLine !== undefined
+        && value.endLine < value.startLine
+    ) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["endLine"],
+            message: "endLine must not precede startLine.",
+        });
+    }
+});
 
 export type ExactSymbolOpenRequest = z.infer<typeof exactSymbolOpenRequestSchema>;
 export type SymbolContextPreset = z.infer<typeof symbolContextRequestSchema>["preset"];

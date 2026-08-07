@@ -873,6 +873,38 @@ test('read_file annotated mode forwards the session workspace policy to the inte
     });
 });
 
+test('read_file exact-symbol validation reports missing version, conflicting identities, missing operation, and missing mode in one response', async () => {
+    const response = await runReadFile({
+        path: '/repo/src/runtime.ts',
+        open_symbol: {
+            symbolId: 'sym_runtime',
+            symbolLabel: 'runtime',
+        },
+    });
+    assert.equal(response.isError, true);
+    const text = response.content[0]?.text || '';
+    assert.match(text, /Invalid arguments for 'read_file'/);
+    assert.match(text, /contractVersion/);
+    assert.match(text, /exactly one of symbolId or symbolLabel/);
+    assert.match(text, /exactly one of context or continuation/);
+    assert.match(text, /mode is required/);
+});
+
+test('read_file exact-symbol validation reports inner context shape errors with missing mode in one response', async () => {
+    const response = await runReadFile({
+        path: '/repo/src/runtime.ts',
+        open_symbol: {
+            contractVersion: 2,
+            symbolId: 'sym_runtime',
+            context: {},
+        },
+    });
+    assert.equal(response.isError, true);
+    const text = response.content[0]?.text || '';
+    assert.match(text, /mode is required/);
+    assert.match(text, /context\.preset/);
+});
+
 test('read_file exact-symbol schema rejects legacy, mixed, and unknown request shapes', async () => {
     const base = {
         path: '/repo/src/runtime.ts',

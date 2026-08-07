@@ -58,8 +58,23 @@ export interface McpTool<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
     execute: (args: unknown, ctx: ToolContext) => Promise<ToolResponse>;
 }
 
+function flattenUnionIssues(issues: readonly z.ZodIssue[]): z.ZodIssue[] {
+    const flattened: z.ZodIssue[] = [];
+    for (const issue of issues) {
+        const unionErrors = (issue as { unionErrors?: readonly z.ZodError[] }).unionErrors;
+        if (issue.code === z.ZodIssueCode.invalid_union && unionErrors && unionErrors.length > 0) {
+            for (const unionError of unionErrors) {
+                flattened.push(...flattenUnionIssues(unionError.issues));
+            }
+        } else {
+            flattened.push(issue);
+        }
+    }
+    return flattened;
+}
+
 export function formatZodError(toolName: string, error: z.ZodError): string {
-    const issues = error.issues.map((issue) => {
+    const issues = flattenUnionIssues(error.issues).map((issue) => {
         const key = issue.path.length > 0 ? issue.path.join('.') : 'input';
         return `${key}: ${issue.message}`;
     });

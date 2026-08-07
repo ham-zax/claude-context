@@ -40,6 +40,7 @@ import {
     SYMBOL_CONTEXT_LIMITS,
     composePublicSymbolContextEnvelope,
     exactSymbolOpenRequestSchema,
+    hasExactSymbolMarker,
     openSymbolRequestSchema,
     resolveSymbolContextOperation,
     type ExactSymbolOpenRequest,
@@ -71,7 +72,7 @@ export const readFileInputSchema = z.object({
             message: "presentation applies only to ordinary reads and cannot be combined with open_symbol.",
         });
     }
-    if (exactSymbolOpenRequestSchema.safeParse(input.open_symbol).success && input.mode === undefined) {
+    if (hasExactSymbolMarker(input.open_symbol) && input.mode === undefined) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["mode"],
@@ -989,9 +990,11 @@ export const readFileTool: McpTool = {
 
                 if (input.open_symbol && !isExactSymbolRequest(input.open_symbol) && totalLines > 0) {
                     const openSymbol = input.open_symbol;
-                    startLine = clamp(openSymbol.startLine, 1, totalLines);
-                    endLine = clamp(openSymbol.endLine, startLine, totalLines);
-                    addContinuationHint = false;
+                    if (typeof openSymbol.startLine === "number" && typeof openSymbol.endLine === "number") {
+                        startLine = clamp(openSymbol.startLine, 1, totalLines);
+                        endLine = clamp(openSymbol.endLine, startLine, totalLines);
+                        addContinuationHint = false;
+                    }
                 }
 
                 const selectedLines = totalLines === 0 ? [] : lines.slice(startLine - 1, endLine);
