@@ -764,6 +764,12 @@ interface SearchBaseResponseEnvelope {
     hints?: SearchResponseHints;
     compatibility?: FingerprintCompatibilityDiagnostics;
     indexingFailure?: IndexingFailureMetadata;
+    retryAfterMs?: number;
+    indexingOperation?: {
+        action: string;
+        phase: string;
+        generation: number;
+    };
 }
 
 export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelope {

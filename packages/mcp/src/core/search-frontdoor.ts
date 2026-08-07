@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { DEFAULT_MANAGE_RETRY_AFTER_MS } from "../config.js";
 import { requireAbsoluteFilesystemPath, trackCodebasePath } from "../utils.js";
 import type { CompletionProofReason } from "./completion-proof.js";
 import type {
@@ -54,6 +55,7 @@ export type SearchFrontDoorHost = {
         "buildIndexFailedSearchPayload" | "buildMissingLocalCollectionSearchPayload"
     >;
     prepareInitialTrackedRootRead: (absolutePath: string) => Promise<TrackedRootReadinessState>;
+    waitForSearchableSync?: (codebasePath: string, timeoutMs: number) => Promise<boolean>;
     preparePostFreshnessTrackedRootRead: (
         absolutePath: string,
         reason: Extract<
@@ -151,7 +153,12 @@ function buildBlockedReadinessPayload(
     }
 
     if (state.state === "indexing") {
-        return host.buildNotReadySearchPayload(state.codebasePath, searchContext);
+        const payload = host.buildNotReadySearchPayload(state.codebasePath, searchContext);
+        return {
+            ...payload,
+            retryAfterMs: DEFAULT_MANAGE_RETRY_AFTER_MS,
+            ...(state.operation ? { indexingOperation: { ...state.operation } } : {}),
+        };
     }
 
     if (state.state === "index_failed") {
@@ -276,7 +283,21 @@ export async function runSearchFrontDoor(
 
     trackCodebasePath(absolutePath);
 
-    const trackedRootState = await host.prepareInitialTrackedRootRead(absolutePath);
+    let trackedRootState = await host.prepareInitialTrackedRootRead(absolutePath);
+    if (
+        trackedRootState.state === "indexing"
+        && trackedRootState.operation?.action === "sync"
+        && trackedRootState.searchableGenerationAvailable
+        && host.waitForSearchableSync
+    ) {
+        const synced = await host.waitForSearchableSync(
+            trackedRootState.codebasePath,
+            DEFAULT_MANAGE_RETRY_AFTER_MS,
+        );
+        if (synced) {
+            trackedRootState = await host.prepareInitialTrackedRootRead(absolutePath);
+        }
+    }
     const canSyncInitialStaleLocal = trackedRootState.state === "stale_local"
         && host.canSyncStaleLocal(trackedRootState.codebasePath, trackedRootState.reason);
     if (!canSyncInitialStaleLocal) {

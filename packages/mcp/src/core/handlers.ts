@@ -960,6 +960,8 @@ export class ToolHandlers {
             getSnapshotIndexingCodebases: this.getSnapshotIndexingCodebases.bind(this),
             getSnapshotCodebaseInfo: this.getSnapshotCodebaseInfo.bind(this),
             getSnapshotCodebaseStatus: this.getSnapshotCodebaseStatus.bind(this),
+            getIndexingOperation: (codebasePath: string) => this.getIndexingOperationForReadiness(codebasePath),
+            hasSearchableGeneration: (codebasePath: string) => this.hasSearchableGenerationForReadiness(codebasePath),
             enforceFingerprintGate: this.enforceFingerprintGate.bind(this),
             validateCompletionProof: (codebasePath: string) => this.validateCompletionProof(codebasePath),
             probeLocalSearchCollectionState: (codebasePath: string) => this.probeLocalSearchCollectionState(codebasePath),
@@ -1924,7 +1926,13 @@ export class ToolHandlers {
             && this.mutationLeaseCoordinator?.getActiveLease(state.root.path)
         ) {
             this.evictPreparedRead(state.root.path);
-            return { state: 'indexing', codebasePath: state.root.path };
+            const operation = this.getIndexingOperationForReadiness(state.root.path);
+            return {
+                state: 'indexing',
+                codebasePath: state.root.path,
+                ...(operation ? { operation } : {}),
+                searchableGenerationAvailable: true,
+            };
         }
         return state;
     }
@@ -2388,6 +2396,72 @@ export class ToolHandlers {
             lastUpdated: typeof info.lastUpdated === 'string' ? info.lastUpdated : null,
             phase: null
         };
+    }
+
+    private readLatestOperationReceipt(codebasePath: string):
+        | { action: string; phase: string; generation: number }
+        | undefined {
+        const reader = this.snapshotManager as unknown as {
+            getLatestOperation?: (path: string) => { action: string; phase: string; generation: number } | undefined;
+        };
+        try {
+            return reader.getLatestOperation?.(codebasePath);
+        } catch {
+            return undefined;
+        }
+    }
+
+    private getIndexingOperationForReadiness(codebasePath: string):
+        | { action: "create" | "reindex" | "sync" | "repair"; phase: string; generation: number }
+        | undefined {
+        const receipt = this.readLatestOperationReceipt(codebasePath);
+        if (!receipt) {
+            return undefined;
+        }
+        if (
+            receipt.action !== "create"
+            && receipt.action !== "reindex"
+            && receipt.action !== "sync"
+            && receipt.action !== "repair"
+        ) {
+            return undefined;
+        }
+        if (receipt.phase === "completed" || receipt.phase === "failed" || receipt.phase === "blocked") {
+            return undefined;
+        }
+        return { action: receipt.action, phase: receipt.phase, generation: receipt.generation };
+    }
+
+    private hasSearchableGenerationForReadiness(codebasePath: string): boolean {
+        // Only sync runs against an already-published, searchable generation.
+        const receipt = this.readLatestOperationReceipt(codebasePath);
+        return Boolean(receipt && receipt.action === "sync");
+    }
+
+    private async waitForSearchableSync(codebasePath: string, timeoutMs: number): Promise<boolean> {
+        const deadline = Date.now() + Math.max(0, Math.trunc(timeoutMs));
+        for (;;) {
+            this.refreshSnapshotStateFromDisk();
+            const status = this.getSnapshotCodebaseStatus(codebasePath);
+            if (status === "indexed" || status === "sync_completed") {
+                return true;
+            }
+            const receipt = this.readLatestOperationReceipt(codebasePath);
+            const syncInFlight = Boolean(
+                receipt
+                && receipt.action === "sync"
+                && receipt.phase !== "completed"
+                && receipt.phase !== "failed"
+                && receipt.phase !== "blocked",
+            );
+            if (!syncInFlight || Date.now() >= deadline) {
+                return false;
+            }
+            await new Promise((resolve) => setTimeout(
+                resolve,
+                Math.min(100, Math.max(1, deadline - Date.now())),
+            ));
+        }
     }
 
     private isIndexingStateStale(codebasePath: string, graceMs: number = STALE_INDEXING_RECOVERY_GRACE_MS): boolean {
@@ -4158,6 +4232,10 @@ export class ToolHandlers {
                 buildNotReadySearchPayload: (codebasePath, searchContext) => this.buildNotReadySearchPayload(
                     codebasePath,
                     searchContext
+                ),
+                waitForSearchableSync: (codebasePath, timeoutMs) => this.waitForSearchableSync(
+                    codebasePath,
+                    timeoutMs
                 ),
                 buildFreshnessBlockedSearchPayload: (codebasePath, freshnessDecision, searchContext) => this.buildFreshnessBlockedSearchPayload(
                     codebasePath,

@@ -380,3 +380,63 @@ test('handleGetIndexingStatus preserves vector readiness while exposing a missin
         });
     });
 });
+
+test('handleSearchCode returns bounded retry hint while a reindex is indexing', async () => {
+    await withTempRepo(async (repoPath) => {
+        const context = {
+            getEmbeddingEngine: () => ({ getProvider: () => 'VoyageAI' }),
+            semanticSearch: async () => {
+                throw new Error('semanticSearch should not run while indexing');
+            }
+        } as unknown as HandlerContext;
+
+        const indexingInfo = {
+            status: 'indexing',
+            indexingPercentage: 12,
+            lastUpdated: new Date('2026-01-01T00:00:00.000Z').toISOString()
+        };
+        const snapshotManager = {
+            getAllCodebases: () => [{ path: repoPath, info: indexingInfo }],
+            getCodebaseInfo: () => indexingInfo,
+            getCodebaseStatus: () => 'indexing',
+            getIndexedCodebases: () => [],
+            getIndexingCodebases: () => [repoPath],
+            getLatestOperation: () => ({
+                id: 'op-reindex-1',
+                action: 'reindex' as const,
+                canonicalRoot: repoPath,
+                generation: 4,
+                acceptedAt: '2026-01-01T00:00:00.000Z',
+                phase: 'writing' as const,
+                lastDurableTransitionAt: '2026-01-01T00:00:00.000Z',
+                runtimeFingerprint: RUNTIME_FINGERPRINT,
+                writer: { ownerId: 'owner-1', pid: 1, satoriVersion: 'test' },
+            }),
+            ensureFingerprintCompatibilityOnAccess: () => ({ allowed: true, changed: false })
+        } as unknown as HandlerSnapshotManager;
+
+        const syncManager = {
+            ensureFreshness: async () => {
+                throw new Error('ensureFreshness should not run while indexing');
+            }
+        } as unknown as HandlerSyncManager;
+
+        const handlers = new ToolHandlers(context, snapshotManager, syncManager, RUNTIME_FINGERPRINT, CAPABILITIES, () => Date.parse('2026-01-01T01:00:00.000Z'));
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'runtime',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 5
+        });
+
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'indexing');
+        assert.equal(payload.retryAfterMs, 2000);
+        assert.deepEqual(payload.indexingOperation, { action: 'reindex', phase: 'writing', generation: 4 });
+        assert.equal(payload.indexing?.progressPct, 12);
+    });
+});

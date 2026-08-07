@@ -68,6 +68,12 @@ type CallGraphContext = {
     limit: number;
 };
 
+export type TrackedRootIndexingOperation = {
+    action: "create" | "reindex" | "sync" | "repair";
+    phase: string;
+    generation: number;
+};
+
 export type TrackedRootReadinessState =
     | {
         state: "ready";
@@ -90,7 +96,12 @@ export type TrackedRootReadinessState =
         exactPayloadRecounts?: number;
     }
     | { state: "requires_reindex"; codebasePath: string; message?: string }
-    | { state: "indexing"; codebasePath: string }
+    | {
+        state: "indexing";
+        codebasePath: string;
+        operation?: TrackedRootIndexingOperation;
+        searchableGenerationAvailable: boolean;
+    }
     | { state: "index_failed"; codebasePath: string; info: TrackedCodebaseInfo }
     | { state: "not_indexed" }
     | { state: "stale_local"; codebasePath: string; reason: CompletionProofReason }
@@ -107,6 +118,8 @@ export type TrackedRootReadinessHost = {
     getSnapshotIndexingCodebases(): string[];
     getSnapshotCodebaseInfo(codebasePath: string): TrackedCodebaseInfo | undefined;
     getSnapshotCodebaseStatus(codebasePath: string): CodebaseStatus | "not_found";
+    getIndexingOperation?(codebasePath: string): TrackedRootIndexingOperation | undefined;
+    hasSearchableGeneration?(codebasePath: string): boolean;
     enforceFingerprintGate(codebasePath: string): { blockedResponse?: unknown; message?: string; reason?: string };
     validateCompletionProof(codebasePath: string): Promise<CompletionProofValidationResult>;
     probeLocalSearchCollectionState(codebasePath: string): Promise<{
@@ -431,9 +444,13 @@ export class TrackedRootReadiness {
         }
 
         if (!searchableRoot && indexingRoot) {
+            const operation = this.host.getIndexingOperation?.(indexingRoot.path);
             return {
                 state: "indexing",
                 codebasePath: indexingRoot.path,
+                ...(operation ? { operation } : {}),
+                searchableGenerationAvailable:
+                    this.host.hasSearchableGeneration?.(indexingRoot.path) ?? false,
             };
         }
 
