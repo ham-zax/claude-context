@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { continueSearchTool } from "./continue_search.js";
 import type { ToolContext } from "./types.js";
@@ -11,6 +13,7 @@ function buildContext(handleContinueSearch: (args: Record<string, unknown>) => P
         capabilities: new CapabilityResolver({
             name: "test",
             version: "1.0.0",
+            stateRoot: path.join(os.tmpdir(), "satori-test-state-root"),
             executionProfile: "connected",
             networkPolicy: { kind: "remote-allowed" },
             vectorStoreProvider: "Milvus",

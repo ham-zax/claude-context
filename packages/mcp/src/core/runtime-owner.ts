@@ -79,6 +79,8 @@ export interface RuntimeOwnerMutationGateResult {
     reason?: "runtime_owner_conflict";
     message?: string;
     conflictingOwners?: RuntimeOwnerConflictSummary[];
+    registryPath?: string;
+    lockPath?: string;
 }
 
 export interface RuntimeOwnerLiveSummaryEntry {
@@ -250,12 +252,16 @@ export function formatRuntimeOwnerConflictMessage(args: {
     currentPid?: number;
     conflictingOwners: RuntimeOwnerConflictSummary[];
     registryError?: string;
+    registryPath?: string;
+    lockPath?: string;
 }): string {
+    const registryPath = args.registryPath || path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME);
+    const lockPath = args.lockPath || path.join(defaultRuntimeStateDir(), OWNER_LOCK_NAME);
     if (args.registryError) {
         return [
             "Index mutation is blocked because the Satori runtime owner registry could not be validated.",
             `Registry error: ${args.registryError}`,
-            `Inspect ${path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME)} and remove a stale lock at ${path.join(defaultRuntimeStateDir(), OWNER_LOCK_NAME)} if present, then retry.`,
+            `Inspect ${registryPath} and remove a stale lock at ${lockPath} if present, then retry.`,
         ].join(" ");
     }
 
@@ -281,15 +287,20 @@ export function formatRuntimeOwnerConflictMessage(args: {
         `Conflicting owners: ${ownerLines.join("; ")}.`,
         "MCP tools do not kill processes.",
         `Stop those clients (or only if they are orphaned Satori MCP servers: kill ${pids}), leave a single Satori version/config running, then retry create/reindex/sync/clear.`,
-        `Registry: ${path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME)}.`,
+        `Registry: ${registryPath}. Lock: ${lockPath}.`,
     ].join(" ");
 }
 
-export function formatRuntimeOwnerConflictNextStep(conflictingOwners: RuntimeOwnerConflictSummary[]): string {
+export function formatRuntimeOwnerConflictNextStep(
+    conflictingOwners: RuntimeOwnerConflictSummary[],
+    paths: { registryPath?: string; lockPath?: string } = {},
+): string {
+    const registryPath = paths.registryPath || path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME);
+    const lockPath = paths.lockPath || path.join(defaultRuntimeStateDir(), OWNER_LOCK_NAME);
     if (conflictingOwners.length === 0) {
         return [
             "Stop every other Satori MCP client (IDE/agent sessions) so only one package version and config remain.",
-            `Inspect ${path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME)}, restart this MCP client, then retry the same manage_index action.`,
+            `Inspect ${registryPath}, restart this MCP client, then retry the same manage_index action.`,
         ].join(" ");
     }
     const pidList = conflictingOwners.map((owner) => owner.pid).join(", ");
@@ -298,7 +309,7 @@ export function formatRuntimeOwnerConflictNextStep(conflictingOwners: RuntimeOwn
         `Stop conflicting Satori MCP process(es) pid=${pidList} (versions: ${versions}) by quitting their host clients.`,
         "Do not retry create/reindex/sync while those PIDs are live.",
         "After only one runtime identity remains, retry the same manage_index action.",
-        `If a PID is an orphaned node server, terminate only that process, then re-check ${path.join(defaultRuntimeStateDir(), OWNER_FILE_NAME)}.`,
+        `If a PID is an orphaned node server, terminate only that process, then re-check ${registryPath}.`,
     ].join(" ");
 }
 
@@ -517,8 +528,12 @@ export class RuntimeOwnerRegistry implements RuntimeOwnerMutationGate {
                     currentVersion: this.identity.satoriVersion,
                     currentPid: this.currentProcess.pid,
                     conflictingOwners,
+                    registryPath: this.ownersFilePath(),
+                    lockPath: this.ownersLockPath(),
                 }),
                 conflictingOwners,
+                registryPath: this.ownersFilePath(),
+                lockPath: this.ownersLockPath(),
             };
         } catch (error) {
             return {
@@ -529,8 +544,12 @@ export class RuntimeOwnerRegistry implements RuntimeOwnerMutationGate {
                     currentPid: this.currentProcess.pid,
                     conflictingOwners: [],
                     registryError: error instanceof Error ? error.message : String(error),
+                    registryPath: this.ownersFilePath(),
+                    lockPath: this.ownersLockPath(),
                 }),
                 conflictingOwners: [],
+                registryPath: this.ownersFilePath(),
+                lockPath: this.ownersLockPath(),
             };
         }
     }
@@ -654,6 +673,14 @@ export class RuntimeOwnerRegistry implements RuntimeOwnerMutationGate {
 
     private ownersLockPath(): string {
         return path.join(this.stateDir, OWNER_LOCK_NAME);
+    }
+
+    public getRegistryPath(): string {
+        return this.ownersFilePath();
+    }
+
+    public getLockPath(): string {
+        return this.ownersLockPath();
     }
 
     private readOwnersFile(onCorrupt: "quarantine" | "throw"): RuntimeOwnerRecord[] {

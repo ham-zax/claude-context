@@ -39,6 +39,7 @@ function config(root: string): ContextMcpConfig {
     return {
         name: "satori-shared-host-test",
         version: "1.0.0",
+        stateRoot: root,
         executionProfile: "offline",
         networkPolicy: { kind: "local-only" },
         vectorStoreProvider: "LanceDB",

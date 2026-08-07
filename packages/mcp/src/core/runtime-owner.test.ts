@@ -15,6 +15,7 @@ import {
     type ProcessSnapshot,
     type RuntimeOwnerRecord,
 } from './runtime-owner.js';
+import { resolveRuntimeOwnerStateDir } from './runtime-state-root.js';
 
 const FINGERPRINT: IndexFingerprint = {
     embeddingProvider: 'VoyageAI',
@@ -943,5 +944,179 @@ test('two startup simulations keep owners.json valid and preserve both live owne
         const raw = fs.readFileSync(path.join(stateDir, 'owners.json'), 'utf8');
         const parsed = JSON.parse(raw);
         assert.deepEqual(parsed.owners.map((owner: RuntimeOwnerRecord) => owner.pid).sort((a: number, b: number) => a - b), [101, 202]);
+    });
+});
+
+function scopedIdentity(embeddingModel: string) {
+    return buildRuntimeOwnerIdentity({
+        satoriVersion: CURRENT_SATORI_VERSION,
+        runtimeFingerprint: { ...FINGERPRINT, embeddingModel },
+        configSource: 'env',
+        configSummary: {
+            embeddingProvider: 'VoyageAI',
+            embeddingModel,
+            embeddingDimension: 1024,
+            vectorStoreProvider: 'Milvus',
+            schemaVersion: 'hybrid_v3',
+            milvusEndpoint: 'http://milvus.local',
+            rankerModel: 'rerank-2.5',
+        },
+    });
+}
+
+test('same LanceDB state root with differing identity blocks mutation', async () => {
+    await withTempState((stateDir) => {
+        const ownerDir = resolveRuntimeOwnerStateDir({
+            stateRoot: path.join(stateDir, 'state-root'),
+            vectorStoreProvider: 'LanceDB',
+            homeDir: path.join(stateDir, 'home'),
+        });
+        const first = snapshot(101);
+        const second = snapshot(202);
+        const processes = new Map([[101, first], [202, second]]);
+
+        new RuntimeOwnerRegistry({
+            stateDir: ownerDir,
+            identity: scopedIdentity('voyage-4-large'),
+            processInspector: inspector(processes),
+            currentProcess: first,
+            now: () => 2_000,
+        }).registerCurrentOwner();
+
+        const result = new RuntimeOwnerRegistry({
+            stateDir: ownerDir,
+            identity: scopedIdentity('voyage-code-3'),
+            processInspector: inspector(processes),
+            currentProcess: second,
+            now: () => 2_100,
+        }).checkMutation('reindex', '/repo');
+
+        assert.equal(result.blocked, true);
+        assert.equal(result.reason, 'runtime_owner_conflict');
+        assert.equal(result.conflictingOwners?.[0]?.pid, 101);
+    });
+});
+
+test('separate LanceDB state roots isolate registries from each other', async () => {
+    await withTempState((stateDir) => {
+        const homeDir = path.join(stateDir, 'home');
+        const alphaDir = resolveRuntimeOwnerStateDir({
+            stateRoot: path.join(stateDir, 'alpha'),
+            vectorStoreProvider: 'LanceDB',
+            homeDir,
+        });
+        const betaDir = resolveRuntimeOwnerStateDir({
+            stateRoot: path.join(stateDir, 'beta'),
+            vectorStoreProvider: 'LanceDB',
+            homeDir,
+        });
+        assert.notEqual(alphaDir, betaDir);
+
+        const first = snapshot(101);
+        const second = snapshot(202);
+        const processes = new Map([[101, first], [202, second]]);
+
+        const alpha = new RuntimeOwnerRegistry({
+            stateDir: alphaDir,
+            identity: scopedIdentity('voyage-4-large'),
+            processInspector: inspector(processes),
+            currentProcess: first,
+            now: () => 2_000,
+        });
+        alpha.registerCurrentOwner();
+
+        const beta = new RuntimeOwnerRegistry({
+            stateDir: betaDir,
+            identity: scopedIdentity('voyage-code-3'),
+            processInspector: inspector(processes),
+            currentProcess: second,
+            now: () => 2_100,
+        });
+        beta.registerCurrentOwner();
+
+        assert.equal(alpha.checkMutation('reindex', '/repo').blocked, false);
+        assert.equal(beta.checkMutation('reindex', '/repo').blocked, false);
+        assert.deepEqual(alpha.readOwnersForDebug().map((owner) => owner.pid), [101]);
+        assert.deepEqual(beta.readOwnersForDebug().map((owner) => owner.pid), [202]);
+    });
+});
+
+test('different state roots sharing one Milvus endpoint still conflict', async () => {
+    await withTempState((stateDir) => {
+        const homeDir = path.join(stateDir, 'home');
+        const endpoint = 'http://milvus.local:19530';
+        const alphaDir = resolveRuntimeOwnerStateDir({
+            stateRoot: path.join(stateDir, 'alpha'),
+            vectorStoreProvider: 'Milvus',
+            milvusEndpoint: endpoint,
+            homeDir,
+        });
+        const betaDir = resolveRuntimeOwnerStateDir({
+            stateRoot: path.join(stateDir, 'beta'),
+            vectorStoreProvider: 'Milvus',
+            milvusEndpoint: endpoint,
+            homeDir,
+        });
+        assert.equal(alphaDir, betaDir);
+
+        const first = snapshot(101);
+        const second = snapshot(202);
+        const processes = new Map([[101, first], [202, second]]);
+
+        new RuntimeOwnerRegistry({
+            stateDir: alphaDir,
+            identity: scopedIdentity('voyage-4-large'),
+            processInspector: inspector(processes),
+            currentProcess: first,
+            now: () => 2_000,
+        }).registerCurrentOwner();
+
+        const result = new RuntimeOwnerRegistry({
+            stateDir: betaDir,
+            identity: scopedIdentity('voyage-code-3'),
+            processInspector: inspector(processes),
+            currentProcess: second,
+            now: () => 2_100,
+        }).checkMutation('sync', '/repo');
+
+        assert.equal(result.blocked, true);
+        assert.equal(result.reason, 'runtime_owner_conflict');
+        assert.equal(result.conflictingOwners?.[0]?.pid, 101);
+    });
+});
+
+test('conflict result and message report the actual registry and lock paths', async () => {
+    await withTempState((stateDir) => {
+        const ownerDir = path.join(stateDir, 'scoped-registry');
+        const first = snapshot(101);
+        const second = snapshot(202);
+        const processes = new Map([[101, first], [202, second]]);
+
+        new RuntimeOwnerRegistry({
+            stateDir: ownerDir,
+            identity: scopedIdentity('voyage-4-large'),
+            processInspector: inspector(processes),
+            currentProcess: first,
+            now: () => 2_000,
+        }).registerCurrentOwner();
+
+        const registry = new RuntimeOwnerRegistry({
+            stateDir: ownerDir,
+            identity: scopedIdentity('voyage-code-3'),
+            processInspector: inspector(processes),
+            currentProcess: second,
+            now: () => 2_100,
+        });
+        const result = registry.checkMutation('reindex', '/repo');
+
+        const expectedRegistryPath = path.join(ownerDir, 'owners.json');
+        const expectedLockPath = path.join(ownerDir, 'owners.lock');
+        assert.equal(result.blocked, true);
+        assert.equal(result.registryPath, expectedRegistryPath);
+        assert.equal(result.lockPath, expectedLockPath);
+        assert.equal(registry.getRegistryPath(), expectedRegistryPath);
+        assert.equal(registry.getLockPath(), expectedLockPath);
+        assert.ok((result.message || '').includes(expectedRegistryPath));
+        assert.ok((result.message || '').includes(expectedLockPath));
     });
 });

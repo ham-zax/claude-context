@@ -36,6 +36,7 @@ function baseConfig(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig
     return {
         name: "test",
         version: "1.0.0",
+        stateRoot: path.join(os.tmpdir(), "satori-test-state-root"),
         executionProfile: "connected",
         networkPolicy: { kind: "remote-allowed" },
         vectorStoreProvider: "Milvus",

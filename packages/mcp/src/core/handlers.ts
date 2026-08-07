@@ -2349,17 +2349,23 @@ export class ToolHandlers {
         result: RuntimeOwnerMutationGateResult
     ): { content: Array<{ type: "text"; text: string }> } {
         const conflictingOwners = result.conflictingOwners || [];
+        const paths = {
+            registryPath: result.registryPath,
+            lockPath: result.lockPath,
+        };
         const message = result.message
             || formatRuntimeOwnerConflictMessage({
                 conflictingOwners,
+                registryPath: paths.registryPath,
+                lockPath: paths.lockPath,
             });
         return this.toolResponseBuilders.manageResponse(action, codebasePath, "blocked", message, {
             reason: "runtime_owner_conflict",
             hints: {
                 runtimeOwners: conflictingOwners,
-                nextStep: formatRuntimeOwnerConflictNextStep(conflictingOwners),
+                nextStep: formatRuntimeOwnerConflictNextStep(conflictingOwners, paths),
                 nextSteps: [
-                    formatRuntimeOwnerConflictNextStep(conflictingOwners),
+                    formatRuntimeOwnerConflictNextStep(conflictingOwners, paths),
                     "Do not loop create/reindex/sync while runtime_owner_conflict is returned.",
                     "Search may still work with degraded freshness; mutations stay blocked until a single runtime identity remains.",
                 ],

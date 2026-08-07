@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
     POTION_DIMENSION,
@@ -87,6 +89,7 @@ function config(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig {
     return {
         name: 'test',
         version: '1.0.0',
+        stateRoot: path.join(os.tmpdir(), 'satori-test-state-root'),
         executionProfile: 'connected',
         networkPolicy: { kind: 'remote-allowed' },
         encoderProvider: 'VoyageAI',

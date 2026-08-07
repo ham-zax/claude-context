@@ -31,6 +31,7 @@ import {
     type LateOnActivationPolicyId,
     type LateOnRuntimeProfileId,
 } from "./server/lateon-reranker-protocol.js";
+import { resolveSatoriStateRoot } from "./core/runtime-state-root.js";
 
 export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'Potion';
 export type VectorStoreProvider = 'Milvus' | 'LanceDB';
@@ -185,6 +186,9 @@ export interface IndexOperationReceipt {
 export interface ContextMcpConfig {
     name: string;
     version: string;
+    // Canonical absolute state root for the MCP runtime. Resolved from
+    // SATORI_STATE_ROOT when configured; otherwise <homeDir>/.satori.
+    stateRoot: string;
     executionProfile: ExecutionProfile;
     networkPolicy: NetworkPolicy;
     // Embedding provider configuration
@@ -845,6 +849,10 @@ export function createMcpConfig(): ContextMcpConfig {
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Satori MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || resolveMcpPackageVersion(),
+        stateRoot: resolveSatoriStateRoot({
+            configured: envManager.get('SATORI_STATE_ROOT'),
+            homeDir: os.homedir(),
+        }),
         executionProfile: executionPolicy.executionProfile,
         networkPolicy: executionPolicy.networkPolicy,
         // Embedding provider configuration

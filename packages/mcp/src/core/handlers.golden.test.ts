@@ -52,6 +52,7 @@ const RUNTIME_FINGERPRINT: IndexFingerprint = {
 const CAPABILITIES = new CapabilityResolver({
     name: 'test',
     version: '0.0.0',
+    stateRoot: path.join(os.tmpdir(), 'satori-test-state-root'),
     executionProfile: 'connected',
     networkPolicy: { kind: 'remote-allowed' },
     vectorStoreProvider: 'Milvus',

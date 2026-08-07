@@ -8,6 +8,7 @@ import path from "node:path";
 import { withSourceMeasurementOperation } from "@zokizuan/satori-core";
 import type { ContextMcpConfig, IndexFingerprint } from "../config.js";
 import { CapabilityResolver } from "../core/capabilities.js";
+import { resolveRuntimeOwnerStateDir } from "../core/runtime-state-root.js";
 import { CallGraphSidecarManager } from "../core/call-graph.js";
 import {
     SearchContinuationCoordinator,
@@ -206,6 +207,12 @@ export class SharedRuntimeHost {
             identity: buildRuntimeOwnerIdentityFromConfig({
                 config,
                 runtimeFingerprint,
+            }),
+            stateDir: resolveRuntimeOwnerStateDir({
+                stateRoot: config.stateRoot,
+                vectorStoreProvider: config.vectorStoreProvider,
+                milvusEndpoint: config.milvusEndpoint,
+                homeDir: os.homedir(),
             }),
         });
         try {

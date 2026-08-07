@@ -216,6 +216,7 @@ const DENSE_RUNTIME_FINGERPRINT: IndexFingerprint = {
 const CAPABILITIES_NO_RERANK = new CapabilityResolver({
     name: 'test',
     version: '0.0.0',
+    stateRoot: path.join(os.tmpdir(), 'satori-test-state-root'),
     executionProfile: 'connected',
     networkPolicy: { kind: 'remote-allowed' },
     vectorStoreProvider: 'Milvus',
@@ -724,6 +725,7 @@ function createHandlers(
     const capabilities = new CapabilityResolver({
         name: 'test',
         version: '0.0.0',
+        stateRoot: path.join(os.tmpdir(), 'satori-test-state-root'),
         executionProfile: 'connected',
         networkPolicy: { kind: 'remote-allowed' },
         vectorStoreProvider: 'Milvus',
@@ -7750,6 +7752,7 @@ test('handleSearchCode uses real synchronizer tracked paths for exact path-scope
         const context = createLocalOnlyContext({
             name: 'test',
             version: '0.0.0',
+            stateRoot: path.join(os.tmpdir(), 'satori-test-state-root'),
             executionProfile: 'connected',
             networkPolicy: { kind: 'remote-allowed' },
             vectorStoreProvider: 'Milvus',
@@ -8648,6 +8651,7 @@ test('handleSearchCode marks rerank.enabled=false when reranker instance is miss
         const capabilities = new CapabilityResolver({
             name: 'test',
             version: '0.0.0',
+            stateRoot: path.join(os.tmpdir(), 'satori-test-state-root'),
             executionProfile: 'connected',
             networkPolicy: { kind: 'remote-allowed' },
             vectorStoreProvider: 'Milvus',

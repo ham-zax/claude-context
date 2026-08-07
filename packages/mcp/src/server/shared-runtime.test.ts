@@ -31,6 +31,7 @@ function config(): ContextMcpConfig {
     return {
         name: "satori-shared-runtime-test",
         version: "1.0.0",
+        stateRoot: path.join(os.tmpdir(), "satori-test-state-root"),
         executionProfile: "connected",
         networkPolicy: { kind: "remote-allowed" },
         vectorStoreProvider: "Milvus",
