@@ -3,6 +3,11 @@ import test from "node:test";
 import type { Reranker, RerankResult } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "./capabilities.js";
 import { parseSearchOperators, buildSearchQueryPlan } from "./search-query-planning.js";
+import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
+import {
+    buildSearchRerankQuery,
+    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+} from "./search-rerank-query.js";
 import { resolveSearchPolicy } from "./search-policy.js";
 import {
     runSearchExecution,
@@ -58,6 +63,8 @@ function buildSupport(reranker: Reranker | null): SearchQuerySupport {
 
 function buildInput(): SearchExecutionInput {
     const parsedOperators = parseSearchOperators("where find the relevant implementation");
+    const queryPlan = buildSearchQueryPlan(parsedOperators.semanticQuery, true, parsedOperators);
+    const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
     return {
         effectiveRoot: "/repo",
         scope: "runtime",
@@ -65,8 +72,14 @@ function buildInput(): SearchExecutionInput {
         limit: 3,
         debugMode: "none",
         semanticQuery: parsedOperators.semanticQuery,
+        answerFocus,
+        rerankQuery: buildSearchRerankQuery({
+            semanticQuery: parsedOperators.semanticQuery,
+            answerFocus,
+        }),
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
         parsedOperators,
-        queryPlan: buildSearchQueryPlan(parsedOperators.semanticQuery, true, parsedOperators),
+        queryPlan,
         exactRegistryEligible: false,
         exactRegistryFallbackForTrackedLexical: false,
         freshnessMode: "synced",

@@ -1908,3 +1908,50 @@ The project is complete only when:
 - provider order remains final and no local relevance weights return;
 - all focused, package, release-smoke, check, and build commands pass;
 - the final working tree is clean.
+
+---
+
+## 7. Execution Log (append-only)
+
+Rule: after each task passes its acceptance checks and is committed, append one entry
+here before starting the next task. Record the commit, whether the task completed
+exactly as planned, and every deviation (extra/missing files, renamed test targets,
+pre-existing failures observed, contract interpretations). Do not rewrite earlier
+entries.
+
+- **Task 0 — done — `15cb77f` (prior session).** Baseline frozen as planned.
+- **Task 1 — done — `bc3b0ae` (prior session).** Potion exec-bit repair after checksum verification, as planned.
+- **Task 2 — done — `600f5d0` (prior session).** Packed release smoke, as planned.
+- **Task 3 — done — `45d666e`.** Completed the prior session's unstaged work (same model, trusted) and added the Step-4 integration tests. Deviation: conflict message now prints both `Registry:` and `Lock:` paths per §2.7 (previously registry path only); `getRegistryPath()`/`getLockPath()` accessors added to support it.
+- **Task 4 — done — `45e75dd`.** As planned: operation-aware indexing readiness, `retryAfterMs` + `indexingOperation` on blocked envelopes, single bounded sync join via `waitForSearchableSync`.
+- **Task 5 — done — `4368477`.** Deviations:
+  1. Also modified `packages/core/src/reranker/index.ts` (barrel export) — required for mcp to see `RerankExecutionDiagnostics`; not in the plan's file list.
+  2. `packages/core/src/reranker/voyageai-reranker.ts` listed by the plan but unchanged: Voyage reports only attempts/retries/timeouts; the absence of LateOn-only fields is asserted by typed tests instead.
+  3. Plan's GREEN names `search-result-finalization.native-order.test.ts`; the actual file is `search-execution.native-order.test.ts`. The new execution-capture test was added there.
+  4. Pre-existing failure observed, unrelated and identical at HEAD (`45e75dd`): `packages/core/src/net/fetch-with-deadline.test.ts` — "retries a listed retryable network error up to maxAttempts" (ECONNREFUSED not retried in this environment). Left untouched; separate finding.
+- **Task 6 — done — `3202426`.** Typed projection results as planned (`search-rerank-context.ts`, `search-rerank-projection-result.ts`, `projectPublicationBoundSearchRerankDocumentV2`, historical wrapper kept, host signature typed, failed projections still translate to the all-or-nothing `document_projection` fallback). Deviations:
+  1. Exported `searchRerankCandidateId(result)` from `search-rerank-projection.ts` and used it in both the compatibility wrapper and the handler wiring; the plan inlined the candidateId computation in the wrapper.
+  2. Handler-level reasons (`generation_receipt_missing`, `navigation_status_invalid`, `registry_load_failed`, `registry_manifest_mismatch`) are exercised at the `SearchExecutionHost` boundary in `search-native-rerank.integration.test.ts` via typed host fakes: no handler harness carries a live reranker (`handlers.golden.test.ts` runs `reranker: null`). The golden suite was still run as the plan's regression guard.
+  3. The pre-existing fake in "projection failure falls back without calling the provider" now returns reason `projection_contract_failed` instead of `undefined`.
+- **Task 7 — done — `2e2d035`.** Per-candidate projection degradation, `RERANKER_INPUT_DEGRADED`/`RERANKER_SKIPPED_INPUT` warnings, projection summary, provider skipped below two projectable documents without counting a provider failure. Deviations:
+  1. Partial degradation applies on the typed `host.buildRerankDocument` path only; the synchronous `searchQuerySupport.buildRerankDocument` fallback keeps its all-or-nothing behavior because it cannot emit typed reasons. The plan's Step 3 snippet assumes `host.buildRerankDocument!` unconditionally; `input.rerankQuery` is deferred to Task 11, so the query stays `input.semanticQuery`.
+  2. `byteSelection.inputBytes` was hoisted to `byteSelectionInputBytes` because byte selection now happens inside each branch (the previous shared variable went out of scope).
+  3. `RerankPhaseResult.warning?: "RERANKER_FAILED"` became `warnings: WarningCode[]`; `RERANKER_FAILED` is appended last on terminal provider/parse failure. Projection summary surfaces on the ok outcome as `rerankerProjection`.
+  4. The Task 6 host-boundary tests were updated in place to the §2.5 contract (no `document_projection` failure phase; `RERANKER_SKIPPED_INPUT` plus failure counts instead).
+- **Task 8 — done — `6f64ceb`.** Candidate-survival v4 with per-document rerank input provenance (bytes/hash/role/projection identity, never text) and `reranker_document_projection_failed`/`reranker_input_insufficient` removal reasons. Deviations:
+  1. `search-result-finalization.ts` listed by the plan but unchanged: the trace already flows into full-debug `debugSearch.candidateSurvival` via `structuredClone`, so metadata and removals surface without finalization edits.
+  2. `scripts/satori-search-candidate-capture.mjs`/`.test.mjs` no longer exist at that path; they were archived under `scripts/archive/ranking-v3/` and are not part of the live test suite, so they were left untouched.
+  3. The plan's RED names `search-result-finalization.native-order.test.ts`; no such file exists. The end-to-end provenance tests were added to `search-native-rerank.integration.test.ts` alongside the existing survival test, plus a unit test in `search-candidate-survival.test.ts`.
+  4. `answerFocus`/`queryProjectionIdentity` remain absent as planned; Task 13 populates them.
+- **Task 9 — done — `fb60e35`.** Deterministic answer-focus resolver with §2.2 priority (tests > documentation > configuration > references > implementation > neutral), `documentationSeeking` added to `SearchQueryPlan`, exact table cases pass, reasons are stable non-numeric strings. No retrieval mode, rerank admission, exact pinning, or ranking changes. Deviations:
+  1. Configuration and references focus are derived from the plan's existing `route.kind` (`configuration`/`references`) and `referenceSeeking`; implementation focus combines `implementationSeeking` with the plan's question-cue regex applied to `semanticQuery` inside the resolver. The plan did not specify which plan signals map to each focus, only the priority and cues.
+  2. Two extra priority tests beyond the exact table (tests > documentation, documentation > configuration) were added to pin the §2.2 ordering.
+  3. RED/GREEN ran from `packages/mcp` with `./src/test-state-root.ts` (same invocation convention as Tasks 3–8).
+- **Task 10 — done — `512e809`.** `resolveSearchCandidateRole` with the plan's exact priority chain (test > documentation > generated > fixture > example > configuration > implementation categories > unknown), reusing the exported ranking-policy predicates without duplicating regexes. Table covers Python/TS tests, docs, runtime sources, config, generated, fixtures, examples, and unknown artifact/landing paths. Deviations:
+  1. The plan's Modify of `search-ranking-policy.ts` had no specified content; added an exported `isConfigurationPath` predicate there (config extensions + `Dockerfile`) so path-classification authority stays in one owner and the resolver reuses it. Config-like languages (`json`, `jsonc`, `yaml`, `toml`, `ini`, `xml`, `properties`, `dockerfile`) and `symbolKind === "config"` are checked in the resolver.
+  2. Rule 7 is implemented as a category-set membership check on `classifyPathCategory` output (`core`, `srcRuntime`, `scriptRuntime`, `adapter`, `entrypoint`, `neutral` → implementation; remaining `landing`/`artifact` fall to `unknown`), which is equivalent to the plan's enumeration.
+- **Task 11 — done — `81801eb`.** As planned: `SEARCH_RERANK_QUERY_PROJECTION_VERSION = "search_rerank_query_v1"`, exact fixed guidance per focus, exact-byte serialization (`Question:` / question / blank / `Answer focus:` / blank / `Guidance:` / guidance), empty trimmed question rejected. Deviation: the "no candidate role" assertion strips the neutral guidance's fixed sentence ("Candidate role is evidence, not a fixed preference.") before checking, since that sentence is part of the mandated guidance text.
+- **Task 12 — done — `36b5296`.** Projection v3 = v2 algorithms + one new `candidate_role` field; parity tests prove identical source/declaration/documentation/sibling fields, key-set delta of exactly `candidate_role`, ≤4,000 bytes, all eight roles serializing exactly, and unchanged v2 canonical bytes. `projectPublicationBoundSearchRerankDocumentV3` resolves the factual role via `resolveSearchCandidateRole` and keeps all v2 fail-closed reasons. Deviations:
+  1. The plan said to extract shared v2 internals into "non-exported helpers"; they are exported instead (`isRecord`, `requireString`, `requireSafeRelativePath`, `sourceLines`, `requireBoundedPhysicalLine`, `requireBoundedDocumentation`, `requireLineSpan`, `normalizeEvidenceSpans`, `sourceLinesInSpan`, `firstStructuralDeclaration`, `normalizeRequiredOwnerSiblings`, `selectedExcerptText`, `selectSource`, and the budgeted loop as `selectRerankSourceWithinBudget`) because v3 lives in a separate module and must reuse the exact algorithms. No v2 constants, logic, or canonical bytes changed (v2 suite re-run green after the extraction).
+  2. `search-rerank-document-v2.ts` is therefore modified but was not in the plan's commit file list; it was included in the Task 12 commit (amended before any push) to avoid leaving the tree broken.
+  3. The v2/v3 publication-bound guard chain was factored into a shared `resolvePublicationBoundEvidence` helper plus a `success` builder in `search-rerank-projection.ts`; behavior is byte-identical (all existing typed tests pass unchanged).

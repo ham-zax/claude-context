@@ -28,6 +28,8 @@ import type {
     SearchRerankerOperationalReason,
 } from "./search-types.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
+import type { SearchAnswerFocus } from "./search-rerank-context.js";
+import { SEARCH_RERANK_QUERY_PROJECTION_VERSION } from "./search-rerank-query.js";
 import {
     appendCoreCandidateTrace,
     appendSearchCandidatePass,
@@ -401,6 +403,9 @@ export type SearchExecutionInput = {
     limit: number;
     debugMode: SearchDebugMode;
     semanticQuery: string;
+    answerFocus: SearchAnswerFocus;
+    rerankQuery: string;
+    rerankQueryProjectionIdentity: typeof SEARCH_RERANK_QUERY_PROJECTION_VERSION;
     parsedOperators: ParsedSearchOperators;
     queryPlan: SearchQueryPlan;
     exactRegistryEligible: boolean;
@@ -612,7 +617,9 @@ async function rerankSearchCandidates(
                                 documentUtf8Bytes: row.projection.utf8Bytes,
                                 documentSha256: row.projection.sha256,
                                 candidateRole: row.projection.candidateRole,
+                                answerFocus: input.answerFocus,
                                 projectionIdentity: row.projection.projectionIdentity,
+                                queryProjectionIdentity: input.rerankQueryProjectionIdentity,
                             },
                         ] as const;
                     }),
@@ -688,7 +695,7 @@ async function rerankSearchCandidates(
             try {
                 rerankResults = await host.measureSearchPhase(
                     'rerank',
-                    () => host.reranker!.rerank(input.semanticQuery, rerankDocuments, {
+                    () => host.reranker!.rerank(input.rerankQuery, rerankDocuments, {
                         topK: rerankCount,
                         truncation: true,
                         returnDocuments: false,

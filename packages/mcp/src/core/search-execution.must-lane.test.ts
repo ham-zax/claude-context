@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSearchOperators, buildSearchQueryPlan } from './search-query-planning.js';
+import { resolveSearchAnswerFocus } from './search-answer-focus.js';
+import {
+    buildSearchRerankQuery,
+    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+} from './search-rerank-query.js';
 import { resolveSearchPolicy } from './search-policy.js';
 import {
     runSearchExecution,
@@ -56,6 +61,8 @@ function buildSupport() {
 
 function buildInput(overrides: Partial<SearchExecutionInput> = {}): SearchExecutionInput {
     const parsed = parseSearchOperators('must:tzinfo must:None where is naive utc handling');
+    const queryPlan = buildSearchQueryPlan(parsed.semanticQuery, true, parsed);
+    const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
     const base: SearchExecutionInput = {
         effectiveRoot: '/repo',
         scope: 'runtime',
@@ -63,8 +70,14 @@ function buildInput(overrides: Partial<SearchExecutionInput> = {}): SearchExecut
         limit: 10,
         debugMode: 'none',
         semanticQuery: parsed.semanticQuery,
+        answerFocus,
+        rerankQuery: buildSearchRerankQuery({
+            semanticQuery: parsed.semanticQuery,
+            answerFocus,
+        }),
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
         parsedOperators: parsed,
-        queryPlan: buildSearchQueryPlan(parsed.semanticQuery, true, parsed),
+        queryPlan,
         exactRegistryEligible: false,
         exactRegistryFallbackForTrackedLexical: false,
         freshnessMode: 'synced',

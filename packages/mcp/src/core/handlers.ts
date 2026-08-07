@@ -220,10 +220,17 @@ import {
 import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
 import {
     projectPublicationBoundSearchRerankDocumentV2,
+    projectPublicationBoundSearchRerankDocumentV3,
     searchRerankCandidateId,
 } from "./search-rerank-projection.js";
 import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
+import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
+import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
+import {
+    buildSearchRerankQuery,
+    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+} from "./search-rerank-query.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
     SearchQueryPlan,
@@ -4946,6 +4953,12 @@ export class ToolHandlers {
                 }
             }
 
+            const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
+            const rerankQuery = buildSearchRerankQuery({
+                semanticQuery: parsedOperators.semanticQuery,
+                answerFocus,
+            });
+            const rerankerDocumentProjectionVersion = this.reranker?.getDocumentProjectionVersion?.();
             const execution = await runSearchExecution({
                 effectiveRoot,
                 scope: input.scope,
@@ -4953,6 +4966,9 @@ export class ToolHandlers {
                 limit: input.limit,
                 debugMode,
                 semanticQuery,
+                answerFocus,
+                rerankQuery,
+                rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
                 parsedOperators,
                 queryPlan,
                 exactRegistryEligible: exactRegistryFallbackForTrackedLexical,
@@ -4990,8 +5006,8 @@ export class ToolHandlers {
                         : this.context.semanticSearch(request);
                 },
                 reranker: this.reranker,
-                ...(this.reranker?.getDocumentProjectionVersion?.()
-                    === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
+                ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
+                    || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
                     ? {
                         buildRerankDocument: async (
                             rerankQuery: string,
@@ -5041,7 +5057,9 @@ export class ToolHandlers {
                                 searchSymbolRegistry = registryState.registry;
                                 searchSymbolRegistryManifestHash = registryState.manifestHash;
                             }
-                            return projectPublicationBoundSearchRerankDocumentV2({
+                            return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
+                                ? projectPublicationBoundSearchRerankDocumentV3
+                                : projectPublicationBoundSearchRerankDocumentV2)({
                                 candidateId,
                                 codebaseRoot: effectiveRoot,
                                 semanticQuery: rerankQuery,
