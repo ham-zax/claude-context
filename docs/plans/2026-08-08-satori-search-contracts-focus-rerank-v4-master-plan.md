@@ -1106,3 +1106,32 @@ The project is complete when:
 - No abstention redesign.
 - No candidate-depth, timeout, thread-count, or model-size change.
 - No broad relevance benchmark or human-labeling project.
+
+---
+
+## 7. Execution Log
+
+### Task 0 — Freeze Actual Head and Reproduce Review Findings — DONE (c87f8f5)
+
+- Head frozen at `c8459fd70ad8929dfe55afc5c5e2753a883b89cf`; evidence in `docs/evidence/search-contracts-focus-v4-baseline-20260808/BASELINE.md`.
+- Reproduced the v2 query mismatch: handlers sent focused v1 unconditionally while `lateon-reranker.ts` advertised `semantic_query_raw_v1` for v1/v2 profiles.
+- Confirmed pre-existing failures carried into Task 15 scope: core `fetch-with-deadline` environmental failure and the stale known-exact-target pin (span 189–604 vs 186–603). No mojibake in committed sources.
+
+### Task 1 — Bump Relationship-Builder Identity (Issue 18) — DONE (3a26a11)
+
+- Fixed: 18 stale relationship sidecars are now rejected. `RELATIONSHIP_BUILDER_VERSION` bumped to `relationship-v10+python-cross-module-constructors+python-native-resolution-v1`.
+- RED proved before the bump (compat test failed against v9); GREEN after: `compareIndexCompatibility` → `requires_reindex` on `relationshipVersion`, `classifyRepairIndexCompatibility` → `relationship_only_upgrade`, and the `TradingCore.__init__` constructor-caller edge fixture passes.
+- Verification: 108 persisted-index-authority + 247 builder + 36 neighbor tests green.
+
+### Task 2 — Restore Profile-Specific Query Compatibility — DONE (fb02f6f)
+
+- Fixed: query projection is now routed by the reranker-advertised identity (`semantic_query_raw_v1` | `search_rerank_query_v1` | `search_rerank_query_v2`); unknown identities fail closed (`search_rerank_query_projection_identity_unknown`).
+- v2 identity resolves only when a focused v2 query is available, otherwise `search_rerank_query_v2_projection_unavailable` (prepares Task 11).
+- Verification: 31 focused routing/binding tests + 20 neighboring integration tests + typecheck green. Note: first commit (a708f50) missed two untracked files via pathspec commit; corrected by fb02f6f.
+
+### Task 3 — Bind the Complete Rerank Request Identity — DONE (5b8f03a)
+
+- Fixed: ranked-set bindings now bind the full rerank request identity (`provider`, `model`, `profile`, `queryProjectionIdentity`, `documentProjectionIdentity`, `requestContractSha256`). Continuations crossing any request-contract change go stale by digest, by design.
+- New canonical-fixture contract `assets/lateon/rerank-request-contract-v1.json` (digest `f9f07b1ecd56851062598a52e804508ae288e32ba8b034bec5a12799f77533d0`), generated/checked via `pnpm contract:generate` / `contract:check`; parser rejects extra keys, wrong schema, digest mismatch, and structural/partial-projection drift.
+- Applied reranking refuses to bind without a complete request identity; deterministic baselines refuse to carry one. Shared runtime identity binds `lateOnRequestContractSha256` for lateon hosts only (fail-open otherwise).
+- Verification: manifest:check + contract:check green; 21 focused tests (contract, ranked-set identity, shared-runtime identity) green; 19 neighboring rerank tests green; typecheck green.
