@@ -29,7 +29,7 @@ import type {
 } from "./search-types.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
 import type { SearchAnswerFocus } from "./search-rerank-context.js";
-import { SEARCH_RERANK_QUERY_PROJECTION_VERSION } from "./search-rerank-query.js";
+import type { SearchRerankQueryProjectionIdentity } from "./search-rerank-query-routing.js";
 import {
     appendCoreCandidateTrace,
     appendSearchCandidatePass,
@@ -405,7 +405,7 @@ export type SearchExecutionInput = {
     semanticQuery: string;
     answerFocus: SearchAnswerFocus;
     rerankQuery: string;
-    rerankQueryProjectionIdentity: typeof SEARCH_RERANK_QUERY_PROJECTION_VERSION;
+    rerankQueryProjectionIdentity: SearchRerankQueryProjectionIdentity;
     parsedOperators: ParsedSearchOperators;
     queryPlan: SearchQueryPlan;
     exactRegistryEligible: boolean;

@@ -10,6 +10,7 @@ import {
     LateOnReranker,
     loadLateOnRuntimeProfile,
 } from "./lateon-reranker.js";
+import { resolveSearchRerankQuery } from "../core/search-rerank-query-routing.js";
 
 type FakeWorkerOptions = Readonly<{
     readyDelayMilliseconds?: number;
@@ -148,6 +149,47 @@ test("LateOn reranker defaults to the V3 profile and reports qualified projectio
     assert.equal(explicitV2D32.getQueryProjectionVersion(), "semantic_query_raw_v1");
     assert.equal(legacy.getDocumentProjectionVersion(), "search_rerank_document_v1");
     assert.equal(legacy.getQueryProjectionVersion(), "semantic_query_raw_v1");
+});
+
+test("LateOn advertised query identities route to the promised query projection", async (t) => {
+    const workerPath = createFakeWorker(t);
+    const contextV3 = new LateOnReranker({ modelDirectory: "/unused", workerPath });
+    const explicitV2D32 = new LateOnReranker({
+        modelDirectory: "/unused",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath,
+    });
+    const legacy = new LateOnReranker({
+        modelDirectory: "/unused",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.legacyD16,
+        workerPath,
+    });
+    t.after(async () => Promise.all([
+        contextV3.close(),
+        explicitV2D32.close(),
+        legacy.close(),
+    ]).then(() => undefined));
+
+    const rawQuestion = "how does Shariah compliance checking block trades";
+    const focusedV1 = "Question:\nhow does Shariah compliance checking block trades\n\nAnswer focus: implementation";
+
+    for (const historical of [explicitV2D32, legacy]) {
+        const resolved = resolveSearchRerankQuery({
+            semanticQuery: rawQuestion,
+            focusedQueryV1: focusedV1,
+            projectionIdentity: historical.getQueryProjectionVersion(),
+        });
+        assert.equal(resolved.query, rawQuestion);
+        assert.equal(resolved.queryProjectionIdentity, "semantic_query_raw_v1");
+    }
+
+    const v3 = resolveSearchRerankQuery({
+        semanticQuery: rawQuestion,
+        focusedQueryV1: focusedV1,
+        projectionIdentity: contextV3.getQueryProjectionVersion(),
+    });
+    assert.equal(v3.query, focusedV1);
+    assert.equal(v3.queryProjectionIdentity, "search_rerank_query_v1");
 });
 
 test("LateOn identity binds named profile selection and effective operational bounds", async (t) => {

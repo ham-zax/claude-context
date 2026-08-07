@@ -227,10 +227,8 @@ import type { SearchRerankProjectionResult } from "./search-rerank-projection-re
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
-import {
-    buildSearchRerankQuery,
-    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
-} from "./search-rerank-query.js";
+import { buildSearchRerankQuery } from "./search-rerank-query.js";
+import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
     SearchQueryPlan,
@@ -4954,9 +4952,13 @@ export class ToolHandlers {
             }
 
             const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
-            const rerankQuery = buildSearchRerankQuery({
+            const resolvedRerankQuery = resolveSearchRerankQuery({
                 semanticQuery: parsedOperators.semanticQuery,
-                answerFocus,
+                focusedQueryV1: buildSearchRerankQuery({
+                    semanticQuery: parsedOperators.semanticQuery,
+                    answerFocus,
+                }),
+                projectionIdentity: this.reranker?.getQueryProjectionVersion?.(),
             });
             const rerankerDocumentProjectionVersion = this.reranker?.getDocumentProjectionVersion?.();
             const execution = await runSearchExecution({
@@ -4967,8 +4969,8 @@ export class ToolHandlers {
                 debugMode,
                 semanticQuery,
                 answerFocus,
-                rerankQuery,
-                rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+                rerankQuery: resolvedRerankQuery.query,
+                rerankQueryProjectionIdentity: resolvedRerankQuery.queryProjectionIdentity,
                 parsedOperators,
                 queryPlan,
                 exactRegistryEligible: exactRegistryFallbackForTrackedLexical,

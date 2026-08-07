@@ -16,6 +16,7 @@ import {
     buildSearchRerankQuery,
     SEARCH_RERANK_QUERY_PROJECTION_VERSION,
 } from "./search-rerank-query.js";
+import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { resolveSearchPolicy } from "./search-policy.js";
 import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
@@ -273,4 +274,64 @@ test("survival metadata carries answer focus and query projection identity", asy
         assert.equal(occurrence.rerankInput?.queryProjectionIdentity, "search_rerank_query_v1");
         assert.equal(occurrence.rerankInput?.projectionIdentity, "search_rerank_document_v3");
     }
+});
+
+test("explicit historical reranker profile receives the raw question byte-exact", async () => {
+    const question = "how does Shariah compliance checking block trades";
+    const captured: { query?: string } = {};
+    const reranker: Reranker = {
+        getIdentity: () => ({
+            provider: "lateon",
+            model: "test",
+            profile: "lateon_offline_quality_projection_v2_d32_v2",
+        }),
+        getQueryProjectionVersion: () => "semantic_query_raw_v1",
+        rerank: async (query, _documents, options) => {
+            captured.query = query;
+            return (options?.identities ?? []).map((_identity, index) => ({
+                index,
+                relevanceScore: 1 - index / 10,
+            })) satisfies RerankResult[];
+        },
+    };
+    const base = buildInput(question);
+    const resolved = resolveSearchRerankQuery({
+        semanticQuery: base.semanticQuery,
+        focusedQueryV1: base.rerankQuery,
+        projectionIdentity: reranker.getQueryProjectionVersion?.(),
+    });
+    const results = [
+        candidate("impl", "src/core/veto.ts", 0.9),
+        candidate("test", "tests/veto.test.ts", 0.8),
+    ];
+    const outcome = await runSearchExecution(
+        {
+            ...base,
+            rerankQuery: resolved.query,
+            rerankQueryProjectionIdentity: resolved.queryProjectionIdentity,
+        },
+        buildHost(results, reranker),
+        buildDiagnostics(),
+    );
+    assert.equal(outcome.kind, "ok");
+    assert.equal(captured.query, question, "historical profile must receive the raw question exactly");
+    if (outcome.kind !== "ok") return;
+    const rerankInputStage = outcome.candidateSurvival?.stages.find(
+        (stage) => stage.stage === "reranker_input",
+    );
+    assert.ok(rerankInputStage);
+    for (const occurrence of rerankInputStage!.candidates) {
+        assert.equal(occurrence.rerankInput?.queryProjectionIdentity, "semantic_query_raw_v1");
+    }
+});
+
+test("v3 profile identity resolves to the focused query v1 bytes", () => {
+    const base = buildInput("how does Shariah compliance checking block trades");
+    const resolved = resolveSearchRerankQuery({
+        semanticQuery: base.semanticQuery,
+        focusedQueryV1: base.rerankQuery,
+        projectionIdentity: "search_rerank_query_v1",
+    });
+    assert.equal(resolved.query, base.rerankQuery);
+    assert.equal(resolved.queryProjectionIdentity, "search_rerank_query_v1");
 });
