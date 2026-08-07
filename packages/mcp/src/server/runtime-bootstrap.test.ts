@@ -50,6 +50,42 @@ test('offline static config preserves the installer-resolved Ollama dimension', 
     }
 });
 
+test('reranker application mode defaults strictly and participates in MCP configuration', () => {
+    const keys = [
+        'SATORI_RUNTIME_PROFILE',
+        'VECTOR_STORE_PROVIDER',
+        'LANCEDB_PATH',
+        'EMBEDDING_PROVIDER',
+        'SATORI_RERANK_APPLICATION_MODE',
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+        for (const key of keys) delete process.env[key];
+        Object.assign(process.env, {
+            SATORI_RUNTIME_PROFILE: 'offline',
+            VECTOR_STORE_PROVIDER: 'LanceDB',
+            LANCEDB_PATH: '/tmp/satori-rerank-mode',
+            EMBEDDING_PROVIDER: 'Potion',
+            POTION_HELPER_PATH: '/opt/satori/potion-helper',
+            POTION_MODEL_PATH: '/opt/satori/potion-model',
+        });
+        assert.equal(createMcpConfig().rerankApplicationMode, 'legacy_rrf');
+        process.env.SATORI_RERANK_APPLICATION_MODE = 'native_order';
+        assert.equal(createMcpConfig().rerankApplicationMode, 'native_order');
+        process.env.SATORI_RERANK_APPLICATION_MODE = 'unexpected';
+        assert.throws(
+            createMcpConfig,
+            /Invalid SATORI_RERANK_APPLICATION_MODE 'unexpected'/,
+        );
+    } finally {
+        for (const key of keys) {
+            const value = previous[key];
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
 function config(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig {
     return {
         name: 'test',
