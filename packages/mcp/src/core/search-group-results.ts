@@ -16,14 +16,12 @@ import {
 import {
     collapseDuplicateDeclarationGroups,
     sortNativeGroupedSearchResults,
-    sortGroupedSearchResults,
 } from "./search-group-ordering.js";
 import type { SearchOrderAuthority } from "./search-order-policy.js";
 import {
     buildSearchCandidateProvenance,
     classifyPathCategory,
     getStalenessBucket,
-    sortSearchCandidates,
 } from "./search-ranking-policy.js";
 import {
     OVERSIZED_SYMBOL_LINE_THRESHOLD,
@@ -124,17 +122,6 @@ type GroupAccumulator = {
     validatedOwnerChunkCount: number;
 };
 
-export function computeSearchGroupScore(
-    representativeScore: number,
-    chunkCount: number,
-): number {
-    return representativeScore + computeSearchGroupSupportBoost(chunkCount);
-}
-
-function computeSearchGroupSupportBoost(chunkCount: number): number {
-    return Math.min(Math.log1p(chunkCount) * 0.01, 0.03);
-}
-
 export function rankAndDiversifySearchGroups<
     T extends SearchGroupResult & { __exactLexicalMatch: boolean },
 >(input: {
@@ -155,13 +142,14 @@ export function rankAndDiversifySearchGroups<
     diversitySummary: SearchDiversitySummary;
     exactMatchPinningApplied: boolean;
 } {
-    const orderAuthority = input.orderAuthority ?? "legacy_score";
+    const orderAuthority = input.orderAuthority ?? "retrieval_order";
     const rankedResults = input.collapseDuplicateDeclarations
         ? collapseDuplicateDeclarationGroups(input.groupedResults, orderAuthority)
         : input.groupedResults;
-    const exactMatchPinningApplied = orderAuthority === "legacy_score"
-        ? sortGroupedSearchResults(rankedResults, input.exactMatchPinningEnabled)
-        : sortNativeGroupedSearchResults(rankedResults, input.exactMatchPinningEnabled);
+    const exactMatchPinningApplied = sortNativeGroupedSearchResults(
+        rankedResults,
+        input.exactMatchPinningEnabled,
+    );
     const diversityApplied = applyGroupDiversity(
         rankedResults,
         input.limit,
@@ -436,11 +424,7 @@ export function buildGroupedSymbolSearchResult(input: {
     authoritativeRank?: number;
     orderAuthority?: SearchOrderAuthority;
 }): SearchGroupResult | undefined {
-    const nativeOrder = input.orderAuthority !== undefined && input.orderAuthority !== "legacy_score";
-    const supportBoost = nativeOrder ? 0 : computeSearchGroupSupportBoost(input.chunkCount);
-    const symbolScore = nativeOrder
-        ? (input.representative.fusionScore ?? input.representative.finalScore)
-        : input.representative.finalScore + supportBoost;
+    const symbolScore = input.representative.fusionScore ?? input.representative.finalScore;
     if (!Number.isFinite(symbolScore)) {
         return undefined;
     }
@@ -558,7 +542,6 @@ export function buildGroupedSymbolSearchResult(input: {
                 symbolAggregation: {
                     ownerSource: effectiveOwnerSource,
                     evidenceChunkCount: input.chunkCount,
-                    supportBoost,
                 },
                 ...(input.debugMode === "full" ? {
                     freshness: {
@@ -679,27 +662,16 @@ export function buildVisibleGroupedSearchResults(input: {
     let registryRepairGroupCount = 0;
 
     for (const group of groups.values()) {
-        const nativeOrder = input.orderAuthority !== undefined && input.orderAuthority !== "legacy_score";
-        const orderedChunks = nativeOrder
-            ? [...group.chunks].sort((a, b) => {
-                if (
-                    input.queryPlan.exactMatchPinningEnabled
-                    && a.exactLexicalMatch !== b.exactLexicalMatch
-                ) {
-                    return a.exactLexicalMatch ? -1 : 1;
-                }
-                return (a.authoritativeRank ?? Number.POSITIVE_INFINITY)
-                    - (b.authoritativeRank ?? Number.POSITIVE_INFINITY);
-            })
-            : (sortSearchCandidates(
-                group.chunks,
-                input.queryPlan.exactMatchPinningEnabled,
-                input.mustMatchesFirst,
-            ), group.chunks);
-
-        if (!nativeOrder && orderedChunks[0]?.exactMatchPinned) {
-            exactMatchPinningApplied = true;
-        }
+        const orderedChunks = [...group.chunks].sort((a, b) => {
+            if (
+                input.queryPlan.exactMatchPinningEnabled
+                && a.exactLexicalMatch !== b.exactLexicalMatch
+            ) {
+                return a.exactLexicalMatch ? -1 : 1;
+            }
+            return (a.authoritativeRank ?? Number.POSITIVE_INFINITY)
+                - (b.authoritativeRank ?? Number.POSITIVE_INFINITY);
+        });
 
         const representative = orderedChunks[0];
         const chunkSpanStart = Math.min(...group.chunks.map((chunk) => (chunk.result as SearchResultLike).startLine || 0));

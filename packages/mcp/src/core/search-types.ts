@@ -168,7 +168,6 @@ export interface SearchGroupedDebugV2 {
     symbolAggregation?: {
         ownerSource: "owner_metadata" | "registry_repair" | "fallback";
         evidenceChunkCount: number;
-        supportBoost: number;
     };
     freshness?: {
         newestChunkIndexedAt: string | null;
@@ -303,8 +302,7 @@ export interface SearchCandidateSurvivalRemoval {
 export interface SearchCandidateSurvivalDebug {
     schemaVersion: "search_candidate_survival_v2";
     scorePolicy: {
-        finalScorePolicyId: "search_candidate_final_score_v2";
-        entrypointOwnerMaxContribution: number;
+        orderAuthority: "retrieval_then_validated_reranker";
     };
     maxEntriesPerStage: number;
     maxRemovalEntries: number;
@@ -588,8 +586,7 @@ export interface SearchDebugHint {
         enabledByPolicy: boolean;
         skippedByScopeDocs: boolean;
         skippedByIdentifierIntent: boolean;
-        applicationMode: "legacy_rrf" | "native_order";
-        orderAuthority: "legacy_score" | "retrieval_order" | "reranker_order";
+        orderAuthority: "retrieval_order" | "reranker_order";
         /** True when top scored hit is already an exact lexical pin / must-satisfied exact match. */
         skippedByExactPin?: boolean;
         capabilityPresent: boolean;

@@ -50,7 +50,7 @@ test('offline static config preserves the installer-resolved Ollama dimension', 
     }
 });
 
-test('reranker application mode defaults strictly and participates in MCP configuration', () => {
+test('legacy reranker application mode is no longer part of MCP configuration', () => {
     const keys = [
         'SATORI_RUNTIME_PROFILE',
         'VECTOR_STORE_PROVIDER',
@@ -69,14 +69,8 @@ test('reranker application mode defaults strictly and participates in MCP config
             POTION_HELPER_PATH: '/opt/satori/potion-helper',
             POTION_MODEL_PATH: '/opt/satori/potion-model',
         });
-        assert.equal(createMcpConfig().rerankApplicationMode, 'native_order');
-        process.env.SATORI_RERANK_APPLICATION_MODE = 'native_order';
-        assert.equal(createMcpConfig().rerankApplicationMode, 'native_order');
-        process.env.SATORI_RERANK_APPLICATION_MODE = 'unexpected';
-        assert.throws(
-            createMcpConfig,
-            /Invalid SATORI_RERANK_APPLICATION_MODE 'unexpected'/,
-        );
+        const config = createMcpConfig();
+        assert.equal("rerankApplicationMode" in config, false);
     } finally {
         for (const key of keys) {
             const value = previous[key];

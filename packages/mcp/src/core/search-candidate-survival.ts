@@ -11,10 +11,6 @@ import type {
     SearchGroupResult,
 } from "./search-types.js";
 import { SEARCH_MAX_DIAGNOSTIC_CANDIDATES } from "./search-constants.js";
-import {
-    SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
-    SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
-} from "./search-ranking-policy.js";
 import { isDeclarationSearchGroup } from "./search-group-ordering.js";
 
 export const SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE = SEARCH_MAX_DIAGNOSTIC_CANDIDATES;
@@ -169,8 +165,7 @@ export function createSearchCandidateSurvivalTrace(): SearchCandidateSurvivalDeb
     return {
         schemaVersion: "search_candidate_survival_v2",
         scorePolicy: {
-            finalScorePolicyId: SEARCH_CANDIDATE_FINAL_SCORE_POLICY_ID,
-            entrypointOwnerMaxContribution: SEARCH_ENTRYPOINT_OWNER_MAX_SCORE_BOOST,
+            orderAuthority: "retrieval_then_validated_reranker",
         },
         maxEntriesPerStage: SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
         maxRemovalEntries: SEARCH_CANDIDATE_SURVIVAL_MAX_REMOVAL_ENTRIES,

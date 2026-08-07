@@ -86,7 +86,6 @@ function makeGroup(index: number, options: {
                 symbolAggregation: {
                     ownerSource: "registry_repair",
                     evidenceChunkCount: 2,
-                    supportBoost: 0.01,
                 },
                 freshness: {
                     newestChunkIndexedAt: "2026-01-01T00:00:00.000Z",

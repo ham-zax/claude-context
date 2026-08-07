@@ -35,19 +35,6 @@ import {
 export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'Potion';
 export type VectorStoreProvider = 'Milvus' | 'LanceDB';
 export type RerankerProvider = 'none' | 'voyage' | 'lateon';
-export type RerankApplicationMode = 'legacy_rrf' | 'native_order';
-export const DEFAULT_RERANK_APPLICATION_MODE: RerankApplicationMode = 'native_order';
-
-export function resolveRerankApplicationMode(
-    value: string | undefined,
-    defaultMode: RerankApplicationMode = DEFAULT_RERANK_APPLICATION_MODE,
-): RerankApplicationMode {
-    if (value === undefined) return defaultMode;
-    if (value === 'legacy_rrf' || value === 'native_order') return value;
-    throw new Error(
-        `Invalid SATORI_RERANK_APPLICATION_MODE '${value}'. Expected legacy_rrf or native_order.`,
-    );
-}
 export type ResolvedVectorStoreConfig =
     | { vectorStoreProvider: 'Milvus' }
     | { vectorStoreProvider: 'LanceDB'; lanceDbPath: string };
@@ -226,8 +213,6 @@ export interface ContextMcpConfig {
     lanceDbPath?: string;
     // Reranker configuration
     rerankerProvider?: RerankerProvider;
-    /** Native order rollout control; omitted test/embedded configs use the release default. */
-    rerankApplicationMode?: RerankApplicationMode;
     rankerModel?: 'rerank-2.5' | 'rerank-2.5-lite' | 'rerank-2' | 'rerank-2-lite';
     lateOnModelPath?: string;
     lateOnProfileId?: LateOnRuntimeProfileId;
@@ -605,9 +590,6 @@ export function createMcpConfig(): ContextMcpConfig {
     const defaultProvider = (envManager.get('EMBEDDING_PROVIDER') as EmbeddingProvider) || 'VoyageAI';
     const defaultReadFileMaxLines = 1000;
     const defaultReadFileMaxBytes = 8 * 1024 * 1024;
-    const rerankApplicationMode = resolveRerankApplicationMode(
-        envManager.get('SATORI_RERANK_APPLICATION_MODE'),
-    );
     const readFileMaxBytesMin = 65_536;
     const readFileMaxBytesMax = 67_108_864;
     const vectorStore = resolveVectorStoreConfig({
@@ -887,7 +869,6 @@ export function createMcpConfig(): ContextMcpConfig {
             : {}),
         // Reranker configuration
         rerankerProvider,
-        rerankApplicationMode,
         rankerModel,
         ...(lateOnModelPath ? { lateOnModelPath } : {}),
         ...(lateOnProfileId ? { lateOnProfileId } : {}),
@@ -923,7 +904,6 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP]   Runtime Profile: ${config.executionProfile} (${config.networkPolicy.kind})`);
     console.log(`[MCP]   Embedding Provider: ${config.encoderProvider}`);
     console.log(`[MCP]   Reranker Provider: ${resolveRerankerProvider(config)}`);
-    console.log(`[MCP]   Reranker Application Mode: ${config.rerankApplicationMode ?? DEFAULT_RERANK_APPLICATION_MODE}`);
     console.log(`[MCP]   Embedding Model: ${config.encoderModel}`);
     console.log(`[MCP]   Vector Store: ${config.vectorStoreProvider}`);
     if (config.vectorStoreProvider === 'LanceDB') {

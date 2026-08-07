@@ -15,11 +15,8 @@ export const SEARCH_DIVERSITY_MAX_PER_FILE = 2;
 export const SEARCH_DIVERSITY_MAX_PER_SYMBOL = 1;
 export const SEARCH_DIVERSITY_RELAXED_FILE_CAP = SEARCH_DIVERSITY_MAX_PER_FILE + 1;
 export const SEARCH_CHANGED_FILES_CACHE_TTL_MS = 5000;
-export const SEARCH_CHANGED_FIRST_MULTIPLIER = 1.10;
 export const SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES = 50;
 export const SEARCH_RERANK_TOP_K = 50;
-export const SEARCH_RERANK_RRF_K = 10;
-export const SEARCH_RERANK_WEIGHT = 1.0;
 export const SEARCH_RERANK_MIN_AMBIGUOUS_CANDIDATES = 12;
 export const SEARCH_RERANK_AMBIGUOUS_CANDIDATES_PER_RESULT = 4;
 export const SEARCH_RERANK_BOUNDED_CANDIDATES_PER_RESULT = 2;
@@ -69,51 +66,3 @@ export type PathCategory =
     | 'tests'
     | 'docs'
     | 'generated';
-
-export const SCOPE_PATH_MULTIPLIERS: Record<SearchScope, Record<PathCategory, number>> = {
-    runtime: {
-        entrypoint: 1.20,
-        core: 1.35,
-        srcRuntime: 1.10,
-        scriptRuntime: 1.15,
-        adapter: 0.70,
-        example: 0.60,
-        fixture: 0.35,
-        artifact: 0.30,
-        landing: 0.30,
-        neutral: 0.95,
-        tests: 0.90,
-        docs: 0.45,
-        generated: 0.30,
-    },
-    mixed: {
-        entrypoint: 1.15,
-        core: 1.10,
-        srcRuntime: 1.05,
-        scriptRuntime: 1.05,
-        adapter: 0.90,
-        example: 0.85,
-        fixture: 0.65,
-        artifact: 0.65,
-        landing: 0.65,
-        neutral: 1.00,
-        tests: 0.90,
-        docs: 0.90,
-        generated: 0.70,
-    },
-    docs: {
-        entrypoint: 0.50,
-        core: 0.50,
-        srcRuntime: 0.50,
-        scriptRuntime: 0.50,
-        adapter: 0.50,
-        example: 0.70,
-        fixture: 0.60,
-        artifact: 0.50,
-        landing: 0.40,
-        neutral: 0.80,
-        tests: 1.10,
-        docs: 1.20,
-        generated: 0.40,
-    },
-};

@@ -646,15 +646,6 @@ export function buildSearchQueryPlan(
             ? (sparseOnlyRoute ? "lexical" : "hybrid")
             : "dense",
         scorePolicyKind: "topk_only",
-        lexicalWeight: quotedLiteralSeeking
-            ? 1.35
-            : intent === "identifier"
-                ? 1.35
-                : intent === "mixed"
-                    ? (referenceSeeking || implementationSeeking || writerSeeking ? 0.30 : 0.10)
-                    : intent === "uncertain"
-                        ? 0.60
-                        : (referenceSeeking || implementationSeeking || writerSeeking ? 0.18 : 0.00),
         exactMatchPinningEnabled: intent === "identifier"
             || quotedLiteralSeeking
             || (writerSeeking && exactPinEligible),

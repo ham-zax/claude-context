@@ -31,7 +31,7 @@ import type { SearchNoiseMitigationHint, SearchOperatorSummary } from "./search-
 import type { ExactRegistryLookupDebug } from "./search/exact-registry.js";
 import {
     hasTokenBoundaryMatch as hasSearchTokenBoundaryMatch,
-    scoreCandidateLexicalEvidence as scoreSearchCandidateLexicalEvidence,
+    detectSearchLexicalEvidence as detectSearchCandidateLexicalEvidence,
     type SearchLexicalEvidence,
     type SearchLexicalTerm,
     type SearchQueryPlan,
@@ -382,14 +382,14 @@ export class SearchQuerySupport {
                 await handle?.close().catch(() => undefined);
             }
 
-            if (lexicalTerms.length > 0 && this.scoreCandidateLexicalEvidence(input.queryPlan, {
+            if (lexicalTerms.length > 0 && !this.detectSearchLexicalEvidence(input.queryPlan, {
                 content,
                 relativePath: normalized,
                 startLine: 1,
                 endLine: content.split(/\r?\n/).length,
                 language: getLanguageIdFromFilename(normalized, 'text'),
                 score: 1,
-            }).score <= 0) {
+            }).hasLexicalEvidence) {
                 continue;
             }
 
@@ -519,7 +519,7 @@ export class SearchQuerySupport {
                     backendScore: 1,
                     backendScoreKind: "lexical_rank",
                 };
-                if (this.scoreCandidateLexicalEvidence(input.queryPlan, candidate).score <= 0) {
+                if (!this.detectSearchLexicalEvidence(input.queryPlan, candidate).hasLexicalEvidence) {
                     continue;
                 }
                 const key = `${relativePath}:${candidate.startLine}:${candidate.endLine}:${candidate.symbolLabel || ""}`;
@@ -655,12 +655,12 @@ export class SearchQuerySupport {
                 continue;
             }
 
-            const evidence = this.scoreCandidateLexicalEvidence(queryPlan, {
+            const evidence = this.detectSearchLexicalEvidence(queryPlan, {
                 relativePath,
                 content: line,
                 symbolLabel: '',
             });
-            if (evidence.score > 0) {
+            if (evidence.hasLexicalEvidence) {
                 const startLineIndex = Math.max(0, lineIndex - SEARCH_TRACKED_LEXICAL_CONTEXT_LINES);
                 const windowStartOffset = recentLineStarts[startLineIndex] ?? 0;
                 let endLineIndex = lineIndex;
@@ -769,7 +769,6 @@ export class SearchQuerySupport {
 
         const candidates: Array<{
             relativePath: string;
-            score: number;
             exactLexicalMatch: boolean;
             startLine: number;
             endLine: number;
@@ -849,7 +848,7 @@ export class SearchQuerySupport {
 
             const exactWindowMatch = this.findExactTrackedLexicalWindowMatch(relativePath, content, input.queryPlan);
             if (exactWindowMatch) {
-                const windowEvidence = this.scoreCandidateLexicalEvidence(input.queryPlan, {
+                const windowEvidence = this.detectSearchLexicalEvidence(input.queryPlan, {
                     relativePath,
                     content: exactWindowMatch.windowContent,
                     symbolLabel: '',
@@ -857,7 +856,6 @@ export class SearchQuerySupport {
 
                 candidates.push({
                     relativePath,
-                    score: windowEvidence.score > 0 ? windowEvidence.score : exactWindowMatch.lineEvidence.score,
                     exactLexicalMatch: windowEvidence.exactLexicalMatch || exactWindowMatch.lineEvidence.exactLexicalMatch,
                     startLine: exactWindowMatch.startLine,
                     endLine: exactWindowMatch.endLine,
@@ -869,25 +867,23 @@ export class SearchQuerySupport {
 
             const lines = content.split(/\r?\n/);
             let bestLineIndex = -1;
-            let bestScore = 0;
             let bestExactLexicalMatch = false;
             for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-                const evidence = this.scoreCandidateLexicalEvidence(input.queryPlan, {
+                const evidence = this.detectSearchLexicalEvidence(input.queryPlan, {
                     relativePath,
                     content: lines[lineIndex],
                     symbolLabel: '',
                 });
                 if (
-                    evidence.score > bestScore
-                    || (evidence.score === bestScore && evidence.exactLexicalMatch && !bestExactLexicalMatch)
+                    (bestLineIndex < 0)
+                    || (!bestExactLexicalMatch && evidence.exactLexicalMatch)
                 ) {
-                    bestScore = evidence.score;
                     bestExactLexicalMatch = evidence.exactLexicalMatch;
                     bestLineIndex = lineIndex;
                 }
             }
 
-            if (bestScore <= 0) {
+            if (bestLineIndex < 0) {
                 continue;
             }
 
@@ -895,7 +891,7 @@ export class SearchQuerySupport {
             const startLine = Math.max(1, anchorLineIndex + 1 - SEARCH_TRACKED_LEXICAL_CONTEXT_LINES);
             const endLine = Math.min(lines.length, anchorLineIndex + 1 + SEARCH_TRACKED_LEXICAL_CONTEXT_LINES);
             const windowContent = lines.slice(startLine - 1, endLine).join('\n');
-            const windowEvidence = this.scoreCandidateLexicalEvidence(input.queryPlan, {
+            const windowEvidence = this.detectSearchLexicalEvidence(input.queryPlan, {
                 relativePath,
                 content: windowContent,
                 symbolLabel: '',
@@ -903,7 +899,6 @@ export class SearchQuerySupport {
 
             candidates.push({
                 relativePath,
-                score: windowEvidence.score > 0 ? windowEvidence.score : bestScore,
                 exactLexicalMatch: windowEvidence.exactLexicalMatch || bestExactLexicalMatch,
                 startLine,
                 endLine,
@@ -915,9 +910,6 @@ export class SearchQuerySupport {
         candidates.sort((a, b) => {
             if (a.exactLexicalMatch !== b.exactLexicalMatch) {
                 return a.exactLexicalMatch ? -1 : 1;
-            }
-            if (b.score !== a.score) {
-                return b.score - a.score;
             }
             const fileCmp = a.relativePath.localeCompare(b.relativePath);
             if (fileCmp !== 0) {
@@ -932,8 +924,8 @@ export class SearchQuerySupport {
             startLine: candidate.startLine,
             endLine: candidate.endLine,
             language: candidate.language,
-            score: candidate.score,
-            backendScore: candidate.score,
+            score: 1,
+            backendScore: 1,
             backendScoreKind: 'lexical_rank' as const,
         }));
         debug.returnedResults = results.length;
@@ -1204,8 +1196,8 @@ export class SearchQuerySupport {
     public hasTokenBoundaryMatch(field: string, term: string): boolean {
         return hasSearchTokenBoundaryMatch(field, term);
     }
-    public scoreCandidateLexicalEvidence(plan: SearchQueryPlan, result: SearchResultLike): SearchLexicalEvidence {
-        return scoreSearchCandidateLexicalEvidence(plan, result);
+    public detectSearchLexicalEvidence(plan: SearchQueryPlan, result: SearchResultLike): SearchLexicalEvidence {
+        return detectSearchCandidateLexicalEvidence(plan, result);
     }
     public pathMatchesAnyPattern(relativePath: string, patterns: string[]): boolean {
         if (patterns.length === 0) return false;

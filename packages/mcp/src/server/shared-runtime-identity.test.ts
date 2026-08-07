@@ -69,13 +69,6 @@ test("shared runtime identity is exact, non-secret, and bounded to eligible Linu
         }).hash,
         identity.hash,
     );
-    assert.notEqual(
-        buildSharedRuntimeIdentity(runtimeEntry, {
-            ...env,
-            SATORI_RERANK_APPLICATION_MODE: "native_order",
-        }).hash,
-        identity.hash,
-    );
     const lateOnD16Identity = buildSharedRuntimeIdentity(runtimeEntry, {
         ...env,
         SATORI_RERANKER_PROVIDER: "lateon",

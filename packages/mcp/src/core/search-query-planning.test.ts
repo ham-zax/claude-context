@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSearchOperators } from './search-query-planning.js';
+import { buildSearchQueryPlan, parseSearchOperators } from './search-query-planning.js';
 
 test('quoted must: value stays one literal token after unquoting', () => {
     const parsed = parseSearchOperators('must:"replace(tzinfo=None)" where is naive utc handling');
@@ -28,4 +28,11 @@ test('wildcard-looking quoted must: values are treated literally, not as globs',
 test('unquoted must: value with punctuation stays a single token', () => {
     const parsed = parseSearchOperators('must:replace(tzinfo=None)');
     assert.deepEqual(parsed.must, ['replace(tzinfo=None)']);
+});
+
+test('query plans do not carry a numeric lexical relevance weight', () => {
+    const parsed = parseSearchOperators('where is the search reranker order decided');
+    const plan = buildSearchQueryPlan(parsed.semanticQuery, true, parsed);
+
+    assert.equal('lexicalWeight' in plan, false);
 });

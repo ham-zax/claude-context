@@ -56,7 +56,7 @@ function buildSupport(reranker: Reranker | null): SearchQuerySupport {
     });
 }
 
-function buildInput(mode: "native_order" | "legacy_rrf"): SearchExecutionInput {
+function buildInput(): SearchExecutionInput {
     const parsedOperators = parseSearchOperators("where find the relevant implementation");
     return {
         effectiveRoot: "/repo",
@@ -72,7 +72,6 @@ function buildInput(mode: "native_order" | "legacy_rrf"): SearchExecutionInput {
         freshnessMode: "synced",
         observedChangedFilesState: { available: false, files: new Set() },
         retrievalPolicy: resolveSearchPolicy({ resultLimit: 3, hasMustOperators: false }),
-        rerankApplicationMode: mode,
     };
 }
 
@@ -116,7 +115,7 @@ test("native execution publishes complete provider order without score blending"
         { index: 0, relevanceScore: 0.90 },
         { index: 1, relevanceScore: 0.80 },
     ]);
-    const outcome = await run(buildInput("native_order"), buildHost(results, reranker));
+    const outcome = await run(buildInput(), buildHost(results, reranker));
 
     assert.equal(outcome.kind, "ok");
     assert.deepEqual(
@@ -135,7 +134,7 @@ test("native execution publishes complete provider order without score blending"
 test("native execution restores the exact retrieval order after provider failure", async () => {
     const results = [candidate("a.ts", 0.90), candidate("b.ts", 0.80), candidate("c.ts", 0.70)];
     const outcome = await run(
-        buildInput("native_order"),
+        buildInput(),
         buildHost(results, rerankerReturning(new Error("timeout"))),
     );
 
@@ -148,4 +147,3 @@ test("native execution restores the exact retrieval order after provider failure
     assert.equal(outcome.rerankerApplied, false);
     assert.equal(outcome.rerankerFailurePhase, "api_call");
 });
-

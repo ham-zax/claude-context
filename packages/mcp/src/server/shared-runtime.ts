@@ -138,10 +138,7 @@ class SessionProviderRuntime {
             shared.runtimeOwnerGate,
             this.mutationLeaseCoordinator,
             this.continuationCoordinator,
-            {
-                readFileMaxBytes: shared.readFileMaxBytes,
-                rerankApplicationMode: shared.rerankApplicationMode,
-            },
+            { readFileMaxBytes: shared.readFileMaxBytes },
         );
         const sessionContext: ToolContext = {
             ...shared,
@@ -243,10 +240,7 @@ export class SharedRuntimeHost {
             this.runtimeOwnerRegistry,
             this.mutationLeaseCoordinator,
             new SearchContinuationCoordinator(this.searchContinuationPool),
-            {
-                readFileMaxBytes: this.readFileMaxBytes,
-                rerankApplicationMode: this.config.rerankApplicationMode,
-            },
+            { readFileMaxBytes: this.readFileMaxBytes },
         );
         this.providerRuntime = new ProviderRuntime({
             config,
@@ -299,10 +293,7 @@ export class SharedRuntimeHost {
             this.runtimeOwnerRegistry,
             this.mutationLeaseCoordinator,
             continuationCoordinator,
-            {
-                readFileMaxBytes: this.readFileMaxBytes,
-                rerankApplicationMode: this.config.rerankApplicationMode,
-            },
+            { readFileMaxBytes: this.readFileMaxBytes },
         );
         const providerRuntime = new SessionProviderRuntime(
             this.providerRuntime,
@@ -324,7 +315,6 @@ export class SharedRuntimeHost {
                 toolHandlers: localHandlers,
                 readFileMaxLines: this.readFileMaxLines,
                 readFileMaxBytes: this.readFileMaxBytes,
-                rerankApplicationMode: this.config.rerankApplicationMode,
                 runtimeOwnerGate: this.runtimeOwnerRegistry,
                 providerRuntime,
                 workspacePolicy,

@@ -389,7 +389,7 @@ test("cross-file stale owner metadata cannot merge evidence before scoring", () 
     for (const group of result.visibleResults) {
         assert.equal(group.evidenceChunks, undefined);
         assert.equal(group.debug?.representativeChunkCount, 1);
-        assert.equal(group.debug?.symbolAggregation?.supportBoost, Math.min(Math.log1p(1) * 0.01, 0.03));
+        assert.equal(group.debug?.symbolAggregation?.evidenceChunkCount, 1);
     }
 });
 

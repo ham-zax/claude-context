@@ -3736,7 +3736,7 @@ test('handleSearchCode grouped symbol mode repairs legacy chunks from compatible
     });
 });
 
-test('handleSearchCode ranks exact warning-code emission above tests and generic helpers', async () => {
+test('handleSearchCode does not apply an owner boost over retrieval order for warning-code results', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -3793,15 +3793,14 @@ test('handleSearchCode ranks exact warning-code emission above tests and generic
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
-        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/handlers.ts');
-        assert.equal(payload.results[0].displayLabel, 'async method handleSearchCode(args: any)');
-        assert.notEqual(payload.results[0].target.file, 'packages/mcp/src/core/handlers.index_state_stability.test.ts');
-        assert.notEqual(payload.results[0].displayLabel, 'method buildReindexHint(codebasePath: string)');
+        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/handlers.index_state_stability.test.ts');
+        assert.equal(payload.results[0].displayLabel, 'function semanticSearch()');
+        assert.equal(payload.results[0].debug?.entrypointOwnerScoreBoost, 0);
         assert.equal(payload.hints?.debugSearch?.queryIntent?.reasons.includes('writer_seeking_query'), true);
     });
 });
 
-test('handleSearchCode ranks natural-language emitted warning site above generic reindex helper', async () => {
+test('handleSearchCode preserves retrieval order for natural-language warning results', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -3847,9 +3846,10 @@ test('handleSearchCode ranks natural-language emitted warning site above generic
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.status, 'ok');
-        assert.equal(payload.results[0].displayLabel, 'async method handleSearchCode(args: any)');
-        assert.equal(payload.results[0].debug?.lexicalScore > payload.results[1].debug?.lexicalScore, true);
-        assert.equal(payload.results[1].displayLabel, 'method buildReindexHint(codebasePath: string)');
+        assert.equal(payload.results[0].displayLabel, 'method buildReindexHint(codebasePath: string)');
+        assert.equal(payload.results[1].displayLabel, 'async method handleSearchCode(args: any)');
+        assert.equal(payload.results[0].debug?.lexicalScore, 0);
+        assert.equal(payload.results[1].debug?.lexicalScore, 0);
     });
 });
 
@@ -4892,14 +4892,14 @@ test('handleSearchCode tracked lexical recovery short-circuits exact-ish line sc
 
             const searchQuerySupport = (handlers as unknown as {
                 searchQuerySupport: {
-                    scoreCandidateLexicalEvidence: (plan: unknown, result: unknown) => unknown;
+                    detectSearchLexicalEvidence: (plan: unknown, result: unknown) => unknown;
                 };
             }).searchQuerySupport;
-            const originalScoreCandidateLexicalEvidence = searchQuerySupport.scoreCandidateLexicalEvidence.bind(searchQuerySupport);
-            let scoreCandidateCalls = 0;
-            searchQuerySupport.scoreCandidateLexicalEvidence = (plan, result) => {
-                scoreCandidateCalls += 1;
-                return originalScoreCandidateLexicalEvidence(plan, result);
+            const originalDetectSearchLexicalEvidence = searchQuerySupport.detectSearchLexicalEvidence.bind(searchQuerySupport);
+            let lexicalEvidenceCalls = 0;
+            searchQuerySupport.detectSearchLexicalEvidence = (plan, result) => {
+                lexicalEvidenceCalls += 1;
+                return originalDetectSearchLexicalEvidence(plan, result);
             };
             const originalSplit = String.prototype.split;
             let trackedNewlineSplitCalls = 0;
@@ -4931,7 +4931,7 @@ test('handleSearchCode tracked lexical recovery short-circuits exact-ish line sc
             assert.equal(payload.status, 'ok');
             assert.equal(payload.results[0].target.file, lexicalPath);
             assert.equal(payload.hints?.debugSearch?.passesUsed?.includes('lexical_files'), true);
-            assert.equal(scoreCandidateCalls <= 3, true);
+            assert.equal(lexicalEvidenceCalls <= 3, true);
             assert.equal(trackedNewlineSplitCalls, 0);
         });
     });
@@ -5244,7 +5244,6 @@ test('sortGroupedSearchResults preserves exactMatchPinned provenance when exact 
                     symbolAggregation: {
                         ownerSource: 'fallback',
                         evidenceChunkCount: 1,
-                        supportBoost: 0,
                     },
                     provenance: {
                         retrievalPasses: ['primary'],
@@ -5286,7 +5285,6 @@ test('sortGroupedSearchResults preserves exactMatchPinned provenance when exact 
                     symbolAggregation: {
                         ownerSource: 'fallback',
                         evidenceChunkCount: 1,
-                        supportBoost: 0,
                     },
                     provenance: {
                         retrievalPasses: ['primary'],
@@ -7028,7 +7026,7 @@ test('handleSearchCode grouped diversity keeps distinct symbol instances that sh
     });
 });
 
-test('handleSearchCode applies changed-files boost in auto mode and skips boost in default mode', async () => {
+test('handleSearchCode treats auto_changed_first as a compatibility no-op', async () => {
     await withTempRepo(async (repoPath) => {
         fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
         fs.writeFileSync(path.join(repoPath, 'src', 'changed.ts'), 'export const changed = true;\n');
@@ -7075,7 +7073,9 @@ test('handleSearchCode applies changed-files boost in auto mode and skips boost 
         assert.equal(autoPayload.results[0].target.file, 'src/changed.ts');
         assert.equal(autoPayload.freshnessSummary.changedFileCount, 1);
         assert.equal(autoPayload.freshnessSummary.gitDirtyFilesConsidered, true);
-        assert.equal(autoPayload.freshnessSummary.changedFilesBoostApplied, true);
+        assert.equal(autoPayload.freshnessSummary.changedFilesBoostApplied, false);
+        assert.equal(autoPayload.hints?.debugSearch?.changedFilesBoost?.enabled, false);
+        assert.equal(autoPayload.hints?.debugSearch?.changedFilesBoost?.applied, false);
 
         const defaultResponse = await handlers.handleSearchCode({
             path: repoPath,
@@ -7088,11 +7088,13 @@ test('handleSearchCode applies changed-files boost in auto mode and skips boost 
             debugMode: 'full'
         });
         const defaultPayload = JSON.parse(defaultResponse.content[0]?.text || '{}');
+        assert.equal(defaultPayload.results[0].target.file, 'src/changed.ts');
         const defaultChanged = defaultPayload.results.find((result: SearchPayloadResultView) => result.target?.file === 'src/changed.ts');
         assert.equal(defaultChanged?.debug?.changedFilesMultiplier, 1);
         assert.equal(defaultPayload.freshnessSummary.changedFileCount, 1);
         assert.equal(defaultPayload.freshnessSummary.gitDirtyFilesConsidered, true);
         assert.equal(defaultPayload.freshnessSummary.changedFilesBoostApplied, false);
+        assert.equal(defaultPayload.hints?.debugSearch?.changedFilesBoost?.enabled, false);
     });
 });
 
@@ -7148,7 +7150,7 @@ test('handleSearchCode probes changed files once per grouped search request', as
     });
 });
 
-test('handleSearchCode freshness summary only marks changed-files boost applied when a candidate was boosted', async () => {
+test('handleSearchCode reports changed-file freshness without a ranking boost', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -7183,13 +7185,13 @@ test('handleSearchCode freshness summary only marks changed-files boost applied 
         assert.equal(payload.status, 'ok');
         assert.equal(payload.freshnessSummary.changedFileCount, 1);
         assert.equal(payload.freshnessSummary.changedFilesBoostApplied, false);
-        assert.equal(payload.hints.debugSearch.changedFilesBoost.enabled, true);
+        assert.equal(payload.hints.debugSearch.changedFilesBoost.enabled, false);
         assert.equal(payload.hints.debugSearch.changedFilesBoost.applied, false);
         assert.equal(payload.hints.debugSearch.changedFilesBoost.boostedCandidates, 0);
     });
 });
 
-test('handleSearchCode exposes freshness summary and warns when dirty files were not synced', async () => {
+test('handleSearchCode exposes freshness summary without applying a changed-file ranking boost', async () => {
     await withTempRepo(async (repoPath) => {
         fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
         fs.writeFileSync(path.join(repoPath, 'src', 'changed.ts'), 'export const changed = true;\n');
@@ -7231,7 +7233,7 @@ test('handleSearchCode exposes freshness summary and warns when dirty files were
         assert.equal(payload.freshnessSummary.lastSyncAt, null);
         assert.equal(payload.freshnessSummary.changedFileCount, 1);
         assert.equal(payload.freshnessSummary.gitDirtyFilesConsidered, true);
-        assert.equal(payload.freshnessSummary.changedFilesBoostApplied, true);
+        assert.equal(payload.freshnessSummary.changedFilesBoostApplied, false);
         assert.equal(payload.freshnessSummary.changedFilesBoostSkippedForLargeChangeSet, false);
         assert.equal(warningCodes(payload).includes('SEARCH_DIRTY_WORKTREE_NOT_SYNCED'), true);
         assert.equal(payload.warnings[0].severity, 'caution');
@@ -7960,7 +7962,7 @@ test('prepared-generation changed-code debug is capped with totals and truncatio
     });
 });
 
-test('handleSearchCode auto_changed_first skips boost when changed file set exceeds threshold', async () => {
+test('handleSearchCode auto_changed_first does not create a large-change-set ranking branch', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -8012,13 +8014,13 @@ test('handleSearchCode auto_changed_first skips boost when changed file set exce
         assert.equal(payload.freshnessSummary.changedFileCount, SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES + 1);
         assert.equal(payload.freshnessSummary.gitDirtyFilesConsidered, true);
         assert.equal(payload.freshnessSummary.changedFilesBoostApplied, false);
-        assert.equal(payload.freshnessSummary.changedFilesBoostSkippedForLargeChangeSet, true);
-        assert.equal(warningCodes(payload).includes('SEARCH_CHANGED_FILES_BOOST_SKIPPED'), true);
-        assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.enabled, true);
+        assert.equal(payload.freshnessSummary.changedFilesBoostSkippedForLargeChangeSet, false);
+        assert.equal(warningCodes(payload).includes('SEARCH_CHANGED_FILES_BOOST_SKIPPED'), false);
+        assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.enabled, false);
         assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.applied, false);
         assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.changedCount, SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES + 1);
         assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.maxChangedFilesForBoost, SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES);
-        assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.skippedForLargeChangeSet, true);
+        assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.skippedForLargeChangeSet, false);
     });
 });
 
@@ -8713,7 +8715,7 @@ test('handleSearchCode exposes identifier query intent and skips reranker for ex
     });
 });
 
-test('handleSearchCode promotes lexical exact matches for hurst-style single-token queries', async () => {
+test('handleSearchCode does not use lexical evidence as a post-retrieval score', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -8755,9 +8757,10 @@ test('handleSearchCode promotes lexical exact matches for hurst-style single-tok
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].file, 'src/hurst_gate.ts');
-        assert.equal(payload.results[0].debug?.exactLexicalMatch, true);
-        assert.equal(payload.results[0].debug?.lexicalScore > payload.results[1].debug?.lexicalScore, true);
+        assert.equal(payload.results[0].file, 'src/regime_gate.ts');
+        assert.equal(payload.results[0].debug?.lexicalScore, 0);
+        assert.equal(payload.results[1].debug?.exactLexicalMatch, true);
+        assert.equal(payload.results[1].debug?.lexicalScore, 0);
         assert.equal(payload.hints?.debugSearch?.retrieval?.backendScoreKinds?.includes('rrf_fusion'), true);
     });
 });
@@ -8822,7 +8825,7 @@ test('handleSearchCode prefers usage hits over declarations for reference-seekin
     });
 });
 
-test('handleSearchCode ranks canonical owners above tool wrappers for implementation queries', async () => {
+test('handleSearchCode does not use agent-fit metadata to reorder implementation candidates', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -8864,15 +8867,13 @@ test('handleSearchCode ranks canonical owners above tool wrappers for implementa
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/handlers.ts');
-        assert.equal(payload.results[0].debug?.pathCategory, 'core');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'implementation_symbol');
-        assert.equal(payload.results[1].debug?.pathCategory, 'adapter');
-        assert.equal(payload.results[1].debug?.agentFitReason, 'adapter_not_canonical_owner');
+        assert.equal(payload.results[0].target.file, 'packages/mcp/src/tools/search_codebase.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
+        assert.equal(payload.results[1].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
-test('handleSearchCode keeps a provider adapter eligible as the canonical implementation owner', async () => {
+test('handleSearchCode keeps a provider adapter eligible without a local owner boost', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -8914,9 +8915,9 @@ test('handleSearchCode keeps a provider adapter eligible as the canonical implem
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/core/src/vectordb/adapters/milvus-rest.ts');
-        assert.equal(payload.results[0].debug?.pathCategory, 'adapter');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'implementation_symbol');
+        assert.equal(payload.results[0].target.file, 'packages/core/src/search/execution.ts');
+        assert.equal(payload.results[0].debug?.pathCategory, 'core');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
@@ -9079,7 +9080,7 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
             const ownerRank = payload.results.findIndex(
                 (result: { target?: { file?: string } }) => result.target?.file === 'src/cli/main.py',
             );
-            assert.equal(ownerRank >= 0 && ownerRank < 3, true, query);
+            assert.equal(ownerRank >= 0, true, query);
             assert.equal(
                 payload.hints?.debugSearch?.entrypointOwnerEvidence?.status,
                 'resolved',
@@ -9114,7 +9115,7 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
             );
             assert.equal(
                 payload.results[ownerRank].debug?.entrypointOwnerScoreReason,
-                'manifest_entrypoint_owner',
+                'not_used_for_ranking',
                 query,
             );
         }
@@ -9263,16 +9264,8 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
         }));
         assert.equal(ownerBaselineRank >= 0, true);
         assert.equal(ownerTracedRank >= 0, true);
-        assert.equal(
-            ownerTracedRank < ownerBaselineRank,
-            true,
-            JSON.stringify(rankTransitions),
-        );
-        assert.deepEqual(
-            tracedOrder.filter((identity) => identity !== ownerIdentity),
-            baselineOrder.filter((identity) => identity !== ownerIdentity),
-            JSON.stringify(rankTransitions),
-        );
+        assert.equal(ownerTracedRank, ownerBaselineRank, JSON.stringify(rankTransitions));
+        assert.deepEqual(tracedOrder, baselineOrder, JSON.stringify(rankTransitions));
         const incompatibleHandlers = createHandlers(
             repoPath,
             searchResults,
@@ -9317,7 +9310,7 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
             debugMode: 'full',
         });
         const developmentPayload = JSON.parse(developmentResponse.content[0]?.text || '{}');
-        assert.equal(developmentPayload.results[0].target.file, 'scripts/dev/qap_ralph.py');
+        assert.equal(developmentPayload.results[0].target.file, 'src/python/core/runtime_paths.py');
         const entrypointResult = developmentPayload.results.find(
             (result: { target?: { file?: string } }) => result.target?.file === 'src/cli/main.py',
         );
@@ -9328,7 +9321,7 @@ test('handleSearchCode ranks a manifest-declared CLI owner without changing cand
     });
 });
 
-test('handleSearchCode demotes tests below implementation owners unless test intent is explicit', async () => {
+test('handleSearchCode preserves retrieval order while retaining test-scope classification', async () => {
     await withTempRepo(async (repoPath) => {
         const searchResults = [
             {
@@ -9370,9 +9363,9 @@ test('handleSearchCode demotes tests below implementation owners unless test int
             debugMode: 'full'
         });
         const ownerPayload = JSON.parse(ownerResponse.content[0]?.text || '{}');
-        assert.equal(ownerPayload.results[0].target.file, 'packages/cli/src/install.ts');
-        assert.equal(ownerPayload.results[0].debug?.agentFitReason, 'writer_owner');
-        assert.equal(ownerPayload.results[1].debug?.agentFitReason, 'implementation_query_test_demotion');
+        assert.equal(ownerPayload.results[0].target.file, 'packages/cli/src/install.test.ts');
+        assert.equal(ownerPayload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
+        assert.equal(ownerPayload.results[1].debug?.agentFitReason, 'not_used_for_ranking');
 
         const testResponse = await handlers.handleSearchCode({
             path: repoPath,
@@ -9385,11 +9378,11 @@ test('handleSearchCode demotes tests below implementation owners unless test int
         });
         const testPayload = JSON.parse(testResponse.content[0]?.text || '{}');
         assert.equal(testPayload.results[0].target.file, 'packages/cli/src/install.test.ts');
-        assert.equal(testPayload.results[0].debug?.agentFitReason, 'test_intent');
+        assert.equal(testPayload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
-test('handleSearchCode strongly demotes test helpers for implementation freshness queries', async () => {
+test('handleSearchCode preserves retrieval order for freshness evidence', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9431,15 +9424,15 @@ test('handleSearchCode strongly demotes test helpers for implementation freshnes
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/sync.ts');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'implementation_symbol');
-        assert.equal(payload.results[1].debug?.agentFitReason, 'implementation_query_test_demotion');
+        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/handlers.index_state_stability.test.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
+        assert.equal(payload.results[1].debug?.agentFitReason, 'not_used_for_ranking');
         assert.equal(payload.hints?.debugSearch?.rerank?.exactMatchPinningEnabled, false);
         assert.equal(payload.hints?.debugSearch?.rerank?.exactMatchPinningApplied, false);
     });
 });
 
-test('handleSearchCode ranks script runtime owners above package installability helpers for script queries', async () => {
+test('handleSearchCode preserves retrieval order for script query candidates', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9481,13 +9474,12 @@ test('handleSearchCode ranks script runtime owners above package installability 
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'scripts/check-version-freshness.mjs');
-        assert.equal(payload.results[0].debug?.pathCategory, 'scriptRuntime');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'script_implementation');
+        assert.equal(payload.results[0].target.file, 'packages/cli/src/package-installability.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
-test('handleSearchCode boosts exact phase/path anchors for broad semantic queries', async () => {
+test('handleSearchCode does not boost path anchors after retrieval', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9538,14 +9530,15 @@ test('handleSearchCode boosts exact phase/path anchors for broad semantic querie
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'scripts/ops/phase6p_pair_relationship_observation_source.py');
-        assert.equal(payload.results[1].target.file, 'scripts/ops/phase6m_pair_relationship_object.py');
-        assert.equal(payload.results[0].debug?.lexicalScore > payload.results[1].debug?.lexicalScore, true);
+        assert.equal(payload.results[0].target.file, 'scripts/ops/phase6m_pair_relationship_object.py');
+        assert.equal(payload.results[1].target.file, 'scripts/ops/phase6p_pair_relationship_observation_source.py');
+        assert.equal(payload.results[0].debug?.lexicalScore, 0);
+        assert.equal(payload.results[1].debug?.lexicalScore, 0);
         assert.equal(payload.hints?.debugSearch?.queryIntent?.classification, 'mixed');
     });
 });
 
-test('handleSearchCode demotes sibling structural-anchor near misses below a neutral parallel control', async () => {
+test('handleSearchCode preserves stable retrieval order for sibling structural anchors', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9616,15 +9609,14 @@ test('handleSearchCode demotes sibling structural-anchor near misses below a neu
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
         assert.equal(payload.results[0].target.file, 'scripts/ops/phase6p_pair_relationship_observation_source.py');
-        assert.equal(payload.results[1].target.file, 'scripts/ops/pair_relationship_observation_source_runtime_admission.py');
-        assert.equal(payload.results[2].target.file, 'scripts/ops/phase6m_pair_relationship_observation_source.py');
-        assert.equal(payload.results[0].debug?.lexicalScore > payload.results[1].debug?.lexicalScore, true);
-        assert.equal(payload.results[1].debug?.lexicalScore > payload.results[2].debug?.lexicalScore, true);
+        assert.equal(payload.results[1].target.file, 'scripts/ops/phase6m_pair_relationship_observation_source.py');
+        assert.equal(payload.results[2].target.file, 'scripts/ops/pair_relationship_observation_source_runtime_admission.py');
+        assert.equal(payload.results.every((result: SearchPayloadResultView) => result.debug?.lexicalScore === 0), true);
         assert.equal(payload.hints?.debugSearch?.queryIntent?.classification, 'mixed');
     });
 });
 
-test('handleSearchCode ranks writer owners above repo config readers for write-intent queries', async () => {
+test('handleSearchCode preserves retrieval order for writer-related candidates', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9666,12 +9658,12 @@ test('handleSearchCode ranks writer owners above repo config readers for write-i
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/cli/src/install.ts');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'writer_owner');
+        assert.equal(payload.results[0].target.file, 'packages/core/src/config/repo-config.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
-test('handleSearchCode treats class-qualified mutator methods as writer owners', async () => {
+test('handleSearchCode does not boost class-qualified mutators locally', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9713,12 +9705,12 @@ test('handleSearchCode treats class-qualified mutator methods as writer owners',
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/cli/src/install.ts');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'writer_owner');
+        assert.equal(payload.results[0].target.file, 'packages/core/src/config/repo-config.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
-test('handleSearchCode does not treat formatter pushes as writer owners', async () => {
+test('handleSearchCode does not apply writer-owner relevance to formatter pushes', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9765,14 +9757,14 @@ test('handleSearchCode does not treat formatter pushes as writer owners', async 
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/cli/src/install.ts');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'writer_owner');
-        assert.equal(payload.results[1].target.file, 'packages/mcp/src/tools/list_codebases.ts');
-        assert.equal(payload.results[1].debug?.agentFitReason, 'writer_query_non_writer');
+        assert.equal(payload.results[0].target.file, 'packages/mcp/src/tools/list_codebases.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
+        assert.equal(payload.results[1].target.file, 'packages/cli/src/install.ts');
+        assert.equal(payload.results[1].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
-test('handleSearchCode ranks implementation chunks above type-only results for owner queries', async () => {
+test('handleSearchCode preserves retrieval order between type and implementation candidates', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -9812,9 +9804,9 @@ test('handleSearchCode ranks implementation chunks above type-only results for o
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/handlers.ts');
-        assert.equal(payload.results[0].debug?.agentFitReason, 'implementation_chunk');
-        assert.equal(payload.results[1].debug?.agentFitReason, 'type_not_owner');
+        assert.equal(payload.results[0].target.file, 'packages/mcp/src/core/search-types.ts');
+        assert.equal(payload.results[0].debug?.agentFitReason, 'not_used_for_ranking');
+        assert.equal(payload.results[1].debug?.agentFitReason, 'not_used_for_ranking');
     });
 });
 
@@ -9869,7 +9861,7 @@ test('handleSearchCode does not boost dirty tests for non-test implementation qu
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'packages/cli/src/install.ts');
+        assert.equal(payload.results[0].target.file, 'packages/cli/src/install.test.ts');
         assert.equal(payload.freshnessSummary.changedFilesBoostApplied, false);
         assert.equal(payload.hints?.debugSearch?.changedFilesBoost?.boostedCandidates, 0);
         assert.equal(payload.results[1].debug?.changedFilesMultiplier, 1);
@@ -9990,7 +9982,8 @@ test('handleSearchCode identifier query does not treat fragment-only matches as 
         assert.equal(payload.results[0].debug?.exactLexicalMatch, true);
         assert.equal(payload.results[1].file, 'src/risk_state.ts');
         assert.equal(payload.results[1].debug?.exactLexicalMatch, false);
-        assert.equal(payload.results[0].debug?.lexicalScore > payload.results[1].debug?.lexicalScore, true);
+        assert.equal(payload.results[0].debug?.lexicalScore, 0);
+        assert.equal(payload.results[1].debug?.lexicalScore, 0);
     });
 });
 
@@ -10054,7 +10047,7 @@ test('handleSearchCode collapses duplicate declaration groups for identifier que
     });
 });
 
-test('handleSearchCode reference-seeking queries downweight fragment-only matches below real usage', async () => {
+test('handleSearchCode preserves retrieval order for reference evidence without local weights', async () => {
     await withTempRepo(async (repoPath) => {
         const reranker = {
             rerank: async () => [
@@ -10116,12 +10109,12 @@ test('handleSearchCode reference-seeking queries downweight fragment-only matche
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'src/runtime_usage.ts');
+        assert.equal(payload.results[0].target.file, 'src/check_gate_state.ts');
         assert.equal(payload.results[1].target.file !== 'src/check_gate_state.ts', true);
     });
 });
 
-test('handleSearchCode reference-seeking queries rank runtime usage above declaration chunks with usage examples', async () => {
+test('handleSearchCode applies the validated provider order to reference candidates', async () => {
     await withTempRepo(async (repoPath) => {
         const reranker = {
             rerank: async () => [
@@ -10176,12 +10169,12 @@ test('handleSearchCode reference-seeking queries rank runtime usage above declar
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'src/runtime_usage.ts');
-        assert.equal(payload.results[1].target.file, 'src/hurst_gate.ts');
+        assert.equal(payload.results[0].target.file, 'src/hurst_gate.ts');
+        assert.equal(payload.results[1].target.file, 'src/runtime_usage.ts');
     });
 });
 
-test('handleSearchCode reference-seeking function declarations do not receive usage-match boost', async () => {
+test('handleSearchCode keeps reference declaration evidence numeric-neutral', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -10223,14 +10216,14 @@ test('handleSearchCode reference-seeking function declarations do not receive us
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].file, 'src/runtime_usage.ts');
+        assert.equal(payload.results[0].file, 'src/check_hurst_gate.ts');
         const declaration = payload.results.find((result: SearchPayloadResultView) => result.file === 'src/check_hurst_gate.ts');
         assert.ok(declaration);
-        assert.equal(declaration.debug?.lexicalScore < 0.05, true);
+        assert.equal(declaration.debug?.lexicalScore, 0);
     });
 });
 
-test('handleSearchCode reference-seeking queries rank executable usage above import-only references', async () => {
+test('handleSearchCode preserves retrieval order between import and executable references', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -10272,13 +10265,14 @@ test('handleSearchCode reference-seeking queries rank executable usage above imp
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].file, 'src/runtime_usage.ts');
-        assert.equal(payload.results[1].file, 'src/runtime_import.ts');
-        assert.equal(payload.results[0].debug?.lexicalScore > payload.results[1].debug?.lexicalScore, true);
+        assert.equal(payload.results[0].file, 'src/runtime_import.ts');
+        assert.equal(payload.results[1].file, 'src/runtime_usage.ts');
+        assert.equal(payload.results[0].debug?.lexicalScore, 0);
+        assert.equal(payload.results[1].debug?.lexicalScore, 0);
     });
 });
 
-test('handleSearchCode treats arrow function declarations as declarations for reference-seeking queries', async () => {
+test('handleSearchCode keeps arrow declaration grouping deterministic for reference queries', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -10333,13 +10327,13 @@ test('handleSearchCode treats arrow function declarations as declarations for re
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].target.file, 'src/runtime_usage.ts');
+        assert.equal(payload.results[0].target.file, 'src/check_hurst_gate.ts');
         const declarationHits = payload.results.filter((result: SearchPayloadResultView) => result.target?.file === 'src/check_hurst_gate.ts' && result.displayLabel === 'const check_hurst_gate =');
         assert.equal(declarationHits.length, 1);
     });
 });
 
-test('handleSearchCode treats arrow declarations with n-containing parameter names as declarations', async () => {
+test('handleSearchCode keeps arrow declaration evidence numeric-neutral', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [
             {
@@ -10381,10 +10375,10 @@ test('handleSearchCode treats arrow declarations with n-containing parameter nam
         });
 
         const payload = JSON.parse(response.content[0]?.text || '{}');
-        assert.equal(payload.results[0].file, 'src/runtime_usage.ts');
+        assert.equal(payload.results[0].file, 'src/check_hurst_gate.ts');
         const declaration = payload.results.find((result: SearchPayloadResultView) => result.file === 'src/check_hurst_gate.ts');
         assert.ok(declaration);
-        assert.equal(declaration.debug?.lexicalScore < 0.05, true);
+        assert.equal(declaration.debug?.lexicalScore, 0);
     });
 });
 

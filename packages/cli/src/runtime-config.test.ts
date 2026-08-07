@@ -1,17 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateStaticRuntimeConfig, selectedRerankApplicationMode } from "./runtime-config.js";
+import { evaluateStaticRuntimeConfig } from "./runtime-config.js";
 
-test("runtime config reports and strictly validates reranker application mode", () => {
-    assert.equal(selectedRerankApplicationMode({}), "native_order");
-    const native = evaluateStaticRuntimeConfig({ SATORI_RERANK_APPLICATION_MODE: "native_order" });
-    assert.deepEqual(native.find((check) => check.name === "rerank_application_mode"), {
-        name: "rerank_application_mode",
-        status: "ok",
-        message: "Reranker application mode: native_order.",
-    });
-    const invalid = evaluateStaticRuntimeConfig({ SATORI_RERANK_APPLICATION_MODE: "unknown" });
-    assert.equal(invalid.find((check) => check.name === "rerank_application_mode")?.status, "error");
+test("legacy reranker application mode is no longer a CLI configuration check", () => {
+    const checks = evaluateStaticRuntimeConfig({ SATORI_RERANK_APPLICATION_MODE: "legacy_rrf" });
+    assert.equal(checks.some((check) => check.name === "rerank_application_mode"), false);
 });
 
 test("static runtime config rejects unsupported providers without unrelated key guidance", () => {

@@ -110,7 +110,6 @@ function projectGroupedDebugV2(debug: SearchGroupedDebugV2): SearchGroupedDebugV
             symbolAggregation: {
                 ownerSource: debug.symbolAggregation.ownerSource,
                 evidenceChunkCount: debug.symbolAggregation.evidenceChunkCount,
-                supportBoost: debug.symbolAggregation.supportBoost,
             },
         } : {}),
         ...(debug.freshness ? {

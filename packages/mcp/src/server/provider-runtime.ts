@@ -426,10 +426,7 @@ export class ProviderRuntime {
                 this.runtimeOwnerGate,
                 this.mutationLeaseCoordinator,
                 this.searchContinuationCoordinator,
-                {
-                    readFileMaxBytes: this.readFileMaxBytes,
-                    rerankApplicationMode: this.config.rerankApplicationMode,
-                },
+                { readFileMaxBytes: this.readFileMaxBytes },
             );
 
             await startProviderSyncLifecycle(syncManager, {
@@ -448,7 +445,6 @@ export class ProviderRuntime {
                 toolHandlers,
                 readFileMaxLines: this.readFileMaxLines,
                 readFileMaxBytes: this.readFileMaxBytes,
-                rerankApplicationMode: this.config.rerankApplicationMode,
                 runtimeOwnerGate: this.runtimeOwnerGate,
                 providerRuntime: this,
                 // Raw host-wide provider contexts are never bound to an MCP

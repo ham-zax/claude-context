@@ -9,15 +9,9 @@ import {
     RerankerRequestError,
     type RerankerFailureKind,
 } from "@zokizuan/satori-core";
-import type { RerankApplicationMode } from "../config.js";
 import {
-    SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
-    SEARCH_CHANGED_FIRST_MULTIPLIER,
     SEARCH_RERANK_INPUT_MAX_UTF8_BYTES,
-    SEARCH_RERANK_RRF_K,
-    SEARCH_RERANK_WEIGHT,
     SEARCH_RRF_K,
-    SCOPE_PATH_MULTIPLIERS,
     type PathCategory,
     type SearchRankingMode,
     type SearchScope,
@@ -46,12 +40,7 @@ import {
 } from "./search-response-helpers.js";
 import {
     classifyPathCategory,
-    computeSearchCandidateFinalScore,
-    resolveAgentFitMultiplier as resolveSearchAgentFitMultiplier,
-    resolveEntrypointOwnerScoreComponent,
-    shouldApplyChangedFilesBoost,
     shouldIncludeCategoryInScope,
-    sortSearchCandidates as sortSearchCandidatesHelper,
 } from "./search-ranking-policy.js";
 import type { SearchQuerySupport } from "./search-query-support.js";
 import type {
@@ -86,7 +75,7 @@ import { sortNativeRetrievalCandidates } from "./search-retrieval-order.js";
 type SearchPassId = "primary" | "expanded";
 type BackendScoreKind = "dense_similarity" | "lexical_rank" | "rrf_fusion" | "unknown";
 type ChangedFilesState = { available: boolean; files: Set<string> };
-export type SearchOrderAuthority = "legacy_score" | "retrieval_order" | "reranker_order";
+export type SearchOrderAuthority = "retrieval_order" | "reranker_order";
 const SEARCH_EXPANSION_MIN_PRIMARY_SCOPED_CANDIDATES = 5;
 const LATEON_OPERATIONAL_REASONS = new Set<SearchRerankerOperationalReason>([
     "lateon_not_ready",
@@ -348,7 +337,6 @@ export type SearchExecutionOutcome =
         rerankerAttempted: boolean;
         rerankerApplied: boolean;
         orderAuthority: SearchOrderAuthority;
-        rerankApplicationMode: RerankApplicationMode;
         skippedByExactPin: boolean;
         rerankerFailurePhase?: "document_projection" | "api_call" | "parse_results";
         rerankerOperationalReason?: SearchRerankerOperationalReason;
@@ -441,7 +429,6 @@ export type SearchExecutionInput = {
     freshnessMode: FreshnessDecision["mode"];
     observedChangedFilesState: ChangedFilesState;
     retrievalPolicy: ResolvedSearchPolicy;
-    rerankApplicationMode?: RerankApplicationMode;
     entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
 };
 
@@ -480,12 +467,10 @@ async function rerankSearchCandidates(
     candidateSurvival?: SearchCandidateSurvivalDebug,
 ): Promise<RerankPhaseResult> {
     const rerankDecision = host.searchQuerySupport.resolveRerankDecision(input.scope, input.queryPlan);
-    const rerankApplicationMode = input.rerankApplicationMode ?? "legacy_rrf";
-    const nativeOrder = rerankApplicationMode === "native_order";
     let exactMatchPinningApplied = initialExactMatchPinningApplied;
     let rerankerApplied = false;
     let rerankerAttempted = false;
-    let orderAuthority: SearchOrderAuthority = nativeOrder ? "retrieval_order" : "legacy_score";
+    let orderAuthority: SearchOrderAuthority = "retrieval_order";
     let rerankerFailurePhase: 'document_projection' | 'api_call' | 'parse_results' | undefined;
     let rerankerOperationalReason: SearchRerankerOperationalReason | undefined;
     const lateOnProvider = (() => {
@@ -503,31 +488,18 @@ async function rerankSearchCandidates(
     let rerankerCandidateBudget = 0;
     let rerankerBudgetReason: RerankBudgetReason | undefined;
     let rerankerByteBudgetOmittedCandidates = 0;
-    const nativeBoundary = nativeOrder
-        ? resolveRerankBoundary({
-            candidates: scored,
-            exactMatchPinningEnabled: rerankDecision.exactMatchPinningEnabled,
-            mustTokenCount: input.parsedOperators.must.length,
-        })
-        : undefined;
-    const skippedByExactPin = nativeOrder
-        ? nativeBoundary?.kind === "skip"
-        : Boolean(
-            rerankDecision.enabled
-            && host.reranker
-            && scored.length > 0
-            && shouldSkipRerankForExactPin({
-                scored,
-                exactMatchPinningEnabled: rerankDecision.exactMatchPinningEnabled,
-                mustTokenCount: input.parsedOperators.must.length,
-            }),
-        );
+    const rerankBoundary = resolveRerankBoundary({
+        candidates: scored,
+        exactMatchPinningEnabled: rerankDecision.exactMatchPinningEnabled,
+        mustTokenCount: input.parsedOperators.must.length,
+    });
+    const skippedByExactPin = rerankBoundary.kind === "skip";
 
     if (rerankDecision.enabled && scored.length > 0 && host.reranker && !skippedByExactPin) {
         try {
-            const rerankInputCandidates = nativeOrder && nativeBoundary?.kind === "rerank"
-                ? scored.slice(nativeBoundary.startIndex)
-                : scored;
+            const rerankInputCandidates = rerankBoundary.kind === "rerank"
+                ? scored.slice(rerankBoundary.startIndex)
+                : [];
             const selection = selectRerankCandidates({
                 candidates: rerankInputCandidates,
                 requestedLimit: input.retrievalPolicy.rerankerResultLimit,
@@ -659,82 +631,34 @@ async function rerankSearchCandidates(
                     throw new Error("reranker_result_malformed");
                 }
 
-                if (nativeOrder) {
-                    const selectedCandidateIds = rerankSlice.map((candidate) => (
-                        searchCandidateIdentity(candidate.result).candidateId
-                    ));
-                    const validatedItems = validateNativeRerankResults({
-                        candidateIds: selectedCandidateIds,
-                        results: rerankResults,
-                    });
-                    const reordered = applyNativeRerankToSelectedSlots({
-                        allCandidates: scored,
-                        selectedCandidateIds,
-                        orderedItems: validatedItems,
-                        identify: (candidate) => searchCandidateIdentity(candidate.result).candidateId,
-                    });
-                    for (const item of validatedItems) {
-                        const candidate = rerankSlice[item.originalIndex]!;
-                        candidate.rerankerRank = item.providerRank;
-                        candidate.rerankerScore = item.relevanceScore;
-                        candidate.rerankAdjusted = true;
-                    }
-                    scored.splice(0, scored.length, ...reordered);
-                    orderAuthority = "reranker_order";
-                    rerankerApplied = validatedItems.length > 0;
-                    if (candidateSurvival) {
-                        appendSearchCandidateStage(
-                            candidateSurvival,
-                            "reranker_output",
-                            validatedItems.map((item) => rerankSlice[item.originalIndex]!),
-                        );
-                    }
-                } else {
-                    const rerankRanks = new Map<number, number>();
-                    if (rerankResults.length !== rerankCount) {
-                        throw new Error("reranker_result_count_mismatch");
-                    }
-                    for (let idx = 0; idx < rerankResults.length; idx++) {
-                        const originalIndex = rerankResults[idx]?.index;
-                        if (
-                            Number.isInteger(originalIndex)
-                            && originalIndex >= 0
-                            && originalIndex < rerankCount
-                            && !rerankRanks.has(originalIndex)
-                        ) {
-                            rerankRanks.set(originalIndex, idx + 1);
-                        } else {
-                            throw new Error("reranker_result_identity_mismatch");
-                        }
-                    }
-                    if (rerankRanks.size !== rerankCount) {
-                        throw new Error("reranker_result_incomplete");
-                    }
-
-                    let rerankerUpdatedCandidates = 0;
-                    for (let idx = 0; idx < rerankSlice.length; idx++) {
-                        const rank = rerankRanks.get(idx);
-                        if (!rank) continue;
-                        const rerankRrf = 1 / (SEARCH_RERANK_RRF_K + rank);
-                        rerankSlice[idx].fusionScore += SEARCH_RERANK_WEIGHT * rerankRrf;
-                        rerankSlice[idx].finalScore = computeSearchCandidateFinalScore(rerankSlice[idx]);
-                        rerankSlice[idx].rerankAdjusted = true;
-                        rerankerUpdatedCandidates++;
-                    }
-                    if (candidateSurvival) {
-                        const rerankerOutput = [...rerankRanks.entries()]
-                            .sort((left, right) => left[1] - right[1])
-                            .map(([originalIndex]) => rerankSlice[originalIndex])
-                            .filter((candidate): candidate is SearchCandidate => Boolean(candidate));
-                        appendSearchCandidateStage(candidateSurvival, "reranker_output", rerankerOutput);
-                    }
-
-                    exactMatchPinningApplied = sortSearchCandidatesHelper(
-                        scored,
-                        rerankDecision.exactMatchPinningEnabled,
-                        input.parsedOperators.must.length > 0,
-                    ) || exactMatchPinningApplied;
-                    rerankerApplied = rerankerUpdatedCandidates > 0;
+                const selectedCandidateIds = rerankSlice.map((candidate) => (
+                    searchCandidateIdentity(candidate.result).candidateId
+                ));
+                const validatedItems = validateNativeRerankResults({
+                    candidateIds: selectedCandidateIds,
+                    results: rerankResults,
+                });
+                const reordered = applyNativeRerankToSelectedSlots({
+                    allCandidates: scored,
+                    selectedCandidateIds,
+                    orderedItems: validatedItems,
+                    identify: (candidate) => searchCandidateIdentity(candidate.result).candidateId,
+                });
+                for (const item of validatedItems) {
+                    const candidate = rerankSlice[item.originalIndex]!;
+                    candidate.rerankerRank = item.providerRank;
+                    candidate.rerankerScore = item.relevanceScore;
+                    candidate.rerankAdjusted = true;
+                }
+                scored.splice(0, scored.length, ...reordered);
+                orderAuthority = "reranker_order";
+                rerankerApplied = validatedItems.length > 0;
+                if (candidateSurvival) {
+                    appendSearchCandidateStage(
+                        candidateSurvival,
+                        "reranker_output",
+                        validatedItems.map((item) => rerankSlice[item.originalIndex]!),
+                    );
                 }
             } catch {
                 rerankerFailurePhase = 'parse_results';
@@ -811,13 +735,7 @@ export async function runSearchExecution(
     const normalizedObservedChangedFiles = new Set(
         [...observedChangedFilesState.files].map((relativePath) => relativePath.replace(/\\/g, "/").replace(/^\/+/, "")),
     );
-    const changedFilesBoostWithinThreshold = changedFilesCount > 0 && changedFilesCount <= SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES;
-    const changedFilesBoostEnabled = input.rankingMode === "auto_changed_first"
-        && changedFilesState.available
-        && changedFilesBoostWithinThreshold;
-    const changedFilesBoostSkippedForLargeChangeSet = input.rankingMode === "auto_changed_first"
-        && changedFilesState.available
-        && changedFilesCount > SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES;
+    const changedFilesBoostSkippedForLargeChangeSet = false;
     const freshnessSummary: SearchFreshnessSummary = {
         syncMode: input.freshnessMode,
         lastSyncAt: null,
@@ -1271,39 +1189,18 @@ export async function runSearchExecution(
                 return false;
             }
 
-            const pathMultiplier = SCOPE_PATH_MULTIPLIERS[input.scope][category];
-            const agentFit = resolveSearchAgentFitMultiplier({
-                plan: input.queryPlan,
-                result: candidate.result,
-                category,
-                scope: input.scope,
-                hasTokenBoundaryMatch: (field, term) => host.searchQuerySupport.hasTokenBoundaryMatch(field, term),
-            });
-            const entrypointOwnerScore = resolveEntrypointOwnerScoreComponent({
-                plan: input.queryPlan,
-                result: candidate.result,
-                entrypointOwnerEvidence: input.entrypointOwnerEvidence,
-            });
-            let changedFilesMultiplier = 1.0;
-            if (changedFilesBoostEnabled
-                && changedFilesState.files.has(relativePath)
-                && shouldApplyChangedFilesBoost(category, input.queryPlan)) {
-                changedFilesMultiplier = SEARCH_CHANGED_FIRST_MULTIPLIER;
-                if (trackBoostedCandidate) boostedCandidates += 1;
-            }
-
             candidate.pathCategory = category;
-            candidate.pathMultiplier = pathMultiplier;
-            candidate.changedFilesMultiplier = changedFilesMultiplier;
-            candidate.agentFitMultiplier = agentFit.multiplier;
-            candidate.agentFitReason = agentFit.reason;
-            candidate.entrypointOwnerScoreBoost = entrypointOwnerScore.scoreBoost;
-            candidate.entrypointOwnerScoreReason = entrypointOwnerScore.reason;
+            candidate.pathMultiplier = 1;
+            candidate.changedFilesMultiplier = 1;
+            candidate.agentFitMultiplier = 1;
+            candidate.agentFitReason = "not_used_for_ranking";
+            candidate.entrypointOwnerScoreBoost = 0;
+            candidate.entrypointOwnerScoreReason = "not_used_for_ranking";
             candidate.passesMatchedMust = matchesMust;
-            const lexicalEvidence = host.searchQuerySupport.scoreCandidateLexicalEvidence(input.queryPlan, candidate.result);
-            candidate.lexicalScore = lexicalEvidence.score;
+            const lexicalEvidence = host.searchQuerySupport.detectSearchLexicalEvidence(input.queryPlan, candidate.result);
+            candidate.lexicalScore = 0;
             candidate.exactLexicalMatch = lexicalEvidence.exactLexicalMatch;
-            candidate.finalScore = computeSearchCandidateFinalScore(candidate);
+            candidate.finalScore = candidate.fusionScore;
             return true;
         };
         const recordFilterRemoval = (
@@ -1421,22 +1318,14 @@ export async function runSearchExecution(
         filterSummary = attemptFilterSummary;
         scored = scoredAttempt;
 
-        if (input.rerankApplicationMode === "native_order") {
-            const nativeOrder = sortNativeRetrievalCandidates(
-                scored,
-                {
-                    exactMatchFirst: input.queryPlan.exactMatchPinningEnabled,
-                    mustMatchesFirst: input.parsedOperators.must.length > 0,
-                },
-            );
-            exactMatchPinningApplied = nativeOrder.exactMatchPinningApplied || exactMatchPinningApplied;
-        } else {
-            exactMatchPinningApplied = sortSearchCandidatesHelper(
-                scored,
-                input.queryPlan.exactMatchPinningEnabled,
-                input.parsedOperators.must.length > 0,
-            ) || exactMatchPinningApplied;
-        }
+        const nativeOrder = sortNativeRetrievalCandidates(
+            scored,
+            {
+                exactMatchFirst: input.queryPlan.exactMatchPinningEnabled,
+                mustMatchesFirst: input.parsedOperators.must.length > 0,
+            },
+        );
+        exactMatchPinningApplied = nativeOrder.exactMatchPinningApplied || exactMatchPinningApplied;
         rankingProvenance.exactMatchPinningApplied = exactMatchPinningApplied;
         if (candidateSurvival) {
             appendSearchCandidateStage(
@@ -1516,10 +1405,12 @@ export async function runSearchExecution(
                 }
             }
             const replaySignals = [...diagnosticCandidates.values()];
-            sortSearchCandidatesHelper(
+            sortNativeRetrievalCandidates(
                 replaySignals,
-                input.queryPlan.exactMatchPinningEnabled,
-                input.parsedOperators.must.length > 0,
+                {
+                    exactMatchFirst: input.queryPlan.exactMatchPinningEnabled,
+                    mustMatchesFirst: input.parsedOperators.must.length > 0,
+                },
             );
             const replayAttemptId = `attempt:${attempt + 1}`;
             if (replaySignals.length === 0) {
@@ -1674,7 +1565,6 @@ export async function runSearchExecution(
         rerankerAttempted,
         rerankerApplied,
         orderAuthority,
-        rerankApplicationMode: input.rerankApplicationMode ?? "legacy_rrf",
         skippedByExactPin,
         rerankerFailurePhase,
         rerankerOperationalReason,

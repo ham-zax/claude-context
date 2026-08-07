@@ -1,7 +1,6 @@
 import type { SymbolRegistry } from "@zokizuan/satori-core";
 import {
     SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
-    SEARCH_CHANGED_FIRST_MULTIPLIER,
     SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES,
     SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
     SEARCH_RERANK_AMBIGUOUS_CANDIDATES_PER_RESULT,
@@ -36,7 +35,6 @@ import type {
     SearchResponseEnvelope,
 } from "./search-types.js";
 import type { FreshnessDecision } from "./sync.js";
-import type { RerankApplicationMode } from "../config.js";
 import type { CompletionProbeDebugHint } from "./tracked-root-readiness.js";
 import { buildSearchDebugSummary, buildSearchGroupPreview } from "./search-response-helpers.js";
 import { WARNING_CODES } from "./warnings.js";
@@ -110,7 +108,6 @@ type SearchExactFastPathInput = {
     rankingProvenance: SearchDebugHint["rankingProvenance"];
     previewMaxBytes: number;
     navigationAuthority: "valid" | "unavailable";
-    rerankApplicationMode?: RerankApplicationMode;
 };
 
 type SearchExactFastPathHandled = {
@@ -414,10 +411,7 @@ export async function runExactRegistryFastPath(
             enabledByPolicy: rerankDecision.enabledByPolicy,
             skippedByScopeDocs: rerankDecision.skippedByScopeDocs,
             skippedByIdentifierIntent: rerankDecision.skippedByIdentifierIntent,
-            applicationMode: input.rerankApplicationMode ?? "legacy_rrf",
-            orderAuthority: input.rerankApplicationMode === "native_order"
-                ? "retrieval_order" as const
-                : "legacy_score" as const,
+            orderAuthority: "retrieval_order" as const,
             skippedByExactPin: false,
             capabilityPresent: rerankDecision.capabilityPresent,
             rerankerPresent: rerankDecision.rerankerPresent,
@@ -505,13 +499,13 @@ export async function runExactRegistryFastPath(
             operatorSummary: input.operatorSummary,
             filterSummary: input.filterSummary,
             changedFilesBoost: {
-                enabled: input.rankingMode === "auto_changed_first",
+                enabled: false,
                 applied: false,
                 available: input.changedFilesState.available,
                 changedCount: input.changedFilesCount,
                 maxChangedFilesForBoost: SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
                 skippedForLargeChangeSet: input.changedFilesBoostSkippedForLargeChangeSet,
-                multiplier: SEARCH_CHANGED_FIRST_MULTIPLIER,
+                multiplier: 1,
                 boostedCandidates: 0,
             },
             rerank: debugRerank!,

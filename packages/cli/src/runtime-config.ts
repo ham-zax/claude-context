@@ -18,15 +18,6 @@ const SUPPORTED_EMBEDDING_PROVIDERS = new Set(["OpenAI", "VoyageAI", "Gemini", "
 const SUPPORTED_VECTOR_STORES = new Set(["Milvus", "LanceDB"]);
 const SUPPORTED_OUTPUT_DIMENSIONS = new Set([256, 512, 1024, 2048]);
 const SUPPORTED_RERANKER_PROVIDERS = new Set(["none", "voyage", "lateon"]);
-const SUPPORTED_RERANK_APPLICATION_MODES = new Set(["legacy_rrf", "native_order"]);
-
-export type RerankApplicationMode = "legacy_rrf" | "native_order";
-
-export function selectedRerankApplicationMode(env: NodeJS.ProcessEnv): string {
-    return env.SATORI_RERANK_APPLICATION_MODE === undefined
-        ? "native_order"
-        : env.SATORI_RERANK_APPLICATION_MODE.trim();
-}
 
 function selectedExecutionProfile(env: NodeJS.ProcessEnv): string {
     return env.SATORI_RUNTIME_PROFILE?.trim() || "connected";
@@ -147,21 +138,6 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
 
     const rerankerProvider = env.SATORI_RERANKER_PROVIDER?.trim()
         || (env.SATORI_LATEON_MODEL_PATH?.trim() ? "lateon" : "none");
-    const rerankApplicationMode = selectedRerankApplicationMode(env);
-    if (!SUPPORTED_RERANK_APPLICATION_MODES.has(rerankApplicationMode)) {
-        checks.push({
-            name: "rerank_application_mode",
-            status: "error",
-            message: `Invalid SATORI_RERANK_APPLICATION_MODE: ${rerankApplicationMode}. Use legacy_rrf or native_order.`,
-            nextStep: "Set SATORI_RERANK_APPLICATION_MODE to legacy_rrf or native_order.",
-        });
-    } else {
-        checks.push({
-            name: "rerank_application_mode",
-            status: "ok",
-            message: `Reranker application mode: ${rerankApplicationMode}.`,
-        });
-    }
     if (!SUPPORTED_RERANKER_PROVIDERS.has(rerankerProvider)) {
         checks.push({
             name: "reranker_provider",

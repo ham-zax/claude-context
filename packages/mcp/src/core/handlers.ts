@@ -41,11 +41,9 @@ import {
     SEARCH_FRESHNESS_THRESHOLD_MS,
     summarizeIndexFingerprint,
     type CodebaseInfo,
-    type RerankApplicationMode,
 } from "../config.js";
 import {
     SEARCH_CHANGED_FILES_CACHE_TTL_MS,
-    SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES,
     SEARCH_GITIGNORE_FORCE_RELOAD_EVERY_N,
     SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES,
     SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES,
@@ -109,7 +107,7 @@ import {
     buildGeneratedArtifactsVerificationHint as buildSearchGeneratedArtifactsVerificationHint,
 } from "./search-debug-helpers.js";
 import {
-    sortGroupedSearchResults as sortGroupedSearchResultsHelper,
+    sortNativeGroupedSearchResults as sortGroupedSearchResultsHelper,
 } from "./search-group-ordering.js";
 import {
     compareNullableNumbersAsc as compareNullableNumbersAscHelper,
@@ -834,7 +832,6 @@ export class ToolHandlers {
     private readonly now: () => number;
     private readonly callGraphManager: CallGraphSidecarManager;
     private readonly reranker: Reranker | null;
-    private readonly rerankApplicationMode: RerankApplicationMode;
     private readonly navigationStore: NavigationStore;
     private readonly canonicalNavigationAuthorityAvailable: boolean;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
@@ -867,10 +864,7 @@ export class ToolHandlers {
         private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null = null,
         private readonly mutationLeaseCoordinator: MutationLeaseCoordinator | null = null,
         searchContinuationCoordinator?: SearchContinuationCoordinator,
-        options?: {
-            readFileMaxBytes?: number;
-            rerankApplicationMode?: RerankApplicationMode;
-        },
+        options?: { readFileMaxBytes?: number },
     ) {
         this.context = context;
         this.snapshotManager = snapshotManager;
@@ -881,7 +875,6 @@ export class ToolHandlers {
         this.now = now;
         this.callGraphManager = callGraphManager || new CallGraphSidecarManager(runtimeFingerprint, { now });
         this.reranker = reranker || null;
-        this.rerankApplicationMode = options?.rerankApplicationMode ?? "legacy_rrf";
         this.searchContinuationCoordinator = searchContinuationCoordinator
             ?? new SearchContinuationCoordinator();
         this.searchContinuationCoordinator.registerOwner(this);
@@ -4401,17 +4394,13 @@ export class ToolHandlers {
             const initialOperatorSummary = this.searchQuerySupport.buildOperatorSummary(parsedOperators);
             const initialObservedChangedFilesState = observedChangedFilesForSearch
                 ?? this.getChangedFilesForCodebase(effectiveRoot);
-            const initialChangedFilesState = input.rankingMode === 'auto_changed_first'
-                ? initialObservedChangedFilesState
-                : { available: initialObservedChangedFilesState.available, files: new Set<string>() };
+            const initialChangedFilesState = initialObservedChangedFilesState;
             const initialDebugChangedFilesState = debugMode === 'freshness' || debugMode === 'full'
                 ? initialObservedChangedFilesState
                 : undefined;
-            const initialChangedFilesCount = initialChangedFilesState.files.size;
             const initialObservedChangedFilesCount = initialObservedChangedFilesState.files.size;
-            const initialChangedFilesBoostSkippedForLargeChangeSet = input.rankingMode === 'auto_changed_first'
-                && initialChangedFilesState.available
-                && initialChangedFilesCount > SEARCH_CHANGED_FIRST_MAX_CHANGED_FILES;
+            const initialChangedFilesCount = initialObservedChangedFilesCount;
+            const initialChangedFilesBoostSkippedForLargeChangeSet = false;
             const initialFreshnessSummary: SearchFreshnessSummary = {
                 syncMode: freshnessDecision.mode,
                 lastSyncAt: typeof freshnessDecision.lastSyncAt === 'string' ? freshnessDecision.lastSyncAt : null,
@@ -4504,7 +4493,6 @@ export class ToolHandlers {
                     rerankerProjectionIdentity,
                     rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
                         orderAuthority,
-                        rerankApplicationMode: this.rerankApplicationMode,
                     }),
                     orderedResults: resultSet.orderedResults,
                     recommendedActions: resultSet.recommendedActions,
@@ -4649,7 +4637,6 @@ export class ToolHandlers {
                 rankingProvenance: initialRankingProvenance,
                 previewMaxBytes: SEARCH_GROUP_PREVIEW_MAX_BYTES,
                 navigationAuthority,
-                rerankApplicationMode: this.rerankApplicationMode,
             }, {
                 searchQuerySupport: this.searchQuerySupport,
                 measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
@@ -4734,9 +4721,7 @@ export class ToolHandlers {
                             exactEnvelope,
                             exactFastPath.finalized.resultSet,
                             false,
-                            this.rerankApplicationMode === "native_order"
-                                ? "retrieval_order"
-                                : "legacy_score",
+                            "retrieval_order",
                         );
                     } else if (exactFastPath.finalized.resultSet) {
                         const unboundEnvelope = { ...exactEnvelope };
@@ -4888,7 +4873,6 @@ export class ToolHandlers {
                 observedChangedFilesState: initialObservedChangedFilesState,
                 retrievalPolicy,
                 entrypointOwnerEvidence,
-                rerankApplicationMode: this.rerankApplicationMode,
             }, {
                 searchQuerySupport: this.searchQuerySupport,
                 semanticSearch: (request) => {
@@ -5309,17 +5293,11 @@ export class ToolHandlers {
                         queryPolicyDigest: entry.queryPolicyDigest,
                         rerankerIdentity,
                         rerankerProjectionIdentity,
-                        rankingPolicyIdentity: this.rerankApplicationMode === "legacy_rrf"
-                            ? resolveSearchRankingPolicyIdentity({
-                                orderAuthority: "legacy_score",
-                                rerankApplicationMode: this.rerankApplicationMode,
-                            })
-                            : resolveSearchRankingPolicyIdentity({
-                                orderAuthority: entry.rankedSetBinding.rerankerIdentity.kind === "provider"
-                                    ? "reranker_order"
-                                    : "retrieval_order",
-                                rerankApplicationMode: this.rerankApplicationMode,
-                            }),
+                        rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
+                            orderAuthority: entry.rankedSetBinding.rerankerIdentity.kind === "provider"
+                                ? "reranker_order"
+                                : "retrieval_order",
+                        }),
                         orderedResults: entry.orderedResults,
                         recommendedActions: entry.recommendedActions,
                     }),
