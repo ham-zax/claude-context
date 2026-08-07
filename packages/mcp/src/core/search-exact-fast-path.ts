@@ -11,9 +11,7 @@ import {
     SEARCH_RERANK_INPUT_MAX_UTF8_BYTES,
     SEARCH_RERANK_MAX_SUPPLEMENTAL_CHUNKS_PER_FAMILY,
     SEARCH_RERANK_MIN_AMBIGUOUS_CANDIDATES,
-    SEARCH_RERANK_RRF_K,
     SEARCH_RERANK_TOP_K,
-    SEARCH_RERANK_WEIGHT,
     SEARCH_RRF_K,
     type SearchGroupBy,
     type SearchResultMode,
@@ -38,6 +36,7 @@ import type {
     SearchResponseEnvelope,
 } from "./search-types.js";
 import type { FreshnessDecision } from "./sync.js";
+import type { RerankApplicationMode } from "../config.js";
 import type { CompletionProbeDebugHint } from "./tracked-root-readiness.js";
 import { buildSearchDebugSummary, buildSearchGroupPreview } from "./search-response-helpers.js";
 import { WARNING_CODES } from "./warnings.js";
@@ -111,6 +110,7 @@ type SearchExactFastPathInput = {
     rankingProvenance: SearchDebugHint["rankingProvenance"];
     previewMaxBytes: number;
     navigationAuthority: "valid" | "unavailable";
+    rerankApplicationMode?: RerankApplicationMode;
 };
 
 type SearchExactFastPathHandled = {
@@ -414,6 +414,10 @@ export async function runExactRegistryFastPath(
             enabledByPolicy: rerankDecision.enabledByPolicy,
             skippedByScopeDocs: rerankDecision.skippedByScopeDocs,
             skippedByIdentifierIntent: rerankDecision.skippedByIdentifierIntent,
+            applicationMode: input.rerankApplicationMode ?? "legacy_rrf",
+            orderAuthority: input.rerankApplicationMode === "native_order"
+                ? "retrieval_order" as const
+                : "legacy_score" as const,
             skippedByExactPin: false,
             capabilityPresent: rerankDecision.capabilityPresent,
             rerankerPresent: rerankDecision.rerankerPresent,
@@ -425,8 +429,6 @@ export async function runExactRegistryFastPath(
             candidatesIn: resultSymbols.length,
             candidatesReranked: 0,
             topK: SEARCH_RERANK_TOP_K,
-            rankK: SEARCH_RERANK_RRF_K,
-            weight: SEARCH_RERANK_WEIGHT,
             docMaxLines: SEARCH_RERANK_DOC_MAX_LINES,
             docMaxChars: SEARCH_RERANK_DOC_MAX_CHARS,
             inputByteBudget: SEARCH_RERANK_INPUT_MAX_UTF8_BYTES,

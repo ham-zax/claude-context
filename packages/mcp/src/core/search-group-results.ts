@@ -80,6 +80,7 @@ type SearchCandidateLike = {
     retrievalPasses: string[];
     backendScoreKindsSeen: Array<"dense_similarity" | "lexical_rank" | "rrf_fusion" | "unknown">;
     lexicalScore: number;
+    fusionScore?: number;
     authoritativeRank?: number;
 };
 
@@ -433,9 +434,13 @@ export function buildGroupedSymbolSearchResult(input: {
     ownershipValidated?: boolean;
     candidateIds: string[];
     authoritativeRank?: number;
+    orderAuthority?: SearchOrderAuthority;
 }): SearchGroupResult | undefined {
-    const supportBoost = computeSearchGroupSupportBoost(input.chunkCount);
-    const symbolScore = input.representative.finalScore + supportBoost;
+    const nativeOrder = input.orderAuthority !== undefined && input.orderAuthority !== "legacy_score";
+    const supportBoost = nativeOrder ? 0 : computeSearchGroupSupportBoost(input.chunkCount);
+    const symbolScore = nativeOrder
+        ? (input.representative.fusionScore ?? input.representative.finalScore)
+        : input.representative.finalScore + supportBoost;
     if (!Number.isFinite(symbolScore)) {
         return undefined;
     }
@@ -768,6 +773,7 @@ export function buildVisibleGroupedSearchResults(input: {
                 chunk.result as SearchResultLike,
             ).candidateId),
             authoritativeRank: representative?.authoritativeRank,
+            orderAuthority: input.orderAuthority,
         });
         if (groupedResult) {
             groupedResults.push(groupedResult);

@@ -4649,6 +4649,7 @@ export class ToolHandlers {
                 rankingProvenance: initialRankingProvenance,
                 previewMaxBytes: SEARCH_GROUP_PREVIEW_MAX_BYTES,
                 navigationAuthority,
+                rerankApplicationMode: this.rerankApplicationMode,
             }, {
                 searchQuerySupport: this.searchQuerySupport,
                 measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),

@@ -588,6 +588,8 @@ export interface SearchDebugHint {
         enabledByPolicy: boolean;
         skippedByScopeDocs: boolean;
         skippedByIdentifierIntent: boolean;
+        applicationMode: "legacy_rrf" | "native_order";
+        orderAuthority: "legacy_score" | "retrieval_order" | "reranker_order";
         /** True when top scored hit is already an exact lexical pin / must-satisfied exact match. */
         skippedByExactPin?: boolean;
         capabilityPresent: boolean;
@@ -613,8 +615,6 @@ export interface SearchDebugHint {
         failurePhase?: "document_projection" | "api_call" | "parse_results";
         operationalReason?: SearchRerankerOperationalReason;
         topK: number;
-        rankK: number;
-        weight: number;
         docMaxLines: number;
         docMaxChars: number;
         requestedResultLimit: number;
