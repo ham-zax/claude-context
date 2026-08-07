@@ -79,6 +79,12 @@ node --import tsx --test \
   packages/mcp/src/core/search-query-support.test.ts \
   packages/mcp/src/core/search-candidate-survival.test.ts
 # 60 pass, 0 fail
+
+node --import tsx --test \
+  packages/mcp/src/core/search-rerank-document.test.ts \
+  packages/mcp/src/core/search-rerank-document-v2.test.ts \
+  packages/mcp/src/core/search-rerank-projection.test.ts
+# 8 pass, 0 fail
 ```
 
 Negative proof for the shared-runtime attach rejection: with the rejection
@@ -98,6 +104,26 @@ pnpm exec tsc --noEmit -p packages/cli/tsconfig.json   # exit 0
 ```
 
 MCP full suite result: 1307 pass, 0 fail, 0 skipped, exit 0.
+
+## Process deviations
+
+The rollout deviated from the plan's staged-release discipline. These are
+recorded here instead of being covered by fabricated retroactive stage
+receipts:
+
+- The plan defined three releases (opt-in, native default, legacy removal),
+  each with its own receipt and verification. All three were executed in a
+  single session with no independent release verification between stages, so
+  no Release-1 opt-in receipt exists; this receipt attests only to the final
+  state.
+- Plan Task 4 (projection contract tests) was skipped during execution and
+  backfilled afterwards in commit `67d9049`
+  (`test(search): freeze reranker projection contracts`), which adds the
+  ranking-field-absence, line-ceiling, canonical-path, and fail-closed
+  projection cases listed above.
+- Commit `ae381f9` (`test(search): cover native reranker production
+  contracts`) also carried production deletions; its test-only label
+  understates that diff.
 
 ## Externally blocked verification
 
