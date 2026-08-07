@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { LATEON_RUNTIME_PROFILE_IDS } from "./lateon-reranker-protocol.js";
 
 export const SHARED_RUNTIME_PROTOCOL_VERSION = 2;
 export const SHARED_RUNTIME_HANDSHAKE_MAX_BYTES = 16 * 1024;
@@ -165,7 +166,10 @@ export function buildSharedRuntimeIdentity(
         lateOnModelPath: env.SATORI_LATEON_MODEL_PATH
             ? canonicalizePath(env.SATORI_LATEON_MODEL_PATH)
             : "",
-        lateOnProfile: env.SATORI_LATEON_PROFILE ?? "",
+        lateOnProfile: env.SATORI_LATEON_PROFILE
+            ?? (env.SATORI_RERANKER_PROVIDER === "lateon"
+                ? LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+                : ""),
         lateOnActivationPolicy: env.SATORI_LATEON_ACTIVATION_POLICY ?? "",
         lateOnRequestDeadlineMs: env.SATORI_LATEON_REQUEST_DEADLINE_MS ?? "",
         lateOnMaximumQueueWaitMs: env.SATORI_LATEON_MAX_QUEUE_WAIT_MS ?? "",

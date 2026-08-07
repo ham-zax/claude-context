@@ -277,8 +277,8 @@ function assertPackedLateOnAcquisitionAuthority(packedMcpRoot: string, packedCli
         ? fs.readdirSync(assetsRoot).sort()
         : [];
     for (const requiredFile of [
-        "runtime-profile-v2-d32.json",
-        "runtime-profile-v2-d32.acquisition.json",
+        "runtime-profile-v3-d32.json",
+        "runtime-profile-v3-d32.acquisition.json",
     ]) {
         if (!shippedFiles.includes(requiredFile)) {
             throw new Error(

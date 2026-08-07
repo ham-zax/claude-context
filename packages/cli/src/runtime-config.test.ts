@@ -181,7 +181,7 @@ test("static runtime config rejects the owner policy with a D16 profile", () => 
     assert.equal(policy?.status, "error");
     assert.match(
         policy?.message || "",
-        /SATORI_LATEON_ACTIVATION_POLICY=lateon_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2; received lateon_projection_v2_d16_v1\./,
+        /SATORI_LATEON_ACTIVATION_POLICY=lateon_d32_owner_default_v1 requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v3_d32_v1; received lateon_projection_v2_d16_v1\./,
     );
 });
 

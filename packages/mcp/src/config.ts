@@ -739,7 +739,7 @@ export function createMcpConfig(): ContextMcpConfig {
     }
     const lateOnProfileId = rerankerProvider === 'lateon'
         ? (lateOnProfileRaw as LateOnRuntimeProfileId | undefined)
-            ?? LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32
+            ?? LATEON_RUNTIME_PROFILE_IDS.contextV3D32
         : undefined;
     const lateOnActivationPolicyRaw = envManager.get('SATORI_LATEON_ACTIVATION_POLICY');
     const knownLateOnActivationPolicies = Object.values(LATEON_ACTIVATION_POLICY_IDS);
@@ -762,11 +762,11 @@ export function createMcpConfig(): ContextMcpConfig {
     }
     if (
         lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32
-        && lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32
+        && lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32
     ) {
         throw new Error(
             `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32} `
-            + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32}; `
+            + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV3D32}; `
             + `received ${lateOnProfileId}.`,
         );
     }

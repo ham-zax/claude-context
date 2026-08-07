@@ -80,14 +80,34 @@ async function assertOperationalReason(
     ));
 }
 
-test("LateOn runtime profiles default to D32 while retaining explicit legacy and D16 contracts", () => {
+test("LateOn runtime profiles default to the V3 D32 context profile while retaining explicit legacy and D16/V2 contracts", () => {
     const defaultProfile = loadLateOnRuntimeProfile();
     const legacy = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.legacyD16);
     const d16 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.projectionV2D16);
     const d32 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32);
+    const contextV3 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.contextV3D32);
 
-    assert.equal(defaultProfile.identity.projectionVersion, "search_rerank_document_v2");
+    assert.equal(defaultProfile.schemaVersion, "satori_lateon_runtime_profile_v3");
+    assert.equal(defaultProfile.identity.projectionVersion, "search_rerank_document_v3");
     assert.equal(defaultProfile.inference.candidateDepth, 32);
+    assert.equal(contextV3.schemaVersion, "satori_lateon_runtime_profile_v3");
+    if (contextV3.schemaVersion !== "satori_lateon_runtime_profile_v3") {
+        throw new Error("expected the v3 runtime profile");
+    }
+    assert.equal(contextV3.identity.projectionVersion, "search_rerank_document_v3");
+    assert.equal(contextV3.identity.queryProjectionVersion, "search_rerank_query_v1");
+    assert.equal(contextV3.inference.candidateDepth, 32);
+    assert.equal(contextV3.identity.repository, d32.identity.repository);
+    assert.equal(contextV3.identity.revision, d32.identity.revision);
+    assert.notEqual(contextV3.identity.projectionSha256, d32.identity.projectionSha256);
+    assert.deepEqual(contextV3.artifacts, d32.artifacts);
+    assert.deepEqual(contextV3.runtime, d32.runtime);
+    assert.deepEqual(contextV3.inference, d32.inference);
+    if (d32.schemaVersion !== "satori_lateon_runtime_profile_v2") {
+        throw new Error("expected the v2 runtime profile");
+    }
+    assert.deepEqual(contextV3.execution, d32.execution);
+    assert.deepEqual(contextV3.operationalBounds, d32.operationalBounds);
     assert.equal(legacy.identity.projectionVersion, "search_rerank_document_v1");
     assert.equal(d16.identity.projectionVersion, "search_rerank_document_v2");
     assert.equal(d16.inference.candidateDepth, 16);
@@ -99,6 +119,35 @@ test("LateOn runtime profiles default to D32 while retaining explicit legacy and
             : undefined,
         250,
     );
+});
+
+test("LateOn reranker defaults to the V3 profile and reports qualified projection identities", async (t) => {
+    const workerPath = createFakeWorker(t);
+    const defaulted = new LateOnReranker({ modelDirectory: "/unused", workerPath });
+    const explicitV2D32 = new LateOnReranker({
+        modelDirectory: "/unused",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath,
+    });
+    const legacy = new LateOnReranker({
+        modelDirectory: "/unused",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.legacyD16,
+        workerPath,
+    });
+    t.after(async () => Promise.all([
+        defaulted.close(),
+        explicitV2D32.close(),
+        legacy.close(),
+    ]).then(() => undefined));
+
+    assert.equal(defaulted.getProfileId(), LATEON_RUNTIME_PROFILE_IDS.contextV3D32);
+    assert.equal(defaulted.getMaxDocuments(), 32);
+    assert.equal(defaulted.getDocumentProjectionVersion(), "search_rerank_document_v3");
+    assert.equal(defaulted.getQueryProjectionVersion(), "search_rerank_query_v1");
+    assert.equal(explicitV2D32.getDocumentProjectionVersion(), "search_rerank_document_v2");
+    assert.equal(explicitV2D32.getQueryProjectionVersion(), "semantic_query_raw_v1");
+    assert.equal(legacy.getDocumentProjectionVersion(), "search_rerank_document_v1");
+    assert.equal(legacy.getQueryProjectionVersion(), "semantic_query_raw_v1");
 });
 
 test("LateOn identity binds named profile selection and effective operational bounds", async (t) => {

@@ -185,7 +185,7 @@ async function initialize(
     const tokenizer = await transformers.AutoTokenizer.from_pretrained(
         path.basename(request.modelDirectory),
     );
-    if (request.profile.schemaVersion === "satori_lateon_runtime_profile_v2") {
+    if (request.profile.schemaVersion !== "satori_lateon_runtime_profile_v1") {
         (tokenizer as unknown as { truncation_side: "right" }).truncation_side = "right";
     }
     const session = await onnxRuntime.InferenceSession.create(
@@ -194,7 +194,7 @@ async function initialize(
             executionProviders: [request.profile.runtime.executionProvider],
             intraOpNumThreads: request.intraOpThreads,
             interOpNumThreads: request.profile.inference.interOpThreads,
-            ...(request.profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+            ...(request.profile.schemaVersion !== "satori_lateon_runtime_profile_v1"
                 ? {
                     executionMode: request.profile.execution.executionMode,
                     graphOptimizationLevel: request.profile.execution.graphOptimizationLevel,
@@ -233,7 +233,7 @@ async function rerank(
         const documentEncoding = await encodeText(runtime, request.documents[index], false);
         aggregateTokenCount += documentEncoding.tokenCount;
         if (
-            runtime.profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+            runtime.profile.schemaVersion !== "satori_lateon_runtime_profile_v1"
             && aggregateTokenCount > runtime.profile.execution.aggregateRequestTokenLimit
         ) {
             throw new Error("LateOn rerank request exceeds the aggregate token contract.");

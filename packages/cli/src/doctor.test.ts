@@ -337,7 +337,7 @@ test("runDoctor surfaces the installer-bound LateOn activation policy", async ()
                 POTION_MODEL_PATH: path.join(tempDir, "potion", "model"),
                 SATORI_RERANKER_PROVIDER: "lateon",
                 SATORI_LATEON_MODEL_PATH: path.join(tempDir, "lateon-model"),
-                SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v2_d32_v2",
+                SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v3_d32_v1",
                 SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
             },
         }));
@@ -406,7 +406,7 @@ test("runDoctor flags a managed launcher whose LateOn activation policy contradi
         assert.equal(policy?.status, "error");
         assert.match(
             policy?.message || "",
-            /requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v2_d32_v2; received lateon_projection_v2_d16_v1/,
+            /requires SATORI_LATEON_PROFILE=lateon_offline_quality_projection_v3_d32_v1; received lateon_projection_v2_d16_v1/,
         );
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });

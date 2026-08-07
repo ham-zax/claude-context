@@ -6,11 +6,11 @@ import path from "node:path";
  * Managed D32 profile identity used for planning and migration checks.
  * Real installation still binds the target MCP package's frozen authority.
  */
-export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v2_d32_v2";
+export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v1";
 export const LATEON_D32_ACTIVATION_POLICY = "lateon_d32_owner_default_v1";
 
-const LATEON_PROFILE_FILE = "runtime-profile-v2-d32.json";
-const LATEON_ACQUISITION_FILE = "runtime-profile-v2-d32.acquisition.json";
+const LATEON_PROFILE_FILE = "runtime-profile-v3-d32.json";
+const LATEON_ACQUISITION_FILE = "runtime-profile-v3-d32.acquisition.json";
 const ACQUISITION_SCHEMA_VERSION = "satori_lateon_acquisition_v1";
 // 71,577,202 bytes at approximately 128 KiB/s takes about 546 seconds, leaving
 // roughly 54 seconds of the ten-minute deadline for requests and redirects.
@@ -20,7 +20,7 @@ const DISK_HEADROOM_FRACTION = 0.1;
 const DISK_HEADROOM_FORMULA =
     "totalExpectedArtifactBytes + ceil(totalExpectedArtifactBytes * diskHeadroomFraction)";
 const FROZEN_LATEON_D32_PROFILE_SHA256 =
-    "5987f5fe649cb69d1d6a4bdd91c8dfc5c01ee08507ce1cbe5194fe72fc13ec84";
+    "a78906862ee684828354edb0449f15b4c0024c973368b0e03536db70770a88af";
 const DEFAULT_LATEON_REPOSITORY = "lightonai/LateOn-Code-edge";
 const DEFAULT_LATEON_REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
 
@@ -32,7 +32,7 @@ type LateOnProfileArtifact = Readonly<{
 }>;
 
 type LateOnRuntimeProfile = Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v2";
+    schemaVersion: "satori_lateon_runtime_profile_v3";
     profileId: string;
     qualificationStatus?: string;
     identity: Readonly<{
@@ -204,7 +204,7 @@ export function loadAcquisitionAuthority(runtimePackageRoot: string): LateOnAcqu
 
     const runtimeProfileSha256 = sha256Bytes(profileBytes);
     if (
-        profile.schemaVersion !== "satori_lateon_runtime_profile_v2"
+        profile.schemaVersion !== "satori_lateon_runtime_profile_v3"
         || typeof profile.profileId !== "string"
         || profile.profileId.length === 0
         || profile.identity?.repository !== DEFAULT_LATEON_REPOSITORY

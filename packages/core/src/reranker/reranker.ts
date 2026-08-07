@@ -58,5 +58,7 @@ export interface Reranker {
     getMaxDocuments?(): number | undefined;
     /** Identity-bearing document projection required by this provider profile. */
     getDocumentProjectionVersion?(): string | undefined;
+    /** Identity-bearing query projection required by this provider profile. */
+    getQueryProjectionVersion?(): string | undefined;
     close?(): Promise<void>;
 }

@@ -16,6 +16,7 @@ import type {
     LateOnEffectiveOperationalBounds,
     LateOnRuntimeProfile,
     LateOnRuntimeProfileV2,
+    LateOnRuntimeProfileV3,
     LateOnWorkerRequest,
     LateOnWorkerResponse,
 } from "./lateon-reranker-protocol.js";
@@ -57,6 +58,9 @@ const PROFILE_PATHS: Readonly<Record<LateOnRuntimeProfileId, string>> = Object.f
     ),
     [LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32]: fileURLToPath(
         new URL("../../assets/lateon/runtime-profile-v2-d32.json", import.meta.url),
+    ),
+    [LATEON_RUNTIME_PROFILE_IDS.contextV3D32]: fileURLToPath(
+        new URL("../../assets/lateon/runtime-profile-v3-d32.json", import.meta.url),
     ),
 });
 
@@ -119,8 +123,11 @@ function assertReducibleBound(
     return effective;
 }
 
-function isV2Profile(profile: LateOnRuntimeProfile): profile is LateOnRuntimeProfileV2 {
-    return profile.schemaVersion === "satori_lateon_runtime_profile_v2";
+function hasBoundedExecutionContract(
+    profile: LateOnRuntimeProfile,
+): profile is LateOnRuntimeProfileV2 | LateOnRuntimeProfileV3 {
+    return profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+        || profile.schemaVersion === "satori_lateon_runtime_profile_v3";
 }
 
 function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
@@ -139,7 +146,7 @@ function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
 }
 
 export function loadLateOnRuntimeProfile(
-    profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+    profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.contextV3D32,
 ): LateOnRuntimeProfile {
     const profilePath = PROFILE_PATHS[profileIdOrPath as LateOnRuntimeProfileId]
         ?? path.resolve(profileIdOrPath);
@@ -159,15 +166,47 @@ export function loadLateOnRuntimeProfile(
         );
         return parsed as LateOnRuntimeProfile;
     }
-    if (parsed.schemaVersion !== "satori_lateon_runtime_profile_v2") {
-        throw new Error("LateOn runtime profile schema is unsupported.");
+    if (parsed.schemaVersion === "satori_lateon_runtime_profile_v2") {
+        if (
+            (parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.projectionV2D16
+                && parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32)
+            || parsed.identity?.projectionVersion !== "search_rerank_document_v2"
+            || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
+        ) {
+            throw new Error("LateOn v2 runtime profile is malformed or unsupported.");
+        }
+        validateBoundedExecutionContract(parsed);
+        const expectedDepth = parsed.profileId === LATEON_RUNTIME_PROFILE_IDS.projectionV2D16
+            ? 16
+            : 32;
+        if (parsed.inference?.candidateDepth !== expectedDepth) {
+            throw new Error(`LateOn ${parsed.profileId} must use candidate depth ${expectedDepth}.`);
+        }
+        return parsed as LateOnRuntimeProfile;
     }
+    if (parsed.schemaVersion === "satori_lateon_runtime_profile_v3") {
+        if (
+            parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+            || parsed.identity?.projectionVersion !== "search_rerank_document_v3"
+            || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
+            || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v1"
+        ) {
+            throw new Error("LateOn v3 runtime profile is malformed or unsupported.");
+        }
+        validateBoundedExecutionContract(parsed);
+        if (parsed.inference?.candidateDepth !== 32) {
+            throw new Error(`LateOn ${parsed.profileId} must use candidate depth 32.`);
+        }
+        return parsed as LateOnRuntimeProfile;
+    }
+    throw new Error("LateOn runtime profile schema is unsupported.");
+}
+
+function validateBoundedExecutionContract(
+    parsed: Partial<LateOnRuntimeProfileV2 | LateOnRuntimeProfileV3>,
+): void {
     if (
-        (parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.projectionV2D16
-            && parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32)
-        || parsed.identity?.projectionVersion !== "search_rerank_document_v2"
-        || !/^[a-f0-9]{64}$/.test(parsed.identity.projectionSha256 ?? "")
-        || parsed.execution?.workerProcesses !== 1
+        parsed.execution?.workerProcesses !== 1
         || parsed.execution.activeModelSessions !== 1
         || parsed.execution.executionMode !== "sequential"
         || parsed.execution.graphOptimizationLevel !== "all"
@@ -177,13 +216,7 @@ export function loadLateOnRuntimeProfile(
         || parsed.operationalBounds?.maximumActiveReranks !== 1
         || parsed.operationalBounds.maximumQueuedReranks !== 1
     ) {
-        throw new Error("LateOn v2 runtime profile is malformed or unsupported.");
-    }
-    const expectedDepth = parsed.profileId === LATEON_RUNTIME_PROFILE_IDS.projectionV2D16
-        ? 16
-        : 32;
-    if (parsed.inference?.candidateDepth !== expectedDepth) {
-        throw new Error(`LateOn ${parsed.profileId} must use candidate depth ${expectedDepth}.`);
+        throw new Error("LateOn bounded execution contract is malformed or unsupported.");
     }
     positiveSafeInteger(
         parsed.operationalBounds.maximumQueueWaitMilliseconds,
@@ -201,7 +234,6 @@ export function loadLateOnRuntimeProfile(
         parsed.operationalBounds.maximumRerankerStageMilliseconds,
         "LateOn reranker-stage deadline",
     );
-    return parsed as LateOnRuntimeProfile;
 }
 
 function profileDigest(profile: LateOnRuntimeProfile): string {
@@ -248,16 +280,16 @@ export class LateOnReranker implements Reranker {
 
     constructor(config: LateOnRerankerConfig) {
         this.profile = loadLateOnRuntimeProfile(
-            config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+            config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.contextV3D32,
         );
         this.rawProfileDigest = profileDigest(this.profile);
         this.modelDirectory = path.resolve(config.modelDirectory);
         this.intraOpThreads = this.resolveIntraOpThreads(config.intraOpThreads);
         this.effectiveBounds = this.resolveOperationalBounds(config);
-        this.readinessDeadlineMilliseconds = isV2Profile(this.profile)
+        this.readinessDeadlineMilliseconds = hasBoundedExecutionContract(this.profile)
             ? this.profile.operationalBounds.maximumReadinessMilliseconds
             : this.profile.measuredProfile.maximumModelLoadMilliseconds;
-        const isUnmodifiedLegacyProfile = !isV2Profile(this.profile)
+        const isUnmodifiedLegacyProfile = !hasBoundedExecutionContract(this.profile)
             && config.requestDeadlineMilliseconds === undefined
             && config.maximumQueueWaitMilliseconds === undefined
             && config.rerankerStageDeadlineMilliseconds === undefined
@@ -297,8 +329,14 @@ export class LateOnReranker implements Reranker {
         return this.profile.identity.projectionVersion;
     }
 
+    getQueryProjectionVersion(): string {
+        return this.profile.schemaVersion === "satori_lateon_runtime_profile_v3"
+            ? this.profile.identity.queryProjectionVersion
+            : "semantic_query_raw_v1";
+    }
+
     getProfileId(): LateOnRuntimeProfileId {
-        return isV2Profile(this.profile)
+        return hasBoundedExecutionContract(this.profile)
             ? this.profile.profileId
             : LATEON_RUNTIME_PROFILE_IDS.legacyD16;
     }
@@ -363,7 +401,7 @@ export class LateOnReranker implements Reranker {
         if (signal?.aborted) {
             throw operationalError("lateon_cancelled", "LateOn rerank was cancelled.");
         }
-        if (this.workerState === "loading" && !isV2Profile(this.profile)) {
+        if (this.workerState === "loading" && !hasBoundedExecutionContract(this.profile)) {
             await this.readinessPromise;
         }
         if (this.workerState !== "ready") {
@@ -430,9 +468,9 @@ export class LateOnReranker implements Reranker {
 
     private resolveIntraOpThreads(requested: number | undefined): number {
         const frozen = this.profile.inference.profileIntraOpThreads;
-        if (isV2Profile(this.profile)) {
+        if (hasBoundedExecutionContract(this.profile)) {
             if (requested !== undefined && requested !== frozen) {
-                throw new Error(`LateOn v2 thread policy is immutable at ${frozen} intra-op threads.`);
+                throw new Error(`LateOn bounded thread policy is immutable at ${frozen} intra-op threads.`);
             }
             return frozen;
         }
@@ -443,7 +481,7 @@ export class LateOnReranker implements Reranker {
     }
 
     private resolveOperationalBounds(config: LateOnRerankerConfig): LateOnEffectiveOperationalBounds {
-        if (!isV2Profile(this.profile)) {
+        if (!hasBoundedExecutionContract(this.profile)) {
             const requestDeadline = positiveSafeInteger(
                 config.requestDeadlineMilliseconds
                     ?? this.profile.measuredProfile.requestDeadlineMilliseconds,

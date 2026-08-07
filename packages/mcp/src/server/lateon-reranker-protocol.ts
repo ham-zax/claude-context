@@ -2,6 +2,7 @@ export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
     legacyD16: "lateon_projection_v1_d16_legacy",
     projectionV2D16: "lateon_projection_v2_d16_v1",
     offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v2",
+    contextV3D32: "lateon_offline_quality_projection_v3_d32_v1",
 } as const);
 
 export type LateOnRuntimeProfileId =
@@ -24,7 +25,10 @@ type LateOnRuntimeProfileBase = Readonly<{
         repository: string;
         revision: string;
         license: "Apache-2.0";
-        projectionVersion: "search_rerank_document_v1" | "search_rerank_document_v2";
+        projectionVersion:
+            | "search_rerank_document_v1"
+            | "search_rerank_document_v2"
+            | "search_rerank_document_v3";
         projectionSha256?: string;
     }>;
     artifacts: readonly LateOnArtifactContract[];
@@ -105,7 +109,23 @@ export type LateOnRuntimeProfileV2 = LateOnRuntimeProfileBase & Readonly<{
     }>;
 }>;
 
-export type LateOnRuntimeProfile = LateOnRuntimeProfileV1 | LateOnRuntimeProfileV2;
+export type LateOnRuntimeProfileV3 = Omit<
+    LateOnRuntimeProfileV2,
+    "schemaVersion" | "profileId" | "identity"
+> & Readonly<{
+    schemaVersion: "satori_lateon_runtime_profile_v3";
+    profileId: "lateon_offline_quality_projection_v3_d32_v1";
+    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
+        projectionVersion: "search_rerank_document_v3";
+        projectionSha256: string;
+        queryProjectionVersion: "search_rerank_query_v1";
+    }>;
+}>;
+
+export type LateOnRuntimeProfile =
+    | LateOnRuntimeProfileV1
+    | LateOnRuntimeProfileV2
+    | LateOnRuntimeProfileV3;
 
 export type LateOnEffectiveOperationalBounds = Readonly<{
     maximumActiveReranks: 0 | 1;
