@@ -70,6 +70,7 @@ import {
     validateNativeRerankResults,
 } from "./search-native-rerank.js";
 import { resolveRerankBoundary } from "./search-rerank-boundary.js";
+import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
 import { sortNativeRetrievalCandidates } from "./search-retrieval-order.js";
 
 type SearchPassId = "primary" | "expanded";
@@ -375,9 +376,9 @@ export type SearchExecutionHost = {
     }) => Promise<SemanticSearchResult[] | SemanticSearchExecutionResult>;
     reranker: Reranker | null;
     buildRerankDocument?: (
-        semanticQuery: string,
+        rerankQuery: string,
         result: SearchResultLike,
-    ) => Promise<string | undefined>;
+    ) => Promise<SearchRerankProjectionResult>;
     shouldForceSearchPassFailure: (passId: SearchPassId) => boolean;
     classifyEmbeddingProviderError: (error: unknown) => EmbeddingProviderDiagnostic | null;
     classifyVectorBackendError: (error: unknown) => VectorBackendDiagnostic | null;
@@ -492,9 +493,21 @@ async function rerankSearchCandidates(
             let selectedDocuments: string[];
             try {
                 selectedDocuments = await Promise.all(providerBoundedSelection.map(async (candidate) => {
-                    const document = host.buildRerankDocument
-                        ? await host.buildRerankDocument(input.semanticQuery, candidate.result)
-                        : host.searchQuerySupport.buildRerankDocument(candidate.result);
+                    if (host.buildRerankDocument) {
+                        const projection = await host.buildRerankDocument(
+                            input.semanticQuery,
+                            candidate.result,
+                        );
+                        if (
+                            !projection.ok
+                            || typeof projection.document !== "string"
+                            || projection.document.length === 0
+                        ) {
+                            throw new Error("reranker_document_projection_unavailable");
+                        }
+                        return projection.document;
+                    }
+                    const document = host.searchQuerySupport.buildRerankDocument(candidate.result);
                     if (typeof document !== "string" || document.length === 0) {
                         throw new Error("reranker_document_projection_unavailable");
                     }

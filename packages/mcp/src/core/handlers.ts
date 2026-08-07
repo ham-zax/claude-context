@@ -218,7 +218,11 @@ import {
     type SearchRerankerBindingIdentity,
 } from "./search-result-set-identity.js";
 import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
-import { buildPublicationBoundSearchRerankDocumentV2 } from "./search-rerank-projection.js";
+import {
+    projectPublicationBoundSearchRerankDocumentV2,
+    searchRerankCandidateId,
+} from "./search-rerank-projection.js";
+import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
@@ -4992,9 +4996,21 @@ export class ToolHandlers {
                         buildRerankDocument: async (
                             rerankQuery: string,
                             result: SearchResultLike,
-                        ): Promise<string | undefined> => {
-                            if (!generationReceipt || navigationStatus !== "valid") {
-                                return undefined;
+                        ): Promise<SearchRerankProjectionResult> => {
+                            const candidateId = searchRerankCandidateId(result);
+                            if (!generationReceipt) {
+                                return {
+                                    ok: false,
+                                    candidateId,
+                                    reason: "generation_receipt_missing",
+                                };
+                            }
+                            if (navigationStatus !== "valid") {
+                                return {
+                                    ok: false,
+                                    candidateId,
+                                    reason: "navigation_status_invalid",
+                                };
                             }
                             if (
                                 !searchSymbolRegistry
@@ -5005,17 +5021,28 @@ export class ToolHandlers {
                                     preparedReadState,
                                     readinessDebug.operations,
                                 );
+                                if (registryState.status !== "ok") {
+                                    return {
+                                        ok: false,
+                                        candidateId,
+                                        reason: "registry_load_failed",
+                                    };
+                                }
                                 if (
-                                    registryState.status !== "ok"
-                                    || registryState.manifestHash
+                                    registryState.manifestHash
                                         !== generationReceipt.navigation.symbolRegistryManifestHash
                                 ) {
-                                    return undefined;
+                                    return {
+                                        ok: false,
+                                        candidateId,
+                                        reason: "registry_manifest_mismatch",
+                                    };
                                 }
                                 searchSymbolRegistry = registryState.registry;
                                 searchSymbolRegistryManifestHash = registryState.manifestHash;
                             }
-                            return buildPublicationBoundSearchRerankDocumentV2({
+                            return projectPublicationBoundSearchRerankDocumentV2({
+                                candidateId,
                                 codebaseRoot: effectiveRoot,
                                 semanticQuery: rerankQuery,
                                 result,

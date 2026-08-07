@@ -6,7 +6,14 @@ import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
     type SymbolRecord,
 } from "@zokizuan/satori-core";
-import { buildPublicationBoundSearchRerankDocumentV2 } from "./search-rerank-projection.js";
+import type { CurrentSourceEvidence } from "./current-source-symbols.js";
+import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
+import type { SearchResultLike } from "./search-lexical-scoring.js";
+import {
+    buildPublicationBoundSearchRerankDocumentV2,
+    projectPublicationBoundSearchRerankDocumentV2,
+    searchRerankCandidateId,
+} from "./search-rerank-projection.js";
 
 const source = [
     "export function owner() {",
@@ -170,4 +177,149 @@ test("projection v2 fails closed for absolute or owner-foreign paths", async () 
         registry: registry(),
         readSourceEvidence,
     }), undefined);
+});
+
+const candidateId = searchRerankCandidateId({
+    relativePath: owner.file,
+    startLine: 1,
+    endLine: 4,
+});
+
+function ownedResult(overrides: Partial<SearchResultLike> = {}): SearchResultLike {
+    return {
+        content: source,
+        relativePath: owner.file,
+        language: "typescript",
+        score: 1,
+        startLine: 1,
+        endLine: 4,
+        ownerSymbolInstanceId: owner.symbolInstanceId,
+        ...overrides,
+    };
+}
+
+function evidence(overrides: Partial<CurrentSourceEvidence> = {}): CurrentSourceEvidence {
+    return {
+        canonicalRoot: "/repo",
+        relativeFile: owner.file,
+        sourceBytes: Buffer.from(source),
+        source,
+        observedHash: fileHash,
+        ...overrides,
+    };
+}
+
+test("typed projection reports owner_not_found without a resolvable registry owner", async () => {
+    const readSourceEvidence = async () => {
+        throw new Error("must not read source without a registry owner");
+    };
+    for (const result of [
+        ownedResult({ ownerSymbolInstanceId: undefined }),
+        ownedResult({ ownerSymbolInstanceId: "symbol-missing" }),
+        ownedResult({ relativePath: "src/other.ts" }),
+    ]) {
+        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+            candidateId,
+            codebaseRoot: "/repo",
+            semanticQuery: "owner",
+            result,
+            registry: registry(),
+            readSourceEvidence,
+        }), { ok: false, candidateId, reason: "owner_not_found" });
+    }
+});
+
+test("typed projection reports candidate_span_invalid for a span outside its owner", async () => {
+    const readSourceEvidence = async () => {
+        throw new Error("must not read an invalid span");
+    };
+    for (const span of [
+        { startLine: 1, endLine: 5 },
+        { startLine: 0, endLine: 4 },
+        { startLine: 3, endLine: 2 },
+    ]) {
+        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+            candidateId,
+            codebaseRoot: "/repo",
+            semanticQuery: "owner",
+            result: ownedResult(span),
+            registry: registry(),
+            readSourceEvidence,
+        }), { ok: false, candidateId, reason: "candidate_span_invalid" });
+    }
+});
+
+test("typed projection reports source_unavailable when the evidence read fails", async () => {
+    const base = {
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: ownedResult(),
+        registry: registry(),
+    };
+    assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+        ...base,
+        readSourceEvidence: async () => undefined,
+    }), { ok: false, candidateId, reason: "source_unavailable" });
+    assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+        ...base,
+        readSourceEvidence: async () => {
+            throw new Error("read failed");
+        },
+    }), { ok: false, candidateId, reason: "source_unavailable" });
+});
+
+test("typed projection reports source_hash_mismatch for stale or foreign evidence", async () => {
+    const base = {
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: ownedResult(),
+        registry: registry(),
+    };
+    assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+        ...base,
+        readSourceEvidence: async () => evidence({ observedHash: "0".repeat(64) }),
+    }), { ok: false, candidateId, reason: "source_hash_mismatch" });
+    assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+        ...base,
+        readSourceEvidence: async () => evidence({ relativeFile: "src/other.ts" }),
+    }), { ok: false, candidateId, reason: "source_hash_mismatch" });
+});
+
+test("typed projection reports projection_contract_failed when the v2 contract throws", async () => {
+    const outcome = await projectPublicationBoundSearchRerankDocumentV2({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: ownedResult(),
+        registry: registry(),
+        readSourceEvidence: async () => evidence({ source: "short" }),
+    });
+    assert.deepEqual(outcome, {
+        ok: false,
+        candidateId,
+        reason: "projection_contract_failed",
+    });
+});
+
+test("typed projection success carries bounded provenance fields", async () => {
+    const outcome = await projectPublicationBoundSearchRerankDocumentV2({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "execute prepared request",
+        result: ownedResult({ startLine: 2, endLine: 3 }),
+        registry: registry(),
+        readSourceEvidence: async () => evidence(),
+    });
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.match(outcome.document, /execute/);
+    assert.equal(outcome.utf8Bytes, Buffer.byteLength(outcome.document, "utf8"));
+    assert.equal(
+        outcome.sha256,
+        crypto.createHash("sha256").update(outcome.document, "utf8").digest("hex"),
+    );
+    assert.equal(outcome.candidateRole, "unknown");
+    assert.equal(outcome.projectionIdentity, SEARCH_RERANK_DOCUMENT_V2_POLICY.id);
 });

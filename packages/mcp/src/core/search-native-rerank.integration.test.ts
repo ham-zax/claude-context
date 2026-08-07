@@ -15,6 +15,11 @@ import {
 import { SearchQuerySupport } from "./search-query-support.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 import { SEARCH_RERANK_INPUT_MAX_UTF8_BYTES } from "./search-constants.js";
+import { searchRerankCandidateId } from "./search-rerank-projection.js";
+import type {
+    SearchRerankProjectionFailureReason,
+    SearchRerankProjectionResult,
+} from "./search-rerank-projection-result.js";
 import { resolveSearchPolicy } from "./search-policy.js";
 
 type FixtureCandidate = {
@@ -332,7 +337,11 @@ test("projection failure falls back without calling the provider", async () => {
     const outcome = await run(
         buildInput(),
         buildHost(results, reranker, {
-            buildRerankDocument: async () => undefined,
+            buildRerankDocument: async (_query, result) => ({
+                ok: false,
+                candidateId: searchRerankCandidateId(result),
+                reason: "projection_contract_failed",
+            }),
         }),
     );
 
@@ -341,6 +350,49 @@ test("projection failure falls back without calling the provider", async () => {
     assert.equal(providerCalls, 0);
     assert.equal(outcome.rerankerFailurePhase, "document_projection");
     assert.deepEqual(outcome.scored.map((entry) => entry.result.candidateId), ["a", "b"]);
+});
+
+test("every typed projection failure reason falls back before provider admission", async () => {
+    const reasons: SearchRerankProjectionFailureReason[] = [
+        "generation_receipt_missing",
+        "navigation_status_invalid",
+        "registry_load_failed",
+        "registry_manifest_mismatch",
+        "owner_not_found",
+        "candidate_span_invalid",
+        "source_unavailable",
+        "source_hash_mismatch",
+        "projection_contract_failed",
+    ];
+    for (const reason of reasons) {
+        let providerCalls = 0;
+        const reranker = buildReranker(() => {
+            providerCalls += 1;
+            return [];
+        });
+        const results = [candidate("a", "src/a.ts", 0.9), candidate("b", "src/b.ts", 0.8)];
+        const outcome = await run(
+            buildInput(),
+            buildHost(results, reranker, {
+                buildRerankDocument: async (_query, result) => ({
+                    ok: false,
+                    candidateId: searchRerankCandidateId(result),
+                    reason,
+                }),
+            }),
+        );
+
+        assert.equal(outcome.kind, "ok", reason);
+        if (outcome.kind !== "ok") continue;
+        assert.equal(providerCalls, 0, reason);
+        assert.equal(outcome.rerankerApplied, false, reason);
+        assert.equal(outcome.rerankerFailurePhase, "document_projection", reason);
+        assert.deepEqual(
+            outcome.scored.map((entry) => entry.result.candidateId),
+            ["a", "b"],
+            reason,
+        );
+    }
 });
 
 test("zero-byte reranker admission falls back to the frozen retrieval order", async () => {
@@ -353,7 +405,17 @@ test("zero-byte reranker admission falls back to the frozen retrieval order", as
     const outcome = await run(
         buildInput(),
         buildHost(results, reranker, {
-            buildRerankDocument: async () => "x".repeat(SEARCH_RERANK_INPUT_MAX_UTF8_BYTES + 1),
+            buildRerankDocument: async (): Promise<SearchRerankProjectionResult> => {
+                const document = "x".repeat(SEARCH_RERANK_INPUT_MAX_UTF8_BYTES + 1);
+                return {
+                    ok: true,
+                    document,
+                    utf8Bytes: Buffer.byteLength(document, "utf8"),
+                    sha256: "0".repeat(64),
+                    candidateRole: "unknown",
+                    projectionIdentity: "search_rerank_document_v2",
+                };
+            },
         }),
     );
 
