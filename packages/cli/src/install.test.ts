@@ -1304,10 +1304,120 @@ test("legacy no-provider upgrade defaults to LateOn D32", async () => {
         });
 
         assert.equal(observedReranker, "lateon");
-        assert.equal(observedProfile, "lateon_offline_quality_projection_v3_d32_v1");
-        assert.equal(observedPolicy, "lateon_d32_owner_default_v1");
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v3_d32_v2");
+        assert.equal(observedPolicy, "lateon_context_v3_d32_owner_default_v1");
         const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(launcherEnvironment.SATORI_RERANKER_PROVIDER, "lateon");
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_PROFILE,
+            "lateon_offline_quality_projection_v3_d32_v2",
+        );
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
+            "lateon_context_v3_d32_owner_default_v1",
+        );
+    });
+});
+
+test("managed runtime upgrade migrates the historical context-v3 activation combination atomically", async () => {
+    const historicalEnvironmentFor = (homeDir: string) => ({
+        SATORI_RUNTIME_PROFILE: "offline",
+        VECTOR_STORE_PROVIDER: "LanceDB",
+        LANCEDB_PATH: path.join(homeDir, "lancedb"),
+        EMBEDDING_PROVIDER: "Potion",
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: path.join(homeDir, "lateon-model"),
+        SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v3_d32_v1",
+        SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+    });
+
+    await withTempHome(async (homeDir) => {
+        await installUpgradeSourceRuntime(homeDir, historicalEnvironmentFor(homeDir));
+        writeLateOnModelDirectory(path.join(homeDir, "lateon-model"), LATEON_FIXTURE_ARTIFACTS);
+        let observedProfile: string | undefined;
+        let observedPolicy: string | undefined;
+
+        await executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+            homeDir,
+            env: {},
+            platform: "linux",
+            architecture: "x64",
+            lateOnModelPath: path.join(homeDir, "lateon-model"),
+            lateOnAuthorityLoader: loadAcquisitionAuthority,
+            execFileSyncImpl: installRuntimePackageStub(
+                "dist/target-runtime.mjs",
+                UPGRADE_TARGET.mcpPackageSpecifier,
+                UPGRADE_TARGET.mcpVersion,
+                UPGRADE_TARGET.coreVersion,
+            ) as never,
+            preflightDependencies: {
+                probeCandidateRuntime: async () => {},
+            },
+            preflightRunner: async (input) => {
+                observedProfile = input.lateOnProfileId;
+                observedPolicy = input.lateOnActivationPolicy;
+                return {
+                    runtimeEnvironment: Object.freeze({
+                        SATORI_RUNTIME_PROFILE: "offline",
+                        VECTOR_STORE_PROVIDER: "LanceDB",
+                        EMBEDDING_PROVIDER: "Potion",
+                        SATORI_RERANKER_PROVIDER: input.reranker ?? "",
+                        SATORI_LATEON_MODEL_PATH: input.lateOnModelPath ?? "",
+                        SATORI_LATEON_PROFILE: input.lateOnProfileId ?? "",
+                        SATORI_LATEON_ACTIVATION_POLICY: input.lateOnActivationPolicy ?? "",
+                    }),
+                };
+            },
+        });
+
+        assert.equal(observedProfile, "lateon_offline_quality_projection_v3_d32_v2");
+        assert.equal(observedPolicy, "lateon_context_v3_d32_owner_default_v1");
+        const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_PROFILE,
+            "lateon_offline_quality_projection_v3_d32_v2",
+        );
+        assert.equal(
+            launcherEnvironment.SATORI_LATEON_ACTIVATION_POLICY,
+            "lateon_context_v3_d32_owner_default_v1",
+        );
+    });
+
+    await withTempHome(async (homeDir) => {
+        await installUpgradeSourceRuntime(homeDir, historicalEnvironmentFor(homeDir));
+        writeLateOnModelDirectory(path.join(homeDir, "lateon-model"), LATEON_FIXTURE_ARTIFACTS);
+        const originalLauncher = readFile(launcherPath(homeDir));
+
+        await assert.rejects(
+            executeManagedRuntimeUpgrade(UPGRADE_TARGET, {
+                homeDir,
+                env: {},
+                platform: "linux",
+                architecture: "x64",
+                lateOnModelPath: path.join(homeDir, "lateon-model"),
+                lateOnAuthorityLoader: loadAcquisitionAuthority,
+                execFileSyncImpl: installRuntimePackageStub(
+                    "dist/target-runtime.mjs",
+                    UPGRADE_TARGET.mcpPackageSpecifier,
+                    UPGRADE_TARGET.mcpVersion,
+                    UPGRADE_TARGET.coreVersion,
+                ) as never,
+                preflightDependencies: {
+                    probeCandidateRuntime: async () => {
+                        throw new Error("candidate probe failed");
+                    },
+                },
+                preflightRunner: async () => ({
+                    runtimeEnvironment: Object.freeze({
+                        SATORI_RUNTIME_PROFILE: "offline",
+                    }),
+                }),
+            }),
+            /candidate probe failed/,
+        );
+
+        assert.equal(readFile(launcherPath(homeDir)), originalLauncher);
+        const launcherEnvironment = parseManagedLauncherDescriptor(readFile(launcherPath(homeDir))).managedEnv;
         assert.equal(
             launcherEnvironment.SATORI_LATEON_PROFILE,
             "lateon_offline_quality_projection_v3_d32_v1",
@@ -1894,6 +2004,22 @@ test("managed offline Ollama launcher preserves the direct runtime lifecycle", (
         fs.copyFileSync(
             path.resolve(PACKAGE_ROOT, "..", "mcp", "dist", "server", "lateon-reranker-protocol.js"),
             path.join(serverDirectory, "lateon-reranker-protocol.js"),
+        );
+        fs.cpSync(
+            path.resolve(PACKAGE_ROOT, "..", "mcp", "dist", "core"),
+            path.join(root, "core"),
+            { recursive: true },
+        );
+        fs.symlinkSync(
+            path.resolve(PACKAGE_ROOT, "..", "mcp", "node_modules"),
+            path.join(root, "node_modules"),
+            "dir",
+        );
+        const contractAssetDirectory = path.join(root, "assets", "lateon");
+        fs.mkdirSync(contractAssetDirectory, { recursive: true });
+        fs.copyFileSync(
+            path.resolve(PACKAGE_ROOT, "..", "mcp", "assets", "lateon", "rerank-request-contract-v1.json"),
+            path.join(contractAssetDirectory, "rerank-request-contract-v1.json"),
         );
         fs.writeFileSync(
             runtimeEntry,

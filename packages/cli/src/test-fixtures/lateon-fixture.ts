@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export const LATEON_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v1";
-export const LATEON_ACTIVATION_POLICY = "lateon_d32_owner_default_v1";
+export const LATEON_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v2";
+export const LATEON_ACTIVATION_POLICY = "lateon_context_v3_d32_owner_default_v1";
 export const LATEON_REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
 export const LATEON_FIXTURE_ARTIFACTS = {
     "model.onnx": "model",
@@ -35,14 +35,14 @@ export function writeLateOnAcquisitionFixture(
         })),
     };
     const profileBytes = Buffer.from(JSON.stringify(profile, null, 2), "utf8");
-    fs.writeFileSync(path.join(assetsRoot, "runtime-profile-v3-d32.json"), profileBytes);
+    fs.writeFileSync(path.join(assetsRoot, "runtime-profile-v3-d32-v2.json"), profileBytes);
     const entries = Object.entries(artifacts).map(([artifactPath, content]) => ({
         path: artifactPath,
         sizeBytes: Buffer.byteLength(content, "utf8"),
         sha256: digest(content),
     }));
     fs.writeFileSync(
-        path.join(assetsRoot, "runtime-profile-v3-d32.acquisition.json"),
+        path.join(assetsRoot, "runtime-profile-v3-d32-v2.acquisition.json"),
         JSON.stringify({
             schemaVersion: "satori_lateon_acquisition_v1",
             runtimeProfileSha256: digest(profileBytes),

@@ -62,6 +62,9 @@ const PROFILE_PATHS: Readonly<Record<LateOnRuntimeProfileId, string>> = Object.f
     [LATEON_RUNTIME_PROFILE_IDS.contextV3D32]: fileURLToPath(
         new URL("../../assets/lateon/runtime-profile-v3-d32.json", import.meta.url),
     ),
+    [LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated]: fileURLToPath(
+        new URL("../../assets/lateon/runtime-profile-v3-d32-v2.json", import.meta.url),
+    ),
 });
 
 type PendingWorkerRequest = {
@@ -186,12 +189,21 @@ export function loadLateOnRuntimeProfile(
     }
     if (parsed.schemaVersion === "satori_lateon_runtime_profile_v3") {
         if (
-            parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+            (parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+                && parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated)
             || parsed.identity?.projectionVersion !== "search_rerank_document_v3"
             || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
             || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v1"
         ) {
             throw new Error("LateOn v3 runtime profile is malformed or unsupported.");
+        }
+        const expectedQualification = parsed.profileId === LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated
+            ? "owner_activated_operationally_qualified_not_held_out"
+            : "disabled_optional_not_track_o_or_held_out_candidate";
+        if (parsed.qualificationStatus !== expectedQualification) {
+            throw new Error(
+                `LateOn ${parsed.profileId} carries an untrusted qualification status.`,
+            );
         }
         validateBoundedExecutionContract(parsed);
         if (parsed.inference?.candidateDepth !== 32) {

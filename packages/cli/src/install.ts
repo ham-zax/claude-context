@@ -50,6 +50,7 @@ import {
 } from "./managed-runtime-closure.js";
 import {
     DEFAULT_LATEON_PROFILE_ID,
+    HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID,
     LATEON_D32_ACTIVATION_POLICY,
     ensureDefaultLateOnModel,
     resolveDefaultLateOnModelDirectory,
@@ -1746,6 +1747,9 @@ function historicalManagedLateOnProfile(
 ): string | null {
     const managed = managedEnvironment.SATORI_RERANKER_PROVIDER;
     const profile = managedEnvironment.SATORI_LATEON_PROFILE?.trim();
+    if (profile === HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID) {
+        return null;
+    }
     if (managed === "lateon" && profile !== DEFAULT_LATEON_PROFILE_ID) {
         return profile || "(missing)";
     }
@@ -1810,7 +1814,10 @@ function resolveOfflineReranker(
         if (managed === "none") return "none";
         if (managed === "lateon") {
             const profile = managedEnvironment.SATORI_LATEON_PROFILE?.trim();
-            if (profile !== DEFAULT_LATEON_PROFILE_ID) {
+            if (
+                profile !== DEFAULT_LATEON_PROFILE_ID
+                && profile !== HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID
+            ) {
                 throw migrationGuidance(profile || "(missing)");
             }
             if (!isQualifiedPlatform) rejectUnsupportedLateOn();

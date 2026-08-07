@@ -760,13 +760,33 @@ export function createMcpConfig(): ContextMcpConfig {
             + `received ${rerankerProvider}.`,
         );
     }
+    if (lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32V2) {
+        if (lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32) {
+            const isContextV3Profile = lateOnProfileId === LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+                || lateOnProfileId === LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated;
+            if (isContextV3Profile) {
+                throw new Error(
+                    `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32V2} `
+                    + `historically authorized only SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32}. `
+                    + `Run \`satori upgrade\` to migrate to SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated} `
+                    + `with SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV3}; `
+                    + `received ${lateOnProfileId}.`,
+                );
+            }
+            throw new Error(
+                `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32V2} `
+                + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32}; `
+                + `received ${lateOnProfileId}.`,
+            );
+        }
+    }
     if (
-        lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32
-        && lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+        lateOnActivationPolicyRaw === LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV3
+        && lateOnProfileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated
     ) {
         throw new Error(
-            `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultD32} `
-            + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV3D32}; `
+            `SATORI_LATEON_ACTIVATION_POLICY=${LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV3} `
+            + `requires SATORI_LATEON_PROFILE=${LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated}; `
             + `received ${lateOnProfileId}.`,
         );
     }

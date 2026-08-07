@@ -3,13 +3,15 @@ export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
     projectionV2D16: "lateon_projection_v2_d16_v1",
     offlineQualityD32: "lateon_offline_quality_projection_v2_d32_v2",
     contextV3D32: "lateon_offline_quality_projection_v3_d32_v1",
+    contextV3D32Activated: "lateon_offline_quality_projection_v3_d32_v2",
 } as const);
 
 export type LateOnRuntimeProfileId =
     typeof LATEON_RUNTIME_PROFILE_IDS[keyof typeof LATEON_RUNTIME_PROFILE_IDS];
 
 export const LATEON_ACTIVATION_POLICY_IDS = Object.freeze({
-    ownerDefaultD32: "lateon_d32_owner_default_v1",
+    ownerDefaultD32V2: "lateon_d32_owner_default_v1",
+    ownerDefaultContextV3: "lateon_context_v3_d32_owner_default_v1",
 } as const);
 
 export type LateOnActivationPolicyId =
@@ -111,10 +113,15 @@ export type LateOnRuntimeProfileV2 = LateOnRuntimeProfileBase & Readonly<{
 
 export type LateOnRuntimeProfileV3 = Omit<
     LateOnRuntimeProfileV2,
-    "schemaVersion" | "profileId" | "identity"
+    "schemaVersion" | "profileId" | "qualificationStatus" | "identity"
 > & Readonly<{
     schemaVersion: "satori_lateon_runtime_profile_v3";
-    profileId: "lateon_offline_quality_projection_v3_d32_v1";
+    profileId:
+        | typeof LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+        | typeof LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated;
+    qualificationStatus:
+        | "disabled_optional_not_track_o_or_held_out_candidate"
+        | "owner_activated_operationally_qualified_not_held_out";
     identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
         projectionVersion: "search_rerank_document_v3";
         projectionSha256: string;

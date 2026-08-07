@@ -6,11 +6,18 @@ import path from "node:path";
  * Managed D32 profile identity used for planning and migration checks.
  * Real installation still binds the target MCP package's frozen authority.
  */
-export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v1";
-export const LATEON_D32_ACTIVATION_POLICY = "lateon_d32_owner_default_v1";
+export const DEFAULT_LATEON_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v2";
+export const LATEON_D32_ACTIVATION_POLICY = "lateon_context_v3_d32_owner_default_v1";
+/**
+ * Historical context-v3 rollout artifact. Its managed combination with the
+ * historical `lateon_d32_owner_default_v1` policy is migratable by
+ * `satori upgrade`, never treated as unknown D16 history.
+ */
+export const HISTORICAL_LATEON_CONTEXT_V3_PROFILE_ID = "lateon_offline_quality_projection_v3_d32_v1";
+export const HISTORICAL_LATEON_D32_ACTIVATION_POLICY = "lateon_d32_owner_default_v1";
 
-const LATEON_PROFILE_FILE = "runtime-profile-v3-d32.json";
-const LATEON_ACQUISITION_FILE = "runtime-profile-v3-d32.acquisition.json";
+const LATEON_PROFILE_FILE = "runtime-profile-v3-d32-v2.json";
+const LATEON_ACQUISITION_FILE = "runtime-profile-v3-d32-v2.acquisition.json";
 const ACQUISITION_SCHEMA_VERSION = "satori_lateon_acquisition_v1";
 // 71,577,202 bytes at approximately 128 KiB/s takes about 546 seconds, leaving
 // roughly 54 seconds of the ten-minute deadline for requests and redirects.
@@ -20,7 +27,7 @@ const DISK_HEADROOM_FRACTION = 0.1;
 const DISK_HEADROOM_FORMULA =
     "totalExpectedArtifactBytes + ceil(totalExpectedArtifactBytes * diskHeadroomFraction)";
 const FROZEN_LATEON_D32_PROFILE_SHA256 =
-    "a78906862ee684828354edb0449f15b4c0024c973368b0e03536db70770a88af";
+    "d0e5c33e1a8281f61d95563cf5af29b82896e15127fab92fadfadcf4c2b8db79";
 const DEFAULT_LATEON_REPOSITORY = "lightonai/LateOn-Code-edge";
 const DEFAULT_LATEON_REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
 

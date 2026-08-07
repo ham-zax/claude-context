@@ -122,6 +122,34 @@ test("LateOn runtime profiles default to the V3 D32 context profile while retain
     );
 });
 
+test("LateOn activated context-v3 profile carries truthful qualification with identical v3 request behavior", () => {
+    const historical = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.contextV3D32);
+    const activated = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated);
+    if (
+        historical.schemaVersion !== "satori_lateon_runtime_profile_v3"
+        || activated.schemaVersion !== "satori_lateon_runtime_profile_v3"
+    ) {
+        throw new Error("expected the v3 runtime profiles");
+    }
+    assert.equal(historical.profileId, "lateon_offline_quality_projection_v3_d32_v1");
+    assert.equal(
+        historical.qualificationStatus,
+        "disabled_optional_not_track_o_or_held_out_candidate",
+    );
+    assert.equal(activated.profileId, "lateon_offline_quality_projection_v3_d32_v2");
+    assert.equal(
+        activated.qualificationStatus,
+        "owner_activated_operationally_qualified_not_held_out",
+    );
+    assert.equal(activated.identity.projectionVersion, "search_rerank_document_v3");
+    assert.equal(activated.identity.queryProjectionVersion, "search_rerank_query_v1");
+    assert.equal(activated.identity.projectionSha256, historical.identity.projectionSha256);
+    assert.deepEqual(activated.artifacts, historical.artifacts);
+    assert.deepEqual(activated.execution, historical.execution);
+    assert.deepEqual(activated.operationalBounds, historical.operationalBounds);
+    assert.deepEqual(activated.inference, historical.inference);
+});
+
 test("LateOn reranker defaults to the V3 profile and reports qualified projection identities", async (t) => {
     const workerPath = createFakeWorker(t);
     const defaulted = new LateOnReranker({ modelDirectory: "/unused", workerPath });
