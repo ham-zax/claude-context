@@ -36,6 +36,47 @@ test("public symbol-context limits remain identical to the frozen Phase 0 vector
     });
 });
 
+test("exact-symbol open requests are validated as one unit with every actionable error at stable paths", () => {
+    const parsed = openSymbolRequestSchema.safeParse({
+        symbolId: "syminst_a",
+        symbolLabel: "processPayment",
+    });
+    assert.equal(parsed.success, false);
+    if (parsed.success) return;
+    const paths = parsed.error.issues.map((issue) => issue.path.join(".")).sort();
+    // Missing contractVersion, conflicting identities, and a missing
+    // context/continuation operation all appear in one response.
+    assert.deepEqual(paths, ["context", "contractVersion", "symbolId"]);
+    const messages = parsed.error.issues.map((issue) => issue.message);
+    assert.ok(messages.some((message) => message.includes("contractVersion")), messages.join(" | "));
+    assert.ok(messages.some((message) => message.includes("exactly one of symbolId or symbolLabel")), messages.join(" | "));
+    assert.ok(messages.some((message) => message.includes("exactly one of context or continuation")), messages.join(" | "));
+});
+
+test("exact-symbol unit validation surfaces inner shape violations at nested paths", () => {
+    const parsed = openSymbolRequestSchema.safeParse({
+        contractVersion: 2,
+        symbolId: "syminst_a",
+        context: {},
+    });
+    assert.equal(parsed.success, false);
+    if (parsed.success) return;
+    const paths = parsed.error.issues.map((issue) => issue.path.join(".")).sort();
+    assert.deepEqual(paths, ["context.preset"]);
+});
+
+test("exact-symbol unit validation flattens continuation union sub-issues", () => {
+    const parsed = openSymbolRequestSchema.safeParse({
+        contractVersion: 2,
+        symbolId: "syminst_a",
+        continuation: { kind: "source_range", fingerprint: "sha256_x", startLine: 5, endLine: 1 },
+    });
+    assert.equal(parsed.success, false);
+    if (parsed.success) return;
+    const issues = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+    assert.ok(issues.some((issue) => issue.startsWith("continuation.endLine:")), issues.join(" | "));
+});
+
 test("exact and direct-span schemas implement every frozen discrimination vector", () => {
     for (const fixture of phase0Contract.wireContract.schemaCases) {
         const parsed = openSymbolRequestSchema.safeParse(fixture.openSymbol);
