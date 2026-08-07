@@ -229,6 +229,7 @@ import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
+import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
 import {
     resolveSearchRerankRequestIdentity,
@@ -4985,6 +4986,10 @@ export class ToolHandlers {
             const resolvedRerankQuery = resolveSearchRerankQuery({
                 semanticQuery: parsedOperators.semanticQuery,
                 focusedQueryV1: buildSearchRerankQuery({
+                    semanticQuery: parsedOperators.semanticQuery,
+                    answerFocus,
+                }),
+                focusedQueryV2: buildSearchRerankQueryV2({
                     semanticQuery: parsedOperators.semanticQuery,
                     answerFocus,
                 }),

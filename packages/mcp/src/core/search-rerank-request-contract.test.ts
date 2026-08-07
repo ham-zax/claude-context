@@ -36,6 +36,21 @@ test("request contract fixtures bind focus, query, role, and document projection
         "implementation",
     );
     assert.ok(fixtures.queryProjectionV1.implementation?.includes("Answer focus: implementation"));
+    assert.equal(
+        fixtures.queryProjectionV2.implementation,
+        [
+            "Question:",
+            "how does Shariah compliance checking block trades",
+            "",
+            "Requested answer type:",
+            "production implementation, control flow, and integration path",
+        ].join("\n"),
+    );
+    assert.equal(
+        fixtures.queryProjectionV2.implementation?.toLowerCase().includes("test"),
+        false,
+        "contract fixture must keep the implementation projection positive-only",
+    );
     assert.equal(fixtures.candidateRoleClassification["tests/veto.test.ts|typescript"], "test");
     assert.ok(fixtures.documentProjectionV3.includes('"candidate_role":"implementation"'));
     assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("search_rerank_document_v3"));

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "satori_rerank_request_contract_v1",
-  "contractSha256": "f9f07b1ecd56851062598a52e804508ae288e32ba8b034bec5a12799f77533d0",
+  "contractSha256": "c9b3d4072dca395a7c83e560bf5c60b8cc8adc27a5f5155dcd44e8f5bbfc453b",
   "fixtures": {
     "answerFocusResolution": {
       "how does Shariah compliance checking block trades": "implementation",
@@ -17,6 +17,14 @@
       "configuration": "Question:\nwhere is the risk threshold configured\n\nAnswer focus: configuration\n\nGuidance:\nRank active configuration declarations and the code that loads or applies them first.",
       "references": "Question:\nwho calls validate_order\n\nAnswer focus: references\n\nGuidance:\nRank direct callers, callees, references, and integration sites that answer the relationship question first.",
       "neutral": "Question:\norder validation overview\n\nAnswer focus: neutral\n\nGuidance:\nRank the candidate that most directly answers the question. Candidate role is evidence, not a fixed preference."
+    },
+    "queryProjectionV2": {
+      "implementation": "Question:\nhow does Shariah compliance checking block trades\n\nRequested answer type:\nproduction implementation, control flow, and integration path",
+      "tests": "Question:\nfind tests for trade veto behavior\n\nRequested answer type:\ntests that directly verify the requested behavior",
+      "documentation": "Question:\nwhat do the docs say about order validation\n\nRequested answer type:\ndocumentation that directly explains the requested topic",
+      "configuration": "Question:\nwhere is the risk threshold configured\n\nRequested answer type:\nactive configuration declarations and the code that applies them",
+      "references": "Question:\nwho calls validate_order\n\nRequested answer type:\ndirect callers, callees, references, and integration sites",
+      "neutral": "Question:\norder validation overview\n\nRequested answer type:\nthe most direct answer to the question"
     },
     "candidateRoleClassification": {
       "src/core/veto.ts|typescript": "implementation",

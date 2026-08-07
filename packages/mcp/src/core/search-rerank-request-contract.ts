@@ -8,6 +8,7 @@ import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY, buildSearchRerankDocumentV3 } from "./search-rerank-document-v3.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
+import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 
@@ -46,6 +47,7 @@ export interface SearchRerankRequestIdentityV1 {
 export type SearchRerankRequestContractFixtures = Readonly<{
     answerFocusResolution: Record<string, string>;
     queryProjectionV1: Record<string, string>;
+    queryProjectionV2: Record<string, string>;
     candidateRoleClassification: Record<string, string>;
     documentProjectionV3: string;
     sourceSelectionPolicyIdentity: string;
@@ -94,13 +96,19 @@ const DOCUMENT_PROJECTION_FIXTURE = Object.freeze({
 export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestContractFixtures {
     const answerFocusResolution: Record<string, string> = {};
     const queryProjectionV1: Record<string, string> = {};
+    const queryProjectionV2: Record<string, string> = {};
     for (const [focus, question] of Object.entries(FOCUS_FIXTURE_QUESTIONS)) {
         const parsedOperators = parseSearchOperators(question);
         const queryPlan = buildSearchQueryPlan(parsedOperators.semanticQuery, true, parsedOperators);
         answerFocusResolution[question] = resolveSearchAnswerFocus(queryPlan).focus;
+        const answerFocus = focus as Parameters<typeof buildSearchRerankQuery>[0]["answerFocus"];
         queryProjectionV1[focus] = buildSearchRerankQuery({
             semanticQuery: question,
-            answerFocus: focus as Parameters<typeof buildSearchRerankQuery>[0]["answerFocus"],
+            answerFocus,
+        });
+        queryProjectionV2[focus] = buildSearchRerankQueryV2({
+            semanticQuery: question,
+            answerFocus,
         });
     }
     const candidateRoleClassification: Record<string, string> = {};
@@ -111,6 +119,7 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
     return {
         answerFocusResolution,
         queryProjectionV1,
+        queryProjectionV2,
         candidateRoleClassification,
         documentProjectionV3: buildSearchRerankDocumentV3(DOCUMENT_PROJECTION_FIXTURE).text,
         sourceSelectionPolicyIdentity: serializeCanonicalJson(SEARCH_RERANK_DOCUMENT_V3_POLICY),
@@ -176,6 +185,7 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
         "documentProjectionV3",
         "partialProjectionSemantics",
         "queryProjectionV1",
+        "queryProjectionV2",
         "sourceSelectionPolicyIdentity",
         "structuralContext",
     ];
@@ -225,6 +235,10 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
             queryProjectionV1: requireStringRecord(
                 fixturesRecord.queryProjectionV1,
                 "fixtures.queryProjectionV1",
+            ),
+            queryProjectionV2: requireStringRecord(
+                fixturesRecord.queryProjectionV2,
+                "fixtures.queryProjectionV2",
             ),
             candidateRoleClassification: requireStringRecord(
                 fixturesRecord.candidateRoleClassification,

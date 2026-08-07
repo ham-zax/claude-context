@@ -1,7 +1,8 @@
 import { SEARCH_RERANK_QUERY_PROJECTION_VERSION } from "./search-rerank-query.js";
+import { SEARCH_RERANK_QUERY_PROJECTION_V2 } from "./search-rerank-query-v2.js";
 
 export const SEARCH_RERANK_QUERY_RAW_IDENTITY = "semantic_query_raw_v1" as const;
-export const SEARCH_RERANK_QUERY_PROJECTION_V2_IDENTITY = "search_rerank_query_v2" as const;
+export const SEARCH_RERANK_QUERY_PROJECTION_V2_IDENTITY = SEARCH_RERANK_QUERY_PROJECTION_V2;
 
 export type SearchRerankQueryProjectionIdentity =
     | typeof SEARCH_RERANK_QUERY_RAW_IDENTITY
