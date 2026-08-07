@@ -24,3 +24,24 @@ test("buildSearchRerankDocument retains the production projection contract", () 
         ].join("\n"),
     );
 });
+
+test("buildSearchRerankDocument carries no ranking or score state", () => {
+    const document = buildSearchRerankDocument({
+        relativePath: "src/search.ts",
+        language: "typescript",
+        symbolLabel: "function rankCandidates",
+        content: "export function rankCandidates() {\n    return [];\n}",
+    });
+    for (const field of [
+        "pathMultiplier",
+        "changedFilesMultiplier",
+        "agentFitMultiplier",
+        "lexicalScore",
+        "fusionScore",
+        "finalScore",
+        "rerankerScore",
+        "authoritativeRank",
+    ]) {
+        assert.ok(!document.includes(field), `document must not leak ${field}`);
+    }
+});

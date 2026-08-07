@@ -115,3 +115,59 @@ test("projection v2 fails closed for stale source or a span outside its owner", 
         },
     }), undefined);
 });
+
+test("projection v2 fails closed without a registry owner", async () => {
+    const base = {
+        content: source,
+        relativePath: owner.file,
+        language: "typescript",
+        score: 1,
+        startLine: 1,
+        endLine: 4,
+    };
+    const readSourceEvidence = async () => {
+        throw new Error("must not read source without a registry owner");
+    };
+    assert.equal(await buildPublicationBoundSearchRerankDocumentV2({
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: { ...base, ownerSymbolInstanceId: "symbol-missing" },
+        registry: registry(),
+        readSourceEvidence,
+    }), undefined);
+    assert.equal(await buildPublicationBoundSearchRerankDocumentV2({
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: base,
+        registry: registry(),
+        readSourceEvidence,
+    }), undefined);
+});
+
+test("projection v2 fails closed for absolute or owner-foreign paths", async () => {
+    const base = {
+        content: source,
+        language: "typescript",
+        score: 1,
+        startLine: 1,
+        endLine: 4,
+        ownerSymbolInstanceId: owner.symbolInstanceId,
+    };
+    const readSourceEvidence = async () => {
+        throw new Error("must not read source for a non-canonical path");
+    };
+    assert.equal(await buildPublicationBoundSearchRerankDocumentV2({
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: { ...base, relativePath: "/repo/src/owner.ts" },
+        registry: registry(),
+        readSourceEvidence,
+    }), undefined);
+    assert.equal(await buildPublicationBoundSearchRerankDocumentV2({
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: { ...base, relativePath: "src/other.ts" },
+        registry: registry(),
+        readSourceEvidence,
+    }), undefined);
+});
