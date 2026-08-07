@@ -56,7 +56,6 @@ import {
 import type { EmbeddingProviderDiagnostic } from "./embedding-provider-diagnostics.js";
 import type { FreshnessDecision } from "./sync.js";
 import {
-    resolveRerankFamilyKey,
     selectRerankCandidates,
     selectRerankInputWithinUtf8Budget,
     type RerankBudgetReason,
@@ -164,8 +163,6 @@ export type SearchCandidate = {
     rerankerRank?: number;
     rerankerScore?: number;
     retrievalPasses: string[];
-    rerankFamilyId?: string;
-    rerankDocumentUtf8Bytes?: number;
 };
 
 export type SearchFilterSummary = {
@@ -280,35 +277,6 @@ export function resolveSearchExpansionDecision(input: {
         reason: "primary_candidate_pool_small",
         primaryScopedCandidateCount: input.primaryScopedCandidateCount,
     };
-}
-
-/**
- * Skip expensive Voyage rerank when the top candidate is already a deterministic exact pin.
- * Safe when exact lexical match owns rank-1 under pinning or must: filters.
- */
-export function shouldSkipRerankForExactPin(input: {
-    scored: ReadonlyArray<Pick<SearchCandidate, "exactLexicalMatch" | "passesMatchedMust">>;
-    exactMatchPinningEnabled: boolean;
-    mustTokenCount: number;
-}): boolean {
-    if (input.scored.length === 0) {
-        return false;
-    }
-    const top = input.scored[0];
-    if (!top.exactLexicalMatch) {
-        return false;
-    }
-    if (input.exactMatchPinningEnabled) {
-        return true;
-    }
-    if (input.mustTokenCount > 0 && top.passesMatchedMust) {
-        return true;
-    }
-    // Sole exact lexical hit — rerank cannot improve ordering among alternatives.
-    if (input.scored.length === 1) {
-        return true;
-    }
-    return false;
 }
 
 export type SearchExecutionOutcome =
@@ -1141,7 +1109,6 @@ export async function runSearchExecution(
                 candidate: SearchCandidate,
                 reason: Parameters<typeof appendSearchCandidateRemoval>[1]["reason"],
             ) => void,
-            trackBoostedCandidate: boolean,
         ): boolean => {
             const category = classifyPathCategory(candidate.result.relativePath);
             if (!shouldIncludeCategoryInScope(input.scope, category)) {
@@ -1218,7 +1185,7 @@ export async function runSearchExecution(
         const evaluateAllCandidates = (): void => {
             scoredAttempt = [];
             for (const candidate of byChunkKey.values()) {
-                if (evaluateCandidate(candidate, attemptFilterSummary, recordFilterRemoval, true)) {
+                if (evaluateCandidate(candidate, attemptFilterSummary, recordFilterRemoval)) {
                     scoredAttempt.push(candidate);
                 }
             }
@@ -1338,11 +1305,6 @@ export async function runSearchExecution(
             const diagnosticCandidates = new Map<string, SearchCandidate>();
             for (const candidate of scoredAttempt) {
                 const candidateId = searchCandidateIdentity(candidate.result).candidateId;
-                candidate.rerankFamilyId = resolveRerankFamilyKey(candidate);
-                candidate.rerankDocumentUtf8Bytes = Buffer.byteLength(
-                    host.searchQuerySupport.buildRerankDocument(candidate.result),
-                    "utf8",
-                );
                 diagnosticCandidates.set(candidateId, candidate);
             }
             const diagnosticFilterSummary = buildEmptyFilterSummary();
@@ -1392,15 +1354,9 @@ export async function runSearchExecution(
                         candidate,
                         diagnosticFilterSummary,
                         recordDiagnosticRemoval,
-                        false,
                     )) {
                         continue;
                     }
-                    candidate.rerankFamilyId = resolveRerankFamilyKey(candidate);
-                    candidate.rerankDocumentUtf8Bytes = Buffer.byteLength(
-                        host.searchQuerySupport.buildRerankDocument(candidate.result),
-                        "utf8",
-                    );
                     diagnosticCandidates.set(candidateId, candidate);
                 }
             }
