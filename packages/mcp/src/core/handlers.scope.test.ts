@@ -11381,6 +11381,61 @@ test('handleSearchCode subdirectory query publishes the effective root once and 
     });
 });
 
+test('handleSearchCode subdirectory scope keeps sibling candidate pools disjoint', async () => {
+    await withTempRepo(async (repoPath) => {
+        fs.mkdirSync(path.join(repoPath, 'src', 'alpha'), { recursive: true });
+        fs.mkdirSync(path.join(repoPath, 'src', 'beta'), { recursive: true });
+        const handlers = createHandlers(repoPath, [
+            {
+                content: 'const alphaToken = computeAlpha();',
+                relativePath: 'src/alpha/alpha.ts',
+                startLine: 10,
+                endLine: 12,
+                language: 'typescript',
+                score: 0.9,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+            },
+            {
+                content: 'const betaToken = computeBeta();',
+                relativePath: 'src/beta/beta.ts',
+                startLine: 10,
+                endLine: 12,
+                language: 'typescript',
+                score: 0.95,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+            },
+        ]);
+
+        const alphaResponse = await handlers.handleSearchCode({
+            path: path.join(repoPath, 'src', 'alpha'),
+            query: 'compute token',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 10,
+        });
+        const alphaPayload = JSON.parse(alphaResponse.content[0]?.text || '{}');
+        assert.deepEqual(
+            alphaPayload.results.map((result: { target: { file: string } }) => result.target.file),
+            ['src/alpha/alpha.ts'],
+        );
+
+        const betaResponse = await handlers.handleSearchCode({
+            path: path.join(repoPath, 'src', 'beta'),
+            query: 'compute token',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 10,
+        });
+        const betaPayload = JSON.parse(betaResponse.content[0]?.text || '{}');
+        assert.deepEqual(
+            betaPayload.results.map((result: { target: { file: string } }) => result.target.file),
+            ['src/beta/beta.ts'],
+        );
+    });
+});
+
 test('handleSearchCode grouped sorting places null symbolLabel last for deterministic tie-breaking', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [

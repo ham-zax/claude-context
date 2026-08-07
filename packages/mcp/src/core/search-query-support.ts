@@ -28,6 +28,7 @@ import {
 } from "./search-constants.js";
 import { buildSearchRerankDocument } from "./search-rerank-document.js";
 import type { SearchNoiseMitigationHint, SearchOperatorSummary } from "./search-types.js";
+import { candidateWithinRequestedSubdirectory, type RequestedSearchSubdirectory } from "./search-requested-scope.js";
 import type { ExactRegistryLookupDebug } from "./search/exact-registry.js";
 import {
     hasTokenBoundaryMatch as hasSearchTokenBoundaryMatch,
@@ -1289,12 +1290,16 @@ export class SearchQuerySupport {
     public buildExactRegistrySymbolFilter(input: {
         scope: SearchScope;
         parsedOperators: ParsedSearchOperators;
+        requestedSubdirectory?: RequestedSearchSubdirectory | null;
     }): (symbol: SymbolRecord) => boolean {
         const includePathMatcher = this.buildSearchPathMatcher(input.parsedOperators.path);
         const excludePathMatcher = this.buildSearchPathMatcher(input.parsedOperators.excludePath);
         return (symbol: SymbolRecord): boolean => {
             const relativePath = this.normalizeRelativePathForIgnoreCheck(symbol.file);
             if (!relativePath) {
+                return false;
+            }
+            if (!candidateWithinRequestedSubdirectory(relativePath, input.requestedSubdirectory ?? null)) {
                 return false;
             }
             const category = this.classifyPathCategory(relativePath);

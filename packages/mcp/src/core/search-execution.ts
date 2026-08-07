@@ -41,6 +41,10 @@ import {
 } from "./search-candidate-survival.js";
 import { WARNING_CODES, type WarningCode } from "./warnings.js";
 import {
+    candidateWithinRequestedSubdirectory,
+    type RequestedSearchSubdirectory,
+} from "./search-requested-scope.js";
+import {
     buildSearchPassWarning as buildSearchPassWarningHelper,
 } from "./search-response-helpers.js";
 import {
@@ -177,6 +181,7 @@ export type SearchCandidate = {
 };
 
 export type SearchFilterSummary = {
+    removedByRequestedSubdirectory: number;
     removedByScope: number;
     removedByLanguage: number;
     removedByPathInclude: number;
@@ -414,6 +419,7 @@ export type SearchExecutionInput = {
     observedChangedFilesState: ChangedFilesState;
     retrievalPolicy: ResolvedSearchPolicy;
     entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
+    requestedSubdirectory?: RequestedSearchSubdirectory | null;
 };
 
 type RerankPhaseResult = {
@@ -820,6 +826,7 @@ async function rerankSearchCandidates(
 
 function buildEmptyFilterSummary(): SearchFilterSummary {
     return {
+        removedByRequestedSubdirectory: 0,
         removedByScope: 0,
         removedByLanguage: 0,
         removedByPathInclude: 0,
@@ -1267,6 +1274,15 @@ export async function runSearchExecution(
             if (!shouldIncludeCategoryInScope(input.scope, category)) {
                 summary.removedByScope += 1;
                 recordRemoval(candidate, "scope_filter");
+                return false;
+            }
+
+            if (!candidateWithinRequestedSubdirectory(
+                String(candidate.result.relativePath || ""),
+                input.requestedSubdirectory ?? null,
+            )) {
+                summary.removedByRequestedSubdirectory += 1;
+                recordRemoval(candidate, "requested_subdirectory_filter");
                 return false;
             }
 

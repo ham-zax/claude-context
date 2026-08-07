@@ -288,6 +288,7 @@ export interface SearchCandidateSurvivalRemoval {
         | "core_fusion_limit"
         | "dirty_source_suppressed"
         | "scope_filter"
+        | "requested_subdirectory_filter"
         | "language_filter"
         | "path_include_filter"
         | "path_exclude_filter"
@@ -538,6 +539,7 @@ export interface SearchDebugHint {
     };
     operatorSummary: SearchOperatorSummary;
     filterSummary: {
+        removedByRequestedSubdirectory: number;
         removedByScope: number;
         removedByLanguage: number;
         removedByPathInclude: number;

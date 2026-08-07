@@ -38,6 +38,7 @@ import type { FreshnessDecision } from "./sync.js";
 import type { CompletionProbeDebugHint } from "./tracked-root-readiness.js";
 import { buildSearchDebugSummary, buildSearchGroupPreview } from "./search-response-helpers.js";
 import { WARNING_CODES } from "./warnings.js";
+import type { RequestedSearchSubdirectory } from "./search-requested-scope.js";
 import { createSearchCandidateSurvivalTrace } from "./search-candidate-survival.js";
 import type {
     RelationshipBackedCallGraphInput,
@@ -77,6 +78,7 @@ type NavigationState = {
 type SearchExactFastPathInput = {
     absolutePath: string;
     effectiveRoot: string;
+    requestedSubdirectory: RequestedSearchSubdirectory | null;
     query: string;
     scope: SearchScope;
     groupBy: SearchGroupBy;
@@ -230,6 +232,7 @@ export async function runExactRegistryFastPath(
     const filterSymbol = host.searchQuerySupport.buildExactRegistrySymbolFilter({
         scope: input.scope,
         parsedOperators: input.parsedOperators,
+        requestedSubdirectory: input.requestedSubdirectory,
     });
     const exactRegistryMatch = await host.measureSearchPhase("exactRegistry", async () => findExactRegistryMatch({
         registry: registryState.registry,

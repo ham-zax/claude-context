@@ -27,6 +27,7 @@ import type {
     SearchRerankProjectionResult,
 } from "./search-rerank-projection-result.js";
 import { resolveSearchPolicy } from "./search-policy.js";
+import { resolveRequestedSearchSubdirectory } from "./search-requested-scope.js";
 
 type FixtureCandidate = {
     candidateId: string;
@@ -289,6 +290,66 @@ test("filters are complete before native provider admission", async () => {
         outcome.scored.map((entry) => entry.result.candidateId),
         ["allowed-2", "allowed"],
     );
+});
+
+test("requested subdirectory is a hard scope before native provider admission", async () => {
+    const providerCandidateIds: string[][] = [];
+    const reranker = buildReranker((documents) => reverseResults(documents), (_documents, candidateIds) => {
+        providerCandidateIds.push([...candidateIds]);
+    });
+    const results = [
+        candidate("in-scope", "src/alpha/a.ts", 0.7),
+        candidate("in-scope-2", "src/alpha/nested/a2.ts", 0.65),
+        candidate("sibling", "src/beta/b.ts", 0.99),
+        candidate("prefix-collision", "src/alpha-x/c.ts", 0.95),
+    ];
+    const outcome = await run(
+        {
+            ...buildInput("find the relevant implementation"),
+            requestedSubdirectory: resolveRequestedSearchSubdirectory({
+                indexedRoot: "/repo",
+                requestedPath: "/repo/src/alpha",
+            }),
+        },
+        buildHost(results, reranker),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.deepEqual(providerCandidateIds, [["in-scope", "in-scope-2"]]);
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["in-scope-2", "in-scope"],
+    );
+    assert.equal(outcome.filterSummary.removedByRequestedSubdirectory, 2);
+});
+
+test("root requests admit every candidate when no subdirectory is requested", async () => {
+    const providerCandidateIds: string[][] = [];
+    const reranker = buildReranker((documents) => reverseResults(documents), (_documents, candidateIds) => {
+        providerCandidateIds.push([...candidateIds]);
+    });
+    const results = [
+        candidate("a", "src/alpha/a.ts", 0.9),
+        candidate("b", "src/beta/b.ts", 0.8),
+    ];
+    const requestedSubdirectory = resolveRequestedSearchSubdirectory({
+        indexedRoot: "/repo",
+        requestedPath: "/repo",
+    });
+    assert.equal(requestedSubdirectory, null);
+    const outcome = await run(
+        {
+            ...buildInput("find the relevant implementation"),
+            requestedSubdirectory,
+        },
+        buildHost(results, reranker),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.deepEqual(providerCandidateIds, [["a", "b"]]);
+    assert.equal(outcome.filterSummary.removedByRequestedSubdirectory, 0);
 });
 
 test("native execution preserves an exact-owned prefix and reranks only its suffix", async () => {

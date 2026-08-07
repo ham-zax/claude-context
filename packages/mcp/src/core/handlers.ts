@@ -120,6 +120,7 @@ import {
     SEARCH_GROUP_PREVIEW_MAX_BYTES,
 } from "./search-response-helpers.js";
 import { runSearchFrontDoor } from "./search-frontdoor.js";
+import { resolveRequestedSearchSubdirectory } from "./search-requested-scope.js";
 import {
     classifyPathCategory,
     hasPathSegment as hasSearchPathSegment,
@@ -4465,6 +4466,10 @@ export class ToolHandlers {
             if (searchableRoot.path !== absolutePath) {
                 console.log(`[SEARCH] Auto-resolved subdirectory '${absolutePath}' to indexed root '${searchableRoot.path}'`);
             }
+            const requestedSubdirectory = resolveRequestedSearchSubdirectory({
+                indexedRoot: effectiveRoot,
+                requestedPath: absolutePath,
+            });
             const encoderEngine = this.context.getEmbeddingEngine();
             const rootTag = `[SEARCH][root=${effectiveRoot}]`;
             const requestId = crypto.randomUUID();
@@ -4494,6 +4499,7 @@ export class ToolHandlers {
             const maxAttempts = retrievalPolicy.maxAttempts;
             const candidateLimit = retrievalPolicy.candidateLimit;
             const initialFilterSummary: SearchFilterSummary = {
+                removedByRequestedSubdirectory: 0,
                 removedByScope: 0,
                 removedByLanguage: 0,
                 removedByPathInclude: 0,
@@ -4721,6 +4727,7 @@ export class ToolHandlers {
             const exactFastPath = await runExactRegistryFastPath({
                 absolutePath,
                 effectiveRoot,
+                requestedSubdirectory,
                 query: input.query,
                 scope: input.scope,
                 groupBy: input.groupBy,
@@ -5001,6 +5008,7 @@ export class ToolHandlers {
                 observedChangedFilesState: initialObservedChangedFilesState,
                 retrievalPolicy,
                 entrypointOwnerEvidence,
+                requestedSubdirectory,
             }, {
                 searchQuerySupport: this.searchQuerySupport,
                 semanticSearch: (request) => {
