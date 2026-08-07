@@ -1,5 +1,10 @@
 # Satori Ranking Policy V3 Implementation Plan
 
+> **ABANDONED / DO NOT EXECUTE.** This document is retained as historical planning
+> context only. It has no dispatch, runtime, registry, receipt, experiment, grading,
+> qualification, or release-gate authority. The active replacement is
+> `docs/superpowers/specs/2026-08-07-native-reranker-ordering-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Dispatch only from the current sealed R0.1B or DX card-set manifest.
 
 **Goal:** introduce an opt-in, qualification-gated ranking policy that adds a bounded deterministic residual and, when preregistered, a provider-derived admitted-slot permutation without changing eligibility, reranker admission, exact controls, failure fallback, or pagination semantics.
