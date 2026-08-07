@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { serializeCanonicalJson } from "./canonical-json.js";
+import type { SearchRerankRequestIdentityV1 } from "./search-rerank-request-contract.js";
 import type {
     SearchGroupedResultV2,
     SearchRecommendedNextAction,
@@ -41,6 +42,7 @@ export type SearchRankedSetBindingInput = Readonly<{
     sourceObservation: string | null;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
+    rerankerRequestIdentity: SearchRerankRequestIdentityV1 | null;
     orderedResults: readonly SearchGroupedResultV2[];
     recommendedActions: readonly (SearchRecommendedNextAction | null)[];
 }>;
@@ -55,6 +57,7 @@ export type SearchRankedSetBinding = Readonly<{
     sourceObservation: string | null;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
+    rerankerRequestIdentity: SearchRerankRequestIdentityV1 | null;
     orderedGroups: readonly Readonly<{
         groupIdentity: string;
         pageableProjectionDigest: string;
@@ -141,6 +144,26 @@ export function buildSearchRankedSetBinding(
         requireIdentityText(input.rerankerIdentity.provider, "reranker provider");
         requireIdentityText(input.rerankerIdentity.model, "reranker model");
         requireIdentityText(input.rerankerIdentity.profile, "reranker profile");
+        if (!input.rerankerRequestIdentity) {
+            throw new Error("Applied search reranking requires a complete rerank request identity.");
+        }
+        requireIdentityText(input.rerankerRequestIdentity.provider, "rerank request provider");
+        requireIdentityText(input.rerankerRequestIdentity.model, "rerank request model");
+        requireIdentityText(input.rerankerRequestIdentity.profile, "rerank request profile");
+        requireIdentityText(
+            input.rerankerRequestIdentity.queryProjectionIdentity,
+            "rerank request query projection",
+        );
+        requireIdentityText(
+            input.rerankerRequestIdentity.documentProjectionIdentity,
+            "rerank request document projection",
+        );
+        requireIdentityText(
+            input.rerankerRequestIdentity.requestContractSha256,
+            "rerank request contract digest",
+        );
+    } else if (input.rerankerRequestIdentity !== null) {
+        throw new Error("Deterministic baseline ranked sets must not carry a rerank request identity.");
     }
 
     const orderedGroups = input.orderedResults.map((result, index) => ({
@@ -160,6 +183,7 @@ export function buildSearchRankedSetBinding(
         sourceObservation: input.sourceObservation,
         rerankerIdentity: input.rerankerIdentity,
         rerankerProjectionIdentity: input.rerankerProjectionIdentity,
+        rerankerRequestIdentity: input.rerankerRequestIdentity,
         orderedGroups,
     };
     return {

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "satori_rerank_request_contract_v1",
+  "contractSha256": "f9f07b1ecd56851062598a52e804508ae288e32ba8b034bec5a12799f77533d0",
+  "fixtures": {
+    "answerFocusResolution": {
+      "how does Shariah compliance checking block trades": "implementation",
+      "find tests for trade veto behavior": "tests",
+      "what do the docs say about order validation": "documentation",
+      "where is the risk threshold configured": "configuration",
+      "who calls validate_order": "references",
+      "order validation overview": "neutral"
+    },
+    "queryProjectionV1": {
+      "implementation": "Question:\nhow does Shariah compliance checking block trades\n\nAnswer focus: implementation\n\nGuidance:\nRank the production mechanism and its integration path first. Tests and documentation are supporting evidence unless they are the clearest direct answer.",
+      "tests": "Question:\nfind tests for trade veto behavior\n\nAnswer focus: tests\n\nGuidance:\nRank tests that directly prove the requested behavior first. Production code may be supporting context.",
+      "documentation": "Question:\nwhat do the docs say about order validation\n\nAnswer focus: documentation\n\nGuidance:\nRank documentation that directly explains the requested topic first. Code may be supporting context.",
+      "configuration": "Question:\nwhere is the risk threshold configured\n\nAnswer focus: configuration\n\nGuidance:\nRank active configuration declarations and the code that loads or applies them first.",
+      "references": "Question:\nwho calls validate_order\n\nAnswer focus: references\n\nGuidance:\nRank direct callers, callees, references, and integration sites that answer the relationship question first.",
+      "neutral": "Question:\norder validation overview\n\nAnswer focus: neutral\n\nGuidance:\nRank the candidate that most directly answers the question. Candidate role is evidence, not a fixed preference."
+    },
+    "candidateRoleClassification": {
+      "src/core/veto.ts|typescript": "implementation",
+      "tests/veto.test.ts|typescript": "test",
+      "docs/architecture.md|markdown": "documentation",
+      "config/risk.toml|toml": "configuration"
+    },
+    "documentProjectionV3": "{\"candidate_role\":\"implementation\",\"canonical_symbol_label\":\"validate_order\",\"documentation_excerpt\":\"\",\"language\":\"typescript\",\"query_relevant_source_excerpt\":\"function validate_order(order) {\\n    return check_shariah_compliance(order);\\n}\",\"repository_relative_path\":\"src/core/veto.ts\",\"required_owner_siblings\":[],\"signature_or_declaration\":\"function validate_order(order) {\",\"symbol_kind\":\"function\"}",
+    "sourceSelectionPolicyIdentity": "{\"addedField\":\"candidate_role\",\"id\":\"search_rerank_document_v3\",\"maximumUtf8Bytes\":4000,\"previousVersion\":\"search_rerank_document_v2\",\"serialization\":\"canonical_json_utf8\",\"serializedKeyOrder\":\"lexicographic_recursive_canonical_json_v1\"}",
+    "canonicalJsonIdentity": "{\"a\":[2,{\"c\":null,\"d\":\"x\"}],\"b\":1}",
+    "structuralContext": {
+      "maxDirectCallers": 3,
+      "maxDirectCallees": 3,
+      "maxSupportingTests": 2,
+      "orderBy": [
+        "relation",
+        "repository_relative_path",
+        "canonical_symbol_label"
+      ],
+      "referenceSourceText": false
+    },
+    "partialProjectionSemantics": {
+      "warnings": [
+        "RERANKER_INPUT_DEGRADED",
+        "RERANKER_SKIPPED_INPUT",
+        "RERANKER_FAILED"
+      ],
+      "providerNeverCalledOnZeroProjectable": true
+    }
+  }
+}

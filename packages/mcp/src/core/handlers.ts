@@ -229,6 +229,10 @@ import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
+import {
+    resolveSearchRerankRequestIdentity,
+    type SearchRerankRequestIdentityV1,
+} from "./search-rerank-request-contract.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import type {
     SearchQueryPlan,
@@ -401,6 +405,17 @@ function resolveSearchRerankerProjectionIdentity(
     return projection;
 }
 
+function resolveSearchRerankRequestIdOrNone(
+    reranker: Reranker | null,
+    rerankerApplied: boolean,
+): SearchRerankRequestIdentityV1 | null {
+    if (!rerankerApplied) return null;
+    if (!reranker) {
+        throw new Error("Applied search reranking requires a complete rerank request identity.");
+    }
+    return resolveSearchRerankRequestIdentity(reranker);
+}
+
 function buildFrozenSearchRankedSetBindingInput(input: {
     vectorReceipt: ProvenVectorGenerationReceipt;
     generationReceipt?: ProvenGenerationReceipt;
@@ -409,6 +424,7 @@ function buildFrozenSearchRankedSetBindingInput(input: {
     queryPolicyDigest: string;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
+    rerankerRequestIdentity: SearchRerankRequestIdentityV1 | null;
     rankingPolicyIdentity: string;
     orderedResults: readonly SearchGroupedResultV2[];
     recommendedActions: readonly (SearchRecommendedNextAction | null)[];
@@ -429,6 +445,7 @@ function buildFrozenSearchRankedSetBindingInput(input: {
         sourceObservation: input.sourceObservation,
         rerankerIdentity: input.rerankerIdentity,
         rerankerProjectionIdentity: input.rerankerProjectionIdentity,
+        rerankerRequestIdentity: input.rerankerRequestIdentity,
         orderedResults: input.orderedResults,
         recommendedActions: input.recommendedActions,
     };
@@ -4576,6 +4593,10 @@ export class ToolHandlers {
                     this.reranker,
                     rerankerApplied,
                 );
+                const rerankerRequestIdentity = resolveSearchRerankRequestIdOrNone(
+                    this.reranker,
+                    rerankerApplied,
+                );
                 const bindingInput = buildFrozenSearchRankedSetBindingInput({
                     vectorReceipt,
                     ...(generationReceipt ? { generationReceipt } : {}),
@@ -4584,6 +4605,7 @@ export class ToolHandlers {
                     queryPolicyDigest,
                     rerankerIdentity,
                     rerankerProjectionIdentity,
+                    rerankerRequestIdentity,
                     rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
                         orderAuthority,
                     }),
@@ -5410,6 +5432,10 @@ export class ToolHandlers {
                 this.reranker,
                 entry.rankedSetBinding.rerankerIdentity.kind === "provider",
             );
+            const rerankerRequestIdentity = resolveSearchRerankRequestIdOrNone(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
             bindingValid = entry.baseEnvelope.rankedSetDigest
                 === entry.rankedSetBinding.rankedSetDigest
                 && verifySearchRankedSetBinding(
@@ -5424,6 +5450,7 @@ export class ToolHandlers {
                         queryPolicyDigest: entry.queryPolicyDigest,
                         rerankerIdentity,
                         rerankerProjectionIdentity,
+                        rerankerRequestIdentity,
                         rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
                             orderAuthority: entry.rankedSetBinding.rerankerIdentity.kind === "provider"
                                 ? "reranker_order"

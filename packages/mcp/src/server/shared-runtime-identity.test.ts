@@ -16,6 +16,7 @@ import {
     removeOwnedLifecycleState,
     writeHostMetadataAtomic,
 } from "./shared-runtime-lifecycle.js";
+import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
 
 const runtimeEntry = path.resolve("dist/index.js");
 
@@ -313,4 +314,24 @@ test("lifecycle cleanup removes only the socket and metadata owned by the exitin
         JSON.parse(fs.readFileSync(paths.metadataPath, "utf8")).ownershipToken,
         "replacement-owner",
     );
+});
+
+test("shared runtime identity binds the LateOn rerank request contract digest", (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-contract-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const env = offlineEnv(root);
+
+    const plainIdentity = buildSharedRuntimeIdentity(runtimeEntry, env);
+    assert.equal(plainIdentity.lateOnRequestContractSha256, "");
+
+    const lateOnIdentity = buildSharedRuntimeIdentity(runtimeEntry, {
+        ...env,
+        SATORI_RERANKER_PROVIDER: "lateon",
+        SATORI_LATEON_MODEL_PATH: path.join(root, "lateon"),
+    });
+    const committedDigest = loadSearchRerankRequestContract().contractSha256;
+    assert.match(committedDigest, /^[a-f0-9]{64}$/);
+    assert.equal(lateOnIdentity.lateOnRequestContractSha256, committedDigest);
+    assert.notEqual(lateOnIdentity.hash, plainIdentity.hash);
 });

@@ -30,6 +30,14 @@ function input(): SearchRankedSetBindingInput {
             profile: "e".repeat(64),
         },
         rerankerProjectionIdentity: "search_rerank_document_v1",
+        rerankerRequestIdentity: {
+            provider: "lateon",
+            model: "lightonai/LateOn-Code-edge@revision-1",
+            profile: "e".repeat(64),
+            queryProjectionIdentity: "search_rerank_query_v1",
+            documentProjectionIdentity: "search_rerank_document_v1",
+            requestContractSha256: "f".repeat(64),
+        },
         orderedResults: [{
             target: {
                 file: "src/owner.ts",
@@ -194,4 +202,58 @@ test("ranked-set binding rejects incomplete publication authority", () => {
             profile: "e".repeat(64),
         },
     }), /reranker model identity must be non-empty/);
+});
+
+test("ranked-set digest binds the complete rerank request identity", () => {
+    const baseline = buildSearchRankedSetBinding(input()).rankedSetDigest;
+    const variants = [
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                queryProjectionIdentity: "search_rerank_query_v2",
+            },
+        })),
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                requestContractSha256: "0".repeat(64),
+            },
+        })),
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                documentProjectionIdentity: "semantic_document_raw_v1",
+            },
+        })),
+    ];
+
+    for (const variant of variants) {
+        const binding = buildSearchRankedSetBinding(variant);
+        assert.notEqual(binding.rankedSetDigest, baseline);
+        assert.equal(verifySearchRankedSetBinding(binding, input()), false);
+    }
+});
+
+test("applied reranking requires a complete request identity; baselines reject one", () => {
+    assert.throws(() => buildSearchRankedSetBinding(
+        withMutation((value) => ({ ...value, rerankerRequestIdentity: null })),
+    ), /requires a complete rerank request identity/);
+    assert.throws(() => buildSearchRankedSetBinding(
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                requestContractSha256: "",
+            },
+        })),
+    ), /rerank request contract digest identity must be non-empty/);
+    assert.throws(() => buildSearchRankedSetBinding(
+        withMutation((value) => ({
+            ...value,
+            rerankerIdentity: { kind: "deterministic_baseline", policy: "B" },
+        })),
+    ), /must not carry a rerank request identity/);
 });

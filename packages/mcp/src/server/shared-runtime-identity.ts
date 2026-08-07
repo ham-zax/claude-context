@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
 import { LATEON_RUNTIME_PROFILE_IDS } from "./lateon-reranker-protocol.js";
 
 export const SHARED_RUNTIME_PROTOCOL_VERSION = 2;
@@ -38,6 +39,7 @@ export type SharedRuntimeIdentity = Readonly<{
     lateOnMaximumActiveReranks: string;
     lateOnMaximumQueuedReranks: string;
     lateOnIntraOpThreads: string;
+    lateOnRequestContractSha256: string;
     vectorStoreProvider: string;
     lanceDbPath: string;
     watcherEnabled: string;
@@ -132,6 +134,15 @@ export function isSharedOfflineRuntimeEligible(
         && architecture === "x64";
 }
 
+function resolveLateOnRequestContractDigest(env: NodeJS.ProcessEnv): string {
+    if (env.SATORI_RERANKER_PROVIDER !== "lateon") return "";
+    try {
+        return loadSearchRerankRequestContract().contractSha256;
+    } catch {
+        return "";
+    }
+}
+
 export function buildSharedRuntimeIdentity(
     runtimeEntry: string,
     env: NodeJS.ProcessEnv,
@@ -178,6 +189,7 @@ export function buildSharedRuntimeIdentity(
         lateOnMaximumActiveReranks: env.SATORI_LATEON_MAX_ACTIVE_RERANKS ?? "",
         lateOnMaximumQueuedReranks: env.SATORI_LATEON_MAX_QUEUED_RERANKS ?? "",
         lateOnIntraOpThreads: env.SATORI_LATEON_INTRA_OP_THREADS ?? "",
+        lateOnRequestContractSha256: resolveLateOnRequestContractDigest(env),
         vectorStoreProvider: env.VECTOR_STORE_PROVIDER ?? "",
         lanceDbPath: env.LANCEDB_PATH
             ? canonicalizePath(env.LANCEDB_PATH)
