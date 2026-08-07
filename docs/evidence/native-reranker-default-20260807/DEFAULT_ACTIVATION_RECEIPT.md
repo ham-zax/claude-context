@@ -2,15 +2,18 @@
 
 Date: 2026-08-07
 
-The missing `SATORI_RERANK_APPLICATION_MODE` value now resolves to
-`native_order`. Explicit `legacy_rrf` remains available only as the temporary
-rollback path until the legacy application branch is removed.
+The native reranker order is the only ranking authority. The
+`SATORI_RERANK_APPLICATION_MODE` variable and the `legacy_rrf` application
+branch have been removed; if the variable is still present, CLI and MCP
+configuration checks fail loudly with a rollback instruction instead of
+silently ignoring it.
 
 Verification performed for this activation:
 
-- MCP configuration default and strict parsing tests pass.
-- CLI runtime configuration default and strict parsing tests pass.
-- Shared-runtime identity differs when the explicit mode changes.
+- MCP configuration rejects a present `SATORI_RERANK_APPLICATION_MODE`.
+- CLI runtime configuration reports a `rerank_application_mode` error for a
+  present `SATORI_RERANK_APPLICATION_MODE`.
 - Native execution tests prove provider order and retrieval-order fallback.
+- Grouping and diversity preserve the accepted provider order.
 
 The exact activation commit is recorded by git history for this repository.

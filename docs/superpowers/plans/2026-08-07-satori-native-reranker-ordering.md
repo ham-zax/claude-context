@@ -1,6 +1,11 @@
 # Satori Native Reranker Ordering Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **STATUS: IMPLEMENTED / HISTORICAL — DO NOT EXECUTE.** Native reranker ordering
+> is now mandatory in production (`search_native_retrieval_order_v1` /
+> `search_native_reranker_order_v1`). The staged `legacy_rrf` rollout sections
+> below describe implementation history only; the legacy mode, its configuration
+> variable, and its scoring machinery have been deleted. Setting
+> `SATORI_RERANK_APPLICATION_MODE` now fails startup by design.
 
 **Goal:** Remove Satori's local relevance weighting and fixed reranker-RRF blend so that deterministic rules control eligibility and safety, retrieval creates the candidate pool, and a complete validated reranker response supplies the authoritative result order.
 
