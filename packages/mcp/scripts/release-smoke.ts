@@ -17,7 +17,7 @@ function npmOutput(error: unknown): string {
     return `${stdout}\n${stderr}\n${error.message}`.trim();
 }
 
-function packPackage(packageRoot: string, smokePackDir: string): string {
+export function packPackage(packageRoot: string, smokePackDir: string): string {
     const beforeFiles = new Set(fs.readdirSync(smokePackDir));
     execFileSync("pnpm", ["pack", "--pack-destination", smokePackDir], {
         cwd: packageRoot,
@@ -149,7 +149,7 @@ function runInitializeSmoke(
     });
 }
 
-function installPackedRuntimeClosure(
+export function installPackedRuntimeClosure(
     coreTarballPath: string,
     tarballPath: string,
     smokeExecDir: string,
@@ -210,6 +210,60 @@ function installPackedRuntimeClosure(
     };
 }
 
+export function resolveInstalledPotionPaths(runtimeRoot: string): {
+    helperPath: string;
+    modelPath: string;
+} {
+    const potionAssetsRoot = path.join(
+        runtimeRoot,
+        "node_modules",
+        "@zokizuan",
+        "satori-mcp",
+        "assets",
+        "potion",
+        "linux-x64",
+    );
+    return {
+        helperPath: path.join(potionAssetsRoot, "satori-potion"),
+        modelPath: path.join(potionAssetsRoot, "model"),
+    };
+}
+
+export async function runPackedPotionSmoke(runtimeRoot: string): Promise<void> {
+    const { helperPath, modelPath } = resolveInstalledPotionPaths(runtimeRoot);
+    if (!fs.existsSync(helperPath) || !fs.existsSync(modelPath)) {
+        throw new Error(`Packed Potion assets are missing under ${runtimeRoot}.`);
+    }
+    const coreEntry = path.join(runtimeRoot, "node_modules", "@zokizuan", "satori-core", "dist", "index.js");
+    if (!fs.existsSync(coreEntry)) {
+        throw new Error(`Packed Core entry is missing under ${runtimeRoot}.`);
+    }
+    const core = await import(pathToFileURL(coreEntry).href) as {
+        PotionEmbedding: {
+            create(config: Readonly<{ helperPath: string; modelPath: string }>): Promise<{
+                embedQuery(text: string): Promise<{ vector: number[]; dimension: number }>;
+                close(): Promise<void>;
+            }>;
+        };
+    };
+    // create() verifies the pinned artifact closure and repairs the owner
+    // execute bit on the trusted helper before any native code runs.
+    const embedding = await core.PotionEmbedding.create({ helperPath, modelPath });
+    try {
+        const result = await embedding.embedQuery("release smoke");
+        if (
+            result.dimension !== 256
+            || !Array.isArray(result.vector)
+            || result.vector.length !== 256
+            || !result.vector.every((value) => Number.isFinite(value))
+        ) {
+            throw new Error("Packed Potion smoke did not return a finite 256-dimensional embedding.");
+        }
+    } finally {
+        await embedding.close();
+    }
+}
+
 function runPackedCoreParserSmoke(runtimeRoot: string): void {
     const script = [
         "const { createLanguageAnalysisService, GeminiEmbedding } = require('@zokizuan/satori-core');",
@@ -252,6 +306,9 @@ async function main(): Promise<void> {
         const coreTarballPath = packPackage(corePackageRoot, smokePackDir);
         const tarballPath = packPackage(packageRoot, smokePackDir);
         const packedRuntime = installPackedRuntimeClosure(coreTarballPath, tarballPath, smokeExecDir);
+        if (process.platform === "linux" && process.arch === "x64") {
+            await runPackedPotionSmoke(packedRuntime.runtimeRoot);
+        }
         runPackedCoreParserSmoke(packedRuntime.runtimeRoot);
         execFileSync(process.execPath, [
             "-e",
@@ -286,8 +343,10 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[release:smoke] ${message}`);
-    process.exit(1);
-});
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+    void main().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[release:smoke] ${message}`);
+        process.exit(1);
+    });
+}
