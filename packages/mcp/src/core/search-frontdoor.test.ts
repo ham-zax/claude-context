@@ -598,6 +598,122 @@ test('search front door does not wait for a sync without a searchable generation
     }
 });
 
+test('search front door enriches a freshness-blocked indexing payload with retry and operation metadata', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-search-frontdoor-freshness-indexing-'));
+    const indexingPayload = {
+        formatVersion: 'test',
+        status: 'not_ready' as const,
+        reason: 'indexing' as const,
+        codebasePath: tempRoot,
+        path: tempRoot,
+        query: 'owner',
+        scope: 'runtime',
+        groupBy: 'symbol',
+        resultMode: 'grouped',
+        limit: 5,
+        results: [],
+    };
+    const host = {
+        prepareInitialTrackedRootRead: async () => ({
+            state: 'ready' as const,
+            root: { path: tempRoot, info: { status: 'indexed' as const } },
+        }),
+        preparePostFreshnessTrackedRootRead: async () => ({
+            state: 'ready' as const,
+            root: { path: tempRoot, info: { status: 'indexed' as const } },
+        }),
+        ensureSearchFreshness: async () => ({
+            mode: 'skipped_indexing' as const,
+            changed: false,
+            checkedAt: 'x',
+            thresholdMs: 60_000,
+        }),
+        noteFreshnessMode: () => undefined,
+        buildFreshnessBlockedSearchPayload: () => indexingPayload,
+        getIndexingOperation: () => ({ action: 'reindex' as const, phase: 'writing', generation: 4 }),
+        isPartialIndexNavigationUnavailable: () => false,
+        partialIndexWarnings: [],
+        canSyncStaleLocal: () => false,
+        trackedRootReadiness: {},
+    } as unknown as SearchFrontDoorHost;
+    try {
+        const result = await runSearchFrontDoor({
+            path: tempRoot,
+            query: 'owner',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+        }, host);
+        assert.equal(result.kind, 'blocked');
+        if (result.kind !== 'blocked') return;
+        assert.equal(result.payload.status, 'not_ready');
+        assert.equal(result.payload.reason, 'indexing');
+        assert.equal(result.payload.retryAfterMs, DEFAULT_MANAGE_RETRY_AFTER_MS);
+        assert.deepEqual(result.payload.indexingOperation, { action: 'reindex', phase: 'writing', generation: 4 });
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('search front door still reports the retry hint when a freshness indexing block has no operation receipt', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-search-frontdoor-freshness-indexing-noop-'));
+    const indexingPayload = {
+        formatVersion: 'test',
+        status: 'not_ready' as const,
+        reason: 'indexing' as const,
+        codebasePath: tempRoot,
+        path: tempRoot,
+        query: 'owner',
+        scope: 'runtime',
+        groupBy: 'symbol',
+        resultMode: 'grouped',
+        limit: 5,
+        results: [],
+    };
+    const host = {
+        prepareInitialTrackedRootRead: async () => ({
+            state: 'ready' as const,
+            root: { path: tempRoot, info: { status: 'indexed' as const } },
+        }),
+        preparePostFreshnessTrackedRootRead: async () => ({
+            state: 'ready' as const,
+            root: { path: tempRoot, info: { status: 'indexed' as const } },
+        }),
+        ensureSearchFreshness: async () => ({
+            mode: 'skipped_indexing' as const,
+            changed: false,
+            checkedAt: 'x',
+            thresholdMs: 60_000,
+        }),
+        noteFreshnessMode: () => undefined,
+        buildFreshnessBlockedSearchPayload: () => indexingPayload,
+        getIndexingOperation: () => undefined,
+        isPartialIndexNavigationUnavailable: () => false,
+        partialIndexWarnings: [],
+        canSyncStaleLocal: () => false,
+        trackedRootReadiness: {},
+    } as unknown as SearchFrontDoorHost;
+    try {
+        const result = await runSearchFrontDoor({
+            path: tempRoot,
+            query: 'owner',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+        }, host);
+        assert.equal(result.kind, 'blocked');
+        if (result.kind !== 'blocked') return;
+        assert.equal(result.payload.status, 'not_ready');
+        assert.equal(result.payload.reason, 'indexing');
+        assert.equal(result.payload.retryAfterMs, DEFAULT_MANAGE_RETRY_AFTER_MS);
+        assert.equal(result.payload.indexingOperation, undefined);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('search front door reproves readiness when a mutation completed after cached receipt validation', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-search-frontdoor-rebased-'));
     let postReads = 0;

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { DEFAULT_MANAGE_RETRY_AFTER_MS } from "../config.js";
+import type { TrackedRootIndexingOperation } from "./tracked-root-readiness.js";
 import { requireAbsoluteFilesystemPath, trackCodebasePath } from "../utils.js";
 import type { CompletionProofReason } from "./completion-proof.js";
 import type {
@@ -89,6 +90,7 @@ export type SearchFrontDoorHost = {
         freshnessDecision: FreshnessDecision,
         searchContext: SearchFrontDoorSearchContext,
     ) => SearchResponseEnvelope | null;
+    getIndexingOperation?: (codebasePath: string) => TrackedRootIndexingOperation | undefined;
     buildManageIndexRecommendedAction: (
         action: "create" | "reindex" | "sync" | "status" | "repair",
         codebasePath: string,
@@ -378,6 +380,21 @@ export async function runSearchFrontDoor(
             searchContext,
         );
         if (freshnessBlockedPayload) {
+            if (
+                freshnessBlockedPayload.status === "not_ready"
+                && freshnessBlockedPayload.reason === "indexing"
+            ) {
+                const operation = host.getIndexingOperation?.(freshnessRoot);
+                return {
+                    kind: "blocked",
+                    payload: {
+                        ...freshnessBlockedPayload,
+                        retryAfterMs: freshnessBlockedPayload.retryAfterMs
+                            ?? DEFAULT_MANAGE_RETRY_AFTER_MS,
+                        ...(operation ? { indexingOperation: { ...operation } } : {}),
+                    },
+                };
+            }
             return { kind: "blocked", payload: freshnessBlockedPayload };
         }
 

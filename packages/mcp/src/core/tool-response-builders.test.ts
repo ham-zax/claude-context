@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { IndexOperationReceipt } from "../config.js";
+import { DEFAULT_MANAGE_RETRY_AFTER_MS, type IndexOperationReceipt } from "../config.js";
+import type { ToolResponseBuildersHost } from "./tool-response-builders.js";
 import { ToolResponseBuilders } from "./tool-response-builders.js";
 
 const receipt: IndexOperationReceipt = {
@@ -22,6 +23,30 @@ const receipt: IndexOperationReceipt = {
 };
 
 const builders = new ToolResponseBuilders({} as ConstructorParameters<typeof ToolResponseBuilders>[0]);
+
+test("not-ready search payload carries the deterministic indexing retry hint", () => {
+    const host = {
+        buildManageIndexRecommendedAction: () => ({
+            tool: "manage_index",
+            args: { action: "status", path: "/repo" },
+            reason: "Check indexing progress before retrying search.",
+        }),
+        buildStatusHint: () => ({ tool: "manage_index", args: { action: "status", path: "/repo" } }),
+        buildIndexingMetadata: () => ({ progressPct: null, lastUpdated: null, phase: null }),
+    } as unknown as ToolResponseBuildersHost;
+    const builders = new ToolResponseBuilders(host);
+    const envelope = builders.buildNotReadySearchPayload("/repo", {
+        path: "/repo",
+        query: "owner",
+        scope: "runtime",
+        groupBy: "symbol",
+        resultMode: "grouped",
+        limit: 5,
+    });
+    assert.equal(envelope.status, "not_ready");
+    assert.equal(envelope.reason, "indexing");
+    assert.equal(envelope.retryAfterMs, DEFAULT_MANAGE_RETRY_AFTER_MS);
+});
 
 test("manage response includes the supplied durable operation receipt", () => {
     const envelope = builders.buildManageResponseEnvelope("status", "/repo", "ok", "ready", { operation: receipt });

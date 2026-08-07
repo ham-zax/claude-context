@@ -1,3 +1,4 @@
+import { DEFAULT_MANAGE_RETRY_AFTER_MS } from "../config.js";
 import type { VectorBackendDiagnostic } from "./backend-diagnostics.js";
 import type { CallGraphDirection, CallGraphSymbolRef } from "./call-graph.js";
 import type { CompletionProofReason } from "./completion-proof.js";
@@ -319,6 +320,7 @@ export class ToolResponseBuilders {
             formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
             status: "not_ready",
             reason: "indexing",
+            retryAfterMs: DEFAULT_MANAGE_RETRY_AFTER_MS,
             codebasePath,
             path: searchContext.path,
             query: searchContext.query,

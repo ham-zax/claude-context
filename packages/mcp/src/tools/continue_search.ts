@@ -26,7 +26,7 @@ const buildContinueSearchSchema = (ctx: ToolContext) => z.object({
 export const continueSearchTool: McpTool = {
     name: "continue_search",
     description: () =>
-        "Return the next groups from a frozen search_codebase result set. Pass the response's exact nextOffset so transport retries are idempotent. Continuation performs no query embedding, vector-store retrieval, or reranking. Handles are process-local, bounded, and expire; stale or unavailable handles require a new search_codebase request.",
+        "Return the next groups from a frozen search_codebase result set. Pass the response's exact nextOffset so transport retries are idempotent. Continuation performs no query embedding, vector-store retrieval, or reranking. A grouped envelope without continuation reports pagination.continuation=\"complete\", meaning complete for the caller-bounded frozen set only; omittedBeyondLimitGroupCount reports groups excluded by the caller limit. Handles are process-local, bounded, and expire; stale or unavailable handles require a new search_codebase request.",
     inputSchemaZod: (ctx: ToolContext) => buildContinueSearchSchema(ctx),
     execute: async (args: unknown, ctx: ToolContext) => {
         const schema = buildContinueSearchSchema(ctx);

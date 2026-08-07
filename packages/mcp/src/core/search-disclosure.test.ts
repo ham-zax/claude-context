@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     projectGroupedDisclosure,
+    resolveOmittedBeyondLimitGroupCount,
     resolveSearchGroupedResultCounts,
 } from "./search-disclosure.js";
 import type {
@@ -70,6 +71,12 @@ test("grouped disclosure preserves the unannotated baseline when no boundary app
     assert.equal(projected.envelope.disclosure, undefined);
     assert.equal(projected.results.length, 2);
     assert.equal(projected.responseBytes, Buffer.byteLength(JSON.stringify(projected.envelope), "utf8"));
+});
+
+test("omitted-beyond-limit count reports only groups excluded by the caller limit", () => {
+    assert.equal(resolveOmittedBeyondLimitGroupCount({ availableGroupCount: 80, effectiveFrozenTotal: 20 }), 60);
+    assert.equal(resolveOmittedBeyondLimitGroupCount({ availableGroupCount: 20, effectiveFrozenTotal: 20 }), 0);
+    assert.equal(resolveOmittedBeyondLimitGroupCount({ availableGroupCount: 5, effectiveFrozenTotal: 20 }), 0);
 });
 
 test("grouped result counts separate requested, available, frozen, returned, and remaining totals", () => {

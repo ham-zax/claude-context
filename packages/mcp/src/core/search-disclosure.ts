@@ -86,6 +86,13 @@ function buildSummary(input: {
     };
 }
 
+export function resolveOmittedBeyondLimitGroupCount(counts: {
+    availableGroupCount: number;
+    effectiveFrozenTotal: number;
+}): number {
+    return Math.max(0, counts.availableGroupCount - counts.effectiveFrozenTotal);
+}
+
 export function projectGroupedDisclosure<T extends { preview: string }>(input: {
     orderedResults: readonly T[];
     callerLimit: number;

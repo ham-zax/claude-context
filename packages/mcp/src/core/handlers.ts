@@ -4092,6 +4092,7 @@ export class ToolHandlers {
                     );
                 },
                 getPreparedReadObservation: (canonicalRoot) => this.getPreparedAuthorityObservation(canonicalRoot),
+                getIndexingOperation: (codebasePath) => this.getIndexingOperationForReadiness(codebasePath),
                 ensureSearchFreshness: (effectiveRoot, preparedRead) => this.measureSearchPhase(
                     phaseTimings,
                     'ensureFreshness',

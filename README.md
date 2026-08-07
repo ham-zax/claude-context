@@ -218,7 +218,7 @@ Public paths are absolute. `read_file` is restricted to tracked searchable roots
 6. use continue_search only when the frozen result has more useful evidence
 ```
 
-If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes. A search that arrives during a transient same-root sync joins it once and proceeds when it completes; other in-flight indexing returns `not_ready` with `retryAfterMs` and the active indexing operation so drivers can retry deterministically. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
+If a tool returns `requires_reindex`, reindex before retrying the original call. Use `sync` for ordinary source changes. A search that arrives during a transient same-root sync joins it once and proceeds when it completes; other in-flight indexing returns `not_ready` with `retryAfterMs` and the active indexing operation so drivers can retry deterministically. Search continuation `"complete"` means complete for the caller-bounded frozen set, never for the full available pool; `omittedBeyondLimitGroupCount` reports groups excluded by the caller limit. Treat inbound call-graph results as leads to verify, not compiler-grade blast-radius proof.
 
 ## Index Profiles
 

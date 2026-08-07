@@ -826,12 +826,20 @@ export interface SearchGroupedResponseEnvelope extends SearchBaseResponseEnvelop
     rankedSetDigest?: string;
     resultIndex?: SearchCompactResultIndex;
     resultCounts?: SearchGroupedResultCounts;
+    /** Groups beyond the caller-bounded frozen set (available - frozen), present only when positive. */
+    omittedBeyondLimitGroupCount?: number;
     disclosure?: SearchDisclosureSummary;
     continuation?: {
         handle: string;
         nextOffset: number;
         remainingGroupCount: number;
     };
+    /**
+     * `continuation: "complete"` means complete for the caller-bounded frozen
+     * set (`totalGroupCount`), not for the full available pool; groups excluded
+     * by the caller limit are reported via `omittedBeyondLimitGroupCount` and
+     * `resultCounts.availableGroupCount`.
+     */
     pagination?: SearchPaginationEvidence;
     /** Results are already in authoritative relevance order. */
     results: SearchGroupedResultV2[];

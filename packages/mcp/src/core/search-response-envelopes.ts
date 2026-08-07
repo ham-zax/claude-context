@@ -18,6 +18,7 @@ import type {
 import { SEARCH_RESPONSE_FORMAT_VERSION } from "./search-types.js";
 import type { SearchMustConstraintHint, SearchMustCoverage } from "./search-types.js";
 import type { CompletionProbeDebugHint } from "./tracked-root-readiness.js";
+import { resolveOmittedBeyondLimitGroupCount } from "./search-disclosure.js";
 import {
     buildSearchWarningDetails,
     buildTopRecommendedRawSearchAction,
@@ -202,6 +203,9 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
     const results = input.results.map(projectGroupedResultV2);
     const exposeFreshnessEvidence = input.debugMode === "freshness"
         || input.debugMode === "full";
+    const omittedBeyondLimitGroupCount = input.resultCounts
+        ? resolveOmittedBeyondLimitGroupCount(input.resultCounts)
+        : 0;
     return {
         formatVersion: SEARCH_RESPONSE_FORMAT_VERSION,
         status: "ok",
@@ -217,6 +221,7 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
             freshnessSummary: input.freshnessSummary,
         } : {}),
         ...(input.resultCounts ? { resultCounts: input.resultCounts } : {}),
+        ...(omittedBeyondLimitGroupCount > 0 ? { omittedBeyondLimitGroupCount } : {}),
         ...(input.disclosure ? { disclosure: input.disclosure } : {}),
         ...buildWarnings(input.warnings),
         ...(recommendedNextAction ? { recommendedNextAction } : {}),
