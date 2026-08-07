@@ -74,6 +74,7 @@ function buildInput(
     query = "where find the relevant implementation",
     overrides: {
         limit?: number;
+        debugMode?: SearchExecutionInput["debugMode"];
         queryPlan?: Partial<SearchExecutionInput["queryPlan"]>;
     } = {},
 ): SearchExecutionInput {
@@ -93,7 +94,7 @@ function buildInput(
         scope: "runtime",
         rankingMode: "default",
         limit,
-        debugMode: "none",
+        debugMode: overrides.debugMode ?? "none",
         semanticQuery: parsedOperators.semanticQuery,
         parsedOperators,
         queryPlan,
@@ -144,11 +145,43 @@ function buildReranker(
     };
 }
 
+function buildDiagnostics(): SearchDiagnostics {
+    return {
+        queryLength: 0,
+        limitRequested: 3,
+        resultsBeforeFilter: 0,
+        resultsAfterFilter: 0,
+        excludedByIgnore: 0,
+        excludedBySubdirectory: 0,
+        filterPass: "expanded",
+        freshnessMode: undefined,
+        searchPassCount: 0,
+        searchPassSuccessCount: 0,
+        searchPassFailureCount: 0,
+        rerankerAttempted: false,
+        rerankerUsed: false,
+        semanticSearchAttempts: 0,
+        embeddingCallsByCurrentContract: 0,
+        denseQueriesByCurrentContract: 0,
+        sparseQueriesByCurrentContract: 0,
+        rerankerCalls: 0,
+        rerankerCandidates: 0,
+        rerankerInputBytes: 0,
+        rerankerFailures: 0,
+        rerankerRetries: 0,
+        rerankerTimeouts: 0,
+        candidatesWithSemanticEvidence: 0,
+        candidatesWithLexicalEvidence: 0,
+        candidatesWithCurrentSourceEvidence: 0,
+        semanticExpansionAttempted: false,
+    };
+}
+
 async function run(
     input: SearchExecutionInput,
     host: SearchExecutionHost,
 ) {
-    return runSearchExecution(input, host, {} as SearchDiagnostics);
+    return runSearchExecution(input, host, buildDiagnostics());
 }
 
 function reverseResults(
@@ -353,8 +386,165 @@ test("provider timeout restores the frozen retrieval order", async () => {
     assert.equal(outcome.rerankerFailurePhase, "api_call");
     assert.equal(outcome.rerankerFailureKind, "timeout");
     assert.equal(outcome.rerankerApplied, false);
+    assert.ok(outcome.searchWarnings.includes("RERANKER_FAILED"));
     assert.deepEqual(
         outcome.scored.map((entry) => entry.result.candidateId),
         ["a", "b", "c"],
+    );
+});
+
+test("no reranker leaves the frozen retrieval order with zero provider calls", async () => {
+    const results = [
+        candidate("a", "src/a.ts", 0.9),
+        candidate("b", "src/b.ts", 0.8),
+        candidate("c", "src/c.ts", 0.7),
+    ];
+    const outcome = await run(buildInput(), buildHost(results, null));
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(outcome.rerankerAttempted, false);
+    assert.equal(outcome.rerankerApplied, false);
+    assert.equal(outcome.orderAuthority, "retrieval_order");
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["a", "b", "c"],
+    );
+});
+
+test("policy-disabled reranking keeps retrieval order with zero provider calls", async () => {
+    let providerCalls = 0;
+    const reranker = buildReranker(() => {
+        providerCalls += 1;
+        return [];
+    });
+    const results = [
+        candidate("a", "src/a.ts", 0.9),
+        candidate("b", "src/b.ts", 0.8),
+        candidate("c", "src/c.ts", 0.7),
+    ];
+    const outcome = await run(
+        buildInput("find the relevant implementation", {
+            queryPlan: { rerankAllowed: false },
+        }),
+        buildHost(results, reranker),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(providerCalls, 0);
+    assert.equal(outcome.rerankerAttempted, false);
+    assert.equal(outcome.rerankerApplied, false);
+    assert.equal(outcome.orderAuthority, "retrieval_order");
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["a", "b", "c"],
+    );
+});
+
+test("a sole exact result skips provider admission entirely", async () => {
+    let providerCalls = 0;
+    const reranker = buildReranker(() => {
+        providerCalls += 1;
+        return [];
+    });
+    const results = [
+        candidate("only", "src/target.ts", 0.1, "export function target() {}"),
+    ];
+    const outcome = await run(
+        buildInput("where is target implementation", {
+            queryPlan: { rerankAllowed: true },
+        }),
+        buildHost(results, reranker),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(providerCalls, 0);
+    assert.equal(outcome.skippedByExactPin, true);
+    assert.equal(outcome.rerankerAttempted, false);
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["only"],
+    );
+});
+
+test("must, exclude, and lang rejection completes before provider admission", async () => {
+    const providerCandidateIds: string[][] = [];
+    const reranker = buildReranker((documents) => reverseResults(documents), (_documents, candidateIds) => {
+        providerCandidateIds.push([...candidateIds]);
+    });
+    const results = [
+        {
+            ...candidate("survivor", "src/survivor.ts", 0.9),
+            content: "export function zzunique() { return true; }",
+            symbolLabel: "function zzunique()",
+        },
+        {
+            ...candidate("must-rejected", "src/must-rejected.ts", 0.99),
+            content: "export function unrelated() { return 1; }",
+            symbolLabel: "function unrelated()",
+        },
+        {
+            ...candidate("exclude-rejected", "src/exclude-rejected.ts", 0.95),
+            content: "export function secret() { return 2; }",
+            symbolLabel: "function secret()",
+        },
+        {
+            ...candidate("lang-rejected", "src/lang-rejected.ts", 0.8),
+            language: "python",
+        },
+    ];
+    const outcome = await run(
+        buildInput("must:zzunique exclude:secret lang:typescript locate the code"),
+        buildHost(results, reranker),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.deepEqual(providerCandidateIds, [["survivor"]]);
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["survivor"],
+    );
+});
+
+test("candidate survival records the exact reranker input and output suffix", async () => {
+    const reranker = buildReranker((documents) => reverseResults(documents));
+    const results = [
+        candidate("exact", "src/target.ts", 0.1, "export function target() {}"),
+        candidate("tail-a", "src/a.ts", 0.9),
+        candidate("tail-b", "src/b.ts", 0.8),
+        candidate("tail-c", "src/c.ts", 0.7),
+    ];
+    const outcome = await run(
+        buildInput("where is target implementation", {
+            debugMode: "full",
+            queryPlan: {
+                exactMatchPinningEnabled: true,
+                rerankAllowed: true,
+            },
+        }),
+        buildHost(results, reranker),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    const stages = outcome.candidateSurvival?.stages ?? [];
+    const inputStage = stages.find((stage) => stage.stage === "reranker_input");
+    const outputStage = stages.find((stage) => stage.stage === "reranker_output");
+    assert.ok(inputStage, "reranker_input stage must be recorded");
+    assert.ok(outputStage, "reranker_output stage must be recorded");
+    assert.deepEqual(
+        inputStage.candidates.map((entry) => entry.candidateId),
+        ["tail-a", "tail-b", "tail-c"],
+    );
+    assert.deepEqual(
+        outputStage.candidates.map((entry) => entry.candidateId),
+        ["tail-c", "tail-b", "tail-a"],
+    );
+    assert.deepEqual(
+        outcome.scored.map((entry) => entry.result.candidateId),
+        ["exact", "tail-c", "tail-b", "tail-a"],
     );
 });

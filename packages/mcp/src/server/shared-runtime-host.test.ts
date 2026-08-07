@@ -382,6 +382,56 @@ test("private socket host keeps MCP sessions independent and shares one runtime 
     assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
 });
 
+test("a stale SATORI_RERANK_APPLICATION_MODE blocks shared-runtime attach", async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-host-"));
+    fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });
+    const previousStateRoot = process.env.SATORI_STATE_ROOT;
+    process.env.SATORI_STATE_ROOT = root;
+    const runtimeEntry = path.resolve("dist/index.js");
+    const runtimeEnv = env(root);
+    const identity = buildSharedRuntimeIdentity(runtimeEntry, runtimeEnv);
+    const runtimeConfig = config(root);
+    const runtimeHost = new SharedRuntimeHost(
+        runtimeConfig,
+        buildRuntimeIndexFingerprint(runtimeConfig, POTION_DIMENSION),
+        "host",
+    );
+    const paths = resolveSharedRuntimePaths(identity, runtimeEnv);
+    const socketHost = new SharedRuntimeSocketHost(
+        runtimeHost,
+        identity,
+        paths,
+        5_000,
+    );
+    await socketHost.start();
+    t.after(async () => {
+        await socketHost.shutdown();
+        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
+        else process.env.SATORI_STATE_ROOT = previousStateRoot;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    const staleEnv = { ...runtimeEnv, SATORI_RERANK_APPLICATION_MODE: "legacy_rrf" };
+    const input = new PassThrough();
+    const output = new PassThrough();
+    await assert.rejects(
+        runSharedRuntimeClient({
+            runtimeEntry,
+            env: staleEnv,
+            stdin: input,
+            stdout: output,
+            attachTimeoutMs: 1_000,
+        }),
+        /SATORI_RERANK_APPLICATION_MODE has been removed/,
+    );
+    // The compatible host is running, but the stale rollback variable must
+    // prevent any attach: rejection happens at the trust boundary, before
+    // identity resolution or socket connection.
+    assert.deepEqual(runtimeHost.getActivity(), { sessions: 0, operations: 0 });
+    input.destroy();
+    output.destroy();
+});
+
 test("protocol v2 echoes challengeNonce", async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-nonce-echo-"));
     fs.mkdirSync(path.join(root, "xdg"), { mode: 0o700 });

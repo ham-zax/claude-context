@@ -2036,6 +2036,45 @@ test('search continuation preserves deterministic and LateOn-ranked grouped orde
             'SEARCH_RESULT_SET_NOT_FOUND',
         );
 
+        const stableReranker = prepareHandlers(true, providerCoordinator, {
+            getIdentity: () => ({
+                provider: 'test-provider',
+                model: 'reranker-model-v1',
+                profile: 'test-profile-v1',
+            }),
+            rerank: async (_query, documents) => {
+                rerankerCalls += 1;
+                return documents.map((_document, index) => ({
+                    index,
+                    relevanceScore: documents.length - index,
+                }));
+            },
+        });
+        const stableInitialResponse = await stableReranker.handlers.handleSearchCode({
+            path: repoPath,
+            query: 'find the owner implementations',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'file',
+            rankingMode: 'default',
+            limit: 20,
+        });
+        const stableInitialPayload = JSON.parse(
+            stableInitialResponse.content[0]?.text || '{}',
+        );
+        const callsAfterInitialSearch = rerankerCalls;
+        assert.ok(callsAfterInitialSearch >= 1);
+        const stableContinuation = await stableReranker.handlers.handleContinueSearch({
+            handle: stableInitialPayload.continuation.handle,
+            expectedOffset: stableInitialPayload.continuation.nextOffset,
+        });
+        assert.equal(stableContinuation.isError, undefined, stableContinuation.content[0]?.text);
+        const stablePagePayload = JSON.parse(stableContinuation.content[0]?.text || '{}');
+        // Continuation serves the frozen provider-ranked set and must not
+        // invoke the reranker again.
+        assert.equal(stablePagePayload.rankedSetDigest, stableInitialPayload.rankedSetDigest);
+        assert.equal(rerankerCalls, callsAfterInitialSearch);
+
         const inadmissiblePool = new SearchContinuationCoordinatorPool({
             maxEntries: 32,
             maxEntryBytes: 1,
