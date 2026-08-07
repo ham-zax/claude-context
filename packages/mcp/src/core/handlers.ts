@@ -4787,6 +4787,7 @@ export class ToolHandlers {
             let exactRegistryDebug: ExactRegistryLookupDebug | undefined = exactFastPath.exactRegistryDebug;
             let searchSymbolRegistry: SymbolRegistry | undefined = exactFastPath.searchSymbolRegistry;
             let searchSymbolRegistryManifestHash: string | undefined = exactFastPath.searchSymbolRegistryManifestHash;
+            let searchRelationshipRecords: readonly RelationshipRecord[] | undefined;
             let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
 
             if (exactFastPath.kind === 'handled') {
@@ -4995,7 +4996,9 @@ export class ToolHandlers {
                 }),
                 projectionIdentity: this.reranker?.getQueryProjectionVersion?.(),
             });
-            const rerankerDocumentProjectionVersion = this.reranker?.getDocumentProjectionVersion?.();
+            const rerankerDocumentProjectionVersion: string | undefined = this.reranker?.getDocumentProjectionVersion?.();
+            const wantsV4StructuralContext = rerankerDocumentProjectionVersion
+                === "search_rerank_document_v4";
             const execution = await runSearchExecution({
                 effectiveRoot,
                 scope: input.scope,
@@ -5095,6 +5098,29 @@ export class ToolHandlers {
                                 searchSymbolRegistry = registryState.registry;
                                 searchSymbolRegistryManifestHash = registryState.manifestHash;
                             }
+                            if (
+                                !searchRelationshipRecords
+                                && wantsV4StructuralContext
+                            ) {
+                                const compatibility = await this.loadPreparedNavigationCompatibility(
+                                    preparedReadState,
+                                    searchSymbolRegistryManifestHash
+                                        ?? generationReceipt.navigation.symbolRegistryManifestHash,
+                                    readinessDebug.operations,
+                                );
+                                if (
+                                    compatibility.relationships.status !== "ok"
+                                    || compatibility.relationships.manifestHash
+                                        !== generationReceipt.navigation.relationshipManifestHash
+                                ) {
+                                    return {
+                                        ok: false,
+                                        candidateId,
+                                        reason: "relationship_manifest_mismatch",
+                                    };
+                                }
+                                searchRelationshipRecords = compatibility.relationships.records;
+                            }
                             return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
                                 ? projectPublicationBoundSearchRerankDocumentV3
                                 : projectPublicationBoundSearchRerankDocumentV2)({
@@ -5103,6 +5129,9 @@ export class ToolHandlers {
                                 semanticQuery: rerankQuery,
                                 result,
                                 registry: searchSymbolRegistry,
+                                ...(searchRelationshipRecords
+                                    ? { relationships: searchRelationshipRecords }
+                                    : {}),
                             });
                         },
                     }

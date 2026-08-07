@@ -5,6 +5,7 @@ export type SearchRerankProjectionFailureReason =
     | "navigation_status_invalid"
     | "registry_load_failed"
     | "registry_manifest_mismatch"
+    | "relationship_manifest_mismatch"
     | "owner_not_found"
     | "candidate_span_invalid"
     | "source_unavailable"

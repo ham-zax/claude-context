@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import type {
+    RelationshipRecord,
     SymbolRecord,
     SymbolRegistry,
 } from "@zokizuan/satori-core";
@@ -31,7 +32,7 @@ export function searchRerankCandidateId(result: SearchResultLike): string {
     ].join(":");
 }
 
-function resolveCanonicalOwner(
+export function resolveCanonicalOwner(
     result: SearchResultLike,
     registry: SymbolRegistry,
 ): SymbolRecord | undefined {
@@ -133,6 +134,7 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
     semanticQuery: string;
     result: SearchResultLike;
     registry: SymbolRegistry;
+    relationships?: readonly RelationshipRecord[];
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<SearchRerankProjectionResult> {
     const { candidateId } = input;
@@ -166,6 +168,7 @@ export async function projectPublicationBoundSearchRerankDocumentV3(input: {
     semanticQuery: string;
     result: SearchResultLike;
     registry: SymbolRegistry;
+    relationships?: readonly RelationshipRecord[];
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<SearchRerankProjectionResult> {
     const { candidateId } = input;
