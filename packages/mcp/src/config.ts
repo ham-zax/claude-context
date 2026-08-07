@@ -36,7 +36,7 @@ export type EmbeddingProvider = 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama' | 'P
 export type VectorStoreProvider = 'Milvus' | 'LanceDB';
 export type RerankerProvider = 'none' | 'voyage' | 'lateon';
 export type RerankApplicationMode = 'legacy_rrf' | 'native_order';
-export const DEFAULT_RERANK_APPLICATION_MODE: RerankApplicationMode = 'legacy_rrf';
+export const DEFAULT_RERANK_APPLICATION_MODE: RerankApplicationMode = 'native_order';
 
 export function resolveRerankApplicationMode(
     value: string | undefined,

@@ -24,7 +24,7 @@ export type RerankApplicationMode = "legacy_rrf" | "native_order";
 
 export function selectedRerankApplicationMode(env: NodeJS.ProcessEnv): string {
     return env.SATORI_RERANK_APPLICATION_MODE === undefined
-        ? "legacy_rrf"
+        ? "native_order"
         : env.SATORI_RERANK_APPLICATION_MODE.trim();
 }
 

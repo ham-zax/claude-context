@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { evaluateStaticRuntimeConfig, selectedRerankApplicationMode } from "./runtime-config.js";
 
 test("runtime config reports and strictly validates reranker application mode", () => {
-    assert.equal(selectedRerankApplicationMode({}), "legacy_rrf");
+    assert.equal(selectedRerankApplicationMode({}), "native_order");
     const native = evaluateStaticRuntimeConfig({ SATORI_RERANK_APPLICATION_MODE: "native_order" });
     assert.deepEqual(native.find((check) => check.name === "rerank_application_mode"), {
         name: "rerank_application_mode",

@@ -69,7 +69,7 @@ test('reranker application mode defaults strictly and participates in MCP config
             POTION_HELPER_PATH: '/opt/satori/potion-helper',
             POTION_MODEL_PATH: '/opt/satori/potion-model',
         });
-        assert.equal(createMcpConfig().rerankApplicationMode, 'legacy_rrf');
+        assert.equal(createMcpConfig().rerankApplicationMode, 'native_order');
         process.env.SATORI_RERANK_APPLICATION_MODE = 'native_order';
         assert.equal(createMcpConfig().rerankApplicationMode, 'native_order');
         process.env.SATORI_RERANK_APPLICATION_MODE = 'unexpected';
