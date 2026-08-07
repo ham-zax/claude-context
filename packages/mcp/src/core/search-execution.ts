@@ -1,5 +1,6 @@
 import type {
     Reranker,
+    RerankExecutionDiagnostics,
     RerankResult,
     SemanticSearchExecutionResult,
     SemanticSearchResult,
@@ -137,6 +138,8 @@ export type SearchDiagnostics = SearchProviderWorkDiagnostics & {
     rerankerUsed: boolean;
     /** Bounded classification metadata for the last terminal reranker failure. */
     rerankerFailureKind?: RerankerFailureKind;
+    /** Qualified deadline diagnostics reported by the last executed rerank attempt. */
+    rerankerExecutionDiagnostics?: RerankExecutionDiagnostics;
 };
 
 export type SearchCandidate = {
@@ -309,6 +312,7 @@ export type SearchExecutionOutcome =
         rerankerFailurePhase?: "document_projection" | "api_call" | "parse_results";
         rerankerOperationalReason?: SearchRerankerOperationalReason;
         rerankerFailureKind?: RerankerFailureKind;
+        rerankerExecutionDiagnostics?: RerankExecutionDiagnostics;
         rerankerCandidatesIn: number;
         rerankerCandidatesReranked: number;
         rerankerFamilyCount: number;
@@ -559,6 +563,7 @@ async function rerankSearchCandidates(
                         // never lose a higher count.
                         onExecutionDiagnostics: (diagnostics) => {
                             rerankerExecutionDiagnosticsObserved = true;
+                            searchDiagnostics.rerankerExecutionDiagnostics = diagnostics;
                             searchDiagnostics.rerankerRetries = Math.max(
                                 searchDiagnostics.rerankerRetries,
                                 diagnostics.retries,
@@ -1525,6 +1530,9 @@ export async function runSearchExecution(
         rerankerFailurePhase,
         rerankerOperationalReason,
         rerankerFailureKind,
+        ...(searchDiagnostics.rerankerExecutionDiagnostics
+            ? { rerankerExecutionDiagnostics: searchDiagnostics.rerankerExecutionDiagnostics }
+            : {}),
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,

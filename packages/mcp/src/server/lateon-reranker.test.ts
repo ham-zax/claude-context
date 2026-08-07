@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { RerankExecutionDiagnostics } from "@zokizuan/satori-core";
 import {
     LATEON_RUNTIME_PROFILE_IDS,
     LateOnOperationalError,
@@ -338,4 +339,116 @@ test("LateOn close rejects active and queued work and joins its worker", async (
         readinessTimerActive: false,
         terminationActive: false,
     });
+});
+
+test("LateOn successful execution reports queue wait, qualified deadlines, and observed wall", async (t) => {
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t),
+    });
+    t.after(() => reranker.close());
+    await reranker.waitUntilReady();
+
+    const profile = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32);
+    const bounds = profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+        ? profile.operationalBounds
+        : undefined;
+    assert.ok(bounds);
+
+    const reported: { diagnostics: RerankExecutionDiagnostics | null } = { diagnostics: null };
+    assert.deepEqual(
+        await reranker.rerank("scored", ["alpha", "alphabetic"], {
+            onExecutionDiagnostics: (diagnostics) => { reported.diagnostics = diagnostics; },
+        }),
+        [{ index: 1, relevanceScore: 10 }, { index: 0, relevanceScore: 5 }],
+    );
+
+    assert.ok(reported.diagnostics);
+    assert.equal(reported.diagnostics.attempts, 1);
+    assert.equal(reported.diagnostics.retries, 0);
+    assert.equal(reported.diagnostics.timeouts, 0);
+    assert.ok(typeof reported.diagnostics.queueWaitMs === "number" && reported.diagnostics.queueWaitMs >= 0);
+    assert.ok(
+        reported.diagnostics.effectiveScoreDeadlineMs !== undefined
+        && reported.diagnostics.effectiveScoreDeadlineMs > 0
+        && reported.diagnostics.effectiveScoreDeadlineMs <= bounds.maximumScoreMilliseconds,
+    );
+    assert.ok(
+        reported.diagnostics.effectiveStageDeadlineMs !== undefined
+        && reported.diagnostics.effectiveStageDeadlineMs > 0
+        && reported.diagnostics.effectiveStageDeadlineMs <= bounds.maximumRerankerStageMilliseconds,
+    );
+    assert.ok(typeof reported.diagnostics.observedWallMs === "number" && reported.diagnostics.observedWallMs >= 0);
+    assert.equal(reported.diagnostics.deadlineLatenessMs, undefined);
+});
+
+test("LateOn execution timeout reports deadline lateness without relaxing any deadline", async (t) => {
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        requestDeadlineMilliseconds: 40,
+        workerPath: createFakeWorker(t),
+    });
+    t.after(() => reranker.close());
+    await reranker.waitUntilReady();
+
+    const profile = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32);
+    const bounds = profile.schemaVersion === "satori_lateon_runtime_profile_v2"
+        ? profile.operationalBounds
+        : undefined;
+    assert.ok(bounds);
+
+    const reported: { diagnostics: RerankExecutionDiagnostics | null } = { diagnostics: null };
+    await assertOperationalReason(
+        reranker.rerank("hang", ["document"], {
+            onExecutionDiagnostics: (diagnostics) => { reported.diagnostics = diagnostics; },
+        }),
+        "lateon_execution_timeout",
+    );
+
+    assert.ok(reported.diagnostics);
+    assert.equal(reported.diagnostics.attempts, 1);
+    assert.equal(reported.diagnostics.retries, 0);
+    assert.equal(reported.diagnostics.timeouts, 1);
+    assert.ok(typeof reported.diagnostics.queueWaitMs === "number" && reported.diagnostics.queueWaitMs >= 0);
+    assert.ok(
+        reported.diagnostics.effectiveScoreDeadlineMs !== undefined
+        && reported.diagnostics.effectiveScoreDeadlineMs <= 40,
+    );
+    assert.ok(
+        reported.diagnostics.effectiveStageDeadlineMs !== undefined
+        && reported.diagnostics.effectiveStageDeadlineMs > 0
+        && reported.diagnostics.effectiveStageDeadlineMs <= bounds.maximumRerankerStageMilliseconds,
+    );
+    assert.ok(typeof reported.diagnostics.observedWallMs === "number" && reported.diagnostics.observedWallMs >= 40);
+    assert.equal(
+        reported.diagnostics.deadlineLatenessMs,
+        Math.max(
+            0,
+            (reported.diagnostics.observedWallMs ?? 0)
+            - (reported.diagnostics.effectiveScoreDeadlineMs ?? 0),
+        ),
+    );
+});
+
+test("LateOn diagnostics callback failure never changes rerank behavior", async (t) => {
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        requestDeadlineMilliseconds: 40,
+        workerPath: createFakeWorker(t),
+    });
+    t.after(() => reranker.close());
+    await reranker.waitUntilReady();
+
+    const throwing = (): void => { throw new Error("telemetry boom"); };
+    assert.deepEqual(
+        await reranker.rerank("scored", ["document"], { onExecutionDiagnostics: throwing }),
+        [{ index: 0, relevanceScore: 8 }],
+    );
+    await assertOperationalReason(
+        reranker.rerank("hang", ["document"], { onExecutionDiagnostics: throwing }),
+        "lateon_execution_timeout",
+    );
 });

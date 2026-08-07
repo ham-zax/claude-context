@@ -1,6 +1,7 @@
 export type {
     Reranker,
     RerankerIdentity,
+    RerankExecutionDiagnostics,
     RerankOptions,
     RerankResult,
 } from "./reranker";

@@ -211,6 +211,7 @@ export async function finalizeSearchResults(
         rerankerFailurePhase,
         rerankerOperationalReason,
         rerankerFailureKind,
+        rerankerExecutionDiagnostics,
         rerankerCandidatesIn,
         rerankerCandidatesReranked,
         rerankerFamilyCount,
@@ -265,6 +266,19 @@ export async function finalizeSearchResults(
             ...common,
             status: "failed" as const,
         };
+    };
+
+    const rerankDeadlineDiagnostics = {
+        ...(rerankerExecutionDiagnostics?.queueWaitMs !== undefined
+            ? { queueWaitMs: rerankerExecutionDiagnostics.queueWaitMs } : {}),
+        ...(rerankerExecutionDiagnostics?.effectiveScoreDeadlineMs !== undefined
+            ? { effectiveScoreDeadlineMs: rerankerExecutionDiagnostics.effectiveScoreDeadlineMs } : {}),
+        ...(rerankerExecutionDiagnostics?.effectiveStageDeadlineMs !== undefined
+            ? { effectiveStageDeadlineMs: rerankerExecutionDiagnostics.effectiveStageDeadlineMs } : {}),
+        ...(rerankerExecutionDiagnostics?.observedWallMs !== undefined
+            ? { observedWallMs: rerankerExecutionDiagnostics.observedWallMs } : {}),
+        ...(rerankerExecutionDiagnostics?.deadlineLatenessMs !== undefined
+            ? { deadlineLatenessMs: rerankerExecutionDiagnostics.deadlineLatenessMs } : {}),
     };
 
     const buildRankingDebug = (
@@ -380,6 +394,7 @@ export async function finalizeSearchResults(
                 ...(rerankerFailurePhase ? { errorCode: "RERANKER_FAILED" as const, failurePhase: rerankerFailurePhase } : {}),
                 ...(rerankerOperationalReason ? { operationalReason: rerankerOperationalReason } : {}),
                 ...(rerankerFailureKind ? { failureKind: rerankerFailureKind } : {}),
+                ...rerankDeadlineDiagnostics,
             },
         });
     const changedCode = debugChangedFilesState && (input.debugMode === "freshness" || input.debugMode === "full")

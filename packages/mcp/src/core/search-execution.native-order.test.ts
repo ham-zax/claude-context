@@ -147,3 +147,28 @@ test("native execution restores the exact retrieval order after provider failure
     assert.equal(outcome.rerankerApplied, false);
     assert.equal(outcome.rerankerFailurePhase, "api_call");
 });
+
+test("native execution surfaces qualified reranker deadline diagnostics", async () => {
+    const results = [candidate("a.ts", 0.90), candidate("b.ts", 0.80), candidate("c.ts", 0.70)];
+    const diagnostics = {
+        attempts: 1,
+        retries: 0,
+        timeouts: 0,
+        queueWaitMs: 3,
+        effectiveScoreDeadlineMs: 500,
+        effectiveStageDeadlineMs: 600,
+        observedWallMs: 42,
+    };
+    const reranker: Reranker = {
+        getIdentity: () => ({ provider: "lateon", model: "test", profile: "test" }),
+        rerank: async (_query, documents, options) => {
+            options?.onExecutionDiagnostics?.(diagnostics);
+            return documents.map((_document, index) => ({ index, relevanceScore: 1 - index * 0.1 }));
+        },
+    };
+    const outcome = await run(buildInput(), buildHost(results, reranker));
+
+    assert.equal(outcome.kind, "ok");
+    assert.equal(outcome.rerankerApplied, true);
+    assert.deepEqual(outcome.rerankerExecutionDiagnostics, diagnostics);
+});

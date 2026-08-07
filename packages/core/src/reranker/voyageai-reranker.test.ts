@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RerankerRequestError, VoyageAIReranker } from './voyageai-reranker';
+import type { RerankExecutionDiagnostics } from './reranker';
 
 type MockFetch = (
     input: Parameters<typeof fetch>[0],
@@ -375,7 +376,7 @@ test('VoyageAIReranker retries a connection reset during the response body read'
 
 test('VoyageAIReranker reports retry diagnostics when a transient failure is followed by success', async () => {
     const calls: string[] = [];
-    let reported: { attempts: number; retries: number; timeouts: number } | null = null;
+    const reported: { diagnostics: RerankExecutionDiagnostics | null } = { diagnostics: null };
     await withMockedFetch(async () => {
         calls.push('call');
         if (calls.length === 1) {
@@ -386,17 +387,23 @@ test('VoyageAIReranker reports retry diagnostics when a transient failure is fol
         const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0 });
         await reranker.rerank('find auth', ['alpha document'], {
             onExecutionDiagnostics: (diagnostics) => {
-                reported = diagnostics;
+                reported.diagnostics = diagnostics;
             },
         });
     });
     assert.equal(calls.length, 2);
-    assert.deepEqual(reported, { attempts: 2, retries: 1, timeouts: 0 });
+    assert.deepEqual(reported.diagnostics, { attempts: 2, retries: 1, timeouts: 0 });
+    assert.ok(reported.diagnostics);
+    assert.equal(reported.diagnostics.queueWaitMs, undefined);
+    assert.equal(reported.diagnostics.effectiveScoreDeadlineMs, undefined);
+    assert.equal(reported.diagnostics.effectiveStageDeadlineMs, undefined);
+    assert.equal(reported.diagnostics.observedWallMs, undefined);
+    assert.equal(reported.diagnostics.deadlineLatenessMs, undefined);
 });
 
 test('VoyageAIReranker reports timeout and retry diagnostics when a timeout is followed by success', async () => {
     const calls: string[] = [];
-    let reported: { attempts: number; retries: number; timeouts: number } | null = null;
+    const reported: { diagnostics: RerankExecutionDiagnostics | null } = { diagnostics: null };
     await withMockedFetch(async (url, init) => {
         calls.push('call');
         if (calls.length === 1) {
@@ -412,12 +419,12 @@ test('VoyageAIReranker reports timeout and retry diagnostics when a timeout is f
         const reranker = new VoyageAIReranker({ apiKey: 'voyage-test-key', retryDelayMs: 0, timeoutMs: 25 });
         await reranker.rerank('find auth', ['alpha document'], {
             onExecutionDiagnostics: (diagnostics) => {
-                reported = diagnostics;
+                reported.diagnostics = diagnostics;
             },
         });
     });
     assert.equal(calls.length, 2);
-    assert.deepEqual(reported, { attempts: 2, retries: 1, timeouts: 1 });
+    assert.deepEqual(reported.diagnostics, { attempts: 2, retries: 1, timeouts: 1 });
 });
 
 test('VoyageAIReranker terminates immediately when the caller cancels during the retry delay', async () => {

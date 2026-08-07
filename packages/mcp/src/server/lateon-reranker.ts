@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
     Reranker,
+    RerankExecutionDiagnostics,
     RerankOptions,
     RerankResult,
 } from "@zokizuan/satori-core";
@@ -74,6 +75,8 @@ type QueuedRerank = {
     signal?: AbortSignal;
     abortListener?: () => void;
     queueTimer?: NodeJS.Timeout;
+    executionStartedAt?: number;
+    onExecutionDiagnostics?: (diagnostics: RerankExecutionDiagnostics) => void;
 };
 
 type WorkerState = "loading" | "ready" | "unhealthy" | "closed";
@@ -387,6 +390,9 @@ export class LateOnReranker implements Reranker {
                 resolve,
                 reject,
                 ...(signal ? { signal } : {}),
+                ...(options.onExecutionDiagnostics
+                    ? { onExecutionDiagnostics: options.onExecutionDiagnostics }
+                    : {}),
             };
             submittedRequest = request;
             if (signal) {
@@ -617,6 +623,7 @@ export class LateOnReranker implements Reranker {
 
     private startExecution(request: QueuedRerank): void {
         if (request.queueTimer) clearTimeout(request.queueTimer);
+        request.executionStartedAt = Date.now();
         this.active = true;
         this.activeRequest = request;
         let task!: Promise<void>;
@@ -672,15 +679,39 @@ export class LateOnReranker implements Reranker {
         this.startExecution(queued);
     }
 
+    private reportExecutionDiagnostics(
+        request: QueuedRerank,
+        diagnostics: RerankExecutionDiagnostics,
+    ): void {
+        if (!request.onExecutionDiagnostics) return;
+        try {
+            request.onExecutionDiagnostics(diagnostics);
+        } catch {
+            // Diagnostics are observational only: a throwing telemetry
+            // callback must never alter ranking behavior or mask the
+            // terminal error classification.
+        }
+    }
+
     private async rerankOnce(request: QueuedRerank): Promise<RerankResult[]> {
         const worker = this.worker;
         if (!worker || this.workerState !== "ready") {
             throw operationalError("lateon_not_ready", "LateOn worker is not ready.");
         }
+        const executionStartedAt = request.executionStartedAt ?? Date.now();
+        const queueWaitMs = Math.max(0, executionStartedAt - request.offeredAt);
         const stageRemaining = request.offeredAt
             + this.effectiveBounds.maximumRerankerStageMilliseconds
             - Date.now();
         if (stageRemaining <= 0) {
+            this.reportExecutionDiagnostics(request, {
+                attempts: 1,
+                retries: 0,
+                timeouts: 1,
+                queueWaitMs,
+                effectiveStageDeadlineMs: stageRemaining,
+                observedWallMs: Date.now() - executionStartedAt,
+            });
             throw operationalError(
                 "lateon_execution_timeout",
                 "LateOn reranker-stage deadline expired before execution.",
@@ -735,12 +766,37 @@ export class LateOnReranker implements Reranker {
         });
         try {
             const response = await Promise.race([operation, deadline]);
-            return this.validateResponse(response, requestId, request.documents.length);
+            const results = this.validateResponse(response, requestId, request.documents.length);
+            this.reportExecutionDiagnostics(request, {
+                attempts: 1,
+                retries: 0,
+                timeouts: 0,
+                queueWaitMs,
+                effectiveScoreDeadlineMs: timeoutMilliseconds,
+                effectiveStageDeadlineMs: stageRemaining,
+                observedWallMs: Date.now() - executionStartedAt,
+            });
+            return results;
         } catch (error) {
             if (terminationAfterTimeout) await terminationAfterTimeout;
             const classified = error instanceof LateOnOperationalError
                 ? error
                 : operationalError("lateon_invalid_output", "LateOn emitted invalid output.", error);
+            if (classified.reason !== "lateon_cancelled") {
+                const observedWallMs = Date.now() - executionStartedAt;
+                this.reportExecutionDiagnostics(request, {
+                    attempts: 1,
+                    retries: 0,
+                    timeouts: classified.reason === "lateon_execution_timeout" ? 1 : 0,
+                    queueWaitMs,
+                    effectiveScoreDeadlineMs: timeoutMilliseconds,
+                    effectiveStageDeadlineMs: stageRemaining,
+                    observedWallMs,
+                    ...(classified.reason === "lateon_execution_timeout"
+                        ? { deadlineLatenessMs: Math.max(0, observedWallMs - timeoutMilliseconds) }
+                        : {}),
+                });
+            }
             if (
                 classified.reason === "lateon_invalid_output"
                 || classified.reason === "lateon_worker_failure"

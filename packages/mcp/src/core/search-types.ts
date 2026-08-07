@@ -606,6 +606,11 @@ export interface SearchDebugHint {
         errorCode?: "RERANKER_FAILED";
         failurePhase?: "document_projection" | "api_call" | "parse_results";
         operationalReason?: SearchRerankerOperationalReason;
+        queueWaitMs?: number;
+        effectiveScoreDeadlineMs?: number;
+        effectiveStageDeadlineMs?: number;
+        observedWallMs?: number;
+        deadlineLatenessMs?: number;
         topK: number;
         docMaxLines: number;
         docMaxChars: number;

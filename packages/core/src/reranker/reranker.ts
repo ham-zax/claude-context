@@ -10,6 +10,22 @@ export interface RerankerIdentity {
     profile: string;
 }
 
+export interface RerankExecutionDiagnostics {
+    attempts: number;
+    retries: number;
+    timeouts: number;
+    /** Local-reranker only: milliseconds queued before execution started. */
+    queueWaitMs?: number;
+    /** Local-reranker only: effective scoring deadline applied to this execution. */
+    effectiveScoreDeadlineMs?: number;
+    /** Local-reranker only: reranker-stage budget remaining when execution started. */
+    effectiveStageDeadlineMs?: number;
+    /** Local-reranker only: wall time from execution start to terminal outcome. */
+    observedWallMs?: number;
+    /** Local-reranker only: max(0, observedWallMs - effective deadline) on execution timeout. */
+    deadlineLatenessMs?: number;
+}
+
 export interface RerankOptions {
     topK?: number;
     returnDocuments?: boolean;
@@ -28,11 +44,7 @@ export interface RerankOptions {
      * reported for caller cancellation, and must never throw: a throwing
      * callback is ignored so telemetry cannot alter ranking behavior.
      */
-    onExecutionDiagnostics?: (diagnostics: {
-        attempts: number;
-        retries: number;
-        timeouts: number;
-    }) => void;
+    onExecutionDiagnostics?: (diagnostics: RerankExecutionDiagnostics) => void;
 }
 
 export interface Reranker {
