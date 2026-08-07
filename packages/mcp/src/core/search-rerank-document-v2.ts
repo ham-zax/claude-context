@@ -96,12 +96,12 @@ export interface SearchRerankDocumentV2Result {
     readonly selectionAttemptCount: number;
 }
 
-interface NormalizedRequiredOwnerSibling {
+export interface NormalizedRequiredOwnerSibling {
     readonly repository_relative_path: string;
     readonly canonical_symbol_label: string;
 }
 
-interface NormalizedProjectionInput {
+export interface NormalizedProjectionInput {
     readonly relativePath: string;
     readonly language: string;
     readonly symbolKind: string;
@@ -126,11 +126,11 @@ interface SearchRerankDocumentV2Projection {
     readonly required_owner_siblings: readonly NormalizedRequiredOwnerSibling[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function requireString(
+export function requireString(
     value: unknown,
     label: string,
     options: { readonly allowEmpty?: boolean } = {},
@@ -142,7 +142,7 @@ function requireString(
     return value;
 }
 
-function requireSafeRelativePath(value: unknown): string {
+export function requireSafeRelativePath(value: unknown): string {
     const relativePath = requireString(value, "relativePath");
     if (!isRepositoryRelativePath(relativePath)) {
         throw new TypeError("relativePath must be a canonical repository-relative path.");
@@ -150,11 +150,11 @@ function requireSafeRelativePath(value: unknown): string {
     return relativePath;
 }
 
-function sourceLines(content: string): string[] {
+export function sourceLines(content: string): string[] {
     return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 }
 
-function requireBoundedPhysicalLine(
+export function requireBoundedPhysicalLine(
     value: unknown,
     label: string,
     maximumUtf8Bytes: number,
@@ -169,7 +169,7 @@ function requireBoundedPhysicalLine(
     return line;
 }
 
-function requireBoundedDocumentation(value: unknown): string {
+export function requireBoundedDocumentation(value: unknown): string {
     const normalized = requireString(value, "documentationExcerpt", { allowEmpty: true })
         .replace(/\r\n/g, "\n")
         .replace(/\r/g, "\n");
@@ -194,7 +194,7 @@ function requireBoundedDocumentation(value: unknown): string {
     return normalized;
 }
 
-function requireLineSpan(value: unknown, label: string, lineCount: number): SourceLineSpan {
+export function requireLineSpan(value: unknown, label: string, lineCount: number): SourceLineSpan {
     if (
         !isRecord(value)
         || !Number.isSafeInteger(value.startLine)
@@ -211,7 +211,7 @@ function requireLineSpan(value: unknown, label: string, lineCount: number): Sour
     };
 }
 
-function normalizeEvidenceSpans(
+export function normalizeEvidenceSpans(
     value: unknown,
     symbolSpan: SourceLineSpan,
     lineCount: number,
@@ -232,11 +232,11 @@ function normalizeEvidenceSpans(
     });
 }
 
-function sourceLinesInSpan(lines: readonly string[], span: SourceLineSpan): string[] {
+export function sourceLinesInSpan(lines: readonly string[], span: SourceLineSpan): string[] {
     return lines.slice(span.startLine - 1, span.endLine);
 }
 
-function firstStructuralDeclaration(
+export function firstStructuralDeclaration(
     lines: readonly string[],
     language: string,
     symbolKind: string,
@@ -263,7 +263,7 @@ function firstStructuralDeclaration(
     return candidates.find((line) => structuralPattern.test(line)) ?? "";
 }
 
-function normalizeRequiredOwnerSiblings(value: unknown): NormalizedRequiredOwnerSibling[] {
+export function normalizeRequiredOwnerSiblings(value: unknown): NormalizedRequiredOwnerSibling[] {
     if (value === undefined) return [];
     if (!Array.isArray(value)) {
         throw new TypeError("requiredOwnerSiblings must be an array when provided.");
@@ -292,7 +292,7 @@ function normalizeRequiredOwnerSiblings(value: unknown): NormalizedRequiredOwner
     ));
 }
 
-function selectedExcerptText(source: SelectedSourceProjection): string {
+export function selectedExcerptText(source: SelectedSourceProjection): string {
     return source.excerpts.map(({ content }) => content).join("\n...\n");
 }
 
@@ -312,7 +312,7 @@ function buildProjection(
     };
 }
 
-function selectSource(input: NormalizedProjectionInput, maxSourceBytes: number) {
+export function selectSource(input: NormalizedProjectionInput, maxSourceBytes: number) {
     return selectBoundedSource({
         sourceBytes: Buffer.from(input.content, "utf8"),
         symbolSpan: input.symbolSpan,
@@ -334,6 +334,47 @@ function selectSource(input: NormalizedProjectionInput, maxSourceBytes: number) 
         ...(input.query ? { query: input.query } : {}),
         ...(input.evidenceSpans.length > 0 ? { evidenceSpans: input.evidenceSpans } : {}),
     });
+}
+
+export function selectRerankSourceWithinBudget(input: {
+    normalized: NormalizedProjectionInput;
+    minimumText: string;
+    buildProjectionText: (queryRelevantSourceExcerpt: string) => string;
+}): {
+    text: string;
+    selectedSource?: SelectedSourceProjection;
+    selectionAttemptCount: number;
+} {
+    const minimumBytes = Buffer.byteLength(input.minimumText, "utf8");
+    let lowerBudget = 1;
+    let upperBudget = Math.max(1, MAXIMUM_UTF8_BYTES - minimumBytes);
+    let selectedSource: SelectedSourceProjection | undefined;
+    let text = input.minimumText;
+    let selectionAttemptCount = 0;
+    for (
+        let attempt = 0;
+        attempt < MAXIMUM_SELECTION_ATTEMPTS && lowerBudget <= upperBudget;
+        attempt += 1
+    ) {
+        selectionAttemptCount += 1;
+        const sourceBudget = Math.floor((lowerBudget + upperBudget) / 2);
+        const selection = selectSource(input.normalized, sourceBudget);
+        if (selection.status !== "selected") {
+            lowerBudget = sourceBudget + 1;
+            continue;
+        }
+        const excerpt = selectedExcerptText(selection.source);
+        const candidateText = input.buildProjectionText(excerpt);
+        const candidateBytes = Buffer.byteLength(candidateText, "utf8");
+        if (candidateBytes <= MAXIMUM_UTF8_BYTES) {
+            selectedSource = selection.source;
+            text = candidateText;
+            lowerBudget = sourceBudget + 1;
+            continue;
+        }
+        upperBudget = sourceBudget - 1;
+    }
+    return { text, selectedSource, selectionAttemptCount };
 }
 
 export function buildSearchRerankDocumentV2(rawInput: unknown): SearchRerankDocumentV2Result {
@@ -393,34 +434,12 @@ export function buildSearchRerankDocumentV2(rawInput: unknown): SearchRerankDocu
         );
     }
 
-    let lowerBudget = 1;
-    let upperBudget = Math.max(1, MAXIMUM_UTF8_BYTES - minimumBytes);
-    let selectedSource: SelectedSourceProjection | undefined;
-    let text = minimumText;
-    let selectionAttemptCount = 0;
-    for (
-        let attempt = 0;
-        attempt < MAXIMUM_SELECTION_ATTEMPTS && lowerBudget <= upperBudget;
-        attempt += 1
-    ) {
-        selectionAttemptCount += 1;
-        const sourceBudget = Math.floor((lowerBudget + upperBudget) / 2);
-        const selection = selectSource(input, sourceBudget);
-        if (selection.status !== "selected") {
-            lowerBudget = sourceBudget + 1;
-            continue;
-        }
-        const excerpt = selectedExcerptText(selection.source);
-        const candidateText = serializeCanonicalJson(buildProjection(input, excerpt));
-        const candidateBytes = Buffer.byteLength(candidateText, "utf8");
-        if (candidateBytes <= MAXIMUM_UTF8_BYTES) {
-            selectedSource = selection.source;
-            text = candidateText;
-            lowerBudget = sourceBudget + 1;
-            continue;
-        }
-        upperBudget = sourceBudget - 1;
-    }
+    const selection = selectRerankSourceWithinBudget({
+        normalized: input,
+        minimumText,
+        buildProjectionText: (excerpt) => serializeCanonicalJson(buildProjection(input, excerpt)),
+    });
+    const { text, selectedSource, selectionAttemptCount } = selection;
 
     return {
         version: SEARCH_RERANK_DOCUMENT_V2_POLICY.id,

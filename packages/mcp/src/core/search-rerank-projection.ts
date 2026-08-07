@@ -5,11 +5,17 @@ import type {
     SymbolRegistry,
 } from "@zokizuan/satori-core";
 import { readCurrentSourceEvidence } from "./current-source-symbols.js";
+import { resolveSearchCandidateRole } from "./search-candidate-role.js";
+import type { SearchCandidateRole } from "./search-rerank-context.js";
 import type { SearchResultLike } from "./search-lexical-scoring.js";
 import {
     buildSearchRerankDocumentV2,
     SEARCH_RERANK_DOCUMENT_V2_POLICY,
 } from "./search-rerank-document-v2.js";
+import {
+    buildSearchRerankDocumentV3,
+    SEARCH_RERANK_DOCUMENT_V3_POLICY,
+} from "./search-rerank-document-v3.js";
 import type {
     SearchRerankProjectionFailureReason,
     SearchRerankProjectionResult,
@@ -56,15 +62,15 @@ function failure(
  * hash-matched current source. The candidate span is retained because it is part
  * of the qualified L3 projection, but it must remain inside the canonical owner.
  */
-export async function projectPublicationBoundSearchRerankDocumentV2(input: {
-    candidateId: string;
+async function resolvePublicationBoundEvidence(input: {
     codebaseRoot: string;
-    semanticQuery: string;
     result: SearchResultLike;
     registry: SymbolRegistry;
     readSourceEvidence?: CurrentSourceEvidenceReader;
-}): Promise<SearchRerankProjectionResult> {
-    const { candidateId } = input;
+}): Promise<
+    | { ok: true; evidence: NonNullable<Awaited<ReturnType<CurrentSourceEvidenceReader>>> }
+    | { ok: false; reason: SearchRerankProjectionFailureReason }
+> {
     const owner = resolveCanonicalOwner(input.result, input.registry);
     const startLine = input.result.startLine;
     const endLine = input.result.endLine;
@@ -73,7 +79,7 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
         || owner.file !== input.result.relativePath
         || !/^[a-f0-9]{64}$/.test(owner.fileHash)
     ) {
-        return failure(candidateId, "owner_not_found");
+        return { ok: false, reason: "owner_not_found" };
     }
     if (
         !Number.isSafeInteger(startLine)
@@ -82,7 +88,7 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
         || (endLine as number) > owner.span.endLine
         || (endLine as number) < (startLine as number)
     ) {
-        return failure(candidateId, "candidate_span_invalid");
+        return { ok: false, reason: "candidate_span_invalid" };
     }
 
     let evidence;
@@ -92,17 +98,46 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
             owner.file,
         );
     } catch {
-        return failure(candidateId, "source_unavailable");
+        return { ok: false, reason: "source_unavailable" };
     }
     if (!evidence) {
-        return failure(candidateId, "source_unavailable");
+        return { ok: false, reason: "source_unavailable" };
     }
     if (
         evidence.relativeFile !== owner.file
         || evidence.observedHash !== owner.fileHash
     ) {
-        return failure(candidateId, "source_hash_mismatch");
+        return { ok: false, reason: "source_hash_mismatch" };
     }
+    return { ok: true, evidence };
+}
+
+function success(
+    document: string,
+    candidateRole: SearchCandidateRole,
+    projectionIdentity: string,
+): SearchRerankProjectionResult {
+    return {
+        ok: true,
+        document,
+        utf8Bytes: Buffer.byteLength(document, "utf8"),
+        sha256: crypto.createHash("sha256").update(document, "utf8").digest("hex"),
+        candidateRole,
+        projectionIdentity,
+    };
+}
+
+export async function projectPublicationBoundSearchRerankDocumentV2(input: {
+    candidateId: string;
+    codebaseRoot: string;
+    semanticQuery: string;
+    result: SearchResultLike;
+    registry: SymbolRegistry;
+    readSourceEvidence?: CurrentSourceEvidenceReader;
+}): Promise<SearchRerankProjectionResult> {
+    const { candidateId } = input;
+    const resolved = await resolvePublicationBoundEvidence(input);
+    if (!resolved.ok) return failure(candidateId, resolved.reason);
 
     let document: string;
     try {
@@ -112,24 +147,60 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
             symbolKind: input.result.symbolKind ?? "file",
             canonicalSymbolLabel:
                 input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
-            content: evidence.source,
+            content: resolved.evidence.source,
             symbolSpan: {
-                startLine: startLine as number,
-                endLine: endLine as number,
+                startLine: input.result.startLine as number,
+                endLine: input.result.endLine as number,
             },
             query: input.semanticQuery,
         }).text;
     } catch {
         return failure(candidateId, "projection_contract_failed");
     }
-    return {
-        ok: true,
-        document,
-        utf8Bytes: Buffer.byteLength(document, "utf8"),
-        sha256: crypto.createHash("sha256").update(document, "utf8").digest("hex"),
-        candidateRole: "unknown",
-        projectionIdentity: SEARCH_RERANK_DOCUMENT_V2_POLICY.id,
-    };
+    return success(document, "unknown", SEARCH_RERANK_DOCUMENT_V2_POLICY.id);
+}
+
+export async function projectPublicationBoundSearchRerankDocumentV3(input: {
+    candidateId: string;
+    codebaseRoot: string;
+    semanticQuery: string;
+    result: SearchResultLike;
+    registry: SymbolRegistry;
+    readSourceEvidence?: CurrentSourceEvidenceReader;
+}): Promise<SearchRerankProjectionResult> {
+    const { candidateId } = input;
+    const resolved = await resolvePublicationBoundEvidence(input);
+    if (!resolved.ok) return failure(candidateId, resolved.reason);
+
+    const candidateRole = resolveSearchCandidateRole({
+        relativePath: input.result.relativePath,
+        ...(typeof input.result.language === "string"
+            ? { language: input.result.language }
+            : {}),
+        ...(typeof input.result.symbolKind === "string"
+            ? { symbolKind: input.result.symbolKind }
+            : {}),
+    });
+    let document: string;
+    try {
+        document = buildSearchRerankDocumentV3({
+            relativePath: input.result.relativePath,
+            language: input.result.language,
+            candidateRole,
+            symbolKind: input.result.symbolKind ?? "file",
+            canonicalSymbolLabel:
+                input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
+            content: resolved.evidence.source,
+            symbolSpan: {
+                startLine: input.result.startLine as number,
+                endLine: input.result.endLine as number,
+            },
+            query: input.semanticQuery,
+        }).text;
+    } catch {
+        return failure(candidateId, "projection_contract_failed");
+    }
+    return success(document, candidateRole, SEARCH_RERANK_DOCUMENT_V3_POLICY.id);
 }
 
 export async function buildPublicationBoundSearchRerankDocumentV2(input: {

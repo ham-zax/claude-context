@@ -8,10 +8,12 @@ import {
 } from "@zokizuan/satori-core";
 import type { CurrentSourceEvidence } from "./current-source-symbols.js";
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
+import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
 import type { SearchResultLike } from "./search-lexical-scoring.js";
 import {
     buildPublicationBoundSearchRerankDocumentV2,
     projectPublicationBoundSearchRerankDocumentV2,
+    projectPublicationBoundSearchRerankDocumentV3,
     searchRerankCandidateId,
 } from "./search-rerank-projection.js";
 
@@ -322,4 +324,41 @@ test("typed projection success carries bounded provenance fields", async () => {
     );
     assert.equal(outcome.candidateRole, "unknown");
     assert.equal(outcome.projectionIdentity, SEARCH_RERANK_DOCUMENT_V2_POLICY.id);
+});
+
+test("typed v3 projection carries the factual candidate role and v3 identity", async () => {
+    const outcome = await projectPublicationBoundSearchRerankDocumentV3({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "execute prepared request",
+        result: ownedResult({ startLine: 2, endLine: 3 }),
+        registry: registry(),
+        readSourceEvidence: async () => evidence(),
+    });
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.equal(outcome.candidateRole, "implementation");
+    assert.equal(outcome.projectionIdentity, SEARCH_RERANK_DOCUMENT_V3_POLICY.id);
+    assert.equal(
+        (JSON.parse(outcome.document) as Record<string, unknown>).candidate_role,
+        "implementation",
+    );
+    assert.equal(outcome.utf8Bytes, Buffer.byteLength(outcome.document, "utf8"));
+    assert.equal(
+        outcome.sha256,
+        crypto.createHash("sha256").update(outcome.document, "utf8").digest("hex"),
+    );
+});
+
+test("typed v3 projection fails closed like v2 without a registry owner", async () => {
+    assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV3({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: ownedResult({ ownerSymbolInstanceId: "symbol-missing" }),
+        registry: registry(),
+        readSourceEvidence: async () => {
+            throw new Error("must not read source without a registry owner");
+        },
+    }), { ok: false, candidateId, reason: "owner_not_found" });
 });
