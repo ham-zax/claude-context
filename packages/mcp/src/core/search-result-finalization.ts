@@ -220,6 +220,7 @@ export async function finalizeSearchResults(
         rerankerCandidateBudget,
         rerankerBudgetReason,
         rerankerByteBudgetOmittedCandidates,
+        rerankerProjection,
         mustConstraintRetrievalOutcome,
         mustConstraintMustTokens,
         mustCoverage,
@@ -397,6 +398,7 @@ export async function finalizeSearchResults(
                 ...(rerankerFailureKind ? { failureKind: rerankerFailureKind } : {}),
                 ...rerankDeadlineDiagnostics,
             },
+            ...(rerankerProjection ? { rerankerProjection } : {}),
         });
     const changedCode = debugChangedFilesState && (input.debugMode === "freshness" || input.debugMode === "full")
         ? await host.buildChangedCodeDebug(input.effectiveRoot, debugChangedFilesState)

@@ -638,6 +638,7 @@ export interface SearchDebugHint {
             maxSupplementalChunksPerFamily: number;
         };
     };
+    rerankerProjection?: SearchRerankProjectionSummary;
 }
 
 export type SearchRerankerOperationalReason =
@@ -653,7 +654,7 @@ export type SearchRerankerOperationalReason =
 export type SearchRerankProjectionSummary = Readonly<{
     requestedCandidates: number;
     projectedCandidates: number;
-    omittedCandidates: number;
+    skippedCandidates: number;
     failureCounts: Partial<Record<SearchRerankProjectionFailureReason, number>>;
     firstFailure?: {
         candidateId: string;
@@ -680,6 +681,7 @@ export type SearchRankingDebugHint = Pick<SearchDebugHint,
     | "diversitySummary"
     | "changedFilesBoost"
     | "rerank"
+    | "rerankerProjection"
 >;
 
 export type SearchFreshnessDebugHint = Pick<SearchDebugHint, "phaseTimingsMs" | "readiness" | "changedCode">;

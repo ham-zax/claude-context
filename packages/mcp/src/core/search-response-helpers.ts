@@ -131,7 +131,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             code,
             severity: "caution",
             blocksUse: false,
-            message: "must: results may be incomplete: the dedicated must: retrieval lane exhausted its candidate budget before the requested result count was reached.",
+            message: "must: results may be incomplete: bounded must: retrieval could not guarantee full recall — the dedicated lane exhausted its candidate budget, was skipped because the result limit was already filled, or was unavailable or failed.",
             action: "Narrow the query or add path:/lang: constraints to reach more matching candidates.",
         };
     }
@@ -160,6 +160,24 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             blocksUse: false,
             message: "Reranking failed, so results use retrieval ranking only.",
             action: "Open the recommended result before trusting final ordering.",
+        };
+    }
+    if (code === WARNING_CODES.RERANKER_INPUT_DEGRADED) {
+        return {
+            code,
+            severity: "degraded",
+            blocksUse: false,
+            message: "Some candidates failed local document projection (source, span, or navigation evidence could not be verified), so the reranker scored a reduced candidate set. This is local projection degradation, not a reranker provider failure.",
+            action: "Use debugMode=ranking to inspect hints.debugSearch.rerankerProjection failure reasons; run manage_index sync if the affected sources changed.",
+        };
+    }
+    if (code === WARNING_CODES.RERANKER_SKIPPED_INPUT) {
+        return {
+            code,
+            severity: "degraded",
+            blocksUse: false,
+            message: "Fewer than two candidates survived local document projection, so reranking was skipped and retrieval order was preserved. This is local projection degradation, not a reranker provider failure.",
+            action: "Use debugMode=ranking to inspect hints.debugSearch.rerankerProjection failure reasons; run manage_index sync if the affected sources changed.",
         };
     }
     if (code.startsWith("SEARCH_PASS_FAILED:")) {

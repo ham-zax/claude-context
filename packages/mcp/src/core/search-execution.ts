@@ -622,7 +622,7 @@ async function rerankSearchCandidates(
                 projectionSummary = {
                     requestedCandidates: providerBoundedSelection.length,
                     projectedCandidates: projectableRows.length,
-                    omittedCandidates: providerBoundedSelection.length - projectableRows.length,
+                    skippedCandidates: providerBoundedSelection.length - projectableRows.length,
                     failureCounts,
                     ...(firstFailure ? { firstFailure } : {}),
                 };

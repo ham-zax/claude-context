@@ -13539,6 +13539,87 @@ test('handleSearchCode publishes skipped-lane coverage when the primary results 
     });
 });
 
+test('handleSearchCode publishes projection degradation only in ranking and full debug', async () => {
+    await withTempRepo(async (repoPath) => {
+        const denseResults = Array.from({ length: 4 }, (_, idx) => ({
+            content: `export const value${idx} = ${idx};`,
+            relativePath: `src/projection-${idx}.ts`,
+            startLine: 1,
+            endLine: 1,
+            language: 'typescript',
+            score: 0.99 - (idx * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+            symbolId: `sym_projection_${idx}`,
+            symbolLabel: `function projection${idx}()`,
+        }));
+        const reranker = {
+            getIdentity: () => ({ provider: 'voyage', model: 'test', profile: 'degradation' }),
+            getDocumentProjectionVersion: () => 'search_rerank_document_v3',
+            rerank: async (_query: string, documents: unknown[]) => (
+                documents.map((_document, index) => ({ index, relevanceScore: 0.5 }))
+            ),
+        };
+        const handlers = createHandlers(repoPath, denseResults, reranker, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+        });
+        const runWith = async (debugMode: 'none' | 'summary' | 'ranking' | 'full') => {
+            const response = await handlers.handleSearchCode({
+                path: repoPath,
+                query: 'find the values',
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'symbol',
+                limit: 4,
+                debugMode,
+            });
+            return JSON.parse(response.content[0]?.text || '{}');
+        };
+
+        const ranking = await runWith('ranking');
+        assert.equal(ranking.status, 'ok');
+        assert.equal(ranking.results.length, 4);
+        assert.equal(
+            warningCodes(ranking).includes('RERANKER_SKIPPED_INPUT'),
+            true,
+            'every candidate failing local projection must skip the provider and warn',
+        );
+        assert.equal(
+            warningCodes(ranking).includes('RERANKER_FAILED'),
+            false,
+            'local projection degradation must not be reported as a provider failure',
+        );
+        const skippedDetail = (ranking.warnings ?? []).find(
+            (entry: { code: string }) => entry.code === 'RERANKER_SKIPPED_INPUT',
+        );
+        assert.notEqual(skippedDetail, undefined);
+        assert.equal(/projection/i.test(skippedDetail.message), true, 'warning details must explain local projection degradation');
+        assert.equal(/provider failure/i.test(skippedDetail.message), true, 'warning details must distinguish local degradation from provider failure');
+
+        const projection = ranking.hints?.debugSearch?.rerankerProjection;
+        assert.notEqual(projection, undefined, 'ranking debug must publish the projection summary');
+        assert.equal(projection.requestedCandidates, 4);
+        assert.equal(projection.projectedCandidates, 0);
+        assert.equal(projection.skippedCandidates, 4);
+        assert.equal(
+            Object.values(projection.failureCounts).reduce((sum: number, count) => sum + (count as number), 0),
+            4,
+            'every skipped candidate must carry a local projection failure reason',
+        );
+        assert.equal(typeof projection.firstFailure?.reason, 'string');
+        assert.equal(typeof projection.firstFailure?.candidateId, 'string');
+
+        const summary = await runWith('summary');
+        assert.equal(summary.hints?.debugSearch, undefined, 'summary debug must not publish the projection summary');
+
+        const full = await runWith('full');
+        assert.notEqual(full.hints?.debugSearch?.rerankerProjection, undefined, 'full debug must publish the projection summary');
+
+        const none = await runWith('none');
+        assert.equal(none.hints?.debugSearch, undefined);
+    });
+});
+
 test('handleSearchCode counts every terminal reranker failure exactly once including parse failures', async () => {
     await withTempRepo(async (repoPath) => {
         const denseResults = Array.from({ length: 10 }, (_, idx) => ({

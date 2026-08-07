@@ -430,7 +430,7 @@ test("projection failure falls back without calling the provider", async () => {
         outcome.rerankerProjection?.failureCounts,
         { projection_contract_failed: 2 },
     );
-    assert.equal(outcome.rerankerProjection?.omittedCandidates, 2);
+    assert.equal(outcome.rerankerProjection?.skippedCandidates, 2);
     assert.deepEqual(outcome.scored.map((entry) => entry.result.candidateId), ["a", "b"]);
 });
 
@@ -523,7 +523,7 @@ test("one projection failure degrades input and reranks only the projectable slo
     assert.equal(outcome.orderAuthority, "reranker_order");
     assert.equal(outcome.rerankerProjection?.requestedCandidates, 4);
     assert.equal(outcome.rerankerProjection?.projectedCandidates, 3);
-    assert.equal(outcome.rerankerProjection?.omittedCandidates, 1);
+    assert.equal(outcome.rerankerProjection?.skippedCandidates, 1);
     assert.deepEqual(outcome.rerankerProjection?.failureCounts, { source_hash_mismatch: 1 });
     assert.deepEqual(
         outcome.scored.map((entry) => entry.result.candidateId),
@@ -569,7 +569,7 @@ test("a single surviving projection skips the provider and preserves retrieval o
     assert.ok(outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"));
     assert.ok(!outcome.searchWarnings.includes("RERANKER_FAILED"));
     assert.equal(outcome.rerankerProjection?.projectedCandidates, 1);
-    assert.equal(outcome.rerankerProjection?.omittedCandidates, 1);
+    assert.equal(outcome.rerankerProjection?.skippedCandidates, 1);
     assert.deepEqual(outcome.scored.map((entry) => entry.result.candidateId), ["a", "b"]);
 });
 
@@ -603,7 +603,7 @@ test("a shared-authority mass failure records every failure without RERANKER_FAI
     assert.ok(outcome.searchWarnings.includes("RERANKER_SKIPPED_INPUT"));
     assert.equal(outcome.rerankerProjection?.requestedCandidates, 3);
     assert.equal(outcome.rerankerProjection?.projectedCandidates, 0);
-    assert.equal(outcome.rerankerProjection?.omittedCandidates, 3);
+    assert.equal(outcome.rerankerProjection?.skippedCandidates, 3);
     assert.deepEqual(
         outcome.rerankerProjection?.failureCounts,
         { registry_manifest_mismatch: 3 },
@@ -660,7 +660,7 @@ test("a provider timeout after partial projection keeps the full frozen retrieva
     assert.ok(outcome.searchWarnings.includes("RERANKER_FAILED"));
     assert.equal(outcome.rerankerFailurePhase, "api_call");
     assert.equal(outcome.rerankerApplied, false);
-    assert.equal(outcome.rerankerProjection?.omittedCandidates, 1);
+    assert.equal(outcome.rerankerProjection?.skippedCandidates, 1);
     assert.deepEqual(
         outcome.scored.map((entry) => entry.result.candidateId),
         ["a", "b", "c"],
