@@ -21,10 +21,14 @@ import {
     buildSearchRerankDocumentV4,
     SEARCH_RERANK_DOCUMENT_V4_POLICY,
 } from "./search-rerank-document-v4.js";
-import { buildSearchRerankStructuralContext } from "./search-rerank-structural-context.js";
+import {
+    buildSearchRerankStructuralContext,
+    type PreparedSearchRerankStructuralRelationships,
+} from "./search-rerank-structural-context.js";
 import type {
     SearchRerankProjectionFailureReason,
     SearchRerankProjectionResult,
+    SearchRerankStructuralContextStatus,
 } from "./search-rerank-projection-result.js";
 
 type CurrentSourceEvidenceReader = typeof readCurrentSourceEvidence;
@@ -122,6 +126,7 @@ function success(
     document: string,
     candidateRole: SearchCandidateRole,
     projectionIdentity: string,
+    structuralContextStatus?: SearchRerankStructuralContextStatus,
 ): SearchRerankProjectionResult {
     return {
         ok: true,
@@ -130,6 +135,7 @@ function success(
         sha256: crypto.createHash("sha256").update(document, "utf8").digest("hex"),
         candidateRole,
         projectionIdentity,
+        ...(structuralContextStatus === undefined ? {} : { structuralContextStatus }),
     };
 }
 
@@ -218,6 +224,8 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
     result: SearchResultLike;
     registry: SymbolRegistry;
     relationships?: readonly RelationshipRecord[];
+    preparedStructuralRelationships?: PreparedSearchRerankStructuralRelationships;
+    structuralContextStatus?: SearchRerankStructuralContextStatus;
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<SearchRerankProjectionResult> {
     const { candidateId } = input;
@@ -236,7 +244,9 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
     const structuralContext = buildSearchRerankStructuralContext({
         candidate: input.result,
         registry: input.registry,
-        relationships: input.relationships ?? [],
+        ...(input.preparedStructuralRelationships
+            ? { preparedRelationships: input.preparedStructuralRelationships }
+            : { relationships: input.relationships ?? [] }),
     });
     let document: string;
     try {
@@ -258,7 +268,12 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
     } catch {
         return failure(candidateId, "projection_contract_failed");
     }
-    return success(document, candidateRole, SEARCH_RERANK_DOCUMENT_V4_POLICY.id);
+    return success(
+        document,
+        candidateRole,
+        SEARCH_RERANK_DOCUMENT_V4_POLICY.id,
+        input.structuralContextStatus ?? "available",
+    );
 }
 
 export async function buildPublicationBoundSearchRerankDocumentV2(input: {

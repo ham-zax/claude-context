@@ -14,6 +14,7 @@ import {
     buildPublicationBoundSearchRerankDocumentV2,
     projectPublicationBoundSearchRerankDocumentV2,
     projectPublicationBoundSearchRerankDocumentV3,
+    projectPublicationBoundSearchRerankDocumentV4,
     searchRerankCandidateId,
 } from "./search-rerank-projection.js";
 
@@ -361,4 +362,24 @@ test("typed v3 projection fails closed like v2 without a registry owner", async 
             throw new Error("must not read source without a registry owner");
         },
     }), { ok: false, candidateId, reason: "owner_not_found" });
+});
+
+
+test("typed v4 projection keeps publication-bound source evidence when structural context is unavailable", async () => {
+    const outcome = await projectPublicationBoundSearchRerankDocumentV4({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "execute prepared request",
+        result: ownedResult({ startLine: 2, endLine: 3 }),
+        registry: registry(),
+        structuralContextStatus: "unavailable",
+        readSourceEvidence: async () => evidence(),
+    });
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.equal(outcome.structuralContextStatus, "unavailable");
+    assert.deepEqual(
+        (JSON.parse(outcome.document) as { structural_context: unknown }).structural_context,
+        { direct_callers: [], direct_callees: [], supporting_tests: [] },
+    );
 });

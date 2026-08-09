@@ -229,6 +229,10 @@ import type { SearchRerankProjectionResult } from "./search-rerank-projection-re
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
 import { SEARCH_RERANK_DOCUMENT_V4_POLICY } from "./search-rerank-document-v4.js";
+import {
+    prepareSearchRerankStructuralRelationships,
+    type PreparedSearchRerankStructuralRelationships,
+} from "./search-rerank-structural-context.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
@@ -4789,7 +4793,11 @@ export class ToolHandlers {
             let exactRegistryDebug: ExactRegistryLookupDebug | undefined = exactFastPath.exactRegistryDebug;
             let searchSymbolRegistry: SymbolRegistry | undefined = exactFastPath.searchSymbolRegistry;
             let searchSymbolRegistryManifestHash: string | undefined = exactFastPath.searchSymbolRegistryManifestHash;
-            let searchRelationshipRecords: readonly RelationshipRecord[] | undefined;
+            let preparedSearchRerankStructuralRelationships: PreparedSearchRerankStructuralRelationships | undefined;
+            let structuralContextLoad: Promise<Readonly<{
+                status: "available" | "unavailable" | "incompatible";
+                preparedRelationships?: PreparedSearchRerankStructuralRelationships;
+            }>> | undefined;
             let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
 
             if (exactFastPath.kind === 'handled') {
@@ -5101,29 +5109,37 @@ export class ToolHandlers {
                                 searchSymbolRegistry = registryState.registry;
                                 searchSymbolRegistryManifestHash = registryState.manifestHash;
                             }
-                            if (
-                                !searchRelationshipRecords
-                                && wantsV4StructuralContext
-                            ) {
-                                const compatibility = await this.loadPreparedNavigationCompatibility(
-                                    preparedReadState,
-                                    searchSymbolRegistryManifestHash
-                                        ?? generationReceipt.navigation.symbolRegistryManifestHash,
-                                    readinessDebug.operations,
-                                );
-                                if (
-                                    compatibility.relationships.status !== "ok"
-                                    || compatibility.relationships.manifestHash
+                            const structuralContext = wantsV4StructuralContext
+                                ? await (structuralContextLoad ??= (async () => {
+                                    const compatibility = await this.loadPreparedNavigationCompatibility(
+                                        preparedReadState,
+                                        searchSymbolRegistryManifestHash
+                                            ?? generationReceipt.navigation.symbolRegistryManifestHash,
+                                        readinessDebug.operations,
+                                    );
+                                    if (compatibility.relationships.status !== "ok") {
+                                        return {
+                                            status: compatibility.relationships.status === "incompatible"
+                                                ? "incompatible" as const
+                                                : "unavailable" as const,
+                                        };
+                                    }
+                                    if (
+                                        compatibility.relationships.manifestHash
                                         !== generationReceipt.navigation.relationshipManifestHash
-                                ) {
+                                    ) {
+                                        return { status: "incompatible" as const };
+                                    }
+                                    preparedSearchRerankStructuralRelationships
+                                        = prepareSearchRerankStructuralRelationships(
+                                            compatibility.relationships.records,
+                                        );
                                     return {
-                                        ok: false,
-                                        candidateId,
-                                        reason: "relationship_manifest_mismatch",
+                                        status: "available" as const,
+                                        preparedRelationships: preparedSearchRerankStructuralRelationships,
                                     };
-                                }
-                                searchRelationshipRecords = compatibility.relationships.records;
-                            }
+                                })())
+                                : undefined;
                             return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
                                 ? projectPublicationBoundSearchRerankDocumentV4
                                 : rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
@@ -5134,8 +5150,11 @@ export class ToolHandlers {
                                 semanticQuery: rerankQuery,
                                 result,
                                 registry: searchSymbolRegistry,
-                                ...(searchRelationshipRecords
-                                    ? { relationships: searchRelationshipRecords }
+                                ...(structuralContext?.preparedRelationships
+                                    ? { preparedStructuralRelationships: structuralContext.preparedRelationships }
+                                    : {}),
+                                ...(structuralContext
+                                    ? { structuralContextStatus: structuralContext.status }
                                     : {}),
                             });
                         },

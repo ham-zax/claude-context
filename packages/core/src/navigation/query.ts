@@ -4,6 +4,7 @@ import type {
     RelationshipType,
 } from '../symbols';
 import { compareContractStrings } from '../utils/compare-contract-strings';
+import { isProofBackedAuthoritativeCall } from '../relationships/resolution';
 import { createRuntimeNavigationStore } from './runtime';
 import type {
     NavigationRelationshipsState,
@@ -372,12 +373,6 @@ function isExportsBackedLowConfidenceCall(
         }
     }
     return false;
-}
-
-function isProofBackedAuthoritativeCall(record: RelationshipRecord): boolean {
-    return record.type === 'CALLS'
-        && (record.resolutionAuthority === 'direct_binding'
-            || record.resolutionAuthority === 'origin_flow');
 }
 
 function isImportUniqueMethodLowConfidenceCall(

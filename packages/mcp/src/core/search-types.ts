@@ -15,7 +15,10 @@ import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evide
 import type { InboundCoverageEvidence } from "./relationship-backed-call-graph.js";
 import type { RerankBudgetReason } from "./search-rerank-policy.js";
 import type { SearchAnswerFocus, SearchCandidateRole } from "./search-rerank-context.js";
-import type { SearchRerankProjectionFailureReason } from "./search-rerank-projection-result.js";
+import type {
+    SearchRerankProjectionFailureReason,
+    SearchRerankStructuralContextStatus,
+} from "./search-rerank-projection-result.js";
 import type { SemanticPassFailureDiagnostic } from "./backend-diagnostics.js";
 
 export type StalenessBucket = "fresh" | "aging" | "stale" | "unknown";
@@ -660,6 +663,8 @@ export type SearchRerankProjectionSummary = Readonly<{
         candidateId: string;
         reason: SearchRerankProjectionFailureReason;
     };
+    /** v4-only optional structural enrichment state for this search. */
+    structuralContextStatus?: SearchRerankStructuralContextStatus;
 }>;
 
 export type SearchRankingDebugHint = Pick<SearchDebugHint,

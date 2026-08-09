@@ -12,6 +12,7 @@ import {
 import type { SearchResultLike } from "./search-lexical-scoring.js";
 import {
     buildSearchRerankStructuralContext,
+    prepareSearchRerankStructuralRelationships,
     type SearchRerankStructuralReference,
 } from "./search-rerank-structural-context.js";
 
@@ -99,7 +100,12 @@ function candidateFor(symbol: SymbolRecord): SearchResultLike {
     };
 }
 
-function calls(source: SymbolRecord, target: SymbolRecord, confidence: RelationshipRecord["confidence"] = "high"): RelationshipRecord {
+function calls(
+    source: SymbolRecord,
+    target: SymbolRecord,
+    confidence: RelationshipRecord["confidence"] = "high",
+    resolutionAuthority?: RelationshipRecord["resolutionAuthority"],
+): RelationshipRecord {
     return {
         sourceKey: source.symbolKey,
         sourceInstanceId: source.symbolInstanceId,
@@ -109,6 +115,7 @@ function calls(source: SymbolRecord, target: SymbolRecord, confidence: Relations
         file: source.file,
         span: { startLine: source.span.startLine, endLine: source.span.endLine },
         confidence,
+        ...(resolutionAuthority === undefined ? {} : { resolutionAuthority }),
     };
 }
 
@@ -212,6 +219,51 @@ test("structural context omits ambiguous, unresolved, and low-confidence referen
     assert.deepEqual(context.directCallers, []);
     assert.deepEqual(context.directCallees, []);
     assert.deepEqual(context.supportingTests, []);
+});
+
+test("structural context admits the proof-backed cross-module TradingCore constructor caller", () => {
+    const constructor = createSymbol({
+        file: "src/trading_core.py",
+        name: "__init__",
+        qualifiedName: "TradingCore.__init__",
+        label: "TradingCore.__init__",
+        startLine: 12,
+        endLine: 20,
+        fileHash: "trading-core",
+        language: "python",
+        kind: "method",
+    });
+    const veto = createSymbol({
+        file: "src/trading_entry_vetoes.py",
+        name: "TradingEntryVetoes",
+        label: "TradingEntryVetoes",
+        startLine: 3,
+        endLine: 18,
+        fileHash: "trading-entry-vetoes",
+        language: "python",
+        kind: "class",
+    });
+    const registry = buildRegistry([constructor, veto]);
+    const context = buildSearchRerankStructuralContext({
+        candidate: candidateFor(veto),
+        registry,
+        relationships: [calls(constructor, veto, "low", "direct_binding")],
+    });
+    assert.deepEqual(context.directCallers, [reference("caller", constructor)]);
+    assert.deepEqual(context.directCallees, []);
+    assert.deepEqual(context.supportingTests, []);
+});
+
+test("structural context reuses a prepared relationship index without changing exact-instance output", () => {
+    const owner = createSymbol({ file: "src/owner.ts", name: "owner", startLine: 10, endLine: 20, fileHash: "owner" });
+    const caller = createSymbol({ file: "src/caller.ts", name: "caller", startLine: 1, endLine: 5, fileHash: "caller" });
+    const registry = buildRegistry([owner, caller]);
+    const preparedRelationships = prepareSearchRerankStructuralRelationships([calls(caller, owner)]);
+    assert.deepEqual(buildSearchRerankStructuralContext({
+        candidate: candidateFor(owner),
+        registry,
+        preparedRelationships,
+    }).directCallers, [reference("caller", caller)]);
 });
 
 test("structural context returns empty context without an exact owner or any records", () => {

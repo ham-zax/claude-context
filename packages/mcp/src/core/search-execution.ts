@@ -82,6 +82,7 @@ import { resolveRerankBoundary } from "./search-rerank-boundary.js";
 import type {
     SearchRerankProjectionFailureReason,
     SearchRerankProjectionResult,
+    SearchRerankStructuralContextStatus,
 } from "./search-rerank-projection-result.js";
 import { sortNativeRetrievalCandidates } from "./search-retrieval-order.js";
 
@@ -584,6 +585,7 @@ async function rerankSearchCandidates(
                 })));
                 const failureCounts: Partial<Record<SearchRerankProjectionFailureReason, number>> = {};
                 let firstFailure: SearchRerankProjectionSummary["firstFailure"];
+                const structuralContextStatuses = new Set<SearchRerankStructuralContextStatus>();
                 const failedCandidateIds: string[] = [];
                 const projectableRows: Array<{
                     candidate: SearchCandidate;
@@ -596,6 +598,9 @@ async function rerankSearchCandidates(
                         && row.projection.document.length > 0
                     ) {
                         projectableRows.push({ candidate: row.candidate, projection: row.projection });
+                        if (row.projection.structuralContextStatus !== undefined) {
+                            structuralContextStatuses.add(row.projection.structuralContextStatus);
+                        }
                         continue;
                     }
                     const reason: SearchRerankProjectionFailureReason = row.projection.ok
@@ -625,6 +630,9 @@ async function rerankSearchCandidates(
                     skippedCandidates: providerBoundedSelection.length - projectableRows.length,
                     failureCounts,
                     ...(firstFailure ? { firstFailure } : {}),
+                    ...(structuralContextStatuses.size === 1
+                        ? { structuralContextStatus: [...structuralContextStatuses][0]! }
+                        : {}),
                 };
                 if (projectableRows.length < 2) {
                     // Fewer than two safe documents remain: skip the provider

@@ -1,5 +1,7 @@
 import type { SearchCandidateRole } from "./search-rerank-context.js";
 
+export type SearchRerankStructuralContextStatus = "available" | "unavailable" | "incompatible";
+
 export type SearchRerankProjectionFailureReason =
     | "generation_receipt_missing"
     | "navigation_status_invalid"
@@ -20,6 +22,7 @@ export type SearchRerankProjectionResult =
         sha256: string;
         candidateRole: SearchCandidateRole;
         projectionIdentity: string;
+        structuralContextStatus?: SearchRerankStructuralContextStatus;
     }>
     | Readonly<{
         ok: false;

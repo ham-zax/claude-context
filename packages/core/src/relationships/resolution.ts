@@ -32,6 +32,21 @@ export function isResolutionAuthority(value: unknown): value is ResolutionAuthor
     return typeof value === 'string' && RESOLUTION_AUTHORITY_SET.has(value);
 }
 
+/**
+ * A CALLS edge independently proven by the resolver. These records may carry
+ * low traversal confidence because confidence and proof authority encode
+ * different facts; consumers that require exact binding can admit only this
+ * narrow low-confidence subset.
+ */
+export function isProofBackedAuthoritativeCall(input: {
+    type: string;
+    resolutionAuthority?: ResolutionAuthority;
+}): boolean {
+    return input.type === 'CALLS'
+        && (input.resolutionAuthority === 'direct_binding'
+            || input.resolutionAuthority === 'origin_flow');
+}
+
 export function resolutionAuthorityForProof(input: {
     decision: ResolutionDecision;
     proofSteps: readonly ResolutionProofStep[];
