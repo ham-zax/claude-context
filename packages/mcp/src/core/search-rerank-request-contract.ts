@@ -7,7 +7,10 @@ import { serializeCanonicalJson } from "./canonical-json.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY, buildSearchRerankDocumentV3 } from "./search-rerank-document-v3.js";
-import { buildSearchRerankDocumentV4 } from "./search-rerank-document-v4.js";
+import {
+    SEARCH_RERANK_DOCUMENT_V4_POLICY,
+    buildSearchRerankDocumentV4,
+} from "./search-rerank-document-v4.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
@@ -20,6 +23,10 @@ export const SEARCH_RERANK_REQUEST_CONTRACT_ASSET_RELPATH =
 export const SEARCH_RERANK_DOCUMENT_RAW_IDENTITY = "semantic_document_raw_v1" as const;
 
 export const SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY = Object.freeze({
+    exactInstanceIdentityRequired: true,
+    callAdmission: "high_confidence_or_proof_backed_authoritative_call_v1",
+    proofBackedAuthorities: ["direct_binding", "origin_flow"] as const,
+    testAdmission: "high_confidence_exact_instance_v1",
     maxDirectCallers: 3,
     maxDirectCallees: 3,
     maxSupportingTests: 2,
@@ -52,6 +59,8 @@ export type SearchRerankRequestContractFixtures = Readonly<{
     candidateRoleClassification: Record<string, string>;
     documentProjectionV3: string;
     documentProjectionV4: string;
+    documentProjectionV4Structural: string;
+    documentProjectionV4SourceFirst: string;
     sourceSelectionPolicyIdentity: string;
     canonicalJsonIdentity: string;
     structuralContext: typeof SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY;
@@ -95,6 +104,54 @@ const DOCUMENT_PROJECTION_FIXTURE = Object.freeze({
     query: FOCUS_FIXTURE_QUESTIONS.implementation,
 });
 
+const DOCUMENT_PROJECTION_STRUCTURAL_FIXTURE = Object.freeze({
+    ...DOCUMENT_PROJECTION_FIXTURE,
+    structuralContext: {
+        directCallers: [{
+            repository_relative_path: "src/core/trading_core.ts",
+            canonical_symbol_label: "TradingCore.__init__",
+            relation: "caller" as const,
+        }],
+        directCallees: [{
+            repository_relative_path: "src/core/checks.ts",
+            canonical_symbol_label: "check_shariah_compliance",
+            relation: "callee" as const,
+        }],
+        supportingTests: [{
+            repository_relative_path: "tests/veto.test.ts",
+            canonical_symbol_label: "validates_trade_veto",
+            relation: "test_support" as const,
+        }],
+    },
+});
+
+const DOCUMENT_PROJECTION_SOURCE_FIRST_FIXTURE = Object.freeze({
+    ...DOCUMENT_PROJECTION_FIXTURE,
+    symbolSpan: { startLine: 1, endLine: 96 },
+    content: Array.from(
+        { length: 96 },
+        (_, index) => `line ${index}: validate_order_for_exact_question(${index});`,
+    ).join("\n"),
+    query: "validate order exact question",
+    structuralContext: {
+        directCallers: [1, 2, 3].map((index) => ({
+            repository_relative_path: `src/callers/caller-${index}.ts`,
+            canonical_symbol_label: `proof_backed_caller_${index}_${"x".repeat(160)}`,
+            relation: "caller" as const,
+        })),
+        directCallees: [1, 2, 3].map((index) => ({
+            repository_relative_path: `src/callees/callee-${index}.ts`,
+            canonical_symbol_label: `proof_backed_callee_${index}_${"x".repeat(160)}`,
+            relation: "callee" as const,
+        })),
+        supportingTests: [1, 2].map((index) => ({
+            repository_relative_path: `tests/veto-${index}.test.ts`,
+            canonical_symbol_label: `proof_backed_test_${index}_${"x".repeat(160)}`,
+            relation: "test_support" as const,
+        })),
+    },
+});
+
 export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestContractFixtures {
     const answerFocusResolution: Record<string, string> = {};
     const queryProjectionV1: Record<string, string> = {};
@@ -125,7 +182,16 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         candidateRoleClassification,
         documentProjectionV3: buildSearchRerankDocumentV3(DOCUMENT_PROJECTION_FIXTURE).text,
         documentProjectionV4: buildSearchRerankDocumentV4(DOCUMENT_PROJECTION_FIXTURE).text,
-        sourceSelectionPolicyIdentity: serializeCanonicalJson(SEARCH_RERANK_DOCUMENT_V3_POLICY),
+        documentProjectionV4Structural: buildSearchRerankDocumentV4(
+            DOCUMENT_PROJECTION_STRUCTURAL_FIXTURE,
+        ).text,
+        documentProjectionV4SourceFirst: buildSearchRerankDocumentV4(
+            DOCUMENT_PROJECTION_SOURCE_FIRST_FIXTURE,
+        ).text,
+        sourceSelectionPolicyIdentity: serializeCanonicalJson({
+            sourceSelection: SEARCH_RERANK_DOCUMENT_V3_POLICY,
+            answerPacketBudget: SEARCH_RERANK_DOCUMENT_V4_POLICY,
+        }),
         canonicalJsonIdentity: serializeCanonicalJson({ b: 1, a: [2, { d: "x", c: null }] }),
         structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
         partialProjectionSemantics: SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS,
@@ -187,6 +253,8 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
         "canonicalJsonIdentity",
         "documentProjectionV3",
         "documentProjectionV4",
+        "documentProjectionV4SourceFirst",
+        "documentProjectionV4Structural",
         "partialProjectionSemantics",
         "queryProjectionV1",
         "queryProjectionV2",
@@ -198,12 +266,8 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
     }
     const structuralContext = requireRecord(fixturesRecord.structuralContext, "fixtures.structuralContext");
     if (
-        structuralContext.maxDirectCallers !== SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY.maxDirectCallers
-        || structuralContext.maxDirectCallees !== SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY.maxDirectCallees
-        || structuralContext.maxSupportingTests !== SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY.maxSupportingTests
-        || structuralContext.referenceSourceText !== SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY.referenceSourceText
-        || serializeCanonicalJson(structuralContext.orderBy)
-            !== serializeCanonicalJson(SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY.orderBy)
+        serializeCanonicalJson(structuralContext)
+        !== serializeCanonicalJson(SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY)
     ) {
         throw new Error("Rerank request contract structural-context policy drifted from the runtime policy.");
     }
@@ -224,6 +288,12 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
     }
     if (typeof fixturesRecord.documentProjectionV4 !== "string") {
         throw new Error("Rerank request contract document projection v4 fixture must be a string.");
+    }
+    if (typeof fixturesRecord.documentProjectionV4Structural !== "string") {
+        throw new Error("Rerank request contract structural document projection v4 fixture must be a string.");
+    }
+    if (typeof fixturesRecord.documentProjectionV4SourceFirst !== "string") {
+        throw new Error("Rerank request contract source-first document projection v4 fixture must be a string.");
     }
     if (typeof fixturesRecord.sourceSelectionPolicyIdentity !== "string") {
         throw new Error("Rerank request contract source-selection identity must be a string.");
@@ -253,6 +323,8 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
             ),
             documentProjectionV3: fixturesRecord.documentProjectionV3,
             documentProjectionV4: fixturesRecord.documentProjectionV4,
+            documentProjectionV4Structural: fixturesRecord.documentProjectionV4Structural,
+            documentProjectionV4SourceFirst: fixturesRecord.documentProjectionV4SourceFirst,
             sourceSelectionPolicyIdentity: fixturesRecord.sourceSelectionPolicyIdentity,
             canonicalJsonIdentity: fixturesRecord.canonicalJsonIdentity,
             structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,

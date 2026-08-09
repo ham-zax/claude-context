@@ -12,6 +12,7 @@ import type {
     RerankResult,
 } from "@zokizuan/satori-core";
 import { serializeCanonicalJson } from "../core/canonical-json.js";
+import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
 import type {
     LateOnEffectiveOperationalBounds,
     LateOnRuntimeProfile,
@@ -222,6 +223,8 @@ export function loadLateOnRuntimeProfile(
             || parsed.identity?.projectionVersion !== "search_rerank_document_v4"
             || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
             || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v2"
+            || parsed.identity?.requestContractSha256
+                !== loadSearchRerankRequestContract().contractSha256
             || parsed.qualificationStatus
                 !== "owner_activated_operationally_qualified_not_held_out"
         ) {

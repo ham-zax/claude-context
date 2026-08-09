@@ -143,6 +143,7 @@ export type LateOnRuntimeProfileV4 = Omit<
         projectionVersion: "search_rerank_document_v4";
         projectionSha256: string;
         queryProjectionVersion: "search_rerank_query_v2";
+        requestContractSha256: string;
     }>;
 }>;
 

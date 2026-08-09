@@ -162,6 +162,21 @@ export function buildSearchRankedSetBinding(
             input.rerankerRequestIdentity.requestContractSha256,
             "rerank request contract digest",
         );
+        if (input.rerankerRequestIdentity.provider !== input.rerankerIdentity.provider) {
+            throw new Error("Ranked-set rerank request provider must match the applied reranker provider.");
+        }
+        if (input.rerankerRequestIdentity.model !== input.rerankerIdentity.model) {
+            throw new Error("Ranked-set rerank request model must match the applied reranker model.");
+        }
+        if (input.rerankerRequestIdentity.profile !== input.rerankerIdentity.profile) {
+            throw new Error("Ranked-set rerank request profile must match the applied reranker profile.");
+        }
+        if (input.rerankerRequestIdentity.documentProjectionIdentity !== input.rerankerProjectionIdentity) {
+            throw new Error("Ranked-set rerank request document projection must match the applied reranker projection.");
+        }
+        if (!/^[a-f0-9]{64}$/.test(input.rerankerRequestIdentity.requestContractSha256)) {
+            throw new Error("Ranked-set rerank request contract digest must be a SHA-256 hex string.");
+        }
     } else if (input.rerankerRequestIdentity !== null) {
         throw new Error("Deterministic baseline ranked sets must not carry a rerank request identity.");
     }

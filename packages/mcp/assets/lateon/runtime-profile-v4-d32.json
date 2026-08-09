@@ -7,8 +7,9 @@
     "revision": "07ef20f406c86badca122464808f4cac2f6e4b25",
     "license": "Apache-2.0",
     "projectionVersion": "search_rerank_document_v4",
-    "projectionSha256": "de52c67d3ce423ee0d063d9916b62d8197530cc593e0bbac37831246f93be33e",
-    "queryProjectionVersion": "search_rerank_query_v2"
+    "projectionSha256": "a44e5ab565d186a586554b787ac1783facd9871374105dacd6cac29f812aa98a",
+    "queryProjectionVersion": "search_rerank_query_v2",
+    "requestContractSha256": "8fdd342e1203aa7a9a3995125850c6d04512145a9a219ef2481fe05bc60b2d52"
   },
   "artifacts": [
     {

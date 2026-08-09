@@ -167,8 +167,19 @@ test("ranked-set digest binds publication, observations, policies, model, and pr
         withMutation((value) => ({
             ...value,
             rerankerIdentity: { ...value.rerankerIdentity, model: "other-model" },
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                model: "other-model",
+            },
         })),
-        withMutation((value) => ({ ...value, rerankerProjectionIdentity: "projection-v2" })),
+        withMutation((value) => ({
+            ...value,
+            rerankerProjectionIdentity: "projection-v2",
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                documentProjectionIdentity: "projection-v2",
+            },
+        })),
     ];
 
     for (const variant of variants) {
@@ -223,6 +234,7 @@ test("ranked-set digest binds the complete rerank request identity", () => {
         })),
         withMutation((value) => ({
             ...value,
+            rerankerProjectionIdentity: "semantic_document_raw_v1",
             rerankerRequestIdentity: {
                 ...value.rerankerRequestIdentity!,
                 documentProjectionIdentity: "semantic_document_raw_v1",
@@ -257,3 +269,40 @@ test("applied reranking requires a complete request identity; baselines reject o
         })),
     ), /must not carry a rerank request identity/);
 });
+
+test("ranked-set binding rejects contradictory duplicated reranker identities", () => {
+    for (const variant of [
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: { ...value.rerankerRequestIdentity!, provider: "other" },
+        })),
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: { ...value.rerankerRequestIdentity!, model: "other-model" },
+        })),
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: { ...value.rerankerRequestIdentity!, profile: "other-profile" },
+        })),
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                documentProjectionIdentity: "semantic_document_raw_v1",
+            },
+        })),
+        withMutation((value) => ({
+            ...value,
+            rerankerRequestIdentity: {
+                ...value.rerankerRequestIdentity!,
+                requestContractSha256: "not-a-sha256",
+            },
+        })),
+    ]) {
+        assert.throws(
+            () => buildSearchRankedSetBinding(variant),
+            /rerank request.*must match|contract digest must be a SHA-256/,
+        );
+    }
+});
+

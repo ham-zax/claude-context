@@ -139,11 +139,9 @@ export function isSharedOfflineRuntimeEligible(
 
 function resolveLateOnRequestContractDigest(env: NodeJS.ProcessEnv): string {
     if (env.SATORI_RERANKER_PROVIDER !== "lateon") return "";
-    try {
-        return loadSearchRerankRequestContract().contractSha256;
-    } catch {
-        return "";
-    }
+    // A shared LateOn host is keyed by its complete rerank request contract.
+    // Do not let a missing/corrupt contract asset silently collapse identity.
+    return loadSearchRerankRequestContract().contractSha256;
 }
 
 export function buildSharedRuntimeIdentity(

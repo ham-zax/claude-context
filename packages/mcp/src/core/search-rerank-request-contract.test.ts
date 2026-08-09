@@ -59,7 +59,17 @@ test("request contract fixtures bind focus, query, role, and document projection
         ),
         "v4 fixture must carry the empty answer-packet structural context",
     );
+    assert.ok(fixtures.documentProjectionV4Structural.includes('"TradingCore.__init__"'));
+    assert.ok(fixtures.documentProjectionV4Structural.includes('"relation":"test_support"'));
+    assert.ok(fixtures.documentProjectionV4SourceFirst.includes('validate_order_for_exact_question'));
     assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("search_rerank_document_v3"));
+    assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("source_before_references_v1"));
+    assert.equal(
+        fixtures.structuralContext.callAdmission,
+        "high_confidence_or_proof_backed_authoritative_call_v1",
+    );
+    assert.deepEqual(fixtures.structuralContext.proofBackedAuthorities, ["direct_binding", "origin_flow"]);
+    assert.equal(fixtures.structuralContext.exactInstanceIdentityRequired, true);
     assert.equal(fixtures.structuralContext.maxDirectCallers, 3);
     assert.equal(fixtures.structuralContext.maxDirectCallees, 3);
     assert.equal(fixtures.structuralContext.maxSupportingTests, 2);
@@ -82,10 +92,15 @@ test("any fixture behavior change moves the request contract digest", () => {
         candidateRoleClassification: { ...baseline.candidateRoleClassification, "tests/veto.test.ts|typescript": "implementation" },
     };
     const mutatedDocument = { ...baseline, documentProjectionV3: `${baseline.documentProjectionV3}x` };
+    const mutatedV4Structural = {
+        ...baseline,
+        documentProjectionV4Structural: `${baseline.documentProjectionV4Structural}x`,
+    };
     const baselineDigest = computeSearchRerankRequestContractSha256(baseline);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedQuery), baselineDigest);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedRole), baselineDigest);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedDocument), baselineDigest);
+    assert.notEqual(computeSearchRerankRequestContractSha256(mutatedV4Structural), baselineDigest);
 });
 
 test("contract parser rejects malformed and drifted manifests", () => {

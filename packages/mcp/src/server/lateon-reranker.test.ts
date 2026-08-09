@@ -11,6 +11,9 @@ import {
     loadLateOnRuntimeProfile,
 } from "./lateon-reranker.js";
 import { resolveSearchRerankQuery } from "../core/search-rerank-query-routing.js";
+import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
+import { buildSearchRerankDocumentV4 } from "../core/search-rerank-document-v4.js";
+import { buildSearchRerankQueryV2 } from "../core/search-rerank-query-v2.js";
 
 type FakeWorkerOptions = Readonly<{
     readyDelayMilliseconds?: number;
@@ -167,7 +170,11 @@ test("LateOn context-v4 profile advertises query-v2 and document-v4 projections 
     assert.equal(v4.identity.queryProjectionVersion, "search_rerank_query_v2");
     assert.equal(
         v4.identity.projectionSha256,
-        "de52c67d3ce423ee0d063d9916b62d8197530cc593e0bbac37831246f93be33e",
+        "a44e5ab565d186a586554b787ac1783facd9871374105dacd6cac29f812aa98a",
+    );
+    assert.equal(
+        v4.identity.requestContractSha256,
+        loadSearchRerankRequestContract().contractSha256,
     );
     if (v3.schemaVersion !== "satori_lateon_runtime_profile_v3") {
         throw new Error("expected the v3 activated runtime profile");
@@ -611,3 +618,54 @@ test("LateOn diagnostics callback failure never changes rerank behavior", async 
         "lateon_execution_timeout",
     );
 });
+
+const realLateOnModelDirectory = process.env.SATORI_LATEON_MODEL_PATH;
+test("LateOn v4 accepts query-v2 and document-v4 through the real tokenizer and model", {
+    skip: !realLateOnModelDirectory || !fs.existsSync(path.join(realLateOnModelDirectory, "model.onnx")),
+}, async (t) => {
+    const reranker = new LateOnReranker({
+        modelDirectory: realLateOnModelDirectory as string,
+        profileId: LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
+    });
+    t.after(async () => reranker.close());
+    await reranker.waitUntilReady();
+    const query = buildSearchRerankQueryV2({
+        semanticQuery: "how does Shariah compliance checking block trades",
+        answerFocus: "implementation",
+    });
+    const documents = [
+        buildSearchRerankDocumentV4({
+            relativePath: "src/veto.ts",
+            language: "typescript",
+            candidateRole: "implementation",
+            symbolKind: "function",
+            canonicalSymbolLabel: "validate_order",
+            symbolSpan: { startLine: 1, endLine: 3 },
+            content: [
+                "function validate_order(order) {",
+                "    return check_shariah_compliance(order);",
+                "}",
+            ].join("\n"),
+            query: "how does Shariah compliance checking block trades",
+        }).text,
+        buildSearchRerankDocumentV4({
+            relativePath: "tests/veto.test.ts",
+            language: "typescript",
+            candidateRole: "test",
+            symbolKind: "test",
+            canonicalSymbolLabel: "validates_trade_veto",
+            symbolSpan: { startLine: 1, endLine: 3 },
+            content: [
+                "test(\"validates trade veto\", () => {",
+                "    assert.equal(validate_order(order), false);",
+                "});",
+            ].join("\n"),
+            query: "how does Shariah compliance checking block trades",
+        }).text,
+    ];
+    const results = await reranker.rerank(query, documents);
+    assert.equal(results.length, documents.length);
+    assert.deepEqual(results.map((result) => result.index).sort(), [0, 1]);
+    assert.ok(results.every((result) => Number.isFinite(result.relevanceScore)));
+});
+

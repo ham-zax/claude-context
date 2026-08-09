@@ -143,3 +143,73 @@ test("v4 rejects a mandatory projection that exceeds the byte budget even with z
         /mandatory projection exceeds/,
     );
 });
+
+test("v4 keeps the same primary source excerpt when optional structural references fit beside it", () => {
+    const content = Array.from(
+        { length: 120 },
+        (_, index) => `line ${index}: dispatch_trade_for_exact_question(${index});`,
+    ).join("\n");
+    const input = baseInput({
+        content,
+        symbolSpan: { startLine: 1, endLine: 120 },
+        canonicalSymbolLabel: "dispatch_trade_for_exact_question",
+        query: "dispatch trade exact question",
+    });
+    const withoutReferences = JSON.parse(buildSearchRerankDocumentV4(input).text);
+    const longLabel = "proof_backed_call_path_".repeat(10);
+    const withReferences = JSON.parse(buildSearchRerankDocumentV4({
+        ...input,
+        structuralContext: {
+            directCallers: [1, 2, 3].map((index) => ({
+                repository_relative_path: `src/callers/caller-${index}.ts`,
+                canonical_symbol_label: `${longLabel}${index}`,
+                relation: "caller" as const,
+            })),
+            directCallees: [1, 2, 3].map((index) => ({
+                repository_relative_path: `src/callees/callee-${index}.ts`,
+                canonical_symbol_label: `${longLabel}${index}`,
+                relation: "callee" as const,
+            })),
+            supportingTests: [1, 2].map((index) => ({
+                repository_relative_path: `tests/support-${index}.test.ts`,
+                canonical_symbol_label: `${longLabel}${index}`,
+                relation: "test_support" as const,
+            })),
+        },
+    }).text);
+    assert.equal(
+        withReferences.query_relevant_source_excerpt,
+        withoutReferences.query_relevant_source_excerpt,
+        "optional references must never shrink a valid source-first excerpt",
+    );
+});
+
+test("v4 normalizes only role-valid, relation-aligned, bounded structural references", () => {
+    assert.throws(
+        () => buildSearchRerankDocumentV4(baseInput({ candidateRole: "preference" })),
+        /candidateRole must be a valid SearchCandidateRole/,
+    );
+    assert.throws(
+        () => buildSearchRerankDocumentV4(baseInput({
+            structuralContext: {
+                directCallers: [ref("callee", 1)],
+            },
+        })),
+        /directCallers\[0\]\.relation must be caller/,
+    );
+    assert.throws(
+        () => buildSearchRerankDocumentV4(baseInput({ unexpected: true })),
+        /unknown key unexpected/,
+    );
+    const parsed = JSON.parse(buildSearchRerankDocumentV4(baseInput({
+        structuralContext: {
+            directCallers: [4, 1, 2, 3].map((index) => ref("caller", index)),
+        },
+    })).text);
+    assert.deepEqual(
+        parsed.structural_context.direct_callers.map((entry: { repository_relative_path: string }) => entry.repository_relative_path),
+        ["src/ref-1.ts", "src/ref-2.ts", "src/ref-3.ts"],
+        "direct callers are sorted and capped by the projection contract",
+    );
+});
+
