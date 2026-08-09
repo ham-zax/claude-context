@@ -1326,8 +1326,9 @@ export class NavigationHandlers {
                     ?? trackedRootState.sourceBackedNavigationBinding?.navigationSealHash,
                 relationshipManifestHash: trackedRootState.generationReceipt?.navigation.relationshipManifestHash
                     ?? trackedRootState.sourceBackedNavigationBinding?.relationshipManifestHash,
-                builtAt: trackedRootState.generationReceipt?.marker?.completedAt
-                    ?? trackedRootState.sourceBackedNavigationBinding?.builtAt,
+                relationshipBuiltAt: compatibility.relationships.manifest.builtAt,
+                publicationCompletedAt: trackedRootState.generationReceipt?.marker?.completedAt
+                    ?? trackedRootState.sourceBackedNavigationBinding?.publicationCompletedAt,
             });
             const payload = this.host.withProofDebugHint({
                 status: "ok" as const,

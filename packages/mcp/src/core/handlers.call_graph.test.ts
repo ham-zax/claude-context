@@ -3399,7 +3399,8 @@ test('handleCallGraph attributes source-backed serving navigation authority from
             generationId: 'generation-42',
             navigationSealSha256: 'navigation-seal-c',
             relationshipManifestSha256: 'relationship-manifest-b',
-            builtAt: completedAt,
+            relationshipBuiltAt: '2026-01-01T00:00:00.000Z',
+            publicationCompletedAt: completedAt,
         });
     });
 });
@@ -3540,7 +3541,8 @@ test('handleCallGraph attributes the exact serving navigation generation authori
             generationId: 'generation-42',
             navigationSealSha256: 'navigation-seal-c',
             relationshipManifestSha256: 'relationship-manifest-b',
-            builtAt: completedAt,
+            relationshipBuiltAt: '2026-01-01T00:00:00.000Z',
+            publicationCompletedAt: completedAt,
         });
     });
 });

@@ -58,27 +58,30 @@ export type CallGraphNavigationAuthority = Readonly<{
     generationId: string;
     navigationSealSha256: string;
     relationshipManifestSha256: string;
-    builtAt: string;
+    relationshipBuiltAt: string;
+    publicationCompletedAt: string;
 }>;
 
 /**
  * Resolve the serving navigation generation attribution for a call-graph
  * traversal. Attribution is emitted only when the complete authority is
- * known: generation identity, navigation seal, relationship manifest, and
- * build time. Partial evidence yields no attribution rather than a guessed
- * one.
+ * known: generation identity, navigation seal, relationship manifest, the
+ * relationship artifact build time, and publication completion time. Partial
+ * evidence yields no attribution rather than a guessed one.
  */
 export function resolveCallGraphNavigationAuthority(input: {
     generationId: string | undefined;
     navigationSealHash: string | undefined;
     relationshipManifestHash: string | undefined;
-    builtAt: string | undefined;
+    relationshipBuiltAt: string | undefined;
+    publicationCompletedAt: string | undefined;
 }): CallGraphNavigationAuthority | null {
     if (
         !input.generationId
         || !input.navigationSealHash
         || !input.relationshipManifestHash
-        || !input.builtAt
+        || !input.relationshipBuiltAt
+        || !input.publicationCompletedAt
     ) {
         return null;
     }
@@ -86,7 +89,8 @@ export function resolveCallGraphNavigationAuthority(input: {
         generationId: input.generationId,
         navigationSealSha256: input.navigationSealHash,
         relationshipManifestSha256: input.relationshipManifestHash,
-        builtAt: input.builtAt,
+        relationshipBuiltAt: input.relationshipBuiltAt,
+        publicationCompletedAt: input.publicationCompletedAt,
     });
 }
 
