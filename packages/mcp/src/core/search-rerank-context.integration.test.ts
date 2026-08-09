@@ -335,3 +335,38 @@ test("v3 profile identity resolves to the focused query v1 bytes", () => {
     assert.equal(resolved.query, base.rerankQuery);
     assert.equal(resolved.queryProjectionIdentity, "search_rerank_query_v1");
 });
+
+test("source excerpt projection receives the exact semantic question rather than the expanded provider query", async () => {
+    const question = "validate the exact shariah gate";
+    const providerQuery = [
+        "Question:",
+        question,
+        "",
+        "Requested answer type:",
+        "production implementation, control flow, and integration path",
+    ].join("\n");
+    const capturedProjectionQueries: string[] = [];
+    const reranker: Reranker = {
+        getIdentity: () => ({ provider: "lateon", model: "test", profile: "context-v4" }),
+        getMaxDocuments: () => 32,
+        rerank: async (_query, _documents, options) => (options?.identities ?? []).map(
+            (_identity, index) => ({ index, relevanceScore: 1 - index / 10 }),
+        ),
+    };
+    const base = buildInput(question);
+    const host = buildHost([
+        candidate("impl", "src/core/veto.ts", 0.9),
+        candidate("test", "tests/veto.test.ts", 0.8),
+    ], reranker);
+    host.buildRerankDocument = async (sourceSelectionQuery, result) => {
+        capturedProjectionQueries.push(sourceSelectionQuery);
+        return typedProjection(result as FixtureCandidate);
+    };
+    const outcome = await runSearchExecution({
+        ...base,
+        rerankQuery: providerQuery,
+        rerankQueryProjectionIdentity: "search_rerank_query_v2",
+    }, host, buildDiagnostics());
+    assert.equal(outcome.kind, "ok");
+    assert.deepEqual(capturedProjectionQueries, [question, question]);
+});
