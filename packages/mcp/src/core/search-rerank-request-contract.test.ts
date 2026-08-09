@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import type { Reranker } from "@zokizuan/satori-core";
+import { SEARCH_CANDIDATE_ROLES } from "./search-rerank-context.js";
 import {
     SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
     buildSearchRerankRequestContractFixtures,
@@ -52,6 +53,11 @@ test("request contract fixtures bind focus, query, role, and document projection
         "contract fixture must keep the implementation projection positive-only",
     );
     assert.equal(fixtures.candidateRoleClassification["tests/veto.test.ts|typescript"], "test");
+    assert.deepEqual(
+        [...new Set(Object.values(fixtures.candidateRoleClassification))].sort(),
+        [...SEARCH_CANDIDATE_ROLES].sort(),
+        "every runtime candidate role must be behaviorally bound",
+    );
     assert.ok(fixtures.documentProjectionV3.includes('"candidate_role":"implementation"'));
     assert.ok(
         fixtures.documentProjectionV4.includes(
@@ -74,11 +80,35 @@ test("request contract fixtures bind focus, query, role, and document projection
     assert.equal(fixtures.structuralContext.maxDirectCallees, 3);
     assert.equal(fixtures.structuralContext.maxSupportingTests, 2);
     assert.equal(fixtures.structuralContext.referenceSourceText, false);
+    assert.deepEqual(fixtures.structuralContextBehavior.lowConfidenceAdmission, {
+        directCallers: [{
+            repository_relative_path: "src/core/trading_core.ts",
+            canonical_symbol_label: "method TradingCore.__init__",
+            relation: "caller",
+        }],
+        directCallees: [],
+        supportingTests: [],
+    });
     assert.deepEqual(fixtures.partialProjectionSemantics.warnings, [
         "RERANKER_INPUT_DEGRADED",
         "RERANKER_SKIPPED_INPUT",
         "RERANKER_FAILED",
     ]);
+    assert.equal(fixtures.partialProjectionSemantics.minimumProjectedCandidatesForProviderCall, 2);
+    assert.deepEqual(fixtures.partialProjectionBehavior.providerCallByProjectedCandidateCount, {
+        zero: false,
+        one: false,
+        two: true,
+    });
+    assert.deepEqual(
+        fixtures.partialProjectionBehavior.failedCandidateSlotPreservation.finalOrder,
+        ["d", "b", "c", "a"],
+    );
+    assert.deepEqual(fixtures.partialProjectionBehavior.byteBudgetOmission, {
+        selectedCandidateIds: ["a", "b"],
+        inputBytes: 7,
+        omittedCandidateCount: 1,
+    });
 });
 
 test("any fixture behavior change moves the request contract digest", () => {
@@ -96,11 +126,32 @@ test("any fixture behavior change moves the request contract digest", () => {
         ...baseline,
         documentProjectionV4Structural: `${baseline.documentProjectionV4Structural}x`,
     };
+    const mutatedStructuralBehavior = {
+        ...baseline,
+        structuralContextBehavior: {
+            lowConfidenceAdmission: {
+                ...baseline.structuralContextBehavior.lowConfidenceAdmission,
+                directCallers: [],
+            },
+        },
+    };
+    const mutatedPartialBehavior = {
+        ...baseline,
+        partialProjectionBehavior: {
+            ...baseline.partialProjectionBehavior,
+            providerCallByProjectedCandidateCount: {
+                ...baseline.partialProjectionBehavior.providerCallByProjectedCandidateCount,
+                one: true,
+            },
+        },
+    };
     const baselineDigest = computeSearchRerankRequestContractSha256(baseline);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedQuery), baselineDigest);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedRole), baselineDigest);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedDocument), baselineDigest);
     assert.notEqual(computeSearchRerankRequestContractSha256(mutatedV4Structural), baselineDigest);
+    assert.notEqual(computeSearchRerankRequestContractSha256(mutatedStructuralBehavior), baselineDigest);
+    assert.notEqual(computeSearchRerankRequestContractSha256(mutatedPartialBehavior), baselineDigest);
 });
 
 test("contract parser rejects malformed and drifted manifests", () => {
@@ -125,6 +176,23 @@ test("contract parser rejects malformed and drifted manifests", () => {
             }),
         }),
         /drifted from the runtime policy/,
+    );
+    const driftedBehavior = {
+        lowConfidenceAdmission: {
+            ...manifest.fixtures.structuralContextBehavior.lowConfidenceAdmission,
+            directCallers: [],
+        },
+    };
+    assert.throws(
+        () => parseSearchRerankRequestContract({
+            ...manifest,
+            fixtures: { ...manifest.fixtures, structuralContextBehavior: driftedBehavior },
+            contractSha256: computeSearchRerankRequestContractSha256({
+                ...manifest.fixtures,
+                structuralContextBehavior: driftedBehavior,
+            }),
+        }),
+        /behavior drifted from runtime owners/,
     );
 });
 

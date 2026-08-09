@@ -2,7 +2,16 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Reranker } from "@zokizuan/satori-core";
+import {
+    SYMBOL_REGISTRY_SCHEMA_VERSION,
+    buildSymbolRegistry,
+    createSymbolInstanceId,
+    createSymbolKey,
+    type RelationshipRecord,
+    type Reranker,
+    type SymbolRecord,
+    type SymbolRegistryManifest,
+} from "@zokizuan/satori-core";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
@@ -14,6 +23,21 @@ import {
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
+import {
+    SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
+    buildSearchRerankStructuralContext,
+    prepareSearchRerankStructuralRelationships,
+} from "./search-rerank-structural-context.js";
+import {
+    applyNativeRerankToSelectedSlots,
+    validateNativeRerankResults,
+} from "./search-native-rerank.js";
+import {
+    SEARCH_RERANK_MIN_PROJECTED_CANDIDATES,
+    selectRerankInputWithinUtf8Budget,
+    shouldCallRerankerForProjectedCandidateCount,
+} from "./search-rerank-policy.js";
+export { SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY } from "./search-rerank-structural-context.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 
 export const SEARCH_RERANK_REQUEST_CONTRACT_SCHEMA_VERSION =
@@ -22,18 +46,6 @@ export const SEARCH_RERANK_REQUEST_CONTRACT_ASSET_RELPATH =
     "assets/lateon/rerank-request-contract-v1.json";
 export const SEARCH_RERANK_DOCUMENT_RAW_IDENTITY = "semantic_document_raw_v1" as const;
 
-export const SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY = Object.freeze({
-    exactInstanceIdentityRequired: true,
-    callAdmission: "high_confidence_or_proof_backed_authoritative_call_v1",
-    proofBackedAuthorities: ["direct_binding", "origin_flow"] as const,
-    testAdmission: "high_confidence_exact_instance_v1",
-    maxDirectCallers: 3,
-    maxDirectCallees: 3,
-    maxSupportingTests: 2,
-    orderBy: ["relation", "repository_relative_path", "canonical_symbol_label"] as const,
-    referenceSourceText: false,
-});
-
 export const SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS = Object.freeze({
     warnings: [
         "RERANKER_INPUT_DEGRADED",
@@ -41,6 +53,10 @@ export const SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS = Object.freeze({
         "RERANKER_FAILED",
     ] as const,
     providerNeverCalledOnZeroProjectable: true,
+    minimumProjectedCandidatesForProviderCall: SEARCH_RERANK_MIN_PROJECTED_CANDIDATES,
+    failedCandidatesRetainOriginalSlots: true,
+    projectedSubsetSlotConfinement: true,
+    byteBudgetOmission: "ordered_prefix_v1",
 });
 
 export interface SearchRerankRequestIdentityV1 {
@@ -64,7 +80,9 @@ export type SearchRerankRequestContractFixtures = Readonly<{
     sourceSelectionPolicyIdentity: string;
     canonicalJsonIdentity: string;
     structuralContext: typeof SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY;
+    structuralContextBehavior: ReturnType<typeof buildStructuralContextBehaviorFixture>;
     partialProjectionSemantics: typeof SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS;
+    partialProjectionBehavior: ReturnType<typeof buildPartialProjectionBehaviorFixture>;
 }>;
 
 export type SearchRerankRequestContractManifest = Readonly<{
@@ -87,6 +105,10 @@ const ROLE_FIXTURES: readonly { relativePath: string; language: string }[] = [
     { relativePath: "tests/veto.test.ts", language: "typescript" },
     { relativePath: "docs/architecture.md", language: "markdown" },
     { relativePath: "config/risk.toml", language: "toml" },
+    { relativePath: "src/generated/types.ts", language: "typescript" },
+    { relativePath: "data/fixtures/orders.json", language: "json" },
+    { relativePath: "examples/basic_usage.py", language: "python" },
+    { relativePath: "reports/render-trace.bin", language: "binary" },
 ];
 
 const DOCUMENT_PROJECTION_FIXTURE = Object.freeze({
@@ -152,6 +174,166 @@ const DOCUMENT_PROJECTION_SOURCE_FIRST_FIXTURE = Object.freeze({
     },
 });
 
+function buildCandidateRoleClassificationFixture(): Record<string, string> {
+    const candidateRoleClassification: Record<string, string> = {};
+    for (const fixture of ROLE_FIXTURES) {
+        candidateRoleClassification[`${fixture.relativePath}|${fixture.language}`] =
+            resolveSearchCandidateRole(fixture);
+    }
+    return candidateRoleClassification;
+}
+
+function createContractSymbol(input: {
+    file: string;
+    name: string;
+    label: string;
+    fileHash: string;
+}): SymbolRecord {
+    const symbolKey = createSymbolKey({
+        relativePath: input.file,
+        language: "typescript",
+        kind: "function",
+        qualifiedName: input.name,
+        parentQualifiedNamePath: [],
+    });
+    const span = { startLine: 1, endLine: 3 };
+    return {
+        symbolKey,
+        symbolInstanceId: createSymbolInstanceId({
+            symbolKey,
+            fileHash: input.fileHash,
+            span,
+            extractorVersion: "contract-fixture-v1",
+        }),
+        language: "typescript",
+        kind: "function",
+        name: input.name,
+        qualifiedName: input.name,
+        label: input.label,
+        file: input.file,
+        span,
+        parentQualifiedNamePath: [],
+        fileHash: input.fileHash,
+        extractorVersion: "contract-fixture-v1",
+    };
+}
+
+function buildStructuralContextBehaviorFixture() {
+    const owner = createContractSymbol({
+        file: "src/core/veto.ts",
+        name: "validate_order",
+        label: "function validate_order()",
+        fileHash: "a".repeat(64),
+    });
+    const proofBackedCaller = createContractSymbol({
+        file: "src/core/trading_core.ts",
+        name: "TradingCore.__init__",
+        label: "method TradingCore.__init__",
+        fileHash: "b".repeat(64),
+    });
+    const unsupportedCaller = createContractSymbol({
+        file: "src/core/guess.ts",
+        name: "guess_caller",
+        label: "function guess_caller()",
+        fileHash: "c".repeat(64),
+    });
+    const symbols = [owner, proofBackedCaller, unsupportedCaller];
+    const manifest: SymbolRegistryManifest = {
+        schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
+        normalizedRootPath: "/contract-fixture",
+        rootFingerprint: "contract-root-v1",
+        indexPolicyHash: "contract-policy-v1",
+        languageRouterVersion: "contract-router-v1",
+        extractorVersion: "contract-fixture-v1",
+        relationshipVersion: "contract-relationship-v1",
+        builtAt: "2026-08-09T00:00:00.000Z",
+        files: symbols.map((symbol) => ({
+            path: symbol.file,
+            hash: symbol.fileHash,
+            language: symbol.language,
+            symbolCount: 1,
+            definitionStatus: "definitions_present" as const,
+        })),
+    };
+    const registry = buildSymbolRegistry({ manifest, symbols });
+    const relationship = (
+        source: SymbolRecord,
+        resolutionAuthority: RelationshipRecord["resolutionAuthority"],
+    ): RelationshipRecord => ({
+        sourceKey: source.symbolKey,
+        sourceInstanceId: source.symbolInstanceId,
+        targetKey: owner.symbolKey,
+        targetInstanceId: owner.symbolInstanceId,
+        type: "CALLS",
+        file: source.file,
+        span: source.span,
+        confidence: "low",
+        resolutionAuthority,
+    });
+    const preparedRelationships = prepareSearchRerankStructuralRelationships([
+        relationship(proofBackedCaller, "direct_binding"),
+        relationship(unsupportedCaller, "unsupported"),
+    ]);
+    const context = buildSearchRerankStructuralContext({
+        candidate: {
+            relativePath: owner.file,
+            startLine: owner.span.startLine,
+            endLine: owner.span.endLine,
+            ownerSymbolInstanceId: owner.symbolInstanceId,
+            ownerSymbolKey: owner.symbolKey,
+            language: owner.language,
+            symbolLabel: owner.label,
+        },
+        registry,
+        preparedRelationships,
+    });
+    return {
+        lowConfidenceAdmission: context,
+    } as const;
+}
+
+function buildPartialProjectionBehaviorFixture() {
+    const candidateIds = ["a", "b", "c", "d"] as const;
+    const selectedCandidateIds = ["a", "b", "d"] as const;
+    const orderedItems = validateNativeRerankResults({
+        candidateIds: selectedCandidateIds,
+        results: [
+            { index: 2, relevanceScore: 0.9 },
+            { index: 1, relevanceScore: 0.8 },
+            { index: 0, relevanceScore: 0.7 },
+        ],
+    });
+    const slotPreservingOrder = applyNativeRerankToSelectedSlots({
+        allCandidates: candidateIds,
+        selectedCandidateIds,
+        orderedItems,
+        identify: (candidate) => candidate,
+    });
+    const byteSelection = selectRerankInputWithinUtf8Budget({
+        candidates: ["a", "b", "c"],
+        documents: ["abc", "éé", "tail"],
+        maxInputBytes: 7,
+    });
+    return {
+        providerCallByProjectedCandidateCount: {
+            zero: shouldCallRerankerForProjectedCandidateCount(0),
+            one: shouldCallRerankerForProjectedCandidateCount(1),
+            two: shouldCallRerankerForProjectedCandidateCount(2),
+        },
+        failedCandidateSlotPreservation: {
+            allCandidateIds: candidateIds,
+            projectedCandidateIds: selectedCandidateIds,
+            providerOrder: orderedItems.map((item) => item.candidateId),
+            finalOrder: slotPreservingOrder,
+        },
+        byteBudgetOmission: {
+            selectedCandidateIds: byteSelection.candidates,
+            inputBytes: byteSelection.inputBytes,
+            omittedCandidateCount: byteSelection.omittedCandidateCount,
+        },
+    } as const;
+}
+
 export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestContractFixtures {
     const answerFocusResolution: Record<string, string> = {};
     const queryProjectionV1: Record<string, string> = {};
@@ -170,11 +352,7 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
             answerFocus,
         });
     }
-    const candidateRoleClassification: Record<string, string> = {};
-    for (const fixture of ROLE_FIXTURES) {
-        candidateRoleClassification[`${fixture.relativePath}|${fixture.language}`] =
-            resolveSearchCandidateRole(fixture);
-    }
+    const candidateRoleClassification = buildCandidateRoleClassificationFixture();
     return {
         answerFocusResolution,
         queryProjectionV1,
@@ -194,7 +372,9 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         }),
         canonicalJsonIdentity: serializeCanonicalJson({ b: 1, a: [2, { d: "x", c: null }] }),
         structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
+        structuralContextBehavior: buildStructuralContextBehaviorFixture(),
         partialProjectionSemantics: SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS,
+        partialProjectionBehavior: buildPartialProjectionBehaviorFixture(),
     };
 }
 
@@ -255,11 +435,13 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
         "documentProjectionV4",
         "documentProjectionV4SourceFirst",
         "documentProjectionV4Structural",
+        "partialProjectionBehavior",
         "partialProjectionSemantics",
         "queryProjectionV1",
         "queryProjectionV2",
         "sourceSelectionPolicyIdentity",
         "structuralContext",
+        "structuralContextBehavior",
     ];
     if (serializeCanonicalJson(fixtureKeys) !== serializeCanonicalJson(expectedFixtureKeys)) {
         throw new Error("Rerank request contract fixtures carry unexpected keys.");
@@ -271,17 +453,35 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
     ) {
         throw new Error("Rerank request contract structural-context policy drifted from the runtime policy.");
     }
+    const structuralContextBehavior = requireRecord(
+        fixturesRecord.structuralContextBehavior,
+        "fixtures.structuralContextBehavior",
+    );
+    if (
+        serializeCanonicalJson(structuralContextBehavior)
+        !== serializeCanonicalJson(buildStructuralContextBehaviorFixture())
+    ) {
+        throw new Error("Rerank request contract structural-context behavior drifted from runtime owners.");
+    }
     const partialProjection = requireRecord(
         fixturesRecord.partialProjectionSemantics,
         "fixtures.partialProjectionSemantics",
     );
     if (
-        serializeCanonicalJson(partialProjection.warnings)
-            !== serializeCanonicalJson(SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS.warnings)
-        || partialProjection.providerNeverCalledOnZeroProjectable
-            !== SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS.providerNeverCalledOnZeroProjectable
+        serializeCanonicalJson(partialProjection)
+        !== serializeCanonicalJson(SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS)
     ) {
         throw new Error("Rerank request contract partial-projection semantics drifted from the runtime policy.");
+    }
+    const partialProjectionBehavior = requireRecord(
+        fixturesRecord.partialProjectionBehavior,
+        "fixtures.partialProjectionBehavior",
+    );
+    if (
+        serializeCanonicalJson(partialProjectionBehavior)
+        !== serializeCanonicalJson(buildPartialProjectionBehaviorFixture())
+    ) {
+        throw new Error("Rerank request contract partial-projection behavior drifted from runtime owners.");
     }
     if (typeof fixturesRecord.documentProjectionV3 !== "string") {
         throw new Error("Rerank request contract document projection fixture must be a string.");
@@ -301,6 +501,16 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
     if (typeof fixturesRecord.canonicalJsonIdentity !== "string") {
         throw new Error("Rerank request contract canonical-JSON identity must be a string.");
     }
+    const candidateRoleClassification = requireStringRecord(
+        fixturesRecord.candidateRoleClassification,
+        "fixtures.candidateRoleClassification",
+    );
+    if (
+        serializeCanonicalJson(candidateRoleClassification)
+        !== serializeCanonicalJson(buildCandidateRoleClassificationFixture())
+    ) {
+        throw new Error("Rerank request contract candidate-role behavior drifted from runtime classification.");
+    }
     const manifest: SearchRerankRequestContractManifest = {
         schemaVersion: SEARCH_RERANK_REQUEST_CONTRACT_SCHEMA_VERSION,
         contractSha256: record.contractSha256,
@@ -317,10 +527,7 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
                 fixturesRecord.queryProjectionV2,
                 "fixtures.queryProjectionV2",
             ),
-            candidateRoleClassification: requireStringRecord(
-                fixturesRecord.candidateRoleClassification,
-                "fixtures.candidateRoleClassification",
-            ),
+            candidateRoleClassification,
             documentProjectionV3: fixturesRecord.documentProjectionV3,
             documentProjectionV4: fixturesRecord.documentProjectionV4,
             documentProjectionV4Structural: fixturesRecord.documentProjectionV4Structural,
@@ -328,7 +535,9 @@ export function parseSearchRerankRequestContract(raw: unknown): SearchRerankRequ
             sourceSelectionPolicyIdentity: fixturesRecord.sourceSelectionPolicyIdentity,
             canonicalJsonIdentity: fixturesRecord.canonicalJsonIdentity,
             structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
+            structuralContextBehavior: buildStructuralContextBehaviorFixture(),
             partialProjectionSemantics: SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS,
+            partialProjectionBehavior: buildPartialProjectionBehaviorFixture(),
         },
     };
     if (computeSearchRerankRequestContractSha256(manifest.fixtures) !== manifest.contractSha256) {

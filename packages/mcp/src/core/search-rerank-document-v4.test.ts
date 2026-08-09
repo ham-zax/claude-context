@@ -89,8 +89,14 @@ test("v4 with empty structural context keeps declaration and primary source sele
         direct_callees: [],
         supporting_tests: [],
     });
+    assert.equal("language" in v4Parsed, false);
     assert.equal("documentation_excerpt" in v4Parsed, false);
     assert.equal("required_owner_siblings" in v4Parsed, false);
+    assert.deepEqual(SEARCH_RERANK_DOCUMENT_V4_POLICY.fieldSetDecision, {
+        language: "intentionally_omitted_v1",
+        documentationExcerpt: "intentionally_removed_v1",
+        requiredOwnerSiblings: "superseded_by_structural_context_v1",
+    });
 });
 
 test("v4 stays within 4,000 UTF-8 bytes under a full structural context and truncates references before source", () => {
@@ -140,7 +146,7 @@ test("v4 rejects a mandatory projection that exceeds the byte budget even with z
         () => buildSearchRerankDocumentV4(baseInput({
             canonicalSymbolLabel: "x".repeat(4_000),
         })),
-        /mandatory projection exceeds/,
+        /base projection exceeds/,
     );
 });
 
@@ -210,5 +216,20 @@ test("v4 normalizes only role-valid, relation-aligned, bounded structural refere
         parsed.structural_context.direct_callers.map((entry: { repository_relative_path: string }) => entry.repository_relative_path),
         ["src/ref-1.ts", "src/ref-2.ts", "src/ref-3.ts"],
         "direct callers are sorted and capped by the projection contract",
+    );
+});
+
+test("v4 requires a trusted non-empty declaration", () => {
+    assert.throws(
+        () => buildSearchRerankDocumentV4(baseInput({
+            content: "",
+            symbolSpan: { startLine: 1, endLine: 1 },
+            symbolKind: "function",
+        })),
+        /inferred signatureOrDeclaration must be a non-empty string/,
+    );
+    assert.throws(
+        () => buildSearchRerankDocumentV4(baseInput({ signatureOrDeclaration: "" })),
+        /signatureOrDeclaration must be a non-empty string/,
     );
 });

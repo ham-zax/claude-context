@@ -1,93 +1,107 @@
-# Search Contracts + Focus-Aware Rerank v4 — Production Receipt
+# Search Contracts + Focus-Aware Rerank v4 — Corrected Production Receipt
 
-**Date:** 2026-08-08 · **Plan:** `docs/plans/2026-08-08-satori-search-contracts-focus-rerank-v4-master-plan.md`
-**Review head:** `786dbe347d6a7605f9d053ca030f2a3820ff0767` (expected) — executed on `master`
-**Sealed head:** `5c7a4583ebf76b4ffb51907733e972c5977970d7` (after Task 15 docs commit)
-**Baseline:** `docs/evidence/search-contracts-focus-v4-baseline-20260808/BASELINE.md` (Task 0, `c87f8f5`)
+**Date:** 2026-08-09
+**Plan:** `docs/plans/2026-08-08-satori-search-contracts-focus-rerank-v4-master-plan.md`
+**Implementation head tested:** `6aaa2f080d2c4932aa534b89508d9475c53008bf`
+**Evidence artifact:** `artifacts/live-f-gate-20260809.json`
+**Redacted manifest SHA-256:** `0dab801ac219f2d16dfeb17d9cea4c8101bb7cb35ca584ce863fe9e11baf3a64`
+**Raw-capture SHA-256:** `6bfd5965dc4759d9e11974e37eddbd1e4d67a8bcc3ceac66301b240115ad21fa`
+(removed from the replacement artifact; `fe95594` must be absent from all branch and tag
+reachability after the authorized tip-only rewrite)
 
-## 1. Exact identities and counts
+## Supersession
+
+This receipt supersedes the prior 2026-08-08 seal. That seal incorrectly described
+mapped tests and packed smokes as the original live F-1…F-8 acceptance sweep and
+recorded an incorrect sealed head. It is not evidence of that live gate.
+
+The implementation head above was tested through `packages/mcp/dist/index.js`, not
+`tsx` or a managed launcher. The live target was a clean detached worktree of
+`tradingview_ratio` at `8d65bf288a4c8b297ce53d0563e3ff4d9d5ba3c7`; its dirty source
+worktree was not modified. The temporary worktree, isolated LanceDB state root, and
+MCP process were removed after a redacted proof manifest was derived. Complete
+response envelopes, copied source, previews, absolute paths, and the local model path
+are not retained in the replacement artifact. The manifest binds deterministic hashes
+of each complete captured decoded JSON-RPC response. Publication requires fresh-clone
+proof that no branch or tag retains the superseded `fe95594` tip.
+
+## Live-evidence runtime identity at `6aaa2f0`
 
 | Identity | Value |
 |---|---|
-| Activated LateOn profile | `lateon_offline_quality_projection_v4_d32_v1` (schema `satori_lateon_runtime_profile_v4`, qualification `owner_activated_operationally_qualified_not_held_out`) |
+| Direct runtime profile selection | `SATORI_LATEON_PROFILE` and `SATORI_LATEON_ACTIVATION_POLICY` omitted |
+| Activated LateOn profile | `lateon_offline_quality_projection_v4_d32_v1` |
 | Activation policy | `lateon_context_v4_d32_owner_default_v1` |
-| Query projection | `search_rerank_query_v2` (positive-only) |
-| Document projection | `search_rerank_document_v4` (answer packet, <= 4,000 UTF-8 bytes) |
-| v4 projection source SHA-256 (O0 receipt convention) | `de52c67d3ce423ee0d063d9916b62d8197530cc593e0bbac37831246f93be33e` |
-| Frozen v4 profile digest (acquisition authority) | `250d57c41d2f63d2302397a7ccc098918c43cb6c29874040e35aad34b283ac40` |
-| Request-contract digest | `d5aa4a07e4f4251955e320c7a3f8f3ea4d1fdfbc22708a98a9cbdfab200c05f5` (binds query v1/v2, role, document v3/v4, structural-context policy, partial-projection semantics) |
+| Query projection observed in production response | `search_rerank_query_v2` |
+| Document projection observed in production response | `search_rerank_document_v4` |
+| v4 projection source SHA-256 | `a44e5ab565d186a586554b787ac1783facd9871374105dacd6cac29f812aa98a` |
+| Frozen v4 profile digest | `956479f3ed07a7e3adec5b39ccfb1ee41ee3bcb9f39c236c3f5deda20d5d417b` |
+| Request-contract digest | `8fdd342e1203aa7a9a3995125850c6d04512145a9a219ef2481fe05bc60b2d52` |
 | Relationship builder | `relationship-v10+python-cross-module-constructors+python-native-resolution-v1` |
+| Production `dist/index.js` SHA-256 | `56553b127ac28ec9d2d951ed2e7e942795e1ecb6bfc761812208751c14185823` |
+| LateOn `model.onnx` SHA-256 | `ac5a92a685512b163c3c591438f518379309d2a98c4818a9c6e2986f789dc8ef` |
 
-Historical meanings remain immutable: `lateon_d32_owner_default_v1` = projection-v2 D32 only;
-`lateon_offline_quality_projection_v3_d32_v1` = historical rollout artifact (never rewritten);
-`lateon_context_v3_d32_owner_default_v1` = v3-d32-v2 only (previous managed default, migrated by `satori upgrade`).
+The direct production response in
+`evidence.directV4RerankerEvidence` contains twelve reranker input records, each
+with the v4 document and query-v2 identities, and records
+`operationalReason: "lateon_applied"`. The profile identifier itself is not exposed
+by the public search envelope; the omitted-profile launch configuration and the
+observed profile-specific projection identities are retained together rather than
+claiming an unobserved response field.
 
-## 2. Verification (15.4) — all exit 0
+## Repository verification
+
+All commands below ran at the implementation head and exited zero.
 
 | Command | Result |
 |---|---|
-| `pnpm --filter @zokizuan/satori-core test` | 679 pass / 1 environment-gated skip (Potion helper absent) / 0 fail |
-| `pnpm --filter @zokizuan/satori-mcp test` | 1481/1481 |
-| `pnpm --filter @zokizuan/satori-cli test` | 342/342 |
-| `pnpm test:scripts` | 337/337 |
-| `pnpm check` (lint + typecheck + versions:check) | pass |
-| `pnpm build` | pass |
-| `pnpm -C packages/mcp release:smoke` | pass |
-| `pnpm -C packages/cli release:smoke` | pass (packed closure 673,685,327 bytes; LateOn D32 v4 acquisition authority) |
-| `pnpm --filter @zokizuan/satori-mcp typecheck` | pass |
-| `git diff --check` | clean |
-| `git status --short` | clean |
+| `pnpm --filter @zokizuan/satori-core test` | 679 passed / 1 skipped / 0 failed |
+| `pnpm --filter @zokizuan/satori-mcp test` | 1488 passed / 1 skipped / 0 failed |
+| `pnpm --filter @zokizuan/satori-cli test` | 342 passed / 0 failed |
+| `pnpm test:scripts` | 337 passed / 0 failed |
+| `pnpm check` | passed |
+| `pnpm build` | passed |
+| `pnpm -C packages/mcp release:smoke` | passed |
+| `pnpm -C packages/mcp contract:check` | passed |
+| `pnpm -C packages/mcp manifest:check` | passed |
+| `pnpm -C packages/mcp typecheck` | passed |
+| both §15.5 static prohibition checks | zero matches |
 
-### 15.1 Pre-existing Core failure — fixed
+The first Core-suite attempt hit one environment-sensitive closed-port timeout test
+(`fetch-with-deadline.test.ts`, expected one attempt, observed two). Its focused
+16-test rerun and the subsequent complete Core-suite rerun both passed; no source was
+changed for that repeat.
 
-`fetch-with-deadline.test.ts` "retries a listed retryable network error up to maxAttempts"
-now injects a deterministic retryable failure (stub `globalThis.fetch` rejecting with a
-listed `ECONNREFUSED` code) instead of relying on environment-dependent real-connection
-classification. 16/16 green.
+## Live F-1…F-8 acceptance gate
 
-### 15.2 Stale script pins — repaired after pinning-script verification
+The artifact contains normalized request and response proof summaries with repository
+roots represented as `$TARGET_ROOT`. Deterministic response hashes bind those summaries
+to the complete historical decoded JSON-RPC responses without retaining their envelopes,
+source excerpts, previews, or original filesystem paths.
 
-`validateTaskKey` (evals/agent-discovery/run-opencode.mjs) verified the current source
-anchors before updating:
-
-| Task key | Old span | New span (verified) |
+| Gate | Live outcome | Evidence |
 |---|---|---|
-| `known-exact-target` (`runExactRegistryFastPath`) | 189–604 | 188–606 |
-| `unknown-freshness-reuse` (`runSearchFrontDoor`) | 229–392 | 238–430 (shifted by Task 8) |
-| `unknown-freshness-reuse` relation `freshnessDecisionPreservesAuthority` | 135–138 | 139–142 |
+| F-1 `must:` bounded recall | **PASS** — the original `must:tzinfo must:replace` request reports `semantics: case_sensitive_raw_substring_all`, `exhaustive: false`, `lane_skipped_primary_limit_filled`, `moreMayExist: true`, and the incomplete-results warning. | `evidence.f1MustBoundedRecall` |
+| F-2 hard requested scope | **PASS** — `src/python/core` returned 20 nonempty raw results exclusively below `src/python/core/`; sibling `src/python/support` returned four exclusively below `src/python/support/`; the returned file sets are disjoint. | `evidence.f2CoreScope`, `evidence.f2SupportScope` |
+| F-3 caller-bounded completion | **PASS** — `trading`, `limit: 1`, and `disclosureLimit: 1` returns `continuation: "complete"`, `effectiveFrozenTotal: 1`, `availableGroupCount: 30`, `omittedBeyondLimitGroupCount: 29`, and disclosure reason `caller_limit`. | `evidence.f3CallerBoundedContinuation` |
+| F-4 constructor callers after fresh reindex | **PASS** — full reindex generation 3 completed; `call_graph(TradingEntryVetoes, callers)` returns `src/python/core/trading_core.py` method `__init__` and its `call` edge to `TradingEntryVetoes` at lines 296–302. | `evidence.reindexKickoff`, `evidence.reindexTerminal`, `evidence.f4Outline`, `evidence.f4F7CallGraph` |
+| F-5 local projection versus provider failure | **PASS** — the live F-1 request projects 29 of 32 requested candidates, reports three typed `source_unavailable` local projection failures and `RERANKER_INPUT_DEGRADED`, applies LateOn ranking, and does **not** report `RERANKER_FAILED`. | `evidence.f1MustBoundedRecall` |
+| F-6 post-100% finalization | **PASS** — at progress 100 during reindex generation 3, search returns `not_ready`, `reason: indexing`, `retryAfterMs: 2000`, and `indexingOperation {action: reindex, phase: writing, generation: 3}`; the adjacent status records terminal completion. | `evidence.f6At100DuringReindex`, `evidence.reindexTerminal` |
+| F-7 serving navigation authority | **PASS** — the F-4 response exposes generation ID, navigation seal, relationship manifest, `relationshipBuiltAt`, and distinct `publicationCompletedAt`; its sidecar timestamp equals the relationship build timestamp. | `evidence.f4F7CallGraph` |
+| F-8 aggregated exact-symbol validation | **PASS** — one invalid `read_file` request returns contract version, exactly-one symbol selector, exactly-one context/continuation, and required mode diagnostics together. | `evidence.f8AggregatedValidation` |
 
-All task keys re-validated: 0 stale.
+Only F-1’s original query and F-4’s exact target/edge were preserved verbatim in the
+historical issue record. The other live requests are the smallest contract probes
+that establish the owner-frozen observable outcomes; they are not represented as
+byte-for-byte reconstructions of undocumented historical requests.
 
-### 15.3 Mojibake
+## Scope confirmation
 
-Byte scan confirms no committed UTF-8 corruption (only intentional pattern quotes in
-plan/baseline docs).
+No comparative quality evaluation, tuning, scoring multiplier, repository-specific
+ranking policy, or additional TradingView A/B was run. Provider order remains final
+after request validation; this work added no local post-provider reordering.
 
-## 3. Static prohibitions (15.5)
-
-```text
-! git grep -n -E 'SEARCH_RERANK_RRF_K|SEARCH_RERANK_WEIGHT|SCOPE_PATH_MULTIPLIERS|SEARCH_AGENT_FIT_|SEARCH_CHANGED_FIRST_MULTIPLIER' -- packages   -> zero matches
-! git grep -n -E 'candidateRole.*multiplier|answerFocus.*weight|test.*0\.65|docs.*0\.45' -- packages                                     -> zero matches
-```
-
-## 4. F-1…F-8 acceptance gate (15.6, owner-frozen 3.5.1)
-
-Run against the production build: the mapped contract suites (the same contracts the
-original live repros exercise) plus the packed-closure release smokes on the built dist.
-
-| Gate | Contract | Evidence | Outcome |
-|---|---|---|---|
-| F-1 `must:` bounded recall disclosure | Task 6 (`405388b`) | `search-execution.must-lane.test.ts` 10/10 + must handler tests; `hints.mustCoverage` five statuses, `MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET` on every incomplete path | PASS |
-| F-2 `path` hard subdirectory scope | Task 5 (`fa2676a`) | `search-requested-scope.test.ts` + scope handler tests (sibling disjoint pools, zero out-of-scope admission) | PASS |
-| F-3 continuation bounded completion | Task 8 (`68a259b`) | `search-disclosure.test.ts` + pagination/omitted-beyond-limit envelope tests (`omittedBeyondLimitGroupCount`, `continuation:"complete"` = caller-bounded frozen set) | PASS |
-| F-4 constructor callers after fresh reindex | Task 1 (`3a26a11`) | relationship builder `TradingCore.__init__` constructor-caller fixture 6/6; persisted-index-authority compatibility `requires_reindex` on `relationshipVersion`; call-graph suite 225/225 | PASS (fresh-build extraction; pre-fix sidecars invalidated) |
-| F-5 typed projection vs provider failure | Task 7 (`66cb96b`) | `search-native-rerank.integration.test.ts` + envelope tests: `rerankerProjection` summary in ranking/full debug; warning details state "not a reranker provider failure" | PASS |
-| F-6 deterministic `not_ready` retry contract | Task 8 (`68a259b`) | `search-frontdoor.test.ts` + `handlers.status.test.ts`: every indexing path carries `retryAfterMs: 2000` + `indexingOperation {action,phase,generation}` when known | PASS |
-| F-7 serving generation authority | Task 9 (`5613b6c`) | call-graph `navigationAuthority` tests (receipt path + source-backed sealed-marker path) 225/225 incl. | PASS |
-| F-8 aggregated exact-symbol validation | Task 10 (`121a4f5`/`d95d3a7`) | `symbol-context-public-contract.test.ts` + `read_file.test.ts`: all errors in one response at stable paths; 9 frozen wire-contract vectors unchanged | PASS |
-
-## 5. Architecture freeze (3.5.5)
-
-All 15 tasks are committed with the plan's exact messages and the final tree is clean.
-The search/ranking architecture is declared frozen per §3.5.5; any later failure starts
-as a specific incremental bug unless evidence proves an architectural contract is wrong.
+This receipt is a historical documentation/evidence record for implementation head
+`6aaa2f080d2c4932aa534b89508d9475c53008bf`, not a publish, merge, independent-audit,
+or architecture-freeze attestation. Later contract or implementation corrections
+require their own verification before release.

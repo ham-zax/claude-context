@@ -383,3 +383,41 @@ test("typed v4 projection keeps publication-bound source evidence when structura
         { direct_callers: [], direct_callees: [], supporting_tests: [] },
     );
 });
+
+test("typed v4 projection defaults missing structural preparation to unavailable", async () => {
+    const outcome = await projectPublicationBoundSearchRerankDocumentV4({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "execute prepared request",
+        result: ownedResult({ startLine: 2, endLine: 3 }),
+        registry: registry(),
+        readSourceEvidence: async () => evidence(),
+    });
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.equal(outcome.structuralContextStatus, "unavailable");
+});
+
+test("typed v4 projection distinguishes explicit empty relationships from incompatible authority", async () => {
+    const common = {
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "execute prepared request",
+        result: ownedResult({ startLine: 2, endLine: 3 }),
+        registry: registry(),
+        readSourceEvidence: async () => evidence(),
+    };
+    const available = await projectPublicationBoundSearchRerankDocumentV4({
+        ...common,
+        relationships: [],
+    });
+    assert.equal(available.ok, true);
+    if (available.ok) assert.equal(available.structuralContextStatus, "available");
+
+    const incompatible = await projectPublicationBoundSearchRerankDocumentV4({
+        ...common,
+        structuralContextStatus: "incompatible",
+    });
+    assert.equal(incompatible.ok, true);
+    if (incompatible.ok) assert.equal(incompatible.structuralContextStatus, "incompatible");
+});

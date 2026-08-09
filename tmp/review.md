@@ -1,1039 +1,418 @@
-# End-to-end verdict
+## Verdict
 
-I reviewed both attached commit series separately, then inspected the combined repository state at `96ffd7f1e927c3eb6354b738cbe28ccb43758efd`.
+The corrective series is **substantially better than the version I previously blocked**. The major implementation defects were repaired correctly:
 
-**Do not publish, merge, or declare the architecture frozen yet.**
+* context-v4 is now the default across MCP config, direct `LateOnReranker` construction, and shared-runtime identity;
+* proof-backed constructor/call edges are retained;
+* relationships are indexed once per request instead of rescanned for every candidate;
+* the async relationship load is promise-cached;
+* structural references no longer displace the primary source excerpt;
+* the provider query and raw source-selection question are separated;
+* the v4 profile now binds the request-contract digest;
+* shared-runtime contract loading fails closed;
+* requested paths and `must:` semantics are hardened;
+* call-graph build/publication times are separated;
+* the live F-1…F-8 production-JS sweep was actually performed and the prior receipt was explicitly superseded.
 
-There is a lot of good implementation here, especially in the first series. I would **not revert either series wholesale**. But the combined final state contains several material contradictions that the reported 1481/1481 MCP tests did not catch.
-
-The largest problems are:
-
-1. **v4 is not actually the default in the direct MCP/runtime paths.**
-2. **The structural context excludes the exact proof-backed constructor edges it was introduced to expose.**
-3. **The v4 document budget allows structural labels to displace primary source code, contrary to the plan.**
-4. **The “complete request identity” does not fully bind v4 behavior and fails open in shared-runtime identity construction.**
-5. **The production receipt claims a live acceptance gate and final sealed head that it did not actually produce.**
-6. **The source excerpt selector is fed the expanded provider query instead of the clean user question, reintroducing query noise.**
-
-My comparative assessment:
-
-| Series                    | Assessment                                                                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Series A — Tasks 0–7**  | Stronger implementation. Mostly sound direction, but request identity, defaults, scope hardening, and `must:` honesty remain incomplete. |
-| **Series B — Tasks 8–15** | Several useful changes, but the structural-context implementation and final production activation have release-blocking defects.         |
-| **Combined state**        | **Request changes.** Not ready for architecture freeze.                                                                                  |
-
-The plan required immutable identities, historical profile compatibility, positive-only query context, source-first answer packets, complete request binding, and a real F-1…F-8 production acceptance gate. 
+I would **not reopen the ranking architecture**. However, I would make one final small corrective pass before publishing. I found **one potentially blocking evidence-handling issue**, three important contract/observability gaps, and two lower-priority documentation/product issues.
 
 ---
 
-# Blocking findings
+# Remaining findings
 
-## P0 — v4 is not actually the default outside the managed CLI path
+## P0 — the committed live evidence artifact contains copied source and local filesystem information
 
-The documentation and receipt say that projection-v4 is now the default.
+The new committed artifact contains complete MCP response envelopes rather than a compact proof record. Those responses include:
 
-But the final code still contains three v3 defaults:
+* source `content` and previews copied from `tradingview_ratio`;
+* symbol and file details;
+* absolute paths under `/home/hamza/...`;
+* the disposable `/tmp/...` worktree path;
+* the local model location;
+* extensive candidate-survival data.
 
-### MCP configuration default
+The artifact is roughly 1.38 MB and includes actual source excerpts inside serialized search responses, not merely hashes and result identities. 
 
-`createMcpConfig()` still resolves an omitted `SATORI_LATEON_PROFILE` to:
+This is an immediate blocker **unless all copied TradingView source is intentionally redistributable inside the Satori repository**. Even when the source is public, committing a large raw operational envelope is unnecessary and creates:
 
-```ts
-LATEON_RUNTIME_PROFILE_IDS.contextV3D32
-```
+* repository bloat;
+* accidental source duplication;
+* local-path disclosure;
+* difficult future redaction;
+* evidence that is harder to audit than a normalized summary.
 
-not `contextV4D32`.
+### Fix
 
-### `LateOnReranker` constructor default
-
-The reranker constructor still defaults to:
-
-```ts
-config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.contextV3D32
-```
-
-and `loadLateOnRuntimeProfile()` itself also defaults to v3.
-
-### Shared-runtime identity default
-
-When `SATORI_RERANKER_PROVIDER=lateon` is present but `SATORI_LATEON_PROFILE` is absent, shared-runtime identity also records:
-
-```ts
-LATEON_RUNTIME_PROFILE_IDS.contextV3D32
-```
-
-not v4.
-
-The managed CLI installation explicitly writes the v4 profile, so managed users may receive v4. But direct MCP users, embedded runtimes, tests constructing `LateOnReranker` directly, and shared-runtime clients without an explicit profile still receive v3.
-
-That creates two production meanings for “default”:
+Keep the raw artifact outside Git or in an access-controlled evidence store. Commit a redacted manifest containing only:
 
 ```text
-managed CLI install  → v4
-direct MCP runtime   → v3
-LateOnReranker()     → v3
-shared identity      → v3
+implementation commit and dist hash
+target repository commit/tree hash
+request arguments with temporary roots normalized
+response status and relevant contract fields
+result file/symbol/span identities
+warning codes
+projection counts/reasons
+generation/seal/manifest identities
+hashes of the complete raw responses
 ```
 
-This contradicts the README and production receipt.
-
-### Required correction
-
-Update all of these together:
+Remove:
 
 ```text
-createMcpConfig default
-LateOnReranker constructor default
-loadLateOnRuntimeProfile default
-shared-runtime identity resolved default
-tests that currently still assert v3 default
+content
+preview
+source excerpts
+/home/hamza paths
+temporary absolute paths
+local model directory
+unnecessary full candidate-survival bodies
 ```
 
-Add one integration test starting with only:
-
-```text
-SATORI_RERANKER_PROVIDER=lateon
-SATORI_LATEON_MODEL_PATH=...
-```
-
-and prove:
-
-```text
-config profile              = v4
-constructed reranker        = v4
-shared-runtime identity     = v4
-query projection            = query-v2
-document projection         = document-v4
-activation policy           = context-v4 policy
-```
-
-This is a release blocker.
+The corrected receipt can retain the SHA-256 of the external raw artifact.
 
 ---
 
-## P0 — structural context discards the exact constructor edge that motivated the work
+## P1 — incompatible structural context is silently converted into empty context
 
-The v4 structural-context builder only accepts relationship records whose raw confidence is exactly:
+The earlier all-or-nothing problem is fixed: unavailable relationship enrichment no longer makes every candidate unprojectable. The handler now loads and prepares the relationships once, and an unavailable/incompatible relationship state results in an empty structural context rather than a failed document.
 
-```ts
-record.confidence === "high"
-```
+That is correct for **optional unavailability**.
 
-Every low- and medium-confidence edge is discarded.
-
-But the fixed cross-module constructor edge is deliberately emitted as:
+But these two cases are currently treated too similarly:
 
 ```text
-confidence: low
-resolutionAuthority: direct_binding
+relationship support unavailable
+relationship manifest incompatible with the sealed generation
 ```
 
-The `TradingEntryVetoes` builder test proves that.
+A relationship manifest mismatch is stronger than “optional context not available.” It means the structural publication does not agree with the generation receipt. The candidate is still reranked and the mismatch is visible only as `structuralContextStatus` under detailed diagnostics. Search execution emits no dedicated warning.
 
-The navigation layer already understands this contract. It recognizes proof-backed authoritative low-confidence calls and promotes them to usable medium-confidence traversal evidence.
-
-Therefore the final v4 answer packet will still omit:
+### Recommended contract
 
 ```text
-TradingCore.__init__
-    → TradingEntryVetoes()
+available
+→ use structural context
+
+unavailable
+→ use empty context
+→ optional bounded diagnostic
+
+incompatible / manifest mismatch
+→ use empty context only if source/symbol authority remains proven
+→ emit a high-signal RERANKER_CONTEXT_DEGRADED or REINDEX_REQUIRED warning
 ```
 
-even after the relationship-version bump and fresh reindex.
+Do not drop the candidate again, but do not silently hide an integrity mismatch.
 
-That means:
-
-* Task 1 correctly fixes stale-sidecar invalidation;
-* Task 12 then throws away the newly rebuilt constructor evidence;
-* the production receipt claims F-4 is closed;
-* but the new reranker answer packet still cannot see that edge.
-
-### Required correction
-
-Do not accept every low-confidence edge. Reuse the same proof-authority rule already used by navigation:
-
-```text
-admit high-confidence exact-instance edges
-OR
-admit proof-backed authoritative exact-instance calls
-    such as resolutionAuthority=direct_binding
-```
-
-The structural packet should still reject:
-
-* unresolved keys;
-* suffix-fuzzy matches;
-* key-only records;
-* ambiguous targets;
-* ordinary unsupported low-confidence records.
-
-Add a test using the exact cross-module constructor fixture and assert:
-
-```json
-{
-  "direct_callers": [
-    {
-      "repository_relative_path": ".../trading_core.py",
-      "canonical_symbol_label": "TradingCore.__init__",
-      "relation": "caller"
-    }
-  ]
-}
-```
-
-The acceptance test must operate through `buildSearchRerankStructuralContext()`, not only through the relationship builder.
+There is also a small status bug: `projectPublicationBoundSearchRerankDocumentV4()` defaults `structuralContextStatus` to `"available"` even when it receives no prepared relationships. That default should be `"unavailable"` or the production caller should be required to pass the status explicitly.
 
 ---
 
-## P0 — missing relationship context can disable the entire v4 reranker
+## P1 — the request-contract digest is stronger, but still not complete
 
-The v4 handler treats structural relationships as mandatory.
+The corrective work improved this considerably. The contract now binds:
 
-For v4, it tries to load relationship compatibility. If the relationship data is unavailable or the manifest hash does not match, it returns:
+* query-v1 and query-v2 fixtures;
+* answer-focus behavior;
+* a v4 packet with structural references;
+* source-first budgeting;
+* proof-backed relationship policy names;
+* the v3 and v4 projection policy identities.
 
-```text
-relationship_manifest_mismatch
-```
+The profile also includes the request-contract SHA-256, and the LateOn loader validates it against the shipped contract asset.
 
-as a document-projection failure. Because this happens before candidate-specific projection, the same shared failure can eliminate every v4 document.
+Remaining gaps:
 
-But the plan says structural context is bounded supporting context. It also explicitly supports an empty structural context.
+### Only four of eight candidate roles are fixture-bound
 
-The safe behavior should be:
-
-```text
-symbol/source projection trusted
-relationship context unavailable
-→ build candidate document with empty structural_context
-→ record structuralContextStatus=unavailable/incompatible
-→ still allow reranking
-```
-
-Not:
+The runtime supports:
 
 ```text
-relationship data unavailable
-→ every candidate unprojectable
-→ reranker skipped
-```
-
-The current implementation risks recreating the all-or-nothing projection degradation that the previous plan just removed.
-
-A manifest mismatch may still deserve a warning or a reindex recommendation, but the absence of optional caller/callee context should not invalidate otherwise publication-bound source evidence.
-
----
-
-# Important cross-series findings
-
-## P1 — structural context performs a full relationship scan per candidate
-
-For every reranker candidate, `buildSearchRerankStructuralContext()` loops over the complete relationship record array.
-
-With 32 reranker candidates:
-
-```text
-cost ≈ 32 × total relationship records
-```
-
-For a large repository with many thousands of edges, this is avoidable work before every LateOn call.
-
-The navigation code already uses prepared incoming/outgoing indexes. The reranker path should similarly build once per search or cache once per serving navigation generation:
-
-```ts
-type PreparedRerankRelationshipIndex = {
-    incomingByTargetInstanceId: Map<string, RelationshipRecord[]>;
-    outgoingBySourceInstanceId: Map<string, RelationshipRecord[]>;
-    testsByTargetInstanceId: Map<string, RelationshipRecord[]>;
-};
-```
-
-Then each candidate becomes proportional to its local degree, not the entire graph.
-
-This is particularly important because the observed LateOn flow already has tight latency and CPU contention.
-
----
-
-## P1 — the structural-context source contains a literal NUL byte
-
-The deduplication key was committed with an actual NUL byte between file and label.
-
-That is why Git treated `search-rerank-structural-context.ts` as binary in the patch. The fetched blob confirms the non-text delimiter.
-
-Even if TypeScript accepts it, this causes practical problems:
-
-* ordinary Git diffs may say “binary files differ”;
-* code search can fail or behave unexpectedly;
-* patch tooling becomes unreliable;
-* reviewers cannot inspect line-level changes normally;
-* formatters and editors may treat the file strangely.
-
-Use a textual escape in source:
-
-```ts
-`${symbol.file}\u0000${symbol.label}`
-```
-
-or preferably a structured key helper:
-
-```ts
-serializeCanonicalJson([symbol.file, symbol.label])
-```
-
-Then verify:
-
-```bash
-git diff --numstat
-git grep -n ...
-file packages/mcp/src/core/search-rerank-structural-context.ts
-```
-
-The source file must be ordinary UTF-8 text.
-
----
-
-## P1 — answer-packet budgeting contradicts the source-first plan
-
-The plan's priority is explicit:
-
-```text
-mandatory declaration
-query-relevant primary source
-structural references
-optional documentation
-```
-
-Structural references are supposed to be discarded before they reduce the primary source excerpt.
-
-The implementation does something different:
-
-1. Build the packet with all structural references and an empty source excerpt.
-2. Drop references only if that empty-source packet already exceeds 4,000 bytes.
-3. Whatever bytes remain are given to source selection.
-
-So if structural references consume 2,000 bytes but the mandatory empty-source packet remains under 4,000, all references stay and the source excerpt is restricted to the remaining space.
-
-That means structural labels can displace the actual implementation source—the opposite of the approved priority.
-
-The test only covers the extreme case where huge references make the empty-source packet exceed the limit. It does not prove source-first behavior.
-
-### Required correction
-
-A better algorithm:
-
-1. Compute the mandatory packet without structural references.
-2. Select the maximum bounded primary source.
-3. Add structural references only using the remaining byte budget.
-4. Drop references in the documented order until the packet fits.
-5. Never shrink an already valid primary source to retain optional references.
-
-Add a test:
-
-```text
-same candidate and query
-A: no structural references
-B: maximum structural references
-
-expected:
-B.query_relevant_source_excerpt === A.query_relevant_source_excerpt
-unless A alone consumes the full packet ceiling
-```
-
----
-
-## P1 — the source excerpt selector receives the expanded provider query
-
-The positive-only provider query is:
-
-```text
-Question:
-<user question>
-
-Requested answer type:
-production implementation, control flow, and integration path
-```
-
-The handler sends this same expanded reranker query into the document projector as `semanticQuery`.
-
-That means source excerpt selection is no longer based solely on the user's question. It also sees generic terms such as:
-
-```text
-production
 implementation
-control flow
-integration path
+test
+documentation
+configuration
+generated
+fixture
+example
+unknown
 ```
 
-Those terms can pull excerpt selection toward generic declarations or integration-related lines rather than the exact question terms.
+but `ROLE_FIXTURES` covers only the first four. A classifier regression affecting generated/fixture/example/unknown may therefore not move the request-contract digest.
 
-The provider query and source-selection query should be separate:
+### Partial-projection behavior is only partially represented
 
-```ts
-providerQuery:
-    positive-only query-v2 bytes
+The contract binds warning names and the zero-projectable-provider rule, but not all operative semantics:
 
-sourceSelectionQuery:
-    exact parsedOperators.semanticQuery
+```text
+minimum two projected candidates before provider call
+failed candidates retain their original slots
+projected subset slot confinement
+byte-budget omission behavior
+structural-context unavailable versus incompatible behavior
 ```
 
-The earlier context-v3 rollout intentionally preserved the raw question for excerpt selection. The v4 integration should retain that separation.
+The test suite verifies the current fixture fields, but those behaviors are not all represented in the canonical digest material.
 
-Add a fixture where generic “implementation” terms exist in one span and the actual question terms exist in another. Verify the question-specific span is selected.
+### Proof-backed admission is named, not behaviorally generated
+
+The fixture declares:
+
+```text
+high_confidence_or_proof_backed_authoritative_call_v1
+direct_binding
+origin_flow
+```
+
+but the canonical structural document is manually constructed. It is not produced by running a representative `RelationshipRecord` through `prepareSearchRerankStructuralRelationships()` and `buildSearchRerankStructuralContext()`.
+
+That means the implementation could accidentally stop admitting `direct_binding` records while the policy string and document fixture remain unchanged.
+
+### Fix
+
+Add fixtures for:
+
+* every candidate role;
+* actual relationship-record → structural-context projection, including low-confidence `direct_binding`;
+* unsupported low-confidence omission;
+* unavailable and incompatible context statuses;
+* one-failed-candidate slot preservation;
+* one-candidate provider skip;
+* byte-budget omission.
+
+Then regenerate the request-contract digest and profile/acquisition digest once.
 
 ---
 
-## P1 — the v4 projection accepts malformed role/reference combinations
+## P1 — the live smoke still demonstrates the original tests-first relevance weakness
 
-`buildSearchRerankDocumentV4()` validates `candidateRole` only as a non-empty string. It does not enforce the `SearchCandidateRole` enum.
-
-The structural reference normalizer accepts any allowed relation in any list:
+The live query:
 
 ```text
-directCallers can contain relation=test_support
-supportingTests can contain relation=callee
+how does entry veto validation work
 ```
 
-It also does not independently enforce the 3/3/2 caps or canonical sorting when called directly.
-
-Production currently constructs these internally, but this is an identity-bearing serialization contract. Its builder should be exact and self-validating.
-
-Required:
+is classified as implementation focus and uses:
 
 ```text
-directCallers[]    → relation must be caller
-directCallees[]    → relation must be callee
-supportingTests[]  → relation must be test_support
-candidateRole      → exact enum
-lists              → sorted, unique, bounded
-unknown keys       → rejected
+search_rerank_query_v2
+search_rerank_document_v4
 ```
+
+LateOn executes successfully. But the resulting top two groups are tests, while implementation files appear later. The candidate-survival evidence also shows that the more direct `trading_entry_vetoes.py` candidates were below the 12-document rerank-admission cutoff, so LateOn never had the opportunity to promote them.
+
+This does **not** mean the native-order architecture is wrong. It means the remaining failure is upstream:
+
+```text
+relevant implementation candidate exists
+→ retrieval ranks it below rerank admission
+→ contextual reranking cannot rescue it
+```
+
+Therefore:
+
+* v4 request compatibility is proven;
+* source-first packets and structural context are functioning;
+* provider-order application is functioning;
+* the original “implementation query sometimes yields tests first” outcome is **not fully solved**.
+
+Do not reintroduce test penalties. Treat this as a specific retrieval/admission-quality bug if it materially hurts real use.
+
+A narrow future fix could examine whether the existing reranker admission process should guarantee representation of a clearly identified implementation owner when the answer focus is implementation. That would be a candidate-admission contract change, not a post-reranker weight. It should not be folded into this corrective release without a separate design decision.
 
 ---
 
-# Request-contract identity review
+## P2 — v4 dropped useful v3 fields without a clear final decision
 
-## P1 — the “complete request contract” does not bind complete v4 behavior
-
-The request-contract design is directionally good. It binds query fixture bytes, role fixtures, projection fixture bytes, structural limits, and partial-projection constants.
-
-But important behavior is still outside the digest.
-
-### The v4 fixture has empty structural context
-
-The fixture used to produce `documentProjectionV4` includes no caller, callee, or supporting-test references.
-
-So changes to:
-
-* relation serialization;
-* reference ordering;
-* truncation behavior;
-* proof-backed edge admission;
-* direct-binding treatment;
-* reference deduplication;
-
-may not change the contract digest.
-
-### The source-selection policy identity is still v3
-
-The manifest records:
-
-```ts
-serializeCanonicalJson(SEARCH_RERANK_DOCUMENT_V3_POLICY)
-```
-
-as `sourceSelectionPolicyIdentity`, even for v4.
-
-It therefore does not directly bind v4's new budget priority or structural-reference truncation contract.
-
-### Structural-context resolution behavior is not bound
-
-The manifest binds:
+The v3 document included:
 
 ```text
-max callers
-max callees
-max tests
-sort fields
-no reference source text
+language
+documentation_excerpt
+required_owner_siblings
 ```
 
-but not the actual trust rules:
+The v4 packet excludes all three.
+
+The exact v4 answer-packet schema in the plan did not list them, so their removal is defensible. But another Task 13 requirement said v4 should differ from v3 only by structural context and identity when context is empty.
+
+Those two requirements conflict.
+
+I would not automatically restore all fields:
+
+* `required_owner_siblings` may now be superseded by structural context;
+* documentation excerpts may consume scarce source budget;
+* `language`, however, is cheap factual metadata and can help distinguish code/document forms.
+
+At minimum, record the decision explicitly in the projection contract:
 
 ```text
-high only?
-proof-backed direct_binding?
-medium?
-TESTS edge orientation?
-exact instance ID requirements?
+language intentionally omitted/preserved
+documentation_excerpt intentionally removed
+required_owner_siblings superseded by structural_context
 ```
 
-### Required correction
-
-Add canonical fixtures for:
-
-1. v4 with caller + callee + supporting test.
-2. proof-backed low-confidence `direct_binding` constructor caller.
-3. ambiguous/key-only edge omitted.
-4. structural-reference truncation.
-5. source-first budgeting.
-6. empty relationship data.
-7. partial candidate projection.
-
-The digest should move whenever any of these output semantics changes.
+Any change to this decision must move the v4 projection/request identity.
 
 ---
 
-## P1 — the v4 profile is not bound to the request-contract digest
+## P2 — “mandatory declaration” is not always mandatory in the implementation
 
-The plan explicitly required the v4 profile to be bound to the generated complete request contract.
+The v4 policy says the signature/declaration is mandatory. But when no structural declaration can be inferred and the candidate is not a file/module candidate, `signature_or_declaration` may remain empty; v4 does not perform the explicit non-empty check present in v3.
 
-But `runtime-profile-v4-d32.json` contains:
+Choose one truthful contract:
 
-* query projection ID;
-* document projection ID;
-* a source-file projection hash;
+### Option A — declaration genuinely required
 
-and **does not contain `requestContractSha256`**.
+Resolve the declaration from the exact canonical owner span rather than only the candidate excerpt, or fail projection when it cannot be established.
 
-That means a profile marked:
+### Option B — declaration preferred
+
+Rename/document it as:
 
 ```text
-owner_activated_operationally_qualified_not_held_out
+signature_or_declaration: string // may be empty when no trusted declaration is available
 ```
 
-does not identify the exact complete request semantics it activated.
-
-Add:
-
-```json
-"requestContractSha256": "d5aa..."
-```
-
-to the profile identity or a dedicated contract block, and validate it against the installed asset at startup.
-
-The acquisition manifest should bind the updated profile digest.
+Given the prior projection-degradation problem, Option B is likely safer, but the policy text must stop calling it mandatory.
 
 ---
 
-## P1 — shared-runtime request identity fails open
+## P2 — the receipt makes an unsupported independent-audit claim
 
-The shared-runtime identity resolver catches any failure loading the rerank request contract and substitutes an empty string. The attached patch shows this behavior. 
+The corrected receipt says:
 
-For a LateOn runtime, a missing or invalid contract asset should not become:
+> “A subsequent independent read-only audit … found no remaining demonstrated release blocker from `tmp/review.md`.”
 
-```text
-lateOnRequestContractSha256: ""
-```
+But the receipt does not identify or preserve:
 
-It should stop startup or mark the runtime ineligible.
+* the audit artifact;
+* its SHA-256;
+* the exact reviewed implementation tree;
+* the reviewer/tool identity;
+* the audit findings;
+* the referenced `tmp/review.md`.
 
-Fail-open behavior weakens the identity contract this task was supposed to establish.
+The live F-1…F-8 evidence is substantial and does not need this unsupported sentence.
 
----
-
-## P2 — ranked-set identity does not cross-check duplicated identity fields
-
-A provider-ranked set carries both:
-
-```text
-rerankerIdentity
-rerankerProjectionIdentity
-rerankerRequestIdentity
-```
-
-The builder verifies each string is non-empty, but it does not require:
-
-```text
-rerankerRequestIdentity.provider === rerankerIdentity.provider
-rerankerRequestIdentity.model === rerankerIdentity.model
-rerankerRequestIdentity.profile === rerankerIdentity.profile
-rerankerRequestIdentity.documentProjectionIdentity
-    === rerankerProjectionIdentity
-requestContractSha256 matches /^[a-f0-9]{64}$/
-```
-
-Production normally constructs them consistently, but an identity verifier should reject contradictions rather than hash them.
+Remove the independent-audit claim, or commit a small audit receipt with its digest and limitations.
 
 ---
 
-# Series A review — Tasks 0–7
+## P2 — recommended-next-action language can contradict the result role
 
-## Task 0 — baseline
+In the live evidence, the top result is a test, but the returned action says:
 
-**Assessment:** acceptable as evidence, but the process chronology is imperfect.
+> “Open bounded implementation context for the highest-ranked concrete symbol…”
 
-The plan itself appears to have been committed after some early implementation commits. The final log therefore overstates the clean “plan first, one task at a time” chronology.
+and requests the `implementation` preset.
 
-This is not a product bug, but the receipt should describe the actual chronology.
+The ranking system now knows `candidate_role`, yet the action text/preset is not role-aware.
 
-## Task 1 — relationship-builder version
-
-**Assessment:** technically sound.
-
-Bumping the relationship builder version was the correct fix for stale sidecars. The builder fixture correctly proves that the constructor edge exists in a fresh build.
-
-The remaining problem is not Task 1—it is Task 12 dropping the low-confidence proof-backed result later.
-
-## Task 2 — profile-specific query routing
-
-**Assessment:** good.
-
-The final routing module is simple and fail-closed:
+Use a generic action:
 
 ```text
-missing/raw identity → raw query
-query-v1             → focused v1
-query-v2             → focused v2
-unknown              → error
+Open bounded symbol context for the highest-ranked concrete result.
 ```
 
-This correctly repairs the historical v1/v2 query compatibility regression.
+or choose a preset/reason based on the result’s factual role.
 
-Process issue: two same-message code commits were used for this one task, contrary to “one semantic commit per task.” That is audit noise, not a runtime defect.
-
-## Task 3 — complete request identity
-
-**Assessment:** good architectural direction, incomplete execution.
-
-Strengths:
-
-* explicit query/document identity;
-* request digest in ranked-set binding;
-* shared-runtime digest field;
-* canonical manifest parser;
-* continuation invalidation tests.
-
-Defects:
-
-* incomplete v4 fixtures;
-* v3 source-policy identity reused;
-* profile does not bind digest;
-* shared-runtime loading fails open;
-* duplicate identity fields not cross-checked.
-
-## Task 4 — activation-policy versioning
-
-**Assessment:** conceptually good.
-
-Creating new profile/policy IDs instead of mutating historical meaning was correct. Atomic managed upgrade tests are valuable.
-
-But the direct MCP/reranker/shared defaults were not changed to the activated profile in Series A, and Series B later failed to correct them to v4.
-
-## Task 5 — requested-subdirectory scope
-
-**Assessment:** mostly good, one hardening problem.
-
-The scope is applied at the shared candidate-evaluation choke point and exact fast path before reranker admission. That is the right architecture.
-
-However, `resolveRequestedSearchSubdirectory()` returns `null` for a path outside the indexed root, and `null` means “no restriction.” It also strips leading `/` from candidate paths.
-
-Upstream workspace authorization likely prevents ordinary exploitation, but the helper itself is fail-open.
-
-Safer:
-
-```text
-requested path == indexed root → null
-requested path inside root     → relative scope
-requested path outside root    → throw / explicit invalid
-absolute candidate path        → reject
-```
-
-## Task 6 — bounded `must:` coverage
-
-**Assessment:** improved honesty, but still slightly overclaims completeness.
-
-The new statuses and warnings are valuable.
-
-The questionable case is:
-
-```text
-lane returned fewer than 80
-→ moreMayExist = false
-```
-
-That proves only that the lexical provider returned fewer than its top-k budget. It does not necessarily prove exhaustive repository substring coverage, especially across live/unindexed/overlay state.
-
-The final frozen constraint explicitly says `must:` remains non-exhaustive. The response should carry:
-
-```ts
-exhaustive: false
-```
-
-unconditionally.
-
-A clearer status would be:
-
-```text
-lane_completed_within_backend_results
-```
-
-rather than `complete_within_examined_candidates`.
-
-## Task 7 — projection degradation diagnostics
-
-**Assessment:** good.
-
-This is one of the cleaner tasks:
-
-* typed summary;
-* dedicated warning messages;
-* no provider-failure misclassification;
-* debug gating;
-* bounded first failure;
-* explicit skipped candidate count.
-
-I found no major defect in Task 7 itself.
+This does not affect ranking, but it undermines the goal of giving agents noise-free, truthful guidance.
 
 ---
 
-# Series B review — Tasks 8–15
+# What the corrective series successfully closed
 
-## Task 8 — continuation and retry clarity
-
-**Assessment:** generally good.
-
-`omittedBeyondLimitGroupCount` correctly separates groups outside the caller-bounded frozen set from undisclosed groups inside it. The helper computes:
-
-```text
-available groups - effective frozen total
-```
-
-which matches the intended semantics.
-
-The indexing retry metadata is also a useful contract improvement.
-
-No release blocker found here.
-
-## Task 9 — call-graph serving authority
-
-**Assessment:** useful idea, incorrect `builtAt` source.
-
-The handler populates `navigationAuthority.builtAt` from:
-
-```ts
-generationReceipt.marker.completedAt
-```
-
-rather than the relationship manifest's actual `builtAt`.
-
-Those values may be close, but they mean different things:
-
-```text
-marker.completedAt        = publication completion
-relationship builtAt      = relationship sidecar generation timestamp
-```
-
-This does not fully solve the original stale-`builtAt` attribution issue.
-
-Either:
-
-* expose the real relationship manifest `builtAt`; or
-* rename the field to `publicationCompletedAt`;
-* ideally expose both.
-
-## Task 10 — aggregated validation
-
-**Assessment:** functionally good.
-
-The outer validation now reports missing mode alongside exact-symbol shape errors, and the public description is clearer.
-
-The two same-message implementation commits violate the process convention but do not appear to damage runtime behavior.
-
-## Task 11 — positive-only query v2
-
-**Assessment:** good in isolation.
-
-The implementation query no longer mentions competing classes such as tests or documentation.
-
-The cross-series problem is that these expanded bytes are also used for source excerpt selection. The module itself is fine; integration needs separation of provider query and source-selection query.
-
-## Task 12 — structural context
-
-**Assessment:** request changes.
-
-Major issues:
-
-* discards proof-backed constructor edges;
-* scans all relationships for every candidate;
-* contains literal NUL source byte;
-* turns unavailable relationship data into candidate projection failure;
-* contract fixture does not bind its actual trust semantics.
-
-This task is the weakest implementation in the second series.
-
-## Task 13 — document v4
-
-**Assessment:** request changes.
-
-Good:
-
-* canonical packet shape;
-* 4,000-byte hard ceiling;
-* mandatory declaration preserved;
-* deterministic serialization;
-* empty-context parity.
-
-Problems:
-
-* structural references displace source;
-* role enum not validated;
-* relation/list alignment not validated;
-* caps/order trusted rather than enforced;
-* tests do not cover source-first priority.
-
-## Task 14 — v4 activation
-
-**Assessment:** not complete.
-
-The managed CLI path is updated to v4, and the new profile has truthful qualification wording.
-
-But:
-
-* direct runtime default remains v3;
-* reranker constructor default remains v3;
-* shared-runtime default remains v3;
-* profile lacks request contract digest;
-* tests still explicitly assert that the default reranker is v3.
-
-Therefore the claim “v4 is the default” is false for the complete product.
-
-## Task 15 — final verification and receipt
-
-**Assessment:** not trustworthy enough to seal production.
-
-The receipt says:
-
-```text
-Sealed head: 5c7a458...
-(after Task 15 docs commit)
-```
-
-But `5c7a458` is the Task 14 execution-log commit. Task 15's receipt commit is `2705b9b`, followed by `96ffd7f`.
-
-The receipt also says F-1…F-8 ran against the production build. The evidence table shows mapped unit/integration suites and packed smokes—not the original live TradingView repros.
-
-For F-4 specifically, it records:
-
-```text
-builder fixture
-compatibility test
-call-graph suite
-```
-
-not:
-
-```text
-fresh full reindex of tradingview_ratio
-real call_graph(TradingEntryVetoes, callers)
-```
-
-It also says “all 15 tasks,” though Tasks 0 through 15 total **16 tasks**.
-
-The receipt should not declare architecture frozen until the actual live acceptance sweep runs.
+| Earlier finding                                         | Current state                                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| MCP/direct/shared defaults differed                     | **Closed** — all default to v4 with the v4 activation policy.                                                |
+| Proof-backed constructor edges were omitted             | **Closed** — `direct_binding` and `origin_flow` calls are admitted.                                          |
+| O(candidates × all relationships) scan                  | **Closed** — prepared incoming/outgoing/test indexes are built once.                                         |
+| Parallel relationship-load race                         | **Closed** — one in-flight `structuralContextLoad` promise is reused.                                        |
+| Literal NUL/binary TypeScript source                    | **Closed** — final structural module is ordinary textual TypeScript and dedupes internally by instance ID.   |
+| Structural references displaced source                  | **Closed** — source selection occurs against empty structural context, references are fitted afterward.      |
+| Expanded query distorted source selection               | **Closed** — projection receives raw `semanticQuery`, provider receives `rerankQuery`.                       |
+| v4 builder accepted malformed roles/relations           | **Closed** — enum, exact keys, relation alignment, sort, dedupe and caps are enforced.                       |
+| Profile omitted request digest                          | **Closed**.                                                                                                  |
+| Shared-runtime contract loading failed open             | **Closed**.                                                                                                  |
+| Ranked-set identities were not cross-checked            | **Closed**.                                                                                                  |
+| `must:` could imply exhaustive recall                   | **Closed** — `exhaustive:false` and bounded status are explicit.                                             |
+| Invalid subdirectory scope became global scope          | **Closed** — out-of-root requests throw; absolute candidate paths fail.                                      |
+| Relationship build time conflated with publication time | **Closed** — both fields are now separate.                                                                   |
+| No real v4 model execution                              | **Closed by the live production evidence**, and a model-backed test exists when the model path is available. |
+| Live F-1…F-8 gate was substituted by unit tests         | **Closed** — the corrected receipt records actual production-JS runs.                                        |
 
 ---
 
-# Recommended corrective sequence
+# Commit-by-commit assessment
 
-Do not create another master redesign plan. Apply a compact correction series on top.
+### `8ff1381` — v4 complete runtime default
 
-## Commit 1 — correct all production defaults
+**Good correction.** It repairs MCP config, direct construction and shared-runtime identity consistently.
 
-```text
-fix(lateon): make context-v4 the complete runtime default
-```
+### `116e6fe` — proof-backed structural context
 
-Update:
+**Good correction.** It resolves the most important functional error and also fixes the NUL, graph rescanning, promise race and source-query separation. The remaining issue is only how unavailable versus incompatible structural authority is surfaced.
 
-* MCP config default;
-* reranker constructor default;
-* profile loader default;
-* shared-runtime identity default;
-* tests and docs.
+### `c279074` — request semantics binding
 
-## Commit 2 — fix structural edge admission and performance
+**Good direction, still incomplete fixture coverage.** The profile-binding and fail-closed behavior are correct. Expand the canonical behavior fixtures before calling the identity “complete.”
 
-```text
-fix(rerank): preserve proof-backed structural context
-```
+### `6f8ff21` — bounded search contracts
 
-* admit proof-backed `direct_binding` edges;
-* reuse/export canonical authoritative-call predicate;
-* pre-index relationships once;
-* remove literal NUL;
-* missing structural context degrades to empty context rather than dropping candidate.
+**Good correction.** `must:` and subdirectory scope now communicate their limits accurately and fail closed.
 
-## Commit 3 — enforce source-first v4 budgeting
+### `3615d54` — navigation timestamps
 
-```text
-fix(rerank): preserve primary source before structural references
-```
+**Good correction.** It finally distinguishes relationship construction from publication completion.
 
-* maximize source first;
-* fit/drop references afterward;
-* validate role enum;
-* validate relation/list alignment;
-* enforce sort, uniqueness, and caps.
+### `cf46c43` — request-identity cross-checks
 
-## Commit 4 — complete request-contract binding
+**Good correction.** The duplicated provider/profile/projection values are now checked rather than blindly hashed.
 
-```text
-fix(rerank): bind context-v4 request semantics completely
-```
+### `5bc4e23`, `6ae5ad1`, `6aaa2f0`
 
-* add non-empty structural fixtures;
-* bind proof-backed admission;
-* bind truncation/source priority;
-* include v4 policy identity;
-* add request contract digest to profile;
-* fail closed loading the contract;
-* cross-check ranked-set identity fields.
+Focused test/fixture corrections. No material concern found.
 
-## Commit 5 — separate provider query from source-selection query
+### `fe955948` — corrected receipt
 
-```text
-fix(rerank): preserve exact question for source selection
-```
-
-Use:
-
-```text
-provider query = query-v2
-source selector = raw semantic query
-```
-
-## Commit 6 — finish search-contract honesty
-
-```text
-fix(search): tighten bounded scope and recall contracts
-```
-
-* `mustCoverage.exhaustive=false`;
-* avoid overclaiming `moreMayExist=false`;
-* out-of-root requested scope fails closed;
-* reject absolute candidate paths.
-
-## Commit 7 — correct generation attribution
-
-```text
-fix(call-graph): distinguish relationship build and publication times
-```
-
-Expose:
-
-```text
-relationshipBuiltAt
-publicationCompletedAt
-generationId
-navigationSealSha256
-relationshipManifestSha256
-```
-
-## Commit 8 — issue a truthful production receipt
-
-Run the actual live F-1…F-8 cases after a clean build and fresh TradingView reindex.
-
-Record:
-
-* implementation head;
-* receipt commit separately;
-* actual live response artifacts;
-* fresh constructor caller result;
-* final direct-runtime v4 identity;
-* final managed-runtime v4 identity.
-
-Only then mark the architecture frozen.
+The supersession and live acceptance record are much more honest than the earlier receipt. The remaining concerns are the committed raw artifact and unsupported “independent audit” statement.
 
 ---
 
-# Final recommendation
+# Minimal final correction set
 
-**Series A should be retained and corrected.**
-**Series B should also be retained, but Tasks 12–15 require material repair.**
+This does **not** require another master plan.
 
-The final code is not a failure. The central architecture remains sound:
+1. **Remove or sanitize the raw live artifact.**
+2. **Expose structural context unavailability/incompatibility honestly.**
+3. **Strengthen request-contract fixtures for all roles and actual relationship/projection behavior.**
+4. **Decide and document v4 language/docs/sibling/declaration semantics.**
+5. **Remove or formally bind the independent-audit claim.**
+6. **Make recommended next actions role-neutral or role-aware.**
+7. Keep the tests-first live relevance outcome as an incremental retrieval/admission issue—do not add global penalties.
+
+After those changes, run:
 
 ```text
-clean question
-+ factual role
-+ trusted structural context
-→ LateOn
-→ provider order stays final
+contract:check
+manifest:check
+MCP/Core/CLI suites
+check
+build
+release smoke
+one direct v4 LateOn smoke
+git diff --check
+clean-tree proof
 ```
 
-But the current implementation does not yet reliably deliver that architecture:
+There are currently no GitHub status checks attached to `fe955948`; the green test counts are therefore local execution evidence rather than independently visible CI evidence.
 
-* the default is split between v3 and v4;
-* the most important constructor edge is filtered out;
-* optional references can crowd out source;
-* optional relationship context can suppress reranking;
-* the complete contract is not actually fully bound;
-* the final receipt overstates what was verified.
+## Approval status
 
-I reviewed the supplied patches and fetched the final source files at `96ffd7f`; I did not independently execute the reported test suites. The static findings above are sufficient to block publishing until corrected.
-----------------
+**Code architecture:** approved.
 
-Also review the following additional findings before making corrections. Treat them as hypotheses to verify against the current tree, not as automatically correct. If verified, include them in the same corrective pass; do not create another architecture redesign.
+**Current commit as a publishable sealed release:** **request changes**, primarily because the committed raw TradingView evidence may disclose/copy source and local environment details.
 
-Additional findings to verify:
-
-1. Structural-context relationship loading may race under parallel candidate projection. If multiple candidate projections can observe `searchRelationshipRecords` as undefined before the first async load completes, cache the in-flight Promise once per search/generation rather than only caching the eventual array.
-
-2. Check whether document-v4 unintentionally dropped useful v3 fields: `language`, `documentation_excerpt`, and `required_owner_siblings`. The plan said v4 should add structural context while preserving useful source/declaration behavior. Do not restore fields blindly; determine which remain useful and whether their removal was actually intended.
-
-3. Add one real LateOn v4 compatibility smoke using the actual tokenizer/model:
-   `query-v2 + document-v4 -> LateOn -> valid response`.
-   This is NOT a quality benchmark, A/B, tuning exercise, or ranking gate. It only proves the new serialized request actually executes through the real model under the frozen operational profile.
-
-4. Structural-reference deduplication should use authoritative `symbolInstanceId` internally rather than `path + display label`, because overloads/same-label symbols can otherwise collapse. Public projected references may still contain only path/label.
-
-5. Check request-contract metadata for stale identities, especially `SEARCH_RERANK_DOCUMENT_V4_POLICY.serializedKeyOrder` inheriting v2 metadata and `sourceSelectionPolicyIdentity` representing v3 rather than the actual v4 source/structural budgeting semantics.
-
-6. Verify structural-context edge admission against the actual relationship authority rules. The important cross-module constructor edge can be emitted as low-confidence but proof-backed `resolutionAuthority: direct_binding`. Do not require raw `confidence === "high"` if that causes authoritative constructor/call edges to disappear. Reuse the same proof-backed authority semantics used by navigation, while still rejecting unsupported fuzzy/ambiguous low-confidence relationships.
-
-7. Keep two different query strings where appropriate:
-
-   * provider rerank query = positive-only query-v2;
-   * source-excerpt selection query = exact raw semantic user question.
-     Do not let generic words such as `production implementation`, `control flow`, or `integration path` distort which source lines are selected.
-
-8. Make document-v4 serialization self-validating:
-
-   * candidate role must be a valid `SearchCandidateRole`;
-   * `directCallers` entries must have relation `caller`;
-   * `directCallees` entries must have relation `callee`;
-   * `supportingTests` entries must have relation `test_support`;
-   * enforce deterministic sort, uniqueness, and 3/3/2 limits in the projection contract itself.
-
-9. Cross-check duplicated ranked-set identity fields rather than merely hashing them:
-
-   * request provider/model/profile must equal reranker identity;
-   * document projection must equal `rerankerProjectionIdentity`;
-   * request-contract digest must be valid SHA-256.
-
-10. For call-graph generation attribution, verify that `builtAt` really represents the relationship/navigation artifact build time. Do not substitute publication completion time under a misleading `builtAt` name. If both are useful, expose them separately.
-
-These are in addition to the previously identified blockers:
-
-* unify every direct/managed/shared LateOn default on v4;
-* fix source-first answer-packet budgeting;
-* make optional structural enrichment degrade to empty context rather than unnecessarily dropping an otherwise valid candidate;
-* strengthen and profile-bind the complete request-contract digest;
-* fail closed when the identity contract itself cannot be loaded;
-* remove the literal NUL/binary-source issue;
-* avoid O(candidates × all relationships) scans;
-* add explicit non-exhaustive `must:` semantics;
-* fail closed for invalid/out-of-root requested scopes;
-* correct the production receipt and run the actual F-1…F-8 live acceptance repros.
-
-For every item:
-
-1. verify against current HEAD first;
-2. mark it CONFIRMED / NOT REPRODUCIBLE / ALREADY FIXED;
-3. for confirmed items, identify root cause and smallest correct fix;
-4. add a regression test before changing production behavior;
-5. do not resurrect ranking weights or local post-reranker sorting;
-6. do not start another A/B or architecture redesign.
-
-Only declare the rollout sealed after these findings and the earlier corrective findings are resolved or explicitly disproved with code/test evidence.
------------
+Once the evidence artifact is sanitized and the three contract/observability gaps are resolved, I would treat this redesign cycle as complete and freeze the architecture.

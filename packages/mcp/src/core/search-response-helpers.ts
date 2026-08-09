@@ -171,6 +171,15 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Use debugMode=ranking to inspect hints.debugSearch.rerankerProjection failure reasons; run manage_index sync if the affected sources changed.",
         };
     }
+    if (code === WARNING_CODES.RERANKER_CONTEXT_DEGRADED) {
+        return {
+            code,
+            severity: "degraded",
+            blocksUse: false,
+            message: "Structural reranker context was omitted because the relationship publication does not match the sealed generation. Source- and symbol-backed documents remain usable, but relationship enrichment is not authoritative.",
+            action: "Run manage_index repair to rebuild compatible navigation from the proven vector generation; reindex only if repair proof requires it.",
+        };
+    }
     if (code === WARNING_CODES.RERANKER_SKIPPED_INPUT) {
         return {
             code,
@@ -463,10 +472,10 @@ export function buildSearchGroupRecommendedAction(
                 open_symbol: {
                     contractVersion: 2,
                     symbolId: result.target.symbolId,
-                    context: { preset: "implementation" },
+                    context: { preset: "definition" },
                 },
             },
-            reason: "Open bounded implementation context for the highest-ranked concrete symbol before graph traversal or editing.",
+            reason: "Open bounded symbol context for the highest-ranked concrete result.",
         };
     }
 

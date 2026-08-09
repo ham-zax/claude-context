@@ -233,6 +233,7 @@ import {
     prepareSearchRerankStructuralRelationships,
     type PreparedSearchRerankStructuralRelationships,
 } from "./search-rerank-structural-context.js";
+import { resolveSearchRerankStructuralContextStatus } from "./search-rerank-structural-status.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
@@ -5123,25 +5124,23 @@ export class ToolHandlers {
                                             ?? generationReceipt.navigation.symbolRegistryManifestHash,
                                         readinessDebug.operations,
                                     );
-                                    if (compatibility.relationships.status !== "ok") {
-                                        return {
-                                            status: compatibility.relationships.status === "incompatible"
-                                                ? "incompatible" as const
-                                                : "unavailable" as const,
-                                        };
-                                    }
-                                    if (
-                                        compatibility.relationships.manifestHash
-                                        !== generationReceipt.navigation.relationshipManifestHash
-                                    ) {
-                                        return { status: "incompatible" as const };
+                                    const status = resolveSearchRerankStructuralContextStatus({
+                                        relationshipStatus: compatibility.relationships.status,
+                                        ...(compatibility.relationships.status === "ok"
+                                            ? { relationshipManifestHash: compatibility.relationships.manifestHash }
+                                            : {}),
+                                        expectedRelationshipManifestHash:
+                                            generationReceipt.navigation.relationshipManifestHash,
+                                    });
+                                    if (status !== "available" || compatibility.relationships.status !== "ok") {
+                                        return { status };
                                     }
                                     preparedSearchRerankStructuralRelationships
                                         = prepareSearchRerankStructuralRelationships(
                                             compatibility.relationships.records,
                                         );
                                     return {
-                                        status: "available" as const,
+                                        status,
                                         preparedRelationships: preparedSearchRerankStructuralRelationships,
                                     };
                                 })())

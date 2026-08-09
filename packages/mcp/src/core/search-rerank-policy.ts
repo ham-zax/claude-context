@@ -7,6 +7,12 @@ import {
     SEARCH_RERANK_TOP_K,
 } from "./search-constants.js";
 
+export const SEARCH_RERANK_MIN_PROJECTED_CANDIDATES = 2;
+
+export function shouldCallRerankerForProjectedCandidateCount(count: number): boolean {
+    return Number.isSafeInteger(count) && count >= SEARCH_RERANK_MIN_PROJECTED_CANDIDATES;
+}
+
 export type RerankBudgetReason =
     | "complete_family_pool"
     | "family_ambiguity"

@@ -5,13 +5,17 @@ master (6.8.2, `e43ff3f`) over raw MCP stdio against
 `~/repo/tradingview_ratio` with isolated `SATORI_STATE_ROOT`s.
 All observations below were reproduced with production JS builds, not tsx.
 
-## Context-v4 Rollout Status (2026-08-08, plan 2026-08-08-satori-search-contracts-focus-rerank-v4)
+## Context-v4 Rollout Status (corrected 2026-08-09)
 
-All entries 11–18 below were closed by the context-v4 rollout; each entry's
-status line cites the fixing task/commit. Acceptance mapping (owner-frozen F-1…F-8
-gate): F-1 → Task 6, F-2 → Task 5, F-3 → Task 8, F-4 → Task 1, F-5 → Task 7,
-F-6 → Task 8, F-7 → Task 9, F-8 → Task 10. Production receipt:
-`docs/evidence/search-contracts-focus-v4-production-20260808/PRODUCTION_RECEIPT.md`.
+Entries 11–18 remain closed by their cited implementation tasks. The earlier
+2026-08-08 receipt overstated mapped contract suites as the original live acceptance
+gate and is superseded. A production-JS sweep against a clean detached
+`tradingview_ratio` worktree passed F-1 through F-8; the raw selected MCP responses,
+implementation identity, and exact requests are recorded in
+`docs/evidence/search-contracts-focus-v4-production-20260808/artifacts/live-f-gate-20260809.json`
+and the corrected receipt beside it. Acceptance mapping remains F-1 → Task 6,
+F-2 → Task 5, F-3 → Task 8, F-4 → Task 1, F-5 → Task 7, F-6 → Task 8,
+F-7 → Task 9, F-8 → Task 10.
 
 ## 1. Published npm tarball ships the pinned Potion helper without the exec bit
 
@@ -283,7 +287,7 @@ against the live index. Entry 18 (F-4) was investigated after entries 11–17
 were written and is appended at the end.
 
 ## 11. `must:` recall is rank-limited by design and the semantics are undocumented (F-1)
-- **Status (2026-08-08 context-v4)**: fixed — Task 6 (`405388b`). `must:` now publishes honest bounded-recall coverage (`hints.mustCoverage` with `moreMayExist`, five statuses including `lane_skipped_primary_limit_filled`) and the `MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET` warning fires on every incomplete path; exact case-sensitive substring semantics are documented in the tool description. No exhaustive scan was added (explicit non-goal).
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 6, hardened by `6f8ff21`. `must:` now always publishes `exhaustive: false`, case-sensitive raw-substring semantics, bounded lane state, and `moreMayExist`; `lane_completed_within_backend_results` replaces the prior overclaim. The original live query passed with `lane_skipped_primary_limit_filled` and the incomplete-results warning. No exhaustive scan was added (explicit non-goal).
 
 - **Symptom (reported)**: `must:tzinfo must:replace` found the gate test and
   helpers but only one of the known violators; `cache_repo.py` never appeared
@@ -317,7 +321,7 @@ were written and is appended at the end.
   settles it).
 
 ## 12. `path` argument is authorization-only — subdirectory scope is silently dropped (F-2)
-- **Status (2026-08-08 context-v4)**: fixed — Task 5 (`fa2676a`). The requested subdirectory is now a hard candidate scope applied before reranker admission across every retrieval arm plus the exact fast path (`removedByRequestedSubdirectory` in the filter summary); sibling subdirectories return disjoint pools.
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 5, hardened by `6f8ff21`. The requested subdirectory is a hard candidate scope before reranker admission across every retrieval arm and the exact fast path; out-of-root requested paths and absolute candidate paths fail closed. The live sibling-core/support probe returned disjoint, wholly in-scope pools.
 
 - **Symptom (reported)**: searches scoped to two different subdirectories
   returned essentially the same global pool, including files outside both
@@ -343,7 +347,7 @@ were written and is appended at the end.
   description. Do not inject it into the reranker query.
 
 ## 13. `continue_search` handle semantics misread by callers — "complete" vs caller-limit omissions (F-3)
-- **Status (2026-08-08 context-v4)**: fixed — Task 8 (`68a259b`). Grouped envelopes now publish `omittedBeyondLimitGroupCount` (available − caller-bounded frozen set) whenever positive, and `continuation: "complete"` explicitly means complete for the caller-bounded frozen set only (documented on the envelope type, both tool descriptions, and READMEs).
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 8 (`68a259b`). Grouped envelopes publish `omittedBeyondLimitGroupCount` (available − caller-bounded frozen set) whenever positive, and `continuation: "complete"` means only caller-bounded completion. The live `trading` limit-one probe returned available=30, frozen=1, omitted-beyond-limit=29, and `continuation: "complete"`.
 
 - **Symptom (reported)**: no continuation handle on 6.8.1; on 6.8.2
   `continuation: "complete"` while `omittedGroupCount: 19` of 27.
@@ -371,7 +375,7 @@ were written and is appended at the end.
   that "complete" refers to the caller-bounded frozen set.
 
 ## 14. Rerank degradation concentrates on `must:`-heavy queries via unprojectable live-disk candidates (F-5)
-- **Status (2026-08-08 context-v4)**: fixed — Task 7 (`66cb96b`). Typed local projection degradation (`hints.debugSearch.rerankerProjection` with `skippedCandidates`, `failureCounts`, `firstFailure`) is published in ranking/full debug and dedicated warning details explicitly distinguish local projection degradation from provider failure.
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 7 (`66cb96b`). Typed local projection degradation (`hints.debugSearch.rerankerProjection` with `skippedCandidates`, `failureCounts`, `firstFailure`) is published in full debug and dedicated warnings distinguish it from provider failure. The live F-5 evidence reports three `source_unavailable` projection skips, `RERANKER_INPUT_DEGRADED`, applied LateOn ordering, and no `RERANKER_FAILED`.
 
 - **Symptom (reported)**: 5/7 degraded-ranking queries were `must:`-heavy;
   non-`must:` queries ranked cleanly on both versions.
@@ -407,7 +411,7 @@ were written and is appended at the end.
   behavior is fixed by this rollout).
 
 ## 15. Post-100% reindex finalization still blocks searches — now with bounded retry (F-6)
-- **Status (2026-08-08 context-v4)**: fixed — Task 8 (`68a259b`). Every `not_ready` reason="indexing" path carries `retryAfterMs: 2000` plus the active `indexingOperation {action,phase,generation}` when known, including the freshness `skipped_indexing` path.
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 8 (`68a259b`). Every `not_ready` reason="indexing" path carries `retryAfterMs: 2000` plus `indexingOperation {action,phase,generation}` when known. The live fresh reindex returned that envelope at progress 100 before terminal publication.
 
 - **Symptom (reported)**: on 6.8.1, after `progressPct: 100.0` /
   `phase: writing`, searches returned `not_ready` for ~30–60s until the
@@ -437,7 +441,7 @@ were written and is appended at the end.
   contract.
 
 ## 16. `sidecar.builtAt` semantics correct on master; reported staleness needs live attribution (F-7)
-- **Status (2026-08-08 context-v4)**: fixed — Task 9 (`5613b6c`). Ok call-graph traversals publish `navigationAuthority {generationId, navigationSealSha256, relationshipManifestSha256, builtAt}` from the exact serving navigation generation (receipt marker or source-backed binding), distinct from the call-graph sidecar `builtAt`.
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 9, corrected by `3615d54`. Ok call-graph traversals publish `navigationAuthority {generationId, navigationSealSha256, relationshipManifestSha256, relationshipBuiltAt, publicationCompletedAt}`. The live fresh-generation response retained both distinct timestamps and the serving seal/manifest identities.
 
 - **Symptom (reported)**: after a full reindex (gen 4185, Aug 7–8),
   `call_graph` still reported `sidecar.builtAt: 2026-08-04T23:20:47.090Z`.
@@ -467,7 +471,7 @@ were written and is appended at the end.
   `relationships/manifest.json` `builtAt` on disk.
 
 ## 17. `read_file` exact-symbol validation reveals errors one round trip at a time (F-8)
-- **Status (2026-08-08 context-v4)**: fixed — Task 10 (`121a4f5`/`d95d3a7`). `open_symbol` is validated as one unit: missing version, conflicting identities, missing operation, missing `mode`, and inner shape violations all appear in one response at stable field paths; union sub-issues are flattened by `formatZodError`.
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 10 (`121a4f5`/`d95d3a7`). `open_symbol` is validated as one unit: missing version, conflicting identities, missing operation, missing `mode`, and inner shape violations appear in one response at stable field paths. The live invalid vector returned all four applicable diagnostics together.
 
 - **Symptom (reported)**: mixing `symbolId` + `symbolLabel` and omitting
   `mode` produced two sequential validation errors instead of one complete
@@ -494,7 +498,7 @@ were written and is appended at the end.
   the full required set in the field description.
 
 ## 18. Cross-module constructor callers: extraction fixed on master, but stale sidecars are never invalidated (F-4)
-- **Status (2026-08-08 context-v4)**: fixed — Task 1 (`3a26a11`). `RELATIONSHIP_BUILDER_VERSION` bumped to `relationship-v10+python-cross-module-constructors+python-native-resolution-v1`; stale pre-fix sidecars are rejected with `requires_reindex`; fresh builds emit the `TradingCore.__init__` constructor-caller edge (fixture + compatibility tests).
+- **Status (corrected 2026-08-09 context-v4)**: fixed — Task 1 (`3a26a11`). `RELATIONSHIP_BUILDER_VERSION` is `relationship-v10+python-cross-module-constructors+python-native-resolution-v1`; stale pre-fix sidecars require reindex. A fresh live full reindex returned the `trading_core.py` `__init__` call edge to `TradingEntryVetoes` at lines 296–302.
 
 - **Symptom (reported)**: `call_graph(TradingEntryVetoes, direction=callers)`
   returned 0 edges with `CALL_GRAPH_INBOUND_COVERAGE_PARTIAL` and
@@ -541,3 +545,11 @@ were written and is appended at the end.
   return the `TradingCore.__init__` edge (kind call, confidence 0.65, no
   coverage-partial warning). The same stale-sidecar hypothesis also connects
   to issue #16's `builtAt` staleness observation.
+
+## 19. Implementation-focus retrieval can miss the implementation owner at reranker admission
+
+- **Status (2026-08-09 final review): open incremental retrieval/admission-quality issue; not a release-architecture redesign.**
+- **Observed live case:** `how does entry veto validation work` resolved to implementation focus and used query-v2/document-v4 with LateOn successfully applied, but the top two grouped results were tests. Direct `trading_entry_vetoes.py` candidates existed below the 12-document reranker-admission cutoff, so contextual reranking could not promote them.
+- **Demonstrated boundary:** provider order, request compatibility, source-first packets, and structural enrichment worked. The remaining mismatch occurs before provider admission: retrieval order and the bounded admission pool exclude a relevant implementation owner.
+- **Action:** investigate only if the outcome materially harms real workflows. Any change requires a separately reviewed candidate-admission contract with fixed evidence and must preserve provider order after validation.
+- **Non-fixes:** do not add test penalties, repository-specific ranking rules, local score weights, post-provider reordering, or another TradingView ranking tournament.

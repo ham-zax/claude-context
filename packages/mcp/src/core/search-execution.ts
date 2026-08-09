@@ -68,6 +68,7 @@ import type { FreshnessDecision } from "./sync.js";
 import {
     selectRerankCandidates,
     selectRerankInputWithinUtf8Budget,
+    shouldCallRerankerForProjectedCandidateCount,
     type RerankBudgetReason,
 } from "./search-rerank-policy.js";
 import {
@@ -625,17 +626,26 @@ async function rerankSearchCandidates(
                         });
                     }
                 }
+                const structuralContextStatus: SearchRerankStructuralContextStatus | undefined
+                    = structuralContextStatuses.has("incompatible")
+                        ? "incompatible"
+                        : structuralContextStatuses.has("unavailable")
+                            ? "unavailable"
+                            : structuralContextStatuses.has("available")
+                                ? "available"
+                                : undefined;
                 projectionSummary = {
                     requestedCandidates: providerBoundedSelection.length,
                     projectedCandidates: projectableRows.length,
                     skippedCandidates: providerBoundedSelection.length - projectableRows.length,
                     failureCounts,
                     ...(firstFailure ? { firstFailure } : {}),
-                    ...(structuralContextStatuses.size === 1
-                        ? { structuralContextStatus: [...structuralContextStatuses][0]! }
-                        : {}),
+                    ...(structuralContextStatus ? { structuralContextStatus } : {}),
                 };
-                if (projectableRows.length < 2) {
+                if (structuralContextStatus === "incompatible") {
+                    phaseWarnings.push(WARNING_CODES.RERANKER_CONTEXT_DEGRADED);
+                }
+                if (!shouldCallRerankerForProjectedCandidateCount(projectableRows.length)) {
                     // Fewer than two safe documents remain: skip the provider
                     // and preserve retrieval order without counting a
                     // provider failure.

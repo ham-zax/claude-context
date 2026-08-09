@@ -317,7 +317,7 @@ function assertPackedCliLateOnAcquisition(packedCliRoot: string): void {
     }
     const storeSource = fs.readFileSync(storePath, "utf8");
     const policyMissing = !storeSource.includes("lateon_context_v4_d32_owner_default_v1");
-    const frozenDigestMissing = !storeSource.includes("956479f3ed07a7e3adec5b39ccfb1ee41ee3bcb9f39c236c3f5deda20d5d417b");
+    const frozenDigestMissing = !storeSource.includes("f20946b9f1176f8e4d605b0bff7f7ff6f6a5c0de11e17cb31d375753623fd1c4");
     const installSource = fs.readFileSync(installPath, "utf8");
     const resolutionMissing = !installSource.includes("resolveVerifiedLateOnModel");
     if (policyMissing || frozenDigestMissing || resolutionMissing) {

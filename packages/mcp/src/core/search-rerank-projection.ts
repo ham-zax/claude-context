@@ -272,7 +272,10 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
         document,
         candidateRole,
         SEARCH_RERANK_DOCUMENT_V4_POLICY.id,
-        input.structuralContextStatus ?? "available",
+        input.structuralContextStatus
+            ?? (input.preparedStructuralRelationships !== undefined || input.relationships !== undefined
+                ? "available"
+                : "unavailable"),
     );
 }
 

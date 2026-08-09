@@ -1010,3 +1010,30 @@ test("insufficient projectable documents record reranker_input_insufficient remo
         ],
     );
 });
+
+test("incompatible structural context keeps candidates and emits a dedicated integrity warning", async () => {
+    const reranker = buildReranker((documents) => reverseResults(documents));
+    const results = [candidate("a", "src/a.ts", 0.9), candidate("b", "src/b.ts", 0.8)];
+    const outcome = await run(
+        buildInput(),
+        buildHost(results, reranker, {
+            buildRerankDocument: async (_query, result) => ({
+                ok: true,
+                document: `document ${result.relativePath}`,
+                utf8Bytes: Buffer.byteLength(`document ${result.relativePath}`, "utf8"),
+                sha256: "0".repeat(64),
+                candidateRole: "implementation",
+                projectionIdentity: "search_rerank_document_v4",
+                structuralContextStatus: "incompatible",
+            }),
+        }),
+    );
+
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(outcome.rerankerApplied, true);
+    assert.equal(outcome.rerankerProjection?.structuralContextStatus, "incompatible");
+    assert.ok(outcome.searchWarnings.includes("RERANKER_CONTEXT_DEGRADED"));
+    assert.ok(!outcome.searchWarnings.includes("RERANKER_FAILED"));
+    assert.deepEqual(outcome.scored.map((entry) => entry.result.candidateId), ["b", "a"]);
+});

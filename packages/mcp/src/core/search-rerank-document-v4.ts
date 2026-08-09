@@ -35,6 +35,12 @@ export const SEARCH_RERANK_DOCUMENT_V4_POLICY = Object.freeze({
     serialization: "canonical_json_utf8",
     serializedKeyOrder: "lexicographic_recursive_canonical_json_v1",
     addedField: "structural_context",
+    fieldSetDecision: {
+        language: "intentionally_omitted_v1",
+        documentationExcerpt: "intentionally_removed_v1",
+        requiredOwnerSiblings: "superseded_by_structural_context_v1",
+    },
+    declarationRequirement: "trusted_non_empty_declaration_required_v1",
     structuralContextBudget: "source_before_references_v1",
     structuralContextOrder: "relation_then_path_then_label_v1",
     directCallerLimit: 3,
@@ -193,7 +199,7 @@ function normalizeStructuralContext(
 
 /**
  * Structural references are optional supporting context. Source selection runs
- * against the declaration-only packet first; references then consume only the
+ * against the base answer packet first; references then consume only the
  * remaining bytes and are dropped in deterministic priority order. Thus no
  * reference can displace an otherwise valid primary source excerpt.
  */
@@ -227,7 +233,7 @@ function truncateStructuralContextToBudget(input: {
             directCallers = directCallers.slice(0, -1);
         } else {
             throw new RangeError(
-                `Projection v4 mandatory projection exceeds ${SEARCH_RERANK_DOCUMENT_V4_POLICY.maximumUtf8Bytes} UTF-8 bytes.`,
+                `Projection v4 base projection exceeds ${SEARCH_RERANK_DOCUMENT_V4_POLICY.maximumUtf8Bytes} UTF-8 bytes.`,
             );
         }
         truncated = true;

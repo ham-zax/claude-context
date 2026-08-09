@@ -170,7 +170,7 @@ test("LateOn context-v4 profile advertises query-v2 and document-v4 projections 
     assert.equal(v4.identity.queryProjectionVersion, "search_rerank_query_v2");
     assert.equal(
         v4.identity.projectionSha256,
-        "a44e5ab565d186a586554b787ac1783facd9871374105dacd6cac29f812aa98a",
+        "f7cee836ca9dac7ae02eaa8384cccb8d51114c66027536366223f59264c2c5b4",
     );
     assert.equal(
         v4.identity.requestContractSha256,

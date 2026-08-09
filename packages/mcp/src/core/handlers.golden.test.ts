@@ -721,10 +721,10 @@ test('golden MCP search_codebase grouped symbol result shape', async () => {
                     open_symbol: {
                         contractVersion: 2,
                         symbolId: '<symbol:function:validateSession>',
-                        context: { preset: 'implementation' },
+                        context: { preset: 'definition' },
                     },
                 },
-                reason: 'Open bounded implementation context for the highest-ranked concrete symbol before graph traversal or editing.',
+                reason: 'Open bounded symbol context for the highest-ranked concrete result.',
             },
             results: [{
                 target: {

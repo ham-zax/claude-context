@@ -45,6 +45,14 @@ test("buildSearchWarningDetails sorts warning codes with contract order (localeC
     }
 });
 
+test("incompatible reranker context warning preserves source-backed results and recommends repair", () => {
+    const [warning] = buildSearchWarningDetails(["RERANKER_CONTEXT_DEGRADED"]);
+    assert.equal(warning?.blocksUse, false);
+    assert.equal(warning?.severity, "degraded");
+    assert.match(warning?.message ?? "", /relationship.*does not match.*generation/i);
+    assert.match(warning?.action ?? "", /manage_index repair/i);
+});
+
 test("navigation repair warning preserves vector usability and recommends repair", () => {
     const [warning] = buildSearchWarningDetails(["NAVIGATION_REPAIR_REQUIRED"]);
     assert.equal(warning?.blocksUse, false);
@@ -117,7 +125,7 @@ test("oversized symbol recommends the matched evidence span before exact open", 
     assert.deepEqual(result.target.span, { startLine: 1, endLine: 2000 });
 });
 
-test("non-oversized concrete symbol recommends exact open_symbol", () => {
+test("non-oversized concrete result recommends role-neutral exact symbol context", () => {
     const result = baseGroup({
         target: {
             file: "src/tool-handlers.ts",
@@ -134,9 +142,10 @@ test("non-oversized concrete symbol recommends exact open_symbol", () => {
         open_symbol: {
             contractVersion: 2,
             symbolId: "sym_tool_handlers",
-            context: { preset: "implementation" },
+            context: { preset: "definition" },
         },
     });
+    assert.equal(action.reason, "Open bounded symbol context for the highest-ranked concrete result.");
 });
 
 test("recommended actions reject executable targets outside the codebase root", () => {

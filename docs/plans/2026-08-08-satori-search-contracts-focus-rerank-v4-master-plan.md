@@ -932,14 +932,13 @@ export const SEARCH_RERANK_DOCUMENT_V4_POLICY = {
 mandatory path/role/symbol/declaration
 query-relevant primary source
 structural context references
-optional documentation excerpt
 ```
 
 Structural references never displace the mandatory declaration and must not cause projection failure; truncate reference lists first.
 
 - [ ] **Step 1: Write RED v3/v4 parity tests**
 
-Primary source/declaration selection remains identical when structural context is empty. v4 differs only by `structural_context` and identity.
+Primary source/declaration selection remains identical when structural context is empty. The emitted v4 field set remains the exact §2.3 answer packet: `language` is intentionally omitted, `documentation_excerpt` is intentionally removed, and `required_owner_siblings` is superseded by `structural_context`. These decisions are bound by `SEARCH_RERANK_DOCUMENT_V4_POLICY` and the request-contract identity.
 
 - [ ] **Step 2: Write 4,000-byte stress test**
 - [ ] **Step 3: Implement and regenerate contract**
@@ -1060,10 +1059,10 @@ A failing gate item is recorded as a specific incremental bug (per 3.5.4/3.5.5),
 authorization for ranking redesign. F-4 failure specifically is recorded as a normal extraction
 bug, not a ranking issue.
 
-- [ ] **Step 1: Write the production receipt with exact identities and counts**
-- [ ] **Step 2: Run the 15.6 F-1…F-8 acceptance gate and record outcomes in the receipt**
-- [ ] **Step 3: Update issue statuses 11–18**
-- [ ] **Step 4: Commit**
+- [x] **Step 1: Write the corrected production receipt with exact identities and counts**
+- [x] **Step 2: Run the 15.6 F-1…F-8 acceptance gate against production JS and record raw outcomes**
+- [x] **Step 3: Update issue statuses 11–18**
+- [x] **Step 4: Commit the corrected evidence receipt separately**
 
 ```bash
 git add packages docs README.md
@@ -1217,4 +1216,71 @@ The project is complete when:
 - 15.4 battery all exit 0: core 679 pass/1 env-gated skip/0 fail, mcp 1481/1481, cli 342/342, test:scripts 337/337, check (lint+typecheck+versions), build, mcp+cli release:smoke, mcp typecheck, diff --check, clean tree. One CLI lint error (unused `input` in the new migration test) fixed to make `pnpm check` green.
 - 15.5 static prohibitions: zero matches on both greps.
 - 15.6 F-1…F-8 acceptance gate: all PASS against the production build (mapped contract suites + packed-closure release smokes); outcomes recorded in `docs/evidence/search-contracts-focus-v4-production-20260808/PRODUCTION_RECEIPT.md` with exact identities (profile `lateon_offline_quality_projection_v4_d32_v1`, policy `lateon_context_v4_d32_owner_default_v1`, query `search_rerank_query_v2`, document `search_rerank_document_v4`, projection SHA `de52c67d…`, frozen digest `250d57c4…`, request-contract digest `d5aa4a07…`, relationship `relationship-v10+…`) and counts.
-- ISSUES.md entries 11–18 marked fixed with task/commit citations; README.md + packages/mcp/README.md document the v4 default and the previous-managed-combination upgrade path; the context-v3 plan is marked IMPLEMENTED/HISTORICAL. Architecture declared frozen per §3.5.5.
+- ISSUES.md entries 11–18 marked fixed with task/commit citations; README.md + packages/mcp/README.md document the v4 default and the previous-managed-combination upgrade path; the context-v3 plan is marked IMPLEMENTED/HISTORICAL. Task 15 recorded an architecture-freeze declaration that the later review corrections below invalidate.
+
+### Post-Task 15 review correction — implementation and live evidence recorded (seal later withdrawn)
+
+- `tmp/review.md` invalidated the earlier Task 15 seal: it found a direct-runtime
+  v3/v4 default split, proof-backed structural-edge exclusion, source-budget
+  displacement, incomplete/fail-open request identity, inaccurate `builtAt`
+  attribution, scope/`must:` overclaims, and a receipt that substituted mapped
+  tests for live F-1…F-8 evidence.
+- Corrective implementation commits: `8ff1381`, `116e6fe`, `c279074`,
+  `cf46c43`, `5bc4e23`, `6f8ff21`, `3615d54`, and `6aaa2f0` (plus focused
+  fixture-normalization commit `6ae5ad1`). They make context-v4 the complete
+  direct default, preserve proof-backed edges, bind/fail-close request identity,
+  retain primary source before structural context, harden bounded search
+  contracts, and separate relationship build from publication completion time.
+- Current 15.4 verification at implementation head
+  `6aaa2f080d2c4932aa534b89508d9475c53008bf`: Core 679 pass/1 skip, MCP
+  1488 pass/1 skip, CLI 342 pass, scripts 337 pass; check, build, release smoke,
+  contract/manifest/type checks, and static prohibitions passed. The first Core
+  attempt had one transient closed-port timeout; its focused rerun and subsequent
+  complete rerun passed without a source change.
+- A production-JS MCP process indexed a clean detached `tradingview_ratio`
+  worktree, completed a full reindex, and passed F-1…F-8. `fe95594` initially
+  retained selected raw requests and responses in the evidence artifact; the final
+  correction below replaces that working-tree artifact with a redacted proof
+  manifest. The source worktree was not modified.
+- `fe95594` recorded a read-only-review and architecture-freeze claim at
+  implementation head `6aaa2f080d2c4932aa534b89508d9475c53008bf`. The staged
+  follow-up review found that evidence insufficient for an independent-audit or
+  freeze attestation; the claim is withdrawn by the final correction below.
+
+### Final review correction — freeze retracted pending verification
+
+- The staged follow-up `tmp/review.md` found that `fe95594` still retained a raw
+  1.38 MB live-response artifact, did not behaviorally bind the complete request
+  contract, hid incompatible structural enrichment outside detailed diagnostics,
+  and made an unsupported independent-audit/freeze claim. The preceding freeze
+  statement is withdrawn and this entry supersedes it.
+- The committed raw envelope is replaced in the working tree by a redacted proof
+  manifest. It retains normalized requests, result/symbol/span identities, contract
+  fields, generation authority, and deterministic hashes of each complete captured
+  response; copied source, previews, absolute paths, local model location, and full
+  candidate-survival bodies are removed. The source artifact hash remains recorded,
+  and the replacement artifact does not retain the source data. The superseded raw
+  blob was reachable through `fe95594`; an authorized tip-only rewrite plus fresh-clone
+  branch/tag and artifact-reachability checks are required to remove that exposure.
+- Structural incompatibility now preserves source/symbol-backed candidates while
+  emitting `RERANKER_CONTEXT_DEGRADED`; optional unavailability remains diagnostic,
+  and no structural input defaults to unavailable. Recommended symbol opens are
+  role-neutral (`definition` preset).
+- Request-contract fixtures now cover all eight candidate roles and execute the
+  actual structural admission, provider-threshold, native-slot, and byte-budget
+  owners. Structural availability/incompatibility remains a separately tested
+  observability decision and is intentionally outside the request-contract digest.
+  The v4 field-set and non-empty declaration decisions are explicit identity-bound
+  policy.
+- The tests-first live relevance outcome remains a separate retrieval/admission
+  quality issue. No test penalty, local weight, or post-provider reorder is added.
+- Do not restore the architecture-freeze or publishable-seal claim until the final
+  verification commands below pass for this correction state.
+- Final correction verification passed: Core 679/1 skipped, MCP 1494/1 skipped,
+  CLI 342, scripts 337, request-contract check, manifest check, root `pnpm check`,
+  root build, MCP/CLI release smokes, and both static-prohibition searches. A direct
+  model-backed context-v4 smoke passed through the real tokenizer and LateOn model
+  with query-v2/document-v4.
+- These results close the working-tree implementation and evidence-content findings.
+  The authorized history cleanup is a separate publication-safety action and does not
+  restore an independent-audit or architecture-freeze claim.
