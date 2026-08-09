@@ -668,4 +668,3 @@ test("LateOn v4 accepts query-v2 and document-v4 through the real tokenizer and 
     assert.deepEqual(results.map((result) => result.index).sort(), [0, 1]);
     assert.ok(results.every((result) => Number.isFinite(result.relevanceScore)));
 });
-

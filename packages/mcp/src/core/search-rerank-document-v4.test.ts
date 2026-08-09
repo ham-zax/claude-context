@@ -212,4 +212,3 @@ test("v4 normalizes only role-valid, relation-aligned, bounded structural refere
         "direct callers are sorted and capped by the projection contract",
     );
 });
-
