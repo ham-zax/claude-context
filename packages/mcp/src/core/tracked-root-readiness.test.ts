@@ -95,7 +95,7 @@ test("fingerprint-mismatch navigation retains the sealed marker binding explicit
             symbolRegistryManifestHash: "registry-p",
             relationshipManifestHash: "relationships-p",
             navigationSealHash: "seal-p",
-            builtAt: "2026-06-17T00:00:00.000Z",
+            publicationCompletedAt: "2026-06-17T00:00:00.000Z",
         });
         assert.equal(result.preparedObservation, "stable-authority-observation");
     }
