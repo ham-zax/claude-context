@@ -34,7 +34,7 @@ const DISK_HEADROOM_FRACTION = 0.1;
 const DISK_HEADROOM_FORMULA =
     "totalExpectedArtifactBytes + ceil(totalExpectedArtifactBytes * diskHeadroomFraction)";
 const FROZEN_LATEON_D32_PROFILE_SHA256 =
-    "f20946b9f1176f8e4d605b0bff7f7ff6f6a5c0de11e17cb31d375753623fd1c4";
+    "befe1751335d5e1373f8166fdc21725baa4f07ea01fb19668436b6340b8c1a2f";
 const DEFAULT_LATEON_REPOSITORY = "lightonai/LateOn-Code-edge";
 const DEFAULT_LATEON_REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
 

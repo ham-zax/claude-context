@@ -6,6 +6,7 @@ import type {
 import type {
     SemanticSearchCandidateTrace,
     SemanticSearchCandidateTraceOccurrence,
+    SemanticSearchDiagnosticRetrieval,
     SemanticSearchCandidateTraceOptions,
     SemanticSearchCandidateTraceStage,
     SemanticSearchCandidateTraceStageName,
@@ -78,6 +79,8 @@ function buildSemanticSearchTraceStage(
     const ordered = stage === 'raw_dense'
         || stage === 'raw_lexical'
         || stage === 'raw_lexical_fallback'
+        || stage === 'diagnostic_dense'
+        || stage === 'diagnostic_lexical'
         ? orderVectorCandidateArm(candidates)
         : [...candidates];
     const occurrences: SemanticSearchCandidateTraceOccurrence[] = ordered
@@ -105,10 +108,12 @@ function buildSemanticSearchTraceStage(
 }
 
 function buildSemanticSearchCandidateTrace(input: {
-    dense?: readonly VectorCandidate[];
-    lexical?: readonly VectorCandidate[];
-    lexicalFallback?: readonly VectorCandidate[];
-    lexicalFallbackParticipated?: boolean;
+    productDense?: readonly VectorCandidate[];
+    productLexical?: readonly VectorCandidate[];
+    diagnosticDense?: readonly VectorCandidate[];
+    diagnosticLexical?: readonly VectorCandidate[];
+    diagnosticLexicalFallback?: readonly VectorCandidate[];
+    diagnosticRetrievals: readonly SemanticSearchDiagnosticRetrieval[];
     result: readonly VectorCandidate[];
     hybrid: boolean;
     maxEntries: number;
@@ -117,16 +122,30 @@ function buildSemanticSearchCandidateTrace(input: {
     lexicalRequests: SemanticSearchCandidateTrace['lexicalRequests'];
 }): SemanticSearchCandidateTrace {
     const stages: SemanticSearchCandidateTraceStage[] = [];
-    if (input.dense) {
-        stages.push(buildSemanticSearchTraceStage('raw_dense', input.dense, input.maxEntries));
+    if (input.productDense) {
+        stages.push(buildSemanticSearchTraceStage('raw_dense', input.productDense, input.maxEntries));
     }
-    if (input.lexical) {
-        stages.push(buildSemanticSearchTraceStage('raw_lexical', input.lexical, input.maxEntries));
+    if (input.productLexical) {
+        stages.push(buildSemanticSearchTraceStage('raw_lexical', input.productLexical, input.maxEntries));
     }
-    if (input.lexicalFallback) {
+    if (input.diagnosticDense) {
+        stages.push(buildSemanticSearchTraceStage(
+            'diagnostic_dense',
+            input.diagnosticDense,
+            input.maxEntries,
+        ));
+    }
+    if (input.diagnosticLexical) {
+        stages.push(buildSemanticSearchTraceStage(
+            'diagnostic_lexical',
+            input.diagnosticLexical,
+            input.maxEntries,
+        ));
+    }
+    if (input.diagnosticLexicalFallback) {
         stages.push(buildSemanticSearchTraceStage(
             'raw_lexical_fallback',
-            input.lexicalFallback,
+            input.diagnosticLexicalFallback,
             input.maxEntries,
         ));
     }
@@ -138,11 +157,8 @@ function buildSemanticSearchCandidateTrace(input: {
 
     const resultIds = new Set(input.result.map((candidate) => candidate.document.id));
     const removedIds = [...new Set([
-        ...(input.dense ?? []).map((candidate) => candidate.document.id),
-        ...(input.lexical ?? []).map((candidate) => candidate.document.id),
-        ...(input.lexicalFallbackParticipated
-            ? (input.lexicalFallback ?? []).map((candidate) => candidate.document.id)
-            : []),
+        ...(input.productDense ?? []).map((candidate) => candidate.document.id),
+        ...(input.productLexical ?? []).map((candidate) => candidate.document.id),
     ])]
         .filter((candidateId) => !resultIds.has(candidateId))
         .sort(compareContractStrings);
@@ -157,6 +173,7 @@ function buildSemanticSearchCandidateTrace(input: {
         productCandidateLimit: input.productCandidateLimit,
         queryEmbeddingSha256: input.queryEmbeddingSha256,
         lexicalRequests: input.lexicalRequests,
+        diagnosticRetrievals: [...input.diagnosticRetrievals],
         stages,
         removals,
         omittedRemovals: Math.max(0, removedIds.length - removals.length),
@@ -172,6 +189,37 @@ function hashSemanticSearchQueryEmbedding(vector: readonly number[]): string {
 
 function hashSemanticSearchLexicalQuery(query: string): string {
     return crypto.createHash('sha256').update(query, 'utf8').digest('hex');
+}
+
+type DiagnosticRetrievalOutcome = Readonly<{
+    retrieval: SemanticSearchDiagnosticRetrieval;
+    candidates?: readonly VectorCandidate[];
+}>;
+
+async function retrieveDiagnosticCandidates(input: {
+    arm: SemanticSearchDiagnosticRetrieval["arm"];
+    requestedLimit: number;
+    retrieve: () => Promise<VectorCandidate[]>;
+}): Promise<DiagnosticRetrievalOutcome> {
+    try {
+        return {
+            retrieval: {
+                arm: input.arm,
+                requestedLimit: input.requestedLimit,
+                status: 'available',
+            },
+            candidates: await input.retrieve(),
+        };
+    } catch {
+        return {
+            retrieval: {
+                arm: input.arm,
+                requestedLimit: input.requestedLimit,
+                status: 'unavailable',
+                failureReason: 'backend_request_failed',
+            },
+        };
+    }
 }
 
 function resolveLexicalMatchCapabilities(vectorDatabase: VectorDatabase): {
@@ -401,7 +449,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         );
         const resolvedRequest = this.resolveRequest(request);
         const codebasePath = resolvedRequest.codebasePath;
-        const candidateRetrievalLimit = candidateTraceConsumer
+        const diagnosticCandidateRetrievalLimit = candidateTraceConsumer
             ? Math.max(
                 resolvedRequest.topK,
                 candidateTraceOptions.diagnosticCandidateLimit ?? resolvedRequest.topK,
@@ -458,8 +506,9 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 `[Context] ⚠️  No proven collection exists for '${codebasePath}'. Please index the codebase first.`,
             );
             candidateTraceConsumer?.(buildSemanticSearchCandidateTrace({
-                ...(isSparseOnly ? { lexical: [] } : { dense: [] }),
-                ...(isHybrid ? { lexical: [] } : {}),
+                ...(isSparseOnly ? { productLexical: [] } : { productDense: [] }),
+                ...(isHybrid ? { productLexical: [] } : {}),
+                diagnosticRetrievals: [],
                 result: [],
                 hybrid: isHybrid,
                 maxEntries: candidateTraceMaxEntries,
@@ -501,45 +550,83 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         };
 
         if (isSparseOnly) {
-            const [searchResults, lexicalFallback] = await Promise.all([
-                vectorDatabase.retrieveLexical(collectionName, {
-                    query: resolvedRequest.query,
-                    limit: candidateRetrievalLimit,
-                    filter: resolvedRequest.filter,
-                    ...(effectivePrimaryMatchMode !== 'provider_sparse'
-                        ? { matchMode: effectivePrimaryMatchMode }
-                        : {}),
-                }),
-                captureLexicalFallback
-                    ? vectorDatabase.retrieveLexical(collectionName, {
+            const productSearchResults = await vectorDatabase.retrieveLexical(collectionName, {
+                query: resolvedRequest.query,
+                limit: resolvedRequest.topK,
+                filter: resolvedRequest.filter,
+                ...(effectivePrimaryMatchMode !== 'provider_sparse'
+                    ? { matchMode: effectivePrimaryMatchMode }
+                    : {}),
+            });
+            const productResults = productSearchResults.slice(0, resolvedRequest.topK);
+            const diagnosticRequests: Array<Promise<DiagnosticRetrievalOutcome>> = [];
+            if (diagnosticCandidateRetrievalLimit > resolvedRequest.topK) {
+                diagnosticRequests.push(retrieveDiagnosticCandidates({
+                    arm: 'precise_lexical',
+                    requestedLimit: diagnosticCandidateRetrievalLimit,
+                    retrieve: () => vectorDatabase.retrieveLexical(collectionName, {
+                        query: resolvedRequest.query,
+                        limit: diagnosticCandidateRetrievalLimit,
+                        filter: resolvedRequest.filter,
+                        ...(effectivePrimaryMatchMode !== 'provider_sparse'
+                            ? { matchMode: effectivePrimaryMatchMode }
+                            : {}),
+                    }),
+                }));
+            }
+            if (captureLexicalFallback) {
+                diagnosticRequests.push(retrieveDiagnosticCandidates({
+                    arm: 'fallback_lexical',
+                    requestedLimit: diagnosticCandidateRetrievalLimit,
+                    retrieve: () => vectorDatabase.retrieveLexical(collectionName, {
                         query: lexicalFallbackQuery,
-                        limit: candidateRetrievalLimit,
+                        limit: diagnosticCandidateRetrievalLimit,
                         filter: resolvedRequest.filter,
                         matchMode: 'any_terms',
-                    })
-                    : Promise.resolve(undefined),
-            ]);
-            if (captureLexicalFallback) {
+                    }),
+                }));
+            }
+            const diagnosticOutcomes = await Promise.all(diagnosticRequests);
+            if (diagnosticOutcomes.length > 0) {
                 await assertCandidateReadAuthorityUnchanged(
                     'Index generation changed during diagnostic lexical retrieval.',
                 );
             }
-            const productResults = searchResults.slice(0, resolvedRequest.topK);
+            const diagnosticLexical = diagnosticOutcomes.find(
+                (outcome) => outcome.retrieval.arm === 'precise_lexical',
+            )?.candidates;
+            const diagnosticLexicalFallback = diagnosticOutcomes.find(
+                (outcome) => outcome.retrieval.arm === 'fallback_lexical',
+            )?.candidates;
             diagnosticCandidateArmsConsumer?.({
-                preciseLexical: searchResults.map((result) => (
-                    toSemanticSearchResult(result, 'lexical_rank')
-                )),
-                ...(lexicalFallback
+                ...(
+                    diagnosticCandidateRetrievalLimit > resolvedRequest.topK
+                        ? diagnosticLexical
+                            ? {
+                                preciseLexical: diagnosticLexical.map((result) => (
+                                    toSemanticSearchResult(result, 'lexical_rank')
+                                )),
+                            }
+                            : {}
+                        : {
+                            preciseLexical: productSearchResults.map((result) => (
+                                toSemanticSearchResult(result, 'lexical_rank')
+                            )),
+                        }
+                ),
+                ...(diagnosticLexicalFallback
                     ? {
-                        fallbackLexical: lexicalFallback.map((result) => (
+                        fallbackLexical: diagnosticLexicalFallback.map((result) => (
                             toSemanticSearchResult(result, 'lexical_rank')
                         )),
                     }
                     : {}),
             });
             candidateTraceConsumer?.(buildSemanticSearchCandidateTrace({
-                lexical: searchResults,
-                ...(lexicalFallback ? { lexicalFallback } : {}),
+                productLexical: productSearchResults.slice(0, resolvedRequest.topK),
+                ...(diagnosticLexical ? { diagnosticLexical } : {}),
+                ...(diagnosticLexicalFallback ? { diagnosticLexicalFallback } : {}),
+                diagnosticRetrievals: diagnosticOutcomes.map((outcome) => outcome.retrieval),
                 result: productResults,
                 hybrid: false,
                 maxEntries: candidateTraceMaxEntries,
@@ -549,7 +636,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                     role: 'primary',
                     querySha256: hashSemanticSearchLexicalQuery(resolvedRequest.query),
                     matchMode: effectivePrimaryMatchMode,
-                }, ...(lexicalFallback ? [{
+                }, ...(captureLexicalFallback ? [{
                     role: 'fallback_or' as const,
                     querySha256: hashSemanticSearchLexicalQuery(lexicalFallbackQuery),
                     matchMode: 'any_terms' as const,
@@ -582,62 +669,127 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                 `[Context] 🔍 Lexical candidate request: query_length=${resolvedRequest.query.length}, request_id=${requestId}, limit=${resolvedRequest.topK}`,
             );
             console.log('[Context] 🔍 Executing hybrid search with RRF reranking...');
-            const [denseCandidates, lexicalCandidates, lexicalFallback] = await Promise.all([
+            const [productDenseCandidates, productLexicalCandidates] = await Promise.all([
                 vectorDatabase.retrieveDense(collectionName, {
                     vector: queryEmbedding.vector,
-                    limit: candidateRetrievalLimit,
+                    limit: resolvedRequest.topK,
                     filter: resolvedRequest.filter,
                 }),
                 vectorDatabase.retrieveLexical(collectionName, {
                     query: resolvedRequest.query,
-                    limit: candidateRetrievalLimit,
+                    limit: resolvedRequest.topK,
                     filter: resolvedRequest.filter,
                     ...(effectivePrimaryMatchMode !== 'provider_sparse'
                         ? { matchMode: effectivePrimaryMatchMode }
                         : {}),
                 }),
-                captureLexicalFallback
-                    ? vectorDatabase.retrieveLexical(collectionName, {
-                        query: lexicalFallbackQuery,
-                        limit: candidateRetrievalLimit,
-                        filter: resolvedRequest.filter,
-                        matchMode: 'any_terms',
-                    })
-                    : Promise.resolve(undefined),
             ]);
             await assertCandidateReadAuthorityUnchanged(
                 'Index generation changed during hybrid retrieval.',
             );
-            const lexicalFusionCandidates = lexicalCandidates.length > 0
-                ? lexicalCandidates
-                : lexicalFallback ?? [];
             const searchResults = fuseVectorCandidatesWithRrf({
-                dense: denseCandidates.slice(0, resolvedRequest.topK),
-                lexical: lexicalFusionCandidates.slice(0, resolvedRequest.topK),
+                dense: productDenseCandidates.slice(0, resolvedRequest.topK),
+                lexical: productLexicalCandidates.slice(0, resolvedRequest.topK),
                 k: VECTOR_CANDIDATE_RRF_K_V1,
                 limit: resolvedRequest.topK,
             });
+
+            const diagnosticRequests: Array<Promise<DiagnosticRetrievalOutcome>> = [];
+            if (diagnosticCandidateRetrievalLimit > resolvedRequest.topK) {
+                diagnosticRequests.push(
+                    retrieveDiagnosticCandidates({
+                        arm: 'dense',
+                        requestedLimit: diagnosticCandidateRetrievalLimit,
+                        retrieve: () => vectorDatabase.retrieveDense(collectionName, {
+                            vector: queryEmbedding.vector,
+                            limit: diagnosticCandidateRetrievalLimit,
+                            filter: resolvedRequest.filter,
+                        }),
+                    }),
+                    retrieveDiagnosticCandidates({
+                        arm: 'precise_lexical',
+                        requestedLimit: diagnosticCandidateRetrievalLimit,
+                        retrieve: () => vectorDatabase.retrieveLexical(collectionName, {
+                            query: resolvedRequest.query,
+                            limit: diagnosticCandidateRetrievalLimit,
+                            filter: resolvedRequest.filter,
+                            ...(effectivePrimaryMatchMode !== 'provider_sparse'
+                                ? { matchMode: effectivePrimaryMatchMode }
+                                : {}),
+                        }),
+                    }),
+                );
+            }
+            if (captureLexicalFallback) {
+                diagnosticRequests.push(retrieveDiagnosticCandidates({
+                    arm: 'fallback_lexical',
+                    requestedLimit: diagnosticCandidateRetrievalLimit,
+                    retrieve: () => vectorDatabase.retrieveLexical(collectionName, {
+                        query: lexicalFallbackQuery,
+                        limit: diagnosticCandidateRetrievalLimit,
+                        filter: resolvedRequest.filter,
+                        matchMode: 'any_terms',
+                    }),
+                }));
+            }
+            const diagnosticOutcomes = await Promise.all(diagnosticRequests);
+            if (diagnosticOutcomes.length > 0) {
+                await assertCandidateReadAuthorityUnchanged(
+                    'Index generation changed during hybrid diagnostic retrieval.',
+                );
+            }
+            const diagnosticDense = diagnosticOutcomes.find(
+                (outcome) => outcome.retrieval.arm === 'dense',
+            )?.candidates;
+            const diagnosticLexical = diagnosticOutcomes.find(
+                (outcome) => outcome.retrieval.arm === 'precise_lexical',
+            )?.candidates;
+            const diagnosticLexicalFallback = diagnosticOutcomes.find(
+                (outcome) => outcome.retrieval.arm === 'fallback_lexical',
+            )?.candidates;
             diagnosticCandidateArmsConsumer?.({
-                dense: denseCandidates.map((result) => (
-                    toSemanticSearchResult(result, 'dense_similarity')
-                )),
-                preciseLexical: lexicalCandidates.map((result) => (
-                    toSemanticSearchResult(result, 'lexical_rank')
-                )),
-                ...(lexicalFallback
+                ...(
+                    diagnosticCandidateRetrievalLimit > resolvedRequest.topK
+                        ? {
+                            ...(diagnosticDense
+                                ? {
+                                    dense: diagnosticDense.map((result) => (
+                                        toSemanticSearchResult(result, 'dense_similarity')
+                                    )),
+                                }
+                                : {}),
+                            ...(diagnosticLexical
+                                ? {
+                                    preciseLexical: diagnosticLexical.map((result) => (
+                                        toSemanticSearchResult(result, 'lexical_rank')
+                                    )),
+                                }
+                                : {}),
+                        }
+                        : {
+                            dense: productDenseCandidates.map((result) => (
+                                toSemanticSearchResult(result, 'dense_similarity')
+                            )),
+                            preciseLexical: productLexicalCandidates.map((result) => (
+                                toSemanticSearchResult(result, 'lexical_rank')
+                            )),
+                        }
+                ),
+                ...(diagnosticLexicalFallback
                     ? {
-                        fallbackLexical: lexicalFallback.map((result) => (
+                        fallbackLexical: diagnosticLexicalFallback.map((result) => (
                             toSemanticSearchResult(result, 'lexical_rank')
                         )),
                     }
                     : {}),
             });
             candidateTraceConsumer?.(buildSemanticSearchCandidateTrace({
-                dense: denseCandidates,
-                lexical: lexicalCandidates,
-                ...(lexicalFallback ? { lexicalFallback } : {}),
-                lexicalFallbackParticipated:
-                    lexicalCandidates.length === 0 && lexicalFallback !== undefined,
+                productDense: productDenseCandidates.slice(0, resolvedRequest.topK),
+                productLexical: productLexicalCandidates.slice(0, resolvedRequest.topK),
+                ...(diagnosticDense ? { diagnosticDense } : {}),
+                ...(diagnosticLexical ? { diagnosticLexical } : {}),
+                ...(diagnosticLexicalFallback ? { diagnosticLexicalFallback } : {}),
+                diagnosticRetrievals: diagnosticOutcomes.map((outcome) => outcome.retrieval),
                 result: searchResults,
                 hybrid: true,
                 maxEntries: candidateTraceMaxEntries,
@@ -647,7 +799,7 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                     role: 'primary',
                     querySha256: hashSemanticSearchLexicalQuery(resolvedRequest.query),
                     matchMode: effectivePrimaryMatchMode,
-                }, ...(lexicalFallback ? [{
+                }, ...(captureLexicalFallback ? [{
                     role: 'fallback_or' as const,
                     querySha256: hashSemanticSearchLexicalQuery(lexicalFallbackQuery),
                     matchMode: 'any_terms' as const,
@@ -670,20 +822,50 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         const denseThreshold = resolvedRequest.scorePolicy.kind === 'dense_similarity_min'
             ? resolvedRequest.scorePolicy.min
             : undefined;
-        const searchResults = await vectorDatabase.retrieveDense(collectionName, {
+        const productSearchResults = await vectorDatabase.retrieveDense(collectionName, {
             vector: queryEmbedding.vector,
-            limit: candidateRetrievalLimit,
+            limit: resolvedRequest.topK,
             minimumScore: denseThreshold,
             filter: resolvedRequest.filter,
         });
-        const productResults = searchResults.slice(0, resolvedRequest.topK);
-        diagnosticCandidateArmsConsumer?.({
-            dense: searchResults.map((result) => (
-                toSemanticSearchResult(result, 'dense_similarity')
-            )),
-        });
+        const productResults = productSearchResults.slice(0, resolvedRequest.topK);
+        const diagnosticOutcome = diagnosticCandidateRetrievalLimit > resolvedRequest.topK
+            ? await retrieveDiagnosticCandidates({
+                arm: 'dense',
+                requestedLimit: diagnosticCandidateRetrievalLimit,
+                retrieve: () => vectorDatabase.retrieveDense(collectionName, {
+                    vector: queryEmbedding.vector,
+                    limit: diagnosticCandidateRetrievalLimit,
+                    minimumScore: denseThreshold,
+                    filter: resolvedRequest.filter,
+                }),
+            })
+            : undefined;
+        if (diagnosticOutcome) {
+            await assertCandidateReadAuthorityUnchanged(
+                'Index generation changed during diagnostic dense retrieval.',
+            );
+        }
+        const diagnosticDense = diagnosticOutcome?.candidates;
+        diagnosticCandidateArmsConsumer?.(
+            diagnosticOutcome
+                ? diagnosticDense
+                    ? {
+                        dense: diagnosticDense.map((result) => (
+                            toSemanticSearchResult(result, 'dense_similarity')
+                        )),
+                    }
+                    : {}
+                : {
+                    dense: productSearchResults.map((result) => (
+                        toSemanticSearchResult(result, 'dense_similarity')
+                    )),
+                },
+        );
         candidateTraceConsumer?.(buildSemanticSearchCandidateTrace({
-            dense: searchResults,
+            productDense: productSearchResults.slice(0, resolvedRequest.topK),
+            ...(diagnosticDense ? { diagnosticDense } : {}),
+            diagnosticRetrievals: diagnosticOutcome ? [diagnosticOutcome.retrieval] : [],
             result: productResults,
             hybrid: false,
             maxEntries: candidateTraceMaxEntries,

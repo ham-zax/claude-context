@@ -616,6 +616,13 @@ function createHandlers(
         searchContinuationCoordinator?: SearchContinuationCoordinator;
         sourceBarrierMode?: 'verified' | 'native';
         sourcePathComparisonStatus?: 'matches' | 'differs' | 'unavailable';
+        semanticSearchQueries?: string[];
+        diagnosticRetrievals?: Array<{
+            arm: 'dense' | 'precise_lexical' | 'fallback_lexical';
+            requestedLimit: number;
+            status: 'available' | 'unavailable';
+            failureReason?: 'backend_request_failed';
+        }>;
     }
 ) {
     const tracedSearchResults = searchResults.map((result, index) => ({
@@ -627,13 +634,15 @@ function createHandlers(
         compareSourcePathsToFreshnessCheckpoint: async () => ({
             status: options?.sourcePathComparisonStatus ?? 'matches',
         }),
-        semanticSearch: async (request: { query: string }) => (
-            options?.mustLaneBlockedQueries?.includes(request.query) ? [] : searchResults
-        ),
+        semanticSearch: async (request: { query: string }) => {
+            options?.semanticSearchQueries?.push(request.query);
+            return options?.mustLaneBlockedQueries?.includes(request.query) ? [] : searchResults;
+        },
         semanticSearchInProvenGeneration: async (
             _receipt: unknown,
             request: { query: string; topK: number },
         ) => {
+            options?.semanticSearchQueries?.push(request.query);
             if (options?.mustLaneBlockedQueries?.includes(request.query)) {
                 return [];
             }
@@ -643,6 +652,7 @@ function createHandlers(
             _receipt: unknown,
             request: { query: string; topK: number },
         ) => {
+            options?.semanticSearchQueries?.push(request.query);
             if (options?.mustLaneBlockedQueries?.includes(request.query)) {
                 return {
                     results: [],
@@ -652,6 +662,7 @@ function createHandlers(
                         productCandidateLimit: request.topK,
                         queryEmbeddingSha256: 'a'.repeat(64),
                         lexicalRequests: [],
+                        diagnosticRetrievals: [],
                         stages: [],
                         removals: [],
                         omittedRemovals: 0,
@@ -682,6 +693,7 @@ function createHandlers(
                     querySha256: 'b'.repeat(64),
                     matchMode: 'all_terms',
                 }],
+                diagnosticRetrievals: options?.diagnosticRetrievals ?? [],
                 stages: [{
                     stage: 'core_result',
                     totalOccurrences: selectedResults.length,
@@ -11628,6 +11640,7 @@ test('handleSearchCode keeps diagnostic candidate depth separate from visible an
 test('full candidate diagnostics preserve reranker input, grouping, and disclosed product results', async () => {
     await withTempRepo(async (repoPath) => {
         const rerankInputs: string[][] = [];
+        const semanticSearchQueries: string[] = [];
         const reranker = {
             rerank: async (_query: string, documents: string[]) => {
                 rerankInputs.push([...documents]);
@@ -11665,7 +11678,16 @@ test('full candidate diagnostics preserve reranker input, grouping, and disclose
                 content: 'export function sessionStatus() { return true; }',
                 score: 0.74,
             },
-        ], reranker as unknown as HandlerReranker);
+        ], reranker as unknown as HandlerReranker, {
+            enableVectorReceipt: true,
+            semanticSearchQueries,
+            diagnosticRetrievals: [{
+                arm: 'fallback_lexical',
+                requestedLimit: 160,
+                status: 'unavailable',
+                failureReason: 'backend_request_failed',
+            }],
+        });
         const baseArgs = {
             path: repoPath,
             query: 'session lifecycle behavior',
@@ -11676,6 +11698,8 @@ test('full candidate diagnostics preserve reranker input, grouping, and disclose
         };
 
         const normal = JSON.parse((await handlers.handleSearchCode(baseArgs)).content[0]?.text || '{}');
+        const normalSemanticSearchQueries = [...semanticSearchQueries];
+        semanticSearchQueries.length = 0;
         const diagnostic = JSON.parse((await handlers.handleSearchCode({
             ...baseArgs,
             debugMode: 'full',
@@ -11686,10 +11710,21 @@ test('full candidate diagnostics preserve reranker input, grouping, and disclose
         );
 
         assert.equal(rerankInputs.length, 2);
+        assert.deepEqual(semanticSearchQueries, normalSemanticSearchQueries);
         assert.deepEqual(rerankInputs[1], rerankInputs[0]);
         assert.deepEqual(productProjection(diagnostic), productProjection(normal));
         assert.equal(diagnostic.limit, normal.limit);
         assert.deepEqual(diagnostic.recommendedNextAction, normal.recommendedNextAction);
+        assert.deepEqual(diagnostic.hints?.debugSearch?.candidateSurvival?.diagnosticRetrievals, [
+            'attempt:1/primary',
+            'attempt:1/expanded',
+        ].map((passId) => ({
+            passId,
+            arm: 'fallback_lexical',
+            requestedLimit: 160,
+            status: 'unavailable',
+            failureReason: 'backend_request_failed',
+        })));
     });
 });
 

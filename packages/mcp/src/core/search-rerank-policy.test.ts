@@ -254,6 +254,84 @@ test("rerank selection applies an adaptive family budget", () => {
     assert.equal(broad.budgetReason, "complete_family_pool");
 });
 
+test("advertised provider capacity decouples semantic admission from output limit", () => {
+    const candidates = Array.from({ length: 26 }, (_, index) => candidate({
+        id: `candidate-${index + 1}`,
+        ownerInstanceId: `owner-${index + 1}`,
+        score: 26 - index,
+    }));
+    const selected = selectRerankCandidates({
+        candidates,
+        requestedLimit: 2,
+        providerMaximumDocuments: 32,
+    });
+    assert.equal(selected.selected.length, 26);
+    assert.equal(selected.selected[16]?.id, "candidate-17");
+    assert.equal(selected.budgetReason, "complete_family_pool");
+});
+
+test("advertised provider and global capacities report the binding admission owner", () => {
+    const forty = Array.from({ length: 40 }, (_, index) => candidate({
+        id: `provider-${index}`,
+        ownerInstanceId: `provider-owner-${index}`,
+    }));
+    const providerBound = selectRerankCandidates({
+        candidates: forty,
+        requestedLimit: 2,
+        providerMaximumDocuments: 32,
+    });
+    assert.equal(providerBound.selected.length, 32);
+    assert.equal(providerBound.budgetReason, "provider_limit");
+
+    const sixty = Array.from({ length: 60 }, (_, index) => candidate({
+        id: `global-${index}`,
+        ownerInstanceId: `global-owner-${index}`,
+    }));
+    const globallyBound = selectRerankCandidates({
+        candidates: sixty,
+        requestedLimit: 2,
+        providerMaximumDocuments: 80,
+    });
+    assert.equal(globallyBound.selected.length, 50);
+    assert.equal(globallyBound.budgetReason, "global_limit");
+});
+
+test("missing or invalid provider capacity preserves legacy adaptive admission", () => {
+    const candidates = Array.from({ length: 30 }, (_, index) => candidate({
+        id: `candidate-${index}`,
+        ownerInstanceId: `owner-${index}`,
+    }));
+    for (const providerMaximumDocuments of [undefined, 0, -1, Number.NaN]) {
+        const selected = selectRerankCandidates({
+            candidates,
+            requestedLimit: 2,
+            ...(providerMaximumDocuments === undefined ? {} : { providerMaximumDocuments }),
+        });
+        assert.equal(selected.selected.length, 12);
+        assert.equal(selected.budgetReason, "family_ambiguity");
+    }
+});
+
+test("provider-capacity selection preserves the existing representative and supplemental byte order", () => {
+    const candidates = [
+        candidate({ id: "a-1", ownerInstanceId: "a" }),
+        candidate({ id: "a-2", ownerInstanceId: "a" }),
+        candidate({ id: "b-1", ownerInstanceId: "b" }),
+        candidate({ id: "a-3", ownerInstanceId: "a" }),
+        candidate({ id: "b-2", ownerInstanceId: "b" }),
+    ];
+    const pool = buildRerankCandidatePool(candidates);
+    const selected = selectRerankCandidates({
+        candidates,
+        requestedLimit: 1,
+        providerMaximumDocuments: 32,
+    });
+    assert.deepEqual(
+        selected.selected.map(({ id }) => id),
+        pool.candidates.map(({ id }) => id),
+    );
+});
+
 test("rerank selection remains stable after shuffled provider rows are deterministically scored", () => {
     const candidates = [
         candidate({ id: "alpha", ownerInstanceId: "owner-a", score: 4 }),

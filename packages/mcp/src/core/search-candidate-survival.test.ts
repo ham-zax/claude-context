@@ -85,6 +85,11 @@ test("Core trace preservation keeps authoritative unique counts and pass-scoped 
             querySha256: "c".repeat(64),
             matchMode: "all_terms",
         }],
+        diagnosticRetrievals: [{
+            arm: "dense",
+            requestedLimit: 160,
+            status: "available",
+        }],
         stages: [{
             stage: "raw_lexical",
             totalOccurrences: 4,
@@ -101,6 +106,22 @@ test("Core trace preservation keeps authoritative unique counts and pass-scoped 
                 rank: 1,
                 score: 0.9,
             }],
+        }, {
+            stage: "diagnostic_dense",
+            totalOccurrences: 1,
+            uniqueCandidates: 1,
+            omittedOccurrences: 0,
+            candidates: [{
+                candidateId: "diagnostic-only",
+                ownerId: '["file","src/diagnostic.ts"]',
+                evidenceOccurrenceId: '["diagnostic-only","diagnostic_dense",1]',
+                relativePath: "src/diagnostic.ts",
+                startLine: 1,
+                endLine: 2,
+                language: "typescript",
+                rank: 1,
+                score: 0.8,
+            }],
         }],
         removals: [{
             candidateId: "stored-2",
@@ -113,6 +134,9 @@ test("Core trace preservation keeps authoritative unique counts and pass-scoped 
     assert.equal(trace.stages[0]?.uniqueCandidates, 3);
     assert.equal(trace.stages[0]?.passId, "expanded");
     assert.equal(trace.removals[0]?.passId, "expanded");
+    assert.equal(trace.stages[1]?.stage, "diagnostic_dense");
+    assert.equal(trace.stages[1]?.candidates[0]?.candidateId, "diagnostic-only");
+    assert.equal(trace.removals.some(({ candidateId }) => candidateId === "diagnostic-only"), false);
     assert.deepEqual(trace.queryEmbeddings, [{
         passId: "expanded",
         sha256: "b".repeat(64),
@@ -122,6 +146,12 @@ test("Core trace preservation keeps authoritative unique counts and pass-scoped 
         role: "primary",
         querySha256: "c".repeat(64),
         matchMode: "all_terms",
+    }]);
+    assert.deepEqual(trace.diagnosticRetrievals, [{
+        passId: "expanded",
+        arm: "dense",
+        requestedLimit: 160,
+        status: "available",
     }]);
     assert.equal(trace.omittedRemovals, 1);
 });

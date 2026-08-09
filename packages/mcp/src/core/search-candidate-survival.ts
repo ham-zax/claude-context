@@ -129,6 +129,7 @@ export function createSearchCandidateSurvivalTrace(): SearchCandidateSurvivalDeb
         corePasses: [],
         queryEmbeddings: [],
         lexicalRequests: [],
+        diagnosticRetrievals: [],
         stages: [],
         removals: [],
         omittedRemovals: 0,
@@ -152,6 +153,12 @@ export function appendCoreCandidateTrace(
         trace.lexicalRequests.push({
             passId,
             ...lexicalRequest,
+        });
+    }
+    for (const diagnosticRetrieval of coreTrace.diagnosticRetrievals) {
+        trace.diagnosticRetrievals.push({
+            passId,
+            ...diagnosticRetrieval,
         });
     }
     const mapOccurrence = (

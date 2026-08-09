@@ -231,6 +231,8 @@ export type SearchCandidateSurvivalStageName =
     | "raw_dense"
     | "raw_lexical"
     | "raw_lexical_fallback"
+    | "diagnostic_dense"
+    | "diagnostic_lexical"
     | "core_fusion"
     | "core_result"
     | "mcp_pass"
@@ -333,6 +335,13 @@ export interface SearchCandidateSurvivalDebug {
         querySha256: string;
         matchMode: "all_terms" | "any_terms" | "provider_sparse" | "unspecified";
         terms?: string[];
+    }>;
+    diagnosticRetrievals: Array<{
+        passId: string;
+        arm: "dense" | "precise_lexical" | "fallback_lexical";
+        requestedLimit: number;
+        status: "available" | "unavailable";
+        failureReason?: "backend_request_failed";
     }>;
     stages: SearchCandidateSurvivalStage[];
     removals: SearchCandidateSurvivalRemoval[];

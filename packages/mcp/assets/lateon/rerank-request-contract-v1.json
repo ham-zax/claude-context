@@ -1,6 +1,6 @@
 {
   "schemaVersion": "satori_rerank_request_contract_v1",
-  "contractSha256": "f5cab7619e553aa45d8fc4b3b9d39459660f201fc5c2b26ff6daf2f772a9f1a3",
+  "contractSha256": "1d0493feb74b2675974d947855d8259687d1327a21e351e9ab3a0e0e2fb507aa",
   "fixtures": {
     "answerFocusResolution": {
       "how does Shariah compliance checking block trades": "implementation",
@@ -122,6 +122,48 @@
         ],
         "inputBytes": 7,
         "omittedCandidateCount": 1
+      },
+      "candidateAdmission": {
+        "providerCapacity32": {
+          "selectedCandidateIds": [
+            "candidate-1",
+            "candidate-2",
+            "candidate-3",
+            "candidate-4",
+            "candidate-5",
+            "candidate-6",
+            "candidate-7",
+            "candidate-8",
+            "candidate-9",
+            "candidate-10",
+            "candidate-11",
+            "candidate-12",
+            "candidate-13",
+            "candidate-14",
+            "candidate-15",
+            "candidate-16"
+          ],
+          "budget": 16,
+          "reason": "complete_family_pool"
+        },
+        "providerCapacityAbsent": {
+          "selectedCandidateIds": [
+            "candidate-1",
+            "candidate-2",
+            "candidate-3",
+            "candidate-4",
+            "candidate-5",
+            "candidate-6",
+            "candidate-7",
+            "candidate-8",
+            "candidate-9",
+            "candidate-10",
+            "candidate-11",
+            "candidate-12"
+          ],
+          "budget": 12,
+          "reason": "family_ambiguity"
+        }
       }
     }
   }

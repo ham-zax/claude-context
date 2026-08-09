@@ -382,6 +382,28 @@ test("native execution preserves an exact-owned prefix and reranks only its suff
     assert.deepEqual(outcome.scored.map((entry) => entry.authoritativeRank), [1, 2, 3]);
 });
 
+test("advertised provider capacity admits all eligible families independently of result limit", async () => {
+    const providerCandidateIds: string[][] = [];
+    const reranker = buildReranker(
+        (documents) => reverseResults(documents),
+        (_documents, candidateIds) => providerCandidateIds.push([...candidateIds]),
+    );
+    reranker.getMaxDocuments = () => 32;
+    const results = Array.from({ length: 26 }, (_, index) => candidate(
+        `candidate-${index + 1}`,
+        `src/candidate-${index + 1}.ts`,
+        26 - index,
+    ));
+    const outcome = await run(buildInput("find implementation", { limit: 2 }), buildHost(results, reranker));
+    assert.equal(outcome.kind, "ok");
+    if (outcome.kind !== "ok") return;
+    assert.equal(outcome.rerankerCandidatePoolCount, 26);
+    assert.equal(outcome.rerankerCandidateBudget, 26);
+    assert.equal(outcome.rerankerBudgetReason, "complete_family_pool");
+    assert.equal(providerCandidateIds[0]?.length, 26);
+    assert.ok(providerCandidateIds[0]?.includes("candidate-17"));
+});
+
 test("provider capacity confines native permutation to admitted slots", async () => {
     const reranker = buildReranker((documents) => reverseResults(documents));
     reranker.getMaxDocuments = () => 2;

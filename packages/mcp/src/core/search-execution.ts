@@ -557,20 +557,14 @@ async function rerankSearchCandidates(
             const selection = selectRerankCandidates({
                 candidates: rerankInputCandidates,
                 requestedLimit: input.retrievalPolicy.rerankerResultLimit,
+                providerMaximumDocuments: host.reranker.getMaxDocuments?.(),
             });
             rerankerFamilyCount = selection.familyCount;
             rerankerSupplementalCandidates = selection.supplementalCandidateCount;
             rerankerCandidatePoolCount = selection.candidatePoolCount;
-            const providerLimit = host.reranker.getMaxDocuments?.();
-            const providerBoundedSelection = Number.isSafeInteger(providerLimit)
-                && (providerLimit as number) > 0
-                && (providerLimit as number) < selection.selected.length
-                ? selection.selected.slice(0, providerLimit)
-                : selection.selected;
-            rerankerCandidateBudget = providerBoundedSelection.length;
-            rerankerBudgetReason = providerBoundedSelection.length < selection.selected.length
-                ? "provider_limit"
-                : selection.budgetReason;
+            const providerBoundedSelection = selection.selected;
+            rerankerCandidateBudget = selection.budget;
+            rerankerBudgetReason = selection.budgetReason;
             let rerankSlice: SearchCandidate[];
             let rerankDocuments: string[];
             let byteBudgetOmittedCandidatesList: SearchCandidate[];

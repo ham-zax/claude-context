@@ -16,7 +16,8 @@ export function shouldCallRerankerForProjectedCandidateCount(count: number): boo
 export type RerankBudgetReason =
     | "complete_family_pool"
     | "family_ambiguity"
-    | "provider_limit";
+    | "provider_limit"
+    | "global_limit";
 
 export type RerankCandidateLike = {
     result: Partial<SemanticSearchResult> & { relativePath: string };
@@ -111,21 +112,44 @@ export function buildRerankCandidatePool<T extends RerankCandidateLike>(
 export function selectRerankCandidates<T extends RerankCandidateLike>(input: {
     candidates: readonly T[];
     requestedLimit: number;
+    providerMaximumDocuments?: number;
 }): RerankCandidateSelection<T> {
     const pool = buildRerankCandidatePool(input.candidates);
     const candidatePool = [...pool.candidates];
-    const requestedLimit = Math.max(1, Math.floor(input.requestedLimit));
-    const ambiguous = pool.familyCount > requestedLimit;
-    const adaptiveBudget = ambiguous
-        ? Math.max(
-            SEARCH_RERANK_MIN_AMBIGUOUS_CANDIDATES,
-            requestedLimit * SEARCH_RERANK_AMBIGUOUS_CANDIDATES_PER_RESULT,
-        )
-        : requestedLimit * SEARCH_RERANK_BOUNDED_CANDIDATES_PER_RESULT;
-    const budget = Math.min(SEARCH_RERANK_TOP_K, candidatePool.length, adaptiveBudget);
-    const budgetReason: RerankBudgetReason = candidatePool.length <= adaptiveBudget
-        ? "complete_family_pool"
-        : "family_ambiguity";
+    const providerMaximumDocuments = Number.isSafeInteger(input.providerMaximumDocuments)
+        && (input.providerMaximumDocuments as number) > 0
+        ? input.providerMaximumDocuments as number
+        : undefined;
+    let budget: number;
+    let budgetReason: RerankBudgetReason;
+    if (providerMaximumDocuments !== undefined) {
+        const capacity = Math.min(SEARCH_RERANK_TOP_K, providerMaximumDocuments);
+        budget = Math.min(candidatePool.length, capacity);
+        if (candidatePool.length <= capacity) {
+            budgetReason = "complete_family_pool";
+        } else {
+            budgetReason = providerMaximumDocuments < SEARCH_RERANK_TOP_K
+                ? "provider_limit"
+                : "global_limit";
+        }
+    } else {
+        const requestedLimit = Math.max(1, Math.floor(input.requestedLimit));
+        const ambiguous = pool.familyCount > requestedLimit;
+        const adaptiveBudget = ambiguous
+            ? Math.max(
+                SEARCH_RERANK_MIN_AMBIGUOUS_CANDIDATES,
+                requestedLimit * SEARCH_RERANK_AMBIGUOUS_CANDIDATES_PER_RESULT,
+            )
+            : requestedLimit * SEARCH_RERANK_BOUNDED_CANDIDATES_PER_RESULT;
+        budget = Math.min(SEARCH_RERANK_TOP_K, candidatePool.length, adaptiveBudget);
+        if (candidatePool.length <= budget) {
+            budgetReason = "complete_family_pool";
+        } else {
+            budgetReason = SEARCH_RERANK_TOP_K < adaptiveBudget
+                ? "global_limit"
+                : "family_ambiguity";
+        }
+    }
 
     return {
         selected: candidatePool.slice(0, budget),

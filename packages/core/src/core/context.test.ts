@@ -6474,17 +6474,25 @@ test('Context hybrid search uses the proven collection without a non-gating quer
         assert.equal(embedding.embedCalls, embedCallsBefore + 2);
         assert.equal(vectorDatabase.queryCalls.length, 0);
         assert.equal(completionMarkerReads, 0);
-        assert.deepEqual(vectorDatabase.denseRequests.map((request) => request.limit), [8]);
-        assert.deepEqual(vectorDatabase.lexicalRequests.map((request) => request.limit), [8, 8]);
-        // The effective primary mode is now passed explicitly (all_terms is
-        // LanceDB's declared default), so execution matches the trace.
+        assert.deepEqual(vectorDatabase.denseRequests.map((request) => request.limit), [5, 8]);
+        assert.deepEqual(vectorDatabase.lexicalRequests.map((request) => request.limit), [5, 8, 8]);
+        // Product and deeper diagnostic retrieval use the same declared primary
+        // mode; the final request is the trace-only any-terms fallback.
         assert.deepEqual(vectorDatabase.lexicalRequests.map((request) => request.matchMode), [
+            'all_terms',
             'all_terms',
             'any_terms',
         ]);
         assert.deepEqual(
             execution.candidateTrace.stages.map((stage) => stage.stage),
-            ['raw_dense', 'raw_lexical', 'raw_lexical_fallback', 'core_fusion'],
+            [
+                'raw_dense',
+                'raw_lexical',
+                'diagnostic_dense',
+                'diagnostic_lexical',
+                'raw_lexical_fallback',
+                'core_fusion',
+            ],
         );
         assert.ok(execution.candidateTrace.stages.every((stage) => stage.omittedOccurrences === 0));
         assert.equal(
@@ -6581,7 +6589,7 @@ test('Context rejects malformed filters before embedding or retrieval', async ()
     }
 });
 
-test('Context hybrid search admits fallback lexical candidates when precise lexical retrieval is empty', async () => {
+test('Context hybrid diagnostics capture lexical fallback without admitting it to product fusion', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-hybrid-fallback-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -6617,29 +6625,218 @@ test('Context hybrid search admits fallback lexical candidates when precise lexi
                 : []
         );
 
+        const request = {
+            codebasePath,
+            query: 'Which function builds the search query plan and route?',
+            topK: 2,
+            retrievalMode: 'hybrid' as const,
+            scorePolicy: { kind: 'topk_only' as const },
+        };
+        const normal = await context.semanticSearchInProvenGeneration(vectorReceipt!, request);
         const execution = await context.semanticSearchWithCandidateTraceInProvenGeneration(
             vectorReceipt!,
-            {
-                codebasePath,
-                query: 'Which function builds the search query plan and route?',
-                topK: 2,
-                retrievalMode: 'hybrid',
-                scorePolicy: { kind: 'topk_only' },
-            },
+            request,
             8,
             {
                 captureLexicalFallback: true,
-                diagnosticCandidateLimit: 8,
+                diagnosticCandidateLimit: 2,
                 lexicalFallbackTerms: ['buildSearchQueryPlan', 'search', 'query', 'plan'],
             },
         );
 
+        assert.deepEqual(
+            execution.results.map((result) => result.candidateId),
+            normal.map((result) => result.candidateId),
+        );
         assert.equal(execution.diagnosticCandidateArms?.preciseLexical?.length, 0);
         assert.equal(execution.diagnosticCandidateArms?.fallbackLexical?.length, 1);
-        assert.ok(execution.results.some((result) => result.relativePath === 'owner.ts'));
         assert.ok(execution.candidateTrace.stages
-            .find((stage) => stage.stage === 'core_fusion')
+            .find((stage) => stage.stage === 'raw_lexical_fallback')
             ?.candidates.some((candidate) => candidate.relativePath === 'owner.ts'));
+        assert.equal(execution.candidateTrace.stages
+            .find((stage) => stage.stage === 'core_fusion')
+            ?.candidates.some((candidate) => candidate.relativePath === 'owner.ts'), false);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context diagnostic depth observes deeper non-prefix arms without changing product results', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-hybrid-diagnostic-depth-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'product.ts'), 'export const product = true;\n', 'utf8');
+        fs.writeFileSync(path.join(codebasePath, 'diagnostic.ts'), 'export const diagnostic = true;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+        });
+        await context.indexCodebase(codebasePath);
+        const vectorReceipt = await context.proveVectorGeneration(codebasePath);
+        assert.ok(vectorReceipt);
+        const documents = [...(vectorDatabase.collections.get(vectorReceipt!.collectionName)?.values() ?? [])]
+            .filter((document) => document.fileExtension !== '.satori_meta');
+        const product = documents.find((document) => document.relativePath === 'product.ts');
+        const diagnostic = documents.find((document) => document.relativePath === 'diagnostic.ts');
+        assert.ok(product);
+        assert.ok(diagnostic);
+
+        const denseLimits: number[] = [];
+        vectorDatabase.retrieveDense = async (_collectionName, request) => {
+            denseLimits.push(request.limit);
+            return request.limit > 2
+                ? [{ document: diagnostic!, score: 1 }, { document: product!, score: 0.9 }]
+                : [{ document: product!, score: 1 }];
+        };
+        vectorDatabase.retrieveLexical = async () => [];
+        const request = {
+            codebasePath,
+            query: 'find product implementation',
+            topK: 2,
+            retrievalMode: 'hybrid' as const,
+            scorePolicy: { kind: 'topk_only' as const },
+        };
+        const normal = await context.semanticSearchInProvenGeneration(vectorReceipt!, request);
+        denseLimits.length = 0;
+        const execution = await context.semanticSearchWithCandidateTraceInProvenGeneration(
+            vectorReceipt!, request, 8, { diagnosticCandidateLimit: 8 },
+        );
+
+        assert.deepEqual(denseLimits, [2, 8]);
+        assert.deepEqual(
+            execution.results.map((result) => result.candidateId),
+            normal.map((result) => result.candidateId),
+        );
+        assert.equal(execution.candidateTrace.stages
+            .find((stage) => stage.stage === 'raw_dense')
+            ?.candidates.some((candidate) => candidate.relativePath === 'diagnostic.ts'), false);
+        assert.ok(execution.candidateTrace.stages
+            .find((stage) => stage.stage === 'diagnostic_dense')
+            ?.candidates.some((candidate) => candidate.relativePath === 'diagnostic.ts'));
+        assert.equal(execution.candidateTrace.stages
+            .find((stage) => stage.stage === 'core_fusion')
+            ?.candidates.some((candidate) => candidate.relativePath === 'diagnostic.ts'), false);
+        assert.equal(execution.candidateTrace.removals
+            .some((removal) => removal.candidateId === diagnostic!.id), false);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context diagnostic-only retrieval failures preserve dense, lexical, and hybrid product results', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-diagnostic-failures-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'product.ts'), 'export const product = true;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+        });
+        await context.indexCodebase(codebasePath);
+        const vectorReceipt = await context.proveVectorGeneration(codebasePath);
+        assert.ok(vectorReceipt);
+        const product = [...(vectorDatabase.collections.get(vectorReceipt!.collectionName)?.values() ?? [])]
+            .find((document) => document.relativePath === 'product.ts');
+        assert.ok(product);
+
+        const assertProductPreserved = (
+            normal: Awaited<ReturnType<typeof context.semanticSearchInProvenGeneration>>,
+            execution: Awaited<ReturnType<typeof context.semanticSearchWithCandidateTraceInProvenGeneration>>,
+        ) => assert.deepEqual(
+            execution.results.map((result) => result.candidateId),
+            normal.map((result) => result.candidateId),
+        );
+
+        vectorDatabase.retrieveDense = async (_collectionName, request) => {
+            if (request.limit > 2) throw new Error('diagnostic dense unavailable');
+            return [{ document: product!, score: 1 }];
+        };
+        vectorDatabase.retrieveLexical = async () => [];
+        const denseRequest = {
+            codebasePath,
+            query: 'find product implementation',
+            topK: 2,
+            retrievalMode: 'dense' as const,
+            scorePolicy: { kind: 'topk_only' as const },
+        };
+        const normalDense = await context.semanticSearchInProvenGeneration(vectorReceipt!, denseRequest);
+        const tracedDense = await context.semanticSearchWithCandidateTraceInProvenGeneration(
+            vectorReceipt!, denseRequest, 8, { diagnosticCandidateLimit: 8 },
+        );
+        assertProductPreserved(normalDense, tracedDense);
+        assert.deepEqual(tracedDense.candidateTrace.diagnosticRetrievals, [{
+            arm: 'dense',
+            requestedLimit: 8,
+            status: 'unavailable',
+            failureReason: 'backend_request_failed',
+        }]);
+
+        vectorDatabase.retrieveDense = async () => [{ document: product!, score: 1 }];
+        vectorDatabase.retrieveLexical = async (_collectionName, request) => {
+            if (request.limit > 2) throw new Error('diagnostic lexical unavailable');
+            return [{ document: product!, score: 1 }];
+        };
+        const lexicalRequest = {
+            codebasePath,
+            query: 'find product implementation',
+            topK: 2,
+            retrievalMode: 'lexical' as const,
+            scorePolicy: { kind: 'topk_only' as const },
+        };
+        const normalLexical = await context.semanticSearchInProvenGeneration(vectorReceipt!, lexicalRequest);
+        const tracedLexical = await context.semanticSearchWithCandidateTraceInProvenGeneration(
+            vectorReceipt!, lexicalRequest, 8, { diagnosticCandidateLimit: 8 },
+        );
+        assertProductPreserved(normalLexical, tracedLexical);
+        assert.deepEqual(tracedLexical.candidateTrace.diagnosticRetrievals, [{
+            arm: 'precise_lexical',
+            requestedLimit: 8,
+            status: 'unavailable',
+            failureReason: 'backend_request_failed',
+        }]);
+
+        vectorDatabase.retrieveLexical = async (_collectionName, request) => {
+            if (request.matchMode === 'any_terms') {
+                throw new Error('diagnostic fallback unavailable');
+            }
+            return [];
+        };
+        const hybridRequest = {
+            codebasePath,
+            query: 'find product implementation',
+            topK: 2,
+            retrievalMode: 'hybrid' as const,
+            scorePolicy: { kind: 'topk_only' as const },
+        };
+        const normalHybrid = await context.semanticSearchInProvenGeneration(vectorReceipt!, hybridRequest);
+        const tracedHybrid = await context.semanticSearchWithCandidateTraceInProvenGeneration(
+            vectorReceipt!,
+            hybridRequest,
+            8,
+            {
+                captureLexicalFallback: true,
+                diagnosticCandidateLimit: 2,
+                lexicalFallbackTerms: ['product'],
+            },
+        );
+        assertProductPreserved(normalHybrid, tracedHybrid);
+        assert.deepEqual(tracedHybrid.candidateTrace.diagnosticRetrievals, [{
+            arm: 'fallback_lexical',
+            requestedLimit: 2,
+            status: 'unavailable',
+            failureReason: 'backend_request_failed',
+        }]);
+        assert.equal(tracedHybrid.candidateTrace.lexicalRequests.at(-1)?.role, 'fallback_or');
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -10744,9 +10941,9 @@ test('Context traces an explicit any-terms lexical mode and never issues a dupli
                 lexicalFallbackTerms: ['alpha', 'beta'],
             },
         );
-        assert.deepEqual(matchModes, ['any_terms']);
-        // The trace must describe the executed mode, and the diagnostic OR
-        // fallback must not fire when the primary is already any-terms.
+        assert.deepEqual(matchModes, ['any_terms', 'any_terms']);
+        // Product and deeper diagnostic retrieval execute the same explicit mode.
+        // No third OR-fallback request fires when the primary is already any-terms.
         assert.deepEqual(execution.candidateTrace.lexicalRequests, [{
             role: 'primary',
             querySha256: crypto.createHash('sha256').update('alpha beta', 'utf8').digest('hex'),

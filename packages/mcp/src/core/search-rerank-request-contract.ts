@@ -34,6 +34,7 @@ import {
 } from "./search-native-rerank.js";
 import {
     SEARCH_RERANK_MIN_PROJECTED_CANDIDATES,
+    selectRerankCandidates,
     selectRerankInputWithinUtf8Budget,
     shouldCallRerankerForProjectedCandidateCount,
 } from "./search-rerank-policy.js";
@@ -314,6 +315,25 @@ function buildPartialProjectionBehaviorFixture() {
         documents: ["abc", "éé", "tail"],
         maxInputBytes: 7,
     });
+    const admissionCandidates = Array.from({ length: 16 }, (_, index) => ({
+        id: `candidate-${index + 1}`,
+        result: {
+            relativePath: `src/candidate-${index + 1}.ts`,
+            startLine: 1,
+            endLine: 3,
+            language: "typescript",
+            ownerSymbolInstanceId: `owner-${index + 1}`,
+        },
+    }));
+    const providerCapacityAdmission = selectRerankCandidates({
+        candidates: admissionCandidates,
+        requestedLimit: 2,
+        providerMaximumDocuments: 32,
+    });
+    const legacyAdmission = selectRerankCandidates({
+        candidates: admissionCandidates,
+        requestedLimit: 2,
+    });
     return {
         providerCallByProjectedCandidateCount: {
             zero: shouldCallRerankerForProjectedCandidateCount(0),
@@ -330,6 +350,18 @@ function buildPartialProjectionBehaviorFixture() {
             selectedCandidateIds: byteSelection.candidates,
             inputBytes: byteSelection.inputBytes,
             omittedCandidateCount: byteSelection.omittedCandidateCount,
+        },
+        candidateAdmission: {
+            providerCapacity32: {
+                selectedCandidateIds: providerCapacityAdmission.selected.map(({ id }) => id),
+                budget: providerCapacityAdmission.budget,
+                reason: providerCapacityAdmission.budgetReason,
+            },
+            providerCapacityAbsent: {
+                selectedCandidateIds: legacyAdmission.selected.map(({ id }) => id),
+                budget: legacyAdmission.budget,
+                reason: legacyAdmission.budgetReason,
+            },
         },
     } as const;
 }

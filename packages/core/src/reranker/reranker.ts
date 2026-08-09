@@ -54,7 +54,12 @@ export interface Reranker {
         documents: string[],
         options?: RerankOptions,
     ): Promise<RerankResult[]>;
-    /** Provider-qualified upper bound for one request. */
+    /**
+     * Provider-qualified per-request candidate capacity. Search may routinely
+     * admit up to this positive safe-integer number of input documents for
+     * semantic evaluation. Undefined means that admission capacity is not
+     * advertised. This is an input-admission capacity, not an output top-K.
+     */
     getMaxDocuments?(): number | undefined;
     /** Identity-bearing document projection required by this provider profile. */
     getDocumentProjectionVersion?(): string | undefined;

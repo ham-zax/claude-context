@@ -48,6 +48,8 @@ export type SemanticSearchCandidateTraceStageName =
     | 'raw_dense'
     | 'raw_lexical'
     | 'raw_lexical_fallback'
+    | 'diagnostic_dense'
+    | 'diagnostic_lexical'
     | 'core_fusion'
     | 'core_result';
 
@@ -77,6 +79,18 @@ export interface SemanticSearchCandidateTraceRemoval {
     reason: 'core_fusion_limit';
 }
 
+export type SemanticSearchDiagnosticRetrievalArm =
+    | 'dense'
+    | 'precise_lexical'
+    | 'fallback_lexical';
+
+export interface SemanticSearchDiagnosticRetrieval {
+    arm: SemanticSearchDiagnosticRetrievalArm;
+    requestedLimit: number;
+    status: 'available' | 'unavailable';
+    failureReason?: 'backend_request_failed';
+}
+
 export interface SemanticSearchCandidateTrace {
     schemaVersion: 'semantic_search_candidate_trace_v1';
     maxEntriesPerStage: number;
@@ -89,6 +103,8 @@ export interface SemanticSearchCandidateTrace {
         matchMode: 'all_terms' | 'any_terms' | 'provider_sparse' | 'unspecified';
         terms?: string[];
     }>;
+    /** Bounded status for additional trace-only backend requests; absence means not requested. */
+    diagnosticRetrievals: SemanticSearchDiagnosticRetrieval[];
     stages: SemanticSearchCandidateTraceStage[];
     removals: SemanticSearchCandidateTraceRemoval[];
     omittedRemovals: number;
