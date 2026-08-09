@@ -3,7 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
-import { LATEON_RUNTIME_PROFILE_IDS } from "./lateon-reranker-protocol.js";
+import {
+    LATEON_ACTIVATION_POLICY_IDS,
+    LATEON_RUNTIME_PROFILE_IDS,
+} from "./lateon-reranker-protocol.js";
 
 export const SHARED_RUNTIME_PROTOCOL_VERSION = 2;
 export const SHARED_RUNTIME_HANDSHAKE_MAX_BYTES = 16 * 1024;
@@ -179,9 +182,12 @@ export function buildSharedRuntimeIdentity(
             : "",
         lateOnProfile: env.SATORI_LATEON_PROFILE
             ?? (env.SATORI_RERANKER_PROVIDER === "lateon"
-                ? LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+                ? LATEON_RUNTIME_PROFILE_IDS.contextV4D32
                 : ""),
-        lateOnActivationPolicy: env.SATORI_LATEON_ACTIVATION_POLICY ?? "",
+        lateOnActivationPolicy: env.SATORI_LATEON_ACTIVATION_POLICY
+            ?? (env.SATORI_RERANKER_PROVIDER === "lateon" && env.SATORI_LATEON_PROFILE === undefined
+                ? LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4
+                : ""),
         lateOnRequestDeadlineMs: env.SATORI_LATEON_REQUEST_DEADLINE_MS ?? "",
         lateOnMaximumQueueWaitMs: env.SATORI_LATEON_MAX_QUEUE_WAIT_MS ?? "",
         lateOnRerankerStageDeadlineMs:

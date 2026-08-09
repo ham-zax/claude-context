@@ -739,7 +739,7 @@ export function createMcpConfig(): ContextMcpConfig {
     }
     const lateOnProfileId = rerankerProvider === 'lateon'
         ? (lateOnProfileRaw as LateOnRuntimeProfileId | undefined)
-            ?? LATEON_RUNTIME_PROFILE_IDS.contextV3D32
+            ?? LATEON_RUNTIME_PROFILE_IDS.contextV4D32
         : undefined;
     const lateOnActivationPolicyRaw = envManager.get('SATORI_LATEON_ACTIVATION_POLICY');
     const knownLateOnActivationPolicies = Object.values(LATEON_ACTIVATION_POLICY_IDS);
@@ -806,7 +806,11 @@ export function createMcpConfig(): ContextMcpConfig {
                 : ''),
         );
     }
-    const lateOnActivationPolicy = lateOnActivationPolicyRaw as LateOnActivationPolicyId | undefined;
+    const lateOnActivationPolicy = (
+        rerankerProvider === 'lateon' && lateOnProfileRaw === undefined
+            ? lateOnActivationPolicyRaw ?? LATEON_ACTIVATION_POLICY_IDS.ownerDefaultContextV4
+            : lateOnActivationPolicyRaw
+    ) as LateOnActivationPolicyId | undefined;
     const lateOnMaximumQueueWaitMs = rerankerProvider === 'lateon'
         ? parseOptionalPositiveInteger('SATORI_LATEON_MAX_QUEUE_WAIT_MS', 300_000)
         : undefined;

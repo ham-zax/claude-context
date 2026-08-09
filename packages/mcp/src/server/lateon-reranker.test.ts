@@ -81,15 +81,16 @@ async function assertOperationalReason(
     ));
 }
 
-test("LateOn runtime profiles default to the V3 D32 context profile while retaining explicit legacy and D16/V2 contracts", () => {
+test("LateOn runtime profiles default to the V4 D32 context profile while retaining explicit legacy and D16/V2 contracts", () => {
     const defaultProfile = loadLateOnRuntimeProfile();
     const legacy = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.legacyD16);
     const d16 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.projectionV2D16);
     const d32 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32);
     const contextV3 = loadLateOnRuntimeProfile(LATEON_RUNTIME_PROFILE_IDS.contextV3D32);
 
-    assert.equal(defaultProfile.schemaVersion, "satori_lateon_runtime_profile_v3");
-    assert.equal(defaultProfile.identity.projectionVersion, "search_rerank_document_v3");
+    assert.equal(defaultProfile.schemaVersion, "satori_lateon_runtime_profile_v4");
+    assert.equal(defaultProfile.identity.projectionVersion, "search_rerank_document_v4");
+    assert.equal(defaultProfile.identity.queryProjectionVersion, "search_rerank_query_v2");
     assert.equal(defaultProfile.inference.candidateDepth, 32);
     assert.equal(contextV3.schemaVersion, "satori_lateon_runtime_profile_v3");
     if (contextV3.schemaVersion !== "satori_lateon_runtime_profile_v3") {
@@ -177,7 +178,7 @@ test("LateOn context-v4 profile advertises query-v2 and document-v4 projections 
     assert.deepEqual(v4.inference, v3.inference);
 });
 
-test("LateOn reranker defaults to the V3 profile and reports qualified projection identities", async (t) => {
+test("LateOn reranker defaults to the V4 profile and reports qualified projection identities", async (t) => {
     const workerPath = createFakeWorker(t);
     const defaulted = new LateOnReranker({ modelDirectory: "/unused", workerPath });
     const explicitV2D32 = new LateOnReranker({
@@ -202,10 +203,10 @@ test("LateOn reranker defaults to the V3 profile and reports qualified projectio
         contextV4.close(),
     ]).then(() => undefined));
 
-    assert.equal(defaulted.getProfileId(), LATEON_RUNTIME_PROFILE_IDS.contextV3D32);
+    assert.equal(defaulted.getProfileId(), LATEON_RUNTIME_PROFILE_IDS.contextV4D32);
     assert.equal(defaulted.getMaxDocuments(), 32);
-    assert.equal(defaulted.getDocumentProjectionVersion(), "search_rerank_document_v3");
-    assert.equal(defaulted.getQueryProjectionVersion(), "search_rerank_query_v1");
+    assert.equal(defaulted.getDocumentProjectionVersion(), "search_rerank_document_v4");
+    assert.equal(defaulted.getQueryProjectionVersion(), "search_rerank_query_v2");
     assert.equal(explicitV2D32.getDocumentProjectionVersion(), "search_rerank_document_v2");
     assert.equal(explicitV2D32.getQueryProjectionVersion(), "semantic_query_raw_v1");
     assert.equal(legacy.getDocumentProjectionVersion(), "search_rerank_document_v1");
@@ -218,7 +219,7 @@ test("LateOn reranker defaults to the V3 profile and reports qualified projectio
 
 test("LateOn advertised query identities route to the promised query projection", async (t) => {
     const workerPath = createFakeWorker(t);
-    const contextV3 = new LateOnReranker({ modelDirectory: "/unused", workerPath });
+    const contextV4 = new LateOnReranker({ modelDirectory: "/unused", workerPath });
     const explicitV2D32 = new LateOnReranker({
         modelDirectory: "/unused",
         profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
@@ -230,13 +231,14 @@ test("LateOn advertised query identities route to the promised query projection"
         workerPath,
     });
     t.after(async () => Promise.all([
-        contextV3.close(),
+        contextV4.close(),
         explicitV2D32.close(),
         legacy.close(),
     ]).then(() => undefined));
 
     const rawQuestion = "how does Shariah compliance checking block trades";
     const focusedV1 = "Question:\nhow does Shariah compliance checking block trades\n\nAnswer focus: implementation";
+    const focusedV2 = "Question:\nhow does Shariah compliance checking block trades\n\nRequested answer type:\nproduction implementation, control flow, and integration path";
 
     for (const historical of [explicitV2D32, legacy]) {
         const resolved = resolveSearchRerankQuery({
@@ -248,13 +250,14 @@ test("LateOn advertised query identities route to the promised query projection"
         assert.equal(resolved.queryProjectionIdentity, "semantic_query_raw_v1");
     }
 
-    const v3 = resolveSearchRerankQuery({
+    const v4 = resolveSearchRerankQuery({
         semanticQuery: rawQuestion,
         focusedQueryV1: focusedV1,
-        projectionIdentity: contextV3.getQueryProjectionVersion(),
+        focusedQueryV2: focusedV2,
+        projectionIdentity: contextV4.getQueryProjectionVersion(),
     });
-    assert.equal(v3.query, focusedV1);
-    assert.equal(v3.queryProjectionIdentity, "search_rerank_query_v1");
+    assert.equal(v4.query, focusedV2);
+    assert.equal(v4.queryProjectionIdentity, "search_rerank_query_v2");
 });
 
 test("LateOn identity binds named profile selection and effective operational bounds", async (t) => {

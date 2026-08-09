@@ -232,7 +232,8 @@ test('offline config selects a shared LateOn model with operator overrides', () 
         assert.equal(parsed.lateOnModelPath, '/opt/satori/models/lateon-code-edge');
         assert.equal(parsed.lateOnRequestDeadlineMs, 3500);
         assert.equal(parsed.lateOnIntraOpThreads, 2);
-        assert.equal(parsed.lateOnActivationPolicy, undefined);
+        assert.equal(parsed.lateOnProfileId, 'lateon_offline_quality_projection_v4_d32_v1');
+        assert.equal(parsed.lateOnActivationPolicy, 'lateon_context_v4_d32_owner_default_v1');
     } finally {
         for (const key of keys) {
             const value = previous[key];
@@ -294,7 +295,7 @@ test('LateOn config selects explicit D16 or D32 profiles with bounded operationa
         delete process.env.SATORI_LATEON_PROFILE;
         assert.equal(
             createMcpConfig().lateOnProfileId,
-            'lateon_offline_quality_projection_v3_d32_v1',
+            'lateon_offline_quality_projection_v4_d32_v1',
         );
 
         process.env.SATORI_LATEON_PROFILE = 'lateon_offline_quality_projection_v2_d32_v2';

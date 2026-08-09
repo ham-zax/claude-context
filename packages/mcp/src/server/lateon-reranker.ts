@@ -154,7 +154,7 @@ function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
 }
 
 export function loadLateOnRuntimeProfile(
-    profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.contextV3D32,
+    profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
 ): LateOnRuntimeProfile {
     const profilePath = PROFILE_PATHS[profileIdOrPath as LateOnRuntimeProfileId]
         ?? path.resolve(profileIdOrPath);
@@ -316,7 +316,7 @@ export class LateOnReranker implements Reranker {
 
     constructor(config: LateOnRerankerConfig) {
         this.profile = loadLateOnRuntimeProfile(
-            config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.contextV3D32,
+            config.profileId ?? LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
         );
         this.rawProfileDigest = profileDigest(this.profile);
         this.modelDirectory = path.resolve(config.modelDirectory);
