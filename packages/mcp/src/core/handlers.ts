@@ -421,7 +421,13 @@ function resolveSearchRerankRequestIdOrNone(
     if (!reranker) {
         throw new Error("Applied search reranking requires a complete rerank request identity.");
     }
-    return resolveSearchRerankRequestIdentity(reranker);
+    const requestIdentity = resolveSearchRerankRequestIdentity(reranker);
+    const documentProjectionIdentity = reranker.getDocumentProjectionVersion?.()?.trim()
+        || SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
+    return {
+        ...requestIdentity,
+        documentProjectionIdentity,
+    };
 }
 
 function buildFrozenSearchRankedSetBindingInput(input: {

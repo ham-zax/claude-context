@@ -6843,11 +6843,12 @@ test('handleSearchCode attaches must-constraint budget metadata when the dedicat
         });
         assert.deepEqual(payload.hints?.mustCoverage, {
             semantics: 'case_sensitive_raw_substring_all',
-            status: 'complete_within_examined_candidates',
+            exhaustive: false,
+            status: 'lane_completed_within_backend_results',
             laneAttempted: true,
             candidatesExamined: 40,
             candidateBudget: 80,
-            moreMayExist: false,
+            moreMayExist: true,
         });
     });
 });
@@ -13600,11 +13601,12 @@ test('raw search results carry the must-constraint hint contract', async () => {
         });
         assert.deepEqual(payload.hints?.mustCoverage, {
             semantics: 'case_sensitive_raw_substring_all',
-            status: 'complete_within_examined_candidates',
+            exhaustive: false,
+            status: 'lane_completed_within_backend_results',
             laneAttempted: true,
             candidatesExamined: 40,
             candidateBudget: 80,
-            moreMayExist: false,
+            moreMayExist: true,
         });
     });
 });
@@ -13640,6 +13642,7 @@ test('handleSearchCode publishes skipped-lane coverage when the primary results 
         assert.equal(payload.results.length, 2);
         assert.deepEqual(payload.hints?.mustCoverage, {
             semantics: 'case_sensitive_raw_substring_all',
+            exhaustive: false,
             status: 'lane_skipped_primary_limit_filled',
             laneAttempted: false,
             candidatesExamined: 0,
