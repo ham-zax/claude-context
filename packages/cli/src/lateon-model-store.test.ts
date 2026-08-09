@@ -16,7 +16,7 @@ import {
 } from "./lateon-model-store.js";
 
 const REVISION = "07ef20f406c86badca122464808f4cac2f6e4b25";
-const FROZEN_PROFILE_SHA256 = "befe1751335d5e1373f8166fdc21725baa4f07ea01fb19668436b6340b8c1a2f";
+const FROZEN_PROFILE_SHA256 = "06e0ee0fea673142323e9cce62a31e8eb4084ac962b6b04e2d311be3557bfdd8";
 const SHIPPED_MCP_PACKAGE_ROOT = fileURLToPath(new URL("../../mcp/", import.meta.url));
 
 function digest(content: string | Buffer): string {

@@ -227,6 +227,13 @@ export interface SearchGroupResult extends SearchGroupedResultV2 {
     __authoritativeRank?: number;
 }
 
+/**
+ * Survival v4 is an additive bounded-observation schema. Existing stage and
+ * removal meanings remain stable; diagnostic metadata/stages may be added
+ * without a version bump. Consumers of serialized diagnostics must ignore
+ * unknown additive fields and tolerate unknown future diagnostic-only stage
+ * values. A breaking or reinterpretive change requires a new schemaVersion.
+ */
 export type SearchCandidateSurvivalStageName =
     | "raw_dense"
     | "raw_lexical"
@@ -336,7 +343,7 @@ export interface SearchCandidateSurvivalDebug {
         matchMode: "all_terms" | "any_terms" | "provider_sparse" | "unspecified";
         terms?: string[];
     }>;
-    diagnosticRetrievals: Array<{
+    diagnosticRetrievals?: Array<{
         passId: string;
         arm: "dense" | "precise_lexical" | "fallback_lexical";
         requestedLimit: number;

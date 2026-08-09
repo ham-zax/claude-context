@@ -315,7 +315,7 @@ function buildPartialProjectionBehaviorFixture() {
         documents: ["abc", "éé", "tail"],
         maxInputBytes: 7,
     });
-    const admissionCandidates = Array.from({ length: 16 }, (_, index) => ({
+    const buildAdmissionCandidates = (count: number) => Array.from({ length: count }, (_, index) => ({
         id: `candidate-${index + 1}`,
         result: {
             relativePath: `src/candidate-${index + 1}.ts`,
@@ -325,15 +325,18 @@ function buildPartialProjectionBehaviorFixture() {
             ownerSymbolInstanceId: `owner-${index + 1}`,
         },
     }));
-    const providerCapacityAdmission = selectRerankCandidates({
-        candidates: admissionCandidates,
-        requestedLimit: 2,
-        providerMaximumDocuments: 32,
-    });
-    const legacyAdmission = selectRerankCandidates({
-        candidates: admissionCandidates,
-        requestedLimit: 2,
-    });
+    const admissionSelection = (count: number, providerMaximumDocuments?: number) => (
+        selectRerankCandidates({
+            candidates: buildAdmissionCandidates(count),
+            requestedLimit: 2,
+            ...(providerMaximumDocuments === undefined ? {} : { providerMaximumDocuments }),
+        })
+    );
+    const providerCapacityAdmission = admissionSelection(16, 32);
+    const legacyAdmission = admissionSelection(16);
+    const providerBoundAdmission = admissionSelection(40, 32);
+    const globalBoundAdmission = admissionSelection(60, 80);
+    const invalidCapacityAdmission = admissionSelection(30, 0);
     return {
         providerCallByProjectedCandidateCount: {
             zero: shouldCallRerankerForProjectedCandidateCount(0),
@@ -361,6 +364,21 @@ function buildPartialProjectionBehaviorFixture() {
                 selectedCandidateIds: legacyAdmission.selected.map(({ id }) => id),
                 budget: legacyAdmission.budget,
                 reason: legacyAdmission.budgetReason,
+            },
+            providerCapacityBound: {
+                selectedCandidateIds: providerBoundAdmission.selected.map(({ id }) => id),
+                budget: providerBoundAdmission.budget,
+                reason: providerBoundAdmission.budgetReason,
+            },
+            globalCapacityBound: {
+                selectedCandidateIds: globalBoundAdmission.selected.map(({ id }) => id),
+                budget: globalBoundAdmission.budget,
+                reason: globalBoundAdmission.budgetReason,
+            },
+            invalidProviderCapacity: {
+                selectedCandidateIds: invalidCapacityAdmission.selected.map(({ id }) => id),
+                budget: invalidCapacityAdmission.budget,
+                reason: invalidCapacityAdmission.budgetReason,
             },
         },
     } as const;

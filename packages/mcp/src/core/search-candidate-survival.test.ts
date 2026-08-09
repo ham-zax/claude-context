@@ -156,6 +156,30 @@ test("Core trace preservation keeps authoritative unique counts and pass-scoped 
     assert.equal(trace.omittedRemovals, 1);
 });
 
+test("candidate-survival v4 accepts additive Core v1 traces without diagnostic metadata", () => {
+    const trace = createSearchCandidateSurvivalTrace();
+    appendCoreCandidateTrace(trace, "primary", {
+        schemaVersion: "semantic_search_candidate_trace_v1",
+        maxEntriesPerStage: 2,
+        productCandidateLimit: 2,
+        queryEmbeddingSha256: null,
+        lexicalRequests: [],
+        stages: [{
+            stage: "core_result",
+            totalOccurrences: 0,
+            uniqueCandidates: 0,
+            omittedOccurrences: 0,
+            candidates: [],
+        }],
+        removals: [],
+        omittedRemovals: 0,
+    });
+
+    assert.deepEqual(trace.diagnosticRetrievals, []);
+    assert.equal(trace.stages[0]?.stage, "core_result");
+    assert.equal(trace.schemaVersion, "search_candidate_survival_v4");
+});
+
 test("grouped and disclosed stages retain underlying candidate identities", () => {
     const trace = createSearchCandidateSurvivalTrace();
     const group = {

@@ -91,6 +91,14 @@ export interface SemanticSearchDiagnosticRetrieval {
     failureReason?: 'backend_request_failed';
 }
 
+/**
+ * Candidate-trace v1 is an additive diagnostic envelope. Existing product
+ * stages and removal meanings remain stable; bounded diagnostic fields/stages
+ * may be added without a version bump. Consumers of serialized diagnostics
+ * must ignore unknown additive fields and tolerate unknown future
+ * diagnostic-only stage values. A breaking or reinterpretive change requires
+ * a new schemaVersion.
+ */
 export interface SemanticSearchCandidateTrace {
     schemaVersion: 'semantic_search_candidate_trace_v1';
     maxEntriesPerStage: number;
@@ -104,7 +112,7 @@ export interface SemanticSearchCandidateTrace {
         terms?: string[];
     }>;
     /** Bounded status for additional trace-only backend requests; absence means not requested. */
-    diagnosticRetrievals: SemanticSearchDiagnosticRetrieval[];
+    diagnosticRetrievals?: SemanticSearchDiagnosticRetrieval[];
     stages: SemanticSearchCandidateTraceStage[];
     removals: SemanticSearchCandidateTraceRemoval[];
     omittedRemovals: number;

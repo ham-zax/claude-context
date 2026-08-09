@@ -155,7 +155,8 @@ export function appendCoreCandidateTrace(
             ...lexicalRequest,
         });
     }
-    for (const diagnosticRetrieval of coreTrace.diagnosticRetrievals) {
+    trace.diagnosticRetrievals ??= [];
+    for (const diagnosticRetrieval of coreTrace.diagnosticRetrievals ?? []) {
         trace.diagnosticRetrievals.push({
             passId,
             ...diagnosticRetrieval,

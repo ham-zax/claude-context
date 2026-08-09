@@ -109,6 +109,21 @@ test("request contract fixtures bind focus, query, role, and document projection
         inputBytes: 7,
         omittedCandidateCount: 1,
     });
+    assert.deepEqual(fixtures.partialProjectionBehavior.candidateAdmission.providerCapacityBound, {
+        selectedCandidateIds: Array.from({ length: 32 }, (_, index) => `candidate-${index + 1}`),
+        budget: 32,
+        reason: "provider_limit",
+    });
+    assert.deepEqual(fixtures.partialProjectionBehavior.candidateAdmission.globalCapacityBound, {
+        selectedCandidateIds: Array.from({ length: 50 }, (_, index) => `candidate-${index + 1}`),
+        budget: 50,
+        reason: "global_limit",
+    });
+    assert.deepEqual(fixtures.partialProjectionBehavior.candidateAdmission.invalidProviderCapacity, {
+        selectedCandidateIds: Array.from({ length: 12 }, (_, index) => `candidate-${index + 1}`),
+        budget: 12,
+        reason: "family_ambiguity",
+    });
 });
 
 test("any fixture behavior change moves the request contract digest", () => {
