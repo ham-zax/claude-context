@@ -30,22 +30,17 @@ test("resolveRequestedSearchSubdirectory builds a canonical slash prefix without
     assert.deepEqual(scope, { relativePrefix: "packages/mcp/src" });
 });
 
-test("resolveRequestedSearchSubdirectory returns null outside the indexed root", () => {
+test("resolveRequestedSearchSubdirectory rejects requests outside the indexed root", () => {
     const root = path.join(path.sep, "repo");
-    assert.equal(
-        resolveRequestedSearchSubdirectory({
-            indexedRoot: root,
-            requestedPath: path.join(path.sep, "elsewhere"),
-        }),
-        null,
-    );
-    assert.equal(
-        resolveRequestedSearchSubdirectory({
-            indexedRoot: root,
-            requestedPath: path.join(root, "..", "sibling"),
-        }),
-        null,
-    );
+    for (const requestedPath of [
+        path.join(path.sep, "elsewhere"),
+        path.join(root, "..", "sibling"),
+    ]) {
+        assert.throws(
+            () => resolveRequestedSearchSubdirectory({ indexedRoot: root, requestedPath }),
+            /must remain within indexed root/,
+        );
+    }
 });
 
 test("candidateWithinRequestedSubdirectory admits every candidate for root requests", () => {
@@ -78,5 +73,5 @@ test("candidateWithinRequestedSubdirectory rejects prefix collisions and escapes
     assert.equal(candidateWithinRequestedSubdirectory("src/alpha/nested/deep.ts", scope), true);
     assert.equal(candidateWithinRequestedSubdirectory("other/alpha/d.ts", scope), false);
     assert.equal(candidateWithinRequestedSubdirectory("src\\alpha\\win.ts", scope), true);
-    assert.equal(candidateWithinRequestedSubdirectory("/src/alpha/lead.ts", scope), true);
+    assert.equal(candidateWithinRequestedSubdirectory("/src/alpha/lead.ts", scope), false);
 });

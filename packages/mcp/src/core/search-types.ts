@@ -715,8 +715,10 @@ export type SearchMustConstraintHint =
 
 export type SearchMustCoverage = Readonly<{
     semantics: "case_sensitive_raw_substring_all";
+    /** Bounded retrieval never proves repository-wide `must:` exhaustiveness. */
+    exhaustive: false;
     status:
-        | "complete_within_examined_candidates"
+        | "lane_completed_within_backend_results"
         | "partial_candidate_budget"
         | "lane_skipped_primary_limit_filled"
         | "lane_unavailable"
@@ -1087,12 +1089,13 @@ export interface CallGraphTraversalResponseEnvelope {
         /** Count of edges returned in this traversal response, not total edges stored for the codebase sidecar. */
         edgeCount: number;
     };
-    /** The exact serving navigation generation this traversal was resolved against (generation id, navigation seal, relationship manifest, build time). */
+    /** The exact serving navigation generation and distinct relationship/publication timestamps. */
     navigationAuthority?: {
         generationId: string;
         navigationSealSha256: string;
         relationshipManifestSha256: string;
-        builtAt: string;
+        relationshipBuiltAt: string;
+        publicationCompletedAt: string;
     };
     freshnessDecision?: FreshnessDecision | { mode: "skipped_requires_reindex" | "skipped_indexing" };
     message?: string;

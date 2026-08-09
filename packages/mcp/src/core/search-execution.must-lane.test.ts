@@ -269,16 +269,17 @@ test('must: coverage reports complete recall when the lane examined fewer candid
     assert.equal(outcome.kind, 'ok');
     assert.deepEqual(outcome.mustCoverage, {
         semantics: 'case_sensitive_raw_substring_all',
-        status: 'complete_within_examined_candidates',
+        exhaustive: false,
+        status: 'lane_completed_within_backend_results',
         laneAttempted: true,
         candidatesExamined: 1,
         candidateBudget: 80,
-        moreMayExist: false,
+        moreMayExist: true,
     });
     assert.equal(
         outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
-        false,
-        'a fully examined lane budget must not claim results may be incomplete',
+        true,
+        'a backend-complete lane remains bounded and must not claim exhaustive repository recall',
     );
 });
 
@@ -298,6 +299,7 @@ test('must: coverage reports partial recall when the lane budget is exhausted', 
     assert.equal(outcome.kind, 'ok');
     assert.deepEqual(outcome.mustCoverage, {
         semantics: 'case_sensitive_raw_substring_all',
+        exhaustive: false,
         status: 'partial_candidate_budget',
         laneAttempted: true,
         candidatesExamined: 80,
@@ -334,6 +336,7 @@ test('must: coverage reports a skipped lane when the primary results already fil
     );
     assert.deepEqual(outcome.mustCoverage, {
         semantics: 'case_sensitive_raw_substring_all',
+        exhaustive: false,
         status: 'lane_skipped_primary_limit_filled',
         laneAttempted: false,
         candidatesExamined: 0,
@@ -358,6 +361,7 @@ test('must: coverage reports an unavailable lane without claiming the budget was
     assert.equal(outcome.kind, 'ok');
     assert.deepEqual(outcome.mustCoverage, {
         semantics: 'case_sensitive_raw_substring_all',
+        exhaustive: false,
         status: 'lane_unavailable',
         laneAttempted: false,
         candidatesExamined: 0,
@@ -383,6 +387,7 @@ test('must: coverage reports a failed lane as incomplete', async () => {
     assert.equal(outcome.kind, 'ok');
     assert.deepEqual(outcome.mustCoverage, {
         semantics: 'case_sensitive_raw_substring_all',
+        exhaustive: false,
         status: 'lane_failed',
         laneAttempted: true,
         candidatesExamined: 0,

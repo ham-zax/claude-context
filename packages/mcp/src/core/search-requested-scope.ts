@@ -14,8 +14,15 @@ export function resolveRequestedSearchSubdirectory(input: {
         return null;
     }
     const relative = path.relative(indexedRoot, requested);
-    if (!relative || relative === "." || relative.startsWith("..") || path.isAbsolute(relative)) {
+    if (!relative || relative === ".") {
         return null;
+    }
+    if (
+        relative === ".."
+        || relative.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relative)
+    ) {
+        throw new RangeError("Requested search path must remain within indexed root.");
     }
     const relativePrefix = relative.split(path.sep).join("/").replace(/\/+$/, "");
     if (!relativePrefix) {
@@ -31,7 +38,11 @@ export function candidateWithinRequestedSubdirectory(
     if (!requested) {
         return true;
     }
-    const normalized = String(relativePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    const raw = String(relativePath || "");
+    if (path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw)) {
+        return false;
+    }
+    const normalized = raw.replace(/\\/g, "/");
     return normalized === requested.relativePrefix
         || normalized.startsWith(`${requested.relativePrefix}/`);
 }

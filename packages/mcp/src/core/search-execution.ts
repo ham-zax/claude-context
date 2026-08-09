@@ -389,6 +389,7 @@ function buildSearchMustCoverage(
     }
     const base = {
         semantics: "case_sensitive_raw_substring_all" as const,
+        exhaustive: false as const,
         candidateBudget,
     };
     if (!outcome) {
@@ -428,10 +429,10 @@ function buildSearchMustCoverage(
         }
         : {
             ...base,
-            status: "complete_within_examined_candidates",
+            status: "lane_completed_within_backend_results",
             laneAttempted: true,
             candidatesExamined: outcome.candidatesExamined,
-            moreMayExist: false,
+            moreMayExist: true,
         };
 }
 
