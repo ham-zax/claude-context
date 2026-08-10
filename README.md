@@ -192,6 +192,15 @@ satori install --client all --runtime voyage
 satori doctor
 ```
 
+`satori doctor` prints an applied-runtime table for Codex, Claude Code, and
+OpenCode. Each row shows whether that client is configured, its effective
+profile, embedding provider/model/dimension, reranker, vector store, and whether
+the values come from the managed launcher or client config. Credentials and
+local artifact paths are never included in the table. This also works when the
+managed launcher temporarily points at a local repository build; doctor keeps
+the outside-managed-store warning while reporting the profile the launcher
+actually applies.
+
 Existing Milvus deployments can select `--vector-store milvus`. Existing Ollama installations can select or retain an explicit model:
 
 ```bash

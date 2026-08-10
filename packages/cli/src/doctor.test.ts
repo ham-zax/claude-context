@@ -139,6 +139,54 @@ test("runDoctor validates each configured client runtime instead of a shell-defa
         result.checks.find((check) => check.name === "client_runtime_opencode")?.message || "",
         /OpenCode: connected · VoyageAI/,
     );
+    assert.deepEqual(
+        result.runtimeConfigurations?.map((configuration) => ({
+            client: configuration.client,
+            status: configuration.status,
+            source: configuration.source,
+            profile: configuration.profile,
+            provider: configuration.embeddingProvider,
+            model: configuration.embeddingModel,
+            dimension: configuration.embeddingDimension,
+            reranker: configuration.rerankerProvider,
+            store: configuration.vectorStore,
+        })),
+        [
+            {
+                client: "codex",
+                status: "needs_repair",
+                source: "client_configuration",
+                profile: "offline",
+                provider: "Potion",
+                model: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
+                dimension: "256",
+                reranker: "none",
+                store: "LanceDB",
+            },
+            {
+                client: "claude",
+                status: "not_configured",
+                source: null,
+                profile: null,
+                provider: null,
+                model: null,
+                dimension: null,
+                reranker: null,
+                store: null,
+            },
+            {
+                client: "opencode",
+                status: "needs_repair",
+                source: "client_configuration",
+                profile: "connected",
+                provider: "VoyageAI",
+                model: "voyage-code-3",
+                dimension: "1024",
+                reranker: "none",
+                store: "Milvus",
+            },
+        ],
+    );
     assert.equal(result.checks.find((check) => check.name === "embedding_provider_env")?.status, "ok");
     assert.equal(result.nextSteps.some((step) => step.includes("VOYAGEAI_API_KEY")), false);
     assert.equal(result.nextSteps.some((step) => step.includes("--client codex --runtime offline")), true);
@@ -1050,7 +1098,7 @@ test("doctor rejects a managed-store symlink that escapes the runtime root", asy
     }
 });
 
-test("doctor does not apply managed environment from a non-active launcher", async () => {
+test("doctor reports the effective environment from a repository-backed managed launcher", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-env-trust-"));
     const outsideRoot = path.join(tempDir, "custom", "node_modules", "@zokizuan", "satori-mcp");
     const target = path.join(outsideRoot, "dist", "index.js");
@@ -1074,11 +1122,29 @@ test("doctor does not apply managed environment from a non-active launcher", asy
         const result = await runDoctor(baseDoctorOptions({
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [{
+                client: "opencode",
+                configPath: "/tmp/opencode.json",
+                status: "ok",
+                message: "opencode config points to the managed launcher",
+                usesManagedLauncher: true,
+                runtimeEnvironment: {},
+            }],
         }));
         assert.equal(result.managedRuntime?.status, "outside_store");
         const storeCheck = result.checks.find((entry) => entry.name === "vector_store_provider");
-        assert.match(storeCheck?.message || "", /LanceDB/);
-        assert.doesNotMatch(storeCheck?.message || "", /Milvus/);
+        assert.match(storeCheck?.message || "", /Milvus/);
+        assert.equal(
+            result.runtimeConfigurations?.find((configuration) => configuration.client === "opencode")?.vectorStore,
+            "Milvus",
+        );
+        assert.equal(
+            result.runtimeConfigurations?.find((configuration) => configuration.client === "opencode")?.source,
+            "managed_launcher",
+        );
+        const launcherCheck = result.checks.find((entry) => entry.name === "managed_launcher");
+        assert.equal(launcherCheck?.status, "warning");
+        assert.match(launcherCheck?.message || "", /outside the managed runtime store/);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }

@@ -51,3 +51,52 @@ test("Doctor falls back to the bundle when the launcher is not active", () => {
     assert.match(text, /Doctor bundle: CLI 1\.9\.2 · MCP 6\.8\.1 · Core 3\.6\.0/);
     assert.doesNotMatch(text, /Doctor runtime:/);
 });
+
+test("Doctor renders effective configuration for every supported client as a table", () => {
+    const result = {
+        ...resultWithActiveRuntime(),
+        runtimeConfigurations: [
+            {
+                client: "codex" as const,
+                status: "configured" as const,
+                source: "managed_launcher" as const,
+                profile: "offline",
+                embeddingProvider: "Potion",
+                embeddingModel: "potion-code",
+                embeddingDimension: "256",
+                rerankerProvider: "lateon",
+                vectorStore: "LanceDB",
+            },
+            {
+                client: "claude" as const,
+                status: "not_configured" as const,
+                source: null,
+                profile: null,
+                embeddingProvider: null,
+                embeddingModel: null,
+                embeddingDimension: null,
+                rerankerProvider: null,
+                vectorStore: null,
+            },
+            {
+                client: "opencode" as const,
+                status: "needs_repair" as const,
+                source: "client_configuration" as const,
+                profile: "connected",
+                embeddingProvider: "VoyageAI",
+                embeddingModel: "voyage-code-3",
+                embeddingDimension: "1024",
+                rerankerProvider: "none",
+                vectorStore: "Milvus",
+            },
+        ],
+    };
+
+    const text = formatDoctorText(result, { verbose: false });
+    assert.match(text, /Applied runtime configuration:/);
+    assert.match(text, /Client\s+\| Status\s+\| Profile\s+\| Embedding\s+\| Dim\s+\| Reranker\s+\| Storage\s+\| Source/);
+    assert.match(text, /Codex\s+\| Configured\s+\| offline\s+\| Potion \/ potion-code\s+\| 256\s+\| LateOn\s+\| LanceDB\s+\| Managed launcher/);
+    assert.match(text, /Claude Code\s+\| Not configured\s+\| —/);
+    assert.match(text, /OpenCode\s+\| Needs repair\s+\| connected\s+\| VoyageAI \/ voyage-code-3\s+\| 1024\s+\| none\s+\| Milvus\s+\| Client config/);
+    assert.doesNotMatch(text, /Selected runtime:|Configured runtimes:/);
+});

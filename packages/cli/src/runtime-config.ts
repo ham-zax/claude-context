@@ -16,6 +16,15 @@ export interface RuntimeConfigCheck {
     nextStep?: string;
 }
 
+export interface RuntimeConfigSelection {
+    executionProfile: string;
+    embeddingProvider: string;
+    embeddingModel: string;
+    embeddingDimension: string;
+    rerankerProvider: string;
+    vectorStore: string;
+}
+
 const SUPPORTED_EMBEDDING_PROVIDERS = new Set(["OpenAI", "VoyageAI", "Gemini", "Ollama", "Potion"]);
 const SUPPORTED_VECTOR_STORES = new Set(["Milvus", "LanceDB"]);
 const SUPPORTED_OUTPUT_DIMENSIONS = new Set([256, 512, 1024, 2048]);
@@ -61,6 +70,20 @@ function selectedModel(env: NodeJS.ProcessEnv, provider: string): string {
     return env.EMBEDDING_MODEL?.trim() || defaultModelForProvider(provider);
 }
 
+export function resolveRuntimeConfigSelection(env: NodeJS.ProcessEnv): RuntimeConfigSelection {
+    const embeddingProvider = selectedProvider(env);
+    return {
+        executionProfile: selectedExecutionProfile(env),
+        embeddingProvider,
+        embeddingModel: selectedModel(env, embeddingProvider),
+        embeddingDimension: env.EMBEDDING_OUTPUT_DIMENSION?.trim()
+            || (embeddingProvider === "VoyageAI" ? "1024" : "provider default"),
+        rerankerProvider: env.SATORI_RERANKER_PROVIDER?.trim()
+            || (env.SATORI_LATEON_MODEL_PATH?.trim() ? "lateon" : "none"),
+        vectorStore: selectedVectorStore(env),
+    };
+}
+
 function requiredEmbeddingEnv(provider: string): string | null {
     switch (provider) {
         case "OpenAI":
@@ -86,7 +109,8 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
             nextStep: "Unset SATORI_RERANK_APPLICATION_MODE or roll back to the previous Satori release for legacy_rrf behavior.",
         }];
     }
-    const executionProfile = selectedExecutionProfile(env);
+    const selection = resolveRuntimeConfigSelection(env);
+    const executionProfile = selection.executionProfile;
     if (executionProfile !== "connected" && executionProfile !== "offline") {
         return [{
             name: "runtime_profile",
@@ -95,7 +119,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
             nextStep: "Set SATORI_RUNTIME_PROFILE to connected or offline.",
         }];
     }
-    const provider = selectedProvider(env);
+    const provider = selection.embeddingProvider;
     if (!SUPPORTED_EMBEDDING_PROVIDERS.has(provider)) {
         return [{
             name: "embedding_provider",
@@ -105,7 +129,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
         }];
     }
 
-    const vectorStore = selectedVectorStore(env);
+    const vectorStore = selection.vectorStore;
     if (!SUPPORTED_VECTOR_STORES.has(vectorStore)) {
         return [{
             name: "vector_store_provider",
@@ -115,7 +139,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
         }];
     }
 
-    const model = selectedModel(env, provider);
+    const model = selection.embeddingModel;
     const checks: RuntimeConfigCheck[] = [
         {
             name: "runtime_profile",
@@ -146,8 +170,7 @@ export function evaluateStaticRuntimeConfig(env: NodeJS.ProcessEnv): RuntimeConf
         },
     ];
 
-    const rerankerProvider = env.SATORI_RERANKER_PROVIDER?.trim()
-        || (env.SATORI_LATEON_MODEL_PATH?.trim() ? "lateon" : "none");
+    const rerankerProvider = selection.rerankerProvider;
     if (!SUPPORTED_RERANKER_PROVIDERS.has(rerankerProvider)) {
         checks.push({
             name: "reranker_provider",

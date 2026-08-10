@@ -116,7 +116,16 @@ Global flags must precede the command token:
 --debug
 ```
 
-`doctor` prints a concise human summary by default. Use `doctor --verbose` for paths, individual successful checks, package sources, and local diagnostics. Use `doctor --json` or the compatible global form `--format json doctor` for the complete machine-readable result.
+`doctor` prints a concise human summary by default, including an
+applied-runtime table for Codex, Claude Code, and OpenCode. The table reports
+configuration status, effective profile, embedding provider/model/dimension,
+reranker, vector store, and configuration source without exposing credentials
+or local artifact paths. A launcher that targets a local repository build keeps
+its outside-managed-store warning, but the table still reports the profile that
+launcher actually applies. Use `doctor --verbose` for paths, individual
+successful checks, package sources, and local diagnostics. Use `doctor --json`
+or the compatible global form `--format json doctor` for the complete
+machine-readable result, including `runtimeConfigurations`.
 
 `install`, `upgrade`, and `uninstall` also print concise human summaries by default. Put `--format json` before the command for a structured receipt without interactive progress text, or use `--debug` to expose MCP startup details during install verification.
 

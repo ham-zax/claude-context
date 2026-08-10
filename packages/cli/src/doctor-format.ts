@@ -27,7 +27,63 @@ function checkValue(result: DoctorResult, name: string): string | null {
     return (separator === -1 ? message : message.slice(separator + 1)).trim().replace(/\.$/, "");
 }
 
+function runtimeClientName(client: NonNullable<DoctorResult["runtimeConfigurations"]>[number]["client"]): string {
+    if (client === "codex") return "Codex";
+    if (client === "claude") return "Claude Code";
+    return "OpenCode";
+}
+
+function runtimeConfigurationTable(result: DoctorResult): string[] | null {
+    if (!result.runtimeConfigurations || result.runtimeConfigurations.length === 0) {
+        return null;
+    }
+    const headers = ["Client", "Status", "Profile", "Embedding", "Dim", "Reranker", "Storage", "Source"];
+    const rows = result.runtimeConfigurations.map((configuration) => [
+        runtimeClientName(configuration.client),
+        configuration.status === "configured"
+            ? "Configured"
+            : configuration.status === "needs_repair"
+                ? "Needs repair"
+                : "Not configured",
+        configuration.profile ?? "—",
+        configuration.embeddingProvider && configuration.embeddingModel
+            ? `${configuration.embeddingProvider} / ${configuration.embeddingModel}`
+            : configuration.embeddingProvider ?? configuration.embeddingModel ?? "—",
+        configuration.embeddingDimension ?? "—",
+        configuration.rerankerProvider === "lateon"
+            ? "LateOn"
+            : configuration.rerankerProvider ?? "—",
+        configuration.vectorStore ?? "—",
+        configuration.source === "managed_launcher"
+            ? "Managed launcher"
+            : configuration.source === "client_configuration"
+                ? "Client config"
+                : configuration.source === "unknown"
+                    ? "Unknown"
+                    : "—",
+    ]);
+    const widths = headers.map((header, index) => Math.max(
+        header.length,
+        ...rows.map((row) => row[index].length),
+    ));
+    const renderRow = (row: readonly string[]): string => row
+        .map((value, index) => value.padEnd(widths[index]))
+        .join(" | ")
+        .trimEnd();
+    return [
+        "",
+        "Applied runtime configuration:",
+        renderRow(headers),
+        widths.map((width) => "-".repeat(width)).join("-+-"),
+        ...rows.map(renderRow),
+    ];
+}
+
 function selectedRuntimeLines(result: DoctorResult): string[] {
+    const table = runtimeConfigurationTable(result);
+    if (table) {
+        return table;
+    }
     const clientRuntimes = result.checks
         .filter((check) => check.name.startsWith("client_runtime_"))
         .map((check) => check.message);

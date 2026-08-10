@@ -19,7 +19,11 @@ import {
     type ManagedClientConfigProof,
 } from "./install.js";
 import { parseManagedLauncherDescriptor } from "./managed-launcher-script.mjs";
-import { evaluateStaticRuntimeConfig, selectedVectorStore } from "./runtime-config.js";
+import {
+    evaluateStaticRuntimeConfig,
+    resolveRuntimeConfigSelection,
+    selectedVectorStore,
+} from "./runtime-config.js";
 import { readLocalDiagnosticsSummary, type LocalDiagnosticsSummary } from "./local-diagnostics.js";
 
 type CheckStatus = "ok" | "warning" | "error";
@@ -54,6 +58,18 @@ export interface ManagedRuntimeSnapshot {
     coreVersion: string | null;
 }
 
+export interface DoctorRuntimeConfiguration {
+    client: ManagedClientConfigProof["client"];
+    status: "configured" | "needs_repair" | "not_configured";
+    source: "managed_launcher" | "client_configuration" | "unknown" | null;
+    profile: string | null;
+    embeddingProvider: string | null;
+    embeddingModel: string | null;
+    embeddingDimension: string | null;
+    rerankerProvider: string | null;
+    vectorStore: string | null;
+}
+
 export interface DoctorResult {
     status: CheckStatus;
     /** Installed Satori package set (independent versions are expected). */
@@ -64,6 +80,8 @@ export interface DoctorResult {
     nextSteps: string[];
     /** Active managed launcher identity; null when no launcher is present. */
     managedRuntime: ManagedRuntimeSnapshot | null;
+    /** Sanitized effective runtime selection for every supported client. */
+    runtimeConfigurations?: DoctorRuntimeConfiguration[];
     /** Aggregated CLI activity stored only on this machine; contains no repository or request identity. */
     localDiagnostics: LocalDiagnosticsSummary;
 }
@@ -120,6 +138,7 @@ const PACKAGE_VERSION_NOTE =
     "Satori ships independent package versions (cli, mcp, core). Doctor reports the installed set for support and debugging; versions need not match each other.";
 const requireFromHere = createRequire(import.meta.url);
 const MAX_DIAGNOSTIC_DETAILS = 10;
+const SUPPORTED_DOCTOR_CLIENTS = ["codex", "claude", "opencode"] as const satisfies readonly ManagedClientConfigProof["client"][];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -214,6 +233,63 @@ function appendRuntimeConfigurationChecks(
         }
     }
     return evaluated;
+}
+
+function buildRuntimeConfigurationRows(
+    clientProofs: readonly ManagedClientConfigProof[],
+    runtimeContexts: readonly EvaluatedDoctorRuntimeContext[],
+): DoctorRuntimeConfiguration[] {
+    const fallbackContext = runtimeContexts.find((context) => context.client === null);
+    return SUPPORTED_DOCTOR_CLIENTS.map((client) => {
+        const proof = clientProofs.find((candidate) => candidate.client === client);
+        if (!proof) {
+            return {
+                client,
+                status: "not_configured",
+                source: null,
+                profile: null,
+                embeddingProvider: null,
+                embeddingModel: null,
+                embeddingDimension: null,
+                rerankerProvider: null,
+                vectorStore: null,
+            };
+        }
+        const context = runtimeContexts.find((candidate) => candidate.client === client) ?? fallbackContext;
+        if (!context) {
+            return {
+                client,
+                status: proof.status === "ok" ? "configured" : "needs_repair",
+                source: proof.usesManagedLauncher === true
+                    ? "managed_launcher"
+                    : proof.usesManagedLauncher === false
+                        ? "client_configuration"
+                        : "unknown",
+                profile: null,
+                embeddingProvider: null,
+                embeddingModel: null,
+                embeddingDimension: null,
+                rerankerProvider: null,
+                vectorStore: null,
+            };
+        }
+        const selection = resolveRuntimeConfigSelection(context.environment);
+        return {
+            client,
+            status: proof.status === "ok" ? "configured" : "needs_repair",
+            source: proof.usesManagedLauncher === true
+                ? "managed_launcher"
+                : proof.usesManagedLauncher === false
+                    ? "client_configuration"
+                    : "unknown",
+            profile: selection.executionProfile,
+            embeddingProvider: selection.embeddingProvider,
+            embeddingModel: selection.embeddingModel,
+            embeddingDimension: selection.embeddingDimension,
+            rerankerProvider: selection.rerankerProvider,
+            vectorStore: selection.vectorStore,
+        };
+    });
 }
 
 function overallStatus(checks: DoctorCheck[]): CheckStatus {
@@ -443,7 +519,7 @@ function resolveActiveManagedRuntime(homeDir: string, launcherPath: string): Act
         return { status: "missing_target", launcherPath, target, managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
     }
     if (!isPathWithinReal(managedRuntimeRoot, target)) {
-        return { status: "outside_store", launcherPath, target, managedEnvironment: Object.freeze({}), mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
+        return { status: "outside_store", launcherPath, target, managedEnvironment, mcpPackageRoot: "", mcpVersion: "", coreVersion: null };
     }
     const targetRealPath = fs.realpathSync(target);
     const mcpPackage = findMcpPackage(targetRealPath);
@@ -528,6 +604,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         }
         : null;
     const managedRuntimeEnvironment = activeManagedRuntime?.status === "active"
+        || activeManagedRuntime?.status === "outside_store"
         ? activeManagedRuntime.managedEnvironment
         : Object.freeze({});
     const bundledMcpVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-mcp");
@@ -630,6 +707,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
     }
 
     const evaluatedRuntimeContexts = appendRuntimeConfigurationChecks(checks, nextSteps, runtimeContexts);
+    const runtimeConfigurations = buildRuntimeConfigurationRows(managedClientProofs, evaluatedRuntimeContexts);
 
     if (
         evaluatedRuntimeContexts.some((context) => selectedVectorStore(context.environment) === "LanceDB")
@@ -742,6 +820,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
         checks,
         nextSteps: [...new Set(nextSteps)],
         managedRuntime,
+        runtimeConfigurations,
         localDiagnostics: readLocalDiagnosticsSummary(
             options.diagnosticsPath || path.join(homeDir, ".satori", "diagnostics", "events.jsonl"),
         ),

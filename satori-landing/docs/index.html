@@ -726,7 +726,13 @@
             <code>uninstall</code> with the same selector to remove only
             Satori-managed config and guidance. Run
             <code>npx -y @zokizuan/satori-cli@latest doctor</code> to check
-            provider and Milvus setup without starting an MCP client.
+            every supported client's applied runtime without starting an MCP
+            client. The table shows configuration status, profile, embedding
+            provider/model/dimension, reranker, vector store, and whether the
+            values come from the managed launcher or client config. It never
+            prints credentials or local artifact paths. Repository-backed
+            development launchers retain the outside-managed-store warning
+            while still reporting the profile they actually apply.
           </p>
         </div>
         <div class="panel">
