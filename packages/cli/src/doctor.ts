@@ -63,12 +63,12 @@ export interface DoctorRuntimeConfiguration {
     client: ManagedClientConfigProof["client"];
     status: "configured" | "needs_repair" | "not_configured";
     source: "managed_launcher" | "client_configuration" | "unknown" | null;
-    profile: string | null;
-    embeddingProvider: string | null;
+    profile: "connected" | "offline" | null;
+    embeddingProvider: "OpenAI" | "VoyageAI" | "Gemini" | "Ollama" | "Potion" | null;
     embeddingModel: string | null;
     embeddingDimension: string | null;
-    rerankerProvider: string | null;
-    vectorStore: string | null;
+    rerankerProvider: "none" | "voyage" | "lateon" | null;
+    vectorStore: "Milvus" | "LanceDB" | null;
 }
 
 export interface DoctorResult {
@@ -140,6 +140,20 @@ const PACKAGE_VERSION_NOTE =
 const requireFromHere = createRequire(import.meta.url);
 const MAX_DIAGNOSTIC_DETAILS = 10;
 const SUPPORTED_DOCTOR_CLIENTS = ["codex", "claude", "opencode"] as const satisfies readonly ManagedClientConfigProof["client"][];
+const DISPLAYED_RUNTIME_PROFILES = new Set<NonNullable<DoctorRuntimeConfiguration["profile"]>>(["connected", "offline"]);
+const DISPLAYED_EMBEDDING_PROVIDERS = new Set<NonNullable<DoctorRuntimeConfiguration["embeddingProvider"]>>([
+    "OpenAI",
+    "VoyageAI",
+    "Gemini",
+    "Ollama",
+    "Potion",
+]);
+const DISPLAYED_RERANKER_PROVIDERS = new Set<NonNullable<DoctorRuntimeConfiguration["rerankerProvider"]>>([
+    "none",
+    "voyage",
+    "lateon",
+]);
+const DISPLAYED_VECTOR_STORES = new Set<NonNullable<DoctorRuntimeConfiguration["vectorStore"]>>(["Milvus", "LanceDB"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -259,6 +273,17 @@ function buildRuntimeConfigurationRows(
         const sanitized = sanitizeTerminalText(value);
         return sanitized || null;
     };
+    const allowlistedValue = <T extends string>(value: string, allowed: ReadonlySet<T>): T | null => {
+        const sanitized = sanitizedValue(value);
+        return sanitized && allowed.has(sanitized as T) ? sanitized as T : null;
+    };
+    const sanitizedDimension = (value: string): string | null => {
+        const sanitized = sanitizedValue(value);
+        if (sanitized === "provider default") return sanitized;
+        if (!sanitized || !/^\d+$/.test(sanitized)) return null;
+        const dimension = Number(sanitized);
+        return Number.isSafeInteger(dimension) && dimension > 0 ? String(dimension) : null;
+    };
     const sanitizedModelIdentity = (value: string): string | null => {
         const sanitized = sanitizedValue(value);
         if (!sanitized) return null;
@@ -266,6 +291,7 @@ function buildRuntimeConfigurationRows(
             path.posix.isAbsolute(sanitized)
             || path.win32.isAbsolute(sanitized)
             || /^file:/i.test(sanitized)
+            || /^~[\\/]/.test(sanitized)
             || /^\.{1,2}[\\/]/.test(sanitized)
         ) {
             return null;
@@ -291,12 +317,12 @@ function buildRuntimeConfigurationRows(
             client,
             status: proof.status === "ok" ? "configured" : "needs_repair",
             source,
-            profile: sanitizedValue(selection.executionProfile),
-            embeddingProvider: sanitizedValue(selection.embeddingProvider),
+            profile: allowlistedValue(selection.executionProfile, DISPLAYED_RUNTIME_PROFILES),
+            embeddingProvider: allowlistedValue(selection.embeddingProvider, DISPLAYED_EMBEDDING_PROVIDERS),
             embeddingModel: sanitizedModelIdentity(selection.embeddingModel),
-            embeddingDimension: sanitizedValue(selection.embeddingDimension),
-            rerankerProvider: sanitizedValue(selection.rerankerProvider),
-            vectorStore: sanitizedValue(selection.vectorStore),
+            embeddingDimension: sanitizedDimension(selection.embeddingDimension),
+            rerankerProvider: allowlistedValue(selection.rerankerProvider, DISPLAYED_RERANKER_PROVIDERS),
+            vectorStore: allowlistedValue(selection.vectorStore, DISPLAYED_VECTOR_STORES),
         };
     });
 }

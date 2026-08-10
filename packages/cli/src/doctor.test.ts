@@ -309,6 +309,41 @@ test("runDoctor excludes path-shaped model values and controls from structured r
     assert.equal(table.includes("\u001b[31m"), false);
 });
 
+test("runDoctor does not echo invalid categorical values or home-relative model paths", async () => {
+    const result = await runDoctor(baseDoctorOptions({
+        env: {},
+        inspectManagedClients: () => [{
+            client: "opencode",
+            configPath: "/tmp/opencode.json",
+            status: "error",
+            message: "opencode config contains invalid runtime values",
+            usesManagedLauncher: false,
+            runtimeEnvironment: {
+                SATORI_RUNTIME_PROFILE: "/home/test/private/profile",
+                EMBEDDING_PROVIDER: "/home/test/private/provider",
+                EMBEDDING_MODEL: "~/private/models/model.onnx",
+                EMBEDDING_OUTPUT_DIMENSION: "/home/test/private/dimension",
+                SATORI_RERANKER_PROVIDER: "/home/test/private/reranker",
+                VECTOR_STORE_PROVIDER: "/home/test/private/store",
+            },
+        }],
+    }));
+
+    const configuration = result.runtimeConfigurations?.find((candidate) => candidate.client === "opencode");
+    assert.deepEqual(configuration, {
+        client: "opencode",
+        status: "needs_repair",
+        source: "client_configuration",
+        profile: null,
+        embeddingProvider: null,
+        embeddingModel: null,
+        embeddingDimension: null,
+        rerankerProvider: null,
+        vectorStore: null,
+    });
+    assert.doesNotMatch(JSON.stringify(configuration), /\/home\/test|~\/private/);
+});
+
 test("runDoctor includes a privacy-safe summary of local CLI diagnostics", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-diagnostics-"));
     const diagnosticsPath = path.join(tempDir, "events.jsonl");

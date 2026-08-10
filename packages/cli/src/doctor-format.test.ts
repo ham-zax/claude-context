@@ -53,7 +53,7 @@ test("Doctor falls back to the bundle when the launcher is not active", () => {
 });
 
 test("Doctor renders effective configuration for every supported client as a table", () => {
-    const result = {
+    const result: DoctorResult = {
         ...resultWithActiveRuntime(),
         runtimeConfigurations: [
             {
