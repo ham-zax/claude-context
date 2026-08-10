@@ -42,9 +42,24 @@ function readChildPid(child) {
 }
 
 test('parseArgs supports local install options', () => {
-  const parsed = parseArgs(['--', '--no-build', '--home', '/tmp/satori-home', '--node', '/usr/bin/node']);
+  const parsed = parseArgs([
+    '--',
+    '--no-build',
+    '--client', 'opencode',
+    '--runtime', 'offline',
+    '--reranker', 'none',
+    '--ollama-model', 'qwen2.5-coder',
+    '--vector-store', 'lancedb',
+    '--home', '/tmp/satori-home',
+    '--node', '/usr/bin/node',
+  ]);
 
   assert.equal(parsed.noBuild, true);
+  assert.equal(parsed.client, 'opencode');
+  assert.equal(parsed.runtime, 'offline');
+  assert.equal(parsed.reranker, 'none');
+  assert.equal(parsed.ollamaModel, 'qwen2.5-coder');
+  assert.equal(parsed.vectorStore, 'LanceDB');
   assert.equal(parsed.homeDir, '/tmp/satori-home');
   assert.equal(parsed.nodePath, '/usr/bin/node');
 });
@@ -141,95 +156,181 @@ test('buildLauncherScript embeds SIGKILL grace path', () => {
   assert.match(script, /forwardShutdown/);
 });
 
-test('installLocalMcpRuntime writes launcher pointing at repo dist entry', () => {
+function createLocalRuntimeFixture() {
   const repoRoot = makeTempDir();
   const homeDir = makeTempDir();
   const runtimeEntry = path.join(repoRoot, 'packages', 'mcp', 'dist', 'index.js');
   fs.mkdirSync(path.dirname(runtimeEntry), { recursive: true });
   fs.writeFileSync(runtimeEntry, '#!/usr/bin/env node\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'packages', 'mcp', 'package.json'), JSON.stringify({
+    name: '@zokizuan/satori-mcp',
+    version: '9.9.9',
+  }), 'utf8');
+  return { repoRoot, homeDir, runtimeEntry };
+}
+
+function createActivationOwner(runtimeEnvironment) {
+  const calls = [];
+  return {
+    calls,
+    async runInstallPreflight(input) {
+      calls.push({ kind: 'preflight', input });
+      return { runtimeEnvironment };
+    },
+    async probeManagedRuntimeCandidate(input) {
+      calls.push({ kind: 'probe', input });
+    },
+    async executeInstallCommand(command, options) {
+      calls.push({ kind: 'execute', command, options });
+      const preflight = await options.preflightRunner({
+        runtime: command.runtime,
+        env: options.env,
+      }, {});
+      const launcherPath = path.join(options.homeDir, '.satori', 'bin', 'satori-mcp.js');
+      fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+      fs.writeFileSync(launcherPath, buildLauncherScript({
+        command: options.runtimeCommand.command,
+        args: options.runtimeCommand.args,
+        managedEnv: preflight.runtimeEnvironment,
+      }), 'utf8');
+      return {
+        runtimeEnvironment: preflight.runtimeEnvironment,
+        results: [{ client: command.client }],
+      };
+    },
+  };
+}
+
+test('installLocalMcpRuntime delegates exact local selection and preflights before activation', async () => {
+  const { repoRoot, homeDir, runtimeEntry } = createLocalRuntimeFixture();
+  const runtimeEnvironment = {
+    SATORI_RUNTIME_PROFILE: 'offline',
+    VECTOR_STORE_PROVIDER: 'LanceDB',
+    EMBEDDING_PROVIDER: 'Potion',
+    SATORI_RERANKER_PROVIDER: 'none',
+  };
+  const activationOwner = createActivationOwner(runtimeEnvironment);
   const messages = [];
 
-  const result = installLocalMcpRuntime({
-    repoRoot,
-    homeDir,
-    nodePath: '/usr/bin/node',
-    noBuild: true,
-    logger: { log: (message) => messages.push(message) },
-  });
-  const launcher = fs.readFileSync(result.launcherPath, 'utf8');
+  try {
+    const result = await installLocalMcpRuntime({
+      repoRoot,
+      homeDir,
+      nodePath: '/usr/bin/node',
+      noBuild: true,
+      client: 'opencode',
+      runtime: 'offline',
+      reranker: 'none',
+      activationOwner,
+      env: { PATH: '/usr/bin' },
+      logger: { log: (message) => messages.push(message) },
+    });
+    const launcher = fs.readFileSync(result.launcherPath, 'utf8');
+    const execute = activationOwner.calls.find((call) => call.kind === 'execute');
+    const probe = activationOwner.calls.find((call) => call.kind === 'probe');
 
-  assert.equal(result.runtimeEntry, runtimeEntry);
-  assert.equal(result.launcherPath, path.join(homeDir, '.satori', 'bin', 'satori-mcp.js'));
-  assert.match(launcher, /\/usr\/bin\/node/);
-  assert.match(launcher, new RegExp(runtimeEntry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.deepEqual(parseManagedLauncherEnvironment(launcher), {});
-  assert.equal(fs.statSync(result.launcherPath).mode & 0o755, 0o755);
-  assert.equal(messages.some((message) => message.includes('Restart your MCP client')), true);
+    assert.equal(result.runtimeEntry, runtimeEntry);
+    assert.deepEqual(execute.command, {
+      kind: 'install',
+      client: 'opencode',
+      runtime: 'offline',
+      reranker: 'none',
+      dryRun: false,
+    });
+    assert.deepEqual(execute.options.runtimeCommand, {
+      command: '/usr/bin/node',
+      args: [runtimeEntry],
+    });
+    assert.equal(
+      execute.options.potionAssetsRoot,
+      path.join(repoRoot, 'packages', 'mcp', 'assets', 'potion', 'linux-x64'),
+    );
+    assert.equal(probe.input.expectedVersion, '9.9.9');
+    assert.deepEqual(probe.input.runtimeEnvironment, runtimeEnvironment);
+    assert.deepEqual(parseManagedLauncherEnvironment(launcher), runtimeEnvironment);
+    assert.equal(messages.some((message) => message.includes('MCP initialization and tool-surface verification passed')), true);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
 });
 
-const managedEnvironmentCases = [
-  {
-    name: 'offline Potion environment',
-    managedEnv: {
-      SATORI_RUNTIME_PROFILE: 'offline',
-      VECTOR_STORE_PROVIDER: 'LanceDB',
-      LANCEDB_PATH: '/var/lib/satori/lancedb',
-      EMBEDDING_PROVIDER: 'Potion',
-      EMBEDDING_MODEL: 'minishlab/potion-code-16M-v2',
-      EMBEDDING_OUTPUT_DIMENSION: '256',
-      POTION_HELPER_PATH: '/var/lib/satori/potion/helper.js',
-      POTION_MODEL_PATH: '/var/lib/satori/potion/model',
-      POTION_REQUEST_TIMEOUT_MS: '30000',
-    },
-  },
-  {
-    name: 'connected VoyageAI environment',
-    managedEnv: {
-      SATORI_RUNTIME_PROFILE: 'connected',
-      VECTOR_STORE_PROVIDER: 'LanceDB',
-      LANCEDB_PATH: '/var/lib/satori/lancedb',
-      EMBEDDING_PROVIDER: 'VoyageAI',
-      EMBEDDING_MODEL: 'voyage-code-3',
-      EMBEDDING_OUTPUT_DIMENSION: '1024',
-    },
-  },
-  {
-    name: 'empty managed environment',
-    managedEnv: {},
-  },
-];
+test('installLocalMcpRuntime preserves the managed runtime family when no runtime is explicit', async () => {
+  const { repoRoot, homeDir } = createLocalRuntimeFixture();
+  const managedEnv = {
+    SATORI_RUNTIME_PROFILE: 'connected',
+    VECTOR_STORE_PROVIDER: 'LanceDB',
+    EMBEDDING_PROVIDER: 'VoyageAI',
+  };
+  const activationOwner = createActivationOwner(managedEnv);
 
-for (const { name, managedEnv } of managedEnvironmentCases) {
-  test(`installLocalMcpRuntime preserves ${name}`, () => {
-    const repoRoot = makeTempDir();
-    const homeDir = makeTempDir();
-    const runtimeEntry = path.join(repoRoot, 'packages', 'mcp', 'dist', 'index.js');
+  try {
     const launcherPath = path.join(homeDir, '.satori', 'bin', 'satori-mcp.js');
-    fs.mkdirSync(path.dirname(runtimeEntry), { recursive: true });
     fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
-    fs.writeFileSync(runtimeEntry, '#!/usr/bin/env node\n', 'utf8');
     fs.writeFileSync(launcherPath, buildLauncherScript({
       command: '/usr/bin/old-node',
       args: ['/old/packages/mcp/dist/index.js'],
       managedEnv,
     }), 'utf8');
 
-    try {
+    const result = await installLocalMcpRuntime({
+      repoRoot,
+      homeDir,
+      nodePath: '/usr/bin/node',
+      noBuild: true,
+      activationOwner,
+      logger: { log: () => {} },
+    });
+
+    assert.equal(result.command.runtime, 'voyage');
+    assert.equal(result.command.client, 'opencode');
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('installLocalMcpRuntime builds Core, MCP, and CLI before activation', async () => {
+  const { repoRoot, homeDir } = createLocalRuntimeFixture();
+  const activationOwner = createActivationOwner({ SATORI_RUNTIME_PROFILE: 'offline' });
+  const buildCalls = [];
+
+  try {
+    await installLocalMcpRuntime({
+      repoRoot,
+      homeDir,
+      activationOwner,
+      execFileSyncImpl: (command, args) => buildCalls.push([command, args]),
+      logger: { log: () => {} },
+    });
+
+    assert.deepEqual(buildCalls, [
+      ['pnpm', ['--filter', '@zokizuan/satori-core', 'build']],
+      ['pnpm', ['--filter', '@zokizuan/satori-mcp', 'build:runtime']],
+      ['pnpm', ['--filter', '@zokizuan/satori-cli', 'build']],
+    ]);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('installLocalMcpRuntime rejects reranker selection for voyage runtime', async () => {
+  const { repoRoot, homeDir } = createLocalRuntimeFixture();
+  try {
+    await assert.rejects(
       installLocalMcpRuntime({
         repoRoot,
         homeDir,
-        nodePath: '/usr/bin/node',
         noBuild: true,
-        logger: { log: () => {} },
-      });
-
-      const launcher = fs.readFileSync(launcherPath, 'utf8');
-      assert.match(launcher, /const command = "\/usr\/bin\/node"/);
-      assert.match(launcher, new RegExp(runtimeEntry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      assert.deepEqual(parseManagedLauncherEnvironment(launcher), managedEnv);
-    } finally {
-      fs.rmSync(repoRoot, { recursive: true, force: true });
-      fs.rmSync(homeDir, { recursive: true, force: true });
-    }
-  });
-}
+        runtime: 'voyage',
+        reranker: 'none',
+        activationOwner: createActivationOwner({}),
+      }),
+      /--reranker is supported only with --runtime offline/,
+    );
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});

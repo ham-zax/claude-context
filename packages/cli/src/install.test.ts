@@ -2802,7 +2802,9 @@ test("install writes OpenCode JSONC config and AGENTS instructions", async () =>
         assert.equal(content.includes(launcherPath(homeDir)), true);
         assert.equal(content.includes("\"environment\""), true);
         assert.equal(content.includes("\"VOYAGEAI_API_KEY\": \"{env:VOYAGEAI_API_KEY}\""), true);
-        assert.equal(content.includes("\"EMBEDDING_OUTPUT_DIMENSION\": \"{env:EMBEDDING_OUTPUT_DIMENSION}\""), true);
+        assert.equal(content.includes("\"SATORI_RUNTIME_PROFILE\""), false);
+        assert.equal(content.includes("\"EMBEDDING_OUTPUT_DIMENSION\""), false);
+        assert.equal(content.includes("\"SATORI_LATEON_PROFILE\""), false);
         assert.equal(content.includes("\"MILVUS_ADDRESS\": \"{env:MILVUS_ADDRESS}\""), true);
         assert.equal(content.includes("node_modules"), false);
 
@@ -2811,6 +2813,47 @@ test("install writes OpenCode JSONC config and AGENTS instructions", async () =>
         assert.equal(instructions.includes("search_codebase"), true);
         assert.equal(instructions.includes("usual/native workflow"), true);
         assert.equal(instructions.includes("Ask before `create`, `reindex`, or `clear`"), true);
+    });
+});
+
+test("OpenCode install removes stale launcher-owned runtime identity while preserving pass-through environment", async () => {
+    await withTempHome(async (homeDir) => {
+        const configPath = path.join(homeDir, ".config", "opencode", "opencode.json");
+        fs.mkdirSync(path.dirname(configPath), { recursive: true });
+        fs.writeFileSync(configPath, `${JSON.stringify({
+            mcp: {
+                satori: {
+                    enabled: true,
+                    type: "local",
+                    command: [process.execPath, launcherPath(homeDir)],
+                    environment: {
+                        SATORI_RUNTIME_PROFILE: "offline",
+                        EMBEDDING_PROVIDER: "Potion",
+                        SATORI_RERANKER_PROVIDER: "lateon",
+                        SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v3_d32_v1",
+                        SATORI_LATEON_ACTIVATION_POLICY: "lateon_d32_owner_default_v1",
+                        VOYAGEAI_API_KEY: "{env:VOYAGEAI_API_KEY}",
+                        SATORI_LATEON_REQUEST_DEADLINE_MS: "12345",
+                    },
+                },
+            },
+        }, null, 2)}\n`, "utf8");
+
+        await executeInstallCommand({
+            kind: "install",
+            client: "opencode",
+            runtime: "voyage",
+            dryRun: false,
+        }, installOptions(homeDir));
+
+        const environment = JSON.parse(readFile(configPath)).mcp.satori.environment;
+        assert.equal(environment.SATORI_RUNTIME_PROFILE, undefined);
+        assert.equal(environment.EMBEDDING_PROVIDER, undefined);
+        assert.equal(environment.SATORI_RERANKER_PROVIDER, undefined);
+        assert.equal(environment.SATORI_LATEON_PROFILE, undefined);
+        assert.equal(environment.SATORI_LATEON_ACTIVATION_POLICY, undefined);
+        assert.equal(environment.VOYAGEAI_API_KEY, "{env:VOYAGEAI_API_KEY}");
+        assert.equal(environment.SATORI_LATEON_REQUEST_DEADLINE_MS, "12345");
     });
 });
 
@@ -2867,7 +2910,7 @@ test("install all smoke writes launcher-backed config for every supported client
         assert.equal(opencodeConfig.mcp.satori.type, "local");
         assert.deepEqual(opencodeConfig.mcp.satori.command, [process.execPath, launcherPath(homeDir)]);
         assert.equal(opencodeConfig.mcp.satori.environment.VOYAGEAI_API_KEY, "{env:VOYAGEAI_API_KEY}");
-        assert.equal(opencodeConfig.mcp.satori.environment.EMBEDDING_OUTPUT_DIMENSION, "{env:EMBEDDING_OUTPUT_DIMENSION}");
+        assert.equal(opencodeConfig.mcp.satori.environment.EMBEDDING_OUTPUT_DIMENSION, undefined);
         assert.equal(opencodeConfig.mcp.satori.environment.MILVUS_ADDRESS, "{env:MILVUS_ADDRESS}");
         assert.equal(JSON.stringify(opencodeConfig.mcp.satori).includes("node_modules"), false);
         const opencodeInstructions = readFile(path.join(homeDir, ".config", "opencode", "AGENTS.md"));
@@ -3008,7 +3051,7 @@ test("uninstall removes managed OpenCode config and instruction block only", asy
     });
 });
 
-test("install preserves direct OpenCode Satori environment values on reinstall", async () => {
+test("install preserves direct OpenCode pass-through environment values on reinstall", async () => {
     await withTempHome(async (homeDir) => {
         const configPath = path.join(homeDir, ".config", "opencode", "opencode.json");
         fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -3036,7 +3079,7 @@ test("install preserves direct OpenCode Satori environment values on reinstall",
         const installed = JSON.parse(readFile(configPath));
         assert.equal(installed.mcp.satori.environment.VOYAGEAI_API_KEY, "direct-key");
         assert.equal(installed.mcp.satori.environment.MILVUS_TOKEN, "direct-token");
-        assert.equal(installed.mcp.satori.environment.EMBEDDING_OUTPUT_DIMENSION, "{env:EMBEDDING_OUTPUT_DIMENSION}");
+        assert.equal(installed.mcp.satori.environment.EMBEDDING_OUTPUT_DIMENSION, undefined);
     });
 });
 

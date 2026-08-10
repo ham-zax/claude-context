@@ -109,6 +109,23 @@ const SATORI_RUNTIME_ENV_VARS = [
     "MCP_ENABLE_WATCHER",
     "MCP_WATCH_DEBOUNCE_MS",
 ] as const;
+const LAUNCHER_OWNED_RUNTIME_ENV_VARS = [
+    "SATORI_RUNTIME_PROFILE",
+    "VECTOR_STORE_PROVIDER",
+    "LANCEDB_PATH",
+    "EMBEDDING_PROVIDER",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_OUTPUT_DIMENSION",
+    "SATORI_RERANKER_PROVIDER",
+    "SATORI_LATEON_MODEL_PATH",
+    "SATORI_LATEON_PROFILE",
+    "SATORI_LATEON_ACTIVATION_POLICY",
+    "OLLAMA_HOST",
+    "OLLAMA_MODEL",
+    "POTION_HELPER_PATH",
+    "POTION_MODEL_PATH",
+    "POTION_REQUEST_TIMEOUT_MS",
+] as const;
 const CODEX_GUIDANCE_HOOK_MESSAGE = "Satori MCP is available for semantic ownership and freshness-aware discovery. Prefer search_codebase for unfamiliar behavior; use the usual/native workflow for known paths, exact literals, or small local edits. Follow recommendedNextAction, verify call_graph inbound results, and ask before create, reindex, or clear.";
 const CODEX_GUIDANCE_HOOK_MATCHER = "startup|resume|clear|compact";
 const CODEX_GUIDANCE_HOOK_TIMEOUT_SECONDS = 5;
@@ -1254,11 +1271,15 @@ function parseJsoncObject(filePath: string, content: string): Record<string, unk
 }
 
 function buildOpenCodeServerConfig(runtimeCommand: ManagedRuntimeCommand, existing?: Record<string, unknown>): Record<string, unknown> {
+    const environment = mergeRuntimeEnv(existing?.environment, runtimeEnvMap((name) => `{env:${name}}`));
+    for (const name of LAUNCHER_OWNED_RUNTIME_ENV_VARS) {
+        delete environment[name];
+    }
     return {
         enabled: true,
         type: "local",
         command: [runtimeCommand.command, ...runtimeCommand.args],
-        environment: mergeRuntimeEnv(existing?.environment, runtimeEnvMap((name) => `{env:${name}}`)),
+        environment,
     };
 }
 
