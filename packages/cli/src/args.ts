@@ -57,7 +57,7 @@ export interface ResolveRawArgsOptions {
     stdinTimeoutMs: number;
 }
 
-export type InstallClient = "all" | "claude" | "codex" | "opencode";
+export type InstallClient = "auto" | "all" | "claude" | "codex" | "opencode";
 export type InstallProfile = "default" | "minimal" | "all-text";
 export type InstallRuntime = "voyage" | "offline";
 export type InstallVectorStore = "LanceDB" | "Milvus";
@@ -214,7 +214,7 @@ function parseRawArgsMode(args: string[]): { rawArgsMode: RawArgsMode; remaining
 }
 
 function parseInstallCommand(kind: "install" | "uninstall", args: string[]): ParsedCommand {
-    let client: InstallClient = "all";
+    let client: InstallClient = kind === "install" ? "auto" : "all";
     let dryRun = false;
     let installGuidanceHook = false;
     let profile: InstallProfile | undefined;
@@ -227,8 +227,8 @@ function parseInstallCommand(kind: "install" | "uninstall", args: string[]): Par
         const token = args[i];
         if (token === "--client") {
             const next = args[i + 1];
-            if (next !== "all" && next !== "claude" && next !== "codex" && next !== "opencode") {
-                throw new CliError("E_USAGE", "--client must be one of: all, claude, codex, opencode.", 2);
+            if (next !== "auto" && next !== "all" && next !== "claude" && next !== "codex" && next !== "opencode") {
+                throw new CliError("E_USAGE", "--client must be one of: auto, all, claude, codex, opencode.", 2);
             }
             client = next;
             i += 1;

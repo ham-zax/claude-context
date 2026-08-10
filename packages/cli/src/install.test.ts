@@ -7,9 +7,11 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { connectCliMcpSession } from "./client.js";
+import { CliError } from "./errors.js";
 import {
     executeInstallCommand as executeInstallCommandProduction,
     executeManagedRuntimeUpgrade,
+    createInstallPlan,
     inspectManagedClientConfigurations,
     type InstallCommandInput,
     type InstallCommandOptions,
@@ -2920,6 +2922,204 @@ test("install all smoke writes launcher-backed config for every supported client
         assert.equal(opencodeInstructions.includes("warnings[].action"), true);
         assert.equal(opencodeInstructions.includes("usual/native workflow"), true);
         assert.equal(opencodeInstructions.includes("Treat inbound `call_graph` results as leads to verify"), true);
+    });
+});
+
+test("auto client selection uses client markers and PATH executables", async () => {
+    await withTempHome(async (homeDir) => {
+        const plan = (env: NodeJS.ProcessEnv) => createInstallPlan({
+            kind: "install",
+            client: "auto",
+            runtime: "voyage",
+            dryRun: true,
+        }, {
+            ...installOptions(homeDir),
+            packageSpecifier: EXPECTED_PACKAGE_SPECIFIER,
+            env,
+        });
+
+        assert.deepEqual(plan({ PATH: "" }).prepared.map((entry) => entry.target.client), []);
+
+        fs.mkdirSync(path.join(homeDir, ".config", "opencode"), { recursive: true });
+        assert.deepEqual(plan({ PATH: "" }).prepared.map((entry) => entry.target.client), ["opencode"]);
+
+        const binDir = path.join(homeDir, ".local", "bin");
+        const codexPath = path.join(binDir, "codex");
+        fs.mkdirSync(binDir, { recursive: true });
+        fs.writeFileSync(codexPath, "#!/bin/sh\n", "utf8");
+        fs.chmodSync(codexPath, 0o755);
+        assert.deepEqual(
+            plan({ PATH: binDir }).prepared.map((entry) => entry.target.client),
+            ["codex", "opencode"],
+        );
+    });
+});
+
+test("auto client selection honors documented client config roots", async () => {
+    await withTempHome(async (homeDir) => {
+        const codexHome = path.join(homeDir, "codex-home");
+        const claudeConfigDir = path.join(homeDir, "claude-config");
+        const opencodeConfig = path.join(homeDir, "opencode", "config.json");
+        fs.mkdirSync(codexHome, { recursive: true });
+        fs.mkdirSync(claudeConfigDir, { recursive: true });
+        fs.mkdirSync(path.dirname(opencodeConfig), { recursive: true });
+        fs.writeFileSync(opencodeConfig, "{}\n", "utf8");
+
+        const plan = createInstallPlan({
+            kind: "install",
+            client: "auto",
+            runtime: "voyage",
+            dryRun: true,
+        }, {
+            ...installOptions(homeDir),
+            packageSpecifier: EXPECTED_PACKAGE_SPECIFIER,
+            env: {
+                PATH: "",
+                CODEX_HOME: "~/codex-home",
+                CLAUDE_CONFIG_DIR: "~/claude-config",
+                OPENCODE_CONFIG: "~/opencode/config.json",
+            },
+        });
+
+        assert.deepEqual(
+            plan.prepared.map((entry) => [entry.target.client, entry.target.configPath]),
+            [
+                ["codex", path.join(codexHome, "config.toml")],
+                ["claude", path.join(claudeConfigDir, ".claude.json")],
+                ["opencode", opencodeConfig],
+            ],
+        );
+
+        const relativeConfigPlan = createInstallPlan({
+            kind: "install",
+            client: "auto",
+            runtime: "voyage",
+            dryRun: true,
+        }, {
+            ...installOptions(homeDir),
+            packageSpecifier: EXPECTED_PACKAGE_SPECIFIER,
+            env: {
+                PATH: "",
+                OPENCODE_CONFIG: "missing-opencode-config.json",
+            },
+        });
+        assert.deepEqual(relativeConfigPlan.prepared.map((entry) => entry.target.client), []);
+    });
+});
+
+test("OpenCode keeps global instructions separate from custom configuration paths", async () => {
+    await withTempHome(async (homeDir) => {
+        const globalConfigDir = path.join(homeDir, ".config", "opencode");
+        const customConfig = path.join(homeDir, "profiles", "opencode.json");
+        fs.mkdirSync(path.dirname(customConfig), { recursive: true });
+        fs.writeFileSync(customConfig, "{}\n", "utf8");
+
+        const result = await executeInstallCommand({
+            kind: "install",
+            client: "auto",
+            runtime: "voyage",
+            dryRun: false,
+        }, {
+            ...installOptions(homeDir),
+            env: { PATH: "", OPENCODE_CONFIG: customConfig },
+        });
+
+        assert.deepEqual(result.results.map((entry) => entry.client), ["opencode"]);
+        assert.equal(fs.existsSync(customConfig), true);
+        assert.equal(fs.existsSync(path.join(globalConfigDir, "AGENTS.md")), true);
+        assert.equal(fs.existsSync(path.join(path.dirname(customConfig), "AGENTS.md")), false);
+    });
+
+    await withTempHome(async (homeDir) => {
+        const globalConfigDir = path.join(homeDir, ".config", "opencode");
+        const customConfigDir = path.join(homeDir, "opencode-directory");
+        fs.mkdirSync(customConfigDir, { recursive: true });
+
+        const result = await executeInstallCommand({
+            kind: "install",
+            client: "auto",
+            runtime: "voyage",
+            dryRun: false,
+        }, {
+            ...installOptions(homeDir),
+            env: { PATH: "", OPENCODE_CONFIG_DIR: customConfigDir },
+        });
+
+        assert.deepEqual(result.results.map((entry) => entry.client), ["opencode"]);
+        assert.equal(fs.existsSync(path.join(globalConfigDir, "opencode.json")), true);
+        assert.equal(fs.existsSync(path.join(globalConfigDir, "AGENTS.md")), true);
+        assert.equal(fs.existsSync(path.join(customConfigDir, "opencode.json")), false);
+        assert.equal(fs.existsSync(path.join(customConfigDir, "AGENTS.md")), false);
+    });
+
+    await withTempHome(async (homeDir) => {
+        const globalConfigDir = path.join(homeDir, ".config", "opencode");
+        const customConfig = path.join(homeDir, "profiles", "opencode.json");
+        const customConfigDir = path.join(homeDir, "opencode-directory");
+        fs.mkdirSync(path.dirname(customConfig), { recursive: true });
+        fs.mkdirSync(customConfigDir, { recursive: true });
+        fs.writeFileSync(customConfig, "{}\n", "utf8");
+
+        const result = await executeInstallCommand({
+            kind: "install",
+            client: "auto",
+            runtime: "voyage",
+            dryRun: false,
+        }, {
+            ...installOptions(homeDir),
+            env: {
+                PATH: "",
+                OPENCODE_CONFIG: customConfig,
+                OPENCODE_CONFIG_DIR: customConfigDir,
+            },
+        });
+
+        assert.deepEqual(result.results.map((entry) => entry.client), ["opencode"]);
+        assert.equal(fs.existsSync(customConfig), true);
+        assert.equal(fs.existsSync(path.join(globalConfigDir, "opencode.json")), false);
+        assert.equal(fs.existsSync(path.join(globalConfigDir, "AGENTS.md")), true);
+        assert.equal(fs.existsSync(path.join(customConfigDir, "AGENTS.md")), false);
+    });
+});
+
+test("auto install fails before runtime, model, preflight, or launcher work when no clients are detected", async () => {
+    await withTempHome(async (homeDir) => {
+        let runtimeInstallCalls = 0;
+        let modelAcquisitionCalls = 0;
+        let preflightCalls = 0;
+
+        await assert.rejects(
+            () => executeInstallCommandProduction({
+                kind: "install",
+                client: "auto",
+                runtime: "offline",
+                dryRun: false,
+            }, {
+                homeDir,
+                packageSpecifier: EXPECTED_PACKAGE_SPECIFIER,
+                env: { PATH: "" },
+                execFileSyncImpl: (() => {
+                    runtimeInstallCalls += 1;
+                    throw new Error("runtime install must not run");
+                }) as typeof execFileSync,
+                lateOnAuthorityLoader: (() => {
+                    modelAcquisitionCalls += 1;
+                    throw new Error("model acquisition must not run");
+                }),
+                preflightRunner: async () => {
+                    preflightCalls += 1;
+                    throw new Error("preflight must not run");
+                },
+            }),
+            (error: unknown) => error instanceof CliError
+                && error.token === "E_NO_CLIENTS_DETECTED"
+                && error.message.includes("satori install --client all"),
+        );
+
+        assert.equal(runtimeInstallCalls, 0);
+        assert.equal(modelAcquisitionCalls, 0);
+        assert.equal(preflightCalls, 0);
+        assert.equal(fs.existsSync(path.join(homeDir, ".satori")), false);
     });
 });
 

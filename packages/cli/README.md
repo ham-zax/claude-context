@@ -10,9 +10,16 @@ Offline on Linux x64 or Windows through WSL2:
 
 ```bash
 npm install -g @zokizuan/satori-cli@latest
-satori install --client all
+satori install
 satori doctor
 ```
+
+Running `satori install` (or using `--client auto`) detects the supported
+Codex, Claude Code, and OpenCode clients from their documented local markers
+or CLI executables. Use `--client all` to force configuration of all three.
+If no supported client is detected, Satori stops before runtime installation and
+shows explicit client commands. `satori uninstall` defaults to all supported
+clients; use `--client auto` to limit cleanup to currently detected clients.
 
 The package installs the `satori` command. Run `satori` without arguments for
 human-readable help.
@@ -73,7 +80,7 @@ capacity, not a proven plateau or multi-day guarantee.
 ## Commands
 
 ```text
-install [--client all|codex|claude|opencode]
+install [--client auto|all|codex|claude|opencode]
         [--runtime offline|voyage] # defaults to offline Potion + LateOn D32
         [--vector-store lancedb|milvus]
         [--ollama-model <model>]
@@ -86,7 +93,7 @@ doctor [--verbose] [--json]
 version # aliases: -v, --version
 upgrade # alias: update
 terminate
-uninstall [--client all|codex|claude|opencode] [--dry-run]
+uninstall [--client auto|all|codex|claude|opencode] [--dry-run] # defaults to all supported clients
 tools list
 tool call <toolName> --args-json '<json>'
 tool call <toolName> --args-file <path>

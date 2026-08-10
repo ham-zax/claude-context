@@ -189,11 +189,21 @@ test("parseCliArgs rejects unknown doctor arguments", () => {
     );
 });
 
-test("parseCliArgs defaults install client to all", () => {
+test("parseCliArgs defaults install client to auto-detection", () => {
     const parsed = parseCliArgs(["install"]);
     assert.equal(parsed.command.kind, "install");
     if (parsed.command.kind !== "install") {
         assert.fail("Expected install command parsing");
+    }
+    assert.equal(parsed.command.client, "auto");
+    assert.equal(parsed.command.dryRun, false);
+});
+
+test("parseCliArgs defaults uninstall client to all supported clients", () => {
+    const parsed = parseCliArgs(["uninstall"]);
+    assert.equal(parsed.command.kind, "uninstall");
+    if (parsed.command.kind !== "uninstall") {
+        assert.fail("Expected uninstall command parsing");
     }
     assert.equal(parsed.command.client, "all");
     assert.equal(parsed.command.dryRun, false);
@@ -219,6 +229,6 @@ test("parseCliArgs rejects guidance hook flag for uninstall", () => {
 test("parseCliArgs rejects unsupported install clients", () => {
     assert.throws(
         () => parseCliArgs(["install", "--client", "cursor"]),
-        /--client must be one of: all, claude, codex, opencode/
+        /--client must be one of: auto, all, claude, codex, opencode/
     );
 });

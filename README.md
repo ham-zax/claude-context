@@ -18,9 +18,16 @@ The npm package installs the `satori` command.
 
 ```bash
 npm install -g @zokizuan/satori-cli@latest
-satori install --client all
+satori install
 satori doctor
 ```
+
+Running `satori install` (or using `--client auto`) detects the supported
+Codex, Claude Code, and OpenCode clients from their documented local markers
+or CLI executables. Use `--client all` to force configuration of all three.
+If no supported client is detected, Satori stops before runtime installation and
+shows explicit client commands. `satori uninstall` defaults to all supported
+clients; use `--client auto` to limit cleanup to currently detected clients.
 
 Run `satori` without arguments at any time for human-readable help.
 Use `satori -v` to print the installed CLI, MCP runtime, and Core versions.

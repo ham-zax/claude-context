@@ -176,7 +176,7 @@ test("runCli defaults to human help and preserves structured help on request", a
     });
 
     assert.equal(exitCode, 0);
-    assert.match(io.read().stdout, /^Satori\n[\s\S]*Get started:\n {2}satori install --client all/m);
+    assert.match(io.read().stdout, /^Satori\n[\s\S]*Get started:\n {2}satori install/m);
     assert.match(io.read().stdout, /satori install --client codex --install-guidance-hook/);
     assert.match(io.read().stdout, /-v, --version\s+Show installed CLI, MCP, and Core versions/);
     assert.match(io.read().stdout, /terminate\s+Stop all running Satori MCP servers/);
@@ -593,6 +593,38 @@ test("runCli install updates config and emits a quiet human summary", async () =
         assert.equal(stderr, "");
         assert.doesNotMatch(stdout, /noisy startup detail|runtimeEnvironment|configPath/);
         assert.equal(fs.existsSync(path.join(homeDir, ".codex", "config.toml")), true);
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});
+
+test("runCli rejects an empty automatic client selection before package verification", async () => {
+    const homeDir = fs.mkdtempSync(path.join(PACKAGE_ROOT, ".tmp-empty-auto-install-home-"));
+    const io = captureIo();
+    let installabilityCalls = 0;
+    let preflightCalls = 0;
+
+    try {
+        const exitCode = await runCli(["install"], {
+            writeStdout: io.writeStdout,
+            writeStderr: io.writeStderr,
+            env: { HOME: homeDir, PATH: "" },
+            installabilityVerifier: () => {
+                installabilityCalls += 1;
+                return "@zokizuan/satori-mcp@4.4.1";
+            },
+            installPreflightRunner: async () => {
+                preflightCalls += 1;
+                throw new Error("preflight must not run");
+            },
+        });
+
+        assert.equal(exitCode, 2);
+        assert.equal(installabilityCalls, 0);
+        assert.equal(preflightCalls, 0);
+        assert.equal(fs.existsSync(path.join(homeDir, ".satori")), false);
+        assert.match(io.read().stderr, /E_NO_CLIENTS_DETECTED/);
+        assert.match(io.read().stderr, /satori install --client all/);
     } finally {
         fs.rmSync(homeDir, { recursive: true, force: true });
     }

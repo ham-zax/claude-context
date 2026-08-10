@@ -11,6 +11,7 @@ import { connectCliMcpSession, type CallToolResult, type ListToolsResult } from 
 import { asCliError, CliError } from "./errors.js";
 import { emitError, emitJson, inferManageStatusState, parseStructuredEnvelope } from "./format.js";
 import {
+    assertAutoClientTargets,
     executeInstallCommand,
     executeManagedRuntimeUpgrade,
     type ManagedRuntimeCommand,
@@ -304,11 +305,11 @@ function buildHelpPayload() {
     return {
         usage: "satori <command>",
         commands: [
-            "install [--client all|codex|claude|opencode] [--runtime offline|voyage] [--vector-store lancedb|milvus] [--ollama-model <model>] [--reranker lateon|none] [--profile default|minimal|all-text] [--dry-run] [--install-guidance-hook] (default: offline Potion embeddings with LateOn D32 reranking on Linux x64; --ollama-model selects Ollama; --reranker none disables reranking)",
+            "install [--client auto|all|codex|claude|opencode] [--runtime offline|voyage] [--vector-store lancedb|milvus] [--ollama-model <model>] [--reranker lateon|none] [--profile default|minimal|all-text] [--dry-run] [--install-guidance-hook] (default: auto-detect supported clients; offline Potion embeddings with LateOn D32 reranking on Linux x64; --ollama-model selects Ollama; --reranker none disables reranking)",
             "version (-v, --version)",
             "upgrade (alias: update)",
             "terminate",
-            "uninstall [--client all|codex|claude|opencode] [--dry-run]",
+            "uninstall [--client auto|all|codex|claude|opencode] [--dry-run] (default: all supported clients)",
             "doctor [--verbose] [--json]",
             "tools list",
             "tool call <toolName> --args-json '<json>'",
@@ -335,19 +336,19 @@ function formatHelpText(): string {
         "  satori <command>",
         "",
         "Get started:",
-        "  satori install --client all",
+        "  satori install",
         "  satori doctor",
         "",
         "Optional Codex startup reminder:",
         "  satori install --client codex --install-guidance-hook",
         "",
         "Commands:",
-        "  install       Install Satori for Codex, Claude Code, OpenCode, or all clients",
+        "  install       Install Satori for detected clients; use --client all to force all supported clients",
         "  version       Show installed CLI, MCP, and Core versions",
         "  upgrade       Update the CLI and its compatible MCP/Core runtime",
         "  terminate     Stop all running Satori MCP servers",
         "  doctor        Check installation, runtime, and client configuration",
-        "  uninstall     Remove Satori-managed client configuration",
+        "  uninstall     Remove Satori-managed client configuration (defaults to all supported clients)",
         "  tools list    List the available MCP tools",
         "  tool call     Call an MCP tool from the terminal",
         "",
@@ -623,6 +624,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
             const wantsJson = parsed.globals.formatExplicit && parsed.globals.format === "json";
             let packageSpecifier: string | undefined;
             if (parsed.command.kind === "install" && !parsed.command.dryRun) {
+                assertAutoClientTargets(parsed.command.client, homeDir, effectiveEnv);
                 packageSpecifier = await (options.installabilityVerifier || verifyManagedPackageInstallability)();
             }
             const result = await executeInstallCommand(parsed.command, {
