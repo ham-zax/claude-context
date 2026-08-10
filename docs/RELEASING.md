@@ -94,7 +94,8 @@ manifest version. This is the fast literal-reference gate; it is part of
 Requires a clean working tree, then runs `pnpm check`, the full Core, MCP, CLI,
 and release-script tests, the MCP request-contract, documentation, and manifest
 checks, a clean root build, and both packed release smokes. It refuses the
-candidate if any of those commands dirties the working tree.
+candidate if any command or the subsequent packed graph verification dirties
+the working tree.
 
 After qualification, it packs Core, MCP and CLI into a temporary directory,
 verifies the packed dependency graph is exact, queries the production registry
@@ -211,13 +212,16 @@ The single supported publication path. It runs:
 4. final verification that all exact versions and all three `latest` tags form
    the expected local Core -> MCP -> CLI closure.
 
-Preconditions: clean working tree, `master` branch, `HEAD` exactly equal to the
-explicitly fetched canonical `refs/remotes/origin/master`, and a valid
-monotonic release graph. Already-published identical packages are skipped only
-after their `latest` tags are verified before the first registry write. An
-intentional emergency release from locally-ahead commits requires the explicit
-`--allow-unpushed-head` override; canonical `origin/master` must still be an
-ancestor of `HEAD`, so stale or diverged history is rejected.
+Preconditions: clean working tree, `master` branch, `HEAD` exactly equal to
+`master` fetched directly from `https://github.com/ham-zax/satori.git` into the
+dedicated `refs/remotes/satori-release/master` authority ref, and a valid
+monotonic release graph. Source authority is fetched and checked both before
+and after qualification, immediately before any registry write.
+Already-published identical packages are skipped only after their `latest` tags
+are verified before the first registry write. An intentional emergency release
+from locally-ahead commits requires the explicit `--allow-unpushed-head`
+override; canonical release master must still be an ancestor of `HEAD`, so
+stale or diverged history is rejected.
 
 After publishing Core, `release:all` polls until `@zokizuan/satori-core@<version>`
 is visible on npm, then publishes MCP, then verifies that the published MCP pins

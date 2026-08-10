@@ -28,7 +28,7 @@ test('qualification runs the complete gate before packed graph verification', as
   });
 
   assert.equal(result, report);
-  assert.equal(statusCalls, 2);
+  assert.equal(statusCalls, 3);
   assert.deepEqual(order, [
     ...RELEASE_QUALIFICATION_COMMANDS.map((entry) => entry.label),
     'packed release graph',
@@ -62,4 +62,24 @@ test('qualification refuses generated drift before graph verification', async ()
     /Working tree became dirty during release qualification/,
   );
   assert.equal(graphCalls, 0);
+});
+
+test('qualification refuses packed-graph drift after verification', async () => {
+  let statusCalls = 0;
+  let graphCalls = 0;
+  await assert.rejects(
+    qualifyReleaseCandidate({
+      gitStatusImpl: () => {
+        statusCalls += 1;
+        return statusCalls < 3 ? '' : ' M packages/mcp/package.json';
+      },
+      runCommandImpl: () => {},
+      checkGraphImpl: () => {
+        graphCalls += 1;
+        return { valid: true };
+      },
+    }),
+    /Working tree became dirty during packed release graph verification/,
+  );
+  assert.equal(graphCalls, 1);
 });

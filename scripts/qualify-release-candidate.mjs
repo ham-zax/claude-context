@@ -44,12 +44,21 @@ export async function qualifyReleaseCandidate(options = {}) {
     throw new Error(`Working tree became dirty during release qualification:\n${finalStatus}`);
   }
 
-  return checkGraphImpl({
+  const report = await checkGraphImpl({
     cwd,
     tempRoot: options.tempRoot,
     keepTempDirectory: options.keepTempDirectory === true,
     execFileSyncImpl,
   });
+
+  const postGraphStatus = String(gitStatusImpl()).trim();
+  if (postGraphStatus !== '') {
+    throw new Error(
+      `Working tree became dirty during packed release graph verification:\n${postGraphStatus}`,
+    );
+  }
+
+  return report;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

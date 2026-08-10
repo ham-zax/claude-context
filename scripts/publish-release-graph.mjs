@@ -17,11 +17,13 @@ import {
 
 const REGISTRY_POLL_ATTEMPTS = 12;
 const REGISTRY_POLL_INTERVAL_MS = 5000;
+export const CANONICAL_RELEASE_REPOSITORY = 'https://github.com/ham-zax/satori.git';
+export const CANONICAL_RELEASE_REF = 'refs/remotes/satori-release/master';
 export const CANONICAL_MASTER_FETCH_ARGS = Object.freeze([
   'fetch',
   '--no-tags',
-  'origin',
-  '+refs/heads/master:refs/remotes/origin/master',
+  CANONICAL_RELEASE_REPOSITORY,
+  `+refs/heads/master:${CANONICAL_RELEASE_REF}`,
 ]);
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
@@ -44,6 +46,28 @@ function isPathWithin(rootPath, candidatePath) {
 
 function formatEntries(entries) {
   return entries.map((entry) => `${entry.name}@${entry.version}`).join(', ') || 'none';
+}
+
+export function assertSourceAuthority(options) {
+  const branch = String(options.branchImpl()).trim();
+  if (branch !== 'master') {
+    throw new Error(`Refusing to publish from branch ${JSON.stringify(branch)}; expected master`);
+  }
+
+  options.fetchCanonicalMasterImpl();
+  const head = String(options.headImpl()).trim();
+  const canonicalMaster = String(options.canonicalMasterImpl()).trim();
+  if (options.allowUnpushedHead === true) {
+    if (!options.canonicalMasterIsAncestorImpl()) {
+      throw new Error(
+        `Refusing emergency publication because canonical release master ${canonicalMaster} is not an ancestor of HEAD ${head}. Rebase the local release onto canonical master first.`,
+      );
+    }
+  } else if (head !== canonicalMaster) {
+    throw new Error(
+      `Refusing to publish because HEAD ${head} does not equal canonical release master ${canonicalMaster} (${CANONICAL_RELEASE_REF}). Push canonical master first or use --allow-unpushed-head only for a locally-ahead emergency release.`,
+    );
+  }
 }
 
 function validateReleaseReport(report) {
@@ -131,18 +155,18 @@ export async function publishReleaseGraph(options = {}) {
     || (() => execFileSyncImpl('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' }));
   const branchImpl = options.branchImpl
     || (() => execFileSyncImpl('git', ['branch', '--show-current'], { cwd, encoding: 'utf8' }).trim());
-  const fetchOriginMasterImpl = options.fetchOriginMasterImpl
+  const fetchCanonicalMasterImpl = options.fetchCanonicalMasterImpl
     || (() => execFileSyncImpl('git', [...CANONICAL_MASTER_FETCH_ARGS], { cwd, stdio: 'inherit' }));
   const headImpl = options.headImpl
     || (() => execFileSyncImpl('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim());
-  const originMasterImpl = options.originMasterImpl
-    || (() => execFileSyncImpl('git', ['rev-parse', 'refs/remotes/origin/master'], { cwd, encoding: 'utf8' }).trim());
-  const originMasterIsAncestorImpl = options.originMasterIsAncestorImpl
+  const canonicalMasterImpl = options.canonicalMasterImpl
+    || (() => execFileSyncImpl('git', ['rev-parse', CANONICAL_RELEASE_REF], { cwd, encoding: 'utf8' }).trim());
+  const canonicalMasterIsAncestorImpl = options.canonicalMasterIsAncestorImpl
     || (() => {
       try {
         execFileSyncImpl(
           'git',
-          ['merge-base', '--is-ancestor', 'refs/remotes/origin/master', 'HEAD'],
+          ['merge-base', '--is-ancestor', CANONICAL_RELEASE_REF, 'HEAD'],
           { cwd, stdio: 'ignore' },
         );
         return true;
@@ -206,28 +230,20 @@ export async function publishReleaseGraph(options = {}) {
   if (status !== '') {
     throw new Error(`Working tree is not clean; refusing to publish:\n${status}`);
   }
-  const branch = String(branchImpl()).trim();
-  if (branch !== 'master') {
-    throw new Error(`Refusing to publish from branch ${JSON.stringify(branch)}; expected master`);
-  }
-  fetchOriginMasterImpl();
-  const head = String(headImpl()).trim();
-  const originMaster = String(originMasterImpl()).trim();
-  if (options.allowUnpushedHead === true) {
-    if (!originMasterIsAncestorImpl()) {
-      throw new Error(
-        `Refusing emergency publication because refs/remotes/origin/master ${originMaster} is not an ancestor of HEAD ${head}. Rebase the local release onto canonical master first.`,
-      );
-    }
-  } else if (head !== originMaster) {
-    throw new Error(
-      `Refusing to publish because HEAD ${head} does not equal refs/remotes/origin/master ${originMaster}. Push master first or use --allow-unpushed-head only for a locally-ahead emergency release.`,
-    );
-  }
+  const sourceAuthorityOptions = {
+    allowUnpushedHead: options.allowUnpushedHead === true,
+    branchImpl,
+    fetchCanonicalMasterImpl,
+    headImpl,
+    canonicalMasterImpl,
+    canonicalMasterIsAncestorImpl,
+  };
+  assertSourceAuthority(sourceAuthorityOptions);
   let report = null;
   const publisherTempRoot = fs.mkdtempSync(path.join(options.tempRoot || os.tmpdir(), 'satori-publish-'));
   try {
     report = await qualifyImpl(publisherTempRoot);
+    assertSourceAuthority(sourceAuthorityOptions);
     if (!report || !report.valid) {
       throw new Error('Release graph is invalid; refusing to publish.');
     }

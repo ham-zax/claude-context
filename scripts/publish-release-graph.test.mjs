@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   CANONICAL_MASTER_FETCH_ARGS,
+  CANONICAL_RELEASE_REF,
+  CANONICAL_RELEASE_REPOSITORY,
   publishReleaseGraph,
 } from './publish-release-graph.mjs';
 import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
@@ -86,10 +88,10 @@ function runnerOptions(extra = {}) {
     log: extra.log || (() => {}),
     gitStatusImpl,
     branchImpl: extra.branchImpl || (() => 'master'),
-    fetchOriginMasterImpl: extra.fetchOriginMasterImpl || (() => { fetchCalls.push(true); }),
+    fetchCanonicalMasterImpl: extra.fetchCanonicalMasterImpl || (() => { fetchCalls.push(true); }),
     headImpl: extra.headImpl || (() => 'release-head'),
-    originMasterImpl: extra.originMasterImpl || (() => 'release-head'),
-    originMasterIsAncestorImpl: extra.originMasterIsAncestorImpl || (() => {
+    canonicalMasterImpl: extra.canonicalMasterImpl || (() => 'release-head'),
+    canonicalMasterIsAncestorImpl: extra.canonicalMasterIsAncestorImpl || (() => {
       ancestorCalls.push(true);
       return true;
     }),
@@ -231,48 +233,67 @@ test('non-master branch publishes nothing', async () => {
   assert.deepEqual(options.records.publishCalls, []);
 });
 
-test('canonical master fetch has an explicit destination and ignores tags', () => {
+test('canonical master fetch binds the release repository to a dedicated authority ref', () => {
+  assert.equal(CANONICAL_RELEASE_REPOSITORY, 'https://github.com/ham-zax/satori.git');
+  assert.equal(CANONICAL_RELEASE_REF, 'refs/remotes/satori-release/master');
   assert.deepEqual(CANONICAL_MASTER_FETCH_ARGS, [
     'fetch',
     '--no-tags',
-    'origin',
-    '+refs/heads/master:refs/remotes/origin/master',
+    CANONICAL_RELEASE_REPOSITORY,
+    `+refs/heads/master:${CANONICAL_RELEASE_REF}`,
   ]);
 });
 
 test('unpushed or diverged master publishes nothing', async () => {
   const options = runnerOptions({
     headImpl: () => 'local-head',
-    originMasterImpl: () => 'origin-head',
+    canonicalMasterImpl: () => 'canonical-head',
   });
-  await assert.rejects(publishReleaseGraph(options), /does not equal refs\/remotes\/origin\/master/);
+  await assert.rejects(publishReleaseGraph(options), /does not equal canonical release master/);
+  assert.deepEqual(options.records.publishCalls, []);
+});
+
+test('canonical authority is refetched after qualification before the first registry write', async () => {
+  let canonicalReadCount = 0;
+  const options = runnerOptions({
+    headImpl: () => 'head-a',
+    canonicalMasterImpl: () => {
+      canonicalReadCount += 1;
+      return canonicalReadCount === 1 ? 'head-a' : 'head-b';
+    },
+  });
+  await assert.rejects(
+    publishReleaseGraph(options),
+    /HEAD head-a does not equal canonical release master head-b/,
+  );
+  assert.equal(options.records.fetchCalls.length, 2);
   assert.deepEqual(options.records.publishCalls, []);
 });
 
 test('explicit emergency override permits only a locally-ahead master', async () => {
   const options = runnerOptions({
     headImpl: () => 'local-head',
-    originMasterImpl: () => 'origin-head',
+    canonicalMasterImpl: () => 'canonical-head',
     allowUnpushedHead: true,
   });
   const result = await publishReleaseGraph(options);
   assert.equal(result.published.length, 3);
-  assert.equal(options.records.fetchCalls.length, 1);
-  assert.equal(options.records.ancestorCalls.length, 1);
+  assert.equal(options.records.fetchCalls.length, 2);
+  assert.equal(options.records.ancestorCalls.length, 2);
 });
 
 test('explicit emergency override rejects stale or diverged history', async () => {
   let fetched = 0;
   const options = runnerOptions({
     headImpl: () => 'local-head',
-    originMasterImpl: () => 'origin-head',
-    originMasterIsAncestorImpl: () => false,
-    fetchOriginMasterImpl: () => { fetched += 1; },
+    canonicalMasterImpl: () => 'canonical-head',
+    canonicalMasterIsAncestorImpl: () => false,
+    fetchCanonicalMasterImpl: () => { fetched += 1; },
     allowUnpushedHead: true,
   });
   await assert.rejects(
     publishReleaseGraph(options),
-    /origin\/master .* is not an ancestor of HEAD/,
+    /canonical release master .* is not an ancestor of HEAD/,
   );
   assert.equal(fetched, 1);
   assert.deepEqual(options.records.publishCalls, []);
