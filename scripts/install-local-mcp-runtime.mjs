@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildLauncherScript,
   DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS,
+  parseManagedLauncherEnvironment,
 } from '../packages/cli/src/managed-launcher-script.mjs';
 
 export { buildLauncherScript, DEFAULT_LAUNCHER_SHUTDOWN_GRACE_MS };
@@ -112,9 +113,13 @@ export function installLocalMcpRuntime(options = {}) {
     throw new Error(`Local MCP runtime entry does not exist: ${runtimeEntry}. Run without --no-build first.`);
   }
 
+  const managedEnv = fs.existsSync(launcherPath)
+    ? parseManagedLauncherEnvironment(fs.readFileSync(launcherPath, 'utf8'))
+    : {};
   const launcherScript = buildLauncherScript({
     command: nodePath,
     args: [runtimeEntry],
+    managedEnv,
   });
   writeTextFileAtomic(launcherPath, launcherScript, 0o755);
 

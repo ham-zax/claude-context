@@ -10,6 +10,7 @@ import {
   installLocalMcpRuntime,
   parseArgs,
 } from './install-local-mcp-runtime.mjs';
+import { parseManagedLauncherEnvironment } from '../packages/cli/src/managed-launcher-script.mjs';
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'satori-local-mcp-test-'));
@@ -161,6 +162,74 @@ test('installLocalMcpRuntime writes launcher pointing at repo dist entry', () =>
   assert.equal(result.launcherPath, path.join(homeDir, '.satori', 'bin', 'satori-mcp.js'));
   assert.match(launcher, /\/usr\/bin\/node/);
   assert.match(launcher, new RegExp(runtimeEntry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.deepEqual(parseManagedLauncherEnvironment(launcher), {});
   assert.equal(fs.statSync(result.launcherPath).mode & 0o755, 0o755);
   assert.equal(messages.some((message) => message.includes('Restart your MCP client')), true);
 });
+
+const managedEnvironmentCases = [
+  {
+    name: 'offline Potion environment',
+    managedEnv: {
+      SATORI_RUNTIME_PROFILE: 'offline',
+      VECTOR_STORE_PROVIDER: 'LanceDB',
+      LANCEDB_PATH: '/var/lib/satori/lancedb',
+      EMBEDDING_PROVIDER: 'Potion',
+      EMBEDDING_MODEL: 'minishlab/potion-code-16M-v2',
+      EMBEDDING_OUTPUT_DIMENSION: '256',
+      POTION_HELPER_PATH: '/var/lib/satori/potion/helper.js',
+      POTION_MODEL_PATH: '/var/lib/satori/potion/model',
+      POTION_REQUEST_TIMEOUT_MS: '30000',
+    },
+  },
+  {
+    name: 'connected VoyageAI environment',
+    managedEnv: {
+      SATORI_RUNTIME_PROFILE: 'connected',
+      VECTOR_STORE_PROVIDER: 'LanceDB',
+      LANCEDB_PATH: '/var/lib/satori/lancedb',
+      EMBEDDING_PROVIDER: 'VoyageAI',
+      EMBEDDING_MODEL: 'voyage-code-3',
+      EMBEDDING_OUTPUT_DIMENSION: '1024',
+    },
+  },
+  {
+    name: 'empty managed environment',
+    managedEnv: {},
+  },
+];
+
+for (const { name, managedEnv } of managedEnvironmentCases) {
+  test(`installLocalMcpRuntime preserves ${name}`, () => {
+    const repoRoot = makeTempDir();
+    const homeDir = makeTempDir();
+    const runtimeEntry = path.join(repoRoot, 'packages', 'mcp', 'dist', 'index.js');
+    const launcherPath = path.join(homeDir, '.satori', 'bin', 'satori-mcp.js');
+    fs.mkdirSync(path.dirname(runtimeEntry), { recursive: true });
+    fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+    fs.writeFileSync(runtimeEntry, '#!/usr/bin/env node\n', 'utf8');
+    fs.writeFileSync(launcherPath, buildLauncherScript({
+      command: '/usr/bin/old-node',
+      args: ['/old/packages/mcp/dist/index.js'],
+      managedEnv,
+    }), 'utf8');
+
+    try {
+      installLocalMcpRuntime({
+        repoRoot,
+        homeDir,
+        nodePath: '/usr/bin/node',
+        noBuild: true,
+        logger: { log: () => {} },
+      });
+
+      const launcher = fs.readFileSync(launcherPath, 'utf8');
+      assert.match(launcher, /const command = "\/usr\/bin\/node"/);
+      assert.match(launcher, new RegExp(runtimeEntry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.deepEqual(parseManagedLauncherEnvironment(launcher), managedEnv);
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+}
