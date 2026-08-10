@@ -1,11 +1,17 @@
 import crypto from "node:crypto";
+import * as fs from "node:fs/promises";
 import path from "node:path";
 import type {
     RelationshipRecord,
     SymbolRecord,
     SymbolRegistry,
 } from "@zokizuan/satori-core";
+import {
+    readStableRootBoundFileWindow,
+    RootBoundFileWindowLimitError,
+} from "@zokizuan/satori-core";
 import { readCurrentSourceEvidence } from "./current-source-symbols.js";
+import { READ_FILE_MAX_BYTES_DEFAULT } from "./published-source-reader.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import type { SearchCandidateRole } from "./search-rerank-context.js";
 import type { SearchResultLike } from "./search-lexical-scoring.js";
@@ -32,6 +38,15 @@ import type {
 } from "./search-rerank-projection-result.js";
 
 type CurrentSourceEvidenceReader = typeof readCurrentSourceEvidence;
+
+const RERANK_PROJECTION_WINDOW_MAX_BYTES = 256 * 1024;
+
+interface PublicationBoundSourceEvidence {
+    readonly relativeFile: string;
+    readonly source: string;
+    readonly observedHash: string;
+    readonly sourceStartLine: number;
+}
 
 export function searchRerankCandidateId(result: SearchResultLike): string {
     return [
@@ -76,9 +91,10 @@ async function resolvePublicationBoundEvidence(input: {
     codebaseRoot: string;
     result: SearchResultLike;
     registry: SymbolRegistry;
+    maxSourceBytes?: number;
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<
-    | { ok: true; evidence: NonNullable<Awaited<ReturnType<CurrentSourceEvidenceReader>>> }
+    | { ok: true; evidence: PublicationBoundSourceEvidence }
     | { ok: false; reason: SearchRerankProjectionFailureReason }
 > {
     const owner = resolveCanonicalOwner(input.result, input.registry);
@@ -101,17 +117,64 @@ async function resolvePublicationBoundEvidence(input: {
         return { ok: false, reason: "candidate_span_invalid" };
     }
 
-    let evidence;
+    let currentSourceEvidence;
     try {
-        evidence = await (input.readSourceEvidence ?? readCurrentSourceEvidence)(
+        currentSourceEvidence = await (input.readSourceEvidence ?? readCurrentSourceEvidence)(
             input.codebaseRoot,
             owner.file,
         );
     } catch {
         return { ok: false, reason: "source_unavailable" };
     }
-    if (!evidence) {
+    let evidence: PublicationBoundSourceEvidence;
+    if (currentSourceEvidence) {
+        const maxSourceBytes = input.maxSourceBytes ?? READ_FILE_MAX_BYTES_DEFAULT;
+        if (currentSourceEvidence.sourceBytes.byteLength > maxSourceBytes) {
+            return { ok: false, reason: "source_exceeds_projection_limit" };
+        }
+        evidence = {
+            relativeFile: currentSourceEvidence.relativeFile,
+            source: currentSourceEvidence.source,
+            observedHash: currentSourceEvidence.observedHash,
+            sourceStartLine: 1,
+        };
+    } else if (input.readSourceEvidence) {
         return { ok: false, reason: "source_unavailable" };
+    } else {
+        try {
+            const canonicalRoot = await fs.realpath(input.codebaseRoot);
+            const window = await readStableRootBoundFileWindow({
+                canonicalRoot,
+                relativePath: owner.file,
+                requestedLineRange: {
+                    startLine: startLine as number,
+                    endLine: endLine as number,
+                },
+                maxFileBytes: input.maxSourceBytes ?? READ_FILE_MAX_BYTES_DEFAULT,
+                maxWindowBytes: RERANK_PROJECTION_WINDOW_MAX_BYTES,
+            });
+            const originalLineRange = window.originalLineRange;
+            if (
+                originalLineRange === null
+                || originalLineRange.startLine !== startLine
+                || originalLineRange.endLine !== endLine
+            ) {
+                return { ok: false, reason: "source_unavailable" };
+            }
+            evidence = {
+                relativeFile: window.normalizedRelativePath,
+                source: window.utf8Window,
+                observedHash: window.rawByteSha256,
+                sourceStartLine: originalLineRange.startLine,
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                reason: error instanceof RootBoundFileWindowLimitError
+                    ? "source_exceeds_projection_limit"
+                    : "source_unavailable",
+            };
+        }
     }
     if (
         evidence.relativeFile !== owner.file
@@ -120,6 +183,16 @@ async function resolvePublicationBoundEvidence(input: {
         return { ok: false, reason: "source_hash_mismatch" };
     }
     return { ok: true, evidence };
+}
+
+function localCandidateSpan(input: {
+    result: SearchResultLike;
+    evidence: PublicationBoundSourceEvidence;
+}): { startLine: number; endLine: number } {
+    return {
+        startLine: (input.result.startLine as number) - input.evidence.sourceStartLine + 1,
+        endLine: (input.result.endLine as number) - input.evidence.sourceStartLine + 1,
+    };
 }
 
 function success(
@@ -146,6 +219,7 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
     result: SearchResultLike;
     registry: SymbolRegistry;
     relationships?: readonly RelationshipRecord[];
+    maxSourceBytes?: number;
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<SearchRerankProjectionResult> {
     const { candidateId } = input;
@@ -161,10 +235,7 @@ export async function projectPublicationBoundSearchRerankDocumentV2(input: {
             canonicalSymbolLabel:
                 input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
             content: resolved.evidence.source,
-            symbolSpan: {
-                startLine: input.result.startLine as number,
-                endLine: input.result.endLine as number,
-            },
+            symbolSpan: localCandidateSpan({ result: input.result, evidence: resolved.evidence }),
             query: input.semanticQuery,
         }).text;
     } catch {
@@ -180,6 +251,7 @@ export async function projectPublicationBoundSearchRerankDocumentV3(input: {
     result: SearchResultLike;
     registry: SymbolRegistry;
     relationships?: readonly RelationshipRecord[];
+    maxSourceBytes?: number;
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<SearchRerankProjectionResult> {
     const { candidateId } = input;
@@ -205,10 +277,7 @@ export async function projectPublicationBoundSearchRerankDocumentV3(input: {
             canonicalSymbolLabel:
                 input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
             content: resolved.evidence.source,
-            symbolSpan: {
-                startLine: input.result.startLine as number,
-                endLine: input.result.endLine as number,
-            },
+            symbolSpan: localCandidateSpan({ result: input.result, evidence: resolved.evidence }),
             query: input.semanticQuery,
         }).text;
     } catch {
@@ -226,6 +295,7 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
     relationships?: readonly RelationshipRecord[];
     preparedStructuralRelationships?: PreparedSearchRerankStructuralRelationships;
     structuralContextStatus?: SearchRerankStructuralContextStatus;
+    maxSourceBytes?: number;
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<SearchRerankProjectionResult> {
     const { candidateId } = input;
@@ -258,10 +328,7 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
             canonicalSymbolLabel:
                 input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
             content: resolved.evidence.source,
-            symbolSpan: {
-                startLine: input.result.startLine as number,
-                endLine: input.result.endLine as number,
-            },
+            symbolSpan: localCandidateSpan({ result: input.result, evidence: resolved.evidence }),
             query: input.semanticQuery,
             structuralContext,
         }).text;
@@ -284,6 +351,7 @@ export async function buildPublicationBoundSearchRerankDocumentV2(input: {
     semanticQuery: string;
     result: SearchResultLike;
     registry: SymbolRegistry;
+    maxSourceBytes?: number;
     readSourceEvidence?: CurrentSourceEvidenceReader;
 }): Promise<string | undefined> {
     const result = await projectPublicationBoundSearchRerankDocumentV2({

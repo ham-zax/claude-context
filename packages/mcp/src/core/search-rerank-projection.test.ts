@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
     buildSymbolRegistry,
@@ -290,6 +293,22 @@ test("typed projection reports source_hash_mismatch for stale or foreign evidenc
     }), { ok: false, candidateId, reason: "source_hash_mismatch" });
 });
 
+test("typed projection enforces the configured source limit on small-file evidence", async () => {
+    assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+        candidateId,
+        codebaseRoot: "/repo",
+        semanticQuery: "owner",
+        result: ownedResult(),
+        registry: registry(),
+        maxSourceBytes: Buffer.byteLength(source, "utf8") - 1,
+        readSourceEvidence: async () => evidence(),
+    }), {
+        ok: false,
+        candidateId,
+        reason: "source_exceeds_projection_limit",
+    });
+});
+
 test("typed projection reports projection_contract_failed when the v2 contract throws", async () => {
     const outcome = await projectPublicationBoundSearchRerankDocumentV2({
         candidateId,
@@ -420,4 +439,106 @@ test("typed v4 projection distinguishes explicit empty relationships from incomp
     });
     assert.equal(incompatible.ok, true);
     if (incompatible.ok) assert.equal(incompatible.structuralContextStatus, "incompatible");
+});
+
+test("publication-bound v2 v3 and v4 projection retain large-file candidates through a bounded source window", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-large-rerank-projection-"));
+    const relativeFile = "src/large-owner.ts";
+    const absoluteFile = path.join(root, relativeFile);
+    const prefixLines = Array.from({ length: 3_000 }, (_, index) => (
+        `// padding ${String(index).padStart(4, "0")} ${"x".repeat(90)}`
+    ));
+    const ownerLines = [
+        "export function largeOwner() {",
+        "  return executeLargeOwner();",
+        "}",
+    ];
+    const largeSource = [...prefixLines, ...ownerLines].join("\n");
+    const largeHash = crypto.createHash("sha256").update(largeSource, "utf8").digest("hex");
+    const largeOwner: SymbolRecord = {
+        symbolKey: `${relativeFile}:largeOwner`,
+        symbolInstanceId: "large-owner-instance",
+        language: "typescript",
+        kind: "function",
+        name: "largeOwner",
+        qualifiedName: "largeOwner",
+        label: "largeOwner",
+        file: relativeFile,
+        span: { startLine: 3_001, endLine: 3_003 },
+        parentQualifiedNamePath: [],
+        fileHash: largeHash,
+        extractorVersion: "test",
+    };
+
+    try {
+        fs.mkdirSync(path.dirname(absoluteFile), { recursive: true });
+        fs.writeFileSync(absoluteFile, largeSource, "utf8");
+        assert.ok(fs.statSync(absoluteFile).size > 256 * 1024);
+        const largeRegistry = buildSymbolRegistry({
+            manifest: {
+                schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
+                normalizedRootPath: root,
+                rootFingerprint: "fingerprint",
+                indexPolicyHash: "policy",
+                languageRouterVersion: "test",
+                extractorVersion: "test",
+                relationshipVersion: "test",
+                builtAt: "2026-08-10T00:00:00.000Z",
+                files: [{
+                    path: relativeFile,
+                    hash: largeHash,
+                    language: "typescript",
+                    symbolCount: 1,
+                    definitionStatus: "definitions_present",
+                }],
+            },
+            symbols: [largeOwner],
+        });
+        const largeResult: SearchResultLike = {
+            content: ownerLines.join("\n"),
+            relativePath: relativeFile,
+            language: "typescript",
+            score: 1,
+            startLine: 3_001,
+            endLine: 3_003,
+            symbolKind: "function",
+            symbolLabel: "largeOwner",
+            ownerSymbolInstanceId: largeOwner.symbolInstanceId,
+        };
+        const common = {
+            candidateId: searchRerankCandidateId(largeResult),
+            codebaseRoot: root,
+            semanticQuery: "execute large owner",
+            result: largeResult,
+            registry: largeRegistry,
+        };
+
+        for (const project of [
+            projectPublicationBoundSearchRerankDocumentV2,
+            projectPublicationBoundSearchRerankDocumentV3,
+            projectPublicationBoundSearchRerankDocumentV4,
+        ]) {
+            const outcome = await project(common);
+            assert.equal(outcome.ok, true);
+            if (outcome.ok) assert.match(outcome.document, /executeLargeOwner/);
+        }
+
+        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+            ...common,
+            maxSourceBytes: 256 * 1024,
+        }), {
+            ok: false,
+            candidateId: common.candidateId,
+            reason: "source_exceeds_projection_limit",
+        });
+
+        fs.appendFileSync(absoluteFile, "\n// changed after publication", "utf8");
+        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2(common), {
+            ok: false,
+            candidateId: common.candidateId,
+            reason: "source_hash_mismatch",
+        });
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
 });

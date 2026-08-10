@@ -10,6 +10,7 @@ export { LexicalRetrievalModeUnsupportedError } from './core/semantic-search-ser
 export { VECTOR_CANDIDATE_RRF_K_V1 } from './core/vector-candidate-fusion';
 export * from './sync/synchronizer';
 export * from './sync/root-bound-fs';
+export * from './sync/root-bound-file-window';
 export * from './net/fetch-with-deadline';
 export * from './measurement/source-ledger';
 export * from './utils';

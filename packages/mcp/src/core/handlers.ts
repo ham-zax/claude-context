@@ -226,6 +226,7 @@ import {
     searchRerankCandidateId,
 } from "./search-rerank-projection.js";
 import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
+import { READ_FILE_MAX_BYTES_DEFAULT } from "./published-source-reader.js";
 import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
 import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
 import { SEARCH_RERANK_DOCUMENT_V4_POLICY } from "./search-rerank-document-v4.js";
@@ -890,6 +891,7 @@ export class ToolHandlers {
     private readonly vectorBackendMaintenance: VectorBackendMaintenance;
     private readonly relationshipBackedCallGraph: RelationshipBackedCallGraph;
     private readonly toolResponseBuilders: ToolResponseBuilders;
+    private readonly readFileMaxBytes: number;
 
     constructor(
         context: Context,
@@ -916,6 +918,7 @@ export class ToolHandlers {
         this.now = now;
         this.callGraphManager = callGraphManager || new CallGraphSidecarManager(runtimeFingerprint, { now });
         this.reranker = reranker || null;
+        this.readFileMaxBytes = Math.max(1, options?.readFileMaxBytes ?? READ_FILE_MAX_BYTES_DEFAULT);
         this.searchContinuationCoordinator = searchContinuationCoordinator
             ?? new SearchContinuationCoordinator();
         this.searchContinuationCoordinator.registerOwner(this);
@@ -5153,6 +5156,7 @@ export class ToolHandlers {
                                 candidateId,
                                 codebaseRoot: effectiveRoot,
                                 semanticQuery: rerankQuery,
+                                maxSourceBytes: this.readFileMaxBytes,
                                 result,
                                 registry: searchSymbolRegistry,
                                 ...(structuralContext?.preparedRelationships

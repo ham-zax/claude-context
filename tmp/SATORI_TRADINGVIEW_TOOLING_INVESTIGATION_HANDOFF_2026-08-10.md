@@ -728,8 +728,10 @@ manifest; and the durable policy must no longer contain the retired rule.
 
 ## 22. Reranker projection rejects indexed candidates from files above 256 KiB
 
-- **Status (observed 2026-08-10 on 6.9.0):** confirmed against the current
-  repository-backed offline runtime on `tradingview_ratio`.
+- **Status (fixed 2026-08-10 on the current branch):** the confirmed 6.9.0
+  failure now has a root-bound streamed projection path and focused regression
+  coverage. No ranking, admission, provider-order, or projection-selection
+  policy changed.
 - **Live symptom:** `must:tzinfo must:replace` admitted 32 reranker candidates
   but projected only 29. The response reported three
   `source_unavailable` failures and emitted `RERANKER_INPUT_DEGRADED`. The first
@@ -737,9 +739,10 @@ manifest; and the durable policy must no longer contain the retired rule.
   `scripts/ops/phase6p_pair_relationship_observation_source.py`. The file is
   tracked, the span exists, and a direct bounded `read_file` of that span
   succeeds.
-- **Demonstrated mismatch:** that file is 525,434 bytes. Index policy accepts
-  text files up to 1 MiB by default (`packages/core/src/config/index-policy.ts`),
-  and published-source reads default to 8 MiB
+- **Demonstrated mismatch:** that file is 525,434 bytes. Its recognized Python
+  extension is index-eligible independently of the 1 MiB fallback all-text cap;
+  `SATORI_ALL_TEXT_MAX_BYTES` is not a universal index ceiling. Published-source
+  reads default to 8 MiB
   (`packages/mcp/src/core/published-source-reader.ts`), but
   `readCurrentSourceEvidence()` hard-caps the whole-file evidence read at
   256 KiB (`packages/mcp/src/core/current-source-symbols.ts:15,59-87`).
@@ -789,10 +792,39 @@ manifest; and the durable policy must no longer contain the retired rule.
   integration table and diagnostics. Hash disagreement remains
   `source_hash_mismatch`.
 
-The first implementation batch should be the Core root-bound primitive and its
-race tests. The second should adapt publication-bound projection and add one
-real 256 KiB–1 MiB v2/v3/v4 fixture. No ranking, admission, provider-order, or
-projection-text tuning belongs in this issue.
+### Issue 22 implementation closure
+
+- `readStableRootBoundFileWindow()` is the reusable Core owner. It opens a
+  root-confined regular file without following the final symlink, binds a
+  publishable file identity and observed size, streams exactly the observed
+  bytes through SHA-256, retains only the requested bounded line window,
+  rejects truncation/growth, and revalidates descriptor plus current pathname
+  identity before returning evidence.
+- Publication-bound projection v2/v3/v4 keeps the existing whole-source path
+  byte-for-byte for files within the 256 KiB current-symbol reader. Only an
+  unavailable default read falls back to the streamed window; injected readers
+  retain their existing fail-closed contract. The candidate span is remapped
+  into the retained window while owner and full-file hash checks remain against
+  canonical publication metadata.
+- The maximum full file accepted by this projection path is the existing
+  configured published-source/read ceiling (`READ_FILE_MAX_BYTES`, 8 MiB by
+  default), which is already part of runtime configuration. A file or retained
+  window above its policy limit reports
+  `source_exceeds_projection_limit`; hash disagreement remains
+  `source_hash_mismatch`.
+- Regression coverage uses a real source above 256 KiB with a three-line owner
+  and proves v2/v3/v4 success, bounded retention, complete raw-byte SHA-256,
+  typed limit failure, hash-mismatch failure, multibyte lines spanning stream
+  chunks, and the existing descriptor/path replacement and growth rejection
+  primitives.
+- Focused verification passed: Core typecheck; 19 root-bound/window tests; Core
+  clean build; MCP typecheck; 41 projection/native-rerank tests; and 187 handler
+  search-scope tests.
+
+The implementation remains split at the intended ownership boundary: the Core
+root-bound primitive and race contract, then MCP publication-bound projection
+with a real source above 256 KiB. No ranking, admission, provider-order, or
+projection-text tuning was included.
 
 ## 23. Must-lane admission can stop at the chunk limit before filling grouped results
 
@@ -918,18 +950,12 @@ lane. `OR` syntax remains out of scope.
 
 ### Confirmed open work
 
-1. **Issue 22 — large-file reranker projection:** create a fixture between
-   256 KiB and the accepted 1 MiB index ceiling with a small canonical symbol.
-   Implement and test the root-bound streamed-hash/bounded-window primitive
-   before adapting projection v2/v3/v4. Preserve source-replacement and
-   hash-mismatch fail-closed behavior; do not tune ranking, admission, provider
-   order, or relevance.
-2. **Issue 23 — must-lane grouped shortfall:** first add a failing execution
+1. **Issue 23 — must-lane grouped shortfall:** first add a failing execution
    fixture with at least 15 matching chunks collapsing below a ten-group caller
    limit plus a recoverable lane-only family. Reserve the bounded must lane for
    grouped mode and keep raw chunk-limit skipping. Keep conjunctive `all_terms`
    semantics and deterministic final grouping. Do not implement `OR`.
-3. **Issue 24 — progress/readiness contract:** create a coordinator test that
+2. **Issue 24 — progress/readiness contract:** create a coordinator test that
    pauses between Core's final progress callback and marker/navigation
    publication. Clamp active MCP progress below 100 and retain terminal
    completion in the existing indexed/completed transition. Do not weaken

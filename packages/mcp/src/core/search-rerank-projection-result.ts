@@ -10,6 +10,7 @@ export type SearchRerankProjectionFailureReason =
     | "owner_not_found"
     | "candidate_span_invalid"
     | "source_unavailable"
+    | "source_exceeds_projection_limit"
     | "source_hash_mismatch"
     | "projection_contract_failed";
 
