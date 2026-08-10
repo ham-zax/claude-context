@@ -2950,6 +2950,9 @@ export async function executeInstallCommand(
                     );
                 }
             }
+            if (!command.dryRun) {
+                assertAutoClientTargets(command.client, homeDir, env);
+            }
         }
         // Read mutable client/profile files only after awaited preflight completes.
         plan = createInstallPlan(command, {

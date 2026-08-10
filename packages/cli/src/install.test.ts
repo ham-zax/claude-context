@@ -3123,6 +3123,59 @@ test("auto install fails before runtime, model, preflight, or launcher work when
     });
 });
 
+test("auto install revalidates client detection after preflight and removes its candidate runtime", async () => {
+    await withTempHome(async (homeDir) => {
+        const codexRoot = path.join(homeDir, ".codex");
+        fs.mkdirSync(codexRoot, { recursive: true });
+        const installRuntime = installRuntimePackageStub("dist/candidate-runtime.mjs");
+        let candidateRuntimeRoot: string | undefined;
+        let preflightCalls = 0;
+
+        await assert.rejects(
+            () => executeInstallCommandProduction({
+                kind: "install",
+                client: "auto",
+                runtime: "voyage",
+                vectorStore: "LanceDB",
+                dryRun: false,
+            }, {
+                homeDir,
+                packageSpecifier: EXPECTED_PACKAGE_SPECIFIER,
+                env: { PATH: "" },
+                execFileSyncImpl: ((command: string, args: string[]) => {
+                    const prefixIndex = args.indexOf("--prefix");
+                    const runtimeRoot = args[prefixIndex + 1];
+                    assert.equal(typeof runtimeRoot, "string");
+                    candidateRuntimeRoot = runtimeRoot;
+                    return installRuntime(command, args);
+                }) as never,
+                preflightRunner: async () => {
+                    preflightCalls += 1;
+                    fs.rmSync(codexRoot, { recursive: true, force: true });
+                    return {
+                        runtimeEnvironment: Object.freeze({
+                            SATORI_RUNTIME_PROFILE: "connected",
+                            VECTOR_STORE_PROVIDER: "LanceDB",
+                        }),
+                    };
+                },
+                preflightDependencies: {
+                    probeCandidateRuntime: async () => {},
+                },
+            }),
+            (error: unknown) => error instanceof CliError
+                && error.token === "E_NO_CLIENTS_DETECTED"
+                && error.message.includes("satori install --client all"),
+        );
+
+        assert.equal(preflightCalls, 1);
+        assert.ok(candidateRuntimeRoot, "expected a candidate runtime to be installed");
+        assert.equal(fs.existsSync(candidateRuntimeRoot), false);
+        assert.equal(fs.existsSync(launcherPath(homeDir)), false);
+        assert.equal(fs.existsSync(path.join(codexRoot, "config.toml")), false);
+    });
+});
+
 test("managed client inspection reuses installer parsers and reports stale wiring", async () => {
     await withTempHome(async (homeDir) => {
         await executeInstallCommand({
