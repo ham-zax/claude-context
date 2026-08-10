@@ -105,6 +105,57 @@ test('unpublished target remains unchanged', () => {
   assert.equal(plan.entries.find((entry) => entry.key === 'core').reason, 'unchanged, already unpublished');
 });
 
+test('prepared target is strengthened when a later request needs a larger bump', () => {
+  const publishedStableVersions = {
+    core: ['3.6.1'],
+    mcp: [],
+    cli: [],
+  };
+  const strengthened = computeBumpPlan({
+    target: 'core',
+    bump: 'minor',
+    localVersions: { ...LOCAL_VERSIONS, core: '3.6.2' },
+    publishedStableVersions,
+    isVersionPublishedImpl: (packageName, version) => (
+      packageName === '@zokizuan/satori-core' && publishedStableVersions.core.includes(version)
+    ),
+  });
+  assert.equal(strengthened.entries.find((entry) => entry.key === 'core').to, '3.7.0');
+  assert.equal(
+    strengthened.entries.find((entry) => entry.key === 'core').reason,
+    'strengthened to requested minor',
+  );
+
+  const plan = computeBumpPlan({
+    target: 'core',
+    bump: 'minor',
+    localVersions: { ...LOCAL_VERSIONS, core: '3.7.0' },
+    publishedStableVersions,
+    isVersionPublishedImpl: (packageName, version) => (
+      packageName === '@zokizuan/satori-core' && publishedStableVersions.core.includes(version)
+    ),
+  });
+  assert.equal(plan.entries.find((entry) => entry.key === 'core').to, '3.7.0');
+});
+
+test('stale local target bumps from the registry maximum', () => {
+  const publishedStableVersions = {
+    core: ['3.6.1', '3.7.0'],
+    mcp: [],
+    cli: [],
+  };
+  const plan = computeBumpPlan({
+    target: 'core',
+    bump: 'patch',
+    localVersions: { ...LOCAL_VERSIONS, core: '3.6.2' },
+    publishedStableVersions,
+    isVersionPublishedImpl: (packageName, version) => (
+      packageName === '@zokizuan/satori-core' && publishedStableVersions.core.includes(version)
+    ),
+  });
+  assert.equal(plan.entries.find((entry) => entry.key === 'core').to, '3.7.1');
+});
+
 test('published downstream receives a patch bump', () => {
   const plan = computeBumpPlan({
     target: 'core',
@@ -368,8 +419,10 @@ test('defaultIsVersionPublishedImpl interprets 404 as unpublished and failures a
 
 test('defaultIsVersionPublishedImpl uses a quiet sanitized npm probe', () => {
   const recordedOptions = [];
+  const recordedArgs = [];
   const runner = (command, args, options) => {
     recordedOptions.push(options);
+    recordedArgs.push(args);
     throw { status: 1, stderr: 'npm error code E404\nversion not found' };
   };
   const isPublished = defaultIsVersionPublishedImpl(runner);
@@ -378,6 +431,12 @@ test('defaultIsVersionPublishedImpl uses a quiet sanitized npm probe', () => {
   assert.deepEqual(recordedOptions[0].stdio, ['ignore', 'pipe', 'pipe']);
   assert.deepEqual(recordedOptions[0].env, createNpmChildEnvironment(process.env));
   assert.equal(recordedOptions[0].encoding, 'utf8');
+  assert.deepEqual(recordedArgs[0].slice(-2), ['--registry', 'https://registry.npmjs.org/']);
+});
+
+test('defaultIsVersionPublishedImpl accepts npm 12 single-result arrays', () => {
+  const isPublished = defaultIsVersionPublishedImpl(() => JSON.stringify(['3.6.1']));
+  assert.equal(isPublished('@zokizuan/satori-core', '3.6.1'), true);
 });
 
 test('usage errors exit with usage message', async () => {

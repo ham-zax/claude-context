@@ -67,15 +67,19 @@ versions:check
     fast, offline literal current-version reference validation
 
 release:check
-    packs all packages, checks exact dependency pins, and compares any
-    already-published same-version package against the locally packed artifact
+    runs the complete release qualification suite, then verifies the packed
+    graph against the production registry
 
 release:bump
     previews or applies an idempotent coordinated bump plan
 
 release:all
-    validates, builds, smokes, publishes only unpublished packages in
-    Core -> MCP -> CLI order, and verifies npm after each publication
+    qualifies once, publishes the retained verified tarballs in
+    Core -> MCP -> CLI order, and verifies the production latest closure
+
+release:verify
+    verifies the exact local versions, latest tags, and published dependency
+    closure on the production registry
 ```
 
 ### `pnpm run versions:check`
@@ -87,9 +91,15 @@ manifest version. This is the fast literal-reference gate; it is part of
 
 ### `pnpm run release:check`
 
-Packs Core, MCP and CLI into a temporary directory, verifies the packed
-dependency graph is exact, queries npm for the published artifact of each local
-version, and compares normalized packed file trees.
+Requires a clean working tree, then runs `pnpm check`, the full Core, MCP, CLI,
+and release-script tests, the MCP request-contract, documentation, and manifest
+checks, a clean root build, and both packed release smokes. It refuses the
+candidate if any of those commands dirties the working tree.
+
+After qualification, it packs Core, MCP and CLI into a temporary directory,
+verifies the packed dependency graph is exact, queries the production registry
+for every published stable version, and compares normalized packed file trees
+when the exact local version is already published.
 
 A release graph is valid when every package is either:
 
@@ -97,9 +107,12 @@ A release graph is valid when every package is either:
 - `published-identical` — the version exists and the local packed artifact is
   byte-for-byte equivalent after normalized extraction, so it must be skipped.
 
-Any `stale-version` (same version already published with a different artifact)
-or `invalid-graph` (packed dependencies do not match local versions) makes the
-release invalid, and `release:check` exits nonzero.
+Any `stale-version` (same version already published with a different artifact),
+`invalid-graph` (packed dependencies do not match local versions),
+`non-monotonic-version` (an unpublished local version is not greater than the
+registry's highest stable version), or `superseded-version` (an identical local
+artifact is older than the registry maximum) makes the release invalid, and
+`release:check` exits nonzero.
 
 The packed artifact, not Git tags or source timestamps, is the release truth:
 
@@ -154,8 +167,11 @@ CLI-only changes
 ```
 
 "Receive an unpublished version" does not always mean increment again. A local
-version that is already prepared and not yet on npm remains unchanged and
-absorbs additional coordinated changes.
+version that is already prepared, greater than the registry maximum, and high
+enough to satisfy the requested major, minor, or patch intent remains unchanged
+and absorbs additional coordinated changes. If a later explicit bump request is
+stronger than the prepared version, the command advances it to the requested
+minimum instead of making the result depend on bump-command order.
 
 Usage:
 
@@ -188,16 +204,20 @@ CLI   1.9.0 -> unchanged, already unpublished
 
 The single supported publication path. It runs:
 
-1. `versions:check`;
-2. `release:check` (via the graph checker);
-3. package builds and both release smokes;
-4. publication of only unpublished packages in Core -> MCP -> CLI order;
-5. post-publish npm verification of each package before the next one is
-   published.
+1. the same complete qualification owned by `release:check`;
+2. publication of only the retained, already-verified tarballs in Core -> MCP
+   -> CLI order;
+3. exact-version and dependency-pin verification after each package;
+4. final verification that all exact versions and all three `latest` tags form
+   the expected local Core -> MCP -> CLI closure.
 
-Preconditions: clean working tree, `master` branch, no stale or
-invalid package, and at least one unpublished package. Already-published
-identical packages are skipped.
+Preconditions: clean working tree, `master` branch, `HEAD` exactly equal to the
+explicitly fetched canonical `refs/remotes/origin/master`, and a valid
+monotonic release graph. Already-published identical packages are skipped only
+after their `latest` tags are verified before the first registry write. An
+intentional emergency release from locally-ahead commits requires the explicit
+`--allow-unpushed-head` override; canonical `origin/master` must still be an
+ancestor of `HEAD`, so stale or diverged history is rejected.
 
 After publishing Core, `release:all` polls until `@zokizuan/satori-core@<version>`
 is visible on npm, then publishes MCP, then verifies that the published MCP pins
@@ -206,14 +226,34 @@ command is never retried automatically. If verification fails after a
 successful publish, the run stops and reports exactly which packages were
 already published.
 
-The individual package publish scripts remain available as explicit
-maintenance commands, but normal publication uses `release:all`:
+Registry reads normalize and validate both npm 11 and npm 12 `npm view --json`
+shapes. Final propagation checks retry transient network, not-found, and
+temporarily stale registry state, while authentication failures and malformed
+responses fail immediately.
+
+All registry probes, tarball downloads, and publication commands are pinned to
+`https://registry.npmjs.org/`; publication explicitly uses `--tag latest` and
+`--access public`. Package `publishConfig` repeats those constraints as
+defense-in-depth.
+
+The individual package publish scripts are deliberately disabled. Publication
+must use `release:all`:
 
 ```bash
 pnpm run release:core
 pnpm run release:mcp
 pnpm run release:cli
 ```
+
+Each command exits nonzero with a message directing the operator to
+`pnpm run release:all`.
+
+### `pnpm run release:verify`
+
+Reads the local Core, MCP, and CLI versions and fails unless every exact version
+exists on the production registry, every package's `latest` tag equals that
+version, published MCP pins the exact local Core, and published CLI pins the
+exact local Core and MCP.
 
 ## Rules for Manual Publication
 
@@ -228,9 +268,8 @@ pnpm run release:cli
   in the packed (published) manifests;
 - do not publish at all when npm metadata cannot be verified.
 
-> The earlier "What to Publish" table, packed-release smoke checks and
-> `release:verify` guidance are superseded by the enforced graph above. The
-> release smokes still run inside `release:all` before publication.
+The release smokes run inside both `release:check` and `release:all` before any
+publication.
 
 ## User-Visible Upgrade Behavior
 

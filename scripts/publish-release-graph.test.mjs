@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { publishReleaseGraph } from './publish-release-graph.mjs';
+import {
+  CANONICAL_MASTER_FETCH_ARGS,
+  publishReleaseGraph,
+} from './publish-release-graph.mjs';
 import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
 
 const NAMES = {
@@ -66,24 +69,54 @@ function runnerOptions(extra = {}) {
   const publishCalls = [];
   const viewCalls = [];
   const sleepCalls = [];
+  const verifyReleaseCalls = [];
+  const fetchCalls = [];
+  const ancestorCalls = [];
+  const skippedLatestCalls = [];
   let coreVisibleAfter = 0;
   let mcpDependencies = { '@zokizuan/satori-core': VERSIONS.core };
   let cliDependencies = { '@zokizuan/satori-core': VERSIONS.core, '@zokizuan/satori-mcp': VERSIONS.mcp };
+  const gitStatusImpl = extra.gitStatusImpl || (() => '');
+  const versionsCheckImpl = extra.versionsCheckImpl || (() => '');
+  const buildImpl = extra.buildImpl || (() => '');
+  const smokeMcpImpl = extra.smokeMcpImpl || (() => '');
+  const smokeCliImpl = extra.smokeCliImpl || (() => '');
+  const checkGraphImpl = extra.checkGraphImpl || retainedReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' });
   const options = {
     log: extra.log || (() => {}),
-    gitStatusImpl: extra.gitStatusImpl || (() => ''),
+    gitStatusImpl,
     branchImpl: extra.branchImpl || (() => 'master'),
-    versionsCheckImpl: extra.versionsCheckImpl || (() => ''),
-    buildImpl: extra.buildImpl || (() => ''),
-    smokeMcpImpl: extra.smokeMcpImpl || (() => ''),
-    smokeCliImpl: extra.smokeCliImpl || (() => ''),
-    checkGraphImpl: extra.checkGraphImpl || retainedReport({ core: 'unpublished', mcp: 'unpublished', cli: 'unpublished' }),
+    fetchOriginMasterImpl: extra.fetchOriginMasterImpl || (() => { fetchCalls.push(true); }),
+    headImpl: extra.headImpl || (() => 'release-head'),
+    originMasterImpl: extra.originMasterImpl || (() => 'release-head'),
+    originMasterIsAncestorImpl: extra.originMasterIsAncestorImpl || (() => {
+      ancestorCalls.push(true);
+      return true;
+    }),
+    qualifyImpl: extra.qualifyImpl || (async (tempRoot) => {
+      versionsCheckImpl();
+      buildImpl();
+      smokeMcpImpl();
+      smokeCliImpl();
+      const status = String(gitStatusImpl()).trim();
+      if (status !== '') {
+        throw new Error(`Working tree became dirty during release qualification:\n${status}`);
+      }
+      return checkGraphImpl(extra.cwd || process.cwd(), tempRoot);
+    }),
+    verifyReleaseImpl: extra.verifyReleaseImpl || ((localVersions) => {
+      verifyReleaseCalls.push(localVersions);
+    }),
+    verifySkippedLatestImpl: extra.verifySkippedLatestImpl || ((packageKeys, localVersions) => {
+      skippedLatestCalls.push({ packageKeys, localVersions });
+    }),
     sleepImpl: (milliseconds) => {
       sleepCalls.push(milliseconds);
       return Promise.resolve();
     },
     ...(extra.cwd ? { cwd: extra.cwd } : {}),
     ...(extra.execFileSyncImpl ? { execFileSyncImpl: extra.execFileSyncImpl } : {}),
+    ...(extra.allowUnpushedHead === true ? { allowUnpushedHead: true } : {}),
   };
   if (!extra.useDefaultExecImpls) {
     options.publishImpl = extra.publishImpl || ((packageName) => {
@@ -105,7 +138,15 @@ function runnerOptions(extra = {}) {
       return cliDependencies;
     });
   }
-  options.records = { publishCalls, viewCalls, sleepCalls };
+  options.records = {
+    publishCalls,
+    viewCalls,
+    sleepCalls,
+    verifyReleaseCalls,
+    fetchCalls,
+    ancestorCalls,
+    skippedLatestCalls,
+  };
   return options;
 }
 
@@ -123,7 +164,19 @@ test('published-identical Core is skipped while MCP/CLI publish', async () => {
   });
   const result = await publishReleaseGraph(options);
   assert.deepEqual(options.records.publishCalls, ['@zokizuan/satori-mcp', '@zokizuan/satori-cli']);
+  assert.deepEqual(options.records.skippedLatestCalls, [{ packageKeys: ['core'], localVersions: VERSIONS }]);
   assert.deepEqual(result.skipped, ['core']);
+});
+
+test('stale latest on a skipped package prevents the first registry write', async () => {
+  const options = runnerOptions({
+    checkGraphImpl: retainedReport({ core: 'published-identical', mcp: 'unpublished', cli: 'unpublished' }),
+    verifySkippedLatestImpl: () => {
+      throw new Error('@zokizuan/satori-core@latest is stale');
+    },
+  });
+  await assert.rejects(publishReleaseGraph(options), /satori-core@latest is stale/);
+  assert.deepEqual(options.records.publishCalls, []);
 });
 
 test('CLI-only release skips Core and MCP', async () => {
@@ -175,6 +228,53 @@ test('dirty tree publishes nothing', async () => {
 test('non-master branch publishes nothing', async () => {
   const options = runnerOptions({ branchImpl: () => 'develop' });
   await assert.rejects(publishReleaseGraph(options), /expected master/);
+  assert.deepEqual(options.records.publishCalls, []);
+});
+
+test('canonical master fetch has an explicit destination and ignores tags', () => {
+  assert.deepEqual(CANONICAL_MASTER_FETCH_ARGS, [
+    'fetch',
+    '--no-tags',
+    'origin',
+    '+refs/heads/master:refs/remotes/origin/master',
+  ]);
+});
+
+test('unpushed or diverged master publishes nothing', async () => {
+  const options = runnerOptions({
+    headImpl: () => 'local-head',
+    originMasterImpl: () => 'origin-head',
+  });
+  await assert.rejects(publishReleaseGraph(options), /does not equal refs\/remotes\/origin\/master/);
+  assert.deepEqual(options.records.publishCalls, []);
+});
+
+test('explicit emergency override permits only a locally-ahead master', async () => {
+  const options = runnerOptions({
+    headImpl: () => 'local-head',
+    originMasterImpl: () => 'origin-head',
+    allowUnpushedHead: true,
+  });
+  const result = await publishReleaseGraph(options);
+  assert.equal(result.published.length, 3);
+  assert.equal(options.records.fetchCalls.length, 1);
+  assert.equal(options.records.ancestorCalls.length, 1);
+});
+
+test('explicit emergency override rejects stale or diverged history', async () => {
+  let fetched = 0;
+  const options = runnerOptions({
+    headImpl: () => 'local-head',
+    originMasterImpl: () => 'origin-head',
+    originMasterIsAncestorImpl: () => false,
+    fetchOriginMasterImpl: () => { fetched += 1; },
+    allowUnpushedHead: true,
+  });
+  await assert.rejects(
+    publishReleaseGraph(options),
+    /origin\/master .* is not an ancestor of HEAD/,
+  );
+  assert.equal(fetched, 1);
   assert.deepEqual(options.records.publishCalls, []);
 });
 
@@ -288,9 +388,9 @@ test('default publish uses the exact verified tarballs in graph order', async ()
   assert.deepEqual(
     publishCalls.map((call) => call.args),
     [
-      ['publish', tarballs.core, '--access', 'public'],
-      ['publish', tarballs.mcp, '--access', 'public'],
-      ['publish', tarballs.cli, '--access', 'public'],
+      ['publish', tarballs.core, '--registry', 'https://registry.npmjs.org/', '--tag', 'latest', '--access', 'public'],
+      ['publish', tarballs.mcp, '--registry', 'https://registry.npmjs.org/', '--tag', 'latest', '--access', 'public'],
+      ['publish', tarballs.cli, '--registry', 'https://registry.npmjs.org/', '--tag', 'latest', '--access', 'public'],
     ]
   );
   for (const call of publishCalls) {
@@ -304,6 +404,7 @@ test('default publish uses the exact verified tarballs in graph order', async ()
   for (const call of probeCalls) {
     assert.deepEqual(call.callOptions.stdio, REGISTRY_PROBE_STDIO);
     assert.deepEqual(call.callOptions.env, expectedEnv);
+    assert.deepEqual(call.args.slice(-2), ['--registry', 'https://registry.npmjs.org/']);
   }
   const pnpmCalls = calls.filter((call) => call.command === 'pnpm');
   assert.equal(pnpmCalls.length, 4);
@@ -414,11 +515,17 @@ test('dirty tree after build or smokes prevents every publish call', async () =>
   });
   await assert.rejects(
     publishReleaseGraph(options),
-    /Working tree became dirty during build or smokes; refusing to publish/
+    /Working tree became dirty during release qualification/
   );
   assert.equal(statusCalls, 2);
   assert.equal(graphChecked, false);
   assert.deepEqual(options.records.publishCalls, []);
+});
+
+test('publisher verifies the complete release closure after publication', async () => {
+  const options = runnerOptions();
+  await publishReleaseGraph(options);
+  assert.deepEqual(options.records.verifyReleaseCalls, [VERSIONS]);
 });
 
 test('verified tarballs exist during publishing and publisher-owned storage is cleaned after success', async () => {

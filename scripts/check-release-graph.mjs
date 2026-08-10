@@ -11,6 +11,10 @@ import {
   buildReleaseGraphReport,
 } from './release-graph.mjs';
 import { packLocalPackage, fetchPublishedPackage } from './release-package-snapshots.mjs';
+import {
+  createReleaseRegistryClient,
+  registryMaxStableVersion,
+} from './release-registry.mjs';
 
 const CHANGED_ENTRY_LIMIT = 20;
 
@@ -53,6 +57,20 @@ export function printReleaseGraphReport(report, output) {
 
   for (const key of report.invalidPackages) {
     const pkg = report.packages[key];
+    if (pkg.status === 'non-monotonic-version') {
+      output(
+        `${pkg.name} ${pkg.localVersion} is unpublished but is not newer than registry maximum ${pkg.registryMaxStable}. Bump from the registry maximum before publishing.`,
+      );
+      output('');
+      continue;
+    }
+    if (pkg.status === 'superseded-version') {
+      output(
+        `${pkg.name} ${pkg.localVersion} is published-identical but older than registry maximum ${pkg.registryMaxStable}. Release from the current package version.`,
+      );
+      output('');
+      continue;
+    }
     output(
       `${pkg.name} ${pkg.localVersion} is already published, but its locally packed artifact differs. Bump ${RELEASE_PACKAGES[key].name} before publishing this graph.`
     );
@@ -83,6 +101,12 @@ export async function checkReleaseGraph(options = {}) {
     || ((input) => packLocalPackage({ ...input, execFileSyncImpl: options.execFileSyncImpl || execFileSync }));
   const fetchPublishedImpl = options.fetchPublishedImpl
     || ((input) => fetchPublishedPackage({ ...input, execFileSyncImpl: options.execFileSyncImpl || execFileSync }));
+  const registryClient = options.registryClient || createReleaseRegistryClient({
+    cwd,
+    execFileSyncImpl: options.execFileSyncImpl || execFileSync,
+  });
+  const listPublishedStableVersionsImpl = options.listPublishedStableVersionsImpl
+    || ((packageName) => registryClient.listStableVersions(packageName));
 
   const graph = readLocalReleaseGraph(cwd);
   const localVersions = localVersionsFromGraph(graph);
@@ -116,12 +140,14 @@ export async function checkReleaseGraph(options = {}) {
       const published = acquired && acquired.status === 'published'
         ? { version: acquired.version, packedSnapshot: acquired.snapshot, packedManifest: acquired.manifest }
         : null;
+      const publishedStableVersions = listPublishedStableVersionsImpl(RELEASE_PACKAGES[key].name);
       packages[key] = {
         key,
         name: RELEASE_PACKAGES[key].name,
         localVersion: localVersions[key],
         localPackedSnapshot: packed[key].snapshot,
         published,
+        registryMaxStable: registryMaxStableVersion(publishedStableVersions),
       };
     }
 

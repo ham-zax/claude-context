@@ -3,6 +3,10 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createFileTreeSnapshot } from './release-graph.mjs';
 import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
+import {
+  PRODUCTION_NPM_REGISTRY,
+  parseNpmViewVersionOutput,
+} from './release-registry.mjs';
 
 const REGISTRY_NOT_FOUND_PATTERN = /E404|404\s+Not\s+Found|version\s+not\s+found/i;
 
@@ -118,7 +122,7 @@ export function fetchPublishedPackage(input) {
   try {
     viewOutput = execFileSyncImpl(
       'npm',
-      ['view', `${packageName}@${version}`, 'version', '--json'],
+      ['view', `${packageName}@${version}`, 'version', '--json', '--registry', PRODUCTION_NPM_REGISTRY],
       {
         cwd: workDirectory,
         env: createNpmChildEnvironment(process.env),
@@ -135,14 +139,10 @@ export function fetchPublishedPackage(input) {
     );
   }
 
-  let registryVersion;
-  try {
-    registryVersion = JSON.parse(String(viewOutput).trim());
-  } catch (error) {
-    throw new Error(
-      `Malformed npm view output for ${packageName}@${version}: ${JSON.stringify(String(viewOutput).trim())}`
-    );
-  }
+  const registryVersion = parseNpmViewVersionOutput(
+    viewOutput,
+    `npm view output for ${packageName}@${version}`,
+  );
   if (registryVersion !== version) {
     throw new Error(
       `Registry returned unexpected version ${JSON.stringify(registryVersion)} for ${packageName}@${version}`
@@ -156,7 +156,14 @@ export function fetchPublishedPackage(input) {
   try {
     packOutput = execFileSyncImpl(
       'npm',
-      ['pack', `${packageName}@${version}`, '--pack-destination', packOutputDirectory],
+      [
+        'pack',
+        `${packageName}@${version}`,
+        '--pack-destination',
+        packOutputDirectory,
+        '--registry',
+        PRODUCTION_NPM_REGISTRY,
+      ],
       {
         cwd: workDirectory,
         env: createNpmChildEnvironment(process.env),

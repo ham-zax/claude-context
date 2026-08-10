@@ -7,9 +7,16 @@ import {
   RELEASE_ORDER,
   RELEASE_PACKAGES,
   affectedReleasePackages,
+  compareStableVersions,
   incrementStableVersion,
   readLocalReleaseGraph,
 } from './release-graph.mjs';
+import {
+  PRODUCTION_NPM_REGISTRY,
+  createReleaseRegistryClient,
+  parseNpmViewVersionOutput,
+  registryMaxStableVersion,
+} from './release-registry.mjs';
 
 const MAX_INCREMENT_ITERATIONS = 1000;
 
@@ -28,7 +35,7 @@ export function defaultIsVersionPublishedImpl(execFileSyncImpl = execFileSync) {
     try {
       output = execFileSyncImpl(
         'npm',
-        ['view', `${packageName}@${version}`, 'version', '--json'],
+        ['view', `${packageName}@${version}`, 'version', '--json', '--registry', PRODUCTION_NPM_REGISTRY],
         { encoding: 'utf8', env: createNpmChildEnvironment(process.env), stdio: REGISTRY_PROBE_STDIO }
       );
     } catch (error) {
@@ -39,14 +46,10 @@ export function defaultIsVersionPublishedImpl(execFileSyncImpl = execFileSync) {
         `Cannot verify ${packageName}@${version} on the registry: ${error.message}`
       );
     }
-    let registryVersion;
-    try {
-      registryVersion = JSON.parse(String(output).trim());
-    } catch (error) {
-      throw new Error(
-        `Malformed npm view output for ${packageName}@${version}: ${JSON.stringify(String(output).trim())}`
-      );
-    }
+    const registryVersion = parseNpmViewVersionOutput(
+      output,
+      `npm view output for ${packageName}@${version}`,
+    );
     if (registryVersion !== version) {
       throw new Error(
         `Registry returned unexpected version ${JSON.stringify(registryVersion)} for ${packageName}@${version}`
@@ -69,7 +72,13 @@ function incrementUntilUnpublished(packageName, version, firstBump, isVersionPub
   return candidate;
 }
 
-export function computeBumpPlan({ target, bump, localVersions, isVersionPublishedImpl }) {
+export function computeBumpPlan({
+  target,
+  bump,
+  localVersions,
+  isVersionPublishedImpl,
+  publishedStableVersions = {},
+}) {
   if (!Object.prototype.hasOwnProperty.call(RELEASE_PACKAGES, target)) {
     throw new Error(`Unknown release target ${JSON.stringify(target)}; expected one of ${RELEASE_ORDER.join(', ')}`);
   }
@@ -85,16 +94,43 @@ export function computeBumpPlan({ target, bump, localVersions, isVersionPublishe
     }
     let next = current;
     let reason;
+    const knownPublishedVersions = publishedStableVersions[key];
+    const registryMaxStable = Array.isArray(knownPublishedVersions)
+      ? registryMaxStableVersion(knownPublishedVersions)
+      : null;
+    const isPublished = Array.isArray(knownPublishedVersions)
+      ? knownPublishedVersions.includes(current)
+      : isVersionPublishedImpl(RELEASE_PACKAGES[key].name, current);
     if (key === target) {
-      if (isVersionPublishedImpl(RELEASE_PACKAGES[key].name, current)) {
-        next = incrementUntilUnpublished(RELEASE_PACKAGES[key].name, current, bump, isVersionPublishedImpl);
+      if (
+        isPublished
+        || (registryMaxStable !== null && compareStableVersions(current, registryMaxStable) <= 0)
+      ) {
+        const baseVersion = registryMaxStable ?? current;
+        next = incrementUntilUnpublished(RELEASE_PACKAGES[key].name, baseVersion, bump, isVersionPublishedImpl);
         reason = `bumped ${bump}`;
       } else {
-        reason = 'unchanged, already unpublished';
+        if (registryMaxStable !== null) {
+          const minimumPreparedVersion = incrementStableVersion(registryMaxStable, bump);
+          if (compareStableVersions(current, minimumPreparedVersion) < 0) {
+            next = incrementUntilUnpublished(
+              RELEASE_PACKAGES[key].name,
+              registryMaxStable,
+              bump,
+              isVersionPublishedImpl,
+            );
+            reason = `strengthened to requested ${bump}`;
+          }
+        }
+        reason ||= 'unchanged, already unpublished';
       }
     } else if (closure.includes(key)) {
-      if (isVersionPublishedImpl(RELEASE_PACKAGES[key].name, current)) {
-        next = incrementUntilUnpublished(RELEASE_PACKAGES[key].name, current, 'patch', isVersionPublishedImpl);
+      if (
+        isPublished
+        || (registryMaxStable !== null && compareStableVersions(current, registryMaxStable) <= 0)
+      ) {
+        const baseVersion = registryMaxStable ?? current;
+        next = incrementUntilUnpublished(RELEASE_PACKAGES[key].name, baseVersion, 'patch', isVersionPublishedImpl);
         reason = 'bumped patch for downstream pin';
       } else {
         reason = 'unchanged, already unpublished';
@@ -197,12 +233,38 @@ export async function runReleaseBump(options = {}) {
   }
   const [target, bump] = positional;
   const execFileSyncImpl = options.execFileSyncImpl || execFileSync;
-  const isVersionPublishedImpl = options.isVersionPublishedImpl || defaultIsVersionPublishedImpl(execFileSyncImpl);
+  const registryClient = options.registryClient || createReleaseRegistryClient({ cwd, execFileSyncImpl });
+  const listPublishedStableVersionsImpl = options.listPublishedStableVersionsImpl
+    || (options.isVersionPublishedImpl
+      ? null
+      : ((packageName) => registryClient.listStableVersions(packageName)));
   const localGraph = readLocalReleaseGraph(cwd);
   const localVersions = Object.freeze(
     Object.fromEntries(RELEASE_ORDER.map((key) => [key, localGraph.packages[key].versionString]))
   );
-  const plan = computeBumpPlan({ target, bump, localVersions, isVersionPublishedImpl });
+  const publishedStableVersions = listPublishedStableVersionsImpl
+    ? Object.freeze(
+        Object.fromEntries(RELEASE_ORDER.map((key) => [
+          key,
+          listPublishedStableVersionsImpl(RELEASE_PACKAGES[key].name),
+        ])),
+      )
+    : Object.freeze({});
+  const publishedByPackage = new Map(
+    RELEASE_ORDER.map((key) => [
+      RELEASE_PACKAGES[key].name,
+      new Set(publishedStableVersions[key] || []),
+    ]),
+  );
+  const isVersionPublishedImpl = options.isVersionPublishedImpl
+    || ((packageName, version) => publishedByPackage.get(packageName)?.has(version) === true);
+  const plan = computeBumpPlan({
+    target,
+    bump,
+    localVersions,
+    isVersionPublishedImpl,
+    publishedStableVersions,
+  });
 
   output(`Release bump plan for ${target} ${bump}`);
   output('');

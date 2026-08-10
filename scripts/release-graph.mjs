@@ -82,6 +82,17 @@ export function incrementStableVersion(version, bump) {
   return formatStableVersion(next);
 }
 
+export function compareStableVersions(left, right) {
+  const leftParts = parseStableVersion(left, 'left version');
+  const rightParts = parseStableVersion(right, 'right version');
+  for (const key of ['major', 'minor', 'patch']) {
+    if (leftParts[key] !== rightParts[key]) {
+      return leftParts[key] < rightParts[key] ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
 export function affectedReleasePackages(changedPackageKey) {
   if (!Object.prototype.hasOwnProperty.call(RELEASE_PACKAGES, changedPackageKey)) {
     throw new Error(`Unknown release package key: ${JSON.stringify(changedPackageKey)}`);
@@ -311,18 +322,38 @@ export function buildReleaseGraphReport(input) {
         changedEntries = comparison.changes;
       }
     }
+    const registryMaxStable = pkg.registryMaxStable ?? null;
+    if (
+      registryMaxStable !== null
+      && status === 'unpublished'
+      && compareStableVersions(pkg.localVersion, registryMaxStable) <= 0
+    ) {
+      status = 'non-monotonic-version';
+    } else if (
+      registryMaxStable !== null
+      && status === 'published-identical'
+      && compareStableVersions(pkg.localVersion, registryMaxStable) < 0
+    ) {
+      status = 'superseded-version';
+    }
     packages[key] = Object.freeze({
       key,
       name: RELEASE_PACKAGES[key].name,
       localVersion: pkg.localVersion,
       status,
       publishedVersion,
+      registryMaxStable,
       changedEntries: Object.freeze(changedEntries),
     });
   }
   const invalidPackages = Object.freeze(
     RELEASE_ORDER.filter(
-      (key) => packages[key].status === 'stale-version' || packages[key].status === 'invalid-graph'
+      (key) => [
+        'stale-version',
+        'invalid-graph',
+        'non-monotonic-version',
+        'superseded-version',
+      ].includes(packages[key].status)
     )
   );
   return Object.freeze({

@@ -4,44 +4,27 @@ import process from 'node:process';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { RELEASE_ORDER, RELEASE_PACKAGES } from './release-graph.mjs';
-import { checkReleaseGraph } from './check-release-graph.mjs';
-import { createNpmChildEnvironment, REGISTRY_PROBE_STDIO } from './npm-child-process.mjs';
+import { createNpmChildEnvironment } from './npm-child-process.mjs';
+import { qualifyReleaseCandidate } from './qualify-release-candidate.mjs';
+import {
+  PRODUCTION_NPM_REGISTRY,
+  PRODUCTION_NPM_TAG,
+  classifyRegistryError,
+  createReleaseRegistryClient,
+  verifyPublishedIdenticalLatest,
+  verifyReleaseRegistry,
+} from './release-registry.mjs';
 
 const REGISTRY_POLL_ATTEMPTS = 12;
 const REGISTRY_POLL_INTERVAL_MS = 5000;
-
-function parseJsonOutput(output, description) {
-  try {
-    return JSON.parse(String(output).trim());
-  } catch (error) {
-    throw new Error(`Malformed ${description}: ${JSON.stringify(String(output).trim())}`);
-  }
-}
-
-function isRegistryNotFoundError(error) {
-  return (
-    error
-    && typeof error === 'object'
-    && error.status === 1
-    && /E404|404\s+Not\s+Found|version\s+not\s+found/i.test(String(error.stderr || ''))
-  );
-}
+export const CANONICAL_MASTER_FETCH_ARGS = Object.freeze([
+  'fetch',
+  '--no-tags',
+  'origin',
+  '+refs/heads/master:refs/remotes/origin/master',
+]);
 
 const STABLE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
-
-function classifyRegistryError(error) {
-  const text = `${errorMessage(error)}\n${String(error?.stderr || '')}\n${String(error?.stdout || '')}`;
-  if (/E401|E403|authentication|authorization|login required|permission denied/i.test(text)) {
-    return 'auth';
-  }
-  if (/E404|404\s+Not\s+Found|version\s+not\s+found/i.test(text)) {
-    return 'not-found';
-  }
-  if (/ETIMEDOUT|ECONNRESET|EAI_AGAIN|EAI_NODATA|EAI_NONAME|socket hang up|ECONNREFUSED|HTTP\s+5\d\d|status\s*[:=]\s*5\d\d/i.test(text)) {
-    return 'transient';
-  }
-  return 'permanent';
-}
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -148,16 +131,37 @@ export async function publishReleaseGraph(options = {}) {
     || (() => execFileSyncImpl('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' }));
   const branchImpl = options.branchImpl
     || (() => execFileSyncImpl('git', ['branch', '--show-current'], { cwd, encoding: 'utf8' }).trim());
-  const versionsCheckImpl = options.versionsCheckImpl
-    || (() => execFileSyncImpl('pnpm', ['run', 'versions:check'], { cwd, encoding: 'utf8' }));
-  const buildImpl = options.buildImpl
-    || (() => execFileSyncImpl('pnpm', ['run', 'build'], { cwd, encoding: 'utf8' }));
-  const smokeMcpImpl = options.smokeMcpImpl
-    || (() => execFileSyncImpl('pnpm', ['-C', 'packages/mcp', 'release:smoke'], { cwd, encoding: 'utf8' }));
-  const smokeCliImpl = options.smokeCliImpl
-    || (() => execFileSyncImpl('pnpm', ['-C', 'packages/cli', 'release:smoke'], { cwd, encoding: 'utf8' }));
-  const checkGraphImpl = options.checkGraphImpl
-    || ((checkCwd, tempRoot) => checkReleaseGraph({ cwd: checkCwd, keepTempDirectory: true, tempRoot }));
+  const fetchOriginMasterImpl = options.fetchOriginMasterImpl
+    || (() => execFileSyncImpl('git', [...CANONICAL_MASTER_FETCH_ARGS], { cwd, stdio: 'inherit' }));
+  const headImpl = options.headImpl
+    || (() => execFileSyncImpl('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim());
+  const originMasterImpl = options.originMasterImpl
+    || (() => execFileSyncImpl('git', ['rev-parse', 'refs/remotes/origin/master'], { cwd, encoding: 'utf8' }).trim());
+  const originMasterIsAncestorImpl = options.originMasterIsAncestorImpl
+    || (() => {
+      try {
+        execFileSyncImpl(
+          'git',
+          ['merge-base', '--is-ancestor', 'refs/remotes/origin/master', 'HEAD'],
+          { cwd, stdio: 'ignore' },
+        );
+        return true;
+      } catch (error) {
+        if (error && typeof error === 'object' && error.status === 1) {
+          return false;
+        }
+        throw error;
+      }
+    });
+  const qualifyImpl = options.qualifyImpl
+    || ((tempRoot) => qualifyReleaseCandidate({
+      cwd,
+      tempRoot,
+      keepTempDirectory: true,
+      execFileSyncImpl,
+      gitStatusImpl,
+    }));
+  const registryClient = options.registryClient || createReleaseRegistryClient({ cwd, execFileSyncImpl });
   const publishImpl = options.publishImpl
     || ((packageName, version, tarballPath) => {
       if (typeof tarballPath !== 'string') {
@@ -165,29 +169,38 @@ export async function publishReleaseGraph(options = {}) {
       }
       return execFileSyncImpl(
         'npm',
-        ['publish', tarballPath, '--access', 'public'],
+        [
+          'publish',
+          tarballPath,
+          '--registry',
+          PRODUCTION_NPM_REGISTRY,
+          '--tag',
+          PRODUCTION_NPM_TAG,
+          '--access',
+          'public',
+        ],
         { cwd, env: createNpmChildEnvironment(process.env), stdio: 'inherit' }
       );
     });
   const viewVersionImpl = options.viewVersionImpl
-    || ((packageName, version) => {
-      const output = execFileSyncImpl(
-        'npm',
-        ['view', `${packageName}@${version}`, 'version', '--json'],
-        { cwd, env: createNpmChildEnvironment(process.env), stdio: REGISTRY_PROBE_STDIO, encoding: 'utf8' }
-      );
-      return parseJsonOutput(output, `npm view output for ${packageName}@${version}`);
-    });
+    || ((packageName, version) => registryClient.viewVersion(packageName, version));
   const viewDependenciesImpl = options.viewDependenciesImpl
-    || ((packageName, version) => {
-      const output = execFileSyncImpl(
-        'npm',
-        ['view', `${packageName}@${version}`, 'dependencies', '--json'],
-        { cwd, env: createNpmChildEnvironment(process.env), stdio: REGISTRY_PROBE_STDIO, encoding: 'utf8' }
-      );
-      return parseJsonOutput(output, `npm view dependencies for ${packageName}@${version}`);
-    });
+    || ((packageName, version) => registryClient.viewDependencies(packageName, version));
   const sleepImpl = options.sleepImpl || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const verifyReleaseImpl = options.verifyReleaseImpl
+    || ((localVersions) => verifyReleaseRegistry({
+      localVersions,
+      registryClient,
+      attempts: REGISTRY_POLL_ATTEMPTS,
+      sleepImpl,
+      retryDelayMs: REGISTRY_POLL_INTERVAL_MS,
+    }));
+  const verifySkippedLatestImpl = options.verifySkippedLatestImpl
+    || ((packageKeys, localVersions) => verifyPublishedIdenticalLatest({
+      packageKeys,
+      localVersions,
+      registryClient,
+    }));
 
   const status = String(gitStatusImpl()).trim();
   if (status !== '') {
@@ -197,18 +210,24 @@ export async function publishReleaseGraph(options = {}) {
   if (branch !== 'master') {
     throw new Error(`Refusing to publish from branch ${JSON.stringify(branch)}; expected master`);
   }
-  versionsCheckImpl();
-  buildImpl();
-  smokeMcpImpl();
-  smokeCliImpl();
-  const postBuildStatus = String(gitStatusImpl()).trim();
-  if (postBuildStatus !== '') {
-    throw new Error(`Working tree became dirty during build or smokes; refusing to publish:\n${postBuildStatus}`);
+  fetchOriginMasterImpl();
+  const head = String(headImpl()).trim();
+  const originMaster = String(originMasterImpl()).trim();
+  if (options.allowUnpushedHead === true) {
+    if (!originMasterIsAncestorImpl()) {
+      throw new Error(
+        `Refusing emergency publication because refs/remotes/origin/master ${originMaster} is not an ancestor of HEAD ${head}. Rebase the local release onto canonical master first.`,
+      );
+    }
+  } else if (head !== originMaster) {
+    throw new Error(
+      `Refusing to publish because HEAD ${head} does not equal refs/remotes/origin/master ${originMaster}. Push master first or use --allow-unpushed-head only for a locally-ahead emergency release.`,
+    );
   }
   let report = null;
   const publisherTempRoot = fs.mkdtempSync(path.join(options.tempRoot || os.tmpdir(), 'satori-publish-'));
   try {
-    report = await checkGraphImpl(cwd, publisherTempRoot);
+    report = await qualifyImpl(publisherTempRoot);
     if (!report || !report.valid) {
       throw new Error('Release graph is invalid; refusing to publish.');
     }
@@ -219,17 +238,19 @@ export async function publishReleaseGraph(options = {}) {
     const toPublish = RELEASE_ORDER.filter((key) => report.packages[key].status === 'unpublished');
     const toSkip = RELEASE_ORDER.filter((key) => report.packages[key].status === 'published-identical');
 
+    if (toPublish.length > 0) {
+      verifySkippedLatestImpl(toSkip, localVersions);
+      validateRetainedStorage(report, publisherTempRoot);
+      if (!options.publishImpl) {
+        validateVerifiedTarballs(report, toPublish);
+      }
+    }
+
     if (toPublish.length === 0) {
       log('All packages are published-identical; nothing to publish.');
-      return { published: [], skipped: Object.freeze(toSkip) };
+    } else {
+      log(`Publishing in order: ${toPublish.map((key) => RELEASE_PACKAGES[key].name).join(' -> ')}`);
     }
-
-    validateRetainedStorage(report, publisherTempRoot);
-    if (!options.publishImpl) {
-      validateVerifiedTarballs(report, toPublish);
-    }
-
-    log(`Publishing in order: ${toPublish.map((key) => RELEASE_PACKAGES[key].name).join(' -> ')}`);
     const publishCommandSucceeded = [];
     const registryVerified = [];
     for (const key of toPublish) {
@@ -268,7 +289,8 @@ export async function publishReleaseGraph(options = {}) {
       }
       registryVerified.push(entry);
     }
-    log('Release graph published.');
+    await verifyReleaseImpl(localVersions);
+    log(toPublish.length === 0 ? 'Release graph verified.' : 'Release graph published and verified.');
     return {
       published: Object.freeze(registryVerified),
       skipped: Object.freeze(toSkip),
@@ -356,12 +378,14 @@ async function verifyPublished(key, version, localVersions, impls) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  if (process.argv.length > 2) {
-    console.error('Usage: node scripts/publish-release-graph.mjs');
+  const args = process.argv.slice(2);
+  const allowUnpushedHead = args.includes('--allow-unpushed-head');
+  if (args.some((arg) => arg !== '--allow-unpushed-head')) {
+    console.error('Usage: node scripts/publish-release-graph.mjs [--allow-unpushed-head]');
     process.exit(2);
   }
   try {
-    await publishReleaseGraph();
+    await publishReleaseGraph({ allowUnpushedHead });
   } catch (error) {
     console.error(error.message);
     process.exit(1);

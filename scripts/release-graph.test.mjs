@@ -9,6 +9,7 @@ import {
   parseStableVersion,
   formatStableVersion,
   incrementStableVersion,
+  compareStableVersions,
   affectedReleasePackages,
   readLocalReleaseGraph,
   validatePackedDependencyGraph,
@@ -87,6 +88,12 @@ test('incrementStableVersion applies patch, minor, and major', () => {
   assert.equal(incrementStableVersion('0.9.9', 'minor'), '0.10.0');
   assert.throws(() => incrementStableVersion('3.5.9', 'prerelease'), /bump kind/);
   assert.throws(() => incrementStableVersion('3.5', 'patch'), /major\.minor\.patch/);
+});
+
+test('stable versions compare numerically rather than lexically', () => {
+  assert.equal(compareStableVersions('3.10.0', '3.9.9'), 1);
+  assert.equal(compareStableVersions('3.9.9', '3.10.0'), -1);
+  assert.equal(compareStableVersions('3.10.0', '3.10.0'), 0);
 });
 
 test('affectedReleasePackages returns reverse dependency closure', () => {

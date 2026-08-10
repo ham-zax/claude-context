@@ -68,6 +68,21 @@ function defaultPackLocal() {
   };
 }
 
+const VERSION_BY_NAME = Object.freeze({
+  '@zokizuan/satori-core': '3.6.0',
+  '@zokizuan/satori-mcp': '6.8.0',
+  '@zokizuan/satori-cli': '1.9.0',
+});
+
+function defaultRegistryVersions(publishedByName) {
+  return (packageName) => {
+    if (!Object.prototype.hasOwnProperty.call(publishedByName, packageName)) {
+      return [];
+    }
+    return [VERSION_BY_NAME[packageName]];
+  };
+}
+
 function stubFetch(publishedByName) {
   return ({ packageName, version }) => {
     const entry = publishedByName[packageName];
@@ -89,12 +104,15 @@ function stubFetch(publishedByName) {
 async function runCheck(options = {}) {
   const lines = [];
   const tempRoot = options.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+  const publishedByName = options.publishedByName || {};
   const result = await checkReleaseGraph({
     cwd: options.cwd,
     tempRoot,
     output: (line) => lines.push(line),
     packLocalImpl: options.packLocalImpl || defaultPackLocal(),
-    fetchPublishedImpl: options.fetchPublishedImpl || stubFetch(options.publishedByName || {}),
+    fetchPublishedImpl: options.fetchPublishedImpl || stubFetch(publishedByName),
+    listPublishedStableVersionsImpl: options.listPublishedStableVersionsImpl
+      || defaultRegistryVersions(publishedByName),
     keepTempDirectory: options.keepTempDirectory,
   });
   return { result, lines, tempRoot };
@@ -103,12 +121,15 @@ async function runCheck(options = {}) {
 async function captureInvalidCheck(options = {}) {
   const lines = [];
   const tempRoot = options.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'satori-check-tmp-'));
+  const publishedByName = options.publishedByName || {};
   const base = {
     cwd: options.cwd,
     tempRoot,
     output: (line) => lines.push(line),
     packLocalImpl: options.packLocalImpl || defaultPackLocal(),
-    fetchPublishedImpl: options.fetchPublishedImpl || stubFetch(options.publishedByName || {}),
+    fetchPublishedImpl: options.fetchPublishedImpl || stubFetch(publishedByName),
+    listPublishedStableVersionsImpl: options.listPublishedStableVersionsImpl
+      || defaultRegistryVersions(publishedByName),
   };
   let error = null;
   try {
@@ -163,6 +184,38 @@ test('published-identical Core plus unpublished MCP/CLI succeeds', async () => {
   assert.equal(result.packages.cli.status, 'unpublished');
   assert.equal(result.valid, true);
   assert.equal(lines[lines.length - 1], 'Release graph valid.');
+});
+
+test('unpublished local version must be newer than the registry maximum', async () => {
+  const cwd = standardWorkspace();
+  const { error, lines } = await captureInvalidCheck({
+    cwd,
+    listPublishedStableVersionsImpl: (packageName) => (
+      packageName === '@zokizuan/satori-core' ? ['3.7.0'] : []
+    ),
+  });
+  assert.match(error?.message || '', /Release graph invalid/);
+  assert.match(rowFor(lines, '@zokizuan/satori-core'), /non-monotonic-version/);
+  assert.equal(lines.some((line) => /registry maximum 3\.7\.0/.test(line)), true);
+});
+
+test('published-identical local version cannot trail the registry maximum', async () => {
+  const cwd = standardWorkspace();
+  const coreManifest = localManifests().core;
+  const { error, lines } = await captureInvalidCheck({
+    cwd,
+    publishedByName: {
+      '@zokizuan/satori-core': {
+        packedSnapshot: snapshotFor(coreManifest),
+        packedManifest: coreManifest,
+      },
+    },
+    listPublishedStableVersionsImpl: (packageName) => (
+      packageName === '@zokizuan/satori-core' ? ['3.6.0', '3.7.0'] : []
+    ),
+  });
+  assert.match(error?.message || '', /Release graph invalid/);
+  assert.match(rowFor(lines, '@zokizuan/satori-core'), /superseded-version/);
 });
 
 test('stale Core fails', async () => {

@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  RELEASE_QUALIFICATION_COMMANDS,
+  qualifyReleaseCandidate,
+} from './qualify-release-candidate.mjs';
+
+test('qualification runs the complete gate before packed graph verification', async () => {
+  const order = [];
+  let statusCalls = 0;
+  const report = { valid: true };
+  const result = await qualifyReleaseCandidate({
+    cwd: '/repo',
+    tempRoot: '/tmp/release',
+    keepTempDirectory: true,
+    gitStatusImpl: () => {
+      statusCalls += 1;
+      return '';
+    },
+    runCommandImpl: (entry) => order.push(entry.label),
+    checkGraphImpl: (options) => {
+      order.push('packed release graph');
+      assert.equal(options.cwd, '/repo');
+      assert.equal(options.tempRoot, '/tmp/release');
+      assert.equal(options.keepTempDirectory, true);
+      return report;
+    },
+  });
+
+  assert.equal(result, report);
+  assert.equal(statusCalls, 2);
+  assert.deepEqual(order, [
+    ...RELEASE_QUALIFICATION_COMMANDS.map((entry) => entry.label),
+    'packed release graph',
+  ]);
+});
+
+test('qualification refuses a dirty initial worktree before running commands', async () => {
+  let commandCalls = 0;
+  await assert.rejects(
+    qualifyReleaseCandidate({
+      gitStatusImpl: () => ' M package.json',
+      runCommandImpl: () => { commandCalls += 1; },
+    }),
+    /Working tree is not clean/,
+  );
+  assert.equal(commandCalls, 0);
+});
+
+test('qualification refuses generated drift before graph verification', async () => {
+  let statusCalls = 0;
+  let graphCalls = 0;
+  await assert.rejects(
+    qualifyReleaseCandidate({
+      gitStatusImpl: () => {
+        statusCalls += 1;
+        return statusCalls === 1 ? '' : ' M server.json';
+      },
+      runCommandImpl: () => {},
+      checkGraphImpl: () => { graphCalls += 1; },
+    }),
+    /Working tree became dirty during release qualification/,
+  );
+  assert.equal(graphCalls, 0);
+});

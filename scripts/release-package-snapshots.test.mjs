@@ -29,7 +29,7 @@ function createRunner({ fixtures = {}, viewVersion, viewRaw, viewError } = {}) {
   const runner = (command, args, options) => {
     calls.push({ command, args, options });
     if (command === 'pnpm' && args.includes('pack')) {
-      const destination = args[args.length - 1];
+      const destination = args[args.indexOf('--pack-destination') + 1];
       const filterIndex = args.indexOf('--filter');
       const packageName = args[filterIndex + 1];
       fs.mkdirSync(destination, { recursive: true });
@@ -57,7 +57,7 @@ function createRunner({ fixtures = {}, viewVersion, viewRaw, viewError } = {}) {
       return JSON.stringify(viewVersion);
     }
     if (command === 'npm' && args.includes('pack')) {
-      const destination = args[args.length - 1];
+      const destination = args[args.indexOf('--pack-destination') + 1];
       const requested = args[1];
       fs.mkdirSync(destination, { recursive: true });
       fs.writeFileSync(path.join(destination, `${requested.replace(/^@/, '').replace('/', '-').replace('@', '-')}.tgz`), 'placeholder');
@@ -213,6 +213,22 @@ test('malformed npm output fails', () => {
   );
 });
 
+test('published package lookup accepts npm 12 single-result arrays', () => {
+  const workDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-pkg-work-'));
+  const fixture = publishedFixture('@zokizuan/satori-core', '3.6.0', {});
+  const runner = createRunner({
+    viewRaw: JSON.stringify(['3.6.0']),
+    fixtures: { 'zokizuan-satori-core-3.6.0.tgz': fixture },
+  });
+  const result = fetchPublishedPackage({
+    packageName: '@zokizuan/satori-core',
+    version: '3.6.0',
+    workDirectory,
+    execFileSyncImpl: runner,
+  });
+  assert.equal(result.status, 'published');
+});
+
 test('published package identity mismatch fails', () => {
   const workDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-pkg-work-'));
   const fixture = publishedFixture('@zokizuan/satori-wrong', '3.6.0', {});
@@ -352,7 +368,9 @@ test('pnpm pack keeps the original environment while npm probes are sanitized', 
   const viewCall = runner.calls.find((call) => call.command === 'npm' && call.args.includes('view'));
   assert.deepEqual(viewCall.options.env, expectedSanitized);
   assert.deepEqual(viewCall.options.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(viewCall.args.slice(-2), ['--registry', 'https://registry.npmjs.org/']);
   const npmPackCall = runner.calls.find((call) => call.command === 'npm' && call.args.includes('pack'));
   assert.deepEqual(npmPackCall.options.env, expectedSanitized);
   assert.deepEqual(npmPackCall.options.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(npmPackCall.args.slice(-2), ['--registry', 'https://registry.npmjs.org/']);
 });
