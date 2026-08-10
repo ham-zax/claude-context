@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import {
     DoctorOptions,
     DoctorPackageVersion,
+    type DoctorResult,
     resolveCorePackageVersionViaMcp,
     resolveRuntimeVersionState,
     runDoctor,
@@ -47,9 +48,42 @@ function baseDoctorOptions(overrides: DoctorOptions = {}): DoctorOptions {
             configPath: "/tmp/config.toml",
             status: "ok",
             message: "codex config is current",
+            usesManagedLauncher: false,
+            runtimeEnvironment: Object.freeze({}),
         }],
         ...overrides,
     };
+}
+
+function managedLauncherClientProof(
+    client: ManagedClientConfigProof["client"] = "opencode",
+): ManagedClientConfigProof {
+    return {
+        client,
+        configPath: `/tmp/${client}.config`,
+        status: "ok",
+        message: `${client} config points to the managed launcher`,
+        usesManagedLauncher: true,
+        runtimeEnvironment: Object.freeze({}),
+    };
+}
+
+function assertManagedRuntimeSelectionUnavailable(
+    result: DoctorResult,
+    client: ManagedClientConfigProof["client"] = "opencode",
+): void {
+    const configuration = result.runtimeConfigurations?.find((candidate) => candidate.client === client);
+    assert.deepEqual(configuration, {
+        client,
+        status: "needs_repair",
+        source: "managed_launcher",
+        profile: null,
+        embeddingProvider: null,
+        embeddingModel: null,
+        embeddingDimension: null,
+        rerankerProvider: null,
+        vectorStore: null,
+    });
 }
 
 function healthyEnv(): NodeJS.ProcessEnv {
@@ -81,14 +115,14 @@ test("runDoctor reports missing default VoyageAI credentials with LanceDB select
     }));
 
     assert.equal(result.status, "error");
-    assert.equal(result.checks.find((check) => check.name === "embedding_provider")?.message, "Embedding provider: VoyageAI.");
-    assert.equal(result.checks.find((check) => check.name === "embedding_model")?.message, "Embedding model: voyage-code-3.");
-    assert.equal(result.checks.find((check) => check.name === "embedding_dimension")?.message, "Embedding output dimension: 1024.");
+    assert.equal(result.checks.find((check) => check.name === "embedding_provider")?.message, "Codex: Embedding provider: VoyageAI.");
+    assert.equal(result.checks.find((check) => check.name === "embedding_model")?.message, "Codex: Embedding model: voyage-code-3.");
+    assert.equal(result.checks.find((check) => check.name === "embedding_dimension")?.message, "Codex: Embedding output dimension: 1024.");
     assert.equal(result.checks.some((check) => check.name === "embedding_provider_env" && check.status === "error"), true);
-    assert.equal(result.checks.find((check) => check.name === "vector_store_provider")?.message, "Vector store provider: LanceDB.");
+    assert.equal(result.checks.find((check) => check.name === "vector_store_provider")?.message, "Codex: Vector store provider: LanceDB.");
     assert.equal(result.checks.find((check) => check.name === "lancedb_path")?.status, "ok");
     assert.deepEqual(result.nextSteps, [
-        "Set VOYAGEAI_API_KEY from the Voyage AI dashboard API keys page.",
+        "Codex: Set VOYAGEAI_API_KEY from the Voyage AI dashboard API keys page.",
         "Restart your MCP client after changing Satori environment variables.",
     ]);
 });
@@ -199,6 +233,82 @@ test("runDoctor validates each configured client runtime instead of a shell-defa
     )), true);
 });
 
+test("runDoctor does not synthesize runtime values for an unreadable client configuration", async () => {
+    const result = await runDoctor(baseDoctorOptions({
+        env: {
+            EMBEDDING_PROVIDER: "VoyageAI",
+            EMBEDDING_MODEL: "shell-model-must-not-be-reported",
+            VOYAGEAI_API_KEY: "shell-key-must-not-create-authority",
+        },
+        inspectManagedClients: () => [{
+            client: "opencode",
+            configPath: "/tmp/malformed-opencode.json",
+            status: "error",
+            message: "opencode config could not be parsed",
+            usesManagedLauncher: undefined,
+            runtimeEnvironment: undefined,
+        }],
+    }));
+
+    const configuration = result.runtimeConfigurations?.find((candidate) => candidate.client === "opencode");
+    assert.deepEqual(configuration, {
+        client: "opencode",
+        status: "needs_repair",
+        source: "unknown",
+        profile: null,
+        embeddingProvider: null,
+        embeddingModel: null,
+        embeddingDimension: null,
+        rerankerProvider: null,
+        vectorStore: null,
+    });
+    assert.equal(result.checks.some((check) => check.name === "client_runtime_opencode"), false);
+    assert.equal(result.checks.some((check) => check.name === "embedding_model"), false);
+});
+
+test("runDoctor excludes path-shaped model values and controls from structured runtime rows", async () => {
+    const result = await runDoctor(baseDoctorOptions({
+        env: {},
+        inspectManagedClients: () => [{
+            client: "opencode",
+            configPath: "/tmp/opencode.json",
+            status: "error",
+            message: "opencode config uses a direct runtime",
+            usesManagedLauncher: false,
+            runtimeEnvironment: {
+                SATORI_RUNTIME_PROFILE: "offline\n",
+                VECTOR_STORE_PROVIDER: "LanceDB\u001b[31m",
+                EMBEDDING_PROVIDER: "Potion",
+                EMBEDDING_MODEL: "/home/test/models/private-model.onnx",
+                EMBEDDING_OUTPUT_DIMENSION: "256",
+                POTION_HELPER_PATH: "/tmp/potion-helper",
+                POTION_MODEL_PATH: "/tmp/potion-model",
+            },
+        }],
+    }));
+
+    const configuration = result.runtimeConfigurations?.find((candidate) => candidate.client === "opencode");
+    assert.equal(configuration?.status, "needs_repair");
+    assert.equal(configuration?.source, "client_configuration");
+    assert.equal(configuration?.profile, "offline");
+    assert.equal(configuration?.embeddingProvider, "Potion");
+    assert.equal(configuration?.embeddingModel, null);
+    assert.equal(configuration?.embeddingDimension, "256");
+    assert.equal(configuration?.vectorStore, "LanceDB");
+    const serializedConfiguration = JSON.stringify(configuration);
+    assert.doesNotMatch(serializedConfiguration, /private-model/);
+    assert.equal(serializedConfiguration.includes("\u001b"), false);
+    assert.equal(serializedConfiguration.includes("\n"), false);
+    const text = formatDoctorText(result, { verbose: false });
+    const table = text.slice(
+        text.indexOf("Applied runtime configuration:"),
+        text.indexOf("\nProblems"),
+    );
+    assert.match(table, /Potion \/ —/);
+    assert.doesNotMatch(table, /private-model/);
+    assert.equal(table.includes("\u001b[31m"), false);
+});
+
 test("runDoctor includes a privacy-safe summary of local CLI diagnostics", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-doctor-diagnostics-"));
     const diagnosticsPath = path.join(tempDir, "events.jsonl");
@@ -258,9 +368,9 @@ test("runDoctor treats Ollama as keyless but still requires MILVUS_ADDRESS", asy
     }));
 
     assert.equal(result.status, "ok");
-    assert.equal(result.checks.find((check) => check.name === "embedding_provider")?.message, "Embedding provider: Ollama.");
-    assert.equal(result.checks.find((check) => check.name === "embedding_model")?.message, "Embedding model: nomic-embed-text.");
-    assert.equal(result.checks.find((check) => check.name === "embedding_dimension")?.message, "Embedding output dimension: provider default.");
+    assert.equal(result.checks.find((check) => check.name === "embedding_provider")?.message, "Codex: Embedding provider: Ollama.");
+    assert.equal(result.checks.find((check) => check.name === "embedding_model")?.message, "Codex: Embedding model: nomic-embed-text.");
+    assert.equal(result.checks.find((check) => check.name === "embedding_dimension")?.message, "Codex: Embedding output dimension: provider default.");
     assert.equal(result.checks.find((check) => check.name === "embedding_provider_env")?.status, "ok");
     assert.equal(result.checks.find((check) => check.name === "milvus_address")?.status, "ok");
     assert.equal(result.checks.find((check) => check.name === "milvus_token")?.status, "ok");
@@ -343,13 +453,14 @@ test("runDoctor uses installer-owned launcher settings over stale ambient provid
                 MILVUS_ADDRESS: "stale-cloud-endpoint",
             },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
             loadManagedLanceDb: async () => undefined,
         }));
 
         assert.equal(result.status, "ok");
-        assert.equal(result.checks.find((check) => check.name === "runtime_profile")?.message, "Runtime profile: offline.");
-        assert.equal(result.checks.find((check) => check.name === "vector_store_provider")?.message, "Vector store provider: LanceDB.");
-        assert.equal(result.checks.find((check) => check.name === "embedding_provider")?.message, "Embedding provider: Ollama.");
+        assert.equal(result.checks.find((check) => check.name === "runtime_profile")?.message, "OpenCode: Runtime profile: offline.");
+        assert.equal(result.checks.find((check) => check.name === "vector_store_provider")?.message, "OpenCode: Vector store provider: LanceDB.");
+        assert.equal(result.checks.find((check) => check.name === "embedding_provider")?.message, "OpenCode: Embedding provider: Ollama.");
         assert.equal(result.checks.find((check) => check.name === "offline_execution_invariant")?.status, "ok");
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -396,13 +507,14 @@ test("runDoctor surfaces the installer-bound LateOn activation policy", async ()
                 VOYAGEAI_API_KEY: "retained-but-disabled",
             },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
             loadManagedLanceDb: async () => undefined,
         }));
 
         assert.equal(result.status, "ok");
         const policy = result.checks.find((check) => check.name === "lateon_activation_policy");
         assert.equal(policy?.status, "ok");
-        assert.equal(policy?.message, "LateOn activation policy: lateon_context_v4_d32_owner_default_v1.");
+        assert.equal(policy?.message, "OpenCode: LateOn activation policy: lateon_context_v4_d32_owner_default_v1.");
         assert.equal(
             result.checks.find((check) => check.name === "reranker_provider")?.status,
             "ok",
@@ -447,6 +559,7 @@ test("runDoctor flags a managed launcher whose LateOn activation policy contradi
                 VOYAGEAI_API_KEY: "retained-but-disabled",
             },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
             loadManagedLanceDb: async () => undefined,
         }));
 
@@ -747,11 +860,13 @@ test("runDoctor diagnoses a managed launcher whose runtime target is missing", a
         const result = await runDoctor(baseDoctorOptions({
             env: healthyEnv(),
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
         }));
 
         const check = result.checks.find((entry) => entry.name === "managed_launcher");
         assert.equal(check?.status, "error");
         assert.match(check?.message || "", /target does not exist/);
+        assertManagedRuntimeSelectionUnavailable(result);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -860,6 +975,7 @@ test("runDoctor reports an exact-runtime LanceDB native load failure independent
         const result = await runDoctor(baseDoctorOptions({
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
         }));
 
         const check = result.checks.find((entry) => entry.name === "lancedb_native_load");
@@ -1051,6 +1167,7 @@ test("doctor does not claim a launcher target outside the managed runtime store"
         const result = await runDoctor(baseDoctorOptions({
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
         }));
         assert.equal(result.managedRuntime?.status, "outside_store");
         assert.equal(result.managedRuntime?.mcpVersion, null);
@@ -1368,12 +1485,14 @@ test("runDoctor reports a missing managed launcher as a warning", async () => {
         const result = await runDoctor(baseDoctorOptions({
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
         }));
         assert.equal(result.managedRuntime?.status, "missing");
         assert.equal(result.managedRuntime?.launcherPath, null);
         const check = result.checks.find((entry) => entry.name === "managed_launcher");
         assert.equal(check?.status, "warning");
         assert.match(check?.message || "", /missing/);
+        assertManagedRuntimeSelectionUnavailable(result);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -1388,12 +1507,14 @@ test("runDoctor reports a malformed managed launcher as an error", async () => {
         const result = await runDoctor(baseDoctorOptions({
             env: { HOME: tempDir },
             managedLauncherPath: launcherPath,
+            inspectManagedClients: () => [managedLauncherClientProof()],
         }));
         assert.equal(result.managedRuntime?.status, "malformed");
         assert.equal(result.managedRuntime?.mcpVersion, null);
         const check = result.checks.find((entry) => entry.name === "managed_launcher");
         assert.equal(check?.status, "error");
         assert.match(check?.message || "", /malformed/);
+        assertManagedRuntimeSelectionUnavailable(result);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }

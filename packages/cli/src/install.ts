@@ -1710,8 +1710,8 @@ function verifyManagedClientTarget(
     inheritedEnv: NodeJS.ProcessEnv = process.env,
 ): ManagedClientConfigProof {
     let matches = false;
-    let usesManagedLauncher = false;
-    let runtimeEnvironment: Readonly<Record<string, string>> = Object.freeze({});
+    let usesManagedLauncher: boolean | undefined;
+    let runtimeEnvironment: Readonly<Record<string, string>> | undefined;
     try {
         if (target.client === "codex") {
             const content = readTextIfExists(target.configPath) ?? "";
@@ -1737,6 +1737,8 @@ function verifyManagedClientTarget(
         }
     } catch {
         matches = false;
+        usesManagedLauncher = undefined;
+        runtimeEnvironment = undefined;
     }
 
     return {

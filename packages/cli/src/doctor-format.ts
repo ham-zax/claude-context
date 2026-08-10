@@ -1,5 +1,6 @@
 import type { DoctorCheck, DoctorResult } from "./doctor.js";
 import type { CliWriters } from "./format.js";
+import { sanitizeTerminalText } from "./terminal-sanitize.js";
 
 export interface DoctorTextOptions {
     verbose: boolean;
@@ -33,6 +34,10 @@ function runtimeClientName(client: NonNullable<DoctorResult["runtimeConfiguratio
     return "OpenCode";
 }
 
+function terminalSafeCell(value: string): string {
+    return sanitizeTerminalText(value) || "—";
+}
+
 function runtimeConfigurationTable(result: DoctorResult): string[] | null {
     if (!result.runtimeConfigurations || result.runtimeConfigurations.length === 0) {
         return null;
@@ -46,9 +51,9 @@ function runtimeConfigurationTable(result: DoctorResult): string[] | null {
                 ? "Needs repair"
                 : "Not configured",
         configuration.profile ?? "—",
-        configuration.embeddingProvider && configuration.embeddingModel
-            ? `${configuration.embeddingProvider} / ${configuration.embeddingModel}`
-            : configuration.embeddingProvider ?? configuration.embeddingModel ?? "—",
+        configuration.embeddingProvider
+            ? `${configuration.embeddingProvider} / ${configuration.embeddingModel ?? "—"}`
+            : configuration.embeddingModel ?? "—",
         configuration.embeddingDimension ?? "—",
         configuration.rerankerProvider === "lateon"
             ? "LateOn"
@@ -61,7 +66,7 @@ function runtimeConfigurationTable(result: DoctorResult): string[] | null {
                 : configuration.source === "unknown"
                     ? "Unknown"
                     : "—",
-    ]);
+    ].map(terminalSafeCell));
     const widths = headers.map((header, index) => Math.max(
         header.length,
         ...rows.map((row) => row[index].length),

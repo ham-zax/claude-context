@@ -3210,6 +3210,24 @@ test("managed client inspection reuses installer parsers and reports stale wirin
     });
 });
 
+test("managed client inspection preserves unknown runtime authority for malformed config", async () => {
+    await withTempHome(async (homeDir) => {
+        const configPath = path.join(homeDir, ".config", "opencode", "opencode.json");
+        fs.mkdirSync(path.dirname(configPath), { recursive: true });
+        fs.writeFileSync(configPath, '{"mcp":{"satori":', "utf8");
+
+        const proofs = inspectManagedClientConfigurations(homeDir, {
+            EMBEDDING_PROVIDER: "VoyageAI",
+            EMBEDDING_MODEL: "shell-model-must-not-be-attributed",
+        });
+        assert.equal(proofs.length, 1);
+        assert.equal(proofs[0].client, "opencode");
+        assert.equal(proofs[0].status, "error");
+        assert.equal(proofs[0].usesManagedLauncher, undefined);
+        assert.equal(proofs[0].runtimeEnvironment, undefined);
+    });
+});
+
 test("install --profile writes repo-local Satori config once for all clients", async () => {
     await withTempHome(async (homeDir) => {
         await withTempRepo(async (repoDir) => {

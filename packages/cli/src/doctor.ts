@@ -25,6 +25,7 @@ import {
     selectedVectorStore,
 } from "./runtime-config.js";
 import { readLocalDiagnosticsSummary, type LocalDiagnosticsSummary } from "./local-diagnostics.js";
+import { sanitizeTerminalText } from "./terminal-sanitize.js";
 
 type CheckStatus = "ok" | "warning" | "error";
 
@@ -239,55 +240,63 @@ function buildRuntimeConfigurationRows(
     clientProofs: readonly ManagedClientConfigProof[],
     runtimeContexts: readonly EvaluatedDoctorRuntimeContext[],
 ): DoctorRuntimeConfiguration[] {
-    const fallbackContext = runtimeContexts.find((context) => context.client === null);
+    const withoutSelection = (
+        client: ManagedClientConfigProof["client"],
+        status: DoctorRuntimeConfiguration["status"],
+        source: DoctorRuntimeConfiguration["source"],
+    ): DoctorRuntimeConfiguration => ({
+        client,
+        status,
+        source,
+        profile: null,
+        embeddingProvider: null,
+        embeddingModel: null,
+        embeddingDimension: null,
+        rerankerProvider: null,
+        vectorStore: null,
+    });
+    const sanitizedValue = (value: string): string | null => {
+        const sanitized = sanitizeTerminalText(value);
+        return sanitized || null;
+    };
+    const sanitizedModelIdentity = (value: string): string | null => {
+        const sanitized = sanitizedValue(value);
+        if (!sanitized) return null;
+        if (
+            path.posix.isAbsolute(sanitized)
+            || path.win32.isAbsolute(sanitized)
+            || /^file:/i.test(sanitized)
+            || /^\.{1,2}[\\/]/.test(sanitized)
+        ) {
+            return null;
+        }
+        return sanitized;
+    };
     return SUPPORTED_DOCTOR_CLIENTS.map((client) => {
         const proof = clientProofs.find((candidate) => candidate.client === client);
         if (!proof) {
-            return {
-                client,
-                status: "not_configured",
-                source: null,
-                profile: null,
-                embeddingProvider: null,
-                embeddingModel: null,
-                embeddingDimension: null,
-                rerankerProvider: null,
-                vectorStore: null,
-            };
+            return withoutSelection(client, "not_configured", null);
         }
-        const context = runtimeContexts.find((candidate) => candidate.client === client) ?? fallbackContext;
+        const source = proof.usesManagedLauncher === true
+            ? "managed_launcher"
+            : proof.usesManagedLauncher === false
+                ? "client_configuration"
+                : "unknown";
+        const context = runtimeContexts.find((candidate) => candidate.client === client);
         if (!context) {
-            return {
-                client,
-                status: proof.status === "ok" ? "configured" : "needs_repair",
-                source: proof.usesManagedLauncher === true
-                    ? "managed_launcher"
-                    : proof.usesManagedLauncher === false
-                        ? "client_configuration"
-                        : "unknown",
-                profile: null,
-                embeddingProvider: null,
-                embeddingModel: null,
-                embeddingDimension: null,
-                rerankerProvider: null,
-                vectorStore: null,
-            };
+            return withoutSelection(client, "needs_repair", source);
         }
         const selection = resolveRuntimeConfigSelection(context.environment);
         return {
             client,
             status: proof.status === "ok" ? "configured" : "needs_repair",
-            source: proof.usesManagedLauncher === true
-                ? "managed_launcher"
-                : proof.usesManagedLauncher === false
-                    ? "client_configuration"
-                    : "unknown",
-            profile: selection.executionProfile,
-            embeddingProvider: selection.embeddingProvider,
-            embeddingModel: selection.embeddingModel,
-            embeddingDimension: selection.embeddingDimension,
-            rerankerProvider: selection.rerankerProvider,
-            vectorStore: selection.vectorStore,
+            source,
+            profile: sanitizedValue(selection.executionProfile),
+            embeddingProvider: sanitizedValue(selection.embeddingProvider),
+            embeddingModel: sanitizedModelIdentity(selection.embeddingModel),
+            embeddingDimension: sanitizedValue(selection.embeddingDimension),
+            rerankerProvider: sanitizedValue(selection.rerankerProvider),
+            vectorStore: sanitizedValue(selection.vectorStore),
         };
     });
 }
@@ -470,6 +479,22 @@ type ManagedLauncherStatus =
     | "outside_store"
     | "custom";
 
+function managedLauncherProvidesRuntimeAuthority(status: ManagedLauncherStatus | undefined): boolean {
+    return status === "active" || status === "outside_store";
+}
+
+function clientProofProvidesRuntimeAuthority(
+    proof: ManagedClientConfigProof,
+    managedLauncherIsUsable: boolean,
+): proof is ManagedClientConfigProof & {
+    runtimeEnvironment: Readonly<Record<string, string>>;
+    usesManagedLauncher: boolean;
+} {
+    return proof.runtimeEnvironment !== undefined
+        && proof.usesManagedLauncher !== undefined
+        && (!proof.usesManagedLauncher || managedLauncherIsUsable);
+}
+
 interface ActiveManagedRuntimeResolution {
     status: ManagedLauncherStatus;
     launcherPath: string;
@@ -603,9 +628,9 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
                 : null,
         }
         : null;
-    const managedRuntimeEnvironment = activeManagedRuntime?.status === "active"
-        || activeManagedRuntime?.status === "outside_store"
-        ? activeManagedRuntime.managedEnvironment
+    const managedLauncherIsUsable = managedLauncherProvidesRuntimeAuthority(activeManagedRuntime?.status);
+    const managedRuntimeEnvironment = managedLauncherIsUsable
+        ? activeManagedRuntime?.managedEnvironment ?? Object.freeze({})
         : Object.freeze({});
     const bundledMcpVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-mcp");
     const bundledCoreVersion = installedPackageVersion(packageVersions, "@zokizuan/satori-core");
@@ -622,9 +647,11 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
     const managedClientProofs = options.inspectManagedClients
         ? options.inspectManagedClients(homeDir)
         : inspectManagedClientConfigurations(homeDir, env);
-    const hasClientRuntimeAuthority = managedClientProofs.some((proof) => proof.runtimeEnvironment !== undefined);
-    const runtimeContexts: DoctorRuntimeContext[] = hasClientRuntimeAuthority
-        ? managedClientProofs.map((proof) => ({
+    const authoritativeClientProofs = managedClientProofs.filter((proof) => (
+        clientProofProvidesRuntimeAuthority(proof, managedLauncherIsUsable)
+    ));
+    const runtimeContexts: DoctorRuntimeContext[] = authoritativeClientProofs.length > 0
+        ? authoritativeClientProofs.map((proof) => ({
             client: proof.client,
             environment: {
                 ...env,
@@ -632,7 +659,9 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorResu
                 ...(proof.usesManagedLauncher ? managedRuntimeEnvironment : {}),
             },
         }))
-        : [{ client: null, environment: runtimeEnv }];
+        : managedClientProofs.length === 0
+            ? [{ client: null, environment: runtimeEnv }]
+            : [];
 
     for (const pkg of packageVersions) {
         const shortName = pkg.name.includes("/")
