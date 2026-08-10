@@ -4012,11 +4012,13 @@ test('resolved index policy retains the exact control-file observation used to p
         const candidate = await context.resolveIndexPolicyForCodebase(codebasePath);
         assert.equal(candidate.fileBasedIgnorePatterns.includes('data/'), true);
         assert.equal(candidate.controlSignature, await computeIndexPolicyControlSignature(codebasePath));
+        assert.equal(await context.isObservedIndexPolicyControlSignatureCurrent(candidate), true);
 
         fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
         const currentSignature = await computeIndexPolicyControlSignature(codebasePath);
         assert.notEqual(currentSignature, candidate.controlSignature);
         assert.equal(candidate.fileBasedIgnorePatterns.includes('data/'), true);
+        assert.equal(await context.isObservedIndexPolicyControlSignatureCurrent(candidate), false);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

@@ -137,7 +137,10 @@ import {
     getCustomIgnorePatternsFromEnvironment,
     readIgnorePatternsFile,
 } from './ignore-rule-service';
-import { observeIndexPolicyInputs } from './index-policy-input-observer';
+import {
+    computeIndexPolicyControlSignature,
+    observeIndexPolicyInputs,
+} from './index-policy-input-observer';
 
 export type {
     MutationGenerationObservation,
@@ -4867,6 +4870,14 @@ export class Context {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         this.loadCustomIndexPolicy(canonicalRoot);
         return this.resolveIndexPolicyFromCurrentInputs(canonicalRoot, {}, true, false);
+    }
+
+    async isObservedIndexPolicyControlSignatureCurrent(
+        policy: ObservedResolvedIndexPolicy,
+    ): Promise<boolean> {
+        const canonicalRoot = this.canonicalizeCodebasePath(policy.canonicalRoot);
+        return canonicalRoot === policy.canonicalRoot
+            && await computeIndexPolicyControlSignature(canonicalRoot) === policy.controlSignature;
     }
 
     activateObservedIndexPolicyForIncrementalReconciliation(

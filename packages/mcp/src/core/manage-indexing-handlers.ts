@@ -48,6 +48,15 @@ type ToolTextResponse = {
     isError?: boolean;
 };
 
+class IndexPolicyControlDriftError extends Error {
+    readonly code = 'index_policy_changed';
+
+    constructor(codebasePath: string) {
+        super(`index_policy_changed: Repository index-policy controls changed while indexing '${codebasePath}'.`);
+        this.name = 'IndexPolicyControlDriftError';
+    }
+}
+
 type IndexCodebaseArgs = {
     path: string;
     force?: boolean;
@@ -1701,6 +1710,10 @@ export class ManageIndexingHandlers {
                 this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
             }
             persistBackgroundPhase("proving");
+
+            if (!await this.host.context.isObservedIndexPolicyControlSignatureCurrent(candidatePolicy)) {
+                throw new IndexPolicyControlDriftError(absolutePath);
+            }
 
             if (stats.status === "limit_reached" && previousCompleteGeneration) {
                 const assertMutationCurrent = mutationLease

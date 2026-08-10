@@ -625,7 +625,11 @@ were written and is appended at the end.
   signature through candidate publication and acknowledges only that value;
   it no longer re-reads later repository bytes and relabels the generation.
   Canonical `satori_index_policy_v5` binds the signature into the durable
-  policy digest and generation proof.
+  policy digest and generation proof. Immediately before candidate authority
+  publication, the MCP coordinator re-observes the controls through the same
+  Core owner. Byte drift aborts candidate activation as typed
+  `index_policy_changed`, without marker/policy/navigation publication,
+  watcher acknowledgement, or accepted-signature advancement.
 - **Incremental behavior:** reconciliation observes one complete candidate and
   compares its semantic policy hash with durable accepted authority before
   refreshing matchers, deleting payload, syncing, or advancing lifecycle
@@ -637,7 +641,10 @@ were written and is appended at the end.
   drift, candidate-signature acknowledgement after full indexing, durable v5
   digest tamper detection, restart behavior, legacy-v4 upgrade, precedence of
   generation-sealed identity over lifecycle snapshot identity, and zero
-  payload/signature mutation when policy drift requires reindex.
+  payload/signature mutation when policy drift requires reindex. The bounded
+  control fixture also binds no-file, bare `data/`, anchored `/data/`, ordered
+  cross-file negation, same-size replacement, deletion, oversized input, and
+  existing symlink rejection behavior.
 - **Do not use daemon restart as the discriminator:** startup can reload the
   same stale durable policy, so continued exclusion after restart does not
   prove a built-in `data` skip. Source inspection and the installed `ignore`

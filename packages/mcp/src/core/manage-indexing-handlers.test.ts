@@ -5,8 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
+    computeIndexPolicyControlSignature,
     FileSynchronizer,
     IndexPolicyPublicationError,
+    observeIndexPolicyInputs,
     SynchronizerCheckpointPublicationError,
 } from "@zokizuan/satori-core";
 import type { CanonicalPublicationBinding, IndexPolicyPublicationReceipt } from "@zokizuan/satori-core";
@@ -413,6 +415,11 @@ function createFailedIndexingHarness(
     let publishedMarkerCollection: string | null = null;
     let navigationPublished = false;
     const publishedSnapshots: Array<{ status: string; collectionName?: string }> = [];
+    const resolvedPolicyObservations: Array<{
+        policyHash: string;
+        fileBasedIgnorePatterns: string[];
+        controlSignature: string;
+    }> = [];
 
     const vectorStore = {
         hasCollection: async (collectionName: string) => {
@@ -431,32 +438,59 @@ function createFailedIndexingHarness(
         loadResolvedIgnorePatterns: async () => undefined,
         resolveIndexPolicyForCodebase: async (_root: string, update: { customExtensions?: string[]; customIgnorePatterns?: string[] } = {}) => {
             standardPolicyResolutionCalls += 1;
-            return {
+            const observed = await observeIndexPolicyInputs(path.resolve(_root));
+            const customIgnorePatterns = update.customIgnorePatterns ?? publishedCustomIgnorePatterns;
+            const policy = {
                 canonicalRoot: path.resolve(_root),
-                profile: 'default',
+                profile: observed.profileConfig.profile,
                 customExtensions: update.customExtensions ?? publishedCustomExtensions,
-                customIgnorePatterns: update.customIgnorePatterns ?? publishedCustomIgnorePatterns,
+                customIgnorePatterns,
                 supportedExtensions: ['.ts', ...(update.customExtensions ?? publishedCustomExtensions)],
-                fileBasedIgnorePatterns: [],
-                effectiveIgnorePatterns: update.customIgnorePatterns ?? publishedCustomIgnorePatterns,
-                policyHash: crypto.createHash('sha256').update(JSON.stringify(update)).digest('hex'),
-                controlSignature: 'v1:candidate-policy-observation',
+                fileBasedIgnorePatterns: [...observed.fileBasedIgnorePatterns],
+                effectiveIgnorePatterns: [...customIgnorePatterns, ...observed.fileBasedIgnorePatterns],
+                policyHash: crypto.createHash('sha256').update(JSON.stringify({
+                    update,
+                    profile: observed.profileConfig.profile,
+                    fileBasedIgnorePatterns: observed.fileBasedIgnorePatterns,
+                })).digest('hex'),
+                controlSignature: observed.controlSignature,
             };
+            resolvedPolicyObservations.push({
+                policyHash: policy.policyHash,
+                fileBasedIgnorePatterns: [...policy.fileBasedIgnorePatterns],
+                controlSignature: policy.controlSignature,
+            });
+            return policy;
         },
         resolveIndexPolicyForReindex: async (_root: string, update: { customExtensions?: string[]; customIgnorePatterns?: string[] } = {}) => {
             reindexPolicyResolutionCalls += 1;
-            return {
+            const observed = await observeIndexPolicyInputs(path.resolve(_root));
+            const customIgnorePatterns = update.customIgnorePatterns ?? [];
+            const policy = {
                 canonicalRoot: path.resolve(_root),
-                profile: 'default',
+                profile: observed.profileConfig.profile,
                 customExtensions: update.customExtensions ?? [],
-                customIgnorePatterns: update.customIgnorePatterns ?? [],
+                customIgnorePatterns,
                 supportedExtensions: ['.ts', ...(update.customExtensions ?? [])],
-                fileBasedIgnorePatterns: [],
-                effectiveIgnorePatterns: update.customIgnorePatterns ?? [],
-                policyHash: crypto.createHash('sha256').update(JSON.stringify(update)).digest('hex'),
-                controlSignature: 'v1:candidate-policy-observation',
+                fileBasedIgnorePatterns: [...observed.fileBasedIgnorePatterns],
+                effectiveIgnorePatterns: [...customIgnorePatterns, ...observed.fileBasedIgnorePatterns],
+                policyHash: crypto.createHash('sha256').update(JSON.stringify({
+                    update,
+                    profile: observed.profileConfig.profile,
+                    fileBasedIgnorePatterns: observed.fileBasedIgnorePatterns,
+                })).digest('hex'),
+                controlSignature: observed.controlSignature,
             };
+            resolvedPolicyObservations.push({
+                policyHash: policy.policyHash,
+                fileBasedIgnorePatterns: [...policy.fileBasedIgnorePatterns],
+                controlSignature: policy.controlSignature,
+            });
+            return policy;
         },
+        isObservedIndexPolicyControlSignatureCurrent: async (policy: { canonicalRoot: string; controlSignature: string }) => (
+            await computeIndexPolicyControlSignature(policy.canonicalRoot)
+        ) === policy.controlSignature,
         publishResolvedIndexPolicy: (
             policy: { canonicalRoot: string; policyHash: string; controlSignature?: string; customExtensions: string[]; customIgnorePatterns: string[] },
             binding: PublishedPolicyBinding,
@@ -759,6 +793,7 @@ function createFailedIndexingHarness(
             return standardPolicyResolutionCalls;
         },
         publishedSnapshots,
+        resolvedPolicyObservations,
         publicationEvents,
         authorityEvents,
         clearedExpectedDocumentDigests,
@@ -1548,7 +1583,43 @@ test("background indexing acknowledges the control signature captured with its c
 
         await harness.handler.startBackgroundIndexing(repoPath, false);
 
-        assert.equal(acknowledgedSignature, 'v1:candidate-policy-observation');
+        assert.equal(acknowledgedSignature, await computeIndexPolicyControlSignature(repoPath));
+    });
+});
+
+test("background indexing rejects candidate activation when root policy controls drift after resolution", async () => {
+    await withTempRepo(async (repoPath) => {
+        const ignorePath = path.join(repoPath, '.satoriignore');
+        fs.writeFileSync(ignorePath, 'data/\n', 'utf8');
+        const candidateControlSignature = await computeIndexPolicyControlSignature(repoPath);
+        let acknowledgedSignature: string | undefined;
+        let watcherTouches = 0;
+        const harness = createFailedIndexingHarness(new Set(), {
+            indexCodebase: async () => {
+                fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
+                return completedIndexResult();
+            },
+            recordCurrentIgnoreControlSignature: async (observedSignature) => {
+                acknowledgedSignature = observedSignature;
+            },
+            touchWatchedCodebase: async () => {
+                watcherTouches += 1;
+            },
+        });
+
+        await harness.handler.startBackgroundIndexing(repoPath, false);
+
+        assert.equal(acknowledgedSignature, undefined);
+        assert.equal(harness.resolvedPolicyObservations.length, 1);
+        assert.deepEqual(harness.resolvedPolicyObservations[0]?.fileBasedIgnorePatterns, ['data/']);
+        assert.equal(harness.resolvedPolicyObservations[0]?.controlSignature, candidateControlSignature);
+        assert.notEqual(await computeIndexPolicyControlSignature(repoPath), candidateControlSignature);
+        assert.deepEqual(harness.publicationEvents, ['navigation:discard:candidate-generation']);
+        assert.equal(harness.publishedMarker, null);
+        assert.equal(harness.indexedSnapshots, 0);
+        assert.equal(watcherTouches, 0);
+        assert.equal(harness.failedSnapshots.length, 1);
+        assert.match(harness.failedSnapshots[0]?.errorMessage ?? '', /index_policy_changed/);
     });
 });
 
