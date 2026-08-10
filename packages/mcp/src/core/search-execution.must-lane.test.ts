@@ -68,6 +68,7 @@ function buildInput(overrides: Partial<SearchExecutionInput> = {}): SearchExecut
         effectiveRoot: '/repo',
         scope: 'runtime',
         rankingMode: 'auto_changed_first',
+        resultMode: 'grouped',
         limit: 10,
         debugMode: 'none',
         semanticQuery: parsed.semanticQuery,
@@ -100,6 +101,7 @@ function buildHost(
         query: string;
         topK: number;
         retrievalMode: string;
+        lexicalMatchMode?: string;
     }> = [];
     const host: SearchExecutionHost = {
         searchQuerySupport: buildSupport(),
@@ -108,8 +110,10 @@ function buildHost(
                 query: request.query,
                 topK: request.topK,
                 retrievalMode: request.retrievalMode,
+                lexicalMatchMode: request.lexicalMatchMode,
             });
             const isLaneCall = request.retrievalMode === 'lexical'
+                && request.lexicalMatchMode === 'all_terms'
                 && request.topK === 80
                 && request.query === 'tzinfo None';
             if (isLaneCall && laneBehavior === 'unsupported') {
@@ -156,6 +160,7 @@ test('must: lane recovers a match outside the normal top-N lexical pool', async 
     assert.equal(laneCall !== undefined, true, 'dedicated must: lane must query the lexical projection');
     assert.equal(laneCall?.topK, 80, 'lane must use the operator-constraint candidate maximum as its hard budget');
     assert.equal(laneCall?.retrievalMode, 'lexical');
+    assert.equal(laneCall?.lexicalMatchMode, 'all_terms');
 
     assert.equal(outcome.mustConstraintRetrievalOutcome?.status, 'attempted');
     assert.equal(outcome.mustConstraintRetrievalOutcome?.candidatesExamined, 1);
@@ -178,7 +183,12 @@ test('must: lane produces the explicit note when no candidate satisfies an absen
         true,
         'absent phrase must produce the explicit budget note',
     );
-    assert.equal(outcome.searchWarnings.includes('FILTER_MUST_UNSATISFIED'), true);
+    assert.equal(outcome.searchWarnings.includes('FILTER_MUST_UNSATISFIED'), false);
+    assert.equal(
+        outcome.searchWarnings.includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+        false,
+        'the specific bounded no-match warning already carries the non-exhaustive caveat',
+    );
     assert.equal(outcome.mustConstraintRetrievalOutcome?.budgetExhausted, false);
 });
 
@@ -322,6 +332,7 @@ test('must: coverage reports a skipped lane when the primary results already fil
     ));
     const { host, semanticSearchCalls } = buildHost(primary, []);
     const input = buildInput({
+        resultMode: 'raw',
         limit: 2,
         retrievalPolicy: resolveSearchPolicy({ resultLimit: 2, hasMustOperators: true }),
     });

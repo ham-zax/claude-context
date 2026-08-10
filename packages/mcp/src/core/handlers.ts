@@ -5023,6 +5023,7 @@ export class ToolHandlers {
                 effectiveRoot,
                 scope: input.scope,
                 rankingMode: input.rankingMode,
+                resultMode: input.resultMode,
                 limit: input.limit,
                 debugMode,
                 semanticQuery,

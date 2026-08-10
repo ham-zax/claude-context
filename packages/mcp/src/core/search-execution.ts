@@ -15,6 +15,7 @@ import {
     SEARCH_RRF_K,
     type PathCategory,
     type SearchRankingMode,
+    type SearchResultMode,
     type SearchScope,
 } from "./search-constants.js";
 import type {
@@ -466,6 +467,7 @@ export type SearchExecutionInput = {
     effectiveRoot: string;
     scope: SearchScope;
     rankingMode: SearchRankingMode;
+    resultMode: SearchResultMode;
     limit: number;
     debugMode: SearchDebugMode;
     semanticQuery: string;
@@ -1441,19 +1443,20 @@ export async function runSearchExecution(
         // repository directly and is capped by the operator-constraint
         // candidate maximum.
         const mustTokens = input.parsedOperators.must;
+        const primaryChunkLimitFilled = scoredAttempt.length
+            >= input.retrievalPolicy.retrievalResultLimit;
+        const shouldRunMustLane = mustTokens.length > 0
+            && (input.resultMode === "grouped" || !primaryChunkLimitFilled);
         if (
             mustTokens.length > 0
-            && scoredAttempt.length >= input.retrievalPolicy.retrievalResultLimit
+            && !shouldRunMustLane
         ) {
-            // The primary lanes already filled the caller's result limit, so
-            // the dedicated lane is skipped; recall beyond the limit is
-            // unexamined and must be reported honestly.
+            // Raw mode exposes chunks directly, so a filled chunk limit retains
+            // the established skip contract. Grouped mode cannot infer visible
+            // capacity here and therefore always reserves the bounded lane.
             mustLaneSkippedByPrimaryLimit = true;
         }
-        if (
-            mustTokens.length > 0
-            && scoredAttempt.length < input.retrievalPolicy.retrievalResultLimit
-        ) {
+        if (shouldRunMustLane) {
             const mustLaneBudget = retrievalPolicy.maxCandidateLimit;
             let laneResults: SearchResultLike[] = [];
             let laneFailed = false;
@@ -1728,20 +1731,25 @@ export async function runSearchExecution(
         mustLaneSkippedByPrimaryLimit,
         retrievalPolicy.maxCandidateLimit,
     );
-    if (mustApplied && !mustSatisfied) {
+    const attemptedMustLaneFoundNoMatch = mustApplied
+        && !mustSatisfied
+        && mustConstraintRetrievalOutcome?.status === "attempted";
+    if (mustApplied && !mustSatisfied && mustCoverage === null) {
         searchWarnings.push("FILTER_MUST_UNSATISFIED");
     }
     if (mustApplied && mustConstraintRetrievalOutcome?.status === "failed") {
         searchWarnings.push(WARNING_CODES.MUST_CONJUNCTIVE_RETRIEVAL_FAILED);
     }
     if (
-        mustApplied
-        && mustConstraintRetrievalOutcome?.status === "attempted"
-        && !mustSatisfied
+        attemptedMustLaneFoundNoMatch
     ) {
         searchWarnings.push(WARNING_CODES.MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET);
     }
-    if (mustApplied && mustCoverage?.moreMayExist) {
+    if (
+        mustApplied
+        && mustCoverage?.moreMayExist
+        && !attemptedMustLaneFoundNoMatch
+    ) {
         searchWarnings.push(WARNING_CODES.MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET);
     }
     if (candidateSurvival) {

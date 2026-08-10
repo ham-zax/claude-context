@@ -106,6 +106,7 @@ function buildInput(
         effectiveRoot: "/repo",
         scope: "runtime",
         rankingMode: "default",
+        resultMode: "raw",
         limit,
         debugMode: overrides.debugMode ?? "none",
         semanticQuery: parsedOperators.semanticQuery,

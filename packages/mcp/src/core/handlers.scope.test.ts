@@ -607,6 +607,7 @@ function createHandlers(
         sidecarBuiltAt?: string;
         respectSemanticTopK?: boolean;
         mustLaneBlockedQueries?: string[];
+        mustLaneResultsByQuery?: Readonly<Record<string, SearchFixtureResult[]>>;
         diagnosticCandidateArms?: {
             dense?: SearchFixtureResult[];
             preciseLexical?: SearchFixtureResult[];
@@ -625,6 +626,9 @@ function createHandlers(
         }>;
     }
 ) {
+    const searchResultsForQuery = (query: string): SearchFixtureResult[] => (
+        options?.mustLaneResultsByQuery?.[query] ?? searchResults
+    );
     const tracedSearchResults = searchResults.map((result, index) => ({
         ...result,
         candidateId: result.candidateId ?? `fixture-candidate-${index + 1}`,
@@ -636,7 +640,9 @@ function createHandlers(
         }),
         semanticSearch: async (request: { query: string }) => {
             options?.semanticSearchQueries?.push(request.query);
-            return options?.mustLaneBlockedQueries?.includes(request.query) ? [] : searchResults;
+            return options?.mustLaneBlockedQueries?.includes(request.query)
+                ? []
+                : searchResultsForQuery(request.query);
         },
         semanticSearchInProvenGeneration: async (
             _receipt: unknown,
@@ -646,7 +652,8 @@ function createHandlers(
             if (options?.mustLaneBlockedQueries?.includes(request.query)) {
                 return [];
             }
-            return options?.respectSemanticTopK ? searchResults.slice(0, request.topK) : searchResults;
+            const queryResults = searchResultsForQuery(request.query);
+            return options?.respectSemanticTopK ? queryResults.slice(0, request.topK) : queryResults;
         },
         semanticSearchWithCandidateTraceInProvenGeneration: async (
             _receipt: unknown,
@@ -669,9 +676,16 @@ function createHandlers(
                     },
                 };
             }
+            const queryResults = searchResultsForQuery(request.query);
+            const tracedQueryResults = queryResults === searchResults
+                ? tracedSearchResults
+                : queryResults.map((result, index) => ({
+                    ...result,
+                    candidateId: result.candidateId ?? `query-fixture-${index + 1}`,
+                }));
             const selectedResults = options?.respectSemanticTopK
-                ? tracedSearchResults.slice(0, request.topK)
-                : tracedSearchResults;
+                ? tracedQueryResults.slice(0, request.topK)
+                : tracedQueryResults;
             const diagnosticCandidateArms = options?.diagnosticCandidateArms
                 ? Object.fromEntries(Object.entries(options.diagnosticCandidateArms).map(
                     ([arm, results]) => [arm, results?.map((result, index) => ({
@@ -6694,7 +6708,7 @@ test('handleSearchCode keeps operator syntax out of an operator-only retrieval q
     });
 });
 
-test('handleSearchCode emits FILTER_MUST_UNSATISFIED after bounded retries', async () => {
+test('handleSearchCode emits one specific bounded must no-match warning', async () => {
     await withTempRepo(async (repoPath) => {
         const denseResults = Array.from({ length: 140 }, (_, idx) => ({
             content: `candidate ${idx}`,
@@ -6744,7 +6758,15 @@ test('handleSearchCode emits FILTER_MUST_UNSATISFIED after bounded retries', asy
         assert.equal(payload.status, 'ok');
         assert.equal(payload.results.length, 0);
         assert.ok(Array.isArray(payload.warnings));
-        assert.equal(warningCodes(payload).includes('FILTER_MUST_UNSATISFIED'), true);
+        assert.equal(warningCodes(payload).includes('FILTER_MUST_UNSATISFIED'), false);
+        assert.equal(
+            warningCodes(payload).includes('MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET'),
+            true,
+        );
+        assert.equal(
+            warningCodes(payload).includes('MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET'),
+            false,
+        );
     });
 });
 
@@ -13646,7 +13668,76 @@ test('raw search results carry the must-constraint hint contract', async () => {
     });
 });
 
-test('handleSearchCode publishes skipped-lane coverage when the primary results fill the limit', async () => {
+test('grouped must search runs the bounded lane when duplicate chunks leave visible capacity', async () => {
+    await withTempRepo(async (repoPath) => {
+        const primaryResults = Array.from({ length: 15 }, (_, index) => ({
+            content: `export function primary${index}() { const x = FILLED_TOKEN; x.replace(SECOND_TOKEN); }`,
+            relativePath: `src/group-${index % 7}.ts`,
+            startLine: index * 2 + 1,
+            endLine: index * 2 + 2,
+            language: 'typescript',
+            score: 0.99 - (index * 0.0001),
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        }));
+        const laneOnlyResult = {
+            content: 'export function recovered() { const x = FILLED_TOKEN; x.replace(SECOND_TOKEN); }',
+            relativePath: 'src/lane-only.ts',
+            startLine: 1,
+            endLine: 2,
+            language: 'typescript',
+            score: 0.5,
+            indexedAt: '2026-01-01T00:30:00.000Z',
+        };
+        const semanticSearchQueries: string[] = [];
+        const handlers = createHandlers(repoPath, primaryResults, undefined, {
+            respectSemanticTopK: true,
+            enableVectorReceipt: true,
+            semanticSearchQueries,
+            mustLaneResultsByQuery: {
+                'FILLED_TOKEN SECOND_TOKEN': [laneOnlyResult],
+            },
+        });
+        const run = async () => {
+            const response = await handlers.handleSearchCode({
+                path: repoPath,
+                query: 'must:FILLED_TOKEN must:SECOND_TOKEN runtime',
+                scope: 'runtime',
+                resultMode: 'grouped',
+                groupBy: 'file',
+                limit: 10,
+                debugMode: 'summary',
+            });
+            return JSON.parse(response.content[0]?.text || '{}');
+        };
+
+        const first = await run();
+        const second = await run();
+        const resultFiles = (payload: { results: SearchPayloadResultView[] }) => payload.results.map(
+            (result) => result.file ?? result.target?.file,
+        );
+
+        assert.equal(first.status, 'ok');
+        assert.equal(first.results.length, 8);
+        assert.equal(resultFiles(first).includes('src/lane-only.ts'), true);
+        assert.deepEqual(resultFiles(second), resultFiles(first));
+        assert.equal(
+            semanticSearchQueries.filter((query) => query === 'FILLED_TOKEN SECOND_TOKEN').length,
+            2,
+            'grouped mode must reserve the bounded conjunctive lane on every execution',
+        );
+        assert.deepEqual(first.hints?.mustCoverage, {
+            semantics: 'case_sensitive_raw_substring_all',
+            exhaustive: false,
+            status: 'lane_completed_within_backend_results',
+            laneAttempted: true,
+            candidatesExamined: 1,
+            candidateBudget: 80,
+            moreMayExist: true,
+        });
+    });
+});
+
+test('raw handleSearchCode preserves skipped-lane coverage when primary chunks fill the limit', async () => {
     await withTempRepo(async (repoPath) => {
         const denseResults = Array.from({ length: 5 }, (_, idx) => ({
             content: `export function filled${idx}() { const x = FILLED_TOKEN; x.replace(SECOND_TOKEN); }`,
@@ -13667,7 +13758,7 @@ test('handleSearchCode publishes skipped-lane coverage when the primary results 
             path: repoPath,
             query: 'must:FILLED_TOKEN must:SECOND_TOKEN runtime',
             scope: 'runtime',
-            resultMode: 'grouped',
+            resultMode: 'raw',
             groupBy: 'symbol',
             limit: 2,
             debugMode: 'full',

@@ -77,6 +77,7 @@ function buildInput(query: string): SearchExecutionInput {
         effectiveRoot: "/repo",
         scope: "runtime",
         rankingMode: "default",
+        resultMode: "raw",
         limit: 3,
         debugMode: "full",
         semanticQuery: parsedOperators.semanticQuery,

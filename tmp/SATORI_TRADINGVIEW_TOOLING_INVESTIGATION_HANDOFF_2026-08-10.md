@@ -828,8 +828,9 @@ projection-text tuning was included.
 
 ## 23. Must-lane admission can stop at the chunk limit before filling grouped results
 
-- **Status (observed 2026-08-10 on 6.9.0):** confirmed against the current
-  `tradingview_ratio` generation.
+- **Status (fixed 2026-08-10 on the current branch):** the confirmed 6.9.0
+  grouped-search shortfall now has a mode-aware admission fix and a real
+  handler/finalization regression.
 - **Live symptom:** `must:cache_repo` with `limit=10` returned seven grouped
   results, while `hints.mustCoverage` reported
   `lane_skipped_primary_limit_filled`, `laneAttempted:false`, and
@@ -886,9 +887,33 @@ projection-text tuning was included.
   existing public `SearchMustCoverage` schema can represent that without a
   schema-version change.
 
-Warning deduplication for genuinely empty scopes should be evaluated only after
-the lane-admission fixture passes; it must not be used to mask an unattempted
-lane. `OR` syntax remains out of scope.
+### Issue 23 implementation closure
+
+- `SearchExecutionInput` now carries the public `resultMode`. Raw mode retains
+  the established chunk-count skip when primary chunks fill the result limit;
+  grouped mode cannot infer final visible capacity at execution time and always
+  reserves the existing bounded conjunctive lane when `must:` tokens exist.
+- Lane candidates still enter through the existing stable chunk identity,
+  normal deterministic filters, and native ordering. Final symbol/file grouping
+  remains the only grouping authority; no grouping or reranker-family policy
+  was copied into execution.
+- The handler regression supplies 15 primary chunks across seven file groups
+  under `limit=10` plus one lane-only eighth file. The bounded `all_terms` lane
+  is attempted on repeated executions, the eighth group is recovered, and
+  final grouped order is stable. Existing execution and handler tests prove raw
+  mode still publishes `lane_skipped_primary_limit_filled`.
+- Empty attempted lanes now emit the single specific
+  `MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET` warning; its message already
+  carries the bounded/non-exhaustive caveat. Failed and unavailable lanes keep
+  their specific diagnostic plus incomplete-recall warning. The authoritative
+  `SearchMustCoverage` status remains unchanged and never claims exhaustive
+  recall.
+- Focused verification passed: MCP typecheck; 10 must-lane execution tests;
+  188 handler search-scope tests; the native-order, native-rerank, reliability,
+  and rerank-context suites; 242 tests total across the implicated files; and
+  targeted ESLint/diff checks.
+
+`OR` syntax remains out of scope.
 
 ## 24. Full-index progress reaches 100% before proof and publication complete
 
@@ -950,12 +975,7 @@ lane. `OR` syntax remains out of scope.
 
 ### Confirmed open work
 
-1. **Issue 23 — must-lane grouped shortfall:** first add a failing execution
-   fixture with at least 15 matching chunks collapsing below a ten-group caller
-   limit plus a recoverable lane-only family. Reserve the bounded must lane for
-   grouped mode and keep raw chunk-limit skipping. Keep conjunctive `all_terms`
-   semantics and deterministic final grouping. Do not implement `OR`.
-2. **Issue 24 — progress/readiness contract:** create a coordinator test that
+1. **Issue 24 — progress/readiness contract:** create a coordinator test that
    pauses between Core's final progress callback and marker/navigation
    publication. Clamp active MCP progress below 100 and retain terminal
    completion in the existing indexed/completed transition. Do not weaken

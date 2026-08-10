@@ -69,6 +69,7 @@ function buildInput(): SearchExecutionInput {
         effectiveRoot: "/repo",
         scope: "runtime",
         rankingMode: "default",
+        resultMode: "raw",
         limit: 3,
         debugMode: "none",
         semanticQuery: parsedOperators.semanticQuery,
