@@ -22,6 +22,13 @@ Satori exposes exactly seven MCP tools:
 
 Filesystem `path` inputs are always absolute, but their targets differ by tool. `manage_index` and `file_outline` use a codebase root; `search_codebase` and `call_graph` accept an indexed root or subdirectory; `read_file` uses the absolute file path. Nested `file` and `symbolRef.file` values are repository-relative to the resolved root. `list_codebases` has no path input, and `continue_search` accepts an opaque process-local result-set handle, the response's exact `nextOffset`, and an optional page limit. Retrying the same handle, offset, and limit replays the same page. Satori never writes source files.
 
+Grouped search separates the total frozen-set bound from initial disclosure.
+`limit=20, disclosureLimit=6` returns six groups initially and freezes up to
+twenty across continuation pages. `pagination.continuation="complete"` means
+that caller-bounded frozen set is complete; it does not mean
+`resultCounts.availableGroupCount` was exhausted. Groups outside `limit` are
+reported by `omittedBeyondLimitGroupCount` and cannot be paged from that search.
+
 ## 1. Install
 
 Use the installer rather than copying runtime paths into MCP client configuration:

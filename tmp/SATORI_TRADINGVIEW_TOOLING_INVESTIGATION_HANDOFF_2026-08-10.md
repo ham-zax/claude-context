@@ -992,9 +992,13 @@ projection-text tuning was included.
 
 ### Confirmed open work
 
-None from Issues 21–24. The only remaining item in the authorized rubric is an
-optional documentation-only clarification of pagination parameter wording; it
-does not require a runtime change or a live index mutation.
+None. Issues 21–24 are closed, and the optional pagination wording is now bound
+in the public `search_codebase` parameter descriptions and synchronized README
+workflows. `limit` is explicitly the total frozen-set bound across all pages;
+`disclosureLimit` is only the initial grouped page size. The documented
+`limit=20, disclosureLimit=6` example returns six initially and freezes up to
+twenty, while `continuation="complete"` remains caller-bound rather than a claim
+that the full available pool was exhausted. No runtime behavior changed.
 
 ### Confirmed non-defects and closed branches
 
