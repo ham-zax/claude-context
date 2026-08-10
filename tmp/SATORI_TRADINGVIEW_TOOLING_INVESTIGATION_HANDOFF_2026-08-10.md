@@ -2,8 +2,8 @@
 
 > **Temporary handoff (2026-08-10):** this file was moved to `tmp/` for the
 > next coding session. It is an investigation ledger, not release, runtime,
-> strategy, or governance authority. Issue 21 now has an implemented,
-> package-verified fix in the 2026-08-10 worktree; Issues 22–24 remain open.
+> strategy, or governance authority. Issues 21–24 now have implemented,
+> package-verified fixes in the 2026-08-10 local commit series.
 > Earlier entries retain their historical status and must not be reopened
 > without a fresh reproduction.
 
@@ -917,9 +917,9 @@ projection-text tuning was included.
 
 ## 24. Full-index progress reaches 100% before proof and publication complete
 
-- **Status (source-confirmed 2026-08-10; live duration supplied by the
-  TradingView investigation):** confirmed. Search correctly remains fail-closed;
-  the defect is the progress/readiness contract, not marker authority.
+- **Status (fixed 2026-08-10 on the current branch):** the MCP coordinator now
+  reserves public 100% for terminal completion. Search/read readiness and Core's
+  payload-processing progress contract are unchanged.
 - **Symptom:** `manage_index status` can report 100% while the operation remains
   in `writing`/`proving`/`publishing` and all reads still return
   `not_ready reason:indexing`. The observed post-100% interval was roughly
@@ -971,21 +971,30 @@ projection-text tuning was included.
   every indexing metadata object is a separate product change and is not
   required to close this defect.
 
+### Issue 24 implementation closure
+
+- `ManageIndexingHandlers.startBackgroundIndexing()` now projects every active
+  Core callback as `min(corePercentage, 99)` before writing public indexing
+  state. Core may still report payload processing at 100 to direct callers.
+- The real coordinator harness invokes Core's 100 callback and pauses inside
+  `publishNavigationCandidate()`. While paused, it proves the durable operation
+  is `publishing`, lifecycle remains `indexing`, no indexed snapshot exists,
+  and public progress is 99. After release, the existing completed transition
+  atomically exposes `completed`/`indexed` readiness.
+- Focused verification passed: 84 indexing-coordinator and read-blocking tests,
+  MCP typecheck, targeted ESLint, clean MCP runtime build, and diff hygiene. An
+  independent review found no correctness or test-coverage blocker.
+- `retryAfterMs=2000` remains a retry cadence. No response schema, completion
+  proof, navigation authority, source checkpoint, or Core progress behavior was
+  changed.
+
 ## Temporary next-session handoff
 
 ### Confirmed open work
 
-1. **Issue 24 — progress/readiness contract:** create a coordinator test that
-   pauses between Core's final progress callback and marker/navigation
-   publication. Clamp active MCP progress below 100 and retain terminal
-   completion in the existing indexed/completed transition. Do not weaken
-   readiness or serve an unproven generation.
-
-Do these as separate ownership-bounded fixes unless shared evidence proves a
-common owner. Ask before any live `create`, `reindex`, or `clear`; focused
-temporary fixtures are preferred over mutating the TradingView index.
-This handoff is sufficient as the implementation plan; no additional planning
-file is needed before the first failing fixture is written.
+None from Issues 21–24. The only remaining item in the authorized rubric is an
+optional documentation-only clarification of pagination parameter wording; it
+does not require a runtime change or a live index mutation.
 
 ### Confirmed non-defects and closed branches
 

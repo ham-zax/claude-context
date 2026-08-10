@@ -391,10 +391,12 @@ function createFailedIndexingHarness(
         legacyRollback?: boolean;
         proveVectorGenerationError?: Error;
         recordCurrentIgnoreControlSignature?: (observedSignature?: string) => Promise<void>;
+        captureOperationPhases?: boolean;
     } = {},
 ) {
     const droppedCollections: string[] = [];
     const failedSnapshots: Array<{ path: string; errorMessage: string; progress?: number }> = [];
+    const indexingProgress: number[] = [];
     const publicationEvents: string[] = [];
     const authorityEvents: string[] = [];
     const clearedExpectedDocumentDigests: Array<string | undefined> = [];
@@ -414,6 +416,8 @@ function createFailedIndexingHarness(
     let publishedMarker: ReturnType<typeof buildMarker> | null = null;
     let publishedMarkerCollection: string | null = null;
     let navigationPublished = false;
+    let lifecycle: "indexing" | "indexed" = "indexing";
+    let latestOperation: IndexOperationReceipt | undefined;
     const publishedSnapshots: Array<{ status: string; collectionName?: string }> = [];
     const resolvedPolicyObservations: Array<{
         policyHash: string;
@@ -723,16 +727,51 @@ function createFailedIndexingHarness(
     const host = {
         context,
         snapshotManager: {
-            setCodebaseIndexing: () => undefined,
+            setCodebaseIndexing: (_codebasePath: string, progress: number) => {
+                lifecycle = "indexing";
+                indexingProgress.push(progress);
+            },
             setCodebaseIndexFailed: (codebasePath: string, errorMessage: string, progress?: number) => {
                 failedSnapshots.push({ path: codebasePath, errorMessage, progress });
             },
             setCodebaseIndexed: (_path: string, stats: { status: string }, _fingerprint?: unknown, _source?: unknown, collectionName?: string) => {
+                lifecycle = "indexed";
                 indexedSnapshots += 1;
                 publishedSnapshots.push({ status: stats.status, collectionName });
             },
             setCodebaseIndexManifest: () => undefined,
             setCodebaseCallGraphSidecar: () => undefined,
+            ...(options.captureOperationPhases ? {
+                getLatestOperation: () => latestOperation,
+                startOperation: (lease: RootMutationLease) => {
+                    latestOperation = {
+                        id: lease.operationId,
+                        action: lease.action,
+                        canonicalRoot: lease.canonicalRoot,
+                        generation: lease.generation,
+                        acceptedAt: lease.acquiredAt,
+                        phase: "accepted",
+                        lastDurableTransitionAt: lease.acquiredAt,
+                        runtimeFingerprint: RUNTIME_FINGERPRINT,
+                        writer: {
+                            ownerId: lease.ownerId,
+                            pid: lease.pid,
+                            satoriVersion: "test",
+                        },
+                    };
+                    return latestOperation;
+                },
+                transitionOperation: (_lease: RootMutationLease, phase: IndexOperationPhase) => {
+                    assert.ok(latestOperation);
+                    latestOperation = {
+                        ...latestOperation,
+                        phase,
+                        lastDurableTransitionAt: new Date().toISOString(),
+                    };
+                    return latestOperation;
+                },
+                saveCodebaseSnapshot: () => true,
+            } : {}),
         },
         syncManager: {
             recordCurrentIgnoreControlSignature: options.recordCurrentIgnoreControlSignature
@@ -771,6 +810,13 @@ function createFailedIndexingHarness(
     return {
         droppedCollections,
         failedSnapshots,
+        indexingProgress,
+        get lifecycle() {
+            return lifecycle;
+        },
+        get latestOperation() {
+            return latestOperation;
+        },
         get indexedSnapshots() {
             return indexedSnapshots;
         },
@@ -1245,6 +1291,67 @@ test("background indexing treats watcher touch as best effort after proof", asyn
             "policy:publish",
             "navigation:publish:candidate-generation",
         ]);
+    });
+});
+
+test("background indexing reserves public 100 percent until publication completes", async () => {
+    await withTempRepo(async (repoPath) => {
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(path.dirname(repoPath), "progress-publication-leases"),
+            ownerId: "progress-publication-owner",
+        });
+        const acquired = coordinator.acquire(repoPath, "create");
+        assert.equal(acquired.acquired, true);
+        if (!acquired.acquired) return;
+
+        let publicationEnteredResolve!: () => void;
+        let releasePublication!: () => void;
+        const publicationEntered = new Promise<void>((resolve) => {
+            publicationEnteredResolve = resolve;
+        });
+        const publicationBarrier = new Promise<void>((resolve) => {
+            releasePublication = resolve;
+        });
+        const harness = createFailedIndexingHarness(new Set(), {
+            mutationLeaseCoordinator: coordinator,
+            captureOperationPhases: true,
+            indexCodebase: async (_codebasePath, onProgress) => {
+                onProgress?.({
+                    phase: "writing",
+                    current: 1,
+                    total: 1,
+                    percentage: 100,
+                });
+                return completedIndexResult();
+            },
+            publishNavigationCandidate: async () => {
+                publicationEnteredResolve();
+                await publicationBarrier;
+            },
+        });
+
+        const worker = harness.handler.startBackgroundIndexing(
+            repoPath,
+            false,
+            undefined,
+            acquired.lease,
+        );
+        try {
+            await publicationEntered;
+
+            assert.equal(harness.latestOperation?.phase, "publishing");
+            assert.equal(harness.lifecycle, "indexing");
+            assert.equal(harness.indexedSnapshots, 0);
+            assert.equal(harness.indexingProgress.at(-1), 99);
+        } finally {
+            releasePublication();
+            await worker;
+            coordinator.release(acquired.lease);
+        }
+
+        assert.equal(harness.latestOperation?.phase, "completed");
+        assert.equal(harness.lifecycle, "indexed");
+        assert.equal(harness.indexedSnapshots, 1);
     });
 });
 

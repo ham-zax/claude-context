@@ -1652,7 +1652,8 @@ export class ManageIndexingHandlers {
                 if (mutationLease) {
                     this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
                 }
-                this.host.snapshotManager.setCodebaseIndexing(absolutePath, progress.percentage);
+                const publicProgress = Math.min(progress.percentage, 99);
+                this.host.snapshotManager.setCodebaseIndexing(absolutePath, publicProgress);
 
                 if (!writingReceiptPublished) {
                     persistBackgroundPhase("writing");
