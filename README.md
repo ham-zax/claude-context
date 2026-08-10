@@ -209,6 +209,60 @@ satori install --client all --runtime offline --ollama-model nomic-embed-text
 
 Changing the embedding provider, model, dimensions, vector backend, or persisted projection changes index compatibility and requires a reindex. Satori never silently converts or deletes the previous backend's publication.
 
+### Test the repository runtime locally
+
+From a Satori checkout, the development installer builds the local Core, MCP,
+and CLI packages, preflights the MCP runtime, updates the selected clients, and
+points the stable launcher at this checkout. It does not install or replace the
+globally published CLI.
+
+```bash
+pnpm dev:install-local-mcp -- --client opencode --runtime offline --reranker lateon
+```
+
+That exact command selects OpenCode, local Potion embeddings, LanceDB, and the
+LateOn reranker. Restart OpenCode after changing the launcher.
+
+| Development option | Supported values and constraints |
+|---|---|
+| `--client` | `opencode` (default), `codex`, `claude`, or `all` |
+| `--runtime` | `offline` or `voyage`; when omitted, preserve the managed selection, or use offline for a new launcher |
+| `--reranker` | `lateon` or `none`; offline only |
+| `--ollama-model` | Selects an Ollama model instead of Potion; offline only |
+| `--vector-store` | `lancedb` or `milvus`; offline requires LanceDB and Milvus requires Voyage |
+| `--no-build` | Reuse the existing local build output |
+| `--home`, `--node` | Override the managed home or Node executable for isolated testing |
+
+Useful local combinations:
+
+```bash
+# Offline Potion + LanceDB + LateOn
+pnpm dev:install-local-mcp -- --client opencode --runtime offline --reranker lateon
+
+# Offline Potion + LanceDB without neural reranking
+pnpm dev:install-local-mcp -- --client opencode --runtime offline --reranker none
+
+# Offline Ollama + LanceDB
+pnpm dev:install-local-mcp -- --client opencode --runtime offline --ollama-model nomic-embed-text --reranker none
+
+# Connected Voyage + LanceDB or Milvus
+pnpm dev:install-local-mcp -- --client opencode --runtime voyage --vector-store lancedb
+pnpm dev:install-local-mcp -- --client opencode --runtime voyage --vector-store milvus
+```
+
+To stop testing the checkout and restore OpenCode to the current published
+runtime, run the published installer again. The explicit form below also
+restores the same offline Potion + LateOn selection used in the first example:
+
+```bash
+npx -y @zokizuan/satori-cli@latest install --client opencode --runtime offline --reranker lateon
+npx -y @zokizuan/satori-cli@latest doctor
+```
+
+If the latest CLI is already installed globally, the equivalent first command
+is `satori install --client opencode --runtime offline --reranker lateon`.
+Restart OpenCode after restoring the published runtime.
+
 ## MCP Tools
 
 | Tool | Purpose |

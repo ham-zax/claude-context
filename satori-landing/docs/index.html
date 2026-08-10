@@ -736,6 +736,36 @@
           </p>
         </div>
         <div class="panel">
+          <h3>Test a Repository Build, Then Restore the Published Runtime</h3>
+          <p>
+            From a Satori checkout, the development installer builds and
+            preflights the local Core, MCP, and CLI, then points the stable
+            launcher at that checkout. It does not replace a globally installed
+            published CLI.
+          </p>
+          <pre><code>pnpm dev:install-local-mcp -- --client opencode --runtime offline --reranker lateon</code></pre>
+          <p>
+            This selects OpenCode, Potion embeddings, LanceDB, and LateOn.
+            Supported development options are:
+          </p>
+          <ul>
+            <li><code>--client opencode|codex|claude|all</code> (default: <code>opencode</code>).</li>
+            <li><code>--runtime offline|voyage</code>; omission preserves the managed selection, or starts offline when no launcher exists.</li>
+            <li><code>--reranker lateon|none</code>, available only with the offline runtime.</li>
+            <li><code>--ollama-model &lt;id&gt;</code> to select Ollama instead of Potion for offline embeddings.</li>
+            <li><code>--vector-store lancedb|milvus</code>; offline requires LanceDB and Milvus requires Voyage.</li>
+            <li><code>--no-build</code>, <code>--home &lt;path&gt;</code>, and <code>--node &lt;path&gt;</code> for existing-build or isolated testing.</li>
+          </ul>
+          <p>Restore OpenCode to the published runtime with:</p>
+          <pre><code>npx -y @zokizuan/satori-cli@latest install --client opencode --runtime offline --reranker lateon
+npx -y @zokizuan/satori-cli@latest doctor</code></pre>
+          <p>
+            Restart OpenCode after either switch. If the latest CLI is already
+            installed globally, the equivalent restore command starts with
+            <code>satori install</code> instead of <code>npx -y @zokizuan/satori-cli@latest install</code>.
+          </p>
+        </div>
+        <div class="panel">
           <h3>Upgrade Satori</h3>
           <pre><code>satori upgrade</code></pre>
           <p>
@@ -899,43 +929,45 @@ profile = "minimal"</code></pre>
       <section class="section" id="setup">
         <h2>Minimum Runtime Setup</h2>
         <p class="lede">
-          Configure the embedding provider and vector backend before indexing.
-          Those values are part of the index fingerprint, so changing provider,
-          model, dimension, or vector-store schema later requires a reindex.
-          Restart every Satori MCP client before mutating indexes after those
-          changes.
+          Select the runtime through the installer before indexing. Provider,
+          model, dimension, reranker projection, and vector-store identity are
+          compatibility inputs; changing an incompatible selection requires a
+          reindex. Restart every Satori MCP client after changing the managed
+          launcher.
         </p>
         <div class="grid">
           <div class="panel">
-            <h3>Cloud Start</h3>
-            <pre><code>EMBEDDING_PROVIDER=VoyageAI
-EMBEDDING_MODEL=voyage-code-3
-EMBEDDING_OUTPUT_DIMENSION=1024
-VOYAGEAI_API_KEY=your-api-key
-VOYAGEAI_RERANKER_MODEL=rerank-2.5
-MILVUS_ADDRESS=your-milvus-endpoint
-MILVUS_TOKEN=your-milvus-token</code></pre>
+            <h3>Offline Potion</h3>
+            <pre><code>npx -y @zokizuan/satori-cli@latest install --runtime offline</code></pre>
             <p>
-              This is the recommended first path for quality: VoyageAI
-              embeddings plus Milvus or Zilliz for vector storage.
+              Uses the bundled Potion embedding runtime with LanceDB. Qualified
+              Linux x64/WSL2 installs default to LateOn reranking; add
+              <code>--reranker none</code> to disable neural reranking.
             </p>
           </div>
           <div class="panel">
-            <h3>Local Start</h3>
-            <pre><code>EMBEDDING_PROVIDER=Ollama
-EMBEDDING_MODEL=nomic-embed-text
-OLLAMA_HOST=http://127.0.0.1:11434
-MILVUS_ADDRESS=localhost:19530</code></pre>
+            <h3>Offline Ollama</h3>
+            <pre><code>npx -y @zokizuan/satori-cli@latest install --runtime offline --ollama-model nomic-embed-text --reranker none</code></pre>
             <p>
-              Use this path when you want local embeddings. Keep model and
-              dimension stable for any repo you have already indexed.
-              <code>MILVUS_TOKEN</code> is optional auth only and is not a
-              substitute for <code>MILVUS_ADDRESS</code>.
+              Uses the selected loopback Ollama model with LanceDB. On qualified
+              Linux x64/WSL2, <code>--reranker lateon</code> is also supported.
             </p>
+          </div>
+          <div class="panel">
+            <h3>Connected Voyage + LanceDB</h3>
+            <pre><code>VOYAGEAI_API_KEY=your-api-key \
+npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store lancedb</code></pre>
+            <p>Uses Voyage Code 3 embeddings and local LanceDB storage.</p>
+          </div>
+          <div class="panel">
+            <h3>Connected Voyage + Milvus</h3>
+            <pre><code>VOYAGEAI_API_KEY=your-api-key \
+MILVUS_ADDRESS=your-milvus-endpoint \
+MILVUS_TOKEN=your-optional-token \
+npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvus</code></pre>
             <p>
-              Today this local embedding path still needs a Milvus-compatible
-              vector store. Embedded local vector storage, such as a Zvec-backed
-              backend, is planned work rather than current setup.
+              Uses Voyage Code 3 embeddings with Milvus or Zilliz. Milvus is
+              not accepted with the offline runtime.
             </p>
           </div>
         </div>
