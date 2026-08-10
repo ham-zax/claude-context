@@ -14,7 +14,7 @@ import type {
     PreparedIndexCollectionReceipt,
     RepairProof,
     RepairSnapshotEvidence,
-    ResolvedIndexPolicy,
+    ObservedResolvedIndexPolicy,
     SourceFreshnessCheckpointEvidence,
 } from "@zokizuan/satori-core";
 import type { SnapshotManager } from "./snapshot.js";
@@ -1455,7 +1455,7 @@ export class ManageIndexingHandlers {
         let lastSaveTime = 0;
         let targetCollectionName: string | undefined;
         let navigationCandidate: import("@zokizuan/satori-core").StagedNavigationSidecarGeneration | undefined;
-        let candidatePolicy: ResolvedIndexPolicy | null = null;
+        let candidatePolicy: ObservedResolvedIndexPolicy | null = null;
         let candidatePolicyPublished = false;
         let candidateAuthorityForRollback: ReturnType<Context['captureDurableIndexAuthority']> | null = null;
         let expectedCandidateAuthority: Awaited<ReturnType<Context['proveVectorGeneration']>> = null;
@@ -1596,12 +1596,10 @@ export class ManageIndexingHandlers {
                 console.log("[BACKGROUND-INDEX] ℹ️  Force reindex mode - building a staged generation before retiring the previous proven collection.");
             }
 
-            const profileConfig = this.host.loadIndexProfileForCodebase(absolutePath);
-            console.log(`[BACKGROUND-INDEX] Using index profile '${profileConfig.profile}'${profileConfig.configPath ? ` from ${profileConfig.configPath}` : " (default)"}`);
-
             candidatePolicy = forceReindex
                 ? await this.host.context.resolveIndexPolicyForReindex(absolutePath, policyUpdate)
                 : await this.host.context.resolveIndexPolicyForCodebase(absolutePath, policyUpdate);
+            console.log(`[BACKGROUND-INDEX] Using observed index profile '${candidatePolicy.profile}'.`);
             candidateMarkerRunId = crypto.randomUUID();
             const { FileSynchronizer } = await import("@zokizuan/satori-core");
             const ignorePatterns = candidatePolicy.effectiveIgnorePatterns;
@@ -1864,6 +1862,7 @@ export class ManageIndexingHandlers {
                     || expectedCandidateAuthority.marker.indexedFiles !== stats.indexedFiles
                     || expectedCandidateAuthority.marker.totalChunks !== stats.totalChunks
                     || expectedCandidateAuthority.marker.indexPolicyHash !== candidatePolicy.policyHash
+                    || expectedCandidateAuthority.policy.controlSignature !== candidatePolicy.controlSignature
                 ) {
                     throw new Error(`Candidate vector authority for '${absolutePath}' could not be proven before navigation publication.`);
                 }
@@ -1882,7 +1881,11 @@ export class ManageIndexingHandlers {
                 this.host.context.registerSynchronizer(this.host.resolveCollectionName(absolutePath), synchronizer);
             }
             if (stats.status === "completed") {
-                await this.host.syncManager.recordCurrentIgnoreControlSignature(absolutePath, mutationLease);
+                await this.host.syncManager.recordObservedIgnoreControlSignature(
+                    absolutePath,
+                    candidatePolicy.controlSignature,
+                    mutationLease,
+                );
             }
             assertMutationCurrent?.();
             persistBackgroundPhase("completed", () => {

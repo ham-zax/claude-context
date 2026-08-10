@@ -168,7 +168,16 @@ export interface CanonicalIndexPolicyV4Payload extends CanonicalIndexPolicyBase 
     publication: CanonicalPublicationBinding;
 }
 
-export type CanonicalIndexPolicyPayload = CanonicalIndexPolicyV3Payload | CanonicalIndexPolicyV4Payload;
+export interface CanonicalIndexPolicyV5Payload extends CanonicalIndexPolicyBase {
+    schemaVersion: 'satori_index_policy_v5';
+    publication: CanonicalPublicationBinding;
+    controlSignature: string;
+}
+
+export type CanonicalIndexPolicyPayload =
+    | CanonicalIndexPolicyV3Payload
+    | CanonicalIndexPolicyV4Payload
+    | CanonicalIndexPolicyV5Payload;
 
 export type CanonicalIndexPolicyDocument = CanonicalIndexPolicyPayload & {
     documentDigest: string;
@@ -570,11 +579,16 @@ function parsePolicyPayload(
         'navigation',
     ] as const;
     const isV4 = value.schemaVersion === 'satori_index_policy_v4';
-    const payloadKeys = isV4 ? [...basePayloadKeys, 'publication'] : basePayloadKeys;
+    const isV5 = value.schemaVersion === 'satori_index_policy_v5';
+    const payloadKeys = isV5
+        ? [...basePayloadKeys, 'publication', 'controlSignature']
+        : isV4
+            ? [...basePayloadKeys, 'publication']
+            : basePayloadKeys;
     if (
         (!hasExactKeys(value, payloadKeys)
             && !hasExactKeys(value, [...payloadKeys, 'documentDigest']))
-        || (value.schemaVersion !== 'satori_index_policy_v3' && !isV4)
+        || (value.schemaVersion !== 'satori_index_policy_v3' && !isV4 && !isV5)
         || value.canonicalRoot !== expectedRoot
         || !isStringArray(value.customExtensions)
         || !isStringArray(value.customIgnorePatterns)
@@ -584,12 +598,13 @@ function parsePolicyPayload(
         || (value.profile !== 'default' && value.profile !== 'minimal' && value.profile !== 'all-text')
         || typeof value.policyHash !== 'string'
         || !SHA256.test(value.policyHash)
+        || (isV5 && (typeof value.controlSignature !== 'string' || !value.controlSignature.startsWith('v1:')))
         || !isNonemptyString(value.collectionName)
     ) return null;
     const navigation = parsePolicyNavigation(value.navigation);
     if (!navigation) return null;
-    const publication = isV4 ? parsePublicationBinding(value.publication) : null;
-    if (isV4 && !publication) return null;
+    const publication = isV4 || isV5 ? parsePublicationBinding(value.publication) : null;
+    if ((isV4 || isV5) && !publication) return null;
     if (
         publication
         && (
@@ -611,6 +626,14 @@ function parsePolicyPayload(
         collectionName: value.collectionName,
         navigation,
     };
+    if (isV5 && publication) {
+        return {
+            ...base,
+            schemaVersion: 'satori_index_policy_v5',
+            publication,
+            controlSignature: value.controlSignature as string,
+        };
+    }
     return publication
         ? { ...base, schemaVersion: 'satori_index_policy_v4', publication }
         : { ...base, schemaVersion: 'satori_index_policy_v3' };
@@ -638,11 +661,15 @@ export function inspectIndexPolicyDocument(
     if (value.schemaVersion === 'satori_index_policy_v2') {
         return { status: 'requires_reindex', reason: 'index policy v2 requires reindex' };
     }
-    if (value.schemaVersion !== 'satori_index_policy_v3' && value.schemaVersion !== 'satori_index_policy_v4') {
+    if (
+        value.schemaVersion !== 'satori_index_policy_v3'
+        && value.schemaVersion !== 'satori_index_policy_v4'
+        && value.schemaVersion !== 'satori_index_policy_v5'
+    ) {
         const futureVersion = typeof value.schemaVersion === 'string'
             ? /^satori_index_policy_v([1-9]\d*)$/.exec(value.schemaVersion)
             : null;
-        return futureVersion && Number(futureVersion[1]) > 4
+        return futureVersion && Number(futureVersion[1]) > 5
             ? { status: 'unsupported', reason: 'index policy schema is unsupported' }
             : { status: 'corrupt', reason: 'index policy schema is invalid' };
     }

@@ -475,7 +475,7 @@ test("public tools lifecycle: status/list → search → outline → read_file a
     });
 });
 
-test("public reindex replaces a coherent retired v2 tuple with restart-proven v4 authority", async () => {
+test("public reindex replaces a coherent retired v2 tuple with restart-proven v5 authority", async () => {
     await withTempState(async ({ repoPath, stateRoot }) => {
         const previousHome = process.env.HOME;
         process.env.HOME = path.join(path.dirname(stateRoot), "home");
@@ -649,7 +649,8 @@ test("public reindex replaces a coherent retired v2 tuple with restart-proven v4
             assert.notEqual(fs.readFileSync(pointerPath, "utf8"), legacyPointerBytes);
             const publishedPolicy = JSON.parse(fs.readFileSync(policyPath, "utf8")) as Record<string, unknown>;
             const publishedPointer = JSON.parse(fs.readFileSync(pointerPath, "utf8")) as Record<string, unknown>;
-            assert.equal(publishedPolicy.schemaVersion, "satori_index_policy_v4");
+            assert.equal(publishedPolicy.schemaVersion, "satori_index_policy_v5");
+            assert.equal(typeof publishedPolicy.controlSignature, "string");
             assert.equal(publishedPointer.schemaVersion, "navigation_current_v3");
             assert.equal(vectorDatabase.collections.has(collectionName), false);
             const publishedCollectionName = publishedPolicy.collectionName;

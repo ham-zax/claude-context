@@ -191,6 +191,23 @@ function createContext() {
     };
 }
 
+function installAcceptedPolicyReconciliation(context: Record<string, unknown>): void {
+    if (typeof context.observeIndexPolicyForIncrementalReconciliation !== 'function') {
+        context.observeIndexPolicyForIncrementalReconciliation = async () => ({
+            controlSignature: 'v1:test-policy-observation',
+        });
+    }
+    if (typeof context.activateObservedIndexPolicyForIncrementalReconciliation !== 'function') {
+        context.activateObservedIndexPolicyForIncrementalReconciliation = async () => {
+            const reload = context.reloadIgnoreRulesForCodebase;
+            if (typeof reload === 'function') {
+                await reload();
+            }
+            return true;
+        };
+    }
+}
+
 function createCrossProcessSyncHarness(options: {
     ownerFailure?: Error;
     runtimeCompatible?: boolean;
@@ -1434,11 +1451,19 @@ test('ensureFreshness persists collection resolved by incremental sync for legac
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
-test('ensureFreshness treats satori.toml as an index-policy control file', async () => {
+test('ensureFreshness treats satori.toml policy changes as requiring a full reindex', async () => {
     const codebasePath = createTempDir();
     fs.writeFileSync(path.join(codebasePath, 'satori.toml'), '[index]\nprofile = "minimal"\n', 'utf8');
     const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
     const context = createContext();
+    Object.assign(context, {
+        async observeIndexPolicyForIncrementalReconciliation() {
+            return { controlSignature: 'v1:changed-profile-observation' };
+        },
+        activateObservedIndexPolicyForIncrementalReconciliation() {
+            return false;
+        },
+    });
     const snapshot = createSnapshot(statusByPath);
     snapshot.setCodebaseIgnoreControlSignature(codebasePath, 'stale-signature');
     snapshot.setCodebaseIndexManifest(codebasePath, ['src/app.ts']);
@@ -1449,8 +1474,89 @@ test('ensureFreshness treats satori.toml as an index-policy control file', async
 
     const decision = await manager.ensureFreshness(codebasePath, 60000);
 
-    assert.equal(decision.mode, 'reconciled_ignore_change');
-    assert.equal(context.calls, 1);
+    assert.equal(decision.mode, 'skipped_requires_reindex');
+    assert.equal(context.calls, 0);
+    assert.equal(snapshot.getCodebaseRequiresReindex(codebasePath)?.reason, 'index_policy_changed');
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('ensureFreshness prefers the control signature sealed into generation authority', async () => {
+    const codebasePath = createTempDir();
+    fs.writeFileSync(path.join(codebasePath, '.gitignore'), '*.generated.ts\n', 'utf8');
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const snapshot = createSnapshot(statusByPath);
+    const context = {
+        async inspectSourceFreshnessCheckpoint() {
+            return {
+                status: 'valid' as const,
+                observationToken: 'checkpoint-v1',
+                merkleRoot: 'a'.repeat(64),
+                documentDigest: 'b'.repeat(64),
+                generationReceipt: {
+                    policy: { controlSignature: 'v1:sealed-generation-signature' },
+                } as never,
+            };
+        },
+        async observeIndexPolicyForIncrementalReconciliation() {
+            return { controlSignature: 'v1:current-policy-observation' };
+        },
+        activateObservedIndexPolicyForIncrementalReconciliation() {
+            return false;
+        },
+    };
+    snapshot.setCodebaseIndexManifest(codebasePath, ['src/app.ts']);
+
+    const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
+        watchEnabled: false,
+    });
+    await manager.recordCurrentIgnoreControlSignature(codebasePath);
+    const currentSnapshotSignature = snapshot.getCodebaseIgnoreControlSignature(codebasePath);
+
+    const decision = await manager.ensureFreshness(codebasePath, 60_000);
+
+    assert.equal(decision.mode, 'skipped_requires_reindex');
+    assert.equal(snapshot.getCodebaseIgnoreControlSignature(codebasePath), currentSnapshotSignature);
+    assert.equal(snapshot.getCodebaseRequiresReindex(codebasePath)?.reason, 'index_policy_changed');
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('ensureFreshness revalidates legacy generation policy even when the lifecycle signature is current', async () => {
+    const codebasePath = createTempDir();
+    fs.writeFileSync(path.join(codebasePath, '.satoriignore'), '# current policy\n', 'utf8');
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const snapshot = createSnapshot(statusByPath);
+    const context = {
+        async inspectSourceFreshnessCheckpoint() {
+            return {
+                status: 'valid' as const,
+                observationToken: 'checkpoint-v1',
+                merkleRoot: 'a'.repeat(64),
+                documentDigest: 'b'.repeat(64),
+                generationReceipt: {
+                    policy: { policyHash: 'c'.repeat(64) },
+                } as never,
+            };
+        },
+        async observeIndexPolicyForIncrementalReconciliation() {
+            return { controlSignature: 'v1:current-policy-observation' };
+        },
+        activateObservedIndexPolicyForIncrementalReconciliation() {
+            return false;
+        },
+    };
+    snapshot.setCodebaseIndexManifest(codebasePath, ['src/app.ts']);
+
+    const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
+        watchEnabled: false,
+    });
+    await manager.recordCurrentIgnoreControlSignature(codebasePath);
+    const currentSnapshotSignature = snapshot.getCodebaseIgnoreControlSignature(codebasePath);
+
+    const decision = await manager.ensureFreshness(codebasePath, 60_000);
+
+    assert.equal(decision.mode, 'skipped_requires_reindex');
+    assert.equal(snapshot.getCodebaseIgnoreControlSignature(codebasePath), currentSnapshotSignature);
+    assert.equal(snapshot.getCodebaseRequiresReindex(codebasePath)?.reason, 'index_policy_changed');
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
 
@@ -1801,6 +1907,7 @@ test('ensureFreshness reconciles missing ignore signature when an indexed manife
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: false,
@@ -1835,6 +1942,80 @@ test('recordCurrentIgnoreControlSignature persists the current root ignore signa
     const signature = snapshot.getCodebaseIgnoreControlSignature(codebasePath);
     assert.equal(typeof signature, 'string');
     assert.match(signature || '', /^v1:/);
+
+    await manager.stopWatcherMode();
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('recordObservedIgnoreControlSignature does not relabel an accepted policy after control files drift', async () => {
+    const codebasePath = createTempDir();
+    const ignorePath = path.join(codebasePath, '.satoriignore');
+    fs.writeFileSync(ignorePath, 'data/\n', 'utf8');
+
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const snapshot = createSnapshot(statusByPath);
+    const manager = new SyncManager(
+        createContext() as unknown as SyncContext,
+        snapshot as unknown as SyncSnapshotManager,
+        { watchEnabled: false },
+    );
+
+    await manager.recordCurrentIgnoreControlSignature(codebasePath);
+    const acceptedSignature = snapshot.getCodebaseIgnoreControlSignature(codebasePath);
+    assert.equal(typeof acceptedSignature, 'string');
+    fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
+
+    await manager.recordObservedIgnoreControlSignature(codebasePath, acceptedSignature!);
+    assert.equal(snapshot.getCodebaseIgnoreControlSignature(codebasePath), acceptedSignature);
+
+    await manager.stopWatcherMode();
+    fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('ignore-policy changes require reindex before reconciliation mutates indexed payload or acknowledges the new signature', async () => {
+    const codebasePath = createTempDir();
+    const ignorePath = path.join(codebasePath, '.satoriignore');
+    fs.writeFileSync(ignorePath, '# no rules\n', 'utf8');
+
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexed']]);
+    const snapshot = createSnapshot(statusByPath);
+    snapshot.setCodebaseIndexManifest(codebasePath, ['src/keep.ts', 'src/data/value.ts']);
+    let activateCalls = 0;
+    let deleteCalls = 0;
+    let syncCalls = 0;
+    const context = {
+        ...createContext(),
+        async observeIndexPolicyForIncrementalReconciliation() {
+            return { controlSignature: 'v1:changed-policy-observation' };
+        },
+        activateObservedIndexPolicyForIncrementalReconciliation() {
+            activateCalls += 1;
+            return false;
+        },
+        async deleteIndexedPathsByRelativePaths() {
+            deleteCalls += 1;
+            return 0;
+        },
+        async reindexByChange() {
+            syncCalls += 1;
+            return { added: 0, removed: 0, modified: 0 };
+        },
+    };
+    const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
+        watchEnabled: false,
+    });
+
+    await manager.recordCurrentIgnoreControlSignature(codebasePath);
+    const acceptedSignature = snapshot.getCodebaseIgnoreControlSignature(codebasePath);
+    fs.writeFileSync(ignorePath, 'data/\n', 'utf8');
+
+    const decision = await manager.ensureFreshness(codebasePath, 60_000);
+    assert.equal(decision.mode, 'skipped_requires_reindex');
+    assert.equal(activateCalls, 1);
+    assert.equal(deleteCalls, 0);
+    assert.equal(syncCalls, 0);
+    assert.equal(snapshot.getCodebaseIgnoreControlSignature(codebasePath), acceptedSignature);
+    assert.equal(snapshot.getCodebaseRequiresReindex(codebasePath)?.reason, 'index_policy_changed');
 
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
@@ -1916,6 +2097,7 @@ test('ensureFreshness detects ignore control signature changes and reconciles be
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: false,
@@ -1987,6 +2169,7 @@ test('ensureFreshness detects same-size ignore control content changes with unch
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: false,
@@ -2054,6 +2237,7 @@ test('ensureFreshness coalesces non-watcher ignore signature reconciles while on
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: false,
@@ -2119,6 +2303,7 @@ test('ignore-change reconciliation deletes newly ignored indexed paths and force
             return { added: 1, removed: 0, modified: 0, changedFiles: ['src/new.ts'] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: true,
@@ -2181,6 +2366,7 @@ test('ignore-change reconciliation marks requires_reindex when sync fails after 
             throw new Error('forced sync failure');
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: true,
@@ -2241,6 +2427,7 @@ test('ignore-change reconcile uses manifest paths captured before reload even wh
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         },
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: true,
@@ -2304,6 +2491,7 @@ test('ignore-change reconciliation runs after in-flight sync and is not skipped 
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: true,
@@ -2357,6 +2545,7 @@ test('ignore-change returns ignore_reload_failed with fallback sync when manifes
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: true,
@@ -2412,6 +2601,7 @@ test('ignore_rules_changed remains pending until the existing reconcile path run
             return { added: 0, removed: 0, modified: 0, changedFiles: [] };
         }
     };
+    installAcceptedPolicyReconciliation(context);
 
     const manager = new SyncManager(context as unknown as SyncContext, snapshot as unknown as SyncSnapshotManager, {
         watchEnabled: true,

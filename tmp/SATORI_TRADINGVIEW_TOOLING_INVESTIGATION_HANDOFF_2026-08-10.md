@@ -1,5 +1,12 @@
 # Issues Found During TradingView A/B Execution (candidates for master fixes)
 
+> **Temporary handoff (2026-08-10):** this file was moved to `tmp/` for the
+> next coding session. It is an investigation ledger, not release, runtime,
+> strategy, or governance authority. Issue 21 now has an implemented,
+> package-verified fix in the 2026-08-10 worktree; Issues 22–24 remain open.
+> Earlier entries retain their historical status and must not be reopened
+> without a fresh reproduction.
+
 Found on 2026-08-07 while driving published `@zokizuan/satori-mcp@6.8.1` and local
 master (6.8.2, `e43ff3f`) over raw MCP stdio against
 `~/repo/tradingview_ratio` with isolated `SATORI_STATE_ROOT`s.
@@ -561,3 +568,445 @@ were written and is appended at the end.
 - **Additional contract risk:** deep tracing asked the backend for 160 candidates and derived the product prefix from that enlarged request. LanceDB returned the same first 32 dense IDs as a direct top-32 request in the observed generation, but backend prefix invariance was not an established product contract and is no longer assumed.
 - **Fix:** product dense/lexical retrieval now executes with the exact normal product limits and modes. Optional deeper dense/lexical and any-term fallback requests populate only diagnostic arms and candidate-survival evidence. Diagnostic-only candidates cannot enter product fusion, deterministic filtering, expansion decisions, reranker input, grouping, continuation, or disclosure. Full diagnostics may perform additional bounded vector work but cannot change product semantics.
 - **Closure evidence:** on the same indexed generation and query, shallow full diagnostics and `debugCandidateLimit=160` produced identical ordered IDs at `core_fusion`, `mcp_filtered`, `reranker_input`, `reranker_output`, `mcp_ranked`, `grouped`, and `disclosed`. Deep diagnostics still exposed 160 candidates in the explicitly diagnostic dense stage and the fallback arm. Diagnostic-only backend failures now publish bounded per-arm `available`/`unavailable` status with `backend_request_failed` while preserving product results; genuine generation-authority loss remains blocking. Generic Core tests cover deliberately non-prefix backend responses, deep dense/lexical failures, and an unavailable any-term fallback; MCP coverage preserves diagnostic-only causality and proves identical semantic-query attempts, reranker input, grouping, and disclosed results with diagnostics off/on.
+
+## 21. Ignore control signatures can diverge from sealed policy authority
+
+- **Status (fixed and package-verified 2026-08-10):** confirmed root cause and
+  implemented the authority repair. This is not an
+  `ignore` parser defect: the repository's installed `ignore@7.0.5` correctly
+  treats `/data/` as root-anchored. The defect is a split between live ignore
+  rules, durable index-policy authority, and the lifecycle signature.
+- **Symptom:** changing `.satoriignore` from `data/` to `/data/` caused one
+  reconciliation to add the nested `src/python/core/data/` and
+  `src/python/data/` source files, then a later sync removed them again. Even
+  explicit negations only held temporarily. Removing every active data pattern
+  also failed: the next completed sync still excluded the same 27 tracked
+  Python files under directories named `data`.
+- **Current-state evidence:** the lifecycle snapshot records the exact SHA-256
+  of the current pattern-free `.satoriignore`
+  (`46170db2059744902c95ed3cf51484cb965ce84c9ec941d465e58fa0d280787b`).
+  Completed sync generation 4228 binds that signature and reports 1,521
+  indexed paths, but zero paths matching `(^|/)data/`. The durable v4
+  index-policy document was republished at the same completion boundary and
+  still contains the retired bare `data/`. Its matcher therefore excludes the
+  27 files while a matcher built from the current root ignore files includes
+  them.
+- **Primary source-confirmed race (best explanation of the observed durable
+  state):** full indexing resolves and freezes `candidatePolicy` before the
+  long payload build (`manage-indexing-handlers.ts:1602-1609`). After publishing
+  that policy, its marker, checkpoint, and navigation authority, the coordinator
+  calls `recordCurrentIgnoreControlSignature()` (`:1885`). That method computes
+  the signature from whatever control-file bytes exist at that later instant;
+  it is not passed the candidate policy or the bytes used to resolve it
+  (`sync.ts:656-691`). An edit during indexing can therefore publish the old
+  bare `data/` policy and then bless the new pattern-free signature.
+- **Why watcher/lease protection does not close the race:** watcher events are
+  accepted only for searchable states, so ignore-file events while the root is
+  `indexing` are dropped. The mutation lease serializes Satori writers but does
+  not freeze or validate repository bytes. The current TradingView root files
+  also disprove the fallback theory that `.gitignore` still supplies bare
+  `data/`: it contains only scoped `data/cache/`, `data/external/`,
+  `data/exports/`, and `data/*.json` rules.
+- **Second source-confirmed gap:** incremental
+  `reconcileIgnoreRulesChange()` reloads current rules but does not resolve and
+  publish a replacement `ResolvedIndexPolicy`. The existing Core delta path is
+  built around the previously sealed policy. A genuine policy mismatch should
+  therefore fail closed before payload deletion or signature acknowledgement
+  unless a new candidate policy can be published atomically.
+- **Impact:** ignore-rule edits can silently flap indexed membership and leave
+  the accepted manifest inconsistent with the operator's current rules. A
+  daemon restart or later policy publication can resurrect retired patterns
+  without triggering reconciliation because the control signature already
+  matches current bytes.
+- **Implemented boundary:** `observeIndexPolicyInputs()` now reads root
+  `.satoriignore`, root `.gitignore`, and `satori.toml` once through stable,
+  root-bound, no-follow descriptors and returns both parsed policy inputs and
+  their exact v1 control signature. Full indexing carries that observed
+  signature through candidate publication and acknowledges only that value;
+  it no longer re-reads later repository bytes and relabels the generation.
+  Canonical `satori_index_policy_v5` binds the signature into the durable
+  policy digest and generation proof.
+- **Incremental behavior:** reconciliation observes one complete candidate and
+  compares its semantic policy hash with durable accepted authority before
+  refreshing matchers, deleting payload, syncing, or advancing lifecycle
+  identity. A changed policy fails closed as `requires_reindex` with reason
+  `index_policy_changed`. A semantically identical legacy v4 policy is upgraded
+  atomically to v5 with the observed signature; this prevents an already-stale
+  v4 snapshot signature from hiding the incident after upgrade or restart.
+- **Regression coverage:** tests bind exact candidate bytes across later file
+  drift, candidate-signature acknowledgement after full indexing, durable v5
+  digest tamper detection, restart behavior, legacy-v4 upgrade, precedence of
+  generation-sealed identity over lifecycle snapshot identity, and zero
+  payload/signature mutation when policy drift requires reindex.
+- **Do not use daemon restart as the discriminator:** startup can reload the
+  same stale durable policy, so continued exclusion after restart does not
+  prove a built-in `data` skip. Source inspection and the installed `ignore`
+  matcher show no generic built-in `data/` exclusion.
+
+### Issue 21 ignore-policy implementation audit
+
+This is the reviewed current contract, not a proposed replacement:
+
+- `IgnoreRuleService.findIgnoreFiles()` reads only root `.satoriignore` and
+  root `.gitignore`, in that fixed order. Symlinks and non-regular files are
+  rejected. Nested `.gitignore` files are not discovered, and watcher control
+  handling explicitly treats `nested/.gitignore` as an ordinary path rather
+  than an ignore-control file.
+- `parseIgnorePatterns()` preserves rule order and gitignore-significant
+  whitespace. It removes CR from CRLF, empty lines, and lines whose first
+  character is `#`; it does not trim patterns.
+- The effective matcher order is defaults, runtime custom patterns, root
+  `.satoriignore`, then root `.gitignore`. The implementation passes that
+  ordered list to `ignore`, so later rules can override earlier rules subject
+  to gitignore parent-directory and negation semantics. Consequently,
+  `.satoriignore` is not currently the final override authority: a later root
+  `.gitignore` rule can change its result.
+- A successful file reload replaces the prior file-based rule set and rebuilds
+  the matcher. If runtime observation of an ignore file fails, the reload logs
+  a warning and deliberately retains the previous active patterns.
+- Ignore-file reads are root-bound, no-follow, stable-observation reads with a
+  1 MiB maximum. This protects rule authority but means unreadable, oversized,
+  replaced, or symlinked control files must be covered as failure cases rather
+  than silently treated as empty.
+- `FileSynchronizer` and the watcher both evaluate normalized repository-
+  relative paths through the active `ignore` matcher; directories are checked
+  in both `path` and `path/` forms. The watcher rebuilds its matcher from
+  `Context.getActiveIgnorePatterns()`, which is intended to be the single
+  runtime source of truth.
+- Search builds another active matcher from the same Context patterns and
+  fails closed by treating all paths as ignored if matcher construction fails.
+  Separately, search-noise guidance maintains a cached matcher for root
+  `.gitignore` only, keyed by observed mtime/size with periodic forced reload.
+  That cache filters suggested ignore patterns; it is not index-membership
+  authority and must not be used as evidence that the accepted manifest obeys
+  current policy.
+- Resolved index policy records the exact ordered file-based and effective
+  patterns. Publishing or reloading that policy calls
+  `setFileBasedPatterns(policy.fileBasedIgnorePatterns)`. This is the path that
+  can restore retired durable rules after a live reload; it is authority
+  behavior, not evidence of a built-in directory skip.
+- There is no generic built-in `data/` default. The observed 27-file exclusion
+  is explained by stale durable policy containing the retired bare `data/`
+  rule; the post-policy eligible-file count is not independent evidence of a
+  hidden directory skip.
+
+Existing focused tests cover significant whitespace/CRLF parsing, ordered
+negation within one root ignore file, persisted-policy restart behavior,
+ignore-signature reconciliation (including same-size content changes), and
+watcher recognition of root control files. A targeted source/test search found
+no direct regression that binds root anchoring and cross-file precedence
+through initial indexing, incremental reconciliation, watcher sync, durable
+publication, restart, and search authorization as one lifecycle.
+
+The repair deliberately preserves the existing cross-file authority:
+`.satoriignore` followed by `.gitignore` as one ordered rule stream. It does
+not add nested `.gitignore` discovery or change parser/matcher semantics.
+
+Required bounded audit matrix for the Issue 21 regression fixture:
+
+| Dimension | Cases that must be bound |
+|---|---|
+| Root rule shape | no ignore files; bare `data/`; anchored `/data/`; ordered negation |
+| Cross-file order | `.satoriignore` plus `.gitignore` with conflicting ignore/re-include rules |
+| Parent semantics | ignored parent with child negation; explicitly re-included parent and child |
+| File parsing | LF/CRLF, comments, escaped or leading `#`, significant leading/trailing spaces |
+| Control-file transitions | edit, deletion, same-size replacement, unreadable/oversized/symlink failure |
+| Execution surface | fresh full index, manual incremental reconcile, watcher-triggered sync, restart, search/read authorization |
+| Published identity | current ignore-file bytes/signature, resolved ordered rules and policy hash, accepted manifest, completion marker/source checkpoint, watcher rule version |
+
+The acceptance condition is not merely that the nested `data` files appear
+once. After the policy transition, every execution surface must resolve the
+same rule set; a follow-up sync and restarted Context must retain the same
+manifest; and the durable policy must no longer contain the retired rule.
+
+## 22. Reranker projection rejects indexed candidates from files above 256 KiB
+
+- **Status (observed 2026-08-10 on 6.9.0):** confirmed against the current
+  repository-backed offline runtime on `tradingview_ratio`.
+- **Live symptom:** `must:tzinfo must:replace` admitted 32 reranker candidates
+  but projected only 29. The response reported three
+  `source_unavailable` failures and emitted `RERANKER_INPUT_DEGRADED`. The first
+  failed candidate was a valid indexed span at lines 774-778 of
+  `scripts/ops/phase6p_pair_relationship_observation_source.py`. The file is
+  tracked, the span exists, and a direct bounded `read_file` of that span
+  succeeds.
+- **Demonstrated mismatch:** that file is 525,434 bytes. Index policy accepts
+  text files up to 1 MiB by default (`packages/core/src/config/index-policy.ts`),
+  and published-source reads default to 8 MiB
+  (`packages/mcp/src/core/published-source-reader.ts`), but
+  `readCurrentSourceEvidence()` hard-caps the whole-file evidence read at
+  256 KiB (`packages/mcp/src/core/current-source-symbols.ts:15,59-87`).
+  `resolvePublicationBoundEvidence()` maps the resulting unavailable evidence
+  to the generic `source_unavailable` projection failure
+  (`search-rerank-projection.ts:72-121`).
+- **Impact:** valid candidates from files accepted by the index can never be
+  scored by the configured reranker. Large source files therefore predictably
+  degrade ordering even when the exact candidate span is small and readable;
+  the diagnostic also hides the actionable `file_too_large` cause.
+- **Required fix boundary:** retain publication/hash authority without requiring
+  the entire file to fit the 256 KiB projection buffer. A bounded span read plus
+  streamed full-file hash verification is one compatible shape. At minimum,
+  expose a distinct size-limit failure reason rather than calling the source
+  unavailable.
+- **Regression contract:** index a file between 256 KiB and the accepted index
+  maximum with a small canonical symbol, admit that symbol to reranking, and
+  prove projection succeeds from hash-matched current source without retaining
+  the complete file text. Preserve fail-closed behavior for hash mismatch and
+  source replacement races.
+
+### Issue 22 implementation investigation
+
+- The 256 KiB limit belongs to general current-symbol validation. Raising it is
+  not the narrow repair: an existing test intentionally binds that validator's
+  bounded behavior.
+- `prepareInspectableSource()` can read a larger file only when given a larger
+  limit, but it buffers the complete file. `readFileHandleExactly()` also
+  concatenates the complete content. `FileSynchronizer.hashFileBytes()` streams
+  a hash but is private, does not capture a source window, and does not provide
+  the exact descriptor/path race contract needed by projection. No reusable
+  root-bound streamed-hash-plus-window primitive exists today.
+- Add one root-bound primitive that opens without following symlinks, snapshots
+  identity/size, streams exactly the observed bytes into SHA-256 while retaining
+  only a bounded line window, rejects growth/truncation, verifies descriptor
+  metadata, then reopens and verifies the path identity. Return no partial
+  evidence on any race.
+- Add a projection-specific evidence type carrying the original line offset so
+  v2/v3/v4 can validate and remap owner/candidate spans without pretending a
+  window is the whole file. Preserve the exact existing projection bytes for
+  files that already fit the current reader.
+- The projection maximum must derive from accepted index/runtime policy rather
+  than another unrelated magic number. Candidate byte offsets are optional, so
+  the bounded reader needs a line-based path rather than requiring byte spans.
+- Add a distinct typed size-limit reason to
+  `SearchRerankProjectionFailureReason`; update the exhaustive typed-reason
+  integration table and diagnostics. Hash disagreement remains
+  `source_hash_mismatch`.
+
+The first implementation batch should be the Core root-bound primitive and its
+race tests. The second should adapt publication-bound projection and add one
+real 256 KiB–1 MiB v2/v3/v4 fixture. No ranking, admission, provider-order, or
+projection-text tuning belongs in this issue.
+
+## 23. Must-lane admission can stop at the chunk limit before filling grouped results
+
+- **Status (observed 2026-08-10 on 6.9.0):** confirmed against the current
+  `tradingview_ratio` generation.
+- **Live symptom:** `must:cache_repo` with `limit=10` returned seven grouped
+  results, while `hints.mustCoverage` reported
+  `lane_skipped_primary_limit_filled`, `laneAttempted:false`, and
+  `candidatesExamined:0`. The response consequently warned that additional
+  must-matches may exist even though the dedicated conjunctive lane was never
+  queried. Full candidate survival recorded 15 `mcp_filtered` chunks before
+  those chunks collapsed to seven caller-visible groups.
+- **Root cause:** `runSearchExecution()` decides whether to run the must lane
+  from the count of filtered chunk candidates before later symbol/file grouping
+  (`packages/mcp/src/core/search-execution.ts:1427-1460`). Enough chunks can
+  satisfy `retrievalResultLimit` while collapsing to fewer distinct output
+  groups, so the lane is skipped even though the caller-visible result bound is
+  not filled. Existing tests bind the skip when primary candidates fill the
+  limit, but do not cover post-group family collapse.
+- **Related diagnostic evidence:** an actually empty scoped must query emitted
+  `FILTER_MUST_UNSATISFIED`,
+  `MUST_NOT_SATISFIED_WITHIN_RETRIEVAL_BUDGET`, and
+  `MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET` together. Those
+  codes are individually compatible with bounded, non-exhaustive recall, but
+  the three-message presentation is redundant and obscures the decisive lane
+  status.
+- **Impact:** deterministic all-terms retrieval can be bypassed by duplicate
+  chunks from too few families, leaving visible grouped capacity unused and
+  making must-constrained recall depend on primary retrieval diversity.
+- **Required fix boundary:** make the must-lane skip decision against the
+  caller-visible grouping/family capacity, or reserve bounded conjunctive-lane
+  admission before final grouping. Keep the existing all-terms backend contract
+  and bounded-recall honesty; do not claim exhaustive recall.
+- **Regression contract:** supply at least the retrieval-result-limit number of
+  primary chunks that satisfy `must:` but collapse below the requested grouped
+  limit, plus a dedicated-lane match from another family. Assert the lane runs,
+  the additional family is recoverable, grouping remains deterministic, and
+  warning codes reflect the final coverage state without duplicate empty-result
+  guidance.
+
+### Issue 23 implementation investigation
+
+- The skip owner is `runSearchExecution()`, but canonical symbol grouping is
+  not available there. Final grouping may repair/reject owner metadata through
+  the registry, fall back to path/proximity buckets, collapse declarations,
+  and apply diversity. The reranker family key is therefore not an equivalent
+  caller-visible group identity.
+- Do not call `buildVisibleGroupedSearchResults()` early and do not duplicate
+  owner/grouping policy in execution. The smallest safe repair is to pass
+  `resultMode` into `SearchExecutionInput`, preserve the chunk-count skip for
+  raw mode, and always reserve the existing bounded `all_terms` must lane for
+  grouped mode. Final grouping remains the only grouping authority.
+- Put the failing cross-boundary fixture at the handler/finalization level: at
+  least 15 primary chunks collapse to seven groups under `limit=10`, while one
+  lane-only family is recoverable. Keep the existing execution-unit test that
+  proves raw-mode primary-limit skipping.
+- This changes some grouped responses from
+  `lane_skipped_primary_limit_filled` to an attempted bounded status, but the
+  existing public `SearchMustCoverage` schema can represent that without a
+  schema-version change.
+
+Warning deduplication for genuinely empty scopes should be evaluated only after
+the lane-admission fixture passes; it must not be used to mask an unattempted
+lane. `OR` syntax remains out of scope.
+
+## 24. Full-index progress reaches 100% before proof and publication complete
+
+- **Status (source-confirmed 2026-08-10; live duration supplied by the
+  TradingView investigation):** confirmed. Search correctly remains fail-closed;
+  the defect is the progress/readiness contract, not marker authority.
+- **Symptom:** `manage_index status` can report 100% while the operation remains
+  in `writing`/`proving`/`publishing` and all reads still return
+  `not_ready reason:indexing`. The observed post-100% interval was roughly
+  30-90 seconds on the 970-file TradingView repository.
+- **Root cause:** `Context.indexCodebase()` assigns the file-processing range
+  through 100% and emits `Indexing complete!` at 100 after vector payload and
+  staged navigation construction (`packages/core/src/core/context.ts:3117-3133,
+  3204-3210`). The MCP full-index coordinator persists that value as the public
+  indexing percentage before it performs exact source-checkpoint proof, call
+  graph rebuild, completion-marker publication, durable policy publication,
+  and navigation-pointer activation
+  (`packages/mcp/src/core/manage-indexing-handlers.ts:1642-1663,1693-1898`).
+  Those later phases correctly keep the operation non-terminal.
+- **Retry contract:** blocked reads always publish the fixed
+  `DEFAULT_MANAGE_RETRY_AFTER_MS=2000` (`packages/mcp/src/config.ts:62`), which
+  is a polling interval rather than an estimated remaining duration. The
+  response does include the durable operation phase, but the 100% headline
+  makes the longer proof/publication window look stalled or inconsistent.
+- **Impact:** clients cannot distinguish completed payload processing from a
+  completed searchable generation, and may perform dozens of futile retries
+  after being shown 100%. This also makes two calls straddling final publication
+  look like contradictory readiness evidence.
+- **Required fix boundary:** reserve progress space for proof/publication or
+  publish a phase-aware progress model where 100% is terminal-only. Keep
+  completion-marker and navigation authority fail-closed. Label the fixed
+  `retryAfterMs` as a retry cadence unless a separately measured ETA is added.
+- **Regression contract:** pause a full rebuild after the Core callback reaches
+  its final value but before marker/navigation publication. Assert public status
+  is non-terminal and below terminal completion (or explicitly phase-complete),
+  reads remain `not_ready`, and only the accepted `completed` receipt can expose
+  terminal 100%/ready state.
+
+### Issue 24 implementation investigation
+
+- `Context.indexCodebase()` owns payload-processing progress and may retain its
+  final 100 callback for direct callers. MCP deliberately defers full
+  publication, so `ManageIndexingHandlers.startBackgroundIndexing()` owns the
+  public projection of that callback.
+- The smallest compatible repair is to cap the active MCP snapshot value below
+  100 (for example `min(corePercentage, 99)`) until the coordinator commits the
+  `completed` operation and replaces `indexing` with `indexed`. No response
+  schema or Core callback change is required.
+- Extend the real indexing-handler harness so `setCodebaseIndexing()` records
+  values instead of being a no-op. Invoke Core's 100 callback, pause
+  `publishNavigationCandidate()`, assert the operation is `publishing` and the
+  public value is below 100, then release publication and assert the final
+  indexed/completed state.
+- Keep `retryAfterMs=2000` as retry cadence. An ETA or adding operation phase to
+  every indexing metadata object is a separate product change and is not
+  required to close this defect.
+
+## Temporary next-session handoff
+
+### Confirmed open work
+
+1. **Issue 22 — large-file reranker projection:** create a fixture between
+   256 KiB and the accepted 1 MiB index ceiling with a small canonical symbol.
+   Implement and test the root-bound streamed-hash/bounded-window primitive
+   before adapting projection v2/v3/v4. Preserve source-replacement and
+   hash-mismatch fail-closed behavior; do not tune ranking, admission, provider
+   order, or relevance.
+2. **Issue 23 — must-lane grouped shortfall:** first add a failing execution
+   fixture with at least 15 matching chunks collapsing below a ten-group caller
+   limit plus a recoverable lane-only family. Reserve the bounded must lane for
+   grouped mode and keep raw chunk-limit skipping. Keep conjunctive `all_terms`
+   semantics and deterministic final grouping. Do not implement `OR`.
+3. **Issue 24 — progress/readiness contract:** create a coordinator test that
+   pauses between Core's final progress callback and marker/navigation
+   publication. Clamp active MCP progress below 100 and retain terminal
+   completion in the existing indexed/completed transition. Do not weaken
+   readiness or serve an unproven generation.
+
+Do these as separate ownership-bounded fixes unless shared evidence proves a
+common owner. Ask before any live `create`, `reindex`, or `clear`; focused
+temporary fixtures are preferred over mutating the TradingView index.
+This handoff is sufficient as the implementation plan; no additional planning
+file is needed before the first failing fixture is written.
+
+### Confirmed non-defects and closed branches
+
+- **Issue 21 ignore-policy authority is fixed in the current worktree.** One
+  observed input tuple now owns parsed policy plus signature; full publication
+  and incremental reconciliation cannot acknowledge a different observation.
+  Durable v5 authority closes the restart/crash window, while genuine policy
+  changes require a full reindex before indexed membership can change.
+- **Pagination works.** Live 6.9.0 verification with `limit=20` and
+  `disclosureLimit=6` returned six groups plus a continuation handle at offset
+  6; `continue_search` returned the next six distinct groups at offset 12 with
+  the same frozen ranked-set digest. `limit` is the total frozen bound,
+  `disclosureLimit` is the initial page size, and `availableGroupCount` includes
+  pool entries outside the caller limit.
+- **Path scoping works** in the current runtime for both the path parameter and
+  the `path:` operator. The nested data-path failure belongs to Issue 21.
+- **TradingEntryVetoes call graph works** on the current generation: depth-two
+  traversal returned 14 sealed edges, including the reported constructor and
+  veto-evaluation callers.
+- **Exact-symbol validation is fixed:** conflicting identities plus missing
+  mode are reported together. Bounded large-symbol reads are intentional.
+- **Fingerprint mismatch remains intentionally fail-closed.** Component-only
+  rebuild or stale lexical serving is a feature proposal, not a confirmed bug.
+- **Runtime-owner and stale-codebase claims were not reproduced** on the
+  current shared runtime. Do not add heartbeat expiry that could declare a live
+  writer dead without a separate safety proof.
+
+### Small-model pagination documentation follow-up
+
+This is a non-defect documentation improvement. Front-load these meanings in
+the `search_codebase` schema instead of adding more prose to the already dense
+description:
+
+- `limit`: total frozen result-set size across all pages, not page size;
+- `disclosureLimit`: initial page size; set it below `limit` to obtain a handle
+  when enough frozen results exist;
+- example: `limit=20, disclosureLimit=6` returns six initially and freezes up to
+  twenty;
+- `continuation: complete` means the caller-bounded frozen set is complete, not
+  that `availableGroupCount` was exhausted.
+
+Update generated MCP documentation/manifest checks only if this wording change
+is implemented. No pagination runtime or ranking change is warranted.
+
+### Closing verification record
+
+- Live read-only checks used the repository-backed server reporting Satori
+  6.9.0 against `/home/hamza/repo/tradingview_ratio`.
+- The 2026-08-10 implementation investigation used four independent read-only
+  subagent lanes, one per open issue, followed by parent source/test
+  verification. Codebase-memory generation `2026-08-10T00:21:35Z` reported no
+  recorded gap for the cited runtime source paths; relevant tests are excluded
+  from that graph mode and were inspected directly.
+- Focused current-contract checks passed 23/23: Core ignore-policy persistence
+  3/3, MCP ignore reconciliation 5/5, current-source/large-inspection 3/3,
+  must-lane execution 10/10, and indexing status/snapshot validation 2/2. The
+  first Core invocation hit a Node test-runner IPC deserialization error after
+  one passing test; rerunning the same three tests with
+  `--test-isolation=none` passed 3/3, so it is recorded as harness/environment
+  noise rather than product evidence.
+- No live create, reindex, clear, process termination, or ranking tournament was
+  performed.
+- Focused disclosure, must-lane, and reranker-projection suites passed 33/33;
+  they bind current behavior and expose the missing regression cases above.
+- Issue 21 implementation verification: Core and MCP typechecks passed; all
+  affected policy/sync/public-lifecycle tests passed; the package-wide Core run
+  found only four stale v4 schema expectations introduced by v5, and their
+  corrected focused rerun passed 4/4 while all other Core tests passed; the
+  package-wide MCP suite passed; and the clean root build completed without
+  generating any additional tracked diff.
+- The historical ledger has 23 numbered entries: issue number 4 was already
+  absent. Do not invent or renumber a historical issue merely to close the gap.
+- Repository-state warning at session close: the pre-existing Git index still
+  records the historical evidence file as renamed to this temporary handoff.
+  This session added further unstaged documentation to that already-staged
+  rename. Reconcile the index deliberately before any commit so the final
+  handoff content, rather than the earlier staged snapshot, is retained.

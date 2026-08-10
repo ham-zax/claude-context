@@ -388,7 +388,7 @@ function createFailedIndexingHarness(
         policyPublicationDocumentDigest?: string;
         legacyRollback?: boolean;
         proveVectorGenerationError?: Error;
-        recordCurrentIgnoreControlSignature?: () => Promise<void>;
+        recordCurrentIgnoreControlSignature?: (observedSignature?: string) => Promise<void>;
     } = {},
 ) {
     const droppedCollections: string[] = [];
@@ -406,6 +406,7 @@ function createFailedIndexingHarness(
     let completionMarkerClearCalls = 0;
     let publishedPolicyCollection: string | null = null;
     let publishedPolicyHash: string | null = null;
+    let publishedPolicyControlSignature: string | null = null;
     let publishedPolicyDocumentDigest: string | null = null;
     let publishedPolicyBinding: PublishedPolicyBinding | null = null;
     let publishedMarker: ReturnType<typeof buildMarker> | null = null;
@@ -436,8 +437,10 @@ function createFailedIndexingHarness(
                 customExtensions: update.customExtensions ?? publishedCustomExtensions,
                 customIgnorePatterns: update.customIgnorePatterns ?? publishedCustomIgnorePatterns,
                 supportedExtensions: ['.ts', ...(update.customExtensions ?? publishedCustomExtensions)],
+                fileBasedIgnorePatterns: [],
                 effectiveIgnorePatterns: update.customIgnorePatterns ?? publishedCustomIgnorePatterns,
                 policyHash: crypto.createHash('sha256').update(JSON.stringify(update)).digest('hex'),
+                controlSignature: 'v1:candidate-policy-observation',
             };
         },
         resolveIndexPolicyForReindex: async (_root: string, update: { customExtensions?: string[]; customIgnorePatterns?: string[] } = {}) => {
@@ -448,12 +451,14 @@ function createFailedIndexingHarness(
                 customExtensions: update.customExtensions ?? [],
                 customIgnorePatterns: update.customIgnorePatterns ?? [],
                 supportedExtensions: ['.ts', ...(update.customExtensions ?? [])],
+                fileBasedIgnorePatterns: [],
                 effectiveIgnorePatterns: update.customIgnorePatterns ?? [],
                 policyHash: crypto.createHash('sha256').update(JSON.stringify(update)).digest('hex'),
+                controlSignature: 'v1:candidate-policy-observation',
             };
         },
         publishResolvedIndexPolicy: (
-            policy: { canonicalRoot: string; policyHash: string; customExtensions: string[]; customIgnorePatterns: string[] },
+            policy: { canonicalRoot: string; policyHash: string; controlSignature?: string; customExtensions: string[]; customIgnorePatterns: string[] },
             binding: PublishedPolicyBinding,
             publishMutation?: (publish: () => void) => void,
         ) => {
@@ -474,6 +479,7 @@ function createFailedIndexingHarness(
                 publishedCustomIgnorePatterns = [...policy.customIgnorePatterns];
                 publishedPolicyCollection = binding.collectionName;
                 publishedPolicyHash = policy.policyHash;
+                publishedPolicyControlSignature = policy.controlSignature ?? null;
                 publishedPolicyDocumentDigest = receipt.documentDigest ?? null;
                 publishedPolicyBinding = structuredClone(binding);
                 publicationEvents.push('policy:publish');
@@ -647,6 +653,9 @@ function createFailedIndexingHarness(
                         supportedExtensions: ['.ts', ...publishedCustomExtensions],
                         effectiveIgnorePatterns: [...publishedCustomIgnorePatterns],
                         policyHash: publishedPolicyHash,
+                        ...(publishedPolicyControlSignature
+                            ? { controlSignature: publishedPolicyControlSignature }
+                            : {}),
                     },
                 };
             }
@@ -694,6 +703,10 @@ function createFailedIndexingHarness(
         syncManager: {
             recordCurrentIgnoreControlSignature: options.recordCurrentIgnoreControlSignature
                 ?? (async () => undefined),
+            recordObservedIgnoreControlSignature: async (
+                _codebasePath: string,
+                observedSignature: string,
+            ) => options.recordCurrentIgnoreControlSignature?.(observedSignature),
         },
         runtimeFingerprint: RUNTIME_FINGERPRINT,
         resolveCollectionName,
@@ -1520,6 +1533,22 @@ test("background indexing resolves create policy normally and force reindex poli
 
         assert.equal(reindexHarness.standardPolicyResolutionCalls, 0);
         assert.equal(reindexHarness.reindexPolicyResolutionCalls, 1);
+    });
+});
+
+test("background indexing acknowledges the control signature captured with its candidate policy", async () => {
+    await withTempRepo(async (repoPath) => {
+        let acknowledgedSignature: string | undefined;
+        const harness = createFailedIndexingHarness(new Set(), {
+            indexCodebase: async () => completedIndexResult(),
+            recordCurrentIgnoreControlSignature: async (observedSignature) => {
+                acknowledgedSignature = observedSignature;
+            },
+        });
+
+        await harness.handler.startBackgroundIndexing(repoPath, false);
+
+        assert.equal(acknowledgedSignature, 'v1:candidate-policy-observation');
     });
 });
 

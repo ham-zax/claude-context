@@ -137,6 +137,7 @@ import {
     getCustomIgnorePatternsFromEnvironment,
     readIgnorePatternsFile,
 } from './ignore-rule-service';
+import { observeIndexPolicyInputs } from './index-policy-input-observer';
 
 export type {
     MutationGenerationObservation,
@@ -294,6 +295,11 @@ export interface ResolvedIndexPolicy {
     supportedExtensions: string[];
     effectiveIgnorePatterns: string[];
     policyHash: string;
+    controlSignature?: string;
+}
+
+export interface ObservedResolvedIndexPolicy extends ResolvedIndexPolicy {
+    controlSignature: string;
 }
 
 type IndexPolicyBinding = {
@@ -3033,7 +3039,11 @@ export class Context {
         const searchType = isHybrid === true ? 'hybrid search' : 'semantic search';
         console.log(`[Context] 🚀 Starting to index codebase with ${searchType}: ${codebasePath}`);
 
-        this.loadIndexProfileForCodebase(codebasePath);
+        if (options.indexPolicy) {
+            this.setIndexProfileForCodebase(codebasePath, options.indexPolicy.profile);
+        } else {
+            this.loadIndexProfileForCodebase(codebasePath);
+        }
         const indexPolicy = options.indexPolicy
             ?? await this.resolveIndexPolicyForCodebase(codebasePath);
 
@@ -4787,26 +4797,31 @@ export class Context {
     async resolveIndexPolicyForCodebase(
         codebasePath: string,
         update: CustomIndexPolicyUpdate = {},
-    ): Promise<ResolvedIndexPolicy> {
+    ): Promise<ObservedResolvedIndexPolicy> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         this.loadCustomIndexPolicy(canonicalRoot);
-        return this.resolveIndexPolicyFromCurrentInputs(canonicalRoot, update, true);
+        return this.resolveIndexPolicyFromCurrentInputs(canonicalRoot, update, true, true);
     }
 
     async resolveIndexPolicyForReindex(
         codebasePath: string,
         update: CustomIndexPolicyUpdate = {},
-    ): Promise<ResolvedIndexPolicy> {
+    ): Promise<ObservedResolvedIndexPolicy> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        return this.resolveIndexPolicyFromCurrentInputs(canonicalRoot, update, false);
+        return this.resolveIndexPolicyFromCurrentInputs(canonicalRoot, update, false, true);
     }
 
     private async resolveIndexPolicyFromCurrentInputs(
         canonicalRoot: string,
         update: CustomIndexPolicyUpdate,
         inheritActiveCustomPolicy: boolean,
-    ): Promise<ResolvedIndexPolicy> {
-        const profile = this.loadIndexProfileForCodebase(canonicalRoot).profile;
+        activateRuntimeProfile: boolean,
+    ): Promise<ObservedResolvedIndexPolicy> {
+        const observedInputs = await observeIndexPolicyInputs(canonicalRoot);
+        const profile = observedInputs.profileConfig.profile;
+        if (activateRuntimeProfile) {
+            this.setIndexProfileForCodebase(canonicalRoot, profile);
+        }
         const customExtensions = update.customExtensions === undefined
             ? inheritActiveCustomPolicy
                 ? [...(this.runtimeCustomExtensionsByCodebase.get(canonicalRoot) ?? [])]
@@ -4817,10 +4832,7 @@ export class Context {
                 ? this.ignoreRuleService.getRuntimeCustomPatterns(canonicalRoot)
                 : []
             : update.customIgnorePatterns.map((pattern) => pattern.trim()).filter(Boolean);
-        const fileBasedPatterns: string[] = [];
-        for (const ignoreFile of await this.findIgnoreFiles(canonicalRoot)) {
-            fileBasedPatterns.push(...await this.loadIgnoreFile(ignoreFile, path.basename(ignoreFile), canonicalRoot));
-        }
+        const fileBasedPatterns = [...observedInputs.fileBasedIgnorePatterns];
         const supportedExtensions = normalizeSupportedExtensions([
             ...getSupportedExtensionsForIndexProfile(profile),
             ...this.configuredExtensionOverlays,
@@ -4845,7 +4857,38 @@ export class Context {
             supportedExtensions,
             effectiveIgnorePatterns,
             policyHash,
+            controlSignature: observedInputs.controlSignature,
         };
+    }
+
+    async observeIndexPolicyForIncrementalReconciliation(
+        codebasePath: string,
+    ): Promise<ObservedResolvedIndexPolicy> {
+        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
+        this.loadCustomIndexPolicy(canonicalRoot);
+        return this.resolveIndexPolicyFromCurrentInputs(canonicalRoot, {}, true, false);
+    }
+
+    activateObservedIndexPolicyForIncrementalReconciliation(
+        policy: ObservedResolvedIndexPolicy,
+    ): boolean {
+        const canonicalRoot = this.canonicalizeCodebasePath(policy.canonicalRoot);
+        this.loadCustomIndexPolicy(canonicalRoot);
+        const publishedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
+        if (!publishedPolicy || publishedPolicy.policyHash !== policy.policyHash) {
+            return false;
+        }
+        const binding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        if (publishedPolicy.controlSignature !== policy.controlSignature) {
+            if (!binding?.publication) {
+                return false;
+            }
+            this.publishResolvedIndexPolicy(policy, binding);
+        }
+        this.setIndexProfileForCodebase(canonicalRoot, policy.profile);
+        this.ignoreRuleService.setFileBasedPatterns(canonicalRoot, policy.fileBasedIgnorePatterns);
+        this.recomputePublishedPolicyRuntimeCompatibility(canonicalRoot);
+        return true;
     }
 
     publishResolvedIndexPolicy(
@@ -5361,9 +5404,7 @@ export class Context {
             canonicalRoot,
             policy.customIgnorePatterns,
         );
-        if (!this.indexProfilesByCodebase.has(canonicalRoot)) {
-            this.indexProfilesByCodebase.set(canonicalRoot, policy.profile);
-        }
+        this.indexProfilesByCodebase.set(canonicalRoot, policy.profile);
         this.loadedCustomPolicyRoots.add(canonicalRoot);
         this.publishedPolicyBindingsByCodebase.set(canonicalRoot, {
             policyHash: policy.policyHash,
@@ -7449,22 +7490,6 @@ export class Context {
         return this.ignoreRuleService.loadIgnorePatterns(codebasePath);
     }
 
-    private async findIgnoreFiles(codebasePath: string): Promise<string[]> {
-        return this.ignoreRuleService.findIgnoreFiles(codebasePath);
-    }
-
-    private async loadIgnoreFile(
-        filePath: string,
-        fileName: string,
-        codebasePath: string,
-    ): Promise<string[]> {
-        return this.ignoreRuleService.loadIgnoreFile(
-            filePath,
-            fileName,
-            codebasePath,
-        );
-    }
-
     private matchesIgnorePattern(
         filePath: string,
         codebasePath: string,
@@ -7681,10 +7706,13 @@ export class Context {
                 supportedExtensions: payload.supportedExtensions,
                 effectiveIgnorePatterns: payload.effectiveIgnorePatterns,
                 policyHash: payload.policyHash,
+                ...(payload.schemaVersion === 'satori_index_policy_v5'
+                    ? { controlSignature: payload.controlSignature }
+                    : {}),
             }, {
                 collectionName: payload.collectionName,
                 navigation: { ...payload.navigation },
-                ...(payload.schemaVersion === 'satori_index_policy_v4'
+                ...(payload.schemaVersion === 'satori_index_policy_v4' || payload.schemaVersion === 'satori_index_policy_v5'
                     ? { publication: structuredClone(payload.publication) }
                     : {}),
             });
@@ -7833,12 +7861,19 @@ export class Context {
             collectionName: binding.collectionName,
             navigation: binding.navigation,
         };
-        const policyDocument = binding.publication
+        const policyDocument = binding.publication && policy.controlSignature
             ? buildCanonicalIndexPolicyDocument({
                 ...policyBase,
-                schemaVersion: 'satori_index_policy_v4',
+                schemaVersion: 'satori_index_policy_v5',
                 publication: binding.publication,
+                controlSignature: policy.controlSignature,
             })
+            : binding.publication
+                ? buildCanonicalIndexPolicyDocument({
+                    ...policyBase,
+                    schemaVersion: 'satori_index_policy_v4',
+                    publication: binding.publication,
+                })
             : buildCanonicalIndexPolicyDocument({
                 ...policyBase,
                 schemaVersion: 'satori_index_policy_v3',

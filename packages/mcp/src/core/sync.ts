@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
-import { createHash } from "crypto";
 import chokidar, { FSWatcher } from "chokidar";
 import ignore from "ignore";
 import {
     AtomicIncrementalPublicationUnsupportedError,
+    computeIndexPolicyControlSignature,
     Context,
     type ProvenGenerationReceipt,
     type ProvenVectorGenerationReceipt,
@@ -657,6 +657,36 @@ export class SyncManager {
         codebasePath: string,
         existingLease?: RootMutationLease,
     ): Promise<void> {
+        return this.recordIgnoreControlSignature(
+            codebasePath,
+            () => this.computeIgnoreControlSignature(codebasePath),
+            existingLease,
+        );
+    }
+
+    public async recordObservedIgnoreControlSignature(
+        codebasePath: string,
+        observedIgnoreControlSignature: string,
+        existingLease?: RootMutationLease,
+    ): Promise<void> {
+        if (typeof this.snapshotManager.setCodebaseIgnoreControlSignature !== 'function') {
+            return;
+        }
+        if (!observedIgnoreControlSignature.startsWith('v1:')) {
+            throw new Error('Observed ignore-control signature is invalid.');
+        }
+        return this.recordIgnoreControlSignature(
+            codebasePath,
+            async () => observedIgnoreControlSignature,
+            existingLease,
+        );
+    }
+
+    private async recordIgnoreControlSignature(
+        codebasePath: string,
+        resolveIgnoreControlSignature: () => Promise<string>,
+        existingLease?: RootMutationLease,
+    ): Promise<void> {
         if (typeof this.snapshotManager.setCodebaseIgnoreControlSignature !== 'function') {
             return;
         }
@@ -679,10 +709,10 @@ export class SyncManager {
 
         try {
             lastDurableOperation = this.persistOwnedOperationStart(lease, releaseLease);
-            const currentIgnoreControlSignature = await this.computeIgnoreControlSignature(codebasePath);
+            const ignoreControlSignature = await resolveIgnoreControlSignature();
             this.assertMutationCurrent(lease);
             const operation = this.persistOwnedOperationPhase(lease, releaseLease, "completed", () => {
-                this.snapshotManager.setCodebaseIgnoreControlSignature(codebasePath, currentIgnoreControlSignature);
+                this.snapshotManager.setCodebaseIgnoreControlSignature(codebasePath, ignoreControlSignature);
             });
             if (operation) {
                 lastDurableOperation = operation;
@@ -786,9 +816,20 @@ export class SyncManager {
         if (options.skipIgnoreControlCheck !== true) {
             currentIgnoreControlSignature = await this.computeIgnoreControlSignature(codebasePath);
             const persistedIgnoreControlSignature = this.snapshotManager.getCodebaseIgnoreControlSignature?.(codebasePath);
+            const publishedPolicy = checkpointValidation.checkpoint
+                ?.generationReceipt
+                ?.policy;
+            const publishedIgnoreControlSignature = publishedPolicy?.controlSignature;
+            const acceptedIgnoreControlSignature = publishedIgnoreControlSignature
+                ?? persistedIgnoreControlSignature;
+            const requiresDurableControlBinding = publishedPolicy !== undefined
+                && publishedIgnoreControlSignature === undefined;
 
-            if (typeof persistedIgnoreControlSignature === 'string') {
-                if (persistedIgnoreControlSignature !== currentIgnoreControlSignature) {
+            if (typeof acceptedIgnoreControlSignature === 'string') {
+                if (
+                    requiresDurableControlBinding
+                    || acceptedIgnoreControlSignature !== currentIgnoreControlSignature
+                ) {
                     const decision = await this.runIgnoreReconcile(
                         codebasePath,
                         1,
@@ -1015,7 +1056,11 @@ export class SyncManager {
             );
             this.activeIgnoreReconciles.set(reconcileKey, promise);
             const decision = await promise;
-            const phase = decision.mode === "ignore_reload_failed" ? "failed" : "completed";
+            const phase = decision.mode === "ignore_reload_failed"
+                ? "failed"
+                : decision.mode === "skipped_requires_reindex"
+                    ? "blocked"
+                    : "completed";
             const operation = this.persistOwnedOperationPhase(lease, releaseLease, phase);
             if (operation) {
                 lastDurableOperation = operation;
@@ -1051,13 +1096,35 @@ export class SyncManager {
         const checkedAtMs = this.now();
         const checkedAt = new Date(checkedAtMs).toISOString();
         const startedAt = checkedAtMs;
-        const resolvedIgnoreControlSignature = nextIgnoreControlSignature ?? await this.computeIgnoreControlSignature(codebasePath);
+        let resolvedIgnoreControlSignature = nextIgnoreControlSignature ?? await this.computeIgnoreControlSignature(codebasePath);
         let indexedStateMutated = false;
+        let policyObservationEstablished = false;
 
         try {
             if (this.activeSyncs.has(codebasePath)) {
                 console.log(`[SYNC] ⏳ Ignore-rule reconcile waiting for in-flight sync '${codebasePath}'`);
                 await this.activeSyncs.get(codebasePath);
+            }
+
+            const candidatePolicy = await this.context.observeIndexPolicyForIncrementalReconciliation(codebasePath);
+            policyObservationEstablished = true;
+            resolvedIgnoreControlSignature = candidatePolicy.controlSignature;
+            this.assertMutationCurrent(mutationLease);
+            if (!await this.context.activateObservedIndexPolicyForIncrementalReconciliation(candidatePolicy)) {
+                this.snapshotManager.setCodebaseRequiresReindex(
+                    codebasePath,
+                    'index_policy_changed',
+                    'Repository index-policy inputs changed. A full reindex is required before the new policy can become authoritative.',
+                );
+                this.snapshotManager.saveCodebaseSnapshot();
+                return {
+                    mode: 'skipped_requires_reindex',
+                    checkedAt,
+                    thresholdMs: 0,
+                    coalescedEdits: Math.max(1, coalescedEdits),
+                    durationMs: Math.max(0, this.now() - startedAt),
+                    errorMessage: 'index_policy_changed',
+                };
             }
 
             const manifestIndexedPaths = typeof this.snapshotManager.getCodebaseIndexedPaths === 'function'
@@ -1074,7 +1141,7 @@ export class SyncManager {
                 throw new Error('missing_manifest_and_synchronizer');
             }
 
-            const { previousMatcher, matcher, version } = await this.reloadIgnoreRulesForCodebase(
+            const { previousMatcher, matcher, version } = await this.refreshIgnoreMatcherForCodebase(
                 codebasePath,
                 mutationLease,
             );
@@ -1161,16 +1228,18 @@ export class SyncManager {
             let fallbackSyncExecuted = false;
             let fallbackStats: { added: number; removed: number; modified: number } | undefined;
             let fallbackRecovered = false;
-            try {
-                const fallbackDecision = await this.ensureFreshness(codebasePath, 0, {
-                    skipIgnoreControlCheck: true,
-                    mutationLease,
-                });
-                fallbackSyncExecuted = true;
-                fallbackStats = fallbackDecision.stats;
-                fallbackRecovered = fallbackDecision.mode === 'synced';
-            } catch {
-                // Preserve primary failure metadata even if fallback sync fails.
+            if (policyObservationEstablished) {
+                try {
+                    const fallbackDecision = await this.ensureFreshness(codebasePath, 0, {
+                        skipIgnoreControlCheck: true,
+                        mutationLease,
+                    });
+                    fallbackSyncExecuted = true;
+                    fallbackStats = fallbackDecision.stats;
+                    fallbackRecovered = fallbackDecision.mode === 'synced';
+                } catch {
+                    // Preserve primary failure metadata even if fallback sync fails.
+                }
             }
 
             if (indexedStateMutated && !fallbackRecovered) {
@@ -1761,17 +1830,11 @@ export class SyncManager {
         return 0;
     }
 
-    private async reloadIgnoreRulesForCodebase(
+    private async refreshIgnoreMatcherForCodebase(
         codebasePath: string,
         mutationLease?: RootMutationLease,
     ): Promise<IgnoreReloadResult> {
         const previousMatcher = this.watcherIgnoreMatchers.get(codebasePath);
-
-        if (typeof this.context.reloadIgnoreRulesForCodebase === 'function') {
-            this.assertMutationCurrent(mutationLease);
-            await this.context.reloadIgnoreRulesForCodebase(codebasePath);
-            this.assertMutationCurrent(mutationLease);
-        }
 
         const matcher = await this.buildIgnoreMatcherForCodebase(codebasePath);
         this.assertMutationCurrent(mutationLease);
@@ -1802,26 +1865,7 @@ export class SyncManager {
     }
 
     private async computeIgnoreControlSignature(codebasePath: string): Promise<string> {
-        const signatureParts: string[] = [];
-
-        for (const controlFile of IGNORE_RULE_CONTROL_FILES) {
-            const controlPath = path.join(codebasePath, controlFile);
-            try {
-                const stat = await fs.promises.stat(controlPath);
-                if (!stat.isFile()) {
-                    signatureParts.push(`${controlFile}:missing`);
-                    continue;
-                }
-
-                const content = await fs.promises.readFile(controlPath);
-                const digest = createHash('sha256').update(content).digest('hex');
-                signatureParts.push(`${controlFile}:sha256:${digest}:${content.length}`);
-            } catch {
-                signatureParts.push(`${controlFile}:missing`);
-            }
-        }
-
-        return `v1:${signatureParts.join('|')}`;
+        return computeIndexPolicyControlSignature(path.resolve(codebasePath));
     }
 
     private normalizeReconcileKey(codebasePath: string): string {

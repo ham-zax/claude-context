@@ -6,7 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { LexicalRetrievalModeUnsupportedError } from './semantic-search-service';
-import { Context, createGenerationProofCoordinator, IndexPolicyPublicationError } from './context';
+import {
+    Context,
+    createGenerationProofCoordinator,
+    IndexPolicyPublicationError,
+    type ResolvedIndexPolicy,
+} from './context';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
     type CanonicalIndexPolicyDocument,
@@ -54,6 +59,7 @@ import {
 } from '../vectordb';
 import { LanceDbVectorDatabase } from '../vectordb/lancedb-vectordb';
 import { FileSynchronizer } from '../sync/synchronizer';
+import { computeIndexPolicyControlSignature } from './index-policy-input-observer';
 
 const previousSatoriStateRoot = process.env.SATORI_STATE_ROOT;
 const testSatoriStateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-test-state-'));
@@ -1590,7 +1596,8 @@ test('Context.reindexByChange activates one immutable vector, navigation, graph,
         const policy = JSON.parse(
             fs.readFileSync(path.join(policyRoot, policyFiles[0]!), 'utf8'),
         ) as CanonicalIndexPolicyDocument;
-        assert.equal(policy.schemaVersion, 'satori_index_policy_v4');
+        assert.equal(policy.schemaVersion, 'satori_index_policy_v5');
+        assert.equal(policy.controlSignature, current.policy.controlSignature);
         assert.equal(policy.collectionName, current.collectionName);
         assert.equal(policy.publication.receipt.ownerId, 'sync-owner');
         assert.equal(policy.publication.receipt.generation, 7);
@@ -3988,6 +3995,134 @@ test('Context stores default index-policy authority under SATORI_STATE_ROOT', as
     }
 });
 
+test('resolved index policy retains the exact control-file observation used to parse its rules', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-observation-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const ignorePath = path.join(codebasePath, '.satoriignore');
+
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(ignorePath, 'data/\n', 'utf8');
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+            indexPolicyStateRoot: path.join(tempRoot, 'policy-state'),
+        });
+
+        const candidate = await context.resolveIndexPolicyForCodebase(codebasePath);
+        assert.equal(candidate.fileBasedIgnorePatterns.includes('data/'), true);
+        assert.equal(candidate.controlSignature, await computeIndexPolicyControlSignature(codebasePath));
+
+        fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
+        const currentSignature = await computeIndexPolicyControlSignature(codebasePath);
+        assert.notEqual(currentSignature, candidate.controlSignature);
+        assert.equal(candidate.fileBasedIgnorePatterns.includes('data/'), true);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('restarted Context rejects a changed observed ignore policy before replacing durable runtime authority', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-restart-drift-'));
+    const stateRoot = path.join(tempRoot, 'policy-state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const ignorePath = path.join(codebasePath, '.satoriignore');
+
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(ignorePath, 'data/\n', 'utf8');
+        const publisher = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+            indexPolicyStateRoot: stateRoot,
+        });
+        const accepted = await publisher.resolveIndexPolicyForCodebase(codebasePath);
+        publisher.publishResolvedIndexPolicy(accepted, {
+            collectionName: 'generation-a',
+            navigation: { status: 'not_bound' },
+        });
+
+        fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
+        const restarted = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+            indexPolicyStateRoot: stateRoot,
+        });
+        const observed = await restarted.observeIndexPolicyForIncrementalReconciliation(codebasePath);
+
+        assert.notEqual(observed.policyHash, accepted.policyHash);
+        assert.equal(
+            restarted.activateObservedIndexPolicyForIncrementalReconciliation(observed),
+            false,
+        );
+        assert.equal(restarted.getActiveIgnorePatterns(codebasePath).includes('data/'), true);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('incremental reconciliation upgrades matching v4 policy authority with its observed control signature', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-v4-upgrade-'));
+    const stateRoot = path.join(tempRoot, 'policy-state');
+    const codebasePath = path.join(tempRoot, 'repo');
+
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, '.satoriignore'), '/data/\n', 'utf8');
+        const publisher = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+            indexPolicyStateRoot: stateRoot,
+        });
+        const observed = await publisher.resolveIndexPolicyForCodebase(codebasePath);
+        const legacyPolicy: ResolvedIndexPolicy = { ...observed };
+        delete legacyPolicy.controlSignature;
+        publisher.publishResolvedIndexPolicy(legacyPolicy, {
+            collectionName: 'generation-a',
+            navigation: {
+                status: 'sealed',
+                generationId: 'navigation-a',
+                sealHash: 'a'.repeat(64),
+            },
+            publication: {
+                activationId: 'activation-a',
+                sourceCheckpoint: {
+                    collectionName: 'generation-a',
+                    markerRunId: 'marker-a',
+                    indexPolicyHash: legacyPolicy.policyHash,
+                    merkleRoot: 'b'.repeat(64),
+                    documentDigest: 'c'.repeat(64),
+                },
+                graph: {
+                    kind: 'relationship_manifest_v2',
+                    manifestHash: 'd'.repeat(64),
+                },
+                receipt: {
+                    ownerId: 'owner-a',
+                    generation: 1,
+                    operationId: 'operation-a',
+                },
+            },
+        });
+
+        const restarted = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+            indexPolicyStateRoot: stateRoot,
+        });
+        const candidate = await restarted.observeIndexPolicyForIncrementalReconciliation(codebasePath);
+
+        assert.equal(restarted.activateObservedIndexPolicyForIncrementalReconciliation(candidate), true);
+        const policyFile = fs.readdirSync(stateRoot).find((file) => file.endsWith('.json'));
+        assert.ok(policyFile);
+        const upgraded = JSON.parse(fs.readFileSync(path.join(stateRoot, policyFile), 'utf8')) as Record<string, unknown>;
+        assert.equal(upgraded.schemaVersion, 'satori_index_policy_v5');
+        assert.equal(upgraded.controlSignature, candidate.controlSignature);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context custom index policy preserves omitted fields, supports explicit reset, and survives restart', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-root-policy-'));
     const stateRoot = path.join(tempRoot, 'policy-state');
@@ -6255,7 +6390,7 @@ test('Context distinguishes unsupported future marker and policy schemas without
                     const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8')) as Record<string, unknown>;
                     fs.writeFileSync(policyPath, JSON.stringify({
                         ...policy,
-                        schemaVersion: 'satori_index_policy_v5',
+                        schemaVersion: 'satori_index_policy_v6',
                     }), 'utf8');
                 }
                 const markerBefore = structuredClone(markerDocument.metadata);
@@ -7566,7 +7701,7 @@ test('Context acknowledges committed restoration of unsupported policy authority
             'current.json',
         );
         const futurePolicy = JSON.parse(fs.readFileSync(policyPath, 'utf8')) as Record<string, unknown>;
-        futurePolicy.schemaVersion = 'satori_index_policy_v5';
+        futurePolicy.schemaVersion = 'satori_index_policy_v6';
         const futurePolicyBytes = `${JSON.stringify(futurePolicy, null, 2)}\n`;
         const currentPointerBytes = fs.readFileSync(pointerPath, 'utf8');
         fs.writeFileSync(policyPath, futurePolicyBytes, 'utf8');
@@ -10188,7 +10323,7 @@ async function assertGenericV4RepairPreservesCheckpoint(removeNavigation: boolea
             policySchema: policy.schemaVersion,
             markerRunIdBefore: before.marker.runId,
             markerRunIdAfter: after.marker.runId,
-            publicationCheckpointMarkerRunId: policy.schemaVersion === 'satori_index_policy_v4'
+            publicationCheckpointMarkerRunId: policy.schemaVersion === 'satori_index_policy_v5'
                 ? policy.publication.sourceCheckpoint.markerRunId
                 : null,
             checkpointAfter,
@@ -10196,7 +10331,7 @@ async function assertGenericV4RepairPreservesCheckpoint(removeNavigation: boolea
         });
         assert.equal(checkpointAfter.status, 'valid', evidence);
         assert.equal(zeroChangeSyncError, null, evidence);
-        assert.equal(policy.schemaVersion, 'satori_index_policy_v4', evidence);
+        assert.equal(policy.schemaVersion, 'satori_index_policy_v5', evidence);
         assert.equal(after.marker.runId, before.marker.runId, evidence);
         assert.equal(fs.readFileSync(checkpointPath, 'utf8'), checkpointBytesBefore, evidence);
         assert.deepEqual(vectorDatabase.mutationCalls, [], evidence);
@@ -10218,11 +10353,11 @@ async function assertGenericV4RepairPreservesCheckpoint(removeNavigation: boolea
     }
 }
 
-test('Context.repairIndex generic navigation repair preserves a valid v4 source checkpoint', async () => {
+test('Context.repairIndex generic navigation repair preserves a valid v5 source checkpoint', async () => {
     await assertGenericV4RepairPreservesCheckpoint(true);
 });
 
-test('Context.repairIndex healthy generic repair preserves a valid v4 source checkpoint', async () => {
+test('Context.repairIndex healthy generic repair preserves a valid v5 source checkpoint', async () => {
     await assertGenericV4RepairPreservesCheckpoint(false);
 });
 
@@ -10290,15 +10425,15 @@ async function assertV4RepairRejectsInvalidCheckpoint(
     }
 }
 
-test('Context.repairIndex requires reindex for a missing v4 source checkpoint', async () => {
+test('Context.repairIndex requires reindex for a missing v5 source checkpoint', async () => {
     await assertV4RepairRejectsInvalidCheckpoint('missing');
 });
 
-test('Context.repairIndex requires reindex for a corrupt v4 source checkpoint', async () => {
+test('Context.repairIndex requires reindex for a corrupt v5 source checkpoint', async () => {
     await assertV4RepairRejectsInvalidCheckpoint('corrupt');
 });
 
-test('Context.repairIndex atomically upgrades only relationship navigation under a proven v4 publication', async () => {
+test('Context.repairIndex atomically upgrades only relationship navigation under a proven v5 publication', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-repair-relationship-only-'));
     const stateRoot = path.join(tempRoot, 'state');
     const policyRoot = path.join(tempRoot, 'policies');
@@ -10399,7 +10534,7 @@ test('Context.repairIndex atomically upgrades only relationship navigation under
         const policy = JSON.parse(
             fs.readFileSync(path.join(policyRoot, policyFile), 'utf8'),
         ) as CanonicalIndexPolicyDocument;
-        assert.equal(policy.schemaVersion, 'satori_index_policy_v4');
+        assert.equal(policy.schemaVersion, 'satori_index_policy_v5');
         assert.equal(policy.collectionName, before.collectionName);
         assert.equal(policy.publication.sourceCheckpoint.markerRunId, markerBefore.runId);
         assert.equal(
