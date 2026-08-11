@@ -139,6 +139,37 @@ export class SynchronizerCheckpointPublicationError extends Error {
     }
 }
 
+export class SynchronizerCheckpointStagingCleanupError extends Error {
+    readonly cleanupStatus = 'unresolved' as const;
+
+    constructor(
+        readonly cleanupPath: string,
+        readonly stagingCause: unknown,
+        readonly cleanupCause: unknown,
+    ) {
+        super(
+            `[Synchronizer] Checkpoint staging failed and cleanup is unresolved for '${cleanupPath}': ${
+                cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
+            }`,
+        );
+        this.name = 'SynchronizerCheckpointStagingCleanupError';
+    }
+}
+
+class SynchronizerCheckpointCleanupFailure extends Error {
+    constructor(
+        readonly cleanupPath: string,
+        readonly cleanupCause: unknown,
+    ) {
+        super(
+            `[Synchronizer] Checkpoint cleanup failed for '${cleanupPath}': ${
+                cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
+            }`,
+        );
+        this.name = 'SynchronizerCheckpointCleanupFailure';
+    }
+}
+
 export interface PreparedFileChangeSet {
     readonly changes: FileChangeResult;
     readonly fileHashes: ReadonlyMap<string, string>;
@@ -888,6 +919,8 @@ export class FileSynchronizer {
         const serializedPayload = JSON.stringify(payload);
         const merkleDir = path.dirname(snapshotPath);
         const tempSnapshotPath = `${snapshotPath}.candidate-${process.pid}-${crypto.randomUUID()}`;
+        let targetReplaced = false;
+        let targetIdentity: fsSync.Stats | undefined;
         assertMutationCurrent?.();
         await fsp.mkdir(merkleDir, { recursive: true });
         if (fsSync.existsSync(snapshotPath)) {
@@ -903,12 +936,34 @@ export class FileSynchronizer {
             }
             assertMutationCurrent?.();
             await fsp.rename(tempSnapshotPath, snapshotPath);
+            targetReplaced = true;
+            targetIdentity = await fsp.lstat(snapshotPath);
             const directory = fsSync.openSync(merkleDir, 'r');
             try {
                 fsSync.fsyncSync(directory);
             } finally {
                 fsSync.closeSync(directory);
             }
+        } catch (error) {
+            if (targetReplaced) {
+                try {
+                    await FileSynchronizer.cleanupStagedCheckpoint({
+                        snapshotPath,
+                        serializedPayload,
+                        targetIdentity,
+                    });
+                } catch (cleanupError) {
+                    const unresolvedCleanupPath = cleanupError instanceof SynchronizerCheckpointCleanupFailure
+                        ? cleanupError.cleanupPath
+                        : snapshotPath;
+                    throw new SynchronizerCheckpointStagingCleanupError(
+                        unresolvedCleanupPath,
+                        error,
+                        cleanupError,
+                    );
+                }
+            }
+            throw error;
         } finally {
             await fsp.unlink(tempSnapshotPath).catch(() => undefined);
         }
@@ -918,6 +973,98 @@ export class FileSynchronizer {
             merkleRoot: checkpoint.merkleRoot,
             documentDigest: payload.documentDigest,
         };
+    }
+
+    private static async cleanupStagedCheckpoint(input: {
+        snapshotPath: string;
+        serializedPayload: string;
+        targetIdentity?: fsSync.Stats;
+    }): Promise<void> {
+        if (!input.targetIdentity) {
+            throw new Error('staged checkpoint identity was not fully established');
+        }
+
+        const cleanupPath = `${input.snapshotPath}.cleanup-${process.pid}-${crypto.randomUUID()}`;
+        let detached = false;
+        let detachedIdentity: fsSync.Stats | undefined;
+        let ownershipValidated = false;
+        try {
+            try {
+                await fsp.rename(input.snapshotPath, cleanupPath);
+            } catch (error) {
+                if (errorCode(error) === 'ENOENT') {
+                    FileSynchronizer.fsyncDirectory(path.dirname(input.snapshotPath));
+                    return;
+                }
+                throw error;
+            }
+            detached = true;
+            detachedIdentity = await fsp.lstat(cleanupPath);
+            if (
+                !detachedIdentity.isFile()
+                || detachedIdentity.isSymbolicLink()
+                || detachedIdentity.dev !== input.targetIdentity.dev
+                || detachedIdentity.ino !== input.targetIdentity.ino
+            ) {
+                throw new Error(`staged checkpoint identity changed at ${input.snapshotPath}`);
+            }
+            if (await fsp.readFile(cleanupPath, 'utf8') !== input.serializedPayload) {
+                throw new Error(`staged checkpoint content changed at ${input.snapshotPath}`);
+            }
+            ownershipValidated = true;
+
+            await fsp.unlink(cleanupPath);
+            try {
+                await fsp.lstat(cleanupPath);
+            } catch (error) {
+                if (errorCode(error) === 'ENOENT') {
+                    FileSynchronizer.fsyncDirectory(path.dirname(input.snapshotPath));
+                    return;
+                }
+                throw error;
+            }
+            throw new Error(`staged checkpoint still exists after cleanup: ${cleanupPath}`);
+        } catch (error) {
+            if (detached && !ownershipValidated && detachedIdentity) {
+                try {
+                    await FileSynchronizer.restoreDetachedCheckpoint({
+                        snapshotPath: input.snapshotPath,
+                        cleanupPath,
+                        detachedIdentity,
+                    });
+                } catch (restoreError) {
+                    throw new SynchronizerCheckpointCleanupFailure(cleanupPath, restoreError);
+                }
+                throw error;
+            }
+            if (detached) {
+                throw new SynchronizerCheckpointCleanupFailure(cleanupPath, error);
+            }
+            throw error;
+        }
+    }
+
+    private static async restoreDetachedCheckpoint(input: {
+        snapshotPath: string;
+        cleanupPath: string;
+        detachedIdentity: fsSync.Stats;
+    }): Promise<void> {
+        try {
+            await fsp.lstat(input.snapshotPath);
+        } catch (error) {
+            if (errorCode(error) !== 'ENOENT') throw error;
+            await fsp.rename(input.cleanupPath, input.snapshotPath);
+            const restoredIdentity = await fsp.lstat(input.snapshotPath);
+            if (
+                restoredIdentity.dev !== input.detachedIdentity.dev
+                || restoredIdentity.ino !== input.detachedIdentity.ino
+            ) {
+                throw new Error(`detached checkpoint identity changed while restoring ${input.snapshotPath}`);
+            }
+            FileSynchronizer.fsyncDirectory(path.dirname(input.snapshotPath));
+            return;
+        }
+        throw new Error(`cannot restore detached checkpoint because ${input.snapshotPath} is occupied`);
     }
 
     private async saveSnapshot(

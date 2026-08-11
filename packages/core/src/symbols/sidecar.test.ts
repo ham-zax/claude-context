@@ -55,6 +55,25 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
     return JSON.parse(await fs.promises.readFile(filePath, 'utf8')) as T;
 }
 
+function singleNavigationStageInput(stateRoot: string) {
+    const symbol = createSynthesizedFileSymbol({
+        relativePath: 'src/auth.ts',
+        language: 'typescript',
+        content: 'export const auth = true;\n',
+        fileHash: 'hash-auth',
+        extractorVersion: 'extractor-v1',
+    });
+    return {
+        stateRoot,
+        registry: buildSymbolRegistry({
+            manifest: manifest([{ path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 1 }]),
+            symbols: [symbol],
+        }),
+        records: [],
+        analysisByFile: new Map([['src/auth.ts', { moduleBindings: [], callSites: [] }]]),
+    };
+}
+
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
     await fs.promises.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
@@ -189,6 +208,162 @@ test('writeSymbolRegistrySidecar does not publish after the mutation guard fails
         assert.equal(guardCalls, 2);
         const sidecar = await readSymbolRegistrySidecar({ stateRoot, normalizedRootPath: '/repo' });
         assert.notEqual(sidecar.status, 'ok');
+    });
+});
+
+test('staged navigation generation removes its candidate after a post-rename fsync failure', async (t) => {
+    await withTempDir(async (stateRoot) => {
+        const input = singleNavigationStageInput(stateRoot);
+        const originalOpen = fs.promises.open.bind(fs.promises);
+        let injected = false;
+        let generationRoot: string | undefined;
+        t.mock.method(fs.promises, 'open', async (...args: Parameters<typeof fs.promises.open>) => {
+            const [filePath] = args;
+            if (!injected && typeof filePath === 'string' && path.basename(filePath) === 'generations') {
+                injected = true;
+                const [generationId] = await fs.promises.readdir(filePath);
+                assert.ok(generationId);
+                generationRoot = path.join(filePath, generationId);
+                throw new Error('navigation parent fsync failed');
+            }
+            return originalOpen(...args);
+        });
+
+        await assert.rejects(
+            () => stageNavigationSidecarGeneration(input),
+            /navigation parent fsync failed/,
+        );
+        assert.equal(injected, true);
+        assert.ok(generationRoot);
+        assert.equal(fs.existsSync(generationRoot), false);
+    });
+});
+
+test('staged navigation generation refuses to remove a replaced candidate path', async (t) => {
+    await withTempDir(async (stateRoot) => {
+        const input = singleNavigationStageInput(stateRoot);
+        const originalOpen = fs.promises.open.bind(fs.promises);
+        let injected = false;
+        let generationRoot: string | undefined;
+        t.mock.method(fs.promises, 'open', async (...args: Parameters<typeof fs.promises.open>) => {
+            const [filePath] = args;
+            if (!injected && typeof filePath === 'string' && path.basename(filePath) === 'generations') {
+                injected = true;
+                const [generationId] = await fs.promises.readdir(filePath);
+                assert.ok(generationId);
+                generationRoot = path.join(filePath, generationId);
+                await fs.promises.rm(generationRoot, { recursive: true, force: true });
+                await fs.promises.mkdir(generationRoot);
+                await fs.promises.writeFile(path.join(generationRoot, 'foreign.txt'), 'foreign', 'utf8');
+                throw new Error('navigation parent fsync failed');
+            }
+            return originalOpen(...args);
+        });
+
+        const failure = await stageNavigationSidecarGeneration(input).then(
+            () => undefined,
+            (error: unknown) => error,
+        );
+        assert.ok(failure instanceof Error);
+        assert.match(failure.message, /cleanup.*unresolved/i);
+        assert.equal((failure as Error & { cleanupStatus?: string }).cleanupStatus, 'unresolved');
+        assert.ok(generationRoot);
+        assert.equal(await fs.promises.readFile(path.join(generationRoot, 'foreign.txt'), 'utf8'), 'foreign');
+    });
+});
+
+test('staged navigation generation does not remove a foreign artifact installed before candidate deletion', async (t) => {
+    await withTempDir(async (stateRoot) => {
+        const input = singleNavigationStageInput(stateRoot);
+        const originalOpen = fs.promises.open.bind(fs.promises);
+        const originalRemove = fs.promises.rm.bind(fs.promises);
+        let fsyncInjected = false;
+        let deletionBarrierInjected = false;
+        let generationRoot: string | undefined;
+        t.mock.method(fs.promises, 'open', async (...args: Parameters<typeof fs.promises.open>) => {
+            const [filePath] = args;
+            if (!fsyncInjected && typeof filePath === 'string' && path.basename(filePath) === 'generations') {
+                fsyncInjected = true;
+                const [generationId] = await fs.promises.readdir(filePath);
+                assert.ok(generationId);
+                generationRoot = path.join(filePath, generationId);
+                throw new Error('navigation parent fsync failed');
+            }
+            return originalOpen(...args);
+        });
+        t.mock.method(fs.promises, 'rm', async (...args: Parameters<typeof fs.promises.rm>) => {
+            const [targetPath] = args;
+            if (
+                !deletionBarrierInjected
+                && generationRoot
+                && typeof targetPath === 'string'
+                && path.dirname(targetPath) === path.dirname(generationRoot)
+            ) {
+                deletionBarrierInjected = true;
+                if (targetPath === generationRoot) {
+                    await originalRemove(targetPath, { recursive: true, force: true });
+                }
+                await fs.promises.mkdir(generationRoot);
+                await fs.promises.writeFile(path.join(generationRoot, 'foreign.txt'), 'foreign', 'utf8');
+            }
+            return originalRemove(...args);
+        });
+
+        await assert.rejects(
+            () => stageNavigationSidecarGeneration(input),
+            /navigation parent fsync failed/,
+        );
+        assert.equal(fsyncInjected, true);
+        assert.equal(deletionBarrierInjected, true);
+        assert.ok(generationRoot);
+        assert.equal(await fs.promises.readFile(path.join(generationRoot, 'foreign.txt'), 'utf8'), 'foreign');
+    });
+});
+
+test('staged navigation generation reports unresolved cleanup when candidate removal fails', async (t) => {
+    await withTempDir(async (stateRoot) => {
+        const input = singleNavigationStageInput(stateRoot);
+        const originalOpen = fs.promises.open.bind(fs.promises);
+        const originalRemove = fs.promises.rm.bind(fs.promises);
+        let injected = false;
+        let generationRoot: string | undefined;
+        let cleanupPath: string | undefined;
+        t.mock.method(fs.promises, 'open', async (...args: Parameters<typeof fs.promises.open>) => {
+            const [filePath] = args;
+            if (!injected && typeof filePath === 'string' && path.basename(filePath) === 'generations') {
+                injected = true;
+                const [generationId] = await fs.promises.readdir(filePath);
+                assert.ok(generationId);
+                generationRoot = path.join(filePath, generationId);
+                throw new Error('navigation parent fsync failed');
+            }
+            return originalOpen(...args);
+        });
+        t.mock.method(fs.promises, 'rm', async (...args: Parameters<typeof fs.promises.rm>) => {
+            const [targetPath] = args;
+            if (
+                !cleanupPath
+                && generationRoot
+                && typeof targetPath === 'string'
+                && path.dirname(targetPath) === path.dirname(generationRoot)
+            ) {
+                cleanupPath = targetPath;
+                throw new Error('navigation candidate removal unavailable');
+            }
+            return originalRemove(...args);
+        });
+
+        const failure = await stageNavigationSidecarGeneration(input).then(
+            () => undefined,
+            (error: unknown) => error,
+        );
+        assert.ok(failure instanceof Error);
+        assert.match(failure.message, /cleanup.*unresolved/i);
+        assert.equal((failure as Error & { cleanupStatus?: string }).cleanupStatus, 'unresolved');
+        assert.ok(generationRoot);
+        assert.ok(cleanupPath);
+        assert.equal((failure as Error & { cleanupPath?: string }).cleanupPath, cleanupPath);
+        assert.equal(fs.existsSync(cleanupPath), true);
     });
 });
 

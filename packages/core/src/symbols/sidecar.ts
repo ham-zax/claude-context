@@ -43,6 +43,7 @@ const SYMBOL_INDEX_SCHEMA_VERSION = 'symbol_index_v3';
 const SYMBOL_FILE_CONTRIBUTION_SCHEMA_VERSION = 'symbol_file_contribution_v1';
 const TEMP_ENTRY_PREFIX = '.satori-tmp-';
 const BACKUP_ENTRY_PREFIX = '.satori-backup-';
+const CLEANUP_ENTRY_PREFIX = '.satori-cleanup-';
 const GENERATIONS_DIR_NAME = 'generations';
 const CURRENT_GENERATION_FILE_NAME = 'current.json';
 const CURRENT_GENERATION_SCHEMA_VERSION = 'navigation_current_v3';
@@ -57,6 +58,37 @@ export class UnsupportedNavigationPointerError extends Error {
     constructor(message: string) {
         super(message);
         this.name = 'UnsupportedNavigationPointerError';
+    }
+}
+
+export class NavigationSidecarStagingCleanupError extends Error {
+    readonly cleanupStatus = 'unresolved' as const;
+
+    constructor(
+        readonly cleanupPath: string,
+        readonly stagingCause: unknown,
+        readonly cleanupCause: unknown,
+    ) {
+        super(
+            `Navigation sidecar staging failed and cleanup is unresolved for '${cleanupPath}': ${
+                cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
+            }`,
+        );
+        this.name = 'NavigationSidecarStagingCleanupError';
+    }
+}
+
+class NavigationSidecarCleanupFailure extends Error {
+    constructor(
+        readonly cleanupPath: string,
+        readonly cleanupCause: unknown,
+    ) {
+        super(
+            `Navigation sidecar cleanup failed for '${cleanupPath}': ${
+                cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
+            }`,
+        );
+        this.name = 'NavigationSidecarCleanupFailure';
     }
 }
 
@@ -282,6 +314,112 @@ async function fsyncPath(targetPath: string): Promise<void> {
         await handle.sync();
     } finally {
         await handle.close();
+    }
+}
+
+function samePathIdentity(expected: fs.Stats, actual: fs.Stats): boolean {
+    return expected.dev === actual.dev && expected.ino === actual.ino;
+}
+
+async function confirmPathAbsent(targetPath: string): Promise<void> {
+    try {
+        await fs.promises.lstat(targetPath);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+    }
+    throw new Error(`Staged navigation artifact still exists after cleanup: ${targetPath}`);
+}
+
+async function restoreDetachedNavigationGeneration(input: {
+    generationRoot: string;
+    cleanupPath: string;
+    detachedStat: fs.Stats;
+}): Promise<void> {
+    try {
+        await fs.promises.lstat(input.generationRoot);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        await fs.promises.rename(input.cleanupPath, input.generationRoot);
+        const restoredStat = await fs.promises.lstat(input.generationRoot);
+        if (!samePathIdentity(input.detachedStat, restoredStat)) {
+            throw new Error(`detached navigation artifact identity changed while restoring ${input.generationRoot}`);
+        }
+        await fsyncPath(path.dirname(input.generationRoot));
+        return;
+    }
+    throw new Error(`cannot restore detached navigation artifact because ${input.generationRoot} is occupied`);
+}
+
+async function cleanupStagedNavigationGeneration(input: {
+    generationRoot: string;
+    generationId: string;
+    generationStat?: fs.Stats;
+    navigationSealHash?: string;
+}): Promise<void> {
+    if (!input.generationStat || !input.navigationSealHash) {
+        throw new Error('staged navigation generation identity was not fully established');
+    }
+
+    const cleanupPath = path.join(
+        path.dirname(input.generationRoot),
+        uniqueSidecarEntryName(CLEANUP_ENTRY_PREFIX),
+    );
+    let detached = false;
+    let detachedStat: fs.Stats | undefined;
+    let ownershipValidated = false;
+    try {
+        try {
+            await fs.promises.rename(input.generationRoot, cleanupPath);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                await fsyncPath(path.dirname(input.generationRoot));
+                return;
+            }
+            throw error;
+        }
+        detached = true;
+        detachedStat = await fs.promises.lstat(cleanupPath);
+        if (
+            !detachedStat.isDirectory()
+            || detachedStat.isSymbolicLink()
+            || !samePathIdentity(input.generationStat, detachedStat)
+        ) {
+            throw new Error(`staged navigation generation identity changed at ${input.generationRoot}`);
+        }
+
+        const seal = parseNavigationGenerationSeal(
+            await readJson(path.join(cleanupPath, NAVIGATION_GENERATION_SEAL_FILE_NAME)),
+        );
+        if (
+            !seal
+            || seal.generationId !== input.generationId
+            || computeNavigationGenerationSealHash(seal) !== input.navigationSealHash
+        ) {
+            throw new Error(`staged navigation generation seal changed at ${input.generationRoot}`);
+        }
+        ownershipValidated = true;
+
+        await fs.promises.rm(cleanupPath, { recursive: true, force: false });
+        await confirmPathAbsent(cleanupPath);
+        await fsyncPath(path.dirname(input.generationRoot));
+    } catch (error) {
+        if (detached && !ownershipValidated && detachedStat) {
+            try {
+                await restoreDetachedNavigationGeneration({
+                    generationRoot: input.generationRoot,
+                    cleanupPath,
+                    detachedStat,
+                });
+            } catch (restoreError) {
+                throw new NavigationSidecarCleanupFailure(cleanupPath, restoreError);
+            }
+            throw error;
+        }
+        if (detached) {
+            throw new NavigationSidecarCleanupFailure(cleanupPath, error);
+        }
+        throw error;
     }
 }
 
@@ -1052,6 +1190,9 @@ export async function stageNavigationSidecarGeneration(
 
     const buildStateRoot = path.join(rootPath, uniqueSidecarEntryName(TEMP_ENTRY_PREFIX));
     let generationRoot: string | undefined;
+    let generationRenamed = false;
+    let generationStat: fs.Stats | undefined;
+    let navigationSealHash: string | undefined;
     try {
         const symbolResult = await writeSymbolRegistrySidecarInternal({
             stateRoot: buildStateRoot,
@@ -1073,6 +1214,8 @@ export async function stageNavigationSidecarGeneration(
         generationRoot = path.join(rootPath, GENERATIONS_DIR_NAME, generationId);
         await fs.promises.mkdir(path.dirname(generationRoot), { recursive: true });
         await fs.promises.rename(builtRoot, generationRoot);
+        generationRenamed = true;
+        generationStat = await fs.promises.lstat(generationRoot);
 
         const symbolIndex = await readJson(path.join(generationRoot, SYMBOLS_DIR_NAME, 'index.json'));
         const relationshipManifest = await readJson(path.join(generationRoot, RELATIONSHIPS_DIR_NAME, 'manifest.json'));
@@ -1092,7 +1235,7 @@ export async function stageNavigationSidecarGeneration(
             symbolQuality: buildNavigationSymbolQualityAggregate(input.registry),
         };
         await writeJson(path.join(generationRoot, NAVIGATION_GENERATION_SEAL_FILE_NAME), seal);
-        const navigationSealHash = computeNavigationGenerationSealHash(seal);
+        navigationSealHash = computeNavigationGenerationSealHash(seal);
         const physical = await fsyncDirectoryTree(
             generationRoot,
             reuse?.symbols.sharedFileSizes,
@@ -1115,6 +1258,27 @@ export async function stageNavigationSidecarGeneration(
             sourceFilesDigest: computeNavigationSourceFilesDigest(input.registry.manifest.files),
             physical,
         };
+    } catch (error) {
+        if (generationRenamed && generationRoot) {
+            try {
+                await cleanupStagedNavigationGeneration({
+                    generationRoot,
+                    generationId: path.basename(generationRoot),
+                    generationStat,
+                    navigationSealHash,
+                });
+            } catch (cleanupError) {
+                const unresolvedCleanupPath = cleanupError instanceof NavigationSidecarCleanupFailure
+                    ? cleanupError.cleanupPath
+                    : generationRoot;
+                throw new NavigationSidecarStagingCleanupError(
+                    unresolvedCleanupPath,
+                    error,
+                    cleanupError,
+                );
+            }
+        }
+        throw error;
     } finally {
         await fs.promises.rm(buildStateRoot, { recursive: true, force: true }).catch(() => undefined);
     }

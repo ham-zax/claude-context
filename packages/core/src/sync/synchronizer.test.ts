@@ -576,6 +576,217 @@ test('FileSynchronizer does not publish a prepared checkpoint after mutation lea
     }
 });
 
+test('FileSynchronizer removes a checkpoint candidate after a post-rename fsync failure', async (t) => {
+    const previousHome = process.env.HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-cleanup-home-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-cleanup-repo-'));
+
+    try {
+        process.env.HOME = tempHome;
+        const sourcePath = path.join(tempRepo, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts']);
+        await synchronizer.initialize();
+        fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
+        const prepared = await synchronizer.prepareChanges();
+        const authority = {
+            collectionName: 'generation-b',
+            markerRunId: 'run-generation-b',
+            indexPolicyHash: 'a'.repeat(64),
+        };
+        const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(tempRepo, authority.collectionName);
+        const originalFsync = fs.fsyncSync.bind(fs);
+        let injected = false;
+        t.mock.method(fs, 'fsyncSync', (directory: number) => {
+            if (!injected && fs.existsSync(snapshotPath)) {
+                injected = true;
+                throw new Error('checkpoint parent fsync failed');
+            }
+            return originalFsync(directory);
+        });
+
+        await assert.rejects(
+            () => prepared.stageCheckpoint(authority),
+            /checkpoint parent fsync failed/,
+        );
+        assert.equal(injected, true);
+        assert.equal(fs.existsSync(snapshotPath), false);
+    } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+});
+
+test('FileSynchronizer refuses to remove a replaced checkpoint candidate path', async (t) => {
+    const previousHome = process.env.HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-identity-home-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-identity-repo-'));
+
+    try {
+        process.env.HOME = tempHome;
+        const sourcePath = path.join(tempRepo, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts']);
+        await synchronizer.initialize();
+        fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
+        const prepared = await synchronizer.prepareChanges();
+        const authority = {
+            collectionName: 'generation-b',
+            markerRunId: 'run-generation-b',
+            indexPolicyHash: 'a'.repeat(64),
+        };
+        const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(tempRepo, authority.collectionName);
+        const originalFsync = fs.fsyncSync.bind(fs);
+        let injected = false;
+        t.mock.method(fs, 'fsyncSync', (directory: number) => {
+            if (!injected && fs.existsSync(snapshotPath)) {
+                injected = true;
+                fs.unlinkSync(snapshotPath);
+                fs.writeFileSync(snapshotPath, 'foreign checkpoint', 'utf8');
+                throw new Error('checkpoint parent fsync failed');
+            }
+            return originalFsync(directory);
+        });
+
+        const failure = await prepared.stageCheckpoint(authority).then(
+            () => undefined,
+            (error: unknown) => error,
+        );
+        assert.ok(failure instanceof Error);
+        assert.match(failure.message, /cleanup.*unresolved/i);
+        assert.equal((failure as Error & { cleanupStatus?: string }).cleanupStatus, 'unresolved');
+        assert.equal(fs.readFileSync(snapshotPath, 'utf8'), 'foreign checkpoint');
+    } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+});
+
+test('FileSynchronizer does not remove a foreign artifact installed before candidate deletion', async (t) => {
+    const previousHome = process.env.HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-barrier-home-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-barrier-repo-'));
+
+    try {
+        process.env.HOME = tempHome;
+        const sourcePath = path.join(tempRepo, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts']);
+        await synchronizer.initialize();
+        fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
+        const prepared = await synchronizer.prepareChanges();
+        const authority = {
+            collectionName: 'generation-b',
+            markerRunId: 'run-generation-b',
+            indexPolicyHash: 'a'.repeat(64),
+        };
+        const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(tempRepo, authority.collectionName);
+        const originalFsync = fs.fsyncSync.bind(fs);
+        const originalUnlink = fs.promises.unlink.bind(fs.promises);
+        let fsyncInjected = false;
+        let deletionBarrierInjected = false;
+        t.mock.method(fs, 'fsyncSync', (directory: number) => {
+            if (!fsyncInjected && fs.existsSync(snapshotPath)) {
+                fsyncInjected = true;
+                throw new Error('checkpoint parent fsync failed');
+            }
+            return originalFsync(directory);
+        });
+        t.mock.method(fs.promises, 'unlink', async (...args: Parameters<typeof fs.promises.unlink>) => {
+            const [targetPath] = args;
+            if (
+                !deletionBarrierInjected
+                && typeof targetPath === 'string'
+                && path.dirname(targetPath) === path.dirname(snapshotPath)
+            ) {
+                deletionBarrierInjected = true;
+                if (targetPath === snapshotPath) {
+                    await originalUnlink(targetPath);
+                }
+                await fs.promises.writeFile(snapshotPath, 'foreign checkpoint', 'utf8');
+            }
+            return originalUnlink(...args);
+        });
+
+        await assert.rejects(
+            () => prepared.stageCheckpoint(authority),
+            /checkpoint parent fsync failed/,
+        );
+        assert.equal(deletionBarrierInjected, true);
+        assert.equal(fs.readFileSync(snapshotPath, 'utf8'), 'foreign checkpoint');
+    } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+});
+
+test('FileSynchronizer reports unresolved cleanup when checkpoint candidate removal fails', async (t) => {
+    const previousHome = process.env.HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-remove-home-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-remove-repo-'));
+
+    try {
+        process.env.HOME = tempHome;
+        const sourcePath = path.join(tempRepo, 'source.ts');
+        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts']);
+        await synchronizer.initialize();
+        fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
+        const prepared = await synchronizer.prepareChanges();
+        const authority = {
+            collectionName: 'generation-b',
+            markerRunId: 'run-generation-b',
+            indexPolicyHash: 'a'.repeat(64),
+        };
+        const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(tempRepo, authority.collectionName);
+        const originalFsync = fs.fsyncSync.bind(fs);
+        const originalUnlink = fs.promises.unlink.bind(fs.promises);
+        let injected = false;
+        let cleanupPath: string | undefined;
+        t.mock.method(fs, 'fsyncSync', (directory: number) => {
+            if (!injected && fs.existsSync(snapshotPath)) {
+                injected = true;
+                throw new Error('checkpoint parent fsync failed');
+            }
+            return originalFsync(directory);
+        });
+        t.mock.method(fs.promises, 'unlink', async (...args: Parameters<typeof fs.promises.unlink>) => {
+            const [targetPath] = args;
+            if (
+                !cleanupPath
+                && typeof targetPath === 'string'
+                && path.dirname(targetPath) === path.dirname(snapshotPath)
+            ) {
+                cleanupPath = targetPath;
+                throw new Error('checkpoint candidate removal unavailable');
+            }
+            return originalUnlink(...args);
+        });
+
+        const failure = await prepared.stageCheckpoint(authority).then(
+            () => undefined,
+            (error: unknown) => error,
+        );
+        assert.ok(failure instanceof Error);
+        assert.match(failure.message, /cleanup.*unresolved/i);
+        assert.equal((failure as Error & { cleanupStatus?: string }).cleanupStatus, 'unresolved');
+        assert.ok(cleanupPath);
+        assert.equal((failure as Error & { cleanupPath?: string }).cleanupPath, cleanupPath);
+        assert.equal(fs.existsSync(cleanupPath), true);
+    } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+});
+
 test('FileSynchronizer publishes the snapshot and in-memory checkpoint inside one mutation fence', async () => {
     const prevHome = process.env.HOME;
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-atomic-commit-home-'));
