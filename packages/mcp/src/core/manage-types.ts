@@ -37,6 +37,7 @@ export type ManageIndexStatusDetail = (typeof MANAGE_INDEX_STATUS_DETAILS)[numbe
 
 export type ManageIndexReason =
     | "indexing"
+    | "source_state_unverified"
     | "not_indexed"
     | "requires_reindex"
     | "unnecessary_reindex_ignore_only"

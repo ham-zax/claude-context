@@ -598,7 +598,7 @@ export class ManageMaintenanceHandlers {
             let statusMessage = "";
             let envelopePath = absolutePath;
             let envelopeStatus: ManageIndexStatus = "ok";
-            let envelopeReason: ManageIndexReason | "source_state_unverified" | undefined;
+            let envelopeReason: ManageIndexReason | undefined;
             let envelopeHints: Record<string, unknown> | undefined;
             let proofDebugHint: CompletionProbeDebugHint | undefined;
             let envelopeMessage: string | undefined;
