@@ -2125,6 +2125,81 @@ test('Context invalidates warm navigation delta state when the bound seal observ
     }
 });
 
+test('Context deferred retention preserves a forked publication until it becomes authoritative', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-retention-staged-race-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'runtime.ts');
+    let releaseRead: (() => void) | undefined;
+    let releaseSecondFork!: () => void;
+    const secondForkGate = new Promise<void>((resolve) => {
+        releaseSecondFork = resolve;
+    });
+    let secondPublication: ReturnType<Context['reindexByChange']> | undefined;
+
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(sourcePath, 'export const runtime = 0;\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+
+        const forkCollection = vectorDatabase.forkCollection.bind(vectorDatabase);
+        let forkCount = 0;
+        let markSecondForked!: (collectionName: string) => void;
+        const secondForked = new Promise<string>((resolve) => {
+            markSecondForked = resolve;
+        });
+        vectorDatabase.forkCollection = async (sourceCollectionName, targetCollectionName) => {
+            const receipt = await forkCollection(sourceCollectionName, targetCollectionName);
+            forkCount += 1;
+            if (forkCount === 2) {
+                markSecondForked(targetCollectionName);
+                await secondForkGate;
+            }
+            return receipt;
+        };
+
+        releaseRead = await context.acquirePublicationReadLease(codebasePath);
+        fs.writeFileSync(sourcePath, 'export const runtime = 1;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+
+        fs.writeFileSync(sourcePath, 'export const runtime = 2;\n', 'utf8');
+        secondPublication = context.reindexByChange(codebasePath);
+        const secondCandidate = await secondForked;
+
+        releaseRead();
+        releaseRead = undefined;
+        await (context as unknown as ContextWithRelationshipVersionOverride)
+            .waitForPublicationRetention(fs.realpathSync(codebasePath));
+
+        assert.equal(
+            await vectorDatabase.hasCollection(secondCandidate),
+            true,
+            'retention for the previous activation must not delete a forked in-flight candidate',
+        );
+
+        releaseSecondFork();
+        const result = await secondPublication;
+        assert.equal(result.collectionName, secondCandidate);
+        await (context as unknown as ContextWithRelationshipVersionOverride)
+            .waitForPublicationRetention(fs.realpathSync(codebasePath));
+        const active = await context.proveIndexedGeneration(codebasePath);
+        assert.equal(active?.collectionName, secondCandidate);
+    } finally {
+        releaseRead?.();
+        releaseSecondFork();
+        await secondPublication?.catch(() => undefined);
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context retains P for an active reader while Q and R activate, then cleans P after release', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-read-lease-'));
     const codebasePath = path.join(tempRoot, 'repo');
@@ -7056,6 +7131,88 @@ test('Context rejects hybrid candidates when the proven generation changes betwe
         );
         assert.equal(vectorDatabase.searchCalls > 0, true);
         assert.equal(vectorDatabase.sparseSearchCalls > 0, true);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context rejects dense candidates when generation authority is withdrawn during retrieval', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-dense-generation-race-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const changingValue = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+        });
+        await context.indexCodebase(codebasePath);
+        const vectorReceipt = await context.proveVectorGeneration(codebasePath);
+        assert.ok(vectorReceipt);
+
+        const retrieveDense = vectorDatabase.retrieveDense.bind(vectorDatabase);
+        vectorDatabase.retrieveDense = async (collectionName, request) => {
+            const results = await retrieveDense(collectionName, request);
+            await vectorDatabase.deleteControl(collectionName, INDEX_COMPLETION_MARKER_DOC_ID);
+            return results;
+        };
+
+        await assert.rejects(
+            context.semanticSearchInProvenGeneration(vectorReceipt, {
+                codebasePath,
+                query: 'changingValue',
+                topK: 5,
+                retrievalMode: 'dense',
+                scorePolicy: { kind: 'topk_only' },
+            }),
+            /Index generation changed during dense retrieval/,
+        );
+        assert.equal(vectorDatabase.searchCalls, 1);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context rejects lexical candidates when generation authority is withdrawn during retrieval', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-lexical-generation-race-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const changingValue = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+        });
+        await context.indexCodebase(codebasePath);
+        const vectorReceipt = await context.proveVectorGeneration(codebasePath);
+        assert.ok(vectorReceipt);
+
+        const retrieveLexical = vectorDatabase.retrieveLexical.bind(vectorDatabase);
+        vectorDatabase.retrieveLexical = async (collectionName, request) => {
+            const results = await retrieveLexical(collectionName, request);
+            await vectorDatabase.deleteControl(collectionName, INDEX_COMPLETION_MARKER_DOC_ID);
+            return results;
+        };
+
+        await assert.rejects(
+            context.semanticSearchInProvenGeneration(vectorReceipt, {
+                codebasePath,
+                query: 'changingValue',
+                topK: 5,
+                retrievalMode: 'lexical',
+                scorePolicy: { kind: 'topk_only' },
+            }),
+            /Index generation changed during lexical retrieval/,
+        );
+        assert.equal(vectorDatabase.sparseSearchCalls, 1);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

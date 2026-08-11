@@ -645,7 +645,9 @@ type CollectionPayloadVerification =
 
 type PublicationReadGate = {
     activeReaders: number;
+    activePublicationIds: Set<string>;
     retentionPending: boolean;
+    retentionCleaning: boolean;
     readersDrained?: Promise<void>;
     resolveReadersDrained?: () => void;
     retentionFinished?: Promise<void>;
@@ -3320,6 +3322,20 @@ export class Context {
         await this.publicationRetentionQueues.get(canonicalRoot);
     }
 
+    private getPublicationReadGate(canonicalRoot: string): PublicationReadGate {
+        let gate = this.publicationReadGates.get(canonicalRoot);
+        if (!gate) {
+            gate = {
+                activeReaders: 0,
+                activePublicationIds: new Set(),
+                retentionPending: false,
+                retentionCleaning: false,
+            };
+            this.publicationReadGates.set(canonicalRoot, gate);
+        }
+        return gate;
+    }
+
     /**
      * Retention is the only owner allowed to remove inactive physical generations.
      * A publication-bound reader holds this lease for its complete operation so a
@@ -3327,11 +3343,7 @@ export class Context {
      */
     public async acquirePublicationReadLease(codebasePath: string): Promise<() => void> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        let gate = this.publicationReadGates.get(canonicalRoot);
-        if (!gate) {
-            gate = { activeReaders: 0, retentionPending: false };
-            this.publicationReadGates.set(canonicalRoot, gate);
-        }
+        const gate = this.getPublicationReadGate(canonicalRoot);
         while (gate.retentionPending) {
             await gate.retentionFinished;
         }
@@ -3349,12 +3361,28 @@ export class Context {
         };
     }
 
-    private async acquirePublicationRetentionLease(canonicalRoot: string): Promise<() => void> {
-        let gate = this.publicationReadGates.get(canonicalRoot);
-        if (!gate) {
-            gate = { activeReaders: 0, retentionPending: false };
-            this.publicationReadGates.set(canonicalRoot, gate);
+    private async acquireStagedPublicationLease(
+        canonicalRoot: string,
+        activationId: string,
+    ): Promise<() => void> {
+        const gate = this.getPublicationReadGate(canonicalRoot);
+        while (gate.retentionCleaning) {
+            await gate.retentionFinished;
         }
+        gate.activePublicationIds.add(activationId);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            gate.activePublicationIds.delete(activationId);
+        };
+    }
+
+    private async acquirePublicationRetentionLease(
+        canonicalRoot: string,
+        activationId: string,
+    ): Promise<(() => void) | null> {
+        const gate = this.getPublicationReadGate(canonicalRoot);
         if (gate.retentionPending) {
             throw new Error(`Publication retention is already active for '${canonicalRoot}'.`);
         }
@@ -3362,21 +3390,28 @@ export class Context {
         gate.retentionFinished = new Promise<void>((resolve) => {
             gate!.resolveRetentionFinished = resolve;
         });
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            gate.retentionCleaning = false;
+            gate.retentionPending = false;
+            gate.resolveRetentionFinished?.();
+            gate.retentionFinished = undefined;
+            gate.resolveRetentionFinished = undefined;
+        };
         if (gate.activeReaders > 0) {
             gate.readersDrained = new Promise<void>((resolve) => {
                 gate!.resolveReadersDrained = resolve;
             });
             await gate.readersDrained;
         }
-        let released = false;
-        return () => {
-            if (released) return;
-            released = true;
-            gate!.retentionPending = false;
-            gate!.resolveRetentionFinished?.();
-            gate!.retentionFinished = undefined;
-            gate!.resolveRetentionFinished = undefined;
-        };
+        if ([...gate.activePublicationIds].some((id) => id !== activationId)) {
+            release();
+            return null;
+        }
+        gate.retentionCleaning = true;
+        return release;
     }
 
     private async rebindGenerationProofAfterRetention(input: {
@@ -3455,7 +3490,11 @@ export class Context {
         const retention = previous
             .catch(() => undefined)
             .then(async () => {
-                const releaseRetention = await this.acquirePublicationRetentionLease(input.canonicalRoot);
+                const releaseRetention = await this.acquirePublicationRetentionLease(
+                    input.canonicalRoot,
+                    input.activationId,
+                );
+                if (!releaseRetention) return;
                 try {
                     this.refreshRuntimePolicyAuthority(input.canonicalRoot);
                     const activeBinding = this.publishedPolicyBindingsByCodebase.get(input.canonicalRoot);
@@ -3644,6 +3683,10 @@ export class Context {
         let navigationCandidate: StagedNavigationSidecarGeneration | undefined;
         let checkpointStaged = false;
         let activated = false;
+        const releaseStagedPublication = await this.acquireStagedPublicationLease(
+            input.canonicalRoot,
+            activationId,
+        );
         try {
             input.options.assertMutationCurrent?.();
             await measurePublicationPhase(
@@ -3963,6 +4006,8 @@ export class Context {
                 await this.vectorDatabase.dropCollection(candidateCollectionName).catch(() => undefined);
             }
             throw error;
+        } finally {
+            releaseStagedPublication();
         }
     }
 

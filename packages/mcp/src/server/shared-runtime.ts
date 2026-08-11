@@ -180,7 +180,6 @@ export class SharedRuntimeHost {
     private readonly localContext: ReturnType<typeof createLocalOnlyContext>;
     private readonly localSyncManager: SyncManager;
     private readonly searchContinuationPool = new SearchContinuationCoordinatorPool();
-    private readonly recoveryHandlers: ToolHandlers;
     private readonly providerRuntime: ProviderRuntime;
     private readonly readFileMaxLines: number;
     private readonly readFileMaxBytes: number;
@@ -233,22 +232,6 @@ export class SharedRuntimeHost {
             watchDebounceMs: this.watchDebounceMs,
             mutationLeaseCoordinator: this.mutationLeaseCoordinator,
         });
-        this.recoveryHandlers = new ToolHandlers(
-            this.localContext,
-            this.snapshotManager,
-            this.localSyncManager,
-            runtimeFingerprint,
-            this.capabilities,
-            () => Date.now(),
-            this.callGraphManager,
-            null,
-            undefined,
-            undefined,
-            this.runtimeOwnerRegistry,
-            this.mutationLeaseCoordinator,
-            new SearchContinuationCoordinator(this.searchContinuationPool),
-            { readFileMaxBytes: this.readFileMaxBytes },
-        );
         this.providerRuntime = new ProviderRuntime({
             config,
             snapshotManager: this.snapshotManager,
@@ -373,7 +356,18 @@ export class SharedRuntimeHost {
     }
 
     async recoverInterruptedIndexingAtStartup(): Promise<void> {
-        await this.recoveryHandlers.recoverInterruptedIndexingAtStartup();
+        if (this.snapshotManager.getIndexingCodebases().length === 0) {
+            console.log("[STARTUP] No interrupted indexing states required recovery");
+            return;
+        }
+        const providerContext = await this.providerRuntime.requireToolContext("vector_only");
+        if (isMissingProviderConfigIssue(providerContext)) {
+            console.warn(
+                `[STARTUP] Deferred interrupted-index recovery: ${providerContext.message}`,
+            );
+            return;
+        }
+        await providerContext.toolHandlers.recoverInterruptedIndexingAtStartup();
     }
 
     async shutdown(): Promise<void> {
@@ -381,7 +375,6 @@ export class SharedRuntimeHost {
         this.shutdownStarted = true;
         await this.localSyncManager.stopAndDrainLifecycle();
         await this.providerRuntime.shutdown();
-        this.recoveryHandlers.releaseSearchContinuationOwnership();
         this.searchContinuationPool.clear();
         this.runtimeOwnerRegistry.unregisterCurrentOwner();
     }

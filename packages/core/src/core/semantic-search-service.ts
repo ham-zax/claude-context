@@ -558,6 +558,9 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
                     ? { matchMode: effectivePrimaryMatchMode }
                     : {}),
             });
+            await assertCandidateReadAuthorityUnchanged(
+                'Index generation changed during lexical retrieval.',
+            );
             const productResults = productSearchResults.slice(0, resolvedRequest.topK);
             const diagnosticRequests: Array<Promise<DiagnosticRetrievalOutcome>> = [];
             if (diagnosticCandidateRetrievalLimit > resolvedRequest.topK) {
@@ -828,6 +831,9 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             minimumScore: denseThreshold,
             filter: resolvedRequest.filter,
         });
+        await assertCandidateReadAuthorityUnchanged(
+            'Index generation changed during dense retrieval.',
+        );
         const productResults = productSearchResults.slice(0, resolvedRequest.topK);
         const diagnosticOutcome = diagnosticCandidateRetrievalLimit > resolvedRequest.topK
             ? await retrieveDiagnosticCandidates({
