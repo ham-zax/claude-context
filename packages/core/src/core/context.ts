@@ -5026,12 +5026,117 @@ export class Context {
         }
     }
 
+    private validateDurableAuthorityRestoreTransactionState(
+        transaction: DurableAuthorityRestoreTransaction,
+    ): void {
+        if (
+            (transaction.phase === 'prepared' && transaction.nextEntry !== 0)
+            || (transaction.phase === 'committed'
+                && transaction.nextEntry !== transaction.entries.length)
+        ) {
+            throw new Error(
+                `Durable authority restoration '${transaction.id}' no longer owns current authority.`,
+            );
+        }
+
+        const matchesDigest = (artifactPath: string, digest: string | null): boolean => (
+            this.artifactMatchesPath(
+                artifactPath,
+                digest === null ? null : { content: '', digest },
+            )
+        );
+
+        for (const [index, entry] of transaction.entries.entries()) {
+            const targetExpected = matchesDigest(entry.targetPath, entry.expectedDigest);
+            const targetDesired = matchesDigest(entry.targetPath, entry.digest);
+            const targetAbsent = matchesDigest(entry.targetPath, null);
+            const temporaryDesired = matchesDigest(entry.temporaryPath, entry.digest);
+            const temporaryAbsent = matchesDigest(entry.temporaryPath, null);
+            const displacedExpected = matchesDigest(entry.displacedPath, entry.expectedDigest);
+            const displacedAbsent = matchesDigest(entry.displacedPath, null);
+
+            let validState = false;
+            if (transaction.phase === 'prepared') {
+                // The journal is durable only after every desired temporary has
+                // been written and before any target is touched.
+                validState = targetExpected && temporaryDesired && displacedAbsent;
+            } else if (transaction.phase === 'committed') {
+                // Committed authority is final. Cleanup may have removed any
+                // subset of the transaction's temporary and displaced paths.
+                validState = targetDesired
+                    && (temporaryDesired || temporaryAbsent)
+                    && (displacedExpected || displacedAbsent);
+            } else if (index < transaction.nextEntry) {
+                // An entry whose progress is durable has its desired bytes at
+                // the target. Its temporary may remain until final cleanup,
+                // and its displaced bytes are either absent or the captured
+                // pre-restore authority.
+                validState = targetDesired
+                    && (temporaryDesired || temporaryAbsent)
+                    && (displacedExpected || displacedAbsent)
+                    && (
+                        entry.expectedDigest === null
+                        || targetExpected
+                        || displacedExpected
+                    );
+            } else if (index === transaction.nextEntry) {
+                // The current entry may have been observed before, during, or
+                // after its swap, but every surviving path must still contain
+                // bytes recorded by this transaction.
+                const targetIsOwned = targetExpected
+                    || (
+                        targetDesired
+                        && (
+                            entry.expectedDigest === null
+                            || entry.digest !== null
+                            || displacedExpected
+                        )
+                    )
+                    || (targetAbsent && displacedExpected);
+                validState = targetIsOwned
+                    && (temporaryDesired || temporaryAbsent)
+                    && (displacedExpected || displacedAbsent);
+            } else {
+                // Entries after the interruption point have not been touched.
+                validState = targetExpected && temporaryDesired && displacedAbsent;
+            }
+
+            if (!validState) {
+                throw new Error(
+                    `Durable authority restoration '${transaction.id}' no longer owns current authority for entry ${index}.`,
+                );
+            }
+        }
+    }
+
     private completeDurableAuthorityRestoreTransaction(
         journalPath: string,
         transaction: DurableAuthorityRestoreTransaction,
     ): void {
+        this.validateDurableAuthorityRestoreTransactionState(transaction);
+        if (transaction.phase === 'committed') {
+            const removeOwnedArtifact = (artifactPath: string, digest: string | null): void => {
+                const expected = digest === null ? null : { content: '', digest };
+                if (!this.artifactMatchesPath(artifactPath, expected) && fs.existsSync(artifactPath)) {
+                    throw new Error(
+                        `Durable authority restoration '${transaction.id}' no longer owns cleanup artifact '${artifactPath}'.`,
+                    );
+                }
+                fs.rmSync(artifactPath, { force: true });
+            };
+
+            for (const entry of transaction.entries) {
+                removeOwnedArtifact(entry.temporaryPath, entry.digest);
+                removeOwnedArtifact(entry.displacedPath, entry.expectedDigest);
+                this.fsyncPath(path.dirname(entry.targetPath));
+            }
+            fs.rmSync(journalPath, { force: true });
+            this.fsyncPath(path.dirname(journalPath));
+            return;
+        }
         transaction.phase = 'swapping';
         this.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
+        this.validateDurableAuthorityRestoreTransactionState(transaction);
         for (let index = transaction.nextEntry; index < transaction.entries.length; index += 1) {
             const entry = transaction.entries[index];
             if (!entry) throw new Error('Durable authority restoration entry is missing.');
@@ -5142,18 +5247,6 @@ export class Context {
                         throw new Error(`Durable authority recovery '${transaction.id}' published more than once.`);
                     }
                     this.indexPolicyMutationCoordinator.withLock(transaction.canonicalRoot, () => {
-                        if (transaction.phase === 'prepared') {
-                            for (const entry of transaction.entries) {
-                                const expected = entry.expectedDigest === null
-                                    ? null
-                                    : { content: '', digest: entry.expectedDigest };
-                                if (!this.artifactMatchesPath(entry.targetPath, expected)) {
-                                    throw new Error(
-                                        `Prepared durable authority restoration '${transaction.id}' no longer owns current authority.`,
-                                    );
-                                }
-                            }
-                        }
                         this.completeDurableAuthorityRestoreTransaction(journalPath, transaction);
                     });
                 },

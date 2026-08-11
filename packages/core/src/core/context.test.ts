@@ -7490,6 +7490,303 @@ test('Context completes an interrupted two-file durable authority restoration on
     }
 });
 
+test('Context refuses a swapping durable authority journal after newer authority is published', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-authority-restore-newer-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const navigationStateRoot = path.join(tempRoot, 'navigation-state');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        const policyPath = path.join(
+            policyRoot,
+            `${crypto.createHash('sha256').update(canonicalRoot).digest('hex')}.json`,
+        );
+        const pointerPath = path.join(
+            resolveNavigationSidecarRoot(navigationStateRoot, canonicalRoot),
+            'current.json',
+        );
+        fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+        fs.mkdirSync(path.dirname(pointerPath), { recursive: true });
+
+        const desired = ['{"previousPolicy":true}\n', '{"previousPointer":true}\n'];
+        const candidate = ['{"candidatePolicy":true}\n', '{"candidatePointer":true}\n'];
+        const newer = ['{"newerPolicy":true}\n', '{"newerPointer":true}\n'];
+        fs.writeFileSync(policyPath, candidate[0]!, 'utf8');
+        fs.writeFileSync(pointerPath, candidate[1]!, 'utf8');
+
+        const id = crypto.randomUUID();
+        const entries = [policyPath, pointerPath].map((targetPath, index) => ({
+            targetPath,
+            temporaryPath: `${targetPath}.restore-${id}`,
+            displacedPath: `${targetPath}.rollback-${id}`,
+            content: desired[index]!,
+            digest: crypto.createHash('sha256').update(desired[index]!, 'utf8').digest('hex'),
+            expectedDigest: crypto.createHash('sha256').update(candidate[index]!, 'utf8').digest('hex'),
+        }));
+        for (const entry of entries) fs.writeFileSync(entry.temporaryPath, entry.content, 'utf8');
+        const journalRoot = path.join(policyRoot, 'restore-transactions');
+        fs.mkdirSync(journalRoot, { recursive: true });
+        const journalPath = path.join(journalRoot, `${id}.json`);
+        fs.writeFileSync(journalPath, JSON.stringify({
+            schemaVersion: 1,
+            id,
+            canonicalRoot,
+            phase: 'swapping',
+            nextEntry: 0,
+            entries,
+        }), 'utf8');
+
+        fs.writeFileSync(policyPath, newer[0]!, 'utf8');
+        fs.writeFileSync(pointerPath, newer[1]!, 'utf8');
+        const journalBeforeRecovery = fs.readFileSync(journalPath, 'utf8');
+
+        assert.throws(
+            () => new Context({
+                embedding: new TestEmbedding(),
+                vectorDatabase: new InMemoryVectorDatabase(),
+                indexPolicyStateRoot: policyRoot,
+                symbolRegistryStateRoot: navigationStateRoot,
+                durableAuthorityRecoveryPublisher: (_root, _owner, publish) => {
+                    publish();
+                    return true;
+                },
+            }),
+            /no longer owns current authority/i,
+        );
+
+        assert.equal(fs.readFileSync(policyPath, 'utf8'), newer[0]);
+        assert.equal(fs.readFileSync(pointerPath, 'utf8'), newer[1]);
+        assert.equal(fs.readFileSync(journalPath, 'utf8'), journalBeforeRecovery);
+        for (const entry of entries) {
+            assert.equal(fs.existsSync(entry.temporaryPath), true);
+            assert.equal(fs.existsSync(entry.displacedPath), false);
+        }
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context recovers a committed durable authority journal after partial auxiliary cleanup', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-authority-restore-committed-cleanup-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const navigationStateRoot = path.join(tempRoot, 'navigation-state');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        const policyPath = path.join(
+            policyRoot,
+            `${crypto.createHash('sha256').update(canonicalRoot).digest('hex')}.json`,
+        );
+        const pointerPath = path.join(
+            resolveNavigationSidecarRoot(navigationStateRoot, canonicalRoot),
+            'current.json',
+        );
+        fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+        fs.mkdirSync(path.dirname(pointerPath), { recursive: true });
+
+        const desired = ['{"desiredPolicy":true}\n', '{"desiredPointer":true}\n'];
+        const previous = ['{"previousPolicy":true}\n', '{"previousPointer":true}\n'];
+        fs.writeFileSync(policyPath, desired[0]!, 'utf8');
+        fs.writeFileSync(pointerPath, desired[1]!, 'utf8');
+
+        const id = '123e4567-e89b-42d3-a456-426614174000';
+        const entries = [policyPath, pointerPath].map((targetPath, index) => ({
+            targetPath,
+            temporaryPath: `${targetPath}.restore-${id}`,
+            displacedPath: `${targetPath}.rollback-${id}`,
+            content: desired[index]!,
+            digest: crypto.createHash('sha256').update(desired[index]!, 'utf8').digest('hex'),
+            expectedDigest: crypto.createHash('sha256').update(previous[index]!, 'utf8').digest('hex'),
+        }));
+        fs.writeFileSync(entries[0]!.displacedPath, previous[0]!, 'utf8');
+        fs.writeFileSync(entries[1]!.temporaryPath, desired[1]!, 'utf8');
+        fs.writeFileSync(entries[1]!.displacedPath, previous[1]!, 'utf8');
+
+        const journalRoot = path.join(policyRoot, 'restore-transactions');
+        fs.mkdirSync(journalRoot, { recursive: true });
+        const journalPath = path.join(journalRoot, `${id}.json`);
+        fs.writeFileSync(journalPath, JSON.stringify({
+            schemaVersion: 1,
+            id,
+            canonicalRoot,
+            phase: 'committed',
+            nextEntry: entries.length,
+            entries,
+        }), 'utf8');
+        fs.rmSync(entries[0]!.displacedPath);
+
+        new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+            indexPolicyStateRoot: policyRoot,
+            symbolRegistryStateRoot: navigationStateRoot,
+            durableAuthorityRecoveryPublisher: (_root, _owner, publish) => {
+                publish();
+                return true;
+            },
+        });
+
+        assert.equal(fs.readFileSync(policyPath, 'utf8'), desired[0]);
+        assert.equal(fs.readFileSync(pointerPath, 'utf8'), desired[1]);
+        assert.deepEqual(fs.readdirSync(journalRoot), []);
+        for (const entry of entries) {
+            assert.equal(fs.existsSync(entry.temporaryPath), false);
+            assert.equal(fs.existsSync(entry.displacedPath), false);
+        }
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context fails closed when a durable authority restore artifact contains foreign bytes', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-authority-restore-foreign-restore-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const navigationStateRoot = path.join(tempRoot, 'navigation-state');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        const policyPath = path.join(
+            policyRoot,
+            `${crypto.createHash('sha256').update(canonicalRoot).digest('hex')}.json`,
+        );
+        const pointerPath = path.join(
+            resolveNavigationSidecarRoot(navigationStateRoot, canonicalRoot),
+            'current.json',
+        );
+        fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+        fs.mkdirSync(path.dirname(pointerPath), { recursive: true });
+
+        const current = ['{"currentPolicy":true}\n', '{"currentPointer":true}\n'];
+        const desired = ['{"desiredPolicy":true}\n', '{"desiredPointer":true}\n'];
+        const foreignRestore = '{"foreignRestore":true}\n';
+        fs.writeFileSync(policyPath, current[0]!, 'utf8');
+        fs.writeFileSync(pointerPath, current[1]!, 'utf8');
+
+        const id = '123e4567-e89b-42d3-a456-426614174001';
+        const entries = [policyPath, pointerPath].map((targetPath, index) => ({
+            targetPath,
+            temporaryPath: `${targetPath}.restore-${id}`,
+            displacedPath: `${targetPath}.rollback-${id}`,
+            content: desired[index]!,
+            digest: crypto.createHash('sha256').update(desired[index]!, 'utf8').digest('hex'),
+            expectedDigest: crypto.createHash('sha256').update(current[index]!, 'utf8').digest('hex'),
+        }));
+        fs.writeFileSync(entries[0]!.temporaryPath, foreignRestore, 'utf8');
+        fs.writeFileSync(entries[1]!.temporaryPath, desired[1]!, 'utf8');
+
+        const journalRoot = path.join(policyRoot, 'restore-transactions');
+        fs.mkdirSync(journalRoot, { recursive: true });
+        const journalPath = path.join(journalRoot, `${id}.json`);
+        fs.writeFileSync(journalPath, JSON.stringify({
+            schemaVersion: 1,
+            id,
+            canonicalRoot,
+            phase: 'swapping',
+            nextEntry: 0,
+            entries,
+        }), 'utf8');
+        const journalBeforeRecovery = fs.readFileSync(journalPath, 'utf8');
+
+        assert.throws(
+            () => new Context({
+                embedding: new TestEmbedding(),
+                vectorDatabase: new InMemoryVectorDatabase(),
+                indexPolicyStateRoot: policyRoot,
+                symbolRegistryStateRoot: navigationStateRoot,
+                durableAuthorityRecoveryPublisher: (_root, _owner, publish) => {
+                    publish();
+                    return true;
+                },
+            }),
+            /no longer owns current authority/i,
+        );
+
+        assert.equal(fs.readFileSync(policyPath, 'utf8'), current[0]);
+        assert.equal(fs.readFileSync(pointerPath, 'utf8'), current[1]);
+        assert.equal(fs.readFileSync(entries[0]!.temporaryPath, 'utf8'), foreignRestore);
+        assert.equal(fs.readFileSync(journalPath, 'utf8'), journalBeforeRecovery);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context fails closed when a durable authority rollback artifact contains foreign bytes', () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-authority-restore-foreign-rollback-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const policyRoot = path.join(tempRoot, 'policies');
+    const navigationStateRoot = path.join(tempRoot, 'navigation-state');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        const canonicalRoot = fs.realpathSync(codebasePath);
+        const policyPath = path.join(
+            policyRoot,
+            `${crypto.createHash('sha256').update(canonicalRoot).digest('hex')}.json`,
+        );
+        const pointerPath = path.join(
+            resolveNavigationSidecarRoot(navigationStateRoot, canonicalRoot),
+            'current.json',
+        );
+        fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+        fs.mkdirSync(path.dirname(pointerPath), { recursive: true });
+
+        const current = ['{"currentPolicy":true}\n', '{"currentPointer":true}\n'];
+        const desired = ['{"desiredPolicy":true}\n', '{"desiredPointer":true}\n'];
+        const foreignRollback = '{"foreignRollback":true}\n';
+        fs.writeFileSync(policyPath, current[0]!, 'utf8');
+        fs.writeFileSync(pointerPath, current[1]!, 'utf8');
+
+        const id = '123e4567-e89b-42d3-a456-426614174002';
+        const entries = [policyPath, pointerPath].map((targetPath, index) => ({
+            targetPath,
+            temporaryPath: `${targetPath}.restore-${id}`,
+            displacedPath: `${targetPath}.rollback-${id}`,
+            content: desired[index]!,
+            digest: crypto.createHash('sha256').update(desired[index]!, 'utf8').digest('hex'),
+            expectedDigest: crypto.createHash('sha256').update(current[index]!, 'utf8').digest('hex'),
+        }));
+        fs.writeFileSync(entries[0]!.temporaryPath, desired[0]!, 'utf8');
+        fs.writeFileSync(entries[0]!.displacedPath, foreignRollback, 'utf8');
+        fs.writeFileSync(entries[1]!.temporaryPath, desired[1]!, 'utf8');
+
+        const journalRoot = path.join(policyRoot, 'restore-transactions');
+        fs.mkdirSync(journalRoot, { recursive: true });
+        const journalPath = path.join(journalRoot, `${id}.json`);
+        fs.writeFileSync(journalPath, JSON.stringify({
+            schemaVersion: 1,
+            id,
+            canonicalRoot,
+            phase: 'swapping',
+            nextEntry: 0,
+            entries,
+        }), 'utf8');
+        const journalBeforeRecovery = fs.readFileSync(journalPath, 'utf8');
+
+        assert.throws(
+            () => new Context({
+                embedding: new TestEmbedding(),
+                vectorDatabase: new InMemoryVectorDatabase(),
+                indexPolicyStateRoot: policyRoot,
+                symbolRegistryStateRoot: navigationStateRoot,
+                durableAuthorityRecoveryPublisher: (_root, _owner, publish) => {
+                    publish();
+                    return true;
+                },
+            }),
+            /no longer owns current authority/i,
+        );
+
+        assert.equal(fs.readFileSync(policyPath, 'utf8'), current[0]);
+        assert.equal(fs.readFileSync(pointerPath, 'utf8'), current[1]);
+        assert.equal(fs.readFileSync(entries[0]!.displacedPath, 'utf8'), foreignRollback);
+        assert.equal(fs.readFileSync(journalPath, 'utf8'), journalBeforeRecovery);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context fails closed and leaves authority untouched when recovery cannot acquire a fence', () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-authority-restore-live-owner-'));
     const codebasePath = path.join(tempRoot, 'repo');
