@@ -88,6 +88,22 @@ function createFileSymlinkOrSkip(t: TestContext, target: string, linkPath: strin
     }
 }
 
+const PATH_COMPARISON_ANCHOR_BYTES = 256 * 1024 * 1024;
+
+function writeSparseHashAnchor(filePath: string): void {
+    const fd = fs.openSync(filePath, 'w');
+    try {
+        fs.writeSync(fd, Buffer.alloc(8192, 'a'));
+        fs.ftruncateSync(fd, PATH_COMPARISON_ANCHOR_BYTES);
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
+function waitForHashWindow(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 25));
+}
+
 // F-D2: snapshot JSON array order must use compareContractStrings, not localeCompare.
 test('FileSynchronizer snapshot JSON key order is independent of String.prototype.localeCompare', async () => {
     const prevHome = process.env.HOME;
@@ -355,86 +371,72 @@ test('FileSynchronizer does not index content when a parent directory is replace
 });
 
 test('FileSynchronizer persists the descriptor signature from the bytes it hashed', async () => {
-    const prevHome = process.env.HOME;
+    const previousHome = process.env.HOME;
+    const previousConcurrency = process.env.SATORI_SYNC_HASH_CONCURRENCY;
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stable-observation-home-'));
     const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stable-observation-repo-'));
-
     try {
         process.env.HOME = tempHome;
+        process.env.SATORI_SYNC_HASH_CONCURRENCY = '1';
+        writeSparseHashAnchor(path.join(tempRepo, 'anchor.ts'));
         const sourcePath = path.join(tempRepo, 'source.ts');
         fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
         const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts']);
         await synchronizer.initialize();
 
         fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
-        const mutable = synchronizer as unknown as {
-            hashFileBytes(filePath: string): Promise<unknown>;
-        };
-        const originalHash = mutable.hashFileBytes.bind(mutable);
-        let replaced = false;
-        mutable.hashFileBytes = async (filePath: string) => {
-            if (!replaced) {
-                replaced = true;
-                fs.writeFileSync(sourcePath, 'export const value = 300;\n', 'utf8');
-            }
-            return originalHash(filePath);
-        };
-
-        const changed = await synchronizer.prepareChanges();
+        const changedPromise = synchronizer.prepareChanges({ forceFullHash: true });
+        await waitForHashWindow();
+        fs.writeFileSync(sourcePath, 'export const value = 300;\n', 'utf8');
+        const changed = await changedPromise;
         await changed.commit();
         const settled = await synchronizer.prepareChanges();
 
         assert.equal(settled.changes.hashedCount, 0);
         assert.deepEqual(settled.changes.modified, []);
     } finally {
-        if (prevHome === undefined) {
-            delete process.env.HOME;
-        } else {
-            process.env.HOME = prevHome;
-        }
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        if (previousConcurrency === undefined) delete process.env.SATORI_SYNC_HASH_CONCURRENCY;
+        else process.env.SATORI_SYNC_HASH_CONCURRENCY = previousConcurrency;
         fs.rmSync(tempRepo, { recursive: true, force: true });
         fs.rmSync(tempHome, { recursive: true, force: true });
     }
 });
 
 test('FileSynchronizer reapplies index policy to the descriptor it hashes', async () => {
-    const prevHome = process.env.HOME;
-    const prevMaxBytes = process.env.SATORI_ALL_TEXT_MAX_BYTES;
+    const previousHome = process.env.HOME;
+    const previousConcurrency = process.env.SATORI_SYNC_HASH_CONCURRENCY;
+    const previousMaxBytes = process.env.SATORI_ALL_TEXT_MAX_BYTES;
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-descriptor-policy-home-'));
     const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-descriptor-policy-repo-'));
-
     try {
         process.env.HOME = tempHome;
+        process.env.SATORI_SYNC_HASH_CONCURRENCY = '1';
         process.env.SATORI_ALL_TEXT_MAX_BYTES = '32';
+        writeSparseHashAnchor(path.join(tempRepo, 'anchor.ts'));
         const sourcePath = path.join(tempRepo, 'notes.unknown');
         fs.writeFileSync(sourcePath, 'small text\n', 'utf8');
-        const synchronizer = new FileSynchronizer(tempRepo, [], ['<all-text>']);
+        const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts', '<all-text>']);
         await synchronizer.initialize();
         assert.ok(synchronizer.getFileHash('notes.unknown'));
 
         fs.writeFileSync(sourcePath, 'changed text\n', 'utf8');
-        const mutable = synchronizer as unknown as {
-            hashFileBytes(filePath: string): Promise<unknown>;
-        };
-        const originalHash = mutable.hashFileBytes.bind(mutable);
-        let replaced = false;
-        mutable.hashFileBytes = async (filePath: string) => {
-            if (!replaced) {
-                replaced = true;
-                fs.writeFileSync(sourcePath, 'x'.repeat(64), 'utf8');
-            }
-            return originalHash(filePath);
-        };
+        const changedPromise = synchronizer.prepareChanges({ forceFullHash: true });
+        await waitForHashWindow();
+        fs.writeFileSync(sourcePath, 'x'.repeat(64), 'utf8');
+        const changed = await changedPromise;
 
-        const prepared = await synchronizer.prepareChanges();
-        assert.deepEqual(prepared.changes.removed, ['notes.unknown']);
-        await prepared.commit();
+        assert.deepEqual(changed.changes.removed, ['notes.unknown']);
+        await changed.commit();
         assert.equal(synchronizer.getFileHash('notes.unknown'), undefined);
     } finally {
-        if (prevHome === undefined) delete process.env.HOME;
-        else process.env.HOME = prevHome;
-        if (prevMaxBytes === undefined) delete process.env.SATORI_ALL_TEXT_MAX_BYTES;
-        else process.env.SATORI_ALL_TEXT_MAX_BYTES = prevMaxBytes;
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        if (previousConcurrency === undefined) delete process.env.SATORI_SYNC_HASH_CONCURRENCY;
+        else process.env.SATORI_SYNC_HASH_CONCURRENCY = previousConcurrency;
+        if (previousMaxBytes === undefined) delete process.env.SATORI_ALL_TEXT_MAX_BYTES;
+        else process.env.SATORI_ALL_TEXT_MAX_BYTES = previousMaxBytes;
         fs.rmSync(tempRepo, { recursive: true, force: true });
         fs.rmSync(tempHome, { recursive: true, force: true });
     }
@@ -1237,8 +1239,8 @@ test('FileSynchronizer exact path comparison fails closed on source or checkpoin
     const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-path-race-repo-'));
     process.env.SATORI_STATE_ROOT = stateRoot;
     try {
-        const sourcePath = path.join(tempRepo, 'source.ts');
-        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
+        const anchorPath = path.join(tempRepo, 'anchor.ts');
+        writeSparseHashAnchor(anchorPath);
         const collectionName = 'path_race_generation';
         const synchronizer = new FileSynchronizer(
             tempRepo,
@@ -1249,41 +1251,24 @@ test('FileSynchronizer exact path comparison fails closed on source or checkpoin
         await synchronizer.initialize(undefined, undefined, { deferSnapshotPublication: true });
         await (await synchronizer.prepareChanges({ forceFullHash: true })).commit();
 
-        const mutable = synchronizer as unknown as {
-            observeExactPath(relativePath: string): Promise<unknown>;
-        };
-        const observeExactPath = mutable.observeExactPath.bind(mutable);
-        let observations = 0;
-        mutable.observeExactPath = async (relativePath: string) => {
-            observations += 1;
-            if (observations === 2) {
-                fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
-            }
-            return observeExactPath(relativePath);
-        };
-        assert.deepEqual(
-            await synchronizer.comparePathsToOwnedCheckpoint(['source.ts']),
-            { status: 'unavailable' },
-        );
+        // The large regular file keeps the first/second observation window open.
+        // Either a write is detected by hashFileBytes as an in-flight mutation or
+        // the second observation sees different bytes; both outcomes are closed.
+        const sourceComparison = synchronizer.comparePathsToOwnedCheckpoint(['anchor.ts']);
+        await waitForHashWindow();
+        fs.appendFileSync(anchorPath, 'x', 'utf8');
+        assert.deepEqual(await sourceComparison, { status: 'unavailable' });
 
-        fs.writeFileSync(sourcePath, 'export const value = 1;\n', 'utf8');
-        observations = 0;
-        mutable.observeExactPath = async (relativePath: string) => {
-            observations += 1;
-            const observation = await observeExactPath(relativePath);
-            if (observations === 1) {
-                fs.appendFileSync(
-                    FileSynchronizer.getSnapshotPathForGeneration(tempRepo, collectionName),
-                    '\n',
-                    'utf8',
-                );
-            }
-            return observation;
-        };
-        assert.deepEqual(
-            await synchronizer.comparePathsToOwnedCheckpoint(['source.ts']),
-            { status: 'unavailable' },
+        // The same observation window lets the checkpoint stat change before the
+        // final token check, independently proving checkpoint-drift fail-closed.
+        const checkpointComparison = synchronizer.comparePathsToOwnedCheckpoint(['anchor.ts']);
+        await waitForHashWindow();
+        fs.appendFileSync(
+            FileSynchronizer.getSnapshotPathForGeneration(tempRepo, collectionName),
+            '\n',
+            'utf8',
         );
+        assert.deepEqual(await checkpointComparison, { status: 'unavailable' });
     } finally {
         if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
         else process.env.SATORI_STATE_ROOT = previousStateRoot;
