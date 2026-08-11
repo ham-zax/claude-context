@@ -5,6 +5,19 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import ignore from 'ignore';
 import { computeMerkleRoot } from './merkle';
+import {
+    assertValidCurrentSnapshot,
+    assertValidGenerationSnapshot,
+    buildSnapshotPayload,
+    GENERATION_SNAPSHOT_VERSION,
+    parseSnapshotDocument,
+    serializeSnapshot,
+    SNAPSHOT_VERSION,
+} from './snapshot-codec';
+import type {
+    SnapshotFileStatSignature,
+    SnapshotV3,
+} from './snapshot-codec';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 import { DEFAULT_SUPPORTED_EXTENSIONS } from '../config/defaults';
 import {
@@ -19,11 +32,7 @@ import {
 } from './root-bound-fs';
 import { canonicalizeRepositoryRelativePath } from '../paths/repository-path';
 
-interface FileStatSignature {
-    size: number;
-    mtimeMs: number;
-    ctimeMs: number;
-}
+type FileStatSignature = SnapshotFileStatSignature;
 
 interface ExactPathObservation {
     kind: 'absent' | 'not_indexable' | 'indexed';
@@ -34,31 +43,6 @@ interface ExactPathObservation {
     ctimeMs?: number;
     hash?: string;
 }
-
-interface SnapshotV2 {
-    snapshotVersion: number;
-    fileHashes: [string, string][];
-    fileStats: [string, FileStatSignature][];
-    merkleRoot: string;
-    partialScan: boolean;
-    unscannedDirPrefixes: string[];
-    fullHashCounter: number;
-}
-
-interface SnapshotV3 extends SnapshotV2 {
-    snapshotVersion: 3;
-    canonicalRoot: string;
-    checkpointIdentity: string;
-    collectionName: string;
-    markerRunId: string;
-    indexPolicyHash: string;
-    documentDigest: string;
-}
-
-type ParsedSnapshot = Partial<SnapshotV2> & Partial<Pick<
-    SnapshotV3,
-    'canonicalRoot' | 'checkpointIdentity' | 'collectionName' | 'markerRunId' | 'indexPolicyHash' | 'documentDigest'
->>;
 
 interface ScanCandidate {
     relativePath: string;
@@ -234,8 +218,6 @@ export type SourceFreshnessPathComparison =
     | { readonly status: 'differs' }
     | { readonly status: 'unavailable' };
 
-const SNAPSHOT_VERSION = 2;
-const GENERATION_SNAPSHOT_VERSION = 3;
 const DEFAULT_HASH_CONCURRENCY = 16;
 
 export class FileSynchronizer {
@@ -867,46 +849,6 @@ export class FileSynchronizer {
         return true;
     }
 
-    private buildSnapshotPayload(
-        checkpoint: SynchronizerCheckpointState,
-        checkpointIdentity: string | null,
-        checkpointAuthority: SourceFreshnessCheckpointAuthority | null,
-    ): SnapshotV2 | SnapshotV3 {
-        const fileHashes = Array.from(checkpoint.fileHashes.entries()).sort(([a], [b]) => compareContractStrings(a, b));
-        const fileStats = Array.from(checkpoint.fileStats.entries()).sort(([a], [b]) => compareContractStrings(a, b));
-        const basePayload: SnapshotV2 = {
-            snapshotVersion: SNAPSHOT_VERSION,
-            fileHashes,
-            fileStats,
-            merkleRoot: checkpoint.merkleRoot,
-            partialScan: checkpoint.partialScan,
-            unscannedDirPrefixes: [...checkpoint.unscannedDirPrefixes],
-            fullHashCounter: checkpoint.fullHashCounter,
-        };
-        if (!checkpointIdentity) return basePayload;
-        if (!checkpointAuthority) {
-            throw new Error('[Synchronizer] Cannot publish an authority-scoped checkpoint without marker ownership evidence.');
-        }
-        if (checkpointAuthority.collectionName !== checkpointIdentity) {
-            throw new Error('[Synchronizer] Candidate checkpoint identity must match its collection authority.');
-        }
-        const generationPayload: Omit<SnapshotV3, 'documentDigest'> = {
-            ...basePayload,
-            snapshotVersion: GENERATION_SNAPSHOT_VERSION,
-            canonicalRoot: this.rootDir,
-            checkpointIdentity,
-            collectionName: checkpointAuthority.collectionName,
-            markerRunId: checkpointAuthority.markerRunId,
-            indexPolicyHash: checkpointAuthority.indexPolicyHash,
-        };
-        return {
-            ...generationPayload,
-            documentDigest: crypto.createHash('sha256')
-                .update(JSON.stringify(generationPayload))
-                .digest('hex'),
-        };
-    }
-
     private async stageCheckpointState(
         checkpoint: SynchronizerCheckpointState,
         checkpointAuthority: SourceFreshnessCheckpointAuthority,
@@ -915,8 +857,8 @@ export class FileSynchronizer {
         const authority = FileSynchronizer.normalizeCheckpointAuthority(checkpointAuthority);
         const checkpointIdentity = authority.collectionName;
         const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(this.rootDir, checkpointIdentity);
-        const payload = this.buildSnapshotPayload(checkpoint, checkpointIdentity, authority) as SnapshotV3;
-        const serializedPayload = JSON.stringify(payload);
+        const payload = buildSnapshotPayload(checkpoint, this.rootDir, checkpointIdentity, authority) as SnapshotV3;
+        const serializedPayload = serializeSnapshot(payload);
         const merkleDir = path.dirname(snapshotPath);
         const tempSnapshotPath = `${snapshotPath}.candidate-${process.pid}-${crypto.randomUUID()}`;
         let targetReplaced = false;
@@ -1089,13 +1031,14 @@ export class FileSynchronizer {
             merkleRoot: this.merkleRoot,
             fullHashCounter: this.fullHashCounter,
         };
-        const payload = this.buildSnapshotPayload(
+        const payload = buildSnapshotPayload(
             checkpoint,
+            this.rootDir,
             this.checkpointIdentity,
             checkpointAuthority,
         );
 
-        const serializedPayload = JSON.stringify(payload);
+        const serializedPayload = serializeSnapshot(payload);
         const publishedDocumentDigest: string | null = 'documentDigest' in payload
             && typeof payload.documentDigest === 'string'
             ? payload.documentDigest
@@ -1161,130 +1104,22 @@ export class FileSynchronizer {
         console.log(`Saved snapshot to ${this.snapshotPath}`);
     }
 
-    private assertValidCurrentSnapshot(snapshot: Partial<SnapshotV2>): void {
-        const invalid = (reason: string): never => {
-            throw new Error(`[Synchronizer] Invalid current-format snapshot: ${reason}`);
-        };
-        const rawFileHashes = snapshot.fileHashes;
-        const rawFileStats = snapshot.fileStats;
-        if (!Array.isArray(rawFileHashes) || !Array.isArray(rawFileStats)) {
-            invalid('fileHashes and fileStats must be arrays.');
-        }
-
-        const hashes = new Map<string, string>();
-        for (const entry of rawFileHashes ?? []) {
-            if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || typeof entry[1] !== 'string') {
-                invalid('fileHashes contains a malformed entry.');
-            }
-            const normalizedPath = this.normalizeRelPath(entry[0]);
-            if (!normalizedPath || normalizedPath !== entry[0] || hashes.has(normalizedPath)) {
-                invalid(`fileHashes contains an invalid or duplicate path '${entry[0]}'.`);
-            }
-            if (!/^[a-f0-9]{64}$/.test(entry[1])) {
-                invalid(`fileHashes contains an invalid SHA-256 for '${normalizedPath}'.`);
-            }
-            hashes.set(normalizedPath, entry[1]);
-        }
-
-        const statPaths = new Set<string>();
-        for (const entry of rawFileStats ?? []) {
-            if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
-                invalid('fileStats contains a malformed entry.');
-            }
-            const normalizedPath = this.normalizeRelPath(entry[0]);
-            const signature = entry[1] as Partial<FileStatSignature> | undefined;
-            if (!normalizedPath || normalizedPath !== entry[0] || statPaths.has(normalizedPath)) {
-                invalid(`fileStats contains an invalid or duplicate path '${entry[0]}'.`);
-            }
-            if (!signature) {
-                throw new Error(`[Synchronizer] Invalid current-format snapshot: fileStats is missing a signature for '${normalizedPath}'.`);
-            }
-            if (!Number.isSafeInteger(signature.size) || Number(signature.size) < 0) {
-                invalid(`fileStats contains an invalid size for '${normalizedPath}'.`);
-            }
-            if (!Number.isFinite(signature.mtimeMs) || Number(signature.mtimeMs) < 0
-                || !Number.isFinite(signature.ctimeMs) || Number(signature.ctimeMs) < 0) {
-                invalid(`fileStats contains invalid timestamps for '${normalizedPath}'.`);
-            }
-            statPaths.add(normalizedPath);
-        }
-        if (hashes.size !== statPaths.size || [...hashes.keys()].some((filePath) => !statPaths.has(filePath))) {
-            invalid('fileHashes and fileStats must contain identical path sets.');
-        }
-
-        if (typeof snapshot.merkleRoot !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot.merkleRoot)) {
-            invalid('merkleRoot must be a SHA-256 digest.');
-        }
-        if (snapshot.merkleRoot !== computeMerkleRoot(hashes)) {
-            invalid('merkleRoot does not match fileHashes.');
-        }
-        const rawUnscannedDirPrefixes = snapshot.unscannedDirPrefixes;
-        if (typeof snapshot.partialScan !== 'boolean' || !Array.isArray(rawUnscannedDirPrefixes)) {
-            invalid('partial scan metadata is malformed.');
-        }
-        const unscannedDirPrefixes = rawUnscannedDirPrefixes as string[];
-        for (const prefix of unscannedDirPrefixes ?? []) {
-            if (typeof prefix !== 'string' || !prefix || this.normalizeRelPath(prefix) !== prefix) {
-                invalid('unscannedDirPrefixes contains an invalid path.');
-            }
-        }
-        const canonicalPrefixes = this.normalizeAndCompressPrefixes(new Set(unscannedDirPrefixes));
-        if (!this.arraysEqual(unscannedDirPrefixes, canonicalPrefixes)) {
-            invalid('unscannedDirPrefixes must be canonical, unique, compressed, and deterministically ordered.');
-        }
-        if (unscannedDirPrefixes.length > 0 && snapshot.partialScan !== true) {
-            invalid('partialScan must be true when unscannedDirPrefixes is nonempty.');
-        }
-        if (!Number.isSafeInteger(snapshot.fullHashCounter) || Number(snapshot.fullHashCounter) < 0) {
-            invalid('fullHashCounter must be a nonnegative safe integer.');
-        }
-    }
-
-    private assertValidGenerationSnapshot(snapshot: ParsedSnapshot): void {
-        this.assertValidCurrentSnapshot(snapshot);
-        if (!this.checkpointIdentity) {
-            throw new Error('[Synchronizer] Generation checkpoint cannot be loaded without an authority identity.');
-        }
-        if (snapshot.canonicalRoot !== this.rootDir) {
-            throw new Error('[Synchronizer] Generation checkpoint canonical root does not match its owner.');
-        }
-        if (snapshot.checkpointIdentity !== this.checkpointIdentity) {
-            throw new Error('[Synchronizer] Generation checkpoint authority identity does not match its owner.');
-        }
-        if (!this.checkpointAuthority) {
-            throw new Error('[Synchronizer] Generation checkpoint cannot be validated without exact marker ownership evidence.');
-        }
-        if (
-            snapshot.collectionName !== this.checkpointAuthority.collectionName
-            || snapshot.markerRunId !== this.checkpointAuthority.markerRunId
-            || snapshot.indexPolicyHash !== this.checkpointAuthority.indexPolicyHash
-        ) {
-            throw new Error('[Synchronizer] Generation checkpoint does not belong to the active completion marker.');
-        }
-        if (typeof snapshot.documentDigest !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot.documentDigest)) {
-            throw new Error('[Synchronizer] Generation checkpoint document digest is invalid.');
-        }
-        const { documentDigest, ...unsignedSnapshot } = snapshot;
-        const expectedDigest = crypto.createHash('sha256')
-            .update(JSON.stringify(unsignedSnapshot))
-            .digest('hex');
-        if (documentDigest !== expectedDigest) {
-            throw new Error('[Synchronizer] Generation checkpoint document digest does not match its payload.');
-        }
-    }
-
     private async loadSnapshot(): Promise<{ migrated: boolean; missing: boolean }> {
         try {
             const data = await fsp.readFile(this.snapshotPath, 'utf-8');
-            const obj = JSON.parse(data) as ParsedSnapshot;
+            const obj = parseSnapshotDocument(data);
             if (obj.snapshotVersion === GENERATION_SNAPSHOT_VERSION) {
-                this.assertValidGenerationSnapshot(obj);
+                assertValidGenerationSnapshot(obj, {
+                    canonicalRoot: this.rootDir,
+                    checkpointIdentity: this.checkpointIdentity,
+                    checkpointAuthority: this.checkpointAuthority,
+                });
                 this.snapshotDocumentDigest = obj.documentDigest ?? null;
             } else if (obj.snapshotVersion === SNAPSHOT_VERSION) {
                 if (this.checkpointIdentity) {
                     throw new Error('[Synchronizer] Authority-scoped checkpoint uses the retired root-global snapshot shape.');
                 }
-                this.assertValidCurrentSnapshot(obj);
+                assertValidCurrentSnapshot(obj, this.rootDir);
                 this.snapshotDocumentDigest = null;
             } else if (this.checkpointIdentity) {
                 throw new Error('[Synchronizer] Authority-scoped checkpoint schema is unsupported.');
@@ -1396,11 +1231,15 @@ export class FileSynchronizer {
             if (!observationBefore || observationAfter !== observationBefore) {
                 throw new Error('[Synchronizer] Source freshness checkpoint changed while it was being inspected.');
             }
-            const snapshot = JSON.parse(data) as ParsedSnapshot;
+            const snapshot = parseSnapshotDocument(data);
             if (snapshot.snapshotVersion !== GENERATION_SNAPSHOT_VERSION) {
                 throw new Error('[Synchronizer] Authority-scoped checkpoint schema is unsupported.');
             }
-            this.assertValidGenerationSnapshot(snapshot);
+            assertValidGenerationSnapshot(snapshot, {
+                canonicalRoot: this.rootDir,
+                checkpointIdentity: this.checkpointIdentity,
+                checkpointAuthority: this.checkpointAuthority,
+            });
             return {
                 status: 'valid',
                 observationToken: JSON.stringify({
