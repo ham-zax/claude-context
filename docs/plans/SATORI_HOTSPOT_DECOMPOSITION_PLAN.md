@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `cec0d1425b06ebfe79b5dd2bb52cd0e3a903170c`
+Checkpoint HEAD: `06bb5db`
 
 Completed ownership-bounded batches:
 
@@ -23,11 +23,12 @@ Completed ownership-bounded batches:
 - Phase 1.1 / root gitignore matcher cache: `f70f972`;
 - Phase 1.2 / pure sidecar validators: `7932fa8`.
 - Phase 1.3 / stateless synchronizer snapshot codec: `9f77131`;
-- Phase 1.4 / CLI install boundaries: `cec0d14`.
+- Phase 1.4 / CLI install boundaries: `cec0d14`;
+- Phase 2.1 / complete sidecar read boundary: `06bb5db`.
 
-Phase 1 is complete. Next open batch at this checkpoint: Phase 2.1. Refresh this
-checkpoint only after an accepted batch is committed; preserve the original baseline
-above as historical lineage.
+Next open batch at this checkpoint: Phase 2.2. Refresh this checkpoint only after an
+accepted batch is committed; preserve the original baseline above as historical
+lineage.
 
 ## Goal
 
@@ -327,6 +328,8 @@ imports remain unchanged.
 ## Phase 2 — Core utility/storage seams
 
 ### 2.1 Complete the sidecar read boundary
+
+Completed by `06bb5db`.
 
 Order:
 
