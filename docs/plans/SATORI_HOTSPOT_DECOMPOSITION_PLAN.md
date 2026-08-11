@@ -4,13 +4,27 @@ Date: 2026-08-12
 
 Baseline repository: `/home/hamza/repo/satori`
 
-Baseline implementation: `6a5ee87680ccc09fc08ef5fe739fb0398e3b9401`
+Original baseline implementation: `6a5ee87680ccc09fc08ef5fe739fb0398e3b9401`
 
-Source review: `HOTSPOT_DECOMPOSITION_REVIEW.md`
+Source review: `docs/plans/SATORI_HOTSPOT_DECOMPOSITION_REVIEW.md`
 
 Status: master roadmap. No implementation is authorized by this document. Each
 implementation batch requires a fresh, bounded batch sheet derived from its current
 HEAD; this document must not be executed continuously as one change.
+
+## Execution checkpoint
+
+Checkpoint HEAD: `f70f972705d69273793e51ab56b99e7411907d65`
+
+Completed ownership-bounded batches:
+
+- Phase 0.2 / F024: `e56c973`;
+- Phase 0.3 / F023: `83fb255`;
+- Phase 1.1 / root gitignore matcher cache: `f70f972`.
+
+Next open batch at this checkpoint: Phase 1.2. Refresh this checkpoint only after an
+accepted batch is committed; preserve the original baseline above as historical
+lineage.
 
 ## Goal
 
@@ -57,7 +71,19 @@ no result is disclosed without post-retrieval authority revalidation
 completion authority is republished only after exact payload/policy/navigation proof
 ```
 
-### Ownership
+### Ownership: current and target
+
+Current state at the execution checkpoint:
+
+```text
+Context owns broad active generation/publication authority
+GenerationProofCoordinator owns generation proof state
+FileSynchronizer owns source checkpoint persistence and comparisons
+SyncManager owns watcher/sync coordination but still depends on Context
+ManageIndexingHandlers owns MCP action orchestration but still depends on Context
+```
+
+Target state:
 
 ```text
 FileSynchronizer owns source checkpoint persistence and comparisons
@@ -116,6 +142,10 @@ verification command(s)
 stopping condition
 ```
 
+Every stopping condition in that sheet must resolve to exact existing test names and
+commands or be marked `new oracle required`. A new oracle must fail against the
+pre-move defect or characterize the current behavior before production code moves.
+
 Every batch must then follow this sequence:
 
 1. confirm current HEAD and preserve unrelated work;
@@ -130,6 +160,20 @@ Every batch must then follow this sequence:
    diff unstaged and record its exact paths and verification;
 9. stop before the next batch.
 
+For delegated read-only reviews, use an isolated checkout or equivalent
+write-isolated workspace. Record HEAD and `git status --porcelain` before and after
+the review. Unexpected writes invalidate that review evidence and must be reconciled
+before another batch starts.
+
+### Risk rubric
+
+```text
+S  pure or owner-local extraction with no authority transition
+M  bounded stateful owner or compatibility boundary
+L  cross-owner workflow, public contract, or lifecycle transition
+XL authority, persistence, concurrency, rollback, or multi-owner transaction
+```
+
 For behavior-preserving refactors, request/profile/embedding identities must remain
 unchanged. A clean build may change the compiled-runtime tree identity because files
 move; measure that identity only from the exact clean implementation commit when an
@@ -137,23 +181,24 @@ evidence receipt requires it.
 
 ## Phase 0 — Rebaseline and close live authority defects
 
-### 0.1 Refresh the finding ledger
+### 0.1 Current finding ledger
 
 Record current disposition:
 
-- F021/F062/F066: resolved by `6a5ee87`;
+- F021: resolved by `6a5ee87`;
 - F022: torn semantic-search disclosure resolved by `6a5ee87`;
 - F067: the marker-withdrawn interval remains intentional fail-closed availability
   behavior, not an open defect; do not add a speculative completion or `replacing`
   marker. A future mutation-intent record would require separate authorization and a
   durable contract;
 - F050: resolved by provider-backed lazy startup recovery;
-- F023/F024: still open.
+- F024: resolved by `e56c973`;
+- F023: resolved by `83fb255`.
 
-Stopping condition: no implementation task refers to F021, F022, F050, or F067 as an
-unfixed incident.
+Stopping condition: no implementation task refers to F021, F022, F023, F024, F050,
+or F067 as an unfixed incident.
 
-### 0.2 Fix F024 before moving durable recovery
+### 0.2 F024 durable-recovery prerequisite — completed by `e56c973`
 
 Add phase-aware validation for `swapping` restore journals. Before resuming each
 entry, every target, temporary artifact, and displaced artifact must match the
@@ -173,7 +218,7 @@ Stopping condition: durable recovery proves transaction ownership before replaci
 any remaining authority path, and it has a complete phase/state contract before
 extraction.
 
-### 0.3 Fix F023 in the staging owners
+### 0.3 F023 staging-owner prerequisite — completed by `83fb255`
 
 Owners:
 
@@ -210,6 +255,8 @@ proves their complete touched-file sets are disjoint.
 
 ### 1.1 Move the root gitignore matcher cache
 
+Completed by `f70f972`.
+
 Move `rootGitignoreMatcherCache` into `SearchQuerySupport`, preserving the existing
 `ToolHandlers` lifecycle and reload policy.
 
@@ -242,7 +289,7 @@ Keep these in `FileSynchronizer`:
 - checkpoint authority and observation tokens;
 - freshness comparisons.
 
-Risk: S–M.
+Risk: M.
 
 Stopping condition: V2/V3 migration and byte-level payload fixtures remain exact.
 
@@ -256,7 +303,7 @@ Create bounded modules for:
 
 Keep `install.ts` as a compatibility façade and re-export established public symbols.
 
-Risk: S–M.
+Risk: M.
 
 Stopping condition: client auto/all detection, configured path handling, and public
 imports remain unchanged.
@@ -324,7 +371,7 @@ After read contracts are stable, separate:
 
 The sidecar modules store artifacts. They do not decide which generation is active.
 
-Risk: M–L.
+Risk: L.
 
 Stopping condition: F023 remains closed and publication/rollback fixtures are exact.
 
@@ -340,7 +387,7 @@ Own:
 
 Do not own `publishedPolicyBindingsByCodebase` or active generation state.
 
-Risk: M–L.
+Risk: L.
 
 Stopping condition: policy hashes, compatibility outcomes, and control signatures are
 unchanged for all current fixtures.
@@ -373,6 +420,11 @@ This is the XL track. Execute incrementally; do not rewrite `Context` in one bat
 
 Define the coordinator's inputs and results before moving mutable state.
 
+Current proof state belongs to the coordinator created by
+`createGenerationProofCoordinator()`. This batch must decide whether that owner is
+composed by or re-parented into the authority coordinator; it must not create a
+second proof cache or proof-flight registry.
+
 Own:
 
 - generation proof caches and proof flights;
@@ -390,6 +442,12 @@ Do not own:
 
 Add focused authority-contract tests before moving state.
 
+Risk: M.
+
+Stopping condition: the contract names one writer for proof state, publication
+bindings, activation, rollback, retention, and durable restore decisions; every
+dependency is a narrow port/type and no production state has moved yet.
+
 ### 4.2 Move proof state and exact binding validation
 
 Move one mutable collection at a time. Keep `Context` methods as delegates.
@@ -404,7 +462,7 @@ observation-token tests pass without public API changes.
 Preserve the `6a5ee87` invariant. Do not fully serialize publication behind reader
 drainage.
 
-Risk: L.
+Risk: XL.
 
 Stopping condition: F021 fork race, active-reader Q/R publication, retention cleanup,
 failure recovery, and reader-drain tests all pass.
@@ -413,6 +471,11 @@ failure recovery, and reader-drain tests all pass.
 
 Wire vector publication, marker/policy contracts, sidecar artifact ports, and source
 checkpoint evidence through narrow dependencies.
+
+Phase 3.3 owns restore transaction parsing/writing/execution mechanics. This batch
+owns the authority decision to invoke those mechanics and must not duplicate them.
+Use the existing Core checkpoint-evidence types behind a narrow dependency; do not
+prematurely create the MCP read-facing `SourceFreshnessPort` from Phase 5.1.
 
 Risk: XL.
 
@@ -427,10 +490,14 @@ generation proof, calls to publication/rollback/retention operations, and Core d
 results. It does not own MCP snapshot lifecycle, mutation leases, status/progress,
 response envelopes, checkpoint persistence, or sidecar activation policy.
 
+Here `generation proof` means orchestrating proof requests and consuming proof
+results. Proof caches, proof flights, and exact binding validation remain exclusively
+owned by the authority/proof owner established in Phases 4.1–4.2.
+
 It calls the authority owner through narrow dependencies; it must not acquire
 authority state by reachability through `Context`.
 
-Risk: L–XL.
+Risk: XL.
 
 Stopping condition: repair, full index, partial limit, rollback, and navigation
 publication fixtures pass through operation-level contracts.
@@ -451,7 +518,8 @@ domain state or policy decisions.
 
 Define separately:
 
-- a narrow Core `SourceFreshnessPort` for checkpoint evidence;
+- a narrow Core `SourceFreshnessPort`, built on the existing checkpoint-evidence
+  types, for read-facing preparation and revalidation;
 - one MCP state owner for generation-scoped observations, handoff, and derived
   readiness.
 
@@ -491,12 +559,13 @@ lease release and final revalidation.
 The port exposes Core mutation/publication operations. It does not contain MCP
 snapshot phases or response projection.
 
-Keep `ManageIndexingHandlers` as the request/action coordinator. If the 768-line
-workflow needs a file move, extract a named MCP `FullIndexActionCoordinator` with
-explicit inputs/results. It owns request/action interpretation, mutation-lease use,
-MCP lifecycle phases, calls to `IndexMutationPort`, status/progress, and response
-projection. It does not own generation authority, policy publication rules,
-checkpoint storage, or sidecar activation rules.
+Keep `ManageIndexingHandlers` as the request/action coordinator. The concrete large
+workflow is `ManageIndexingHandlers.startBackgroundIndexing()`. If it needs a file
+move, extract a named MCP `FullIndexActionCoordinator` with explicit inputs/results.
+It owns request/action interpretation, mutation-lease use, MCP lifecycle phases,
+calls to `IndexMutationPort`, status/progress, and response projection. It does not
+own generation authority, policy publication rules, checkpoint storage, or sidecar
+activation rules.
 
 Risk: L.
 
@@ -532,7 +601,7 @@ Return ordered, labelled retrieval-pass outcomes only. Keep fusion, filtering,
 `must:` admission, survival diagnostics, reranker admission, and provider ordering in
 the established owner.
 
-Risk: M–L.
+Risk: L.
 
 Stopping condition: canonical request/ranking/diagnostic fixtures and provider-order
 tests remain byte/order equivalent; no request/profile digest changes occur.
@@ -556,23 +625,30 @@ and partial-coverage behavior remain unchanged.
 
 ## Phase 7 — CLI decomposition
 
-Execute as independent batches while preserving `install.ts` exports.
+Execute sequentially by default while preserving `install.ts` exports:
 
-1. client config mutation builders;
-2. client config inspection/runtime authority;
-3. runtime and reranker/vector-store selection;
-4. install planning as a pure mutation plan;
-5. install application/activation/lock/cleanup as a separate executor;
-6. runtime upgrade orchestration last.
+1. Client config mutation builders. Risk: M. Stop when exact Codex, Claude Code,
+   and OpenCode mutation fixtures remain unchanged.
+2. Client config inspection/runtime authority. Risk: L. Stop when all supported
+   client inspection fixtures and managed-launcher precedence remain unchanged.
+3. Runtime and reranker/vector-store selection. Risk: M. Stop when offline/connected
+   defaults, explicit overrides, dimensions, and provider selections remain exact.
+4. Install planning as a pure mutation plan. Risk: M. Stop when dry-run, auto/all
+   detection, prepared target sets, and no-write guarantees remain exact.
+5. Install application/activation/lock/cleanup as a separate executor. Risk: L. Stop
+   when activation, mutation locking, cleanup, local developer install, and rollback
+   fixtures remain exact.
+6. Runtime upgrade orchestration last. Risk: L. Stop when version selection,
+   published-runtime activation, launcher precedence, and rollback fixtures remain
+   exact.
 
 Do not merge planning and application into one generic module. When a batch changes
 `install.ts` exports, package entrypoints, runtime-path resolution, or client
 discovery, run the relevant packed-artifact proof in addition to source-tree tests
 (using the existing package-installability or packed release-smoke owner as applicable).
 
-Stopping condition per batch: Codex/Claude Code/OpenCode config fixtures, managed
-launcher precedence, privacy-safe doctor output, offline/connected selection, local
-developer install, and published-runtime rollback behavior remain unchanged.
+Privacy-safe doctor output remains a cross-batch public oracle whenever inspection,
+runtime authority, selection, or launcher behavior moves.
 
 ## Test migration policy
 
@@ -608,6 +684,8 @@ Add checks only after the target boundary exists:
 - new domain services may not depend on broad `Context`;
 - enforce `Context → domain coordinator → narrow stores/ports` and MCP coordinator
   → Core public/narrow port imports; reject Core → MCP imports;
+- when a target boundary first exists, add an enforceable import/ownership check in
+  that same batch before relying on the boundary as an invariant;
 - public façade exports remain stable;
 - size/complexity metrics remain reporting signals, not hard gates.
 
@@ -627,14 +705,10 @@ The decomposition is complete only when:
    independently committed;
 9. no unrelated user work is staged, modified, or committed.
 
-## Recommended first implementation batch
+## Recommended next implementation batch
 
-Start with Phase 0.2 (F024 durable restore-journal authority validation), not a large
-file move.
-
-Why: a resumed swapping journal can otherwise displace newer legitimate authority.
-It closes the higher-impact live authority gap in the current owner before that owner
-is decomposed.
-
-Stop after the swapping-journal regression and affected package suite pass. Derive the
-next batch sheet from that resulting HEAD before beginning F023.
+At checkpoint `f70f972`, start with Phase 1.2: pure sidecar validators. Derive a
+current-HEAD batch sheet naming the exact validator symbols, preserved
+`symbols/index.ts` exports, malformed-input classifications, round-trip fixtures, and
+verification commands. Do not move sidecar write, staging, publication, rollback, or
+cleanup behavior in that batch.
