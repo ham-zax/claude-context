@@ -25,7 +25,6 @@ function buildTrackedLexicalSupport(trackedPaths: string[]): SearchQuerySupport 
         capabilities: {} as CapabilityResolver,
         runtimeFingerprint: {} as never,
         reranker: null,
-        rootGitignoreMatcherCache: new Map(),
         gitignoreForceReloadEveryN: 25,
     });
 }
@@ -42,6 +41,44 @@ test('normalizeRelativePathForIgnoreCheck enforces canonical repo-relative ident
     assert.equal(support.normalizeRelativePathForIgnoreCheck('src/./service.ts'), 'src/service.ts');
     assert.equal(support.normalizeRelativePathForIgnoreCheck('src//service.ts'), 'src/service.ts');
     assert.equal(support.normalizeRelativePathForIgnoreCheck('src\\service.ts'), 'src/service.ts');
+});
+
+test('SearchQuerySupport owns the root gitignore matcher cache', () => {
+    const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-root-gitignore-cache-'));
+    try {
+        fs.writeFileSync(path.join(repositoryRoot, '.gitignore'), '**/*.test.*\n', 'utf8');
+
+        const support = new SearchQuerySupport({
+            normalizeSearchPath: (value) => value,
+            hasPathSegment: () => false,
+            isGeneratedPath: () => false,
+            isTestPath: () => true,
+            isFixturePath: () => false,
+            isDocPath: () => false,
+            getContextActiveIgnorePatterns: () => [],
+            getContextTrackedRelativePaths: () => [],
+            classifyPathCategory: () => 'srcRuntime',
+            shouldIncludeCategoryInScope: () => true,
+            getSyncWatchDebounceMs: () => 0,
+            capabilities: {} as CapabilityResolver,
+            runtimeFingerprint: {} as never,
+            reranker: null,
+            gitignoreForceReloadEveryN: 25,
+        });
+
+        const hint = support.buildNoiseMitigationHint(
+            repositoryRoot,
+            ['tests/auth.test.ts'],
+            'mixed',
+            { path: [] },
+        );
+
+        assert.ok(hint);
+        assert.deepEqual(hint.suggestedIgnorePatterns, []);
+        assert.match(hint.nextStep, /already covered by root \.gitignore/i);
+    } finally {
+        fs.rmSync(repositoryRoot, { recursive: true, force: true });
+    }
 });
 
 test('tracked lexical fallback anchors the window on the first line with lexical evidence', async () => {

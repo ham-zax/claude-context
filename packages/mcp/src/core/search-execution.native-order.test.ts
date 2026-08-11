@@ -56,7 +56,6 @@ function buildSupport(reranker: Reranker | null): SearchQuerySupport {
         } as unknown as CapabilityResolver,
         runtimeFingerprint: {} as never,
         reranker,
-        rootGitignoreMatcherCache: new Map(),
         gitignoreForceReloadEveryN: 1000,
     });
 }

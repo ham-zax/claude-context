@@ -55,7 +55,6 @@ function buildSupport() {
         } as unknown as CapabilityResolver,
         runtimeFingerprint: {} as never,
         reranker: null,
-        rootGitignoreMatcherCache: new Map(),
         gitignoreForceReloadEveryN: 1000,
     });
 }

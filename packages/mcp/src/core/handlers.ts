@@ -1,6 +1,5 @@
 import * as path from "path";
 import crypto from "node:crypto";
-import ignore from "ignore";
 import {
     Context,
     COLLECTION_LIMIT_MESSAGE,
@@ -756,16 +755,6 @@ type SnapshotManagerCapabilities = {
     saveCodebaseSnapshot?: () => boolean | void;
 };
 
-type GitignoreMatcherCacheState = "ready" | "absent" | "error";
-
-type GitignoreMatcherCacheEntry = {
-    state: GitignoreMatcherCacheState;
-    mtimeMs: number | null;
-    size: number | null;
-    matcher: ReturnType<typeof ignore> | null;
-    checksSinceReload: number;
-};
-
 type CompletionProbeDebugHint = {
     ok: false;
     reason: "probe_failed";
@@ -877,7 +866,6 @@ export class ToolHandlers {
     private readonly navigationStore: NavigationStore;
     private readonly canonicalNavigationAuthorityAvailable: boolean;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
-    private readonly rootGitignoreMatcherCache = new Map<string, GitignoreMatcherCacheEntry>();
     private readonly preparedReadCache = new PreparedReadCache<Extract<TrackedRootReadinessState, { state: 'ready' }>>();
     private readonly statusPreparedReadObservations = new Map<string, StatusPreparedReadObservation>();
     private readonly preparedNavigationCache = new Map<string, PreparedNavigationCacheEntry>();
@@ -947,7 +935,6 @@ export class ToolHandlers {
             capabilities: this.capabilities,
             runtimeFingerprint: this.runtimeFingerprint,
             reranker: this.reranker,
-            rootGitignoreMatcherCache: this.rootGitignoreMatcherCache,
             gitignoreForceReloadEveryN: this.gitignoreForceReloadEveryN,
         };
         this.searchQuerySupport = new SearchQuerySupport(searchQuerySupportHost);

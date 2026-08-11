@@ -181,11 +181,12 @@ export type SearchQuerySupportHost = {
     capabilities: CapabilityResolver;
     runtimeFingerprint: IndexFingerprint;
     reranker: Reranker | null;
-    rootGitignoreMatcherCache: Map<string, GitignoreMatcherCacheEntry>;
     gitignoreForceReloadEveryN: number;
 };
 
 export class SearchQuerySupport {
+    private readonly rootGitignoreMatcherCache = new Map<string, GitignoreMatcherCacheEntry>();
+
     constructor(private readonly host: SearchQuerySupportHost) {}
 
     private normalizeSearchPath(relativePath: string): string {
@@ -242,10 +243,6 @@ export class SearchQuerySupport {
 
     private get reranker(): Reranker | null {
         return this.host.reranker;
-    }
-
-    private get rootGitignoreMatcherCache(): Map<string, GitignoreMatcherCacheEntry> {
-        return this.host.rootGitignoreMatcherCache;
     }
 
     private get gitignoreForceReloadEveryN(): number {
