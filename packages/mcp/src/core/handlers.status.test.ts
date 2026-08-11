@@ -381,6 +381,169 @@ test('handleGetIndexingStatus preserves vector readiness while exposing a missin
     });
 });
 
+test('handleGetIndexingStatus reports enabled unproven watcher authority as source_state_unverified', async () => {
+    await withTempRepo(async (repoPath) => {
+        const collectionName = 'hybrid_code_chunks_unproven_watcher';
+        const info = {
+            status: 'indexed' as const,
+            indexedFiles: 1,
+            totalChunks: 2,
+            indexStatus: 'completed' as const,
+            indexFingerprint: RUNTIME_FINGERPRINT,
+            fingerprintSource: 'verified' as const,
+        };
+        const context = {
+            inspectSourceFreshnessCheckpoint: async () => ({
+                status: 'valid' as const,
+                observationToken: 'checkpoint-observation',
+                merkleRoot: 'a'.repeat(64),
+                documentDigest: 'b'.repeat(64),
+            }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getCodebaseStatus: () => 'indexed',
+            getCodebaseInfo: () => info,
+        } as unknown as HandlerSnapshotManager;
+        const syncManager = {
+            getPreparedReadObservation: () => ({
+                available: false as const,
+                reason: 'watcher_observation_gap' as const,
+                freshnessEpoch: 0,
+                watcherState: 'ready' as const,
+            }),
+            getPreparedReadDiagnostics: () => ({
+                configured: true,
+                managerStarted: true,
+                rootRegistered: true,
+                watcherActive: true,
+                lifecycleState: 'ready' as const,
+                checkpointStatus: 'unverified' as const,
+            }),
+        } as unknown as HandlerSyncManager;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            syncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const access = handlers as unknown as {
+            trackedRootReadiness: {
+                prepareTrackedRootForRead: (path: string) => Promise<unknown>;
+            };
+        };
+        access.trackedRootReadiness.prepareTrackedRootForRead = async () => ({
+            state: 'ready',
+            root: { path: repoPath, info },
+            vectorReceipt: {
+                collectionName,
+                marker: {
+                    indexStatus: 'completed',
+                    runId: 'marker-run-unproven-watcher',
+                    indexPolicyHash: 'a'.repeat(64),
+                },
+                policyDocumentDigest: 'b'.repeat(64),
+            },
+            navigationStatus: 'valid',
+        });
+
+        const response = await handlers.handleGetIndexingStatus({ path: repoPath });
+        const payload = JSON.parse(response.content[0]?.text || '{}') as {
+            status?: string;
+            reason?: string;
+            humanText?: string;
+            hints?: Record<string, unknown>;
+        };
+
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.reason, 'source_state_unverified');
+        assert.match(payload.humanText || '', /current source state is unverified/i);
+        assert.deepEqual(payload.hints?.sync, {
+            tool: 'manage_index',
+            args: { action: 'sync', path: repoPath },
+        });
+    });
+});
+
+test('handleGetIndexingStatus preserves watcher-disabled source comparison fallback', async () => {
+    await withTempRepo(async (repoPath) => {
+        const collectionName = 'hybrid_code_chunks_watcher_disabled';
+        const info = {
+            status: 'indexed' as const,
+            indexedFiles: 1,
+            totalChunks: 2,
+            indexStatus: 'completed' as const,
+            indexFingerprint: RUNTIME_FINGERPRINT,
+            fingerprintSource: 'verified' as const,
+        };
+        const context = {
+            inspectSourceFreshnessCheckpoint: async () => ({
+                status: 'valid' as const,
+                observationToken: 'checkpoint-observation',
+                merkleRoot: 'a'.repeat(64),
+                documentDigest: 'b'.repeat(64),
+            }),
+        } as unknown as HandlerContext;
+        const snapshotManager = {
+            getCodebaseStatus: () => 'indexed',
+            getCodebaseInfo: () => info,
+        } as unknown as HandlerSnapshotManager;
+        const syncManager = {
+            getPreparedReadObservation: () => ({
+                available: false as const,
+                reason: 'watcher_disabled' as const,
+                freshnessEpoch: 0,
+            }),
+            getPreparedReadDiagnostics: () => ({
+                configured: false,
+                managerStarted: false,
+                rootRegistered: false,
+                watcherActive: false,
+                checkpointStatus: 'unverified' as const,
+            }),
+        } as unknown as HandlerSyncManager;
+        const handlers = new ToolHandlers(
+            context,
+            snapshotManager,
+            syncManager,
+            RUNTIME_FINGERPRINT,
+            CAPABILITIES,
+        );
+        const access = handlers as unknown as {
+            trackedRootReadiness: {
+                prepareTrackedRootForRead: (path: string) => Promise<unknown>;
+            };
+        };
+        access.trackedRootReadiness.prepareTrackedRootForRead = async () => ({
+            state: 'ready',
+            root: { path: repoPath, info },
+            vectorReceipt: {
+                collectionName,
+                marker: {
+                    indexStatus: 'completed',
+                    runId: 'marker-run-watcher-disabled',
+                    indexPolicyHash: 'a'.repeat(64),
+                },
+                policyDocumentDigest: 'b'.repeat(64),
+            },
+            navigationStatus: 'valid',
+        });
+
+        const response = await handlers.handleGetIndexingStatus({ path: repoPath });
+        const payload = JSON.parse(response.content[0]?.text || '{}') as {
+            status?: string;
+            reason?: string;
+            humanText?: string;
+            hints?: Record<string, unknown>;
+        };
+
+        assert.equal(payload.status, 'ok');
+        assert.equal(payload.reason, undefined);
+        assert.match(payload.humanText || '', /fully indexed and ready for search/i);
+        assert.equal(payload.hints?.sync, undefined);
+    });
+});
+
 test('handleSearchCode returns bounded retry hint while a reindex is indexing', async () => {
     await withTempRepo(async (repoPath) => {
         const context = {

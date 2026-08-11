@@ -22,6 +22,11 @@ import {
     MutationLeaseCoordinator,
     type RootMutationLease,
 } from "./mutation-lease.js";
+import type {
+    CandidateWatcherPolicy,
+    FullIndexSourceHandoffInput,
+    WatcherBootstrapCapture,
+} from "./sync.js";
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: "VoyageAI",
@@ -378,7 +383,23 @@ function createFailedIndexingHarness(
             indexedFileHashes: ReadonlyMap<string, string>;
         }>;
         beforeHasCollection?: (collectionName: string) => void;
-        touchWatchedCodebase?: () => Promise<void>;
+        touchWatchedCodebase?: (
+            codebasePath: string,
+            candidatePolicy?: CandidateWatcherPolicy,
+        ) => Promise<void>;
+        captureWatcherBootstrap?: (
+            codebasePath: string,
+            candidatePolicyHash: string,
+        ) => WatcherBootstrapCapture | undefined;
+        completeFullIndexSourceHandoff?: (
+            codebasePath: string,
+            input: FullIndexSourceHandoffInput,
+            mutationLease?: RootMutationLease,
+        ) => Promise<boolean>;
+        restoreActiveWatcherPolicy?: (
+            codebasePath: string,
+            candidatePolicyHash: string,
+        ) => Promise<boolean>;
         rebuildCallGraphForIndex?: () => Promise<void>;
         publishNavigationCandidate?: (candidate: { generationId: string }) => Promise<void>;
         pruneIndexedCollectionFamily?: (keepCollectionName: string) => Promise<string[]>;
@@ -780,6 +801,30 @@ function createFailedIndexingHarness(
                 _codebasePath: string,
                 observedSignature: string,
             ) => options.recordCurrentIgnoreControlSignature?.(observedSignature),
+            touchWatchedCodebase: async (
+                codebasePath: string,
+                candidatePolicy?: CandidateWatcherPolicy,
+            ) => options.touchWatchedCodebase?.(codebasePath, candidatePolicy),
+            captureWatcherBootstrap: (
+                codebasePath: string,
+                candidatePolicyHash: string,
+            ) => options.captureWatcherBootstrap?.(codebasePath, candidatePolicyHash),
+            completeFullIndexSourceHandoff: async (
+                codebasePath: string,
+                input: FullIndexSourceHandoffInput,
+                mutationLease?: RootMutationLease,
+            ) => options.completeFullIndexSourceHandoff?.(
+                codebasePath,
+                input,
+                mutationLease,
+            ) ?? false,
+            restoreActiveWatcherPolicy: async (
+                codebasePath: string,
+                candidatePolicyHash: string,
+            ) => options.restoreActiveWatcherPolicy?.(
+                codebasePath,
+                candidatePolicyHash,
+            ) ?? true,
         },
         runtimeFingerprint: RUNTIME_FINGERPRINT,
         resolveCollectionName,
@@ -797,7 +842,9 @@ function createFailedIndexingHarness(
         getContextTrackedRelativePaths: () => [],
         setIndexingStats: () => undefined,
         rebuildCallGraphForIndex: options.rebuildCallGraphForIndex ?? (async () => undefined),
-        touchWatchedCodebase: options.touchWatchedCodebase ?? (async () => undefined),
+        touchWatchedCodebase: async (codebasePath: string) => {
+            await options.touchWatchedCodebase?.(codebasePath);
+        },
         saveSnapshotIfSupported: () => undefined,
         clearIndexCompletionMarker: async () => {
             completionMarkerClearCalls += 1;
@@ -1273,7 +1320,7 @@ test("handleReindexCodebase canonicalizes once before ownership, preflight, and 
     });
 });
 
-test("background indexing treats watcher touch as best effort after proof", async () => {
+test("background indexing treats candidate watcher setup as best effort before indexing", async () => {
     await withTempRepo(async (repoPath) => {
         const harness = createFailedIndexingHarness(new Set(), {
             indexCodebase: async () => completedIndexResult(),
@@ -1430,6 +1477,80 @@ test("background reindex publishes an exact post-index source checkpoint with th
             harness.publishedPolicyBinding?.publication?.activationId ?? "",
             /^[0-9a-f-]{36}$/,
         );
+    });
+});
+
+test("completed full indexing hands the candidate watcher checkpoint to source authority before lifecycle completion", async () => {
+    await withTempRepo(async (repoPath) => {
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(path.dirname(repoPath), "watcher-handoff-leases"),
+            ownerId: "watcher-handoff-owner",
+        });
+        const acquired = coordinator.acquire(repoPath, "reindex");
+        assert.equal(acquired.acquired, true);
+        if (!acquired.acquired) return;
+
+        let candidateWatcherBound = false;
+        let capture: WatcherBootstrapCapture | undefined;
+        let handoffCalls = 0;
+        let harness!: ReturnType<typeof createFailedIndexingHarness>;
+        harness = createFailedIndexingHarness(new Set(), {
+            mutationLeaseCoordinator: coordinator,
+            touchWatchedCodebase: async (codebasePath, candidatePolicy) => {
+                if (!candidatePolicy) return;
+                assert.equal(codebasePath, repoPath);
+                assert.ok(candidatePolicy.policyHash.length > 0);
+                assert.deepEqual(candidatePolicy.effectiveIgnorePatterns, []);
+                candidateWatcherBound = true;
+            },
+            indexCodebase: async () => {
+                assert.equal(candidateWatcherBound, true);
+                return completedIndexResult();
+            },
+            captureWatcherBootstrap: (codebasePath, candidatePolicyHash) => {
+                assert.equal(codebasePath, repoPath);
+                capture = Object.freeze({
+                    canonicalRoot: repoPath,
+                    watcherGeneration: 7,
+                    observedEventEpoch: 3,
+                    candidatePolicyHash,
+                });
+                return capture;
+            },
+            completeFullIndexSourceHandoff: async (codebasePath, input, mutationLease) => {
+                handoffCalls += 1;
+                assert.equal(codebasePath, repoPath);
+                assert.equal(harness.lifecycle, "indexing");
+                assert.deepEqual(harness.publicationEvents, [
+                    "marker:completed",
+                    "policy:publish",
+                    "navigation:publish:candidate-generation",
+                ]);
+                assert.deepEqual(input.capture, capture);
+                assert.equal(input.candidatePolicyHash, capture?.candidatePolicyHash);
+                assert.equal(input.provenGeneration.collectionName, resolveCollectionName(repoPath));
+                assert.equal(input.provenGeneration.marker.indexStatus, "completed");
+                assert.equal(input.provenGeneration.marker.indexPolicyHash, capture?.candidatePolicyHash);
+                assert.ok(input.checkpointObservation.length > 0);
+                assert.deepEqual(mutationLease, acquired.lease);
+                return true;
+            },
+        });
+
+        try {
+            await harness.handler.startBackgroundIndexing(
+                repoPath,
+                true,
+                undefined,
+                acquired.lease,
+            );
+        } finally {
+            coordinator.release(acquired.lease);
+        }
+
+        assert.equal(handoffCalls, 1);
+        assert.equal(harness.lifecycle, "indexed");
+        assert.equal(harness.indexedSnapshots, 1);
     });
 });
 
@@ -1701,6 +1822,7 @@ test("background indexing rejects candidate activation when root policy controls
         const candidateControlSignature = await computeIndexPolicyControlSignature(repoPath);
         let acknowledgedSignature: string | undefined;
         let watcherTouches = 0;
+        let watcherRestores = 0;
         const harness = createFailedIndexingHarness(new Set(), {
             indexCodebase: async () => {
                 fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
@@ -1711,6 +1833,10 @@ test("background indexing rejects candidate activation when root policy controls
             },
             touchWatchedCodebase: async () => {
                 watcherTouches += 1;
+            },
+            restoreActiveWatcherPolicy: async () => {
+                watcherRestores += 1;
+                return true;
             },
         });
 
@@ -1724,7 +1850,8 @@ test("background indexing rejects candidate activation when root policy controls
         assert.deepEqual(harness.publicationEvents, ['navigation:discard:candidate-generation']);
         assert.equal(harness.publishedMarker, null);
         assert.equal(harness.indexedSnapshots, 0);
-        assert.equal(watcherTouches, 0);
+        assert.equal(watcherTouches, 1);
+        assert.equal(watcherRestores, 1);
         assert.equal(harness.failedSnapshots.length, 1);
         assert.match(harness.failedSnapshots[0]?.errorMessage ?? '', /index_policy_changed/);
     });
@@ -1745,6 +1872,7 @@ test("background indexing rejects policy drift during call-graph rebuild before 
         });
         let acknowledgedSignature: string | undefined;
         let watcherTouches = 0;
+        let watcherRestores = 0;
         const harness = createFailedIndexingHarness(new Set(), {
             indexCodebase: async () => completedIndexResult(),
             rebuildCallGraphForIndex: async () => {
@@ -1756,6 +1884,10 @@ test("background indexing rejects policy drift during call-graph rebuild before 
             },
             touchWatchedCodebase: async () => {
                 watcherTouches += 1;
+            },
+            restoreActiveWatcherPolicy: async () => {
+                watcherRestores += 1;
+                return true;
             },
         });
 
@@ -1771,7 +1903,8 @@ test("background indexing rejects policy drift during call-graph rebuild before 
         assert.deepEqual(harness.publicationEvents, ['navigation:discard:candidate-generation']);
         assert.equal(harness.publishedMarker, null);
         assert.equal(harness.indexedSnapshots, 0);
-        assert.equal(watcherTouches, 0);
+        assert.equal(watcherTouches, 1);
+        assert.equal(watcherRestores, 1);
         assert.equal(harness.failedSnapshots.length, 1);
         assert.match(harness.failedSnapshots[0]?.errorMessage ?? '', /index_policy_changed/);
     });

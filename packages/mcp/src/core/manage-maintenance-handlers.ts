@@ -14,7 +14,11 @@ import {
     type SymbolQualitySummary,
 } from "@zokizuan/satori-core";
 import type { SnapshotCorruptionWarning, SnapshotManager } from "./snapshot.js";
-import { SyncOperationError, type SyncManager } from "./sync.js";
+import {
+    SyncOperationError,
+    type PreparedReadObservationUnavailableReason,
+    type SyncManager,
+} from "./sync.js";
 import type {
     CompletionProbeDebugHint,
     TrackedRootReadiness,
@@ -58,7 +62,10 @@ type ToolTextResponse = {
 type ManageMaintenanceHandlersHost = {
     context: Pick<Context, "clearIndex"> & Partial<Pick<Context, "inspectSourceFreshnessCheckpoint">>;
     snapshotManager: Pick<SnapshotManager, "removeCodebaseCompletely" | "getLatestOperation" | "startOperation" | "transitionOperation" | "commitOperationPhase" | "saveCodebaseSnapshot">;
-    syncManager: Pick<SyncManager, "ensureFreshness">;
+    syncManager: Pick<SyncManager, "ensureFreshness"> & Partial<Pick<
+        SyncManager,
+        "getPreparedReadObservation" | "getPreparedReadDiagnostics"
+    >>;
     trackedRootReadiness: Pick<
         TrackedRootReadiness,
         "buildMissingLocalCollectionMessage"
@@ -218,6 +225,19 @@ function formatUnknownError(error: unknown): string {
 function formatActiveMutationStatusLine(lease: RootMutationLease): string {
     return `Active mutation: ${lease.action} operation=${lease.operationId} generation=${lease.generation} pid=${lease.pid} acquiredAt=${lease.acquiredAt}`;
 }
+
+const SOURCE_STATE_UNVERIFIED_REASONS = new Set<PreparedReadObservationUnavailableReason>([
+    "watcher_manager_not_started",
+    "root_not_registered",
+    "watcher_starting",
+    "root_watcher_not_active",
+    "watcher_failed",
+    "watcher_event_pending",
+    "watcher_observation_gap",
+    "source_observation_failed",
+    "checkpoint_unverified",
+    "checkpoint_observation_mismatch",
+]);
 
 export class ManageMaintenanceHandlers {
     constructor(private readonly host: ManageMaintenanceHandlersHost) {}
@@ -553,10 +573,32 @@ export class ManageMaintenanceHandlers {
                 )
                 : null;
 
+            let sourceObservationUnavailableReason: PreparedReadObservationUnavailableReason | undefined;
+            if (
+                trackedRootState.state === "ready"
+                && trackedRootState.vectorReceipt?.marker.indexStatus === "completed"
+                && typeof this.host.syncManager.getPreparedReadObservation === "function"
+                && typeof this.host.syncManager.getPreparedReadDiagnostics === "function"
+            ) {
+                const watcherDiagnostics = this.host.syncManager.getPreparedReadDiagnostics(
+                    trackedRootState.root.path,
+                );
+                const sourceObservation = this.host.syncManager.getPreparedReadObservation(
+                    trackedRootState.root.path,
+                );
+                if (
+                    watcherDiagnostics.configured
+                    && !sourceObservation.available
+                    && SOURCE_STATE_UNVERIFIED_REASONS.has(sourceObservation.reason)
+                ) {
+                    sourceObservationUnavailableReason = sourceObservation.reason;
+                }
+            }
+
             let statusMessage = "";
             let envelopePath = absolutePath;
             let envelopeStatus: ManageIndexStatus = "ok";
-            let envelopeReason: ManageIndexReason | undefined;
+            let envelopeReason: ManageIndexReason | "source_state_unverified" | undefined;
             let envelopeHints: Record<string, unknown> | undefined;
             let proofDebugHint: CompletionProbeDebugHint | undefined;
             let envelopeMessage: string | undefined;
@@ -681,6 +723,22 @@ export class ManageMaintenanceHandlers {
                         statusMessage = `❌ Codebase '${trackedRootState.root.path}' is not indexed. Call manage_index with {"action":"create","path":"${trackedRootState.root.path}"} to index it first.`;
                         break;
                 }
+            }
+
+            if (trackedRootState.state === "ready" && sourceObservationUnavailableReason) {
+                envelopePath = trackedRootState.root.path;
+                envelopeStatus = "not_ready";
+                envelopeReason = "source_state_unverified";
+                envelopeHints = {
+                    ...(envelopeHints || {}),
+                    sync: this.host.buildSyncHint(trackedRootState.root.path),
+                    sourceFreshness: {
+                        status: "unverified",
+                        reason: sourceObservationUnavailableReason,
+                        action: "Run manage_index sync to establish current-source authority for the durable generation.",
+                    },
+                };
+                statusMessage = `⏳ Codebase '${trackedRootState.root.path}' has a durable completed generation, but its current source state is unverified (${sourceObservationUnavailableReason}). Run manage_index with {"action":"sync","path":"${trackedRootState.root.path}"} before search or navigation.`;
             }
 
             const warnings: WarningCode[] = [];

@@ -81,6 +81,25 @@ export type WatcherEventReason =
     | 'ignore_rules_changed'
     | 'directory_changed';
 
+export type CandidateWatcherPolicy = Readonly<{
+    policyHash: string;
+    effectiveIgnorePatterns: readonly string[];
+}>;
+
+export type WatcherBootstrapCapture = Readonly<{
+    canonicalRoot: string;
+    watcherGeneration: number;
+    observedEventEpoch: number;
+    candidatePolicyHash: string;
+}>;
+
+export type FullIndexSourceHandoffInput = Readonly<{
+    capture: WatcherBootstrapCapture;
+    candidatePolicyHash: string;
+    checkpointObservation: string;
+    provenGeneration: ProvenVectorGenerationReceipt;
+}>;
+
 export interface WatcherObservationSnapshot {
     observedEventEpoch: number;
     comparedThroughEventEpoch: number;
@@ -282,6 +301,9 @@ export class SyncManager {
     private watcherLifecycleStates: Map<string, WatcherLifecycleState> = new Map();
     private watcherErrorCodes: Map<string, string> = new Map();
     private watcherIgnoreMatchers: Map<string, ReturnType<typeof ignore>> = new Map();
+    private watcherCandidatePolicies: Map<string, CandidateWatcherPolicy> = new Map();
+    private watcherGenerations: Map<string, number> = new Map();
+    private nextWatcherGeneration = 0;
     private ignoreRulesVersions: Map<string, number> = new Map();
     private activeIgnoreReconciles: Map<string, Promise<FreshnessDecision>> = new Map();
     private freshnessEpochs: Map<string, number> = new Map();
@@ -369,7 +391,7 @@ export class SyncManager {
         reason: WatcherEventReason,
     ): number | null {
         const root = this.canonicalWatcherRoot(codebasePath);
-        if (!this.watchEnabled || !this.watcherModeStarted || !this.canScheduleWatchSync(root)) {
+        if (!this.watchEnabled || !this.watcherModeStarted || !this.canObserveRoot(root)) {
             return null;
         }
         const observation = this.ensureWatcherObservation(root);
@@ -422,6 +444,133 @@ export class SyncManager {
         const observation = this.watcherObservations.get(this.canonicalWatcherRoot(codebasePath));
         if (!observation) return undefined;
         return observation.observedEventEpoch;
+    }
+
+    /**
+     * Captures the exact watcher observation that a completed full-index
+     * candidate may later hand off to the prepared-source authority.
+     */
+    public captureWatcherBootstrap(
+        codebasePath: string,
+        candidatePolicyHash: string,
+    ): WatcherBootstrapCapture | undefined {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const observation = this.watcherObservations.get(root);
+        const watcherGeneration = this.watcherGenerations.get(root);
+        const candidatePolicy = this.watcherCandidatePolicies.get(root);
+        if (
+            !this.watchEnabled
+            || !this.watcherModeStarted
+            || !this.watchedCodebases.has(root)
+            || !this.canObserveRoot(root)
+            || !this.watchers.has(root)
+            || this.watcherLifecycleStates.get(root) !== 'ready'
+            || observation?.coverage !== 'ready'
+            || watcherGeneration === undefined
+            || candidatePolicy?.policyHash !== candidatePolicyHash
+        ) {
+            return undefined;
+        }
+        return Object.freeze({
+            canonicalRoot: root,
+            watcherGeneration,
+            observedEventEpoch: observation.observedEventEpoch,
+            candidatePolicyHash,
+        });
+    }
+
+    /**
+     * Binds an already-proven completed generation/checkpoint to the watcher
+     * observation captured for the same candidate. This deliberately does not
+     * use the ordinary snapshot-status-gated checkpoint validator: the full
+     * index lifecycle is still marked indexing until this handoff succeeds or
+     * fails closed.
+     */
+    public async completeFullIndexSourceHandoff(
+        codebasePath: string,
+        input: FullIndexSourceHandoffInput,
+        mutationLease?: RootMutationLease,
+    ): Promise<boolean> {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        this.assertMutationCurrent(mutationLease);
+        if (
+            input.capture.canonicalRoot !== root
+            || input.capture.candidatePolicyHash !== input.candidatePolicyHash
+            || input.checkpointObservation.length === 0
+            || input.provenGeneration.collectionName.length === 0
+            || input.provenGeneration.policy.canonicalRoot !== root
+            || input.provenGeneration.marker.indexStatus !== 'completed'
+            || input.provenGeneration.marker.indexPolicyHash !== input.candidatePolicyHash
+        ) {
+            return false;
+        }
+
+        const matchesProvenGeneration = (
+            current: ProvenVectorGenerationReceipt,
+        ): boolean => current.collectionName === input.provenGeneration.collectionName
+            && current.marker.runId === input.provenGeneration.marker.runId
+            && current.marker.indexStatus === 'completed'
+            && current.marker.indexedFiles === input.provenGeneration.marker.indexedFiles
+            && current.marker.totalChunks === input.provenGeneration.marker.totalChunks
+            && current.marker.indexPolicyHash === input.candidatePolicyHash
+            && current.policyDocumentDigest === input.provenGeneration.policyDocumentDigest
+            && current.policy.canonicalRoot === input.provenGeneration.policy.canonicalRoot
+            && current.policy.policyHash === input.provenGeneration.policy.policyHash
+            && current.policy.controlSignature === input.provenGeneration.policy.controlSignature
+            && current.exactPayloadCount === input.provenGeneration.exactPayloadCount
+            && current.observations.profileFileToken === input.provenGeneration.observations.profileFileToken
+            && current.observations.policyFileToken === input.provenGeneration.observations.policyFileToken;
+
+        const hasCurrentWatcherCapture = (): boolean => {
+            const observation = this.watcherObservations.get(root);
+            return this.watchEnabled
+                && this.watcherModeStarted
+                && this.watchedCodebases.has(root)
+                && this.watchers.has(root)
+                && this.watcherLifecycleStates.get(root) === 'ready'
+                && observation?.coverage === 'ready'
+                && observation.observedEventEpoch >= input.capture.observedEventEpoch
+                && this.watcherGenerations.get(root) === input.capture.watcherGeneration
+                && this.watcherCandidatePolicies.get(root)?.policyHash === input.candidatePolicyHash;
+        };
+
+        if (!hasCurrentWatcherCapture()) return false;
+
+        try {
+            const currentGeneration = await this.context.proveVectorGeneration(root);
+            if (!currentGeneration || !matchesProvenGeneration(currentGeneration)) {
+                return false;
+            }
+
+            const currentCheckpoint = await this.context.inspectSourceFreshnessCheckpoint(
+                root,
+                input.provenGeneration.collectionName,
+                input.provenGeneration,
+            );
+            if (
+                currentCheckpoint.status !== 'valid'
+                || currentCheckpoint.observationToken !== input.checkpointObservation
+                || (
+                    currentCheckpoint.generationReceipt !== undefined
+                    && !matchesProvenGeneration(currentCheckpoint.generationReceipt)
+                )
+            ) {
+                return false;
+            }
+
+            const registeredObservation = this.context
+                .getRegisteredSourceFreshnessCheckpointObservation(root);
+            if (registeredObservation !== input.checkpointObservation) return false;
+        } catch {
+            return false;
+        }
+
+        this.assertMutationCurrent(mutationLease);
+        if (!hasCurrentWatcherCapture()) return false;
+        this.sourceCheckpointStatuses.set(root, 'valid');
+        this.sourceCheckpointObservations.set(root, input.checkpointObservation);
+        this.coverWatcherObservation(root, input.capture.observedEventEpoch);
+        return this.getPreparedReadObservation(root).available;
     }
 
     private hasPendingWatcherObservation(codebasePath: string): boolean {
@@ -1273,7 +1422,8 @@ export class SyncManager {
         joinRequest: CrossProcessSyncJoinRequest = {},
         preparedVectorReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<SyncExecutionOutcome> {
-        if (this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexing') {
+        if (!this.canRunFreshnessMutation(codebasePath)
+            && this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexing') {
             console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because indexing is active.`);
             return { mode: 'skipped_indexing' };
         }
@@ -1809,7 +1959,12 @@ export class SyncManager {
         return DEFAULT_WATCH_DEBOUNCE_MS;
     }
 
-    private canScheduleWatchSync(codebasePath: string): boolean {
+    private canObserveRoot(codebasePath: string): boolean {
+        const status = this.snapshotManager.getCodebaseStatus(codebasePath);
+        return status === 'indexing' || status === 'indexed' || status === 'sync_completed';
+    }
+
+    private canRunFreshnessMutation(codebasePath: string): boolean {
         const status = this.snapshotManager.getCodebaseStatus(codebasePath);
         return status === 'indexed' || status === 'sync_completed';
     }
@@ -1856,10 +2011,15 @@ export class SyncManager {
         }
     }
 
-    private async buildIgnoreMatcherForCodebase(codebasePath: string): Promise<ReturnType<typeof ignore>> {
+    private async buildIgnoreMatcherForCodebase(
+        codebasePath: string,
+        effectiveIgnorePatterns?: readonly string[],
+    ): Promise<ReturnType<typeof ignore>> {
         const matcher = ignore();
         // Context is the single source of truth for effective ignore rules.
-        const basePatterns = this.context.getActiveIgnorePatterns?.(codebasePath) || [];
+        const basePatterns = effectiveIgnorePatterns
+            ?? this.context.getActiveIgnorePatterns?.(codebasePath)
+            ?? [];
         matcher.add([...new Set(basePatterns)]);
         return matcher;
     }
@@ -1958,14 +2118,52 @@ export class SyncManager {
         await this.unregisterCodebaseWatcher(codebasePath);
     }
 
-    public async touchWatchedCodebase(codebasePath: string): Promise<void> {
+    public async touchWatchedCodebase(
+        codebasePath: string,
+        candidatePolicy?: CandidateWatcherPolicy,
+    ): Promise<void> {
         codebasePath = this.canonicalWatcherRoot(codebasePath);
         this.watchedCodebases.add(codebasePath);
         this.ensureWatcherObservation(codebasePath, this.watchEnabled ? 'starting' : 'disabled');
+        if (candidatePolicy) {
+            const previousCandidatePolicy = this.watcherCandidatePolicies.get(codebasePath);
+            this.watcherCandidatePolicies.set(codebasePath, {
+                policyHash: candidatePolicy.policyHash,
+                effectiveIgnorePatterns: Object.freeze([...candidatePolicy.effectiveIgnorePatterns]),
+            });
+            if (
+                this.watchers.has(codebasePath)
+                && previousCandidatePolicy?.policyHash !== candidatePolicy.policyHash
+            ) {
+                await this.unregisterCodebaseWatcher(codebasePath);
+            }
+        }
         if (!this.watchEnabled || !this.watcherModeStarted) {
             return;
         }
         await this.refreshWatchersFromWatchList();
+    }
+
+    /**
+     * Rebinds observation to the active published policy after a candidate is
+     * rejected. The replacement gets a new watcher generation and retains the
+     * existing observation gap until an ordinary freshness proof covers it.
+     */
+    public async restoreActiveWatcherPolicy(
+        codebasePath: string,
+        candidatePolicyHash: string,
+    ): Promise<boolean> {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        if (this.watcherCandidatePolicies.get(root)?.policyHash !== candidatePolicyHash) {
+            return false;
+        }
+
+        this.watcherCandidatePolicies.delete(root);
+        await this.unregisterCodebaseWatcher(root);
+        if (this.watchEnabled && this.watcherModeStarted && this.canObserveRoot(root)) {
+            await this.refreshWatchersFromWatchList();
+        }
+        return true;
     }
 
     public async unwatchCodebase(codebasePath: string): Promise<void> {
@@ -1978,6 +2176,8 @@ export class SyncManager {
         this.watcherObservations.delete(codebasePath);
         this.sourceCheckpointObservations.delete(codebasePath);
         this.sourceCheckpointStatuses.delete(codebasePath);
+        this.watcherCandidatePolicies.delete(codebasePath);
+        this.watcherGenerations.delete(codebasePath);
         this.activeIgnoreReconciles.delete(codebasePath);
         this.watcherLifecycleStates.delete(codebasePath);
         this.watcherErrorCodes.delete(codebasePath);
@@ -1989,7 +2189,7 @@ export class SyncManager {
             return;
         }
 
-        if (!this.canScheduleWatchSync(codebasePath)) {
+        if (!this.canObserveRoot(codebasePath)) {
             return;
         }
 
@@ -2008,9 +2208,13 @@ export class SyncManager {
 
         let watcher: FSWatcher;
         try {
+            const candidatePolicy = this.watcherCandidatePolicies.get(codebasePath);
             this.watcherIgnoreMatchers.set(
                 codebasePath,
-                await this.buildIgnoreMatcherForCodebase(codebasePath)
+                await this.buildIgnoreMatcherForCodebase(
+                    codebasePath,
+                    candidatePolicy?.effectiveIgnorePatterns,
+                )
             );
             watcher = chokidar.watch(codebasePath, {
                 persistent: true,
@@ -2041,6 +2245,7 @@ export class SyncManager {
 
         this.watcherErrorCodes.delete(codebasePath);
         this.setWatcherCoverage(codebasePath, 'starting');
+        this.watcherGenerations.set(codebasePath, ++this.nextWatcherGeneration);
         this.watchers.set(codebasePath, watcher);
         watcher
             .on('ready', () => {
@@ -2086,7 +2291,7 @@ export class SyncManager {
         }
 
         const watchableCodebases = new Set(
-            Array.from(this.watchedCodebases).filter((codebasePath) => this.canScheduleWatchSync(codebasePath))
+            Array.from(this.watchedCodebases).filter((codebasePath) => this.canObserveRoot(codebasePath))
         );
 
         for (const watchedPath of Array.from(this.watchers.keys())) {
@@ -2123,6 +2328,8 @@ export class SyncManager {
         }
 
         this.watcherIgnoreMatchers.clear();
+        this.watcherCandidatePolicies.clear();
+        this.watcherGenerations.clear();
         this.lastSyncTimes.clear();
         this.ignoreRulesVersions.clear();
         this.freshnessEpochs.clear();

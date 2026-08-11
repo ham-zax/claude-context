@@ -18,7 +18,7 @@ import type {
     SourceFreshnessCheckpointEvidence,
 } from "@zokizuan/satori-core";
 import type { SnapshotManager } from "./snapshot.js";
-import type { SyncManager } from "./sync.js";
+import type { SyncManager, WatcherBootstrapCapture } from "./sync.js";
 import type { ManageIndexAction } from "./manage-types.js";
 import type { CompletionProofValidationResult } from "./completion-proof.js";
 import {
@@ -1476,6 +1476,7 @@ export class ManageIndexingHandlers {
         let fullIndexCheckpointEvidence:
             | Extract<SourceFreshnessCheckpointEvidence, { status: "valid" }>
             | undefined;
+        let watcherBootstrapCapture: WatcherBootstrapCapture | undefined;
         let fullIndexCheckpointCommitted = false;
         let candidateAuthorityCommitted = false;
         let publishedIndexStats: {
@@ -1494,6 +1495,17 @@ export class ManageIndexingHandlers {
                 this.host.mutationLeaseCoordinator.publishWhileCurrent(mutationLease, publish);
             }
             : undefined;
+        const restoreActiveWatcherAfterRejectedCandidate = async (): Promise<void> => {
+            if (!candidatePolicy) return;
+            try {
+                await this.host.syncManager.restoreActiveWatcherPolicy(
+                    absolutePath,
+                    candidatePolicy.policyHash,
+                );
+            } catch (watcherError) {
+                console.warn(`[BACKGROUND-INDEX] Failed to restore active watcher policy for '${absolutePath}': ${formatUnknownError(watcherError)}`);
+            }
+        };
         const persistBackgroundPhase = (phase: IndexOperationPhase, mutateSnapshot?: () => void): void => {
             if (!mutationLease) {
                 mutateSnapshot?.();
@@ -1609,6 +1621,14 @@ export class ManageIndexingHandlers {
                 ? await this.host.context.resolveIndexPolicyForReindex(absolutePath, policyUpdate)
                 : await this.host.context.resolveIndexPolicyForCodebase(absolutePath, policyUpdate);
             console.log(`[BACKGROUND-INDEX] Using observed index profile '${candidatePolicy.profile}'.`);
+            try {
+                await this.host.syncManager.touchWatchedCodebase(absolutePath, {
+                    policyHash: candidatePolicy.policyHash,
+                    effectiveIgnorePatterns: candidatePolicy.effectiveIgnorePatterns,
+                });
+            } catch (watcherError) {
+                console.warn(`[BACKGROUND-INDEX] Failed to establish candidate watcher for '${absolutePath}': ${formatUnknownError(watcherError)}`);
+            }
             candidateMarkerRunId = crypto.randomUUID();
             const { FileSynchronizer } = await import("@zokizuan/satori-core");
             const ignorePatterns = candidatePolicy.effectiveIgnorePatterns;
@@ -1688,6 +1708,10 @@ export class ManageIndexingHandlers {
                 status: stats.status,
             };
             if (stats.status === "completed") {
+                watcherBootstrapCapture = this.host.syncManager.captureWatcherBootstrap(
+                    absolutePath,
+                    candidatePolicy.policyHash,
+                );
                 // The checkpoint is authoritative only when it describes the exact
                 // source bytes consumed by this candidate generation.
                 fullIndexCheckpoint = await synchronizer.prepareChanges({ forceFullHash: true });
@@ -1756,6 +1780,7 @@ export class ManageIndexingHandlers {
                     indexedFiles: previousCompleteGeneration.indexedFiles,
                     totalChunks: previousCompleteGeneration.totalChunks,
                 });
+                await restoreActiveWatcherAfterRejectedCandidate();
                 console.warn(`[BACKGROUND-INDEX] Candidate for '${absolutePath}' reached the chunk limit; preserved previous complete collection '${previousCompleteGeneration.collectionName}'.`);
                 return;
             }
@@ -1820,11 +1845,6 @@ export class ManageIndexingHandlers {
             }
             if (mutationLease) {
                 this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
-            }
-            try {
-                await this.host.touchWatchedCodebase(absolutePath);
-            } catch (watcherError) {
-                console.warn(`[BACKGROUND-INDEX] Failed to refresh watcher for '${absolutePath}' after index proof: ${formatUnknownError(watcherError)}`);
             }
             if (stats.status === "completed" && stats.navigationCandidate) {
                 if (!fullIndexCheckpointEvidence || !candidateMarkerRunId) {
@@ -1896,6 +1916,25 @@ export class ManageIndexingHandlers {
                     throw new Error(`Full index checkpoint was not committed for '${absolutePath}'.`);
                 }
                 this.host.context.registerSynchronizer(this.host.resolveCollectionName(absolutePath), synchronizer);
+                if (
+                    watcherBootstrapCapture
+                    && fullIndexCheckpointEvidence
+                    && expectedCandidateAuthority
+                ) {
+                    const sourceHandoffCompleted = await this.host.syncManager.completeFullIndexSourceHandoff(
+                        absolutePath,
+                        {
+                            capture: watcherBootstrapCapture,
+                            candidatePolicyHash: candidatePolicy.policyHash,
+                            checkpointObservation: fullIndexCheckpointEvidence.observationToken,
+                            provenGeneration: expectedCandidateAuthority,
+                        },
+                        mutationLease,
+                    );
+                    if (!sourceHandoffCompleted) {
+                        console.warn(`[BACKGROUND-INDEX] Completed generation for '${absolutePath}' is durable, but current source observation remains unverified.`);
+                    }
+                }
             }
             if (stats.status === "completed") {
                 await this.host.syncManager.recordObservedIgnoreControlSignature(
@@ -2105,6 +2144,7 @@ export class ManageIndexingHandlers {
                 }
             }
             assertMutationCurrent?.();
+            await restoreActiveWatcherAfterRejectedCandidate();
 
             try {
                 persistBackgroundPhase("failed", () => {

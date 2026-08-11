@@ -49,7 +49,37 @@ type SyncManagerTestAccess = {
     watcherIgnoreMatchers: Map<string, unknown>;
     shouldIgnoreWatchPath(codebasePath: string, filePath: string): boolean;
     isIgnoreRuleControlFile(relativePath: string): boolean;
-    touchWatchedCodebase(codebasePath: string): Promise<void>;
+    touchWatchedCodebase(
+        codebasePath: string,
+        candidatePolicy?: { policyHash: string; effectiveIgnorePatterns: readonly string[] },
+    ): Promise<void>;
+    restoreActiveWatcherPolicy(
+        codebasePath: string,
+        candidatePolicyHash: string,
+    ): Promise<boolean>;
+    captureWatcherBootstrap(
+        codebasePath: string,
+        candidatePolicyHash: string,
+    ): {
+        canonicalRoot: string;
+        watcherGeneration: number;
+        observedEventEpoch: number;
+        candidatePolicyHash: string;
+    } | undefined;
+    completeFullIndexSourceHandoff(
+        codebasePath: string,
+        input: {
+            capture: {
+                canonicalRoot: string;
+                watcherGeneration: number;
+                observedEventEpoch: number;
+                candidatePolicyHash: string;
+            };
+            candidatePolicyHash: string;
+            checkpointObservation: string;
+            provenGeneration: Record<string, unknown>;
+        },
+    ): Promise<boolean>;
     unwatchCodebase(codebasePath: string): Promise<void>;
     lastSyncTimes: Map<string, number>;
     ignoreRulesVersions: Map<string, number>;
@@ -189,6 +219,108 @@ function createContext() {
             return { added: 0, removed: 0, modified: 0 };
         }
     };
+}
+
+function buildProvenVectorGeneration(
+    codebasePath: string,
+    policyHash: string,
+    collectionName = 'generation-candidate-v1',
+) {
+    return {
+        collectionName,
+        marker: {
+            runId: 'marker-candidate-v1',
+            indexStatus: 'completed' as const,
+            indexedFiles: 1,
+            totalChunks: 1,
+            indexPolicyHash: policyHash,
+        },
+        policy: {
+            canonicalRoot: path.resolve(codebasePath),
+            policyHash,
+            controlSignature: 'v1:candidate-control-signature',
+        },
+        policyDocumentDigest: 'a'.repeat(64),
+        exactPayloadCount: 1,
+        observations: {
+            profileFileToken: null,
+            policyFileToken: 'candidate-policy-file-token',
+        },
+    };
+}
+
+async function withCandidateWatcher<T>(
+    options: {
+        activeIgnorePatterns?: readonly string[];
+        candidateIgnorePatterns?: readonly string[];
+        beforeStart?: (codebasePath: string) => void;
+    },
+    run: (fixture: {
+        codebasePath: string;
+        manager: SyncManager;
+        access: SyncManagerTestAccess;
+        checkpointObservation: string;
+        provenGeneration: ReturnType<typeof buildProvenVectorGeneration>;
+        mutationCalls: () => number;
+    }) => Promise<T>,
+): Promise<T> {
+    const codebasePath = createTempDir();
+    const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexing']]);
+    const checkpointObservation = 'checkpoint-candidate-v1';
+    const provenGeneration = buildProvenVectorGeneration(codebasePath, 'candidate-policy-v1');
+    let mutationCalls = 0;
+    const context = {
+        getActiveIgnorePatterns() {
+            return [...(options.activeIgnorePatterns ?? [])];
+        },
+        getRegisteredSourceFreshnessCheckpointObservation() {
+            return checkpointObservation;
+        },
+        async proveVectorGeneration() {
+            return provenGeneration;
+        },
+        async inspectSourceFreshnessCheckpoint() {
+            return {
+                status: 'valid' as const,
+                observationToken: checkpointObservation,
+                merkleRoot: 'merkle-candidate-v1',
+                documentDigest: 'document-candidate-v1',
+            };
+        },
+        async reindexByChange() {
+            mutationCalls += 1;
+            return { added: 0, removed: 0, modified: 0 };
+        },
+    };
+    const manager = new SyncManager(
+        context as unknown as SyncContext,
+        createSnapshot(statusByPath) as unknown as SyncSnapshotManager,
+        { watchEnabled: true },
+    );
+    const access = manager as unknown as SyncManagerTestAccess;
+
+    try {
+        options.beforeStart?.(codebasePath);
+        await manager.startWatcherMode();
+        await access.touchWatchedCodebase(codebasePath, {
+            policyHash: 'candidate-policy-v1',
+            effectiveIgnorePatterns: options.candidateIgnorePatterns ?? [],
+        });
+        while (access.watcherLifecycleStates.get(codebasePath) !== 'ready') {
+            await wait(5);
+        }
+        return await run({
+            codebasePath,
+            manager,
+            access,
+            checkpointObservation,
+            provenGeneration,
+            mutationCalls: () => mutationCalls,
+        });
+    } finally {
+        await manager.stopWatcherMode();
+        fs.rmSync(codebasePath, { recursive: true, force: true });
+    }
 }
 
 function installAcceptedPolicyReconciliation(context: Record<string, unknown>): void {
@@ -401,7 +533,7 @@ test('background sync skips recent roots without lease churn and compares expire
     }
 });
 
-test('watcher events are rejected for non-searchable statuses', async () => {
+test('watcher events are observed during indexing without scheduling freshness mutation', async () => {
     const codebasePath = createTempDir();
     const statusByPath = new Map<string, CodebaseStatus>([[codebasePath, 'indexing']]);
     const context = createContext();
@@ -414,9 +546,10 @@ test('watcher events are rejected for non-searchable statuses', async () => {
     (manager as unknown as SyncManagerTestAccess).watcherModeStarted = true;
     const epoch = manager.recordWatcherEvent(codebasePath, 'source_changed');
 
-    assert.equal(epoch, null);
+    assert.equal(epoch, 1);
     assert.equal(context.calls, 0);
-    assert.equal(manager.getWatcherObservation(codebasePath).observedEventEpoch, 0);
+    assert.equal(manager.getWatcherObservation(codebasePath).observedEventEpoch, 1);
+    assert.equal(manager.getWatcherObservation(codebasePath).pending, true);
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
 });
@@ -2676,6 +2809,174 @@ test('registering watcher contains ignore matcher failures', async () => {
 
     await manager.stopWatcherMode();
     fs.rmSync(codebasePath, { recursive: true, force: true });
+});
+
+test('candidate-bound watcher observes paths included by the candidate policy', async () => {
+    await withCandidateWatcher({
+        activeIgnorePatterns: ['src/generated/**'],
+        beforeStart(codebasePath) {
+            fs.mkdirSync(path.join(codebasePath, 'src', 'generated'), { recursive: true });
+        },
+    }, async ({ codebasePath, manager, mutationCalls }) => {
+        const observedBeforeWrite = manager.getWatcherObservation(codebasePath).observedEventEpoch;
+        fs.writeFileSync(path.join(codebasePath, 'src', 'generated', 'included.ts'), 'export const included = true;\n');
+        const deadline = Date.now() + 2_000;
+        while (manager.getWatcherObservation(codebasePath).observedEventEpoch <= observedBeforeWrite) {
+            assert.ok(Date.now() < deadline, 'Expected candidate-bound watcher to observe the included path.');
+            await wait(10);
+        }
+
+        const observation = manager.getWatcherObservation(codebasePath);
+        assert.ok(observation.observedEventEpoch > observedBeforeWrite);
+        assert.equal(observation.pending, true);
+        assert.equal(mutationCalls(), 0);
+    });
+});
+
+test('candidate watcher capture binds the ready generation and event epoch to its policy', async () => {
+    await withCandidateWatcher({}, async ({ codebasePath, access }) => {
+        const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.deepEqual(capture, {
+            canonicalRoot: path.resolve(codebasePath),
+            watcherGeneration: 1,
+            observedEventEpoch: 0,
+            candidatePolicyHash: 'candidate-policy-v1',
+        });
+    });
+});
+
+test('candidate watcher capture fails closed while the watcher is starting or failed', async () => {
+    await withCandidateWatcher({}, async ({ codebasePath, access }) => {
+        access.setWatcherCoverage(codebasePath, 'starting');
+        assert.equal(
+            access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1'),
+            undefined,
+        );
+        access.setWatcherCoverage(codebasePath, 'failed', 'WATCHER_FAILED');
+        assert.equal(
+            access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1'),
+            undefined,
+        );
+    });
+});
+
+test('failed candidate observation restores the active ignore policy with a new watcher generation', async () => {
+    await withCandidateWatcher({ activeIgnorePatterns: ['src/generated/**'] }, async ({
+        codebasePath,
+        access,
+    }) => {
+        const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.ok(capture);
+        assert.equal(
+            access.shouldIgnoreWatchPath(codebasePath, path.join(codebasePath, 'src/generated/file.ts')),
+            false,
+        );
+
+        assert.equal(
+            await access.restoreActiveWatcherPolicy(codebasePath, 'candidate-policy-v1'),
+            true,
+        );
+        while (access.watcherLifecycleStates.get(codebasePath) !== 'ready') {
+            await wait(5);
+        }
+
+        assert.equal(
+            access.shouldIgnoreWatchPath(codebasePath, path.join(codebasePath, 'src/generated/file.ts')),
+            true,
+        );
+        const restoredCapture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.equal(restoredCapture, undefined);
+    });
+});
+
+test('full-index source handoff binds the exact checkpoint and makes prepared reads available', async () => {
+    await withCandidateWatcher({}, async ({
+        codebasePath,
+        manager,
+        access,
+        checkpointObservation,
+        provenGeneration,
+    }) => {
+        const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.ok(capture);
+
+        const handedOff = await access.completeFullIndexSourceHandoff(codebasePath, {
+            capture,
+            candidatePolicyHash: 'candidate-policy-v1',
+            checkpointObservation,
+            provenGeneration,
+        });
+
+        assert.equal(handedOff, true);
+        assert.deepEqual(manager.getPreparedReadObservation(codebasePath), {
+            available: true,
+            observation: {
+                freshnessEpoch: 0,
+                watcherState: 'ready',
+                checkpointObservation,
+            },
+        });
+    });
+});
+
+test('full-index source handoff leaves an event after capture pending', async () => {
+    await withCandidateWatcher({}, async ({
+        codebasePath,
+        manager,
+        access,
+        checkpointObservation,
+        provenGeneration,
+    }) => {
+        const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.ok(capture);
+        assert.equal(manager.recordWatcherEvent(codebasePath, 'source_changed'), 1);
+
+        const handedOff = await access.completeFullIndexSourceHandoff(codebasePath, {
+            capture,
+            candidatePolicyHash: 'candidate-policy-v1',
+            checkpointObservation,
+            provenGeneration,
+        });
+
+        assert.equal(handedOff, false);
+        assert.deepEqual(manager.getPreparedReadObservation(codebasePath), {
+            available: false,
+            reason: 'watcher_event_pending',
+            freshnessEpoch: 1,
+            watcherState: 'ready',
+        });
+    });
+});
+
+test('full-index source handoff fails closed when the watcher generation is replaced', async () => {
+    await withCandidateWatcher({}, async ({
+        codebasePath,
+        manager,
+        access,
+        checkpointObservation,
+        provenGeneration,
+    }) => {
+        const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.ok(capture);
+
+        await access.touchWatchedCodebase(codebasePath, {
+            policyHash: 'candidate-policy-v2',
+            effectiveIgnorePatterns: [],
+        });
+        while (access.watcherLifecycleStates.get(codebasePath) !== 'ready') {
+            await wait(5);
+        }
+
+        const handedOff = await access.completeFullIndexSourceHandoff(codebasePath, {
+            capture,
+            candidatePolicyHash: 'candidate-policy-v1',
+            checkpointObservation,
+            provenGeneration,
+        });
+
+        assert.equal(handedOff, false);
+        assert.notEqual(manager.getPreparedReadObservation(codebasePath).available, true);
+    });
 });
 
 test('startWatcherMode does not automatically watch every indexed codebase from snapshot state', async () => {
