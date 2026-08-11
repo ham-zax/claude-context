@@ -93,6 +93,8 @@ type QueuedRerank = {
 
 type WorkerState = "loading" | "ready" | "unhealthy" | "closed";
 
+const MAXIMUM_BOOTSTRAP_ATTEMPTS = 2;
+
 export type LateOnRerankerConfig = Readonly<{
     modelDirectory: string;
     profileId?: LateOnRuntimeProfileId;
@@ -316,6 +318,11 @@ export class LateOnReranker implements Reranker {
     private queued: QueuedRerank | null = null;
     private termination: Promise<void> | null = null;
     private closed = false;
+    private hasReachedReady = false;
+    private bootstrapAttemptCount = 0;
+    private initialBootstrapFailure?: LateOnOperationalError;
+    private lastBootstrapFailure?: LateOnOperationalError;
+    private terminalBootstrapFailure?: LateOnOperationalError;
 
     constructor(config: LateOnRerankerConfig) {
         this.profile = loadLateOnRuntimeProfile(
@@ -395,7 +402,21 @@ export class LateOnReranker implements Reranker {
         pendingWorkerRequests: number;
         readinessTimerActive: boolean;
         terminationActive: boolean;
+        bootstrap: Readonly<{
+            attemptCount: number;
+            initialFailureReason?: LateOnOperationalReason;
+            lastFailureReason?: LateOnOperationalReason;
+        }>;
     }> {
+        const bootstrap = Object.freeze({
+            attemptCount: this.bootstrapAttemptCount,
+            ...(this.initialBootstrapFailure
+                ? { initialFailureReason: this.initialBootstrapFailure.reason }
+                : {}),
+            ...(this.lastBootstrapFailure
+                ? { lastFailureReason: this.lastBootstrapFailure.reason }
+                : {}),
+        });
         return Object.freeze({
             state: this.workerState,
             closed: this.closed,
@@ -406,6 +427,7 @@ export class LateOnReranker implements Reranker {
             pendingWorkerRequests: this.pending.size,
             readinessTimerActive: this.readinessTimer !== undefined,
             terminationActive: this.termination !== null,
+            bootstrap,
         });
     }
 
@@ -445,6 +467,9 @@ export class LateOnReranker implements Reranker {
             await this.readinessPromise;
         }
         if (this.workerState !== "ready") {
+            if (this.terminalBootstrapFailure) {
+                throw this.terminalBootstrapFailure;
+            }
             throw operationalError(
                 "lateon_not_ready",
                 `LateOn profile ${this.getProfileId()} is not ready.`,
@@ -581,7 +606,11 @@ export class LateOnReranker implements Reranker {
     private startWorker(): void {
         if (this.closed || this.worker || this.termination) return;
         this.workerState = "loading";
-        this.readinessPromise = this.createReadinessPromise();
+        if (this.hasReachedReady) {
+            this.readinessPromise = this.createReadinessPromise();
+        } else {
+            this.bootstrapAttemptCount += 1;
+        }
         const worker = fork(this.workerPath, [], {
             stdio: ["ignore", "ignore", "ignore", "ipc"],
             execArgv: process.execArgv.filter(
@@ -591,7 +620,7 @@ export class LateOnReranker implements Reranker {
         this.worker = worker;
         const fail = (error: LateOnOperationalError): void => {
             if (this.worker !== worker) return;
-            void this.stopWorker(error, this.workerState === "ready");
+            this.failWorker(error, true);
         };
         worker.once("error", (error) => fail(operationalError(
             "lateon_worker_failure",
@@ -627,10 +656,10 @@ export class LateOnReranker implements Reranker {
 
     private handleWorkerMessage(worker: ChildProcess, message: unknown): void {
         if (!message || typeof message !== "object" || !("type" in message)) {
-            void this.stopWorker(operationalError(
+            this.failWorker(operationalError(
                 "lateon_invalid_output",
                 "LateOn worker emitted a malformed message.",
-            ), this.workerState === "ready");
+            ), false);
             return;
         }
         const response = message as Record<string, unknown> & {
@@ -642,10 +671,10 @@ export class LateOnReranker implements Reranker {
             && response.type !== "result"
             && response.type !== "error"
         ) {
-            void this.stopWorker(operationalError(
+            this.failWorker(operationalError(
                 "lateon_invalid_output",
                 "LateOn worker emitted an unsupported message.",
-            ), this.workerState === "ready");
+            ), false);
             return;
         }
         if (response.type === "ready") {
@@ -655,7 +684,7 @@ export class LateOnReranker implements Reranker {
                 || response.projectionVersion !== this.profile.identity.projectionVersion
                 || response.candidateDepth !== this.profile.inference.candidateDepth
             ) {
-                void this.stopWorker(operationalError(
+                this.failWorker(operationalError(
                     "lateon_worker_failure",
                     "LateOn worker readiness identity does not match the selected profile.",
                 ), false);
@@ -664,24 +693,25 @@ export class LateOnReranker implements Reranker {
             if (this.readinessTimer) clearTimeout(this.readinessTimer);
             this.readinessTimer = undefined;
             this.workerState = "ready";
+            this.hasReachedReady = true;
             this.resolveReadiness();
             return;
         }
         if (response.type === "error" && response.requestId === undefined) {
-            void this.stopWorker(operationalError(
+            this.failWorker(operationalError(
                 "lateon_worker_failure",
                 typeof response.message === "string"
                     ? response.message
                     : "LateOn worker initialization failed.",
-            ), false);
+            ), true);
             return;
         }
         const requestId = response.requestId;
         if (!Number.isSafeInteger(requestId)) {
-            void this.stopWorker(operationalError(
+            this.failWorker(operationalError(
                 "lateon_invalid_output",
                 "LateOn worker response has an invalid request identity.",
-            ), true);
+            ), false);
             return;
         }
         const pending = this.pending.get(requestId as number);
@@ -921,14 +951,43 @@ export class LateOnReranker implements Reranker {
         });
     }
 
-    private async stopWorker(error: LateOnOperationalError, restart: boolean): Promise<void> {
+    private failWorker(error: LateOnOperationalError, retryableBeforeReady: boolean): void {
+        if (this.workerState === "ready") {
+            void this.stopWorker(error, true);
+            return;
+        }
+        if (!this.hasReachedReady) {
+            void this.finishBootstrapAttempt(error, retryableBeforeReady);
+            return;
+        }
+        void this.stopWorker(error, false);
+    }
+
+    private async finishBootstrapAttempt(
+        error: LateOnOperationalError,
+        retryable: boolean,
+    ): Promise<void> {
+        this.initialBootstrapFailure ??= error;
+        this.lastBootstrapFailure = error;
+        const retry = retryable
+            && this.bootstrapAttemptCount < MAXIMUM_BOOTSTRAP_ATTEMPTS;
+        if (!retry) this.terminalBootstrapFailure = error;
+        await this.stopWorker(error, false, !retry);
+        if (retry && !this.closed && !this.hasReachedReady) this.startWorker();
+    }
+
+    private async stopWorker(
+        error: LateOnOperationalError,
+        restart: boolean,
+        rejectReadiness: boolean = true,
+    ): Promise<void> {
         if (this.termination) return this.termination;
         const worker = this.worker;
         this.worker = null;
         if (this.readinessTimer) clearTimeout(this.readinessTimer);
         this.readinessTimer = undefined;
         if (!this.closed) this.workerState = "unhealthy";
-        this.rejectReadiness(error);
+        if (rejectReadiness) this.rejectReadiness(error);
         const pendingRequests = [...this.pending.values()];
         this.pending.clear();
         const termination = (async () => {
@@ -953,6 +1012,7 @@ export class LateOnReranker implements Reranker {
         this.closed = true;
         this.workerState = "closed";
         const cancellation = operationalError("lateon_cancelled", "LateOn reranker is closed.");
+        this.rejectReadiness(cancellation);
         const queued = this.queued;
         this.queued = null;
         if (queued) {

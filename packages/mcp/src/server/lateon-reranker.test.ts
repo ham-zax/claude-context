@@ -19,15 +19,23 @@ type FakeWorkerOptions = Readonly<{
     readyDelayMilliseconds?: number;
     readinessMismatch?: boolean;
     pidLogPath?: string;
+    bootstrapAttempts?: readonly (
+        | "ready"
+        | "exit"
+        | "timeout"
+        | "initialization_error"
+        | "malformed"
+    )[];
 }>;
 
 function createFakeWorker(t: { after(fn: () => void): void }, options: FakeWorkerOptions = {}): string {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-worker-"));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const workerPath = path.join(directory, "worker.cjs");
+    const attemptLogPath = options.pidLogPath ?? path.join(directory, "worker-attempts.txt");
     fs.writeFileSync(workerPath, `
 const fs = require("node:fs");
-const options = ${JSON.stringify(options)};
+const options = ${JSON.stringify({ ...options, attemptLogPath })};
 function sendResults(message) {
     if (message.query === "hang") return;
     if (message.query === "malformed") {
@@ -59,7 +67,23 @@ function sendResults(message) {
 }
 process.on("message", (message) => {
     if (message.type === "initialize") {
-        if (options.pidLogPath) fs.appendFileSync(options.pidLogPath, String(process.pid) + "\\n");
+        const previousAttempts = fs.existsSync(options.attemptLogPath)
+            ? fs.readFileSync(options.attemptLogPath, "utf8").trim().split("\\n").filter(Boolean).length
+            : 0;
+        fs.appendFileSync(options.attemptLogPath, String(process.pid) + "\\n");
+        const bootstrapBehavior = options.bootstrapAttempts?.[previousAttempts] || "ready";
+        if (bootstrapBehavior === "exit") {
+            process.exit(42);
+        }
+        if (bootstrapBehavior === "timeout") return;
+        if (bootstrapBehavior === "initialization_error") {
+            process.send({ type: "error", message: "LateOn fake initialization failed." });
+            return;
+        }
+        if (bootstrapBehavior === "malformed") {
+            process.send({ unexpected: "message" });
+            return;
+        }
         setTimeout(() => process.send({
             type: "ready",
             modelRevision: message.profile.identity.revision,
@@ -73,6 +97,25 @@ process.on("message", (message) => {
 });
 `, "utf8");
     return workerPath;
+}
+
+function readWorkerPids(pidLogPath: string): number[] {
+    if (!fs.existsSync(pidLogPath)) return [];
+    return fs.readFileSync(pidLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map(Number);
+}
+
+async function waitForWorkerAttempts(pidLogPath: string, expected: number): Promise<void> {
+    const deadline = Date.now() + 1_000;
+    while (readWorkerPids(pidLogPath).length < expected) {
+        if (Date.now() >= deadline) {
+            assert.fail(`Expected ${expected} LateOn worker attempts.`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+    }
 }
 
 async function assertOperationalReason(
@@ -351,20 +394,188 @@ test("projection-v2 requests fall back immediately while eager readiness is inco
     );
 });
 
-test("LateOn fails closed when worker readiness identity mismatches the selected profile", async (t) => {
+test("LateOn retries one pre-ready worker exit and stays non-blocking during recovery", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-exit-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
     const reranker = new LateOnReranker({
         modelDirectory: "/unused/by/fake-worker",
         profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
-        workerPath: createFakeWorker(t, { readinessMismatch: true }),
+        workerPath: createFakeWorker(t, {
+            bootstrapAttempts: ["exit", "ready"],
+            pidLogPath,
+            readyDelayMilliseconds: 100,
+        }),
+    });
+    t.after(() => reranker.close());
+
+    await waitForWorkerAttempts(pidLogPath, 2);
+    let recoveryCompleted = false;
+    const recovery = reranker.waitUntilReady().then(() => {
+        recoveryCompleted = true;
+    });
+    await assertOperationalReason(
+        reranker.rerank("find owner", ["document"]),
+        "lateon_not_ready",
+    );
+    assert.equal(recoveryCompleted, false);
+
+    await recovery;
+    assert.equal(readWorkerPids(pidLogPath).length, 2);
+    assert.deepEqual(
+        await reranker.rerank("find owner", ["document"]),
+        [{ index: 0, relevanceScore: 8 }],
+    );
+    assert.deepEqual(reranker.getOperationalSnapshot().bootstrap, {
+        attemptCount: 2,
+        initialFailureReason: "lateon_worker_failure",
+        lastFailureReason: "lateon_worker_failure",
+    });
+});
+
+test("LateOn retries one readiness timeout with a fresh per-attempt deadline", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-timeout-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t, {
+            bootstrapAttempts: ["timeout", "ready"],
+            pidLogPath,
+        }),
+    });
+    t.after(() => reranker.close());
+
+    await reranker.waitUntilReady();
+    assert.equal(readWorkerPids(pidLogPath).length, 2);
+    assert.equal(reranker.getOperationalState(), "ready");
+    assert.deepEqual(reranker.getOperationalSnapshot().bootstrap, {
+        attemptCount: 2,
+        initialFailureReason: "lateon_not_ready",
+        lastFailureReason: "lateon_not_ready",
+    });
+});
+
+test("LateOn retries one worker-reported initialization failure", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-init-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t, {
+            bootstrapAttempts: ["initialization_error", "ready"],
+            pidLogPath,
+        }),
+    });
+    t.after(() => reranker.close());
+
+    await reranker.waitUntilReady();
+    assert.equal(readWorkerPids(pidLogPath).length, 2);
+    assert.equal(reranker.getOperationalState(), "ready");
+});
+
+test("LateOn stops after two retryable bootstrap failures and retains the final cause", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-terminal-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t, {
+            bootstrapAttempts: ["timeout", "exit"],
+            pidLogPath,
+        }),
+    });
+    t.after(() => reranker.close());
+
+    await assert.rejects(reranker.waitUntilReady(), (error: unknown) => (
+        error instanceof LateOnOperationalError
+        && error.reason === "lateon_worker_failure"
+        && error.message.includes("exited before completion")
+    ));
+    await waitForWorkerAttempts(pidLogPath, 2);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(readWorkerPids(pidLogPath).length, 2);
+    assert.equal(reranker.getOperationalState(), "unhealthy");
+    assert.deepEqual(reranker.getOperationalSnapshot().bootstrap, {
+        attemptCount: 2,
+        initialFailureReason: "lateon_not_ready",
+        lastFailureReason: "lateon_worker_failure",
+    });
+    await assert.rejects(
+        reranker.rerank("find owner", ["document"]),
+        (error: unknown) => (
+            error instanceof LateOnOperationalError
+            && error.reason === "lateon_worker_failure"
+            && error.message.includes("exited before completion")
+        ),
+    );
+});
+
+test("LateOn fails closed when worker readiness identity mismatches the selected profile", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-identity-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t, { readinessMismatch: true, pidLogPath }),
     });
     t.after(() => reranker.close());
 
     await assertOperationalReason(reranker.waitUntilReady(), "lateon_worker_failure");
     assert.equal(reranker.getOperationalState(), "unhealthy");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(readWorkerPids(pidLogPath).length, 1);
     await assertOperationalReason(
         reranker.rerank("find owner", ["document"]),
-        "lateon_not_ready",
+        "lateon_worker_failure",
     );
+});
+
+test("LateOn treats malformed bootstrap protocol as terminal without retry", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-protocol-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t, {
+            bootstrapAttempts: ["malformed", "ready"],
+            pidLogPath,
+        }),
+    });
+    t.after(() => reranker.close());
+
+    await assertOperationalReason(reranker.waitUntilReady(), "lateon_invalid_output");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(readWorkerPids(pidLogPath).length, 1);
+    await assertOperationalReason(
+        reranker.rerank("find owner", ["document"]),
+        "lateon_invalid_output",
+    );
+});
+
+test("LateOn close prevents a loading worker from spawning a bootstrap retry", async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "satori-lateon-bootstrap-close-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const pidLogPath = path.join(directory, "worker-pids.txt");
+    const reranker = new LateOnReranker({
+        modelDirectory: "/unused/by/fake-worker",
+        profileId: LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+        workerPath: createFakeWorker(t, {
+            bootstrapAttempts: ["timeout", "ready"],
+            pidLogPath,
+        }),
+    });
+
+    await waitForWorkerAttempts(pidLogPath, 1);
+    await reranker.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(readWorkerPids(pidLogPath).length, 1);
+    assert.equal(reranker.getOperationalState(), "closed");
 });
 
 test("LateOn admits one active and one queued request and rejects further overlap", async (t) => {
@@ -504,6 +715,9 @@ test("LateOn close rejects active and queued work and joins its worker", async (
         pendingWorkerRequests: 0,
         readinessTimerActive: false,
         terminationActive: false,
+        bootstrap: {
+            attemptCount: 1,
+        },
     });
 });
 
