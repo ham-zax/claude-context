@@ -68,6 +68,19 @@ test("bounded source selector uses universal physical-line semantics", () => {
     }
 });
 
+test("bounded source selector rejects unknown runtime policy identities", () => {
+    assert.throws(() => selectBoundedSource({
+        sourceBytes: Buffer.from("function run() {}", "utf8"),
+        symbolSpan: { startLine: 1, endLine: 1 },
+        budgets: budgets(),
+        capabilities,
+        selectionPolicyVersion: "bounded_source_selection_v99" as never,
+    }), {
+        name: "TypeError",
+        message: "Unsupported bounded source selection policy version.",
+    });
+});
+
 test("bounded source selector returns beginning, query, and terminal evidence instead of first N lines", () => {
     const lines = [
         "function reconcile() {",

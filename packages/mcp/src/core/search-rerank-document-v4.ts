@@ -26,7 +26,10 @@ import {
 import {
     SEARCH_RERANK_DOCUMENT_V3_POLICY,
 } from "./search-rerank-document-v3.js";
-import type { SourceLineSpan } from "./bounded-source-selector.js";
+import {
+    BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
+    type SourceLineSpan,
+} from "./bounded-source-selector.js";
 
 export const SEARCH_RERANK_DOCUMENT_V4_POLICY = Object.freeze({
     id: "search_rerank_document_v4",
@@ -334,6 +337,7 @@ export function buildSearchRerankDocumentV4(rawInput: unknown): SearchRerankDocu
         normalized,
         minimumText: buildProjectionText(emptyContext, ""),
         buildProjectionText: (excerpt) => buildProjectionText(emptyContext, excerpt),
+        selectionPolicyVersion: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
     });
     const queryRelevantSourceExcerpt = sourceSelection.selectedSource
         ? selectedExcerptText(sourceSelection.selectedSource)

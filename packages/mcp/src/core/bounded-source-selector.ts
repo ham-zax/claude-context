@@ -1,6 +1,12 @@
 import { compareContractStrings } from "@zokizuan/satori-core";
 
 export const BOUNDED_SOURCE_SELECTION_POLICY_VERSION = "bounded_source_selection_v2" as const;
+export const LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION =
+    "bounded_source_selection_v1" as const;
+
+export type BoundedSourceSelectionPolicyVersion =
+    | typeof LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION
+    | typeof BOUNDED_SOURCE_SELECTION_POLICY_VERSION;
 
 export type SourceSelectionCapabilityStatus =
     | "available"
@@ -66,7 +72,7 @@ export interface SourceExcerpt extends SourceByteLineRange {
 }
 
 export interface SelectedSourceProjection {
-    selectionPolicyVersion: typeof BOUNDED_SOURCE_SELECTION_POLICY_VERSION;
+    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion;
     mode: "complete" | "bounded";
     status: "available" | "partially_available" | "unavailable";
     span: SourceByteLineRange;
@@ -98,6 +104,7 @@ export interface BoundedSourceSelectionInput {
     symbolSpan: SourceLineSpan;
     budgets: BoundedSourceBudgets;
     capabilities: SourceSelectionCapabilities;
+    selectionPolicyVersion?: BoundedSourceSelectionPolicyVersion;
     query?: string;
     evidenceSpans?: readonly SourceLineSpan[];
     structuralAnchors?: readonly SourceSelectionAnchor[];
@@ -150,12 +157,29 @@ function validateBudgets(budgets: BoundedSourceBudgets): void {
     }
 }
 
-function readPhysicalLines(sourceBytes: Buffer): PhysicalLine[] {
+function readPhysicalLines(
+    sourceBytes: Buffer,
+    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion,
+): PhysicalLine[] {
     new TextDecoder("utf-8", { fatal: true }).decode(sourceBytes);
     const lines: PhysicalLine[] = [];
     let startByte = 0;
     for (let index = 0; index < sourceBytes.length; index += 1) {
         const byte = sourceBytes[index];
+        if (selectionPolicyVersion === LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION) {
+            if (byte !== 0x0a) continue;
+            const contentEndByte = index > startByte && sourceBytes[index - 1] === 0x0d
+                ? index - 1
+                : index;
+            lines.push({
+                line: lines.length + 1,
+                startByte,
+                contentEndByte,
+                text: sourceBytes.subarray(startByte, contentEndByte).toString("utf8"),
+            });
+            startByte = index + 1;
+            continue;
+        }
         if (byte !== 0x0a && byte !== 0x0d) continue;
         const lineEndByte = byte === 0x0d && sourceBytes[index + 1] === 0x0a
             ? index + 2
@@ -478,6 +502,7 @@ function buildSourceProjection(input: {
     complete: boolean;
     capabilities: SourceSelectionCapabilities;
     hasOversizedLine: boolean;
+    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion;
 }): SelectedSourceProjection {
     const fullSpan = byteRangeForLines(input.lines, input.symbolSpan.endLine, input.symbolSpan);
     const excerpts = buildExcerpts(input.sourceBytes, input.lines, input.symbolSpan, input.selected);
@@ -491,7 +516,7 @@ function buildSourceProjection(input: {
     );
     const unavailable = !input.complete && excerpts.length === 0 && input.hasOversizedLine;
     return {
-        selectionPolicyVersion: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
+        selectionPolicyVersion: input.selectionPolicyVersion,
         mode: input.complete ? "complete" : "bounded",
         status: unavailable
             ? "unavailable"
@@ -523,7 +548,15 @@ export function selectBoundedSource(
 ): BoundedSourceSelectionResult {
     validateBudgets(input.budgets);
     const sourceBytes = Buffer.from(input.sourceBytes);
-    const lines = readPhysicalLines(sourceBytes);
+    const selectionPolicyVersion = input.selectionPolicyVersion
+        ?? BOUNDED_SOURCE_SELECTION_POLICY_VERSION;
+    if (
+        selectionPolicyVersion !== LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION
+        && selectionPolicyVersion !== BOUNDED_SOURCE_SELECTION_POLICY_VERSION
+    ) {
+        throw new TypeError("Unsupported bounded source selection policy version.");
+    }
+    const lines = readPhysicalLines(sourceBytes, selectionPolicyVersion);
     validateSymbolSpan(input.symbolSpan, lines.length);
     const fullSpan = byteRangeForLines(lines, input.symbolSpan.endLine, input.symbolSpan);
     const totalLines = input.symbolSpan.endLine - input.symbolSpan.startLine + 1;
@@ -544,6 +577,7 @@ export function selectBoundedSource(
         complete: true,
         capabilities: input.capabilities,
         hasOversizedLine: false,
+        selectionPolicyVersion,
     });
     const completeSerializedBytes = serializedBytes(completeProjection);
     if (
@@ -614,6 +648,7 @@ export function selectBoundedSource(
             complete: false,
             capabilities: input.capabilities,
             hasOversizedLine: oversizedLines.size > 0,
+            selectionPolicyVersion,
         });
         const projectionBytes = serializedBytes(projection);
         if (projectionBytes > input.budgets.maxSerializedSourceBytes) {
@@ -637,6 +672,7 @@ export function selectBoundedSource(
         complete: false,
         capabilities: input.capabilities,
         hasOversizedLine: oversizedLines.size > 0,
+        selectionPolicyVersion,
     });
     const boundedSerializedBytes = serializedBytes(boundedProjection);
     if (selected.length === 0 && oversizedLines.size === 0) {

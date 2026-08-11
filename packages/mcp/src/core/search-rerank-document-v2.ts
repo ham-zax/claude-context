@@ -3,8 +3,9 @@ import {
     isRepositoryRelativePath,
 } from "@zokizuan/satori-core";
 import {
-    BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
+    LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
     selectBoundedSource,
+    type BoundedSourceSelectionPolicyVersion,
     type SelectedSourceProjection,
     type SourceLineSpan,
 } from "./bounded-source-selector.js";
@@ -38,13 +39,13 @@ export const SEARCH_RERANK_DOCUMENT_V2_POLICY = Object.freeze({
         "required_owner_siblings",
     ]),
     selector: Object.freeze({
-        version: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
+        version: LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
         queryTokens: "normalized_query_tokens_v1",
         maxExcerpts: MAXIMUM_EXCERPTS,
         maxExcerptLines: MAXIMUM_EXCERPT_LINES,
         contextLines: CONTEXT_LINES,
         evidenceSpans: "validated_only",
-        stableTieOrder: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
+        stableTieOrder: LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
         declarationRetention: "mandatory_or_minimum_projection_exceeds_budget",
         serializedSourceBudget: "remaining_projection_utf8_bytes",
         maximumSelectionAttempts: MAXIMUM_SELECTION_ATTEMPTS,
@@ -312,7 +313,12 @@ function buildProjection(
     };
 }
 
-export function selectSource(input: NormalizedProjectionInput, maxSourceBytes: number) {
+export function selectSource(
+    input: NormalizedProjectionInput,
+    maxSourceBytes: number,
+    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion =
+    SEARCH_RERANK_DOCUMENT_V2_POLICY.selector.version,
+) {
     return selectBoundedSource({
         sourceBytes: Buffer.from(input.content, "utf8"),
         symbolSpan: input.symbolSpan,
@@ -331,6 +337,7 @@ export function selectSource(input: NormalizedProjectionInput, maxSourceBytes: n
             syntaxBoundaries: "not_requested",
             controlFlowAnchors: "not_requested",
         },
+        selectionPolicyVersion,
         ...(input.query ? { query: input.query } : {}),
         ...(input.evidenceSpans.length > 0 ? { evidenceSpans: input.evidenceSpans } : {}),
     });
@@ -340,6 +347,7 @@ export function selectRerankSourceWithinBudget(input: {
     normalized: NormalizedProjectionInput;
     minimumText: string;
     buildProjectionText: (queryRelevantSourceExcerpt: string) => string;
+    selectionPolicyVersion?: BoundedSourceSelectionPolicyVersion;
 }): {
     text: string;
     selectedSource?: SelectedSourceProjection;
@@ -358,7 +366,11 @@ export function selectRerankSourceWithinBudget(input: {
     ) {
         selectionAttemptCount += 1;
         const sourceBudget = Math.floor((lowerBudget + upperBudget) / 2);
-        const selection = selectSource(input.normalized, sourceBudget);
+        const selection = selectSource(
+            input.normalized,
+            sourceBudget,
+            input.selectionPolicyVersion,
+        );
         if (selection.status !== "selected") {
             lowerBudget = sourceBudget + 1;
             continue;

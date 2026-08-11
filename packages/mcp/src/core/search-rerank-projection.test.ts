@@ -441,7 +441,7 @@ test("typed v4 projection distinguishes explicit empty relationships from incomp
     if (incompatible.ok) assert.equal(incompatible.structuralContextStatus, "incompatible");
 });
 
-test("publication-bound v2 v3 and v4 projection retain large-file candidates through a bounded source window", async () => {
+function createLargeProjectionFixture(lineEnding: "\n" | "\r") {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "satori-large-rerank-projection-"));
     const relativeFile = "src/large-owner.ts";
     const absoluteFile = path.join(root, relativeFile);
@@ -453,9 +453,7 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
         "  return executeLargeOwner();",
         "}",
     ];
-    // Bare CR binds universal-newline handling across the streamed fallback
-    // and the shared bounded source selector used by every projection version.
-    const largeSource = [...prefixLines, ...ownerLines].join("\r");
+    const largeSource = [...prefixLines, ...ownerLines].join(lineEnding);
     const largeHash = crypto.createHash("sha256").update(largeSource, "utf8").digest("hex");
     const largeOwner: SymbolRecord = {
         symbolKey: `${relativeFile}:largeOwner`,
@@ -472,49 +470,56 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
         extractorVersion: "test",
     };
 
-    try {
-        fs.mkdirSync(path.dirname(absoluteFile), { recursive: true });
-        fs.writeFileSync(absoluteFile, largeSource, "utf8");
-        assert.ok(fs.statSync(absoluteFile).size > 256 * 1024);
-        const largeRegistry = buildSymbolRegistry({
-            manifest: {
-                schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
-                normalizedRootPath: root,
-                rootFingerprint: "fingerprint",
-                indexPolicyHash: "policy",
-                languageRouterVersion: "test",
-                extractorVersion: "test",
-                relationshipVersion: "test",
-                builtAt: "2026-08-10T00:00:00.000Z",
-                files: [{
-                    path: relativeFile,
-                    hash: largeHash,
-                    language: "typescript",
-                    symbolCount: 1,
-                    definitionStatus: "definitions_present",
-                }],
-            },
-            symbols: [largeOwner],
-        });
-        const largeResult: SearchResultLike = {
-            content: ownerLines.join("\n"),
-            relativePath: relativeFile,
-            language: "typescript",
-            score: 1,
-            startLine: 3_001,
-            endLine: 3_003,
-            symbolKind: "function",
-            symbolLabel: "largeOwner",
-            ownerSymbolInstanceId: largeOwner.symbolInstanceId,
-        };
-        const common = {
+    fs.mkdirSync(path.dirname(absoluteFile), { recursive: true });
+    fs.writeFileSync(absoluteFile, largeSource, "utf8");
+    assert.ok(fs.statSync(absoluteFile).size > 256 * 1024);
+    const largeRegistry = buildSymbolRegistry({
+        manifest: {
+            schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
+            normalizedRootPath: root,
+            rootFingerprint: "fingerprint",
+            indexPolicyHash: "policy",
+            languageRouterVersion: "test",
+            extractorVersion: "test",
+            relationshipVersion: "test",
+            builtAt: "2026-08-10T00:00:00.000Z",
+            files: [{
+                path: relativeFile,
+                hash: largeHash,
+                language: "typescript",
+                symbolCount: 1,
+                definitionStatus: "definitions_present",
+            }],
+        },
+        symbols: [largeOwner],
+    });
+    const largeResult: SearchResultLike = {
+        content: ownerLines.join("\n"),
+        relativePath: relativeFile,
+        language: "typescript",
+        score: 1,
+        startLine: 3_001,
+        endLine: 3_003,
+        symbolKind: "function",
+        symbolLabel: "largeOwner",
+        ownerSymbolInstanceId: largeOwner.symbolInstanceId,
+    };
+    return {
+        root,
+        absoluteFile,
+        common: {
             candidateId: searchRerankCandidateId(largeResult),
             codebaseRoot: root,
             semanticQuery: "execute large owner",
             result: largeResult,
             registry: largeRegistry,
-        };
+        },
+    };
+}
 
+test("publication-bound v2 v3 and v4 retain large LF source through a bounded window", async () => {
+    const { root, common } = createLargeProjectionFixture("\n");
+    try {
         for (const project of [
             projectPublicationBoundSearchRerankDocumentV2,
             projectPublicationBoundSearchRerankDocumentV3,
@@ -524,8 +529,34 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
             assert.equal(outcome.ok, true, JSON.stringify(outcome));
             if (outcome.ok) assert.match(outcome.document, /executeLargeOwner/);
         }
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
 
-        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2({
+test("publication-bound v4 uses universal newlines without changing historical v2/v3 semantics", async () => {
+    // Bare CR binds universal-newline handling across the streamed fallback
+    // and the current v4 selector. Historical v2/v3 profiles retain their
+    // byte-frozen LF-only selector semantics.
+    const { root, absoluteFile, common } = createLargeProjectionFixture("\r");
+    try {
+        for (const project of [
+            projectPublicationBoundSearchRerankDocumentV2,
+            projectPublicationBoundSearchRerankDocumentV3,
+        ]) {
+            const outcome = await project(common);
+            assert.deepEqual(outcome, {
+                ok: false,
+                candidateId: common.candidateId,
+                reason: "projection_contract_failed",
+            });
+        }
+
+        const v4Outcome = await projectPublicationBoundSearchRerankDocumentV4(common);
+        assert.equal(v4Outcome.ok, true, JSON.stringify(v4Outcome));
+        if (v4Outcome.ok) assert.match(v4Outcome.document, /executeLargeOwner/);
+
+        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV4({
             ...common,
             maxSourceBytes: 256 * 1024,
         }), {
@@ -535,7 +566,7 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
         });
 
         fs.appendFileSync(absoluteFile, "\r// changed after publication", "utf8");
-        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2(common), {
+        assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV4(common), {
             ok: false,
             candidateId: common.candidateId,
             reason: "source_hash_mismatch",

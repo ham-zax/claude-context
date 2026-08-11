@@ -332,7 +332,7 @@ function createToolContext(snapshotManager: SnapshotManager, syncManager: SyncMa
     } as unknown as ToolContext;
 }
 
-test('MCP handlers fail closed after ignore reconciliation deletes indexed paths and sync recovery fails', async () => {
+test('MCP handlers fail closed before mutating indexed payload when ignore policy changes', async () => {
     await withTempState(async ({ repoPath, stateRoot }) => {
         const ignoredRelativePath = 'src/ignored.ts';
         const callerRelativePath = 'src/caller.ts';
@@ -457,11 +457,11 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
                 groupBy: 'symbol',
                 limit: 10,
             }));
-            assert.equal(forcedSyncCalls, 2);
+            assert.equal(forcedSyncCalls, 0);
             assert.equal(info.status, 'requires_reindex');
-            assert.equal(info.reindexReason, 'navigation_recovery_failed');
-            assert.match(info.message || '', /Ignore-rule reconciliation deleted indexed paths/);
-            assert.equal(snapshotManager.getCodebaseIndexedPaths?.(repoPath).includes(ignoredRelativePath), false);
+            assert.equal(info.reindexReason, 'index_policy_changed');
+            assert.match(info.message || '', /Repository index-policy inputs changed/);
+            assert.equal(snapshotManager.getCodebaseIndexedPaths?.(repoPath).includes(ignoredRelativePath), true);
             assert.equal(triggerSearchPayload.status, 'requires_reindex');
             assert.equal(triggerSearchPayload.reason, 'requires_reindex');
             assert.equal(triggerSearchPayload.freshnessDecision, undefined);
@@ -518,8 +518,9 @@ test('MCP handlers fail closed after ignore reconciliation deletes indexed paths
             }, toolContext);
             assert.equal(staleReadResponse.isError, true);
             const staleReadPayload = parsePayload(staleReadResponse);
-            // File is no longer under a searchable indexed root after ignore reconciliation;
-            // accepted exact-symbol requests fail through the canonical navigation boundary.
+            // The old generation remains intact but is no longer searchable after
+            // policy drift; exact-symbol requests fail through the canonical
+            // navigation boundary without serving stale source.
             assert.equal(staleReadPayload.formatVersion, 2);
             assert.equal(staleReadPayload.kind, 'symbol_context');
             assert.equal(staleReadPayload.status, 'error');

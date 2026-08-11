@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import type { SearchCandidateRole } from "./search-rerank-context.js";
 import {
@@ -85,6 +86,44 @@ test("projection v2 canonical bytes remain unchanged by the v3 introduction", ()
     assert.equal(v2.text.includes("candidate_role"), false);
     const parsed = JSON.parse(v2.text) as Record<string, unknown>;
     assert.deepEqual(Object.keys(parsed), [...Object.keys(parsed)].sort());
+});
+
+test("loadable v2 and v3 profiles preserve historical bare-CR projection bytes", () => {
+    const content = "function runWorker() {\r  return queue.next();\r}";
+    const input = {
+        relativePath: "src/worker.ts",
+        language: "typescript",
+        symbolKind: "function",
+        canonicalSymbolLabel: "runWorker",
+        symbolSpan: { startLine: 1, endLine: 1 },
+        content,
+        signatureOrDeclaration: "function runWorker() {",
+        query: "queue next",
+    };
+    const v2 = buildSearchRerankDocumentV2(input);
+    const v3 = buildSearchRerankDocumentV3({
+        ...input,
+        candidateRole: "implementation",
+    });
+
+    assert.equal(v2.utf8Bytes, 322);
+    assert.equal(
+        createHash("sha256").update(v2.text, "utf8").digest("hex"),
+        "55fd01cb44faa37391e4bfcbe567e371bf76f7399a282c4f7d531f3d983928e9",
+    );
+    assert.equal(v3.utf8Bytes, 356);
+    assert.equal(
+        createHash("sha256").update(v3.text, "utf8").digest("hex"),
+        "bbf98ff695fb0e7541df901812baae1fa7d48a37f0b6a1f6d914c8133b5a6fdc",
+    );
+    assert.equal(
+        (JSON.parse(v2.text) as Record<string, unknown>).query_relevant_source_excerpt,
+        content,
+    );
+    assert.equal(
+        (JSON.parse(v3.text) as Record<string, unknown>).query_relevant_source_excerpt,
+        content,
+    );
 });
 
 test("projection v3 policy references v2 as its previous version", () => {
