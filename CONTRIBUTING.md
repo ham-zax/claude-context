@@ -79,4 +79,4 @@ MCP or CLI out of order or against a stale Core version.
 
 ## License
 
-By contributing, you agree your changes are released under the MIT License.
+Satori is licensed under AGPL-3.0-only and is also intended to support separately negotiated commercial licensing by the copyright holder. External code contributions are not being accepted until contributor licensing terms are finalized. Please open an issue before submitting code.

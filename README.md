@@ -1,6 +1,6 @@
 # Satori
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](./LICENSE)
 [![CI](https://github.com/ham-zax/satori/actions/workflows/ci.yml/badge.svg)](https://github.com/ham-zax/satori/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@zokizuan/satori-cli?label=npm)](https://www.npmjs.com/package/@zokizuan/satori-cli)
 
@@ -512,4 +512,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for repository conventions, [docs/RELEA
 
 ## License
 
-MIT
+Copyright (c) 2026 Hamza (@ham-zax)
+
+Satori is open-source software available under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](./LICENSE).
+
+Alternative commercial licensing terms are available separately from the copyright holder for organizations that require different licensing terms. See [COMMERCIAL-LICENSING.md](./COMMERCIAL-LICENSING.md).

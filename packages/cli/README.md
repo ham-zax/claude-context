@@ -160,4 +160,13 @@ pnpm --filter @zokizuan/satori-cli test
 pnpm run release:smoke:cli
 ```
 
-Node.js 22.13 or newer is required. Satori is MIT licensed.
+Node.js 22.13 or newer is required.
+
+## License
+
+Copyright (c) 2026 Hamza (@ham-zax)
+
+Satori is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](./LICENSE).
+
+Alternative commercial licensing terms are available separately from the copyright holder.
+

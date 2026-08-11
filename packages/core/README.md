@@ -50,4 +50,11 @@ pnpm --filter @zokizuan/satori-core typecheck
 pnpm --filter @zokizuan/satori-core test
 ```
 
-Satori is MIT licensed.
+## License
+
+Copyright (c) 2026 Hamza (@ham-zax)
+
+Satori is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](./LICENSE).
+
+Alternative commercial licensing terms are available separately from the copyright holder.
+

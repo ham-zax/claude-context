@@ -81,6 +81,6 @@
   "bugs": {
     "url": "https://github.com/ham-zax/satori/issues"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "author": "Hamza (@ham-zax)"
 }

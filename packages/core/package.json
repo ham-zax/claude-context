@@ -61,7 +61,7 @@
     "url": "https://github.com/ham-zax/satori/issues"
   },
   "author": "Hamza (@ham-zax)",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/",
