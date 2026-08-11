@@ -1,6 +1,6 @@
 import { compareContractStrings } from "@zokizuan/satori-core";
 
-export const BOUNDED_SOURCE_SELECTION_POLICY_VERSION = "bounded_source_selection_v1" as const;
+export const BOUNDED_SOURCE_SELECTION_POLICY_VERSION = "bounded_source_selection_v2" as const;
 
 export type SourceSelectionCapabilityStatus =
     | "available"

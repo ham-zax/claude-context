@@ -978,7 +978,7 @@ function composedContextFixture() {
             },
         },
         source: {
-            selectionPolicyVersion: 'bounded_source_selection_v1',
+            selectionPolicyVersion: 'bounded_source_selection_v2',
             mode: 'complete',
             status: 'available',
             span: { startLine: 1, endLine: 3, startByte: 0, endByte: 42 },

@@ -12,7 +12,7 @@ const hashB = "b".repeat(64);
 function snapshotIdentity(): IndexSnapshotMatchedContinuationIdentity {
     return {
         canonicalRoot: "/repo",
-        selectionPolicyVersion: "bounded_source_selection_v1",
+        selectionPolicyVersion: "bounded_source_selection_v2",
         spanResolution: "index_snapshot_matched",
         registryManifestIdentity: "symmanifest_v1",
         indexedSourceIdentity: hashA,
@@ -24,7 +24,7 @@ function snapshotIdentity(): IndexSnapshotMatchedContinuationIdentity {
 function currentIdentity(): CurrentSymbolValidatedContinuationIdentity {
     return {
         canonicalRoot: "/repo",
-        selectionPolicyVersion: "bounded_source_selection_v1",
+        selectionPolicyVersion: "bounded_source_selection_v2",
         spanResolution: "current_symbol_validated",
         currentSourceHash: hashA,
         currentSpanIdentity: {
@@ -59,7 +59,7 @@ test("snapshot continuation changes with manifest, source, span, or selection po
         indexedSpan: { ...snapshotIdentity().indexedSpan, endLine: 21 },
     }, {
         ...snapshotIdentity(),
-        selectionPolicyVersion: "bounded_source_selection_v2",
+        selectionPolicyVersion: "bounded_source_selection_v3",
     }];
     for (const variant of variants) {
         assert.notEqual(buildSourceContinuationFingerprint(variant).fingerprint, baseline);

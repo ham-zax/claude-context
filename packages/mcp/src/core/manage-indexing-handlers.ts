@@ -1800,6 +1800,9 @@ export class ManageIndexingHandlers {
                 if (!stats.navigationCandidate) {
                     throw new Error(`Completed index candidate for '${absolutePath}' did not produce a navigation generation.`);
                 }
+                if (!await this.host.context.isObservedIndexPolicyControlSignatureCurrent(candidatePolicy)) {
+                    throw new IndexPolicyControlDriftError(absolutePath);
+                }
                 // Seal vector proof first. Active resolution also requires the matching
                 // navigation pointer, so the candidate remains unavailable until the
                 // pointer publication below succeeds.

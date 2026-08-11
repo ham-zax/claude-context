@@ -69,6 +69,7 @@ test("request contract fixtures bind focus, query, role, and document projection
     assert.ok(fixtures.documentProjectionV4Structural.includes('"relation":"test_support"'));
     assert.ok(fixtures.documentProjectionV4SourceFirst.includes('validate_order_for_exact_question'));
     assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("search_rerank_document_v3"));
+    assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("bounded_source_selection_v2"));
     assert.ok(fixtures.sourceSelectionPolicyIdentity.includes("source_before_references_v1"));
     assert.equal(
         fixtures.structuralContext.callAdmission,

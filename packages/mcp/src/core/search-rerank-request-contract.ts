@@ -12,6 +12,7 @@ import {
     type SymbolRecord,
     type SymbolRegistryManifest,
 } from "@zokizuan/satori-core";
+import { BOUNDED_SOURCE_SELECTION_POLICY_VERSION } from "./bounded-source-selector.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
@@ -417,6 +418,7 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
             DOCUMENT_PROJECTION_SOURCE_FIRST_FIXTURE,
         ).text,
         sourceSelectionPolicyIdentity: serializeCanonicalJson({
+            boundedSourceSelection: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
             sourceSelection: SEARCH_RERANK_DOCUMENT_V3_POLICY,
             answerPacketBudget: SEARCH_RERANK_DOCUMENT_V4_POLICY,
         }),

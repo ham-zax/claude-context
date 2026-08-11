@@ -1730,6 +1730,53 @@ test("background indexing rejects candidate activation when root policy controls
     });
 });
 
+test("background indexing rejects policy drift during call-graph rebuild before candidate authority publication", async () => {
+    await withTempRepo(async (repoPath) => {
+        const ignorePath = path.join(repoPath, '.satoriignore');
+        fs.writeFileSync(ignorePath, 'data/\n', 'utf8');
+        const candidateControlSignature = await computeIndexPolicyControlSignature(repoPath);
+        let rebuildEnteredResolve!: () => void;
+        let releaseRebuild!: () => void;
+        const rebuildEntered = new Promise<void>((resolve) => {
+            rebuildEnteredResolve = resolve;
+        });
+        const rebuildBarrier = new Promise<void>((resolve) => {
+            releaseRebuild = resolve;
+        });
+        let acknowledgedSignature: string | undefined;
+        let watcherTouches = 0;
+        const harness = createFailedIndexingHarness(new Set(), {
+            indexCodebase: async () => completedIndexResult(),
+            rebuildCallGraphForIndex: async () => {
+                rebuildEnteredResolve();
+                await rebuildBarrier;
+            },
+            recordCurrentIgnoreControlSignature: async (observedSignature) => {
+                acknowledgedSignature = observedSignature;
+            },
+            touchWatchedCodebase: async () => {
+                watcherTouches += 1;
+            },
+        });
+
+        const worker = harness.handler.startBackgroundIndexing(repoPath, false);
+        await rebuildEntered;
+        fs.writeFileSync(ignorePath, '# pattern removed during call-graph rebuild\n', 'utf8');
+        releaseRebuild();
+        await worker;
+
+        assert.equal(acknowledgedSignature, undefined);
+        assert.equal(harness.resolvedPolicyObservations[0]?.controlSignature, candidateControlSignature);
+        assert.notEqual(await computeIndexPolicyControlSignature(repoPath), candidateControlSignature);
+        assert.deepEqual(harness.publicationEvents, ['navigation:discard:candidate-generation']);
+        assert.equal(harness.publishedMarker, null);
+        assert.equal(harness.indexedSnapshots, 0);
+        assert.equal(watcherTouches, 0);
+        assert.equal(harness.failedSnapshots.length, 1);
+        assert.match(harness.failedSnapshots[0]?.errorMessage ?? '', /index_policy_changed/);
+    });
+});
+
 test("force reindex continues when retired authority prevents optional previous-generation proof", async () => {
     await withTempRepo(async (repoPath) => {
         const harness = createFailedIndexingHarness(new Set([resolveCollectionName(repoPath)]), {
