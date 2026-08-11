@@ -6,8 +6,6 @@ import {
     RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION,
     RELATIONSHIP_MANIFEST_SCHEMA_VERSION,
     isRelationshipManifest,
-    isStructuralDefinitionStatus,
-    isSymbolKind,
     isSymbolRegistryManifest,
 } from './contracts';
 import { isRepositoryRelativePath } from '../paths/repository-path';
@@ -25,7 +23,24 @@ import type {
 } from './contracts';
 import type { SymbolRegistry } from './registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
-import { isResolutionAuthority, MAX_PYTHON_FLOW_HOPS } from '../relationships/resolution';
+import {
+    CURRENT_GENERATION_SCHEMA_VERSION,
+    NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION,
+    SYMBOL_INDEX_SCHEMA_VERSION,
+    isCurrentGenerationPointer,
+    isRecord,
+    isRelationshipAnalysisEvidence,
+    isRelationshipRecord,
+    isSymbolIndexFile,
+    isSymbolRecord,
+    parseNavigationGenerationSeal,
+} from './sidecar-validators';
+import type {
+    NavigationGenerationSeal,
+    NavigationSymbolQualityAggregate,
+    SymbolIndexFile,
+    SymbolIndexFileEntry,
+} from './sidecar-validators';
 import type {
     PythonFlowFact,
     SourceSpan,
@@ -38,16 +53,12 @@ import type {
 const NAVIGATION_DIR_NAME = 'navigation';
 const SYMBOLS_DIR_NAME = 'symbols';
 const RELATIONSHIPS_DIR_NAME = 'relationships';
-const LEGACY_SYMBOL_INDEX_SCHEMA_VERSION = 'symbol_index_v2';
-const SYMBOL_INDEX_SCHEMA_VERSION = 'symbol_index_v3';
 const SYMBOL_FILE_CONTRIBUTION_SCHEMA_VERSION = 'symbol_file_contribution_v1';
 const TEMP_ENTRY_PREFIX = '.satori-tmp-';
 const BACKUP_ENTRY_PREFIX = '.satori-backup-';
 const CLEANUP_ENTRY_PREFIX = '.satori-cleanup-';
 const GENERATIONS_DIR_NAME = 'generations';
 const CURRENT_GENERATION_FILE_NAME = 'current.json';
-const CURRENT_GENERATION_SCHEMA_VERSION = 'navigation_current_v3';
-const NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION = 'navigation_generation_seal_v1';
 const NAVIGATION_GENERATION_SEAL_FILE_NAME = 'seal.json';
 const SHARD_IO_CONCURRENCY = 64;
 const RELATIONSHIP_SHARD_IO_CONCURRENCY = 8;
@@ -92,40 +103,8 @@ class NavigationSidecarCleanupFailure extends Error {
     }
 }
 
-export interface NavigationSymbolQualityAggregate {
-    indexedFileCount: number;
-    languages: Array<{
-        language: string;
-        indexedFiles: number;
-        filesWithNonFileSymbols: number;
-        nonFileSymbolCount: number;
-    }>;
-}
-
-export interface NavigationGenerationSeal {
-    schemaVersion: typeof NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION;
-    generationId: string;
-    symbolRegistryManifestHash: string;
-    relationshipManifestHash: string;
-    artifactSetHash: string;
-    symbolQuality: NavigationSymbolQualityAggregate;
-}
-
-interface SymbolIndexFileEntry {
-    path: string;
-    hash: string;
-    language: string;
-    symbolCount: number;
-    definitionStatus: SymbolRegistryManifestFile['definitionStatus'];
-    shardPath: string;
-    shardHash: string;
-}
-
-interface SymbolIndexFile {
-    schemaVersion: typeof LEGACY_SYMBOL_INDEX_SCHEMA_VERSION | typeof SYMBOL_INDEX_SCHEMA_VERSION;
-    manifestHash: string;
-    files: SymbolIndexFileEntry[];
-}
+export { isRelationshipRecord, isSymbolRecord, parseNavigationGenerationSeal };
+export type { NavigationGenerationSeal, NavigationSymbolQualityAggregate };
 
 export interface WriteSymbolRegistrySidecarInput {
     registry: SymbolRegistry;
@@ -1372,28 +1351,6 @@ export async function clearSymbolRegistrySidecar(input: ClearSymbolRegistrySidec
     await fs.promises.rm(rootPath, { recursive: true, force: true });
 }
 
-function isSymbolIndexFile(value: unknown): value is SymbolIndexFile {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        return false;
-    }
-    const record = value as Record<string, unknown>;
-    return (record.schemaVersion === SYMBOL_INDEX_SCHEMA_VERSION
-        || record.schemaVersion === LEGACY_SYMBOL_INDEX_SCHEMA_VERSION)
-        && isNonEmptyString(record.manifestHash)
-        && Array.isArray(record.files)
-        && record.files.every((file) => (
-            isRecord(file)
-            && isRepositoryRelativePath(file.path)
-            && isNonEmptyString(file.hash)
-            && isNonEmptyString(file.language)
-            && isNonNegativeInteger(file.symbolCount)
-            && isStructuralDefinitionStatus(file.definitionStatus)
-            && isRepositoryRelativePath(file.shardPath)
-            && typeof file.shardHash === 'string'
-            && /^[a-f0-9]{64}$/.test(file.shardHash)
-        ));
-}
-
 function symbolIndexMatchesManifest(
     indexFile: SymbolIndexFile,
     manifest: SymbolRegistryManifest,
@@ -1421,174 +1378,8 @@ function symbolIndexMatchesManifest(
     });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-    return typeof value === 'string' && value.length > 0;
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-    return Number.isInteger(value) && Number(value) >= 0;
-}
-
-function isPositiveInteger(value: unknown): value is number {
-    return Number.isInteger(value) && Number(value) >= 1;
-}
-
-function isOptionalNonEmptyString(value: unknown): boolean {
-    return value === undefined || isNonEmptyString(value);
-}
-
-function isSymbolSpan(value: unknown): boolean {
-    if (!isRecord(value)) {
-        return false;
-    }
-    if (!isPositiveInteger(value.startLine) || !isPositiveInteger(value.endLine)) {
-        return false;
-    }
-    if (value.endLine < value.startLine) {
-        return false;
-    }
-    for (const field of ['startByte', 'endByte', 'startColumn', 'endColumn']) {
-        if (value[field] !== undefined && !isNonNegativeInteger(value[field])) {
-            return false;
-        }
-    }
-    if (
-        typeof value.startByte === 'number'
-        && typeof value.endByte === 'number'
-        && value.endByte < value.startByte
-    ) {
-        return false;
-    }
-    if (
-        value.startLine === value.endLine
-        && typeof value.startColumn === 'number'
-        && typeof value.endColumn === 'number'
-        && value.endColumn < value.startColumn
-    ) {
-        return false;
-    }
-    return true;
-}
-
-const VALID_RELATIONSHIP_TYPES = new Set([
-    'CALLS',
-    'IMPORTS',
-    'EXPORTS',
-    'EXTENDS',
-    'IMPLEMENTS',
-    'REFERENCES',
-    'TESTS',
-    'GENERATES',
-    'CONFIGURES',
-]);
-
-export function isSymbolRecord(value: unknown): value is SymbolRecord {
-    if (!isRecord(value)) {
-        return false;
-    }
-    for (const field of [
-        'symbolKey',
-        'symbolInstanceId',
-        'language',
-        'name',
-        'qualifiedName',
-        'label',
-        'file',
-        'fileHash',
-        'extractorVersion',
-    ]) {
-        if (!isNonEmptyString(value[field])) {
-            return false;
-        }
-    }
-    if (!isSymbolKind(value.kind)) {
-        return false;
-    }
-    if (!isSymbolSpan(value.span)) {
-        return false;
-    }
-    if (!isOptionalNonEmptyString(value.parentKey)) {
-        return false;
-    }
-    if (!Array.isArray(value.parentQualifiedNamePath) || !value.parentQualifiedNamePath.every((item) => typeof item === 'string')) {
-        return false;
-    }
-    if (value.exported !== undefined && typeof value.exported !== 'boolean') {
-        return false;
-    }
-    if (value.ontologyTags !== undefined && (!Array.isArray(value.ontologyTags) || !value.ontologyTags.every(isNonEmptyString))) {
-        return false;
-    }
-    return true;
-}
-
 async function readJson(filePath: string): Promise<unknown> {
     return JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
-}
-
-function isCurrentGenerationPointer(value: unknown): value is {
-    schemaVersion: typeof CURRENT_GENERATION_SCHEMA_VERSION;
-    generationId: string;
-    symbolRegistryManifestHash: string;
-    relationshipManifestHash: string;
-    navigationSealHash: string;
-} {
-    return isRecord(value)
-        && Object.keys(value).length === 5
-        && [
-            'schemaVersion',
-            'generationId',
-            'symbolRegistryManifestHash',
-            'relationshipManifestHash',
-            'navigationSealHash',
-        ].every((key) => Object.prototype.hasOwnProperty.call(value, key))
-        && value.schemaVersion === CURRENT_GENERATION_SCHEMA_VERSION
-        && isNonEmptyString(value.generationId)
-        && /^[a-zA-Z0-9_-]+$/.test(value.generationId)
-        && isNonEmptyString(value.symbolRegistryManifestHash)
-        && isNonEmptyString(value.relationshipManifestHash)
-        && typeof value.navigationSealHash === 'string'
-        && /^[a-f0-9]{64}$/.test(value.navigationSealHash);
-}
-
-export function parseNavigationGenerationSeal(value: unknown): NavigationGenerationSeal | null {
-    if (!isRecord(value)) return null;
-    const quality = value.symbolQuality;
-    const structurallyValid = value.schemaVersion === NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION
-        && isNonEmptyString(value.generationId)
-        && /^[a-zA-Z0-9_-]+$/.test(value.generationId)
-        && typeof value.symbolRegistryManifestHash === 'string'
-        && /^symmanifest_[a-f0-9]{32}$/.test(value.symbolRegistryManifestHash)
-        && typeof value.relationshipManifestHash === 'string'
-        && /^[a-f0-9]{64}$/.test(value.relationshipManifestHash)
-        && typeof value.artifactSetHash === 'string'
-        && /^[a-f0-9]{64}$/.test(value.artifactSetHash)
-        && isRecord(quality)
-        && isNonNegativeInteger(quality.indexedFileCount)
-        && Array.isArray(quality.languages)
-        && quality.languages.every((entry) => isRecord(entry)
-            && isNonEmptyString(entry.language)
-            && isNonNegativeInteger(entry.indexedFiles)
-            && isNonNegativeInteger(entry.filesWithNonFileSymbols)
-            && entry.filesWithNonFileSymbols <= entry.indexedFiles
-            && isNonNegativeInteger(entry.nonFileSymbolCount)
-            && entry.nonFileSymbolCount >= entry.filesWithNonFileSymbols);
-    if (!structurallyValid || !isRecord(quality) || !Array.isArray(quality.languages)) return null;
-    let indexedFileTotal = 0;
-    let previousLanguage: string | null = null;
-    for (const rawEntry of quality.languages) {
-        const entry = rawEntry as NavigationSymbolQualityAggregate['languages'][number];
-        if (previousLanguage !== null && compareStrings(previousLanguage, entry.language) >= 0) return null;
-        previousLanguage = entry.language;
-        indexedFileTotal += entry.indexedFiles;
-        if (!Number.isSafeInteger(indexedFileTotal)) return null;
-    }
-    if (indexedFileTotal !== quality.indexedFileCount) return null;
-    return value as unknown as NavigationGenerationSeal;
 }
 
 export async function readNavigationGenerationSeal(
@@ -1953,219 +1744,6 @@ export async function readSymbolRegistrySidecar(input: ReadSymbolRegistrySidecar
             reason: error instanceof Error ? error.message : String(error),
         };
     }
-}
-
-export function isRelationshipRecord(value: unknown): value is RelationshipRecord {
-    if (!isRecord(value)) {
-        return false;
-    }
-    const hasTarget = isNonEmptyString(value.targetKey)
-        || isNonEmptyString(value.targetInstanceId)
-        || isNonEmptyString(value.targetPath);
-    return isNonEmptyString(value.sourceKey)
-        && hasTarget
-        && isNonEmptyString(value.type)
-        && VALID_RELATIONSHIP_TYPES.has(value.type)
-        && isNonEmptyString(value.file)
-        && isOptionalNonEmptyString(value.sourceInstanceId)
-        && isOptionalNonEmptyString(value.targetKey)
-        && isOptionalNonEmptyString(value.targetInstanceId)
-        && isOptionalNonEmptyString(value.targetPath)
-        && (value.span === undefined || isSymbolSpan(value.span))
-        && (value.confidence === 'high' || value.confidence === 'medium' || value.confidence === 'low')
-        && (value.resolutionAuthority === undefined || isResolutionAuthority(value.resolutionAuthority));
-}
-
-function isSourceSpan(value: unknown): boolean {
-    if (!isSymbolSpan(value) || !isRecord(value)) return false;
-    return ['startByte', 'endByte', 'startColumn', 'endColumn']
-        .every((field) => isNonNegativeInteger(value[field]));
-}
-
-const PYTHON_FLOW_VALUE_KINDS = new Set(['constructor', 'call', 'member', 'identifier', 'unknown']);
-const RESOLUTION_DECISIONS = new Set(['resolved', 'unresolved', 'ambiguous']);
-const RESOLUTION_PROOF_STEP_KINDS = new Set([
-    'call_site',
-    'containing_caller',
-    'absolute_import',
-    'relative_import',
-    'same_file_definition',
-    'constructor_origin',
-    'parameter_annotation',
-    'allocation_origin',
-    'field_origin',
-    'callback_origin',
-    'class_inheritance',
-    'flow_hop',
-    'candidate_set',
-    'ambiguity',
-    'unresolved_dependency',
-]);
-
-function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-    const allowed = new Set(keys);
-    return Object.keys(value).every((key) => allowed.has(key));
-}
-
-function isPythonFlowFact(value: unknown): value is PythonFlowFact {
-    if (!isRecord(value) || typeof value.kind !== 'string') return false;
-    if (value.kind === 'assignment_origin') {
-        return hasOnlyKeys(value, [
-            'kind',
-            'targetText',
-            'valueText',
-            'valueKind',
-            'constructorTypeName',
-            'calleeName',
-            'span',
-            'contextSpan',
-        ])
-            && isNonEmptyString(value.targetText)
-            && isNonEmptyString(value.valueText)
-            && typeof value.valueKind === 'string'
-            && PYTHON_FLOW_VALUE_KINDS.has(value.valueKind)
-            && isOptionalNonEmptyString(value.constructorTypeName)
-            && isOptionalNonEmptyString(value.calleeName)
-            && isSourceSpan(value.span)
-            && isSourceSpan(value.contextSpan);
-    }
-    if (value.kind === 'call_argument') {
-        return hasOnlyKeys(value, [
-            'kind',
-            'calleeText',
-            'argumentName',
-            'argumentIndex',
-            'valueText',
-            'span',
-            'contextSpan',
-        ])
-            && isNonEmptyString(value.calleeText)
-            && isOptionalNonEmptyString(value.argumentName)
-            && (value.argumentIndex === undefined || isNonNegativeInteger(value.argumentIndex))
-            && isNonEmptyString(value.valueText)
-            && isSourceSpan(value.span)
-            && isSourceSpan(value.contextSpan);
-    }
-    if (value.kind !== 'class_bases') return false;
-    return hasOnlyKeys(value, ['kind', 'className', 'baseNames', 'span', 'contextSpan'])
-        && isNonEmptyString(value.className)
-        && Array.isArray(value.baseNames)
-        && value.baseNames.every(isNonEmptyString)
-        && isSourceSpan(value.span)
-        && isSourceSpan(value.contextSpan);
-}
-
-function isResolutionProofStep(value: unknown): value is ResolutionProofStep {
-    if (!isRecord(value)
-        || !hasOnlyKeys(value, ['kind', 'subject', 'detail', 'span', 'hop'])
-        || typeof value.kind !== 'string'
-        || !RESOLUTION_PROOF_STEP_KINDS.has(value.kind)
-        || !isNonEmptyString(value.subject)
-        || !isOptionalNonEmptyString(value.detail)
-        || (value.span !== undefined && !isSourceSpan(value.span))
-        || (value.hop !== undefined && !isNonNegativeInteger(value.hop))) {
-        return false;
-    }
-    return true;
-}
-
-function isResolutionClaim(value: unknown): value is ResolutionClaim {
-    if (!isRecord(value)
-        || !hasOnlyKeys(value, [
-            'providerId',
-            'providerVersion',
-            'environmentConfigId',
-            'sourceFile',
-            'sourceInstanceId',
-            'targetInstanceId',
-            'targetSymbol',
-            'callSpan',
-            'decision',
-            'relationshipType',
-            'resolutionAuthority',
-            'proofSteps',
-            'dependencyKeys',
-            'flowHops',
-        ])
-        || !isNonEmptyString(value.providerId)
-        || !isNonEmptyString(value.providerVersion)
-        || !isNonEmptyString(value.environmentConfigId)
-        || !isRepositoryRelativePath(value.sourceFile)
-        || !isOptionalNonEmptyString(value.sourceInstanceId)
-        || !isOptionalNonEmptyString(value.targetInstanceId)
-        || !isOptionalNonEmptyString(value.targetSymbol)
-        || !isSourceSpan(value.callSpan)
-        || typeof value.decision !== 'string'
-        || !RESOLUTION_DECISIONS.has(value.decision)
-        || (value.relationshipType !== 'CALLS' && value.relationshipType !== 'REFERENCES')
-        || !isResolutionAuthority(value.resolutionAuthority)
-        || !Array.isArray(value.proofSteps)
-        || value.proofSteps.length === 0
-        || !value.proofSteps.every(isResolutionProofStep)
-        || !Array.isArray(value.dependencyKeys)
-        || !value.dependencyKeys.every(isNonEmptyString)
-        || !isNonNegativeInteger(value.flowHops)
-        || value.flowHops > MAX_PYTHON_FLOW_HOPS) {
-        return false;
-    }
-    if (value.decision === 'resolved') {
-        return value.relationshipType === 'CALLS'
-            && isNonEmptyString(value.targetInstanceId)
-            && isNonEmptyString(value.targetSymbol)
-            && (value.resolutionAuthority === 'direct_binding' || value.resolutionAuthority === 'origin_flow');
-    }
-    return value.relationshipType === 'REFERENCES'
-        && value.dependencyKeys.length > 0
-        && value.targetInstanceId === undefined
-        && value.targetSymbol === undefined
-        && (value.resolutionAuthority === 'ambiguous'
-            || value.resolutionAuthority === 'unresolved'
-            || value.resolutionAuthority === 'unsupported'
-            || value.resolutionAuthority === 'heuristic_reference');
-}
-
-function isRelationshipAnalysisEvidence(value: unknown): value is RelationshipAnalysisEvidence {
-    if (
-        !isRecord(value)
-        || !hasOnlyKeys(value, ['moduleBindings', 'callSites', 'receiverTypeBindings', 'pythonFlowFacts', 'resolutionClaims'])
-        || !Array.isArray(value.moduleBindings)
-        || !Array.isArray(value.callSites)
-        || !Array.isArray(value.receiverTypeBindings)
-    ) {
-        return false;
-    }
-    const bindingsValid = value.moduleBindings.every((binding) => {
-        if (!isRecord(binding)) return false;
-        if (binding.kind !== 'import' && binding.kind !== 'reexport' && binding.kind !== 'export') return false;
-        if (typeof binding.typeOnly !== 'boolean' || !isSourceSpan(binding.span)) return false;
-        return ['moduleSpecifier', 'importedName', 'localName', 'exportedName']
-            .every((field) => isOptionalNonEmptyString(binding[field]));
-    });
-    const callsValid = value.callSites.every((call) => (
-        isRecord(call)
-        && isNonEmptyString(call.calleeName)
-        && isSourceSpan(call.span)
-    ));
-    const receiverTypesValid = value.receiverTypeBindings.every((binding) => {
-        if (
-            !isRecord(binding)
-            || !isNonEmptyString(binding.localName)
-            || !isNonEmptyString(binding.typeName)
-            || !isSourceSpan(binding.span)
-        ) {
-            return false;
-        }
-        if (binding.kind === 'local_constructor') {
-            return Object.keys(binding).length === 5 && isSourceSpan(binding.statementBlockSpan);
-        }
-        return Object.keys(binding).length === 4
-            && (binding.kind === 'parameter_annotation' || binding.kind === 'self_field_constructor');
-    });
-    const flowFactsValid = value.pythonFlowFacts === undefined
-        || (Array.isArray(value.pythonFlowFacts) && value.pythonFlowFacts.every(isPythonFlowFact));
-    const claimsValid = value.resolutionClaims === undefined
-        || (Array.isArray(value.resolutionClaims) && value.resolutionClaims.every(isResolutionClaim));
-    return bindingsValid && callsValid && receiverTypesValid && flowFactsValid && claimsValid;
 }
 
 export async function readRelationshipSidecar(input: ReadRelationshipSidecarInput): Promise<ReadRelationshipSidecarResult> {
