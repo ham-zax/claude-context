@@ -108,10 +108,11 @@ test('search_codebase schema exposes scoped grouped/raw controls', () => {
     assert.equal(properties.rankingMode.default, 'auto_changed_first');
     assert.equal(properties.limit.default, 20);
     assert.equal(properties.limit.maximum, Number.MAX_SAFE_INTEGER);
-    assert.match(String(properties.limit.description), /total caller bound across all pages/i);
+    assert.match(String(properties.limit.description), /grouped mode: total frozen result-set bound across continuation pages/i);
     assert.equal(properties.disclosureLimit.maximum, 200);
     assert.match(String(properties.disclosureLimit.description), /at most 10 results initially/i);
-    assert.match(String(properties.disclosureLimit.description), /limit=20 and disclosureLimit=6 returns 6 initially and freezes up to 20 total/i);
+    assert.match(String(properties.limit.description), /raw mode: maximum returned chunk count/i);
+    assert.match(String(properties.disclosureLimit.description), /limit=20 and disclosureLimit=6 returns up to 6 initially and freezes up to 20 total/i);
     assert.deepEqual(properties.debugMode.enum, ['summary', 'ranking', 'freshness', 'full']);
     assert.equal(properties.debugCandidateLimit.maximum, 160);
     assert.equal(Object.prototype.hasOwnProperty.call(properties, 'useReranker'), false);

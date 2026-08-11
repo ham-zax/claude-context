@@ -5708,6 +5708,36 @@ test('Context ignore policy rejects an outside-root ignore-file symlink', async 
     }
 });
 
+test('Context index policy rejects a symlinked satori.toml authority file', async (t) => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-config-link-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const configTarget = path.join(codebasePath, 'actual-satori.toml');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(configTarget, '[index]\nprofile = "minimal"\n', 'utf8');
+        try {
+            fs.symlinkSync(configTarget, path.join(codebasePath, 'satori.toml'));
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTSUP') {
+                t.skip(`File symlinks are unavailable on this platform: ${code}`);
+                return;
+            }
+            throw error;
+        }
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryVectorDatabase(),
+        });
+        await assert.rejects(
+            () => context.resolveIndexPolicyForCodebase(codebasePath),
+            /satori\.toml must not be a symbolic link/i,
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context resolves the repository index profile without caller ordering', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-profile-policy-'));
     const codebasePath = path.join(tempRoot, 'repo');

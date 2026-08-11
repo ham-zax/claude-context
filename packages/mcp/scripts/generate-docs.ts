@@ -10,7 +10,7 @@ const END_MARKER = '<!-- TOOLS_END -->';
 
 const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
     manage_index: 'Create, synchronize, inspect, repair, reindex, or clear a repository index. Use status and repair guidance instead of guessing whether an index is ready.',
-    search_codebase: 'Run freshness-aware hybrid search and return symbol-owned evidence. `limit` bounds the frozen result set across all pages; `disclosureLimit` controls only the initial grouped page. For example, `limit=20, disclosureLimit=6` returns six initially and freezes up to twenty.',
+    search_codebase: 'Run freshness-aware hybrid search and return symbol-owned evidence. `limit` bounds the frozen result set across all pages; `disclosureLimit` controls only the initial grouped page. For example, `limit=20, disclosureLimit=6` returns up to six initially and freezes up to twenty.',
     continue_search: 'Reveal more of one frozen result set without rerunning retrieval. Use it when the initial disclosure is relevant but incomplete. A grouped envelope without continuation reports pagination.continuation="complete" for the caller-bounded frozen set only; omittedBeyondLimitGroupCount reports groups excluded by the caller limit.',
     file_outline: 'List indexed symbols and spans in one file. Exact Python functions and methods can request on-demand structural analysis.',
     call_graph: 'Inspect advisory callers, callees, imports, and exports when supported. Verify inbound leads before blast-radius changes.',

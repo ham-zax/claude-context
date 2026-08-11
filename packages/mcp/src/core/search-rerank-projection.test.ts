@@ -453,7 +453,9 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
         "  return executeLargeOwner();",
         "}",
     ];
-    const largeSource = [...prefixLines, ...ownerLines].join("\n");
+    // Bare CR binds universal-newline handling across the streamed fallback
+    // and the shared bounded source selector used by every projection version.
+    const largeSource = [...prefixLines, ...ownerLines].join("\r");
     const largeHash = crypto.createHash("sha256").update(largeSource, "utf8").digest("hex");
     const largeOwner: SymbolRecord = {
         symbolKey: `${relativeFile}:largeOwner`,
@@ -519,7 +521,7 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
             projectPublicationBoundSearchRerankDocumentV4,
         ]) {
             const outcome = await project(common);
-            assert.equal(outcome.ok, true);
+            assert.equal(outcome.ok, true, JSON.stringify(outcome));
             if (outcome.ok) assert.match(outcome.document, /executeLargeOwner/);
         }
 
@@ -532,7 +534,7 @@ test("publication-bound v2 v3 and v4 projection retain large-file candidates thr
             reason: "source_exceeds_projection_limit",
         });
 
-        fs.appendFileSync(absoluteFile, "\n// changed after publication", "utf8");
+        fs.appendFileSync(absoluteFile, "\r// changed after publication", "utf8");
         assert.deepEqual(await projectPublicationBoundSearchRerankDocumentV2(common), {
             ok: false,
             candidateId: common.candidateId,

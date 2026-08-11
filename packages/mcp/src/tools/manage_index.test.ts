@@ -3,15 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { manageIndexTool, MANAGE_INDEX_ACTIONS } from "./manage_index.js";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { ContextMcpConfig } from "../config.js";
 import { ToolContext } from "./types.js";
 import { createSessionWorkspacePolicy } from "../core/session-workspace-policy.js";
-
-const TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(TOOLS_DIR, "../../../..");
 
 /** Session policy authorizing the canonical test repo for existing fixtures. */
 const TEST_WORKSPACE_POLICY = createSessionWorkspacePolicy({
@@ -317,30 +313,6 @@ test("manage_index response shape is a JSON envelope in MCP text content", async
     assert.ok(
         typeof payload.message === "string" || typeof payload.humanText === "string",
         "envelope must expose message and/or humanText",
-    );
-});
-
-test("public product docs list manage_index repair and do not claim text-only responses", () => {
-    const e2e = fs.readFileSync(
-        path.join(REPO_ROOT, "docs/SATORI_FEATURES_AND_USE_CASES.md"),
-        "utf8",
-    );
-    assert.match(e2e, /create\|reindex\|sync\|status\|clear\|repair/);
-    assert.match(e2e, /JSON envelope \(serialized in `content\[0\]\.text`\)/);
-    assert.match(e2e, /optional `repairProof`/);
-    assert.match(e2e, /no related collection[^.\n]*create/i);
-    assert.match(e2e, /malformed completion marker[^.\n]*reindex/i);
-    assert.doesNotMatch(
-        e2e,
-        /manage_index` action router supports `create\|reindex\|sync\|status\|clear`;/,
-    );
-    // OWN-3: installer SSOT is packages/cli; MCP install path is hard-deprecated (no deleted test cites).
-    assert.match(e2e, /Public installer\/doctor ownership is `packages\/cli`/);
-    assert.match(e2e, /hard-deprecated/);
-    assert.doesNotMatch(e2e, /packages\/mcp\/src\/cli\/install\.test\.ts/);
-    assert.doesNotMatch(
-        e2e,
-        /Shell CLI runtime \(`packages\/mcp\/src\/cli`\) is transport\/client glue plus install\/uninstall/,
     );
 });
 

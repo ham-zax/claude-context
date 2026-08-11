@@ -16,6 +16,8 @@ import {
 } from './root-bound-fs';
 
 const LINE_FEED_BYTE = 0x0a;
+const CARRIAGE_RETURN_BYTE = 0x0d;
+const STREAM_CHUNK_BYTES = 64 * 1024;
 
 export interface RootBoundFileLineRange {
     readonly startLine: number;
@@ -72,6 +74,11 @@ interface StreamedFileWindow {
     readonly totalLineCount: number;
 }
 
+interface StreamedLineState {
+    readonly currentLine: number;
+    readonly pendingCarriageReturn: boolean;
+}
+
 function normalizeCanonicalRoot(canonicalRoot: string): string {
     if (
         typeof canonicalRoot !== 'string'
@@ -124,44 +131,52 @@ function validateMaximumBytes(value: number, name: string): number {
 
 function captureRequestedChunkBytes(input: {
     chunk: Buffer;
-    currentLine: number;
+    lineState: StreamedLineState;
     requestedLineRange: RootBoundFileLineRange;
     capturedChunks: Buffer[];
     remainingWindowBytes: number;
-}): { currentLine: number; capturedByteLength: number } {
+}): { lineState: StreamedLineState; capturedByteLength: number } {
     const { chunk, requestedLineRange, capturedChunks } = input;
-    let currentLine = input.currentLine;
-    let segmentStart = 0;
+    let { currentLine, pendingCarriageReturn } = input.lineState;
     let captureStart = -1;
     let captureEnd = -1;
 
-    for (
-        let newlineIndex = chunk.indexOf(LINE_FEED_BYTE, segmentStart);
-        newlineIndex !== -1;
-        newlineIndex = chunk.indexOf(LINE_FEED_BYTE, segmentStart)
-    ) {
+    const captureByte = (byteIndex: number): void => {
         if (
             currentLine >= requestedLineRange.startLine
             && currentLine <= requestedLineRange.endLine
         ) {
-            captureStart = captureStart === -1 ? segmentStart : captureStart;
-            captureEnd = newlineIndex + 1;
+            captureStart = captureStart === -1 ? byteIndex : captureStart;
+            captureEnd = byteIndex + 1;
         }
-        currentLine += 1;
-        segmentStart = newlineIndex + 1;
-    }
+    };
 
-    if (
-        segmentStart < chunk.length
-        && currentLine >= requestedLineRange.startLine
-        && currentLine <= requestedLineRange.endLine
-    ) {
-        captureStart = captureStart === -1 ? segmentStart : captureStart;
-        captureEnd = chunk.length;
+    for (let byteIndex = 0; byteIndex < chunk.length; byteIndex += 1) {
+        const byte = chunk[byteIndex];
+        if (pendingCarriageReturn) {
+            if (byte === LINE_FEED_BYTE) {
+                captureByte(byteIndex);
+                currentLine += 1;
+                pendingCarriageReturn = false;
+                continue;
+            }
+            currentLine += 1;
+            pendingCarriageReturn = false;
+        }
+
+        captureByte(byteIndex);
+        if (byte === CARRIAGE_RETURN_BYTE) {
+            pendingCarriageReturn = true;
+        } else if (byte === LINE_FEED_BYTE) {
+            currentLine += 1;
+        }
     }
 
     if (captureStart === -1 || captureEnd <= captureStart) {
-        return { currentLine, capturedByteLength: 0 };
+        return {
+            lineState: { currentLine, pendingCarriageReturn },
+            capturedByteLength: 0,
+        };
     }
 
     // Copy only the requested span so a tiny window cannot retain whole stream chunks.
@@ -173,7 +188,10 @@ function captureRequestedChunkBytes(input: {
         );
     }
     capturedChunks.push(captured);
-    return { currentLine, capturedByteLength: captured.length };
+    return {
+        lineState: { currentLine, pendingCarriageReturn },
+        capturedByteLength: captured.length,
+    };
 }
 
 async function streamObservedFileWindow(
@@ -186,10 +204,14 @@ async function streamObservedFileWindow(
     const capturedChunks: Buffer[] = [];
     let capturedByteLength = 0;
     let totalBytes = 0;
-    let currentLine = 1;
+    let lineState: StreamedLineState = {
+        currentLine: 1,
+        pendingCarriageReturn: false,
+    };
     const stream = handle.createReadStream({
         autoClose: false,
         start: 0,
+        highWaterMark: STREAM_CHUNK_BYTES,
         // Node's end offset is inclusive. One extra byte makes growth observable.
         end: observedByteSize,
     });
@@ -207,12 +229,12 @@ async function streamObservedFileWindow(
         hash.update(buffer);
         const captured = captureRequestedChunkBytes({
             chunk: buffer,
-            currentLine,
+            lineState,
             requestedLineRange,
             capturedChunks,
             remainingWindowBytes: maxWindowBytes - capturedByteLength,
         });
-        currentLine = captured.currentLine;
+        lineState = captured.lineState;
         capturedByteLength += captured.capturedByteLength;
         totalBytes = nextTotalBytes;
     }
@@ -224,11 +246,15 @@ async function streamObservedFileWindow(
         );
     }
 
+    const totalLineCount = lineState.pendingCarriageReturn
+        ? lineState.currentLine + 1
+        : lineState.currentLine;
+
     return {
         hash,
         capturedChunks,
         capturedByteLength,
-        totalLineCount: currentLine,
+        totalLineCount,
     };
 }
 
@@ -257,10 +283,20 @@ function buildLineMappings(
     const lineCount = originalLineRange.endLine - originalLineRange.startLine + 1;
     let startUtf16Offset = 0;
     for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
-        const newlineIndex = utf8Window.indexOf('\n', startUtf16Offset);
-        const endUtf16Offset = newlineIndex === -1
-            ? utf8Window.length
-            : newlineIndex + 1;
+        let endUtf16Offset = utf8Window.length;
+        for (let offset = startUtf16Offset; offset < utf8Window.length; offset += 1) {
+            const character = utf8Window[offset];
+            if (character === '\n') {
+                endUtf16Offset = offset + 1;
+                break;
+            }
+            if (character === '\r') {
+                endUtf16Offset = utf8Window[offset + 1] === '\n'
+                    ? offset + 2
+                    : offset + 1;
+                break;
+            }
+        }
         mappings.push({
             localLine: lineIndex + 1,
             originalLine: originalLineRange.startLine + lineIndex,

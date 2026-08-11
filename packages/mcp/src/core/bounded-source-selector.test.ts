@@ -46,6 +46,28 @@ test("bounded source selector returns complete UTF-8 source when all caps fit", 
     assert.ok(result.serializedSourceBytes <= 24_000);
 });
 
+test("bounded source selector uses universal physical-line semantics", () => {
+    for (const [name, lineEnding] of [
+        ["lf", "\n"],
+        ["crlf", "\r\n"],
+        ["cr", "\r"],
+    ] as const) {
+        const content = ["function run() {", "  return true;", "}"].join(lineEnding);
+        const result = selectBoundedSource({
+            sourceBytes: Buffer.from(content, "utf8"),
+            symbolSpan: { startLine: 1, endLine: 3 },
+            budgets: budgets(),
+            capabilities,
+        });
+
+        assert.equal(result.status, "selected", name);
+        if (result.status !== "selected") continue;
+        assert.equal(result.source.mode, "complete", name);
+        assert.equal(result.source.totalLines, 3, name);
+        assert.equal(result.source.excerpts[0]?.content, content, name);
+    }
+});
+
 test("bounded source selector returns beginning, query, and terminal evidence instead of first N lines", () => {
     const lines = [
         "function reconcile() {",

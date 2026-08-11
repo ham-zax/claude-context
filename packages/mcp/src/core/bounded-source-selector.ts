@@ -155,17 +155,19 @@ function readPhysicalLines(sourceBytes: Buffer): PhysicalLine[] {
     const lines: PhysicalLine[] = [];
     let startByte = 0;
     for (let index = 0; index < sourceBytes.length; index += 1) {
-        if (sourceBytes[index] !== 0x0a) continue;
-        const contentEndByte = index > startByte && sourceBytes[index - 1] === 0x0d
-            ? index - 1
-            : index;
+        const byte = sourceBytes[index];
+        if (byte !== 0x0a && byte !== 0x0d) continue;
+        const lineEndByte = byte === 0x0d && sourceBytes[index + 1] === 0x0a
+            ? index + 2
+            : index + 1;
         lines.push({
             line: lines.length + 1,
             startByte,
-            contentEndByte,
-            text: sourceBytes.subarray(startByte, contentEndByte).toString("utf8"),
+            contentEndByte: index,
+            text: sourceBytes.subarray(startByte, index).toString("utf8"),
         });
-        startByte = index + 1;
+        startByte = lineEndByte;
+        index = lineEndByte - 1;
     }
     if (startByte <= sourceBytes.length) {
         lines.push({

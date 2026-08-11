@@ -40,6 +40,7 @@ profile = "minimal"
 ```
 
 The file controls index breadth only. Credentials, provider models, dimensions, and backend endpoints belong in runtime configuration.
+As a policy-authority file, `satori.toml` must be a regular file at the repository root; symbolic links are rejected fail-closed.
 
 ## Development
 

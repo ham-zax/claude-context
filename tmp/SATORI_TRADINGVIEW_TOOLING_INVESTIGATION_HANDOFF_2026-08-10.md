@@ -675,6 +675,10 @@ This is the reviewed current contract, not a proposed replacement:
   1 MiB maximum. This protects rule authority but means unreadable, oversized,
   replaced, or symlinked control files must be covered as failure cases rather
   than silently treated as empty.
+- `satori.toml` participates in the same policy-authority observation. It must
+  be a regular root file and is intentionally rejected fail-closed when it is
+  a symbolic link; focused Context coverage now binds that compatibility
+  decision explicitly.
 - `FileSynchronizer` and the watcher both evaluate normalized repository-
   relative paths through the active `ignore` matcher; directories are checked
   in both `path` and `path/` forms. The watcher rebuilds its matcher from
@@ -825,6 +829,33 @@ The implementation remains split at the intended ownership boundary: the Core
 root-bound primitive and race contract, then MCP publication-bound projection
 with a real source above 256 KiB. No ranking, admission, provider-order, or
 projection-text tuning was included.
+
+### Issue 22 closure follow-up (2026-08-11)
+
+- Review found a size-dependent newline hole in the streamed Core path: it
+  advanced lines only for LF. The bounded MCP source selector independently
+  had the same LF-only assumption, so fixing only the stream scanner still
+  produced `projection_contract_failed` for a large bare-CR source.
+- Both owners now use universal physical-line semantics: LF, CRLF, and bare CR
+  are equivalent, CRLF is one newline even when split across stream chunks,
+  and a final bare CR creates the same trailing empty line as a final LF.
+- The projection ceiling remains the configured `READ_FILE_MAX_BYTES` (8 MiB
+  by default). This intentionally fixes the unintended 256 KiB mismatch
+  without claiming that every extension-eligible file of arbitrary size can
+  be rerank-projected. Files above the ceiling continue to report the typed
+  `source_exceeds_projection_limit` degradation.
+- Direct Core tests now reject streamed growth, truncation, and pathname
+  replacement deterministically. The MCP regression projects the real
+  above-256-KiB fixture with bare-CR line endings through v2, v3, and v4, and
+  bounded-selector coverage binds LF/CRLF/bare-CR equivalence.
+- The closure follow-up changes evidence availability and physical-line
+  parsing only. It does not change candidate admission, relevance scoring,
+  reranker/provider order, or projection selection.
+- Follow-up verification passed: nine direct Core streamed-window tests; three
+  focused policy-authority tests; 27 bounded-selector/projection tests; 59
+  projection-document, symbol-context, `manage_index`, and registry tests;
+  Core and MCP typechecks; clean Core and MCP runtime builds; targeted ESLint;
+  generated-doc and manifest checks; and diff hygiene.
 
 ## 23. Must-lane admission can stop at the chunk limit before filling grouped results
 
@@ -996,9 +1027,15 @@ None. Issues 21–24 are closed, and the optional pagination wording is now boun
 in the public `search_codebase` parameter descriptions and synchronized README
 workflows. `limit` is explicitly the total frozen-set bound across all pages;
 `disclosureLimit` is only the initial grouped page size. The documented
-`limit=20, disclosureLimit=6` example returns six initially and freezes up to
-twenty, while `continuation="complete"` remains caller-bound rather than a claim
-that the full available pool was exhausted. No runtime behavior changed.
+`limit=20, disclosureLimit=6` example returns up to six initially and freezes
+up to twenty, while `continuation="complete"` remains caller-bound rather than
+a claim that the full available pool was exhausted. No runtime behavior
+changed.
+
+The redundant `docs/SATORI_FEATURES_AND_USE_CASES.md` workflow document was
+removed during this closure follow-up. Root/package READMEs and generated MCP
+tool schemas remain the maintained public documentation surfaces; the direct
+`manage_index` response-envelope test remains the runtime contract oracle.
 
 ### Confirmed non-defects and closed branches
 
@@ -1035,8 +1072,8 @@ description:
 - `limit`: total frozen result-set size across all pages, not page size;
 - `disclosureLimit`: initial page size; set it below `limit` to obtain a handle
   when enough frozen results exist;
-- example: `limit=20, disclosureLimit=6` returns six initially and freezes up to
-  twenty;
+- example: `limit=20, disclosureLimit=6` returns up to six initially and
+  freezes up to twenty;
 - `continuation: complete` means the caller-bounded frozen set is complete, not
   that `availableGroupCount` was exhausted.
 
