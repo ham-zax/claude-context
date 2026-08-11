@@ -66,6 +66,20 @@ type SyncManagerTestAccess = {
         observedEventEpoch: number;
         candidatePolicyHash: string;
     } | undefined;
+    beginFullIndexSourceHandoff(
+        codebasePath: string,
+        input: {
+            candidatePolicyHash: string;
+            markerRunId: string;
+        },
+    ): void;
+    rejectFullIndexSourceHandoff(
+        codebasePath: string,
+        input: {
+            candidatePolicyHash: string;
+            markerRunId: string;
+        },
+    ): boolean;
     completeFullIndexSourceHandoff(
         codebasePath: string,
         input: {
@@ -262,6 +276,7 @@ async function withCandidateWatcher<T>(
         checkpointObservation: string;
         provenGeneration: ReturnType<typeof buildProvenVectorGeneration>;
         mutationCalls: () => number;
+        setStatus: (status: CodebaseStatus) => void;
     }) => Promise<T>,
 ): Promise<T> {
     const codebasePath = createTempDir();
@@ -285,11 +300,19 @@ async function withCandidateWatcher<T>(
                 observationToken: checkpointObservation,
                 merkleRoot: 'merkle-candidate-v1',
                 documentDigest: 'document-candidate-v1',
+                generationReceipt: provenGeneration,
             };
         },
         async reindexByChange() {
             mutationCalls += 1;
-            return { added: 0, removed: 0, modified: 0 };
+            return {
+                added: 0,
+                removed: 0,
+                modified: 0,
+                changedFiles: [],
+                collectionName: provenGeneration.collectionName,
+                generationReceipt: provenGeneration,
+            };
         },
     };
     const manager = new SyncManager(
@@ -316,6 +339,7 @@ async function withCandidateWatcher<T>(
             checkpointObservation,
             provenGeneration,
             mutationCalls: () => mutationCalls,
+            setStatus: (status) => statusByPath.set(codebasePath, status),
         });
     } finally {
         await manager.stopWatcherMode();
@@ -2899,6 +2923,10 @@ test('full-index source handoff binds the exact checkpoint and makes prepared re
     }) => {
         const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
         assert.ok(capture);
+        access.beginFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: provenGeneration.marker.runId,
+        });
 
         const handedOff = await access.completeFullIndexSourceHandoff(codebasePath, {
             capture,
@@ -2919,6 +2947,85 @@ test('full-index source handoff binds the exact checkpoint and makes prepared re
     });
 });
 
+test('same-policy full-index candidate explicitly blocks an older prepared-source proof until rollback', async () => {
+    await withCandidateWatcher({}, async ({
+        codebasePath,
+        manager,
+        access,
+        checkpointObservation,
+        provenGeneration,
+    }) => {
+        const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
+        assert.ok(capture);
+        access.beginFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: provenGeneration.marker.runId,
+        });
+        assert.equal(await access.completeFullIndexSourceHandoff(codebasePath, {
+            capture,
+            candidatePolicyHash: 'candidate-policy-v1',
+            checkpointObservation,
+            provenGeneration,
+        }), true);
+        assert.equal(manager.getPreparedReadObservation(codebasePath).available, true);
+
+        access.beginFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: 'marker-candidate-v2',
+        });
+
+        const rejectedGeneration = {
+            ...provenGeneration,
+            marker: {
+                ...provenGeneration.marker,
+                runId: 'marker-candidate-v2',
+            },
+        };
+        assert.equal(await access.completeFullIndexSourceHandoff(codebasePath, {
+            capture,
+            candidatePolicyHash: 'candidate-policy-v1',
+            checkpointObservation,
+            provenGeneration: rejectedGeneration,
+        }), false);
+
+        assert.deepEqual(manager.getPreparedReadObservation(codebasePath), {
+            available: false,
+            reason: 'checkpoint_unverified',
+            freshnessEpoch: 0,
+            watcherState: 'ready',
+        });
+        assert.equal(manager.getPreparedReadDiagnostics(codebasePath).checkpointStatus, 'unverified');
+        assert.equal(access.rejectFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: 'marker-candidate-v2',
+        }), true);
+        assert.equal(manager.getPreparedReadObservation(codebasePath).available, true);
+    });
+});
+
+test('a successful exact sync supersedes a retained full-index source handoff barrier', async () => {
+    await withCandidateWatcher({}, async ({
+        codebasePath,
+        manager,
+        access,
+        provenGeneration,
+        setStatus,
+    }) => {
+        access.beginFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: provenGeneration.marker.runId,
+        });
+        setStatus('indexed');
+
+        const decision = await manager.ensureFreshness(codebasePath, 0, {
+            skipIgnoreControlCheck: true,
+        });
+
+        assert.equal(decision.mode, 'synced');
+        assert.equal(manager.getPreparedReadObservation(codebasePath).available, true);
+    });
+});
+
 test('full-index source handoff leaves an event after capture pending', async () => {
     await withCandidateWatcher({}, async ({
         codebasePath,
@@ -2929,6 +3036,10 @@ test('full-index source handoff leaves an event after capture pending', async ()
     }) => {
         const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
         assert.ok(capture);
+        access.beginFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: provenGeneration.marker.runId,
+        });
         assert.equal(manager.recordWatcherEvent(codebasePath, 'source_changed'), 1);
 
         const handedOff = await access.completeFullIndexSourceHandoff(codebasePath, {
@@ -2958,6 +3069,10 @@ test('full-index source handoff fails closed when the watcher generation is repl
     }) => {
         const capture = access.captureWatcherBootstrap(codebasePath, 'candidate-policy-v1');
         assert.ok(capture);
+        access.beginFullIndexSourceHandoff(codebasePath, {
+            candidatePolicyHash: 'candidate-policy-v1',
+            markerRunId: provenGeneration.marker.runId,
+        });
 
         await access.touchWatchedCodebase(codebasePath, {
             policyHash: 'candidate-policy-v2',

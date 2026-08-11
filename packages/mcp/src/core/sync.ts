@@ -100,6 +100,11 @@ export type FullIndexSourceHandoffInput = Readonly<{
     provenGeneration: ProvenVectorGenerationReceipt;
 }>;
 
+export type FullIndexSourceHandoffBarrierInput = Readonly<{
+    candidatePolicyHash: string;
+    markerRunId: string;
+}>;
+
 export interface WatcherObservationSnapshot {
     observedEventEpoch: number;
     comparedThroughEventEpoch: number;
@@ -310,6 +315,7 @@ export class SyncManager {
     private watcherObservations: Map<string, RootWatcherObservation> = new Map();
     private sourceCheckpointObservations: Map<string, string> = new Map();
     private sourceCheckpointStatuses: Map<string, 'valid' | 'missing' | 'corrupt'> = new Map();
+    private fullIndexSourceHandoffBarriers: Map<string, FullIndexSourceHandoffBarrierInput> = new Map();
     private readonly now: () => number;
     private readonly onSyncCompleted?: SyncManagerOptions['onSyncCompleted'];
     private readonly mutationLeaseCoordinator?: MutationLeaseCoordinator;
@@ -479,6 +485,57 @@ export class SyncManager {
         });
     }
 
+    public beginFullIndexSourceHandoff(
+        codebasePath: string,
+        input: FullIndexSourceHandoffBarrierInput,
+        mutationLease?: RootMutationLease,
+    ): void {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        this.assertMutationCurrent(mutationLease);
+        if (input.candidatePolicyHash.length === 0 || input.markerRunId.length === 0) {
+            throw new TypeError('Full-index source handoff requires a candidate policy hash and marker run ID.');
+        }
+        this.fullIndexSourceHandoffBarriers.set(root, Object.freeze({ ...input }));
+    }
+
+    public rejectFullIndexSourceHandoff(
+        codebasePath: string,
+        input: FullIndexSourceHandoffBarrierInput,
+        mutationLease?: RootMutationLease,
+    ): boolean {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        this.assertMutationCurrent(mutationLease);
+        const barrier = this.fullIndexSourceHandoffBarriers.get(root);
+        if (
+            barrier?.candidatePolicyHash !== input.candidatePolicyHash
+            || barrier.markerRunId !== input.markerRunId
+        ) {
+            return false;
+        }
+        this.fullIndexSourceHandoffBarriers.delete(root);
+        return true;
+    }
+
+    private supersedeFullIndexSourceHandoffAfterSync(
+        codebasePath: string,
+        provenGeneration: ProvenVectorGenerationReceipt | undefined,
+    ): boolean {
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const barrier = this.fullIndexSourceHandoffBarriers.get(root);
+        if (
+            !barrier
+            || provenGeneration?.marker.runId !== barrier.markerRunId
+            || provenGeneration.marker.indexStatus !== 'completed'
+            || provenGeneration.marker.indexPolicyHash !== barrier.candidatePolicyHash
+            || provenGeneration.policy.canonicalRoot !== root
+            || provenGeneration.policy.policyHash !== barrier.candidatePolicyHash
+        ) {
+            return false;
+        }
+        this.fullIndexSourceHandoffBarriers.delete(root);
+        return true;
+    }
+
     /**
      * Binds an already-proven completed generation/checkpoint to the watcher
      * observation captured for the same candidate. This deliberately does not
@@ -493,8 +550,11 @@ export class SyncManager {
     ): Promise<boolean> {
         const root = this.canonicalWatcherRoot(codebasePath);
         this.assertMutationCurrent(mutationLease);
+        const barrier = this.fullIndexSourceHandoffBarriers.get(root);
         if (
-            input.capture.canonicalRoot !== root
+            barrier?.candidatePolicyHash !== input.candidatePolicyHash
+            || barrier.markerRunId !== input.provenGeneration.marker.runId
+            || input.capture.canonicalRoot !== root
             || input.capture.candidatePolicyHash !== input.candidatePolicyHash
             || input.checkpointObservation.length === 0
             || input.provenGeneration.collectionName.length === 0
@@ -570,6 +630,7 @@ export class SyncManager {
         this.sourceCheckpointStatuses.set(root, 'valid');
         this.sourceCheckpointObservations.set(root, input.checkpointObservation);
         this.coverWatcherObservation(root, input.capture.observedEventEpoch);
+        this.fullIndexSourceHandoffBarriers.delete(root);
         return this.getPreparedReadObservation(root).available;
     }
 
@@ -636,6 +697,7 @@ export class SyncManager {
         }
         if (this.activeSyncs.has(root)) return unavailable('sync_active');
         if (this.activeIgnoreReconciles.has(root)) return unavailable('ignore_reconcile_active');
+        if (this.fullIndexSourceHandoffBarriers.has(root)) return unavailable('checkpoint_unverified');
 
         const checkpointInspectionSupported = typeof this.context.inspectSourceFreshnessCheckpoint === 'function';
         const checkpointObservation = this.sourceCheckpointObservations.get(root);
@@ -667,21 +729,24 @@ export class SyncManager {
     }
 
     public getPreparedReadDiagnostics(codebasePath: string): PreparedReadWatcherDiagnostics {
-        const checkpointState = this.sourceCheckpointStatuses.get(codebasePath) ?? 'unverified';
-        const checkpointObservation = this.sourceCheckpointObservations.get(codebasePath);
+        const root = this.canonicalWatcherRoot(codebasePath);
+        const checkpointState = this.fullIndexSourceHandoffBarriers.has(root)
+            ? 'unverified' as const
+            : this.sourceCheckpointStatuses.get(root) ?? 'unverified';
+        const checkpointObservation = this.sourceCheckpointObservations.get(root);
         const registeredCheckpointObservation =
-            this.context.getRegisteredSourceFreshnessCheckpointObservation?.(codebasePath);
+            this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
         const checkpointStatus = checkpointState === 'valid'
             && (!checkpointObservation || registeredCheckpointObservation !== checkpointObservation)
             ? 'observation_mismatch'
             : checkpointState;
-        const lifecycleState = this.watcherLifecycleStates.get(codebasePath);
-        const lastErrorCode = this.watcherErrorCodes.get(codebasePath);
+        const lifecycleState = this.watcherLifecycleStates.get(root);
+        const lastErrorCode = this.watcherErrorCodes.get(root);
         return {
             configured: this.watchEnabled,
             managerStarted: this.watcherModeStarted,
-            rootRegistered: this.watchedCodebases.has(codebasePath),
-            watcherActive: lifecycleState === 'ready' && this.watchers.has(codebasePath),
+            rootRegistered: this.watchedCodebases.has(root),
+            watcherActive: lifecycleState === 'ready' && this.watchers.has(root),
             ...(lifecycleState ? { lifecycleState } : {}),
             ...(lastErrorCode ? { lastErrorCode } : {}),
             checkpointStatus,
@@ -1146,6 +1211,12 @@ export class SyncManager {
         };
         if (outcome.mode === 'synced' && !outcome.errorMessage) {
             this.coverWatcherObservation(codebasePath, flightEpoch);
+            if (committedCheckpoint?.status === 'valid') {
+                this.supersedeFullIndexSourceHandoffAfterSync(
+                    codebasePath,
+                    committedCheckpoint.generationReceipt,
+                );
+            }
         }
         return decision;
     }
@@ -2176,6 +2247,7 @@ export class SyncManager {
         this.watcherObservations.delete(codebasePath);
         this.sourceCheckpointObservations.delete(codebasePath);
         this.sourceCheckpointStatuses.delete(codebasePath);
+        this.fullIndexSourceHandoffBarriers.delete(codebasePath);
         this.watcherCandidatePolicies.delete(codebasePath);
         this.watcherGenerations.delete(codebasePath);
         this.activeIgnoreReconciles.delete(codebasePath);
@@ -2336,6 +2408,7 @@ export class SyncManager {
         this.watcherObservations.clear();
         this.sourceCheckpointObservations.clear();
         this.sourceCheckpointStatuses.clear();
+        this.fullIndexSourceHandoffBarriers.clear();
         this.watchedCodebases.clear();
 
         const watchers = Array.from(this.watchers.values());

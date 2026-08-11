@@ -118,3 +118,24 @@ LateOn regressions must prove:
 - post-ready restart and close behavior remain unchanged.
 
 The final temporary handoff records these closures and leaves exact-current TradingView runtime qualification as evidence work requiring a restarted MCP client. No live reindex or ranking tournament is part of this design.
+
+## Follow-up: explicit full-index handoff barrier
+
+A later review identified that a same-policy reindex could reuse both the watcher and the previous prepared-source proof until the newly published generation's checkpoint observation happened to displace it. The generation mismatch normally failed closed, but the full-index owner already knows whether its handoff succeeded and must represent that fact directly.
+
+`SyncManager` therefore owns a generation-bound handoff barrier:
+
+```text
+begin candidate {canonical root, policy hash, marker run ID}
+→ prepared reads are explicitly unverified
+
+complete the exact candidate handoff successfully
+→ install the new checkpoint proof and clear the exact barrier
+
+reject the candidate before it becomes active
+→ clear the exact barrier
+→ restore the previous watcher only when a previous proven generation exists
+→ otherwise remove the failed first-create watcher registration
+```
+
+The barrier is separate from watcher event coverage. It must not synthesize a filesystem event or erase the previous generation's proof during a staged reindex, because rollback may still restore that generation. A durable new generation whose handoff is absent or fails keeps the barrier and reports `source_state_unverified`. A later successful sync may supersede that barrier only when its valid checkpoint receipt names the exact marker run, policy hash, and canonical root retained by the barrier; this preserves the existing sync-based recovery path without accepting an unrelated generation.

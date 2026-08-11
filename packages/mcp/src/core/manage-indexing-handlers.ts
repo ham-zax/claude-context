@@ -1495,17 +1495,6 @@ export class ManageIndexingHandlers {
                 this.host.mutationLeaseCoordinator.publishWhileCurrent(mutationLease, publish);
             }
             : undefined;
-        const restoreActiveWatcherAfterRejectedCandidate = async (): Promise<void> => {
-            if (!candidatePolicy) return;
-            try {
-                await this.host.syncManager.restoreActiveWatcherPolicy(
-                    absolutePath,
-                    candidatePolicy.policyHash,
-                );
-            } catch (watcherError) {
-                console.warn(`[BACKGROUND-INDEX] Failed to restore active watcher policy for '${absolutePath}': ${formatUnknownError(watcherError)}`);
-            }
-        };
         const persistBackgroundPhase = (phase: IndexOperationPhase, mutateSnapshot?: () => void): void => {
             if (!mutationLease) {
                 mutateSnapshot?.();
@@ -1593,6 +1582,34 @@ export class ManageIndexingHandlers {
             }
         }
 
+        const rejectCandidateSourceHandoff = (): boolean => {
+            if (!candidatePolicy || !candidateMarkerRunId) return false;
+            return this.host.syncManager.rejectFullIndexSourceHandoff(
+                absolutePath,
+                {
+                    candidatePolicyHash: candidatePolicy.policyHash,
+                    markerRunId: candidateMarkerRunId,
+                },
+                mutationLease,
+            );
+        };
+        const restoreActiveWatcherAfterRejectedCandidate = async (): Promise<void> => {
+            if (!candidatePolicy) return;
+            try {
+                rejectCandidateSourceHandoff();
+                if (previousCompleteGeneration) {
+                    await this.host.syncManager.restoreActiveWatcherPolicy(
+                        absolutePath,
+                        candidatePolicy.policyHash,
+                    );
+                } else {
+                    await this.host.syncManager.unwatchCodebase(absolutePath);
+                }
+            } catch (watcherError) {
+                console.warn(`[BACKGROUND-INDEX] Failed to reject candidate watcher policy for '${absolutePath}': ${formatUnknownError(watcherError)}`);
+            }
+        };
+
         try {
             for (const [capability, implementation] of [
                 ["publishCompletedIndexMarker", this.host.context.publishCompletedIndexMarker],
@@ -1621,6 +1638,15 @@ export class ManageIndexingHandlers {
                 ? await this.host.context.resolveIndexPolicyForReindex(absolutePath, policyUpdate)
                 : await this.host.context.resolveIndexPolicyForCodebase(absolutePath, policyUpdate);
             console.log(`[BACKGROUND-INDEX] Using observed index profile '${candidatePolicy.profile}'.`);
+            candidateMarkerRunId = crypto.randomUUID();
+            this.host.syncManager.beginFullIndexSourceHandoff(
+                absolutePath,
+                {
+                    candidatePolicyHash: candidatePolicy.policyHash,
+                    markerRunId: candidateMarkerRunId,
+                },
+                mutationLease,
+            );
             try {
                 await this.host.syncManager.touchWatchedCodebase(absolutePath, {
                     policyHash: candidatePolicy.policyHash,
@@ -1629,7 +1655,6 @@ export class ManageIndexingHandlers {
             } catch (watcherError) {
                 console.warn(`[BACKGROUND-INDEX] Failed to establish candidate watcher for '${absolutePath}': ${formatUnknownError(watcherError)}`);
             }
-            candidateMarkerRunId = crypto.randomUUID();
             const { FileSynchronizer } = await import("@zokizuan/satori-core");
             const ignorePatterns = candidatePolicy.effectiveIgnorePatterns;
             const supportedExtensions = candidatePolicy.supportedExtensions;
@@ -1786,6 +1811,7 @@ export class ManageIndexingHandlers {
             }
 
             if (stats.status === "limit_reached") {
+                rejectCandidateSourceHandoff();
                 this.host.context.publishResolvedIndexPolicy(
                     candidatePolicy,
                     {

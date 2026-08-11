@@ -208,3 +208,45 @@ docs(handoff): close watcher and LateOn lifecycle work
 - [ ] **Step 4: Stop**
 
 Do not push. Do not perform a live TradingView reindex or ranking tournament. Report the exact-current MCP restart qualification as the only external evidence step if it remains unperformed.
+
+### Task 4: Explicit full-index handoff barrier follow-up
+
+**Files:**
+- Modify: `packages/mcp/src/core/sync.ts`
+- Modify: `packages/mcp/src/core/manage-indexing-handlers.ts`
+- Test: `packages/mcp/src/core/sync.test.ts`
+- Test: `packages/mcp/src/core/manage-indexing-handlers.test.ts`
+- Test only if the public projection needs direct coverage: `packages/mcp/src/core/handlers.status.test.ts`
+
+**Interfaces:**
+- Produces: an exact candidate barrier bound to canonical root, policy hash, and marker run ID.
+- Preserves: prior-generation proof during a staged candidate, watcher event epochs, candidate ignore matching, and durable generation publication.
+- Excludes: LateOn, ranking, retrieval, admission, grouping, provider order, projection budgets, and ignore semantics.
+
+- [x] **Step 1: Add the failing same-policy handoff regression**
+
+Prove that an existing valid prepared-source observation becomes unavailable when a same-policy full-index candidate begins, stays unavailable when the candidate handoff fails, and becomes available only after exact candidate rollback/completion or a later exact-generation sync proof.
+
+- [x] **Step 2: Verify the regression fails for the missing explicit barrier**
+
+Run the named `sync.test.ts` case. Expected failure: the previous prepared-source observation remains available after the candidate begins.
+
+- [x] **Step 3: Implement exact begin/complete/reject ownership**
+
+Add a `SyncManager` barrier keyed by canonical root with `{ candidatePolicyHash, markerRunId }`. Establish it before candidate watcher/indexing work. Make prepared-read observation and diagnostics unverified while it exists. Require the exact barrier in `completeFullIndexSourceHandoff()` and clear it only after successful proof installation. Clear it on exact candidate rejection without deleting the previous proof. Preserve the normal sync repair path by allowing a successful sync to supersede the barrier only with a valid receipt for the exact retained marker, policy, and root.
+
+- [x] **Step 4: Verify the barrier regression passes**
+
+Run the same named test and the existing capture, post-capture event, watcher replacement, prepared-read, and status tests.
+
+- [x] **Step 5: Add the failing initial-create cleanup regression**
+
+Prove that a first create with no previous proven generation removes its candidate watcher after failure and never calls active-watcher restoration while the lifecycle still says `indexing`.
+
+- [x] **Step 6: Implement candidate rejection cleanup**
+
+If a previous proven generation exists, reject the exact barrier and restore the active watcher. Otherwise reject/unwatch the failed candidate root before persisting `indexfailed`. Do not install a replacement watcher for a root with no active generation.
+
+- [x] **Step 7: Verify and inspect**
+
+Run the focused sync, manage-indexing, status, and watcher suites; MCP typecheck; targeted ESLint; `git diff --check`; and inspect the complete task diff. Preserve unrelated work and do not commit or push without explicit authorization.
