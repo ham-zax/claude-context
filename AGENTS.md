@@ -10,6 +10,7 @@ Move quickly, but do not guess. Find the behavior’s true owner, make the small
 
 * The current explicit request defines the required outcome and authorized scope within applicable safety, permission, and repository constraints.
 * More specific repository instructions refine this file.
+* Applicable skill instructions supersede this file and general agent instructions when they conflict; follow the skill's protocol even where general delegation or process guidance here differs.
 * Repository code, tests, configuration, schemas, generated contracts, and authoritative documentation are the primary local evidence.
 * Surface instruction conflicts that could change the outcome, scope, behavior, safety, risk, or responsible owner.
 * Do not invent requirements, product policy, APIs, schemas, parameters, aliases, compatibility guarantees, or output shapes.
