@@ -8,7 +8,6 @@ import { POTION_DIMENSION, POTION_MODEL_ID } from "@zokizuan/satori-core";
 import { applyEdits, modify, parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { CliError } from "./errors.js";
 import type {
-    InstallClient,
     InstallOfflineReranker,
     InstallProfile,
     InstallRuntime,
@@ -22,10 +21,56 @@ import {
     runInstallPreflight,
     selectedConnectedVectorStore,
     type InstallPreflightDependencies,
-    type InstallPreflightInput,
     type InstallPreflightResult,
     type LanceDbModule,
 } from "./install-preflight.js";
+import {
+    assertAutoClientTargets,
+    resolveClientTargets,
+    selectClientTargets,
+} from "./client-targets.js";
+import {
+    packageNameFromSpecifier,
+    plannedManagedRuntimeCommand,
+    resolveLauncherPath,
+    resolveManagedClientCommand,
+    resolvePotionAssetsRoot,
+    resolveRuntimeEntryPath,
+    resolveRuntimePackageRoot,
+    resolveRuntimePackageRootFromRoot,
+    resolveRuntimeRoot,
+} from "./managed-runtime-paths.js";
+import {
+    LAUNCHER_OWNED_RUNTIME_ENV_VARS,
+    MANAGED_BIN_DIR,
+    MANAGED_LAUNCHER_FILE,
+    MANAGED_RUNTIME_DIR,
+    SATORI_RUNTIME_ENV_VARS,
+} from "./install-contracts.js";
+import type {
+    ClientTarget,
+    CompanionTarget,
+    ExecFileSyncLike,
+    InstallCommandInput,
+    InstallCommandOptions,
+    InstallCommandResult,
+    ManagedClientConfigProof,
+    ManagedRuntimeCommand,
+    ManagedRuntimeUpgradeResult,
+} from "./install-contracts.js";
+export type {
+    ClientName,
+    ClientInstallResult,
+    InstallCommandInput,
+    InstallCommandOptions,
+    InstallCommandResult,
+    ManagedClientConfigProof,
+    ManagedRuntimeCommand,
+    ManagedRuntimeUpgradePhase,
+    ManagedRuntimeUpgradeResult,
+} from "./install-contracts.js";
+export { assertAutoClientTargets, detectClientTargets } from "./client-targets.js";
+export { resolveLauncherPath, resolveManagedClientCommand } from "./managed-runtime-paths.js";
 import { resolveManagedPackageSpecifier } from "./managed-package.js";
 import {
     buildLauncherScript,
@@ -70,62 +115,6 @@ const CODEX_GUIDANCE_HOOK_START = "# >>> satori-cli managed codex guidance hook 
 const CODEX_GUIDANCE_HOOK_END = "# <<< satori-cli managed codex guidance hook end <<<";
 const INSTRUCTIONS_BLOCK_START = "<!-- satori-mcp:start -->";
 const INSTRUCTIONS_BLOCK_END = "<!-- satori-mcp:end -->";
-const LEGACY_SKILL_DIR_NAME = "satori";
-const MANAGED_RUNTIME_DIR = "mcp-runtime";
-const MANAGED_BIN_DIR = "bin";
-const MANAGED_LAUNCHER_FILE = "satori-mcp.js";
-const SATORI_RUNTIME_ENV_VARS = [
-    "SATORI_RUNTIME_PROFILE",
-    "VECTOR_STORE_PROVIDER",
-    "LANCEDB_PATH",
-    "EMBEDDING_PROVIDER",
-    "EMBEDDING_MODEL",
-    "EMBEDDING_OUTPUT_DIMENSION",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "VOYAGEAI_API_KEY",
-    "VOYAGEAI_RERANKER_MODEL",
-    "SATORI_RERANKER_PROVIDER",
-    "SATORI_LATEON_MODEL_PATH",
-    "SATORI_LATEON_PROFILE",
-    "SATORI_LATEON_ACTIVATION_POLICY",
-    "SATORI_LATEON_REQUEST_DEADLINE_MS",
-    "SATORI_LATEON_MAX_QUEUE_WAIT_MS",
-    "SATORI_LATEON_RERANKER_STAGE_DEADLINE_MS",
-    "SATORI_LATEON_MAX_ACTIVE_RERANKS",
-    "SATORI_LATEON_MAX_QUEUED_RERANKS",
-    "SATORI_LATEON_INTRA_OP_THREADS",
-    "GEMINI_API_KEY",
-    "GEMINI_BASE_URL",
-    "OLLAMA_HOST",
-    "OLLAMA_MODEL",
-    "OLLAMA_MODEL_DIGEST",
-    "POTION_HELPER_PATH",
-    "POTION_MODEL_PATH",
-    "POTION_REQUEST_TIMEOUT_MS",
-    "MILVUS_ADDRESS",
-    "MILVUS_TOKEN",
-    "READ_FILE_MAX_LINES",
-    "MCP_ENABLE_WATCHER",
-    "MCP_WATCH_DEBOUNCE_MS",
-] as const;
-const LAUNCHER_OWNED_RUNTIME_ENV_VARS = [
-    "SATORI_RUNTIME_PROFILE",
-    "VECTOR_STORE_PROVIDER",
-    "LANCEDB_PATH",
-    "EMBEDDING_PROVIDER",
-    "EMBEDDING_MODEL",
-    "EMBEDDING_OUTPUT_DIMENSION",
-    "SATORI_RERANKER_PROVIDER",
-    "SATORI_LATEON_MODEL_PATH",
-    "SATORI_LATEON_PROFILE",
-    "SATORI_LATEON_ACTIVATION_POLICY",
-    "OLLAMA_HOST",
-    "OLLAMA_MODEL",
-    "POTION_HELPER_PATH",
-    "POTION_MODEL_PATH",
-    "POTION_REQUEST_TIMEOUT_MS",
-] as const;
 const CODEX_GUIDANCE_HOOK_MESSAGE = "Satori MCP is available for semantic ownership and freshness-aware discovery. Prefer search_codebase for unfamiliar behavior; use the usual/native workflow for known paths, exact literals, or small local edits. Follow recommendedNextAction, verify call_graph inbound results, and ask before create, reindex, or clear.";
 const CODEX_GUIDANCE_HOOK_MATCHER = "startup|resume|clear|compact";
 const CODEX_GUIDANCE_HOOK_TIMEOUT_SECONDS = 5;
@@ -146,124 +135,6 @@ const CODEX_GUIDANCE_HOOK_SCRIPT = [
     'printf "%s\\n" "$msg"',
 ].join("; ");
 const CODEX_GUIDANCE_HOOK_COMMAND = `sh -lc '${CODEX_GUIDANCE_HOOK_SCRIPT}'`;
-const SATORI_AGENT_INSTRUCTIONS = `# Satori MCP
-
-Satori MCP is available for semantic ownership and freshness-aware code discovery. Prefer it for unfamiliar behavior, related implementation, or index state. Use the usual/native workflow for known paths, exact literals, and small local edits.
-
-## Priority Order
-1. \`search_codebase\` — find behavior or ownership by intent
-2. \`continue_search\` — reveal more from the same frozen result when useful
-3. \`read_file\` / \`file_outline\` — inspect exact source or structure
-4. \`call_graph\` — inspect advisory relationships for graph-ready targets
-5. \`list_codebases\` / \`manage_index\` — inspect index state
-
-## Boundaries
-- Follow \`recommendedNextAction\` and read \`warnings[].action\`.
-- Treat inbound \`call_graph\` results as leads to verify, not complete blast-radius proof.
-- If Satori reports \`requires_reindex\`, report the reason. Ask before \`create\`, \`reindex\`, or \`clear\`.
-`;
-
-type ExecFileSyncLike = typeof execFileSync;
-
-export type ClientName = Exclude<InstallClient, "auto" | "all">;
-
-export interface ManagedRuntimeCommand {
-    command: string;
-    args: string[];
-}
-
-export type ManagedRuntimeUpgradePhase = "installing" | "verifying" | "activating";
-
-type InstallCommandBase = {
-        kind: "install";
-        client: InstallClient;
-        dryRun: boolean;
-        installGuidanceHook?: boolean;
-        profile?: InstallProfile;
-};
-
-export type InstallCommandInput =
-    | (InstallCommandBase & {
-        runtime: "voyage";
-        vectorStore?: InstallVectorStore;
-        ollamaModel?: never;
-    })
-    | (InstallCommandBase & {
-        runtime: "offline";
-        vectorStore?: "LanceDB";
-        ollamaModel?: string;
-        reranker?: InstallOfflineReranker;
-    })
-    | {
-        kind: "uninstall";
-        client: InstallClient;
-        dryRun: boolean;
-    };
-
-export interface InstallCommandOptions {
-    homeDir?: string;
-    repoDir?: string;
-    packageSpecifier?: string;
-    runtimeCommand?: ManagedRuntimeCommand;
-    execFileSyncImpl?: ExecFileSyncLike;
-    env?: NodeJS.ProcessEnv;
-    preflightDependencies?: InstallPreflightDependencies;
-    potionAssetsRoot?: string;
-    lateOnModelPath?: string;
-    fetchImpl?: typeof fetch;
-    /** Structural test seam for LateOn acquisition; the production default binds the frozen digest. */
-    lateOnAuthorityLoader?: LateOnAuthorityLoader;
-    /** Test seam for proving LateOn acquisition deadline handling without waiting ten minutes. */
-    lateOnNowImpl?: () => number;
-    platform?: NodeJS.Platform;
-    architecture?: string;
-    libc?: "gnu" | "musl";
-    onUpgradeProgress?: (phase: ManagedRuntimeUpgradePhase) => void;
-    preflightRunner?: (
-        input: InstallPreflightInput,
-        dependencies?: InstallPreflightDependencies,
-    ) => Promise<InstallPreflightResult>;
-}
-
-export interface ClientInstallResult {
-    client: ClientName;
-    configPath: string;
-    instructionsPath?: string;
-    guidanceHookPath?: string;
-    configChanged: boolean;
-    instructionsChanged: boolean;
-    guidanceHookChanged: boolean;
-    status: "updated" | "unchanged";
-    dryRun: boolean;
-}
-
-export interface InstallCommandResult {
-    action: "install" | "uninstall";
-    client: InstallClient;
-    dryRun: boolean;
-    /** Managed MCP package specifier used for runtime install (install only). */
-    packageSpecifier?: string;
-    profile?: InstallProfile;
-    profileConfigPath?: string;
-    profileConfigChanged?: boolean;
-    runtime?: InstallRuntime;
-    /** Non-secret runtime values persisted in the managed launcher. */
-    runtimeEnvironment?: Readonly<Record<string, string>>;
-    results: ClientInstallResult[];
-}
-
-export interface ManagedRuntimeUpgradeResult {
-    action: "upgrade";
-    status: "upgraded" | "up_to_date";
-    fromMcpVersion: string;
-    toMcpVersion: string;
-    fromCoreVersion: string;
-    toCoreVersion: string;
-    packageSpecifier: string;
-    configuredClients: ClientName[];
-    restartRequired: boolean;
-}
-
 export interface InstallPlan {
     readonly command: InstallCommandInput;
     readonly homeDir: string;
@@ -274,17 +145,6 @@ export interface InstallPlan {
     readonly prepared: PreparedMutation[];
     readonly options: InstallCommandOptions;
 }
-
-interface ClientTarget {
-    client: ClientName;
-    configPath: string;
-    companions: CompanionTarget[];
-}
-
-type CompanionTarget =
-    | { kind: "legacy-skill"; path: string }
-    | { kind: "instructions"; path: string; instructions: string }
-    | { kind: "guidance-hook"; path: string };
 
 interface CompanionMutation {
     companion: CompanionTarget;
@@ -327,17 +187,6 @@ interface FileMutation {
     apply: () => void;
 }
 
-export interface ManagedClientConfigProof {
-    client: ClientName;
-    configPath: string;
-    status: "ok" | "error";
-    message: string;
-    /** Client-owned runtime values resolved without exposing them in doctor output. */
-    runtimeEnvironment?: Readonly<Record<string, string>>;
-    /** Whether this client actually launches through ~/.satori/bin/satori-mcp.js. */
-    usesManagedLauncher?: boolean;
-}
-
 function resolveDefaultPackageSpecifier(): string {
     try {
         return resolveManagedPackageSpecifier();
@@ -345,180 +194,6 @@ function resolveDefaultPackageSpecifier(): string {
         // Fall through to hard failure below.
     }
     throw new CliError("E_USAGE", "Unable to resolve the installed Satori package version for CLI install.", 2);
-}
-
-function resolveConfiguredPath(value: string | undefined, homeDir: string): string | undefined {
-    const trimmed = value?.trim();
-    if (!trimmed) {
-        return undefined;
-    }
-    if (trimmed === "~") {
-        return homeDir;
-    }
-    if (trimmed.startsWith(`~${path.sep}`) || trimmed.startsWith("~/")) {
-        return path.join(homeDir, trimmed.slice(2));
-    }
-    return trimmed;
-}
-
-function resolveOpenCodeGlobalConfigDir(homeDir: string): string {
-    return path.join(homeDir, ".config", "opencode");
-}
-
-function resolveClientTargets(homeDir: string, env: NodeJS.ProcessEnv = process.env): ClientTarget[] {
-    const codexHome = resolveConfiguredPath(env.CODEX_HOME, homeDir)
-        ?? path.join(homeDir, ".codex");
-    const claudeConfigDir = resolveConfiguredPath(env.CLAUDE_CONFIG_DIR, homeDir)
-        ?? path.join(homeDir, ".claude");
-    const claudeUserRoot = resolveConfiguredPath(env.CLAUDE_CONFIG_DIR, homeDir) ?? homeDir;
-    const opencodeGlobalConfigDir = resolveOpenCodeGlobalConfigDir(homeDir);
-    const opencodeConfigPath = resolveConfiguredPath(env.OPENCODE_CONFIG, homeDir)
-        ?? path.join(opencodeGlobalConfigDir, "opencode.json");
-
-    return [
-        {
-            client: "codex",
-            configPath: path.join(codexHome, "config.toml"),
-            companions: [
-                {
-                    kind: "legacy-skill",
-                    path: path.join(codexHome, "skills", LEGACY_SKILL_DIR_NAME),
-                },
-                {
-                    kind: "instructions",
-                    path: path.join(codexHome, "AGENTS.md"),
-                    instructions: SATORI_AGENT_INSTRUCTIONS,
-                },
-                {
-                    kind: "guidance-hook",
-                    path: path.join(codexHome, "hooks.json"),
-                },
-            ],
-        },
-        {
-            client: "claude",
-            configPath: path.join(claudeUserRoot, ".claude.json"),
-            companions: [{
-                kind: "legacy-skill",
-                path: path.join(claudeConfigDir, "skills", LEGACY_SKILL_DIR_NAME),
-            }],
-        },
-        {
-            client: "opencode",
-            configPath: opencodeConfigPath,
-            companions: [{
-                kind: "instructions",
-                path: path.join(opencodeGlobalConfigDir, "AGENTS.md"),
-                instructions: SATORI_AGENT_INSTRUCTIONS,
-            }],
-        },
-    ];
-}
-
-function isExecutable(filePath: string): boolean {
-    try {
-        const stats = fs.statSync(filePath);
-        return stats.isFile() && (stats.mode & 0o111) !== 0;
-    } catch {
-        return false;
-    }
-}
-
-function executableExists(command: string, homeDir: string, env: NodeJS.ProcessEnv): boolean {
-    const pathEntries = (env.PATH ?? "")
-        .split(path.delimiter)
-        .filter((entry) => entry.length > 0);
-    const fallbackEntries = [
-        ...(path.resolve(homeDir) === path.resolve(os.homedir()) ? ["/usr/local/bin"] : []),
-        path.join(homeDir, ".npm", "bin"),
-        path.join(homeDir, ".local", "bin"),
-        path.join(homeDir, ".cargo", "bin"),
-    ];
-    return [...new Set([...pathEntries, ...fallbackEntries])]
-        .some((entry) => isExecutable(path.join(entry, command)));
-}
-
-function configuredPathExists(value: string | undefined, homeDir: string, directory: boolean): boolean {
-    const resolved = resolveConfiguredPath(value, homeDir);
-    if (!resolved) {
-        return false;
-    }
-    try {
-        const stats = fs.statSync(resolved);
-        return directory ? stats.isDirectory() : stats.isFile();
-    } catch {
-        return false;
-    }
-}
-
-function isClientDetected(target: ClientTarget, homeDir: string, env: NodeJS.ProcessEnv): boolean {
-    switch (target.client) {
-        case "codex":
-            return configuredPathExists(path.dirname(target.configPath), homeDir, true)
-                || executableExists("codex", homeDir, env);
-        case "claude": {
-            const skill = target.companions.find((companion) => companion.kind === "legacy-skill");
-            const configDir = skill && skill.kind === "legacy-skill"
-                ? path.dirname(path.dirname(skill.path))
-                : undefined;
-            return configuredPathExists(configDir, homeDir, true)
-                || configuredPathExists(target.configPath, homeDir, false)
-                || executableExists("claude", homeDir, env);
-        }
-        case "opencode": {
-            const customConfigDir = resolveConfiguredPath(env.OPENCODE_CONFIG_DIR, homeDir);
-            return configuredPathExists(target.configPath, homeDir, false)
-                || configuredPathExists(resolveOpenCodeGlobalConfigDir(homeDir), homeDir, true)
-                || configuredPathExists(customConfigDir, homeDir, true)
-                || executableExists("opencode", homeDir, env);
-        }
-    }
-}
-
-export function detectClientTargets(
-    homeDir: string,
-    env: NodeJS.ProcessEnv = process.env,
-): ClientName[] {
-    return resolveClientTargets(homeDir, env)
-        .filter((target) => isClientDetected(target, homeDir, env))
-        .map((target) => target.client);
-}
-
-export function assertAutoClientTargets(
-    client: InstallClient,
-    homeDir: string,
-    env: NodeJS.ProcessEnv = process.env,
-): void {
-    if (client !== "auto" || detectClientTargets(homeDir, env).length > 0) {
-        return;
-    }
-    throw new CliError(
-        "E_NO_CLIENTS_DETECTED",
-        [
-            "No supported coding clients were detected.",
-            "",
-            "Detected clients: none",
-            "",
-            "Install Codex, Claude Code, or OpenCode, or explicitly choose:",
-            "  satori install --client codex",
-            "  satori install --client claude",
-            "  satori install --client opencode",
-            "  satori install --client all",
-        ].join("\n"),
-        2,
-    );
-}
-
-function selectTargets(homeDir: string, client: InstallClient, env: NodeJS.ProcessEnv): ClientTarget[] {
-    const targets = resolveClientTargets(homeDir, env);
-    if (client === "all") {
-        return targets;
-    }
-    if (client === "auto") {
-        const detectedClients = new Set(detectClientTargets(homeDir, env));
-        return targets.filter((target) => detectedClients.has(target.client));
-    }
-    return targets.filter((target) => target.client === client);
 }
 
 function ensureParentDir(filePath: string): void {
@@ -685,66 +360,6 @@ function buildPreservedManagedEnv(existing: unknown): Record<string, string> {
         out[name] = raw;
     }
     return out;
-}
-
-function packageNameFromSpecifier(packageSpecifier: string): string {
-    if (packageSpecifier.startsWith("@")) {
-        const versionMarker = packageSpecifier.indexOf("@", 1);
-        return versionMarker === -1 ? packageSpecifier : packageSpecifier.slice(0, versionMarker);
-    }
-    const versionMarker = packageSpecifier.indexOf("@");
-    return versionMarker === -1 ? packageSpecifier : packageSpecifier.slice(0, versionMarker);
-}
-
-function safeRuntimeDirName(packageSpecifier: string): string {
-    return packageSpecifier.replace(/[^A-Za-z0-9._@-]+/g, "-");
-}
-
-function resolveRuntimeRoot(homeDir: string, packageSpecifier: string): string {
-    return path.join(homeDir, ".satori", MANAGED_RUNTIME_DIR, safeRuntimeDirName(packageSpecifier));
-}
-
-function resolveRuntimePackageRoot(homeDir: string, packageSpecifier: string): string {
-    return path.join(resolveRuntimeRoot(homeDir, packageSpecifier), "node_modules", ...packageNameFromSpecifier(packageSpecifier).split("/"));
-}
-
-function resolveRuntimePackageRootFromRoot(runtimeRoot: string, packageSpecifier: string): string {
-    return path.join(runtimeRoot, "node_modules", ...packageNameFromSpecifier(packageSpecifier).split("/"));
-}
-
-function resolvePotionAssetsRoot(packageRoot: string): string {
-    return path.join(packageRoot, "assets", "potion", "linux-x64");
-}
-
-function resolveRuntimeEntryPath(packageRoot: string, packageJson?: { bin?: unknown; main?: unknown }): string {
-    const bin = packageJson?.bin;
-    let relativeEntry = "dist/index.js";
-    if (bin && typeof bin === "object" && !Array.isArray(bin) && typeof (bin as Record<string, unknown>).satori === "string") {
-        relativeEntry = (bin as Record<string, string>).satori;
-    } else if (typeof bin === "string") {
-        relativeEntry = bin;
-    } else if (typeof packageJson?.main === "string") {
-        relativeEntry = packageJson.main;
-    }
-    return path.resolve(packageRoot, relativeEntry);
-}
-
-export function resolveLauncherPath(homeDir: string): string {
-    return path.join(homeDir, ".satori", MANAGED_BIN_DIR, MANAGED_LAUNCHER_FILE);
-}
-
-function plannedManagedRuntimeCommand(homeDir: string, packageSpecifier: string): ManagedRuntimeCommand {
-    return {
-        command: process.execPath,
-        args: [resolveRuntimeEntryPath(resolveRuntimePackageRoot(homeDir, packageSpecifier))],
-    };
-}
-
-export function resolveManagedClientCommand(homeDir: string): ManagedRuntimeCommand {
-    return {
-        command: process.execPath,
-        args: [resolveLauncherPath(homeDir)],
-    };
 }
 
 function writeTextFileAtomic(filePath: string, content: string, mode?: number): void {
@@ -2227,7 +1842,7 @@ export function createInstallPlan(
         ? prepareProjectProfileInstall(repoDir, command.profile)
         : { changed: false, apply: () => {} };
 
-    const prepared = selectTargets(homeDir, command.client, options.env ?? process.env).map((target) => (
+    const prepared = selectClientTargets(homeDir, command.client, options.env ?? process.env).map((target) => (
         prepareMutation(target, command, clientCommand)
     ));
 

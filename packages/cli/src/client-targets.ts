@@ -1,0 +1,185 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { CliError } from "./errors.js";
+import {
+    LEGACY_SKILL_DIR_NAME,
+    SATORI_AGENT_INSTRUCTIONS,
+    type ClientName,
+    type ClientTarget,
+} from "./install-contracts.js";
+import type { InstallClient } from "./args.js";
+
+export function resolveConfiguredPath(value: string | undefined, homeDir: string): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    if (trimmed === "~") {
+        return homeDir;
+    }
+    if (trimmed.startsWith(`~${path.sep}`) || trimmed.startsWith("~/")) {
+        return path.join(homeDir, trimmed.slice(2));
+    }
+    return trimmed;
+}
+
+export function resolveOpenCodeGlobalConfigDir(homeDir: string): string {
+    return path.join(homeDir, ".config", "opencode");
+}
+
+export function resolveClientTargets(homeDir: string, env: NodeJS.ProcessEnv = process.env): ClientTarget[] {
+    const codexHome = resolveConfiguredPath(env.CODEX_HOME, homeDir)
+        ?? path.join(homeDir, ".codex");
+    const claudeConfigDir = resolveConfiguredPath(env.CLAUDE_CONFIG_DIR, homeDir)
+        ?? path.join(homeDir, ".claude");
+    const claudeUserRoot = resolveConfiguredPath(env.CLAUDE_CONFIG_DIR, homeDir) ?? homeDir;
+    const opencodeGlobalConfigDir = resolveOpenCodeGlobalConfigDir(homeDir);
+    const opencodeConfigPath = resolveConfiguredPath(env.OPENCODE_CONFIG, homeDir)
+        ?? path.join(opencodeGlobalConfigDir, "opencode.json");
+
+    return [
+        {
+            client: "codex",
+            configPath: path.join(codexHome, "config.toml"),
+            companions: [
+                {
+                    kind: "legacy-skill",
+                    path: path.join(codexHome, "skills", LEGACY_SKILL_DIR_NAME),
+                },
+                {
+                    kind: "instructions",
+                    path: path.join(codexHome, "AGENTS.md"),
+                    instructions: SATORI_AGENT_INSTRUCTIONS,
+                },
+                {
+                    kind: "guidance-hook",
+                    path: path.join(codexHome, "hooks.json"),
+                },
+            ],
+        },
+        {
+            client: "claude",
+            configPath: path.join(claudeUserRoot, ".claude.json"),
+            companions: [{
+                kind: "legacy-skill",
+                path: path.join(claudeConfigDir, "skills", LEGACY_SKILL_DIR_NAME),
+            }],
+        },
+        {
+            client: "opencode",
+            configPath: opencodeConfigPath,
+            companions: [{
+                kind: "instructions",
+                path: path.join(opencodeGlobalConfigDir, "AGENTS.md"),
+                instructions: SATORI_AGENT_INSTRUCTIONS,
+            }],
+        },
+    ];
+}
+
+function isExecutable(filePath: string): boolean {
+    try {
+        const stats = fs.statSync(filePath);
+        return stats.isFile() && (stats.mode & 0o111) !== 0;
+    } catch {
+        return false;
+    }
+}
+
+function executableExists(command: string, homeDir: string, env: NodeJS.ProcessEnv): boolean {
+    const pathEntries = (env.PATH ?? "")
+        .split(path.delimiter)
+        .filter((entry) => entry.length > 0);
+    const fallbackEntries = [
+        ...(path.resolve(homeDir) === path.resolve(os.homedir()) ? ["/usr/local/bin"] : []),
+        path.join(homeDir, ".npm", "bin"),
+        path.join(homeDir, ".local", "bin"),
+        path.join(homeDir, ".cargo", "bin"),
+    ];
+    return [...new Set([...pathEntries, ...fallbackEntries])]
+        .some((entry) => isExecutable(path.join(entry, command)));
+}
+
+function configuredPathExists(value: string | undefined, homeDir: string, directory: boolean): boolean {
+    const resolved = resolveConfiguredPath(value, homeDir);
+    if (!resolved) {
+        return false;
+    }
+    try {
+        const stats = fs.statSync(resolved);
+        return directory ? stats.isDirectory() : stats.isFile();
+    } catch {
+        return false;
+    }
+}
+
+function isClientDetected(target: ClientTarget, homeDir: string, env: NodeJS.ProcessEnv): boolean {
+    switch (target.client) {
+        case "codex":
+            return configuredPathExists(path.dirname(target.configPath), homeDir, true)
+                || executableExists("codex", homeDir, env);
+        case "claude": {
+            const skill = target.companions.find((companion) => companion.kind === "legacy-skill");
+            const configDir = skill && skill.kind === "legacy-skill"
+                ? path.dirname(path.dirname(skill.path))
+                : undefined;
+            return configuredPathExists(configDir, homeDir, true)
+                || configuredPathExists(target.configPath, homeDir, false)
+                || executableExists("claude", homeDir, env);
+        }
+        case "opencode": {
+            const customConfigDir = resolveConfiguredPath(env.OPENCODE_CONFIG_DIR, homeDir);
+            return configuredPathExists(target.configPath, homeDir, false)
+                || configuredPathExists(resolveOpenCodeGlobalConfigDir(homeDir), homeDir, true)
+                || configuredPathExists(customConfigDir, homeDir, true)
+                || executableExists("opencode", homeDir, env);
+        }
+    }
+}
+
+export function detectClientTargets(
+    homeDir: string,
+    env: NodeJS.ProcessEnv = process.env,
+): ClientName[] {
+    return resolveClientTargets(homeDir, env)
+        .filter((target) => isClientDetected(target, homeDir, env))
+        .map((target) => target.client);
+}
+
+export function assertAutoClientTargets(
+    client: InstallClient,
+    homeDir: string,
+    env: NodeJS.ProcessEnv = process.env,
+): void {
+    if (client !== "auto" || detectClientTargets(homeDir, env).length > 0) {
+        return;
+    }
+    throw new CliError(
+        "E_NO_CLIENTS_DETECTED",
+        [
+            "No supported coding clients were detected.",
+            "",
+            "Detected clients: none",
+            "",
+            "Install Codex, Claude Code, or OpenCode, or explicitly choose:",
+            "  satori install --client codex",
+            "  satori install --client claude",
+            "  satori install --client opencode",
+            "  satori install --client all",
+        ].join("\n"),
+        2,
+    );
+}
+
+export function selectClientTargets(homeDir: string, client: InstallClient, env: NodeJS.ProcessEnv): ClientTarget[] {
+    const targets = resolveClientTargets(homeDir, env);
+    if (client === "all") {
+        return targets;
+    }
+    if (client === "auto") {
+        const detectedClients = new Set(detectClientTargets(homeDir, env));
+        return targets.filter((target) => detectedClients.has(target.client));
+    }
+    return targets.filter((target) => target.client === client);
+}
