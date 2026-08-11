@@ -14,17 +14,20 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `f70f972705d69273793e51ab56b99e7411907d65`
+Checkpoint HEAD: `cec0d1425b06ebfe79b5dd2bb52cd0e3a903170c`
 
 Completed ownership-bounded batches:
 
 - Phase 0.2 / F024: `e56c973`;
 - Phase 0.3 / F023: `83fb255`;
-- Phase 1.1 / root gitignore matcher cache: `f70f972`.
+- Phase 1.1 / root gitignore matcher cache: `f70f972`;
+- Phase 1.2 / pure sidecar validators: `7932fa8`.
+- Phase 1.3 / stateless synchronizer snapshot codec: `9f77131`;
+- Phase 1.4 / CLI install boundaries: `cec0d14`.
 
-Next open batch at this checkpoint: Phase 1.2. Refresh this checkpoint only after an
-accepted batch is committed; preserve the original baseline above as historical
-lineage.
+Phase 1 is complete. Next open batch at this checkpoint: Phase 2.1. Refresh this
+checkpoint only after an accepted batch is committed; preserve the original baseline
+above as historical lineage.
 
 ## Goal
 
@@ -79,6 +82,7 @@ Current state at the execution checkpoint:
 Context owns broad active generation/publication authority
 GenerationProofCoordinator owns generation proof state
 FileSynchronizer owns source checkpoint persistence and comparisons
+MutationLeaseCoordinator owns persisted root mutation fencing
 SyncManager owns watcher/sync coordination but still depends on Context
 ManageIndexingHandlers owns MCP action orchestration but still depends on Context
 ```
@@ -88,7 +92,7 @@ Target state:
 ```text
 FileSynchronizer owns source checkpoint persistence and comparisons
 SnapshotManager owns MCP lifecycle persistence and merge arbitration
-MutationLeaseCoordinator owns root mutation fencing
+MutationLeaseCoordinator continues to own root mutation fencing
 IndexAuthorityCoordinator owns active generation/publication authority
 SyncManager owns watcher/sync coordination, not Core checkpoint truth
 ManageIndexingHandlers owns MCP action orchestration, not Core publication policy
@@ -267,6 +271,8 @@ and search outputs are unchanged.
 
 ### 1.2 Extract pure sidecar validators
 
+Completed by `7932fa8`.
+
 Create a validator module for symbol, relationship, seal, resolution-proof, and
 analysis-evidence parsing. Preserve `symbols/index.ts` re-exports.
 
@@ -278,6 +284,8 @@ Stopping condition: existing sidecar fixtures round-trip identically and malform
 inputs receive unchanged classifications.
 
 ### 1.3 Extract only stateless synchronizer snapshot codec logic
+
+Completed by `9f77131`.
 
 Move serialization, parsing, and stateless validation only.
 
@@ -291,9 +299,17 @@ Keep these in `FileSynchronizer`:
 
 Risk: M.
 
-Stopping condition: V2/V3 migration and byte-level payload fixtures remain exact.
+Stopping condition: V2/V3 migration and byte-level payload fixtures remain exact. The
+Phase 1.3 batch sheet must resolve the exact fixture names — e.g. `FileSynchronizer
+defers legacy snapshot replacement until a prepared checkpoint commits`, `FileSynchronizer
+snapshot JSON key order is independent of String.prototype.localeCompare`, and
+`FileSynchronizer rejects corrupt current-format snapshots` in
+`packages/core/src/sync/synchronizer.test.ts` — or mark `new oracle required`; the sheet
+must state explicitly whether byte-exact payload fixtures already exist or are new.
 
 ### 1.4 Extract CLI neutral contracts, detection, and runtime paths
+
+Completed by `cec0d14`.
 
 Create bounded modules for:
 
@@ -344,6 +360,11 @@ Risk: M.
 
 Stopping condition: symlink/root safety, partial scans, cached stat behavior, full
 hashing, and concurrency fixtures remain unchanged.
+
+The Phase 2.2 batch sheet must add a deterministic bounded-concurrency oracle; no
+current synchronizer fixture directly proves the scan worker bound. Resolve the
+remaining named behaviors to exact existing fixtures under the normal batch-sheet
+gate.
 
 ### 2.3 Extract the Python relationship-resolution engine
 
@@ -401,6 +422,10 @@ Risk: M.
 
 Stopping condition: durable formats and locking behavior remain unchanged; no active
 generation state enters the store.
+
+The Phase 3.2 batch sheet must add direct owner-level document-store and mutation-lock
+contract tests before moving production I/O. Existing `Context` policy fixtures remain
+integration oracles, not substitutes for the extracted owner's contract.
 
 ### 3.3 Extract durable restore transaction mechanics
 
@@ -637,7 +662,10 @@ Execute sequentially by default while preserving `install.ts` exports:
    detection, prepared target sets, and no-write guarantees remain exact.
 5. Install application/activation/lock/cleanup as a separate executor. Risk: L. Stop
    when activation, mutation locking, cleanup, local developer install, and rollback
-   fixtures remain exact.
+   fixtures remain exact. Preserve the existing
+   `installLocalMcpRuntime delegates exact local selection and preflights before
+   activation` script fixture; add an executor-level oracle only if that fixture does
+   not cross the extracted application boundary.
 6. Runtime upgrade orchestration last. Risk: L. Stop when version selection,
    published-runtime activation, launcher precedence, and rollback fixtures remain
    exact.
@@ -707,8 +735,8 @@ The decomposition is complete only when:
 
 ## Recommended next implementation batch
 
-At checkpoint `f70f972`, start with Phase 1.2: pure sidecar validators. Derive a
-current-HEAD batch sheet naming the exact validator symbols, preserved
-`symbols/index.ts` exports, malformed-input classifications, round-trip fixtures, and
-verification commands. Do not move sidecar write, staging, publication, rollback, or
-cleanup behavior in that batch.
+At checkpoint `cec0d14`, start with Phase 2.1: complete the sidecar read boundary.
+Derive a current-HEAD batch sheet naming the exact shared generation/seal helpers,
+seal verification and generation resolution, symbol-registry reads, relationship
+reads, and affected contract tests. Keep sidecar-specific rollback, replace, and
+write lifecycle behavior with its existing owner.

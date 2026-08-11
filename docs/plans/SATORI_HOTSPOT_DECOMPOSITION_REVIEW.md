@@ -4,7 +4,7 @@ Date: 2026-08-12
 
 Original review baseline: `6a5ee87680ccc09fc08ef5fe739fb0398e3b9401`
 
-Current reconciliation baseline: `f70f972705d69273793e51ab56b99e7411907d65`
+Current reconciliation baseline: `cec0d1425b06ebfe79b5dd2bb52cd0e3a903170c`
 
 Status: durable review provenance for
 `docs/plans/SATORI_HOTSPOT_DECOMPOSITION_PLAN.md`. This document records why the
@@ -20,6 +20,11 @@ It is not implementation authorization.
 - `e56c973` for F024 restore-journal ownership validation;
 - `83fb255` for F023 identity-bound quarantine cleanup;
 - `f70f972` for the completed Phase 1.1 gitignore-cache ownership move;
+- `7932fa8` for the completed Phase 1.2 pure sidecar-validator extraction;
+- `9f77131` for the completed Phase 1.3 stateless synchronizer snapshot-codec
+  extraction;
+- `cec0d14` for the completed Phase 1.4 CLI install-boundary extraction and packed
+  artifact proof;
 - focused regressions named below and the package suites recorded with those
   commits.
 
@@ -50,16 +55,18 @@ F021 invariant and does not use F062/F066 as independent execution claims.
    mutable checkpoint owner.
 4. `SyncManager` and `ManageIndexingHandlers` still depend on broad `Context` today.
    Narrow ports are target-state boundaries, not descriptions of current wiring.
-5. Durable restore transaction mechanics belong to infrastructure; deciding when
+5. The existing `MutationLeaseCoordinator` owns persisted root mutation fencing and
+   remains that owner; the roadmap does not need a batch that recreates it.
+6. Durable restore transaction mechanics belong to infrastructure; deciding when
    they may alter active authority belongs to the generation-authority owner.
-6. The MCP full-index seam is
+7. The MCP full-index seam is
    `ManageIndexingHandlers.startBackgroundIndexing()`. It mixes MCP lifecycle,
    watcher handoff, Core mutation/publication, rollback, progress, and response
    projection; a future move must separate those responsibilities explicitly.
-7. Retrieval-pass execution may be extracted only as ordered labelled outcomes.
+8. Retrieval-pass execution may be extracted only as ordered labelled outcomes.
    Fusion, filtering, `must:` admission, diagnostics, reranker admission, and
    provider ordering remain with their established owner.
-8. CLI mutation, inspection/runtime authority, runtime selection, planning,
+9. CLI mutation, inspection/runtime authority, runtime selection, planning,
    application, and upgrade are separate batches. `install.ts` remains the public
    compatibility facade.
 
