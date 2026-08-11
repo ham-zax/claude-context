@@ -1021,21 +1021,168 @@ projection-text tuning was included.
 
 ## Temporary next-session handoff
 
-### Confirmed open work
+### Post-closure lifecycle work (implemented 2026-08-11)
 
-None. Issues 21–24 are closed, and the optional pagination wording is now bound
-in the public `search_codebase` parameter descriptions and synchronized README
-workflows. `limit` is explicitly the total frozen-set bound across all pages;
-`disclosureLimit` is only the initial grouped page size. The documented
-`limit=20, disclosureLimit=6` example returns up to six initially and freezes
-up to twenty, while `continuation="complete"` remains caller-bound rather than
-a claim that the full available pool was exhausted. No runtime behavior
-changed.
+Issues 21–24 remain closed at their original behavioral boundaries. Do not
+reopen Issue 22 projection or Issue 24 terminal-progress behavior. Later live
+revalidation identified two separately owned follow-ups; both are now fixed in
+the current branch:
+
+1. **Watcher bootstrap/status readiness contract (P1, fixed by `b5e59b4f` and
+   public-contract follow-up `0d1961f`).** `SyncManager` now separates roots
+   eligible for observation (`indexing`, `indexed`, `sync_completed`) from
+   roots eligible for freshness mutation (`indexed`, `sync_completed`). A
+   candidate-policy watcher records events during full indexing without
+   starting a competing sync. Its capture binds canonical root, watcher
+   generation, event epoch, and candidate policy. After canonical generation
+   publication, the dedicated full-index handoff re-proves the exact generation
+   and checkpoint, covers only the captured epoch, and fails closed on watcher
+   replacement, policy mismatch, or a later event. `manage_index status` now
+   reports `not_ready/source_state_unverified` with a sync hint for an enabled
+   unproven watcher; watcher-disabled mode retains the full-source-comparison
+   fallback. `source_state_unverified` is included in the exported
+   `ManageIndexReason` response contract.
+2. **LateOn pre-ready lifecycle and diagnostics (P1, fixed by `0aa32cb4`).**
+   `LateOnReranker` now performs at most one automatic retry after a retryable
+   pre-ready process error, exit, readiness timeout, or worker initialization
+   failure. Identity and malformed/unsupported protocol failures remain
+   terminal without retry. Calls during either bootstrap attempt still return
+   immediate `lateon_not_ready`; no query waits. A second failure is terminal,
+   later calls expose the retained cause, diagnostics retain only bounded reason
+   fields and attempt count, post-ready restart behavior is unchanged, and
+   `close()` prevents another attempt from spawning. This is operational worker
+   recovery, not a ranking/request-byte contract change, so the frozen request
+   contract and runtime-profile assets remain unchanged.
+
+The combined changes still need one exact-runtime live qualification after the
+MCP client is restarted on the current build. This is an evidence/provenance
+requirement, not a newly demonstrated ignore, ranking, or provider-order defect.
+
+The pagination wording is bound in the public `search_codebase` parameter
+descriptions and synchronized README workflows. `limit` is the total frozen-set
+bound across all pages; `disclosureLimit` is only the initial grouped page size.
+The documented `limit=20, disclosureLimit=6` example returns up to six initially
+and freezes up to twenty, while `continuation="complete"` remains caller-bound
+rather than a claim that the full available pool was exhausted. No pagination
+runtime behavior changed.
 
 The redundant `docs/SATORI_FEATURES_AND_USE_CASES.md` workflow document was
 removed during this closure follow-up. Root/package READMEs and generated MCP
 tool schemas remain the maintained public documentation surfaces; the direct
 `manage_index` response-envelope test remains the runtime contract oracle.
+
+### 2026-08-11 live revalidation and corrected interpretation
+
+#### Issue 21 evidence
+
+- The durable snapshot now records generation 4326 as a completed no-op sync
+  after the reported generation-4316 reindex. It still contains 1548 files,
+  20,177 chunks, and all 27 tracked Python files beneath directories named
+  `data`. The second-sync flap therefore did not recur in the current daemon.
+- Current defaults contain no generic `data/` exclusion. The policy-observer
+  fixture proves gitignore anchoring directly: `/data/` excludes root `data/`
+  and does not exclude `src/data/`. The built-in-skip hypothesis is rejected.
+- The historical stale-rule-cache/reconciliation explanation remains the
+  best-supported cause, but the original bad transition was not captured with
+  enough identity evidence to prove that mechanism uniquely.
+- The reindex did **not** live-qualify the current Issue 21 implementation. Its
+  durable policy is `satori_index_policy_v4`, while current source publishes v5
+  with the bound control signature. The live Node process started before the
+  current `dist` files were rebuilt. A changed `indexPolicyHash` proves changed
+  policy inputs, not that updated daemon code was loaded.
+
+#### Issue 24 correction and separate watcher finding
+
+- The navigation-sidecar-delay explanation is false. The generation manifest
+  was built at 02:05:08 UTC, its seal at 02:05:19, the call graph at 02:05:43,
+  and policy publication at 02:05:44. The reported ready time was 02:05:55, so
+  navigation evidence existed before readiness rather than roughly 50 seconds
+  afterward.
+- `source_state_unverified` is produced by the current-source watcher barrier,
+  not by a missing navigation sidecar. Navigation requires ready watcher
+  coverage, no coverage gap, and identical observed/compared event epochs
+  before and after the read.
+- `registerCodebaseWatcher()` marks coverage ready asynchronously but preserves
+  its initial coverage gap until a sync covers the flight epoch. Full indexing
+  calls `touchWatchedCodebase()` and may then persist completed status without
+  waiting for that coverage proof. The observed one-sync recovery follows this
+  contract exactly.
+- The current fix establishes candidate-policy observation before indexing,
+  captures a ready watcher generation immediately before the exact full-hash
+  checkpoint, and completes the source handoff only after canonical publication
+  and before lifecycle completion. An event after capture remains pending.
+- Status now distinguishes durable-generation completion from current-source
+  authority instead of claiming ready while an enabled watcher remains
+  unproven. Disabled watcher mode is intentionally not given a watcher-repair
+  instruction.
+- Keep the terminal-progress repair closed. Track the watcher bootstrap/status
+  correction under the separate owner and boundaries listed above.
+
+#### Issue 22 provider failure separated from projection
+
+- The decisive live ranking diagnostics reported 32 requested, 32 projected,
+  zero skipped, no projection failure counts, and 68,757 bytes used from a
+  1 MiB input budget. The observed `RERANKER_FAILED` therefore occurred in the
+  provider API phase and was not caused by the 256 KiB projection ceiling.
+- The live MCP process had no LateOn child process despite selecting LateOn;
+  only the Potion worker remained. All five selected LateOn artifact SHA-256
+  values matched the profile, and a fresh isolated instance using the same
+  profile and artifacts reached ready in 1,216 ms within the frozen 2,000 ms
+  readiness bound.
+- The evidence supports a terminal startup failure or timeout in the long-lived
+  daemon. The exact original cause is unrecoverable because current lifecycle
+  state does not retain it. Do not infer that increasing the readiness deadline
+  is necessary without a captured cold-start failure.
+- The lifecycle correction retains future bootstrap failure causes and permits
+  one bounded retry for transient pre-ready failures. The existing 2,000 ms
+  qualification deadline remains per attempt; it was not increased or made
+  adaptive. Deterministic identity/protocol failures are not retried.
+- Request-contract and runtime-profile identity remain unchanged because the
+  retry controls worker bootstrap availability, not provider request bytes,
+  ranking, admission, fallback ordering, or applied profile inference.
+- The separate large-file projection repair remains closed in current source:
+  publication-bound projection streams through the configured 8 MiB source-read
+  ceiling. The repository's two Python files above 256 KiB remain below that
+  ceiling. That correction still needs exact-current-runtime qualification
+  because the running daemon predates the current compiled output.
+
+#### Revalidated non-defects and focused checks
+
+- Pagination works as documented. The supplied live handle/offset/digest chain
+  is consistent with the contract, and 17 focused disclosure/cache tests passed.
+- The durable call-graph sidecar verifies five inbound edges through depth two
+  for `TradingEntryVetoes`: two direct production callers and three second-level
+  test callers.
+- Focused current-tree checks passed: 3 policy-observer tests, 57 sync and
+  reconciliation tests, 18 watcher/status tests, 18 LateOn tests with one
+  additional real-model fixture skipped, 17 pagination/cache tests, and 2
+  indexing authority-barrier tests.
+- The live TradingView literal-search payload was not independently replayed
+  from the investigating MCP session because that session was authorized only
+  for the Satori root. Durable index membership confirms the relevant source
+  files are present but is not a substitute for replaying the exact search.
+
+#### Next bounded runtime qualification
+
+After the MCP client is restarted on an exact current build:
+
+1. record the implementation/runtime identity and confirm the accepted policy
+   is v5 with its control signature;
+2. if a TradingView full-index run is separately approved, verify terminal
+   status, `file_outline`, and `call_graph` agree immediately without a repair
+   sync when no post-capture event occurred; otherwise record the source
+   handoff as code/test-qualified but not live-qualified;
+3. verify all 27 tracked `data`-directory Python files remain indexed after the
+   next ordinary sync/auto-sync; and
+4. run one `debugMode=ranking` search to record whether LateOn qualified on its
+   first or second bootstrap attempt or, if terminal, the retained failure
+   reason. Do not wait inside the query or run a relevance tournament.
+
+Do not perform an unapproved reindex, ranking tournament, admission change,
+provider-order change, or relevance tuning. Stop when the current build
+identity, policy authority, watcher barrier, and provider readiness evidence all
+refer to the same runtime, or explicitly retain the missing full-index runtime
+proof as the only unqualified boundary.
 
 ### Confirmed non-defects and closed branches
 
@@ -1043,7 +1190,8 @@ tool schemas remain the maintained public documentation surfaces; the direct
   observed input tuple now owns parsed policy plus signature; full publication
   and incremental reconciliation cannot acknowledge a different observation.
   Durable v5 authority closes the restart/crash window, while genuine policy
-  changes require a full reindex before indexed membership can change.
+  changes require a full reindex before indexed membership can change. The
+  exact-runtime live qualification caveat is recorded above.
 - **Pagination works.** Live 6.9.0 verification with `limit=20` and
   `disclosureLimit=6` returned six groups plus a continuation handle at offset
   6; `continue_search` returned the next six distinct groups at offset 12 with
@@ -1052,9 +1200,9 @@ tool schemas remain the maintained public documentation surfaces; the direct
   pool entries outside the caller limit.
 - **Path scoping works** in the current runtime for both the path parameter and
   the `path:` operator. The nested data-path failure belongs to Issue 21.
-- **TradingEntryVetoes call graph works** on the current generation: depth-two
-  traversal returned 14 sealed edges, including the reported constructor and
-  veto-evaluation callers.
+- **TradingEntryVetoes call graph works** on the current generation: durable
+  depth-two traversal contains five inbound edges—two direct production
+  callers and three second-level test callers.
 - **Exact-symbol validation is fixed:** conflicting identities plus missing
   mode are reported together. Bounded large-symbol reads are intentional.
 - **Fingerprint mismatch remains intentionally fail-closed.** Component-only
@@ -1106,10 +1254,17 @@ is implemented. No pagination runtime or ranking change is warranted.
   corrected focused rerun passed 4/4 while all other Core tests passed; the
   package-wide MCP suite passed; and the clean root build completed without
   generating any additional tracked diff.
+- Watcher lifecycle follow-up verification passed 64 sync tests, 57 indexing
+  coordinator tests, 9 status tests, 11 watcher integration tests, MCP
+  typecheck, targeted ESLint, docs/manifest checks, and diff hygiene. An
+  independent review found one public response-type mismatch; `0d1961f` fixed
+  it and the affected checks passed again.
+- LateOn lifecycle verification passed 24 tests with one model-dependent test
+  skipped, MCP typecheck, targeted ESLint, request-contract check, and diff
+  hygiene. Independent review found no P0/P1/P2 defect. Runtime-profile and
+  request-contract assets were unchanged.
 - The historical ledger has 23 numbered entries: issue number 4 was already
   absent. Do not invent or renumber a historical issue merely to close the gap.
-- Repository-state warning at session close: the pre-existing Git index still
-  records the historical evidence file as renamed to this temporary handoff.
-  This session added further unstaged documentation to that already-staged
-  rename. Reconcile the index deliberately before any commit so the final
-  handoff content, rather than the earlier staged snapshot, is retained.
+- No live create, reindex, clear, process termination, ranking tournament, or
+  push was performed for the lifecycle follow-ups. Exact-current runtime
+  qualification remains the bounded external evidence step above.
