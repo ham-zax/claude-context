@@ -138,6 +138,18 @@ import {
     type DurableAuthorityRestoreTransaction,
     type DurableIndexAuthorityArtifact,
 } from '../generation/restore-transaction';
+import {
+    IndexAuthorityCoordinator,
+    createGenerationProofCoordinator,
+    type CachedGenerationProof,
+    type GenerationProofCoordinator,
+} from '../generation/index-authority-coordinator';
+
+export {
+    createGenerationProofCoordinator,
+    type GenerationProofCoordinator,
+} from '../generation/index-authority-coordinator';
+
 import { IndexPolicyDocumentStore } from '../policy/index-policy-document-store';
 import {
     IgnoreRuleService,
@@ -273,10 +285,6 @@ function summarizeVectorWriteMetrics(
     };
 }
 
-declare const generationProofCoordinatorBrand: unique symbol;
-export type GenerationProofCoordinator = {
-    readonly [generationProofCoordinatorBrand]: true;
-};
 
 export interface ContextConfig {
     embedding?: Embedding;
@@ -604,13 +612,6 @@ type PublicationReadGate = {
     resolveRetentionFinished?: () => void;
 };
 
-type CachedGenerationProof = {
-    identity: string;
-    vectorReceipt: ProvenVectorGenerationReceipt;
-    generationReceipt?: ProvenGenerationReceipt;
-    navigationArtifactsValidated: boolean;
-    source: 'activation' | 'exact';
-};
 
 type VectorGenerationProofResult = {
     receipt: ProvenVectorGenerationReceipt | null;
@@ -618,12 +619,6 @@ type VectorGenerationProofResult = {
     source: 'activation' | 'exact' | 'joined' | 'reused';
 };
 
-type GenerationProofCoordinatorState = {
-    readonly proofs: Map<string, CachedGenerationProof>;
-    readonly proofFlights: Map<string, Promise<CachedGenerationProof | null>>;
-    readonly navigationFlights: Map<string, Promise<NavigationGenerationProof>>;
-    readonly preparedReceipts: WeakMap<ProvenGenerationReceipt, string>;
-};
 
 type CachedNavigationDeltaState = {
     readonly canonicalRoot: string;
@@ -642,21 +637,6 @@ type NavigationDeltaBuildResult = {
     readonly state?: CachedNavigationDeltaState;
 };
 
-const generationProofCoordinatorStates = new WeakMap<
-    GenerationProofCoordinator,
-    GenerationProofCoordinatorState
->();
-
-export function createGenerationProofCoordinator(): GenerationProofCoordinator {
-    const coordinator = Object.freeze({}) as GenerationProofCoordinator;
-    generationProofCoordinatorStates.set(coordinator, {
-        proofs: new Map(),
-        proofFlights: new Map(),
-        navigationFlights: new Map(),
-        preparedReceipts: new WeakMap(),
-    });
-    return coordinator;
-}
 
 export class Context {
     private embedding: Embedding;
@@ -676,10 +656,7 @@ export class Context {
     private reindexByChangeQueues = new Map<string, Promise<void>>();
     private publicationRetentionQueues = new Map<string, Promise<void>>();
     private publicationReadGates = new Map<string, PublicationReadGate>();
-    private readonly generationProofs: Map<string, CachedGenerationProof>;
-    private readonly generationProofFlights: Map<string, Promise<CachedGenerationProof | null>>;
-    private readonly navigationProofFlights: Map<string, Promise<NavigationGenerationProof>>;
-    private readonly preparedGenerationReceipts: WeakMap<ProvenGenerationReceipt, string>;
+    private readonly indexAuthorityCoordinator: IndexAuthorityCoordinator;
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
     private navigationDeltaState?: CachedNavigationDeltaState;
@@ -694,15 +671,9 @@ export class Context {
     private vectorStoreProvider: VectorStoreProviderIdentity;
 
     constructor(config: ContextConfig = {}) {
-        const proofCoordinator = config.generationProofCoordinator ?? createGenerationProofCoordinator();
-        const proofCoordinatorState = generationProofCoordinatorStates.get(proofCoordinator);
-        if (!proofCoordinatorState) {
-            throw new Error('Generation proof coordinator must be created by createGenerationProofCoordinator().');
-        }
-        this.generationProofs = proofCoordinatorState.proofs;
-        this.generationProofFlights = proofCoordinatorState.proofFlights;
-        this.navigationProofFlights = proofCoordinatorState.navigationFlights;
-        this.preparedGenerationReceipts = proofCoordinatorState.preparedReceipts;
+        this.indexAuthorityCoordinator = new IndexAuthorityCoordinator(
+            config.generationProofCoordinator ?? createGenerationProofCoordinator(),
+        );
         // Initialize services
         if (config.embedding) {
             this.embedding = config.embedding;
@@ -1105,7 +1076,7 @@ export class Context {
             // the exact validation above, but cannot safely propagate its proof.
             return checkpoint;
         }
-        this.preparedGenerationReceipts.set(preparedReceipt, preparedIdentity);
+        this.indexAuthorityCoordinator.setPreparedGenerationReceipt(preparedReceipt, preparedIdentity);
         return { ...checkpoint, generationReceipt: preparedReceipt };
     }
 
@@ -1113,8 +1084,8 @@ export class Context {
         canonicalRoot: string,
         receipt: ProvenGenerationReceipt,
     ): ProvenGenerationReceipt | null {
-        const preparedIdentity = this.preparedGenerationReceipts.get(receipt);
-        const cached = this.generationProofs.get(canonicalRoot);
+        const preparedIdentity = this.indexAuthorityCoordinator.getPreparedGenerationReceipt(receipt);
+        const cached = this.indexAuthorityCoordinator.getGenerationProof(canonicalRoot);
         if (
             !preparedIdentity
             || !cached
@@ -1132,7 +1103,7 @@ export class Context {
         ) {
             return null;
         }
-        this.preparedGenerationReceipts.delete(receipt);
+        this.indexAuthorityCoordinator.deletePreparedGenerationReceipt(receipt);
         return this.cloneProvenGenerationReceipt(cached.generationReceipt);
     }
 
@@ -1140,7 +1111,7 @@ export class Context {
         canonicalRoot: string,
     ): ProvenGenerationReceipt | null {
         if (!this.publicationRetentionQueues.has(canonicalRoot)) return null;
-        const cached = this.generationProofs.get(canonicalRoot);
+        const cached = this.indexAuthorityCoordinator.getGenerationProof(canonicalRoot);
         if (
             !cached
             || cached.source !== 'activation'
@@ -1182,7 +1153,7 @@ export class Context {
         canonicalRoot: string,
         receipt: ProvenGenerationReceipt,
     ): Promise<ProvenGenerationReceipt | null> {
-        const preparedIdentity = this.preparedGenerationReceipts.get(receipt);
+        const preparedIdentity = this.indexAuthorityCoordinator.getPreparedGenerationReceipt(receipt);
         if (!preparedIdentity) return null;
         this.refreshRuntimePolicyAuthority(canonicalRoot);
         if (!this.isPreparedVectorReceiptBoundToCurrentAuthority(canonicalRoot, receipt)) return null;
@@ -2422,7 +2393,7 @@ export class Context {
             || !receipt.observations.policyFileToken
             || !this.isPreparedVectorReceiptBoundToCurrentAuthority(input.canonicalRoot, receipt)
         ) return null;
-        this.generationProofs.set(input.canonicalRoot, {
+        this.indexAuthorityCoordinator.setGenerationProof(input.canonicalRoot, {
             identity,
             vectorReceipt: this.cloneProvenVectorGenerationReceipt(receipt),
             generationReceipt: this.cloneProvenGenerationReceipt(receipt),
@@ -2430,16 +2401,16 @@ export class Context {
             source: 'activation',
         });
         const preparedReceipt = this.cloneProvenGenerationReceipt(receipt);
-        this.preparedGenerationReceipts.set(preparedReceipt, identity);
+        this.indexAuthorityCoordinator.setPreparedGenerationReceipt(preparedReceipt, identity);
         return preparedReceipt;
     }
 
     private invalidateGenerationProofForCollection(collectionName: string): void {
-        for (const [canonicalRoot, proof] of this.generationProofs) {
+        this.indexAuthorityCoordinator.forEachGenerationProof((canonicalRoot, proof) => {
             if (proof.vectorReceipt.collectionName === collectionName) {
-                this.generationProofs.delete(canonicalRoot);
+                this.indexAuthorityCoordinator.deleteGenerationProof(canonicalRoot);
             }
-        }
+        });
     }
 
     private cachedGenerationProofMatches(
@@ -2535,7 +2506,7 @@ export class Context {
         }
         const identity = await this.resolveGenerationProofIdentity(canonicalRoot);
         if (identity) {
-            const cached = this.generationProofs.get(canonicalRoot);
+            const cached = this.indexAuthorityCoordinator.getGenerationProof(canonicalRoot);
             if (
                 cached
                 && this.cachedGenerationProofMatches(canonicalRoot, cached, identity, priorReceipt)
@@ -2551,7 +2522,7 @@ export class Context {
             }
 
             const flightKey = JSON.stringify([canonicalRoot, identity]);
-            const joinedFlight = this.generationProofFlights.get(flightKey);
+            const joinedFlight = this.indexAuthorityCoordinator.getGenerationProofFlight(flightKey);
             if (joinedFlight) {
                 const joined = await joinedFlight;
                 if (
@@ -2584,10 +2555,10 @@ export class Context {
                     navigationArtifactsValidated: false,
                     source: 'exact',
                 };
-                this.generationProofs.set(canonicalRoot, proven);
+                this.indexAuthorityCoordinator.setGenerationProof(canonicalRoot, proven);
                 return proven;
             })();
-            this.generationProofFlights.set(flightKey, flight);
+            this.indexAuthorityCoordinator.setGenerationProofFlight(flightKey, flight);
             try {
                 const proven = await flight;
                 return {
@@ -2596,8 +2567,8 @@ export class Context {
                     source: 'exact',
                 };
             } finally {
-                if (this.generationProofFlights.get(flightKey) === flight) {
-                    this.generationProofFlights.delete(flightKey);
+                if (this.indexAuthorityCoordinator.getGenerationProofFlight(flightKey) === flight) {
+                    this.indexAuthorityCoordinator.deleteGenerationProofFlight(flightKey, flight);
                 }
             }
         }
@@ -2622,7 +2593,7 @@ export class Context {
     ): Promise<NavigationGenerationProof> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         const identity = await this.resolveGenerationProofIdentity(canonicalRoot);
-        const cached = identity ? this.generationProofs.get(canonicalRoot) : undefined;
+        const cached = identity ? this.indexAuthorityCoordinator.getGenerationProof(canonicalRoot) : undefined;
         if (
             cached
             && this.cachedGenerationProofMatches(canonicalRoot, cached, identity!, receipt)
@@ -2642,7 +2613,7 @@ export class Context {
         const flightKey = identity
             ? JSON.stringify([canonicalRoot, identity, validateArtifacts])
             : null;
-        const joinedFlight = flightKey ? this.navigationProofFlights.get(flightKey) : undefined;
+        const joinedFlight = flightKey ? this.indexAuthorityCoordinator.getNavigationProofFlight(flightKey) : undefined;
         if (joinedFlight) {
             const joinedProof = await joinedFlight;
             return await this.resolveGenerationProofIdentity(canonicalRoot) === identity
@@ -2650,13 +2621,13 @@ export class Context {
                 : { status: 'incompatible' };
         }
         const flight = this.proveNavigationGeneration(canonicalRoot, receipt.marker, validateArtifacts);
-        if (flightKey) this.navigationProofFlights.set(flightKey, flight);
+        if (flightKey) this.indexAuthorityCoordinator.setNavigationProofFlight(flightKey, flight);
         let proof: NavigationGenerationProof;
         try {
             proof = await flight;
         } finally {
-            if (flightKey && this.navigationProofFlights.get(flightKey) === flight) {
-                this.navigationProofFlights.delete(flightKey);
+            if (flightKey && this.indexAuthorityCoordinator.getNavigationProofFlight(flightKey) === flight) {
+                this.indexAuthorityCoordinator.deleteNavigationProofFlight(flightKey, flight);
             }
         }
         const identityAfter = await this.resolveGenerationProofIdentity(canonicalRoot);
@@ -2670,7 +2641,7 @@ export class Context {
                     navigationToken: proof.observationToken,
                 },
             };
-            this.generationProofs.set(canonicalRoot, {
+            this.indexAuthorityCoordinator.setGenerationProof(canonicalRoot, {
                 identity,
                 vectorReceipt: this.cloneProvenVectorGenerationReceipt(receipt),
                 generationReceipt,
@@ -3398,11 +3369,11 @@ export class Context {
         activeCollectionName: string;
         expectedDataObservation?: string;
     }): Promise<void> {
-        const cached = this.generationProofs.get(input.canonicalRoot);
+        const cached = this.indexAuthorityCoordinator.getGenerationProof(input.canonicalRoot);
         if (!cached || cached.vectorReceipt.collectionName !== input.activeCollectionName) return;
         const invalidate = () => {
-            if (this.generationProofs.get(input.canonicalRoot) === cached) {
-                this.generationProofs.delete(input.canonicalRoot);
+            if (this.indexAuthorityCoordinator.getGenerationProof(input.canonicalRoot) === cached) {
+                this.indexAuthorityCoordinator.deleteGenerationProof(input.canonicalRoot);
             }
         };
 
@@ -3452,7 +3423,7 @@ export class Context {
         // advances that table's manifest. Carry the proof only after independently
         // proving that both the active data manifest and its marker remained exact
         // across the combined-observation read.
-        this.generationProofs.set(input.canonicalRoot, { ...cached, identity });
+        this.indexAuthorityCoordinator.setGenerationProof(input.canonicalRoot, { ...cached, identity });
     }
 
     private schedulePublicationRetention(input: {
@@ -3944,7 +3915,7 @@ export class Context {
                             `Atomic delta publication for '${input.codebasePath}' lost its retained generation identity.`,
                         );
                     }
-                    this.preparedGenerationReceipts.set(
+                    this.indexAuthorityCoordinator.setPreparedGenerationReceipt(
                         retainedGenerationReceipt,
                         retainedGenerationIdentity,
                     );
