@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `1106ff4`
+Checkpoint HEAD: `c5806b7`
 
 Completed ownership-bounded batches:
 
@@ -31,9 +31,10 @@ Completed ownership-bounded batches:
 - Phase 3.1 / IndexPolicyRuntimeService ownership: `e665659`;
 - Phase 3.2 / IndexPolicyDocumentStore ownership: `9cd239e`;
 - Phase 3.3 / durable restore-transaction mechanics: `4db73b0`;
-- Phase 4.1 / generation authority contract freeze: `1106ff4`.
+- Phase 4.1 / generation authority contract freeze: `1106ff4`;
+- Phase 4.2 / proof state behind IndexAuthorityCoordinator: `c5806b7`.
 
-Next open batch at this checkpoint: Phase 4.2. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 4.3. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
