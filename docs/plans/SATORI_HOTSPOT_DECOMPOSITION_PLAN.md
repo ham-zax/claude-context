@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `c43ff1a`
+Checkpoint HEAD: `4db73b0`
 
 Completed ownership-bounded batches:
 
@@ -27,9 +27,12 @@ Completed ownership-bounded batches:
 - Phase 2.1 / complete sidecar read boundary: `06bb5db`;
 - Phase 2.2 / synchronizer scan boundary: `6bde22a`;
 - Phase 2.3 / extract the Python relationship-resolution engine: `4389fe0`;
-- Phase 2.4 / complete sidecar write/lifecycle decomposition: `c43ff1a`.
+- Phase 2.4 / complete sidecar write/lifecycle decomposition: `c43ff1a`;
+- Phase 3.1 / IndexPolicyRuntimeService ownership: `e665659`;
+- Phase 3.2 / IndexPolicyDocumentStore ownership: `9cd239e`;
+- Phase 3.3 / durable restore-transaction mechanics: `4db73b0`.
 
-Next open batch at this checkpoint: Phase 3.1. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 4.1. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
