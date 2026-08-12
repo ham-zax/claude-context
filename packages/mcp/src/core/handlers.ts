@@ -118,7 +118,7 @@ import {
     normalizeSearchSymbolLabel as normalizeSearchSymbolLabelHelper,
     SEARCH_GROUP_PREVIEW_MAX_BYTES,
 } from "./search-response-helpers.js";
-import { runSearchFrontDoor } from "./search-frontdoor.js";
+import { runSearchFrontDoor, type SearchFrontDoorReady } from "./search-frontdoor.js";
 import { resolveRequestedSearchSubdirectory } from "./search-requested-scope.js";
 import {
     classifyPathCategory,
@@ -255,6 +255,7 @@ import {
     type RuntimeOwnerMutationGateResult,
 } from "./runtime-owner.js";
 import { MutationLeaseCoordinator, type RootMutationLease } from "./mutation-lease.js";
+import { PreparedPublicationReadSession } from "./prepared-publication-read-session.js";
 import type { SessionWorkspacePolicy } from "./session-workspace-policy.js";
 
 const SEARCH_PARTIAL_INDEX_LIMIT_REACHED_WARNING = 'SEARCH_PARTIAL_INDEX:limit_reached';
@@ -2023,19 +2024,33 @@ export class ToolHandlers {
         symbolId?: string;
         symbolLabel?: string;
     }): Promise<PrepareSymbolContextSnapshotResult> {
-        const preparedRead = await this.prepareNavigationRead(
-            path.resolve(input.codebaseRoot, input.relativeFile),
-        );
-        if (preparedRead.state !== 'ready') {
-            return {
-                status: 'unavailable',
-                reason: `prepared_navigation_${preparedRead.state}`,
-            };
-        }
-
-        const releasePublicationReadLease = await this.acquirePublicationReadLease(preparedRead.root.path);
-        try {
-            const initialNavigationIdentity = this.getPreparedNavigationIdentity(preparedRead);
+        let initialNavigationIdentity: string | null;
+        const session = new PreparedPublicationReadSession<TrackedRootReadinessState>({
+            prepareReadiness: () => this.prepareNavigationRead(
+                path.resolve(input.codebaseRoot, input.relativeFile),
+            ),
+            // The lease is acquired only after readiness resolves; non-ready
+            // states never acquire it (Phase 5.2 lifetime contract).
+            acquirePublicationReadLease: (prepared) => (
+                prepared.state === 'ready'
+                    ? this.acquirePublicationReadLease(prepared.root.path)
+                    : Promise.resolve(undefined)
+            ),
+            revalidateAuthority: (prepared) => (
+                prepared.state !== 'ready'
+                || this.getPreparedNavigationIdentity(prepared) === initialNavigationIdentity
+            ),
+        });
+        const executeSymbolContextRead = async (
+            preparedRead: TrackedRootReadinessState,
+        ): Promise<PrepareSymbolContextSnapshotResult> => {
+            if (preparedRead.state !== 'ready') {
+                return {
+                    status: 'unavailable',
+                    reason: `prepared_navigation_${preparedRead.state}`,
+                };
+            }
+            initialNavigationIdentity = this.getPreparedNavigationIdentity(preparedRead);
             if (!initialNavigationIdentity) {
                 return { status: 'unavailable', reason: 'prepared_navigation_identity_unavailable' };
             }
@@ -2106,10 +2121,6 @@ export class ToolHandlers {
                             : 'relationship_manifest_identity_changed'
                         : `relationship_sidecar_${relationshipState.status}`,
                 };
-            if (this.getPreparedNavigationIdentity(preparedRead) !== initialNavigationIdentity) {
-                return { status: 'unavailable', reason: 'prepared_navigation_changed' };
-            }
-
             return {
                 status: 'ready',
                 snapshot: {
@@ -2124,9 +2135,11 @@ export class ToolHandlers {
                     ),
                 },
             };
-        } finally {
-            releasePublicationReadLease?.();
-        }
+        };
+        const outcome = await session.read(executeSymbolContextRead);
+        return outcome.status === 'stale'
+            ? { status: 'unavailable', reason: 'prepared_navigation_changed' }
+            : outcome.result;
     }
 
     private getSyncWatchDebounceMs(): number {
@@ -4012,7 +4025,6 @@ export class ToolHandlers {
             },
         };
         let preservePreparedProofAge = false;
-        let releasePublicationReadLease: (() => void) | undefined;
         let preparedEntrypointOwnerEvidence: PreparedEntrypointOwnerEvidence | undefined;
         let observedChangedFilesForSearch: { available: boolean; files: Set<string> } | undefined;
         let completedFreshnessRequestProof: CompletedFreshnessRequestProof | undefined;
@@ -4305,503 +4317,1038 @@ export class ToolHandlers {
                 };
             }
 
-            const {
-                absolutePath,
-                searchableRoot,
-                effectiveRoot,
-                proofDebugHint,
-                partialIndexSearchWarnings: frontDoorWarnings,
-                freshnessDecision,
-                vectorReceipt,
-                generationReceipt,
-                navigationStatus,
-                preparedObservation,
-            } = frontDoor;
-            releasePublicationReadLease = await this.acquirePublicationReadLease(effectiveRoot);
-            const finalSourceObservation = this.getPreparedReadCacheObservation(effectiveRoot);
-            let requestSourceBarrier: RequestSourceBarrier | undefined;
-            if (
-                finalSourceObservation.observation !== null
-                && finalSourceObservation.sourceObservation !== null
-                && finalSourceObservation.unavailableReason === undefined
-            ) {
-                requestSourceBarrier = {
-                    mode: 'watcher',
-                    observation: finalSourceObservation.observation,
-                    sourceObservation: finalSourceObservation.sourceObservation,
-                };
-            } else if (
-                finalSourceObservation.observation !== null
-                && finalSourceObservation.unavailableReason !== undefined
-                && WATCHER_UNAVAILABLE_SOURCE_REASONS.has(finalSourceObservation.unavailableReason)
-            ) {
-                let freshnessProofBound = false;
-                if (completedFreshnessRequestProof) {
-                    const checkpoint = await this.measureSearchPhase(
-                        phaseTimings,
-                        'freshnessCheckpointProof',
-                        () => this.context.inspectSourceFreshnessCheckpoint(
-                            effectiveRoot,
-                            undefined,
-                            vectorReceipt,
-                        ),
-                    );
-                    freshnessProofBound = checkpoint.status === 'valid'
-                        && checkpoint.observationToken
-                            === completedFreshnessRequestProof.checkpointObservation
-                        && checkpoint.generationReceipt?.collectionName
-                            === completedFreshnessRequestProof.collectionName
-                        && checkpoint.generationReceipt.marker.runId
-                            === completedFreshnessRequestProof.markerRunId
-                        && checkpoint.generationReceipt.marker.indexPolicyHash
-                            === completedFreshnessRequestProof.indexPolicyHash;
-                }
-                if (freshnessProofBound) {
-                    requestSourceBarrier = {
-                        mode: 'full_comparison',
-                        authorityObservation: finalSourceObservation.observation,
-                    };
-                    readinessDebug.requestProof = {
-                        freshnessComparisonMode:
-                            completedFreshnessRequestProof!.comparisonMode,
-                        exactPathCount: completedFreshnessRequestProof!.exactPathCount,
-                        checkpointBindings: 1,
-                        preRetrievalFullComparisons:
-                            completedFreshnessRequestProof!.preRetrievalFullComparisons,
-                        finalFullComparisons: 0,
-                    };
-                } else {
-                    const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
-                        effectiveRoot,
+            let absolutePath: string = "";
+            let effectiveRoot: string = "";
+            let freshnessDecision!: SearchFrontDoorReady["freshnessDecision"];
+            let sourceBarrierChanged: () => Promise<boolean> = async () => false;
+            let finalBarrierChanged = false;
+            // The outer flow returns the blocked payload before the session
+            // runs, so the session operates on the ready front-door outcome.
+            const session = new PreparedPublicationReadSession<SearchFrontDoorReady>({
+                prepareReadiness: async () => frontDoor as SearchFrontDoorReady,
+                // The publication read lease is acquired only after readiness
+                // (the front door) resolves.
+                acquirePublicationReadLease: (prepared) => (
+                    this.acquirePublicationReadLease(prepared.effectiveRoot)
+                ),
+                // Final authority revalidation: the prepared source barrier must
+                // still match. Handled mid-execute drift paths release the lease
+                // early, which skips this check in favour of the fresh attempt.
+                // The execute performs the final barrier comparison; the session
+                // revalidates against that captured result so drift paths and
+                // stable paths both prove one final revalidation.
+                revalidateAuthority: async () => !finalBarrierChanged,
+            });
+            const outcome = await session.read(async (prepared, releaseLease): Promise<SearchToolTextResponse> => {
+
+                    const {
+                        absolutePath: absolutePathFromFrontDoor,
+                        searchableRoot,
+                        effectiveRoot: effectiveRootFromFrontDoor,
+                        proofDebugHint,
+                        partialIndexSearchWarnings: frontDoorWarnings,
+                        freshnessDecision: freshnessDecisionFromFrontDoor,
                         vectorReceipt,
-                    );
-                    if (comparison.status === 'matches') {
+                        generationReceipt,
+                        navigationStatus,
+                        preparedObservation,
+                    } = prepared;
+                    absolutePath = absolutePathFromFrontDoor;
+                    effectiveRoot = effectiveRootFromFrontDoor;
+                    freshnessDecision = freshnessDecisionFromFrontDoor;
+                const finalSourceObservation = this.getPreparedReadCacheObservation(effectiveRoot);
+                let requestSourceBarrier: RequestSourceBarrier | undefined;
+                if (
+                    finalSourceObservation.observation !== null
+                    && finalSourceObservation.sourceObservation !== null
+                    && finalSourceObservation.unavailableReason === undefined
+                ) {
+                    requestSourceBarrier = {
+                        mode: 'watcher',
+                        observation: finalSourceObservation.observation,
+                        sourceObservation: finalSourceObservation.sourceObservation,
+                    };
+                } else if (
+                    finalSourceObservation.observation !== null
+                    && finalSourceObservation.unavailableReason !== undefined
+                    && WATCHER_UNAVAILABLE_SOURCE_REASONS.has(finalSourceObservation.unavailableReason)
+                ) {
+                    let freshnessProofBound = false;
+                    if (completedFreshnessRequestProof) {
+                        const checkpoint = await this.measureSearchPhase(
+                            phaseTimings,
+                            'freshnessCheckpointProof',
+                            () => this.context.inspectSourceFreshnessCheckpoint(
+                                effectiveRoot,
+                                undefined,
+                                vectorReceipt,
+                            ),
+                        );
+                        freshnessProofBound = checkpoint.status === 'valid'
+                            && checkpoint.observationToken
+                                === completedFreshnessRequestProof.checkpointObservation
+                            && checkpoint.generationReceipt?.collectionName
+                                === completedFreshnessRequestProof.collectionName
+                            && checkpoint.generationReceipt.marker.runId
+                                === completedFreshnessRequestProof.markerRunId
+                            && checkpoint.generationReceipt.marker.indexPolicyHash
+                                === completedFreshnessRequestProof.indexPolicyHash;
+                    }
+                    if (freshnessProofBound) {
                         requestSourceBarrier = {
                             mode: 'full_comparison',
                             authorityObservation: finalSourceObservation.observation,
                         };
                         readinessDebug.requestProof = {
-                            freshnessComparisonMode: 'full',
-                            exactPathCount: 0,
-                            checkpointBindings: 0,
-                            preRetrievalFullComparisons: 1,
+                            freshnessComparisonMode:
+                                completedFreshnessRequestProof!.comparisonMode,
+                            exactPathCount: completedFreshnessRequestProof!.exactPathCount,
+                            checkpointBindings: 1,
+                            preRetrievalFullComparisons:
+                                completedFreshnessRequestProof!.preRetrievalFullComparisons,
                             finalFullComparisons: 0,
                         };
+                    } else {
+                        const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
+                            effectiveRoot,
+                            vectorReceipt,
+                        );
+                        if (comparison.status === 'matches') {
+                            requestSourceBarrier = {
+                                mode: 'full_comparison',
+                                authorityObservation: finalSourceObservation.observation,
+                            };
+                            readinessDebug.requestProof = {
+                                freshnessComparisonMode: 'full',
+                                exactPathCount: 0,
+                                checkpointBindings: 0,
+                                preRetrievalFullComparisons: 1,
+                                finalFullComparisons: 0,
+                            };
+                        }
                     }
                 }
-            }
-            if (!requestSourceBarrier) {
-                const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
-                    effectiveRoot,
-                    {
+                if (!requestSourceBarrier) {
+                    const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
+                        effectiveRoot,
+                        {
+                            path: absolutePath,
+                            query: input.query,
+                            scope: input.scope,
+                            groupBy: input.groupBy,
+                            resultMode: input.resultMode,
+                            limit: input.limit,
+                        },
+                        "Satori could not verify the active publication against the current source.",
+                        "source_state_unverified",
+                        {
+                            debugMode,
+                            freshnessDecision,
+                            readiness: readinessDebug,
+                        },
+                    );
+                    return {
+                        content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                        meta: { searchDiagnostics },
+                    };
+                }
+                sourceBarrierChanged = async (): Promise<boolean> => {
+                    if (requestSourceBarrier.mode === 'watcher') {
+                        const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
+                        return currentBarrier.observation !== requestSourceBarrier.observation
+                            || currentBarrier.sourceObservation !== requestSourceBarrier.sourceObservation
+                            || currentBarrier.unavailableReason !== undefined;
+                    }
+                    if (
+                        this.getPreparedAuthorityObservation(effectiveRoot)
+                        !== requestSourceBarrier.authorityObservation
+                    ) {
+                        return true;
+                    }
+                    const comparison = await this.measureSearchPhase(
+                        phaseTimings,
+                        'finalSourceValidation',
+                        () => this.context.compareSourceObservationToFreshnessCheckpoint(
+                            effectiveRoot,
+                            vectorReceipt,
+                        ),
+                    );
+                    if (readinessDebug.requestProof) {
+                        readinessDebug.requestProof.finalFullComparisons += 1;
+                    }
+                    return comparison.status !== 'matches';
+                };
+                if (debugMode === 'full' && finalSourceObservation.unavailableReason) {
+                    readinessDebug.observationUnavailableReason = finalSourceObservation.unavailableReason;
+                }
+                if (debugMode === 'full') {
+                    const getPreparedReadDiagnostics = (
+                        this.syncManager as SyncManager & {
+                            getPreparedReadDiagnostics?: SyncManager['getPreparedReadDiagnostics'];
+                        }
+                    ).getPreparedReadDiagnostics;
+                    if (typeof getPreparedReadDiagnostics === 'function') {
+                        readinessDebug.watcher = getPreparedReadDiagnostics.call(
+                            this.syncManager,
+                            effectiveRoot,
+                        );
+                    }
+                }
+                const sourceFreshnessWasEstablished = freshnessDecision.mode === 'synced'
+                    || freshnessDecision.mode === 'reconciled_ignore_change'
+                    || freshnessDecision.mode === 'skipped_source_unchanged';
+                const checkpointWarningAlreadyPresent = frontDoorWarnings.includes(
+                    WARNING_CODES.SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE,
+                );
+                const partialIndexSearchWarnings = !sourceFreshnessWasEstablished
+                    && !checkpointWarningAlreadyPresent
+                    && finalSourceObservation.unavailableReason
+                    ? [...frontDoorWarnings, WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED]
+                    : frontDoorWarnings;
+
+                if (searchableRoot.path !== absolutePath) {
+                    console.log(`[SEARCH] Auto-resolved subdirectory '${absolutePath}' to indexed root '${searchableRoot.path}'`);
+                }
+                const requestedSubdirectory = resolveRequestedSearchSubdirectory({
+                    indexedRoot: effectiveRoot,
+                    requestedPath: absolutePath,
+                });
+                const encoderEngine = this.context.getEmbeddingEngine();
+                const rootTag = `[SEARCH][root=${effectiveRoot}]`;
+                const requestId = crypto.randomUUID();
+                console.log(`${rootTag} Searching (requestedPath='${absolutePath}')`);
+                console.log(`${rootTag} Query metadata: length=${input.query.length}, requestId=${requestId}`);
+                console.log(`${rootTag} Indexing status: Completed`);
+                console.log(`${rootTag} 🧠 Using embedding provider: ${encoderEngine.getProvider()} for search`);
+
+                const semanticQuery = parsedOperators.semanticQuery;
+                const queryPlan = this.searchQuerySupport.buildSearchQueryPlan(semanticQuery, parsedOperators);
+                const entrypointOwnerSeeking = queryPlan.entrypointIntent.kinds.some((kind) => (
+                    kind === "installed_command_ownership"
+                    || kind === "application_startup_ownership"
+                ));
+                searchDiagnostics.routeKind = queryPlan.route.kind;
+                searchDiagnostics.retrievalMode = queryPlan.retrievalMode;
+                const retrievalPolicy = resolveSearchPolicy({
+                    resultLimit: input.limit,
+                    ...(input.disclosureLimit !== undefined
+                        ? { disclosureResultLimit: input.disclosureLimit }
+                        : {}),
+                    hasMustOperators: parsedOperators.must.length > 0,
+                    ...(input.debugCandidateLimit !== undefined
+                        ? { diagnosticCandidateLimit: input.debugCandidateLimit }
+                        : {}),
+                });
+                const maxAttempts = retrievalPolicy.maxAttempts;
+                const candidateLimit = retrievalPolicy.candidateLimit;
+                const initialFilterSummary: SearchFilterSummary = {
+                    removedByRequestedSubdirectory: 0,
+                    removedByScope: 0,
+                    removedByLanguage: 0,
+                    removedByPathInclude: 0,
+                    removedByPathExclude: 0,
+                    removedByMust: 0,
+                    removedByExclude: 0,
+                };
+                const initialOperatorSummary = this.searchQuerySupport.buildOperatorSummary(parsedOperators);
+                const initialObservedChangedFilesState = observedChangedFilesForSearch
+                    ?? this.getChangedFilesForCodebase(effectiveRoot);
+                const initialChangedFilesState = initialObservedChangedFilesState;
+                const initialDebugChangedFilesState = debugMode === 'freshness' || debugMode === 'full'
+                    ? initialObservedChangedFilesState
+                    : undefined;
+                const initialObservedChangedFilesCount = initialObservedChangedFilesState.files.size;
+                const initialChangedFilesCount = initialObservedChangedFilesCount;
+                const initialChangedFilesBoostSkippedForLargeChangeSet = false;
+                const initialFreshnessSummary: SearchFreshnessSummary = {
+                    syncMode: freshnessDecision.mode,
+                    lastSyncAt: typeof freshnessDecision.lastSyncAt === 'string' ? freshnessDecision.lastSyncAt : null,
+                    changedFileCount: initialObservedChangedFilesCount,
+                    gitDirtyFilesConsidered: initialObservedChangedFilesState.available,
+                    changedFilesBoostApplied: false,
+                    changedFilesBoostSkippedForLargeChangeSet: initialChangedFilesBoostSkippedForLargeChangeSet,
+                };
+                const initialDirtyFilesNotFreshened = initialObservedChangedFilesState.available
+                    && initialObservedChangedFilesCount > 0
+                    && freshnessDecision.mode !== 'synced'
+                    && freshnessDecision.mode !== 'skipped_source_unchanged'
+                    && freshnessDecision.mode !== 'reconciled_ignore_change';
+                const initialRankingProvenance = {
+                    semanticPassesUsed: [] as string[],
+                    lexicalPassesUsed: [] as string[],
+                    livePathSupplementUsed: false,
+                    lexicalFileScanUsed: false,
+                    rerankApplied: false,
+                    exactMatchPinningApplied: false,
+                    registryRepairGroupCount: 0,
+                };
+                const navigationAuthority = navigationStatus === 'valid'
+                    && generationReceipt?.navigation
+                    && generationReceipt.navigation.navigationSealHash
+                    ? 'valid' as const
+                    : 'unavailable' as const;
+                const preparedReadState: Extract<TrackedRootReadinessState, { state: 'ready' }> = {
+                    state: 'ready',
+                    root: searchableRoot,
+                    navigationAuthorityMode: 'canonical_v4',
+                    proofDebugHint,
+                    vectorReceipt,
+                    generationReceipt,
+                    navigationStatus,
+                    preparedObservation,
+                };
+                const attachSearchResultSet = (
+                    envelope: SearchGroupedResponseEnvelope,
+                    resultSet: FinalizedSearchResultSet | undefined,
+                    rerankerApplied: boolean,
+                    orderAuthority: SearchOrderAuthority,
+                ): SearchGroupedResponseEnvelope => {
+                    if (!resultSet) return envelope;
+                    if (!vectorReceipt) {
+                        throw new Error("Search result-set binding requires a proven vector publication.");
+                    }
+                    if (!preparedObservation) {
+                        throw new Error("Search result-set binding requires a prepared publication and source observation.");
+                    }
+                    const responseByteLimit = debugMode === "full"
+                        ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
+                        : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES;
+                    const successfulEnvelope = removeCacheAdmissionWarning(envelope);
+                    const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(
+                        successfulEnvelope,
+                    );
+                    const resultSpecificHints = baseEnvelopeDraft.hints;
+                    delete baseEnvelopeDraft.results;
+                    delete baseEnvelopeDraft.disclosure;
+                    delete baseEnvelopeDraft.continuation;
+                    delete baseEnvelopeDraft.recommendedNextAction;
+                    delete baseEnvelopeDraft.rankedSetDigest;
+                    delete baseEnvelopeDraft.resultIndex;
+                    delete baseEnvelopeDraft.hints;
+                    const frozenHints = freezeContinuationHints(resultSpecificHints);
+                    const queryPolicyDigest = crypto.createHash("sha256").update(serializeCanonicalJson([
+                        input.query,
+                        input.scope,
+                        input.groupBy,
+                        input.rankingMode,
+                        retrievalPolicy,
+                        queryPlan,
+                    ]), "utf8").digest("hex");
+                    const rerankerIdentity = resolveSearchRerankerBindingIdentity(
+                        this.reranker,
+                        rerankerApplied,
+                    );
+                    const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
+                        this.reranker,
+                        rerankerApplied,
+                    );
+                    const rerankerRequestIdentity = resolveSearchRerankRequestIdOrNone(
+                        this.reranker,
+                        rerankerApplied,
+                    );
+                    const bindingInput = buildFrozenSearchRankedSetBindingInput({
+                        vectorReceipt,
+                        ...(generationReceipt ? { generationReceipt } : {}),
+                        preparedObservation,
+                        sourceObservation: finalSourceObservation.sourceObservation,
+                        queryPolicyDigest,
+                        rerankerIdentity,
+                        rerankerProjectionIdentity,
+                        rerankerRequestIdentity,
+                        rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
+                            orderAuthority,
+                        }),
+                        orderedResults: resultSet.orderedResults,
+                        recommendedActions: resultSet.recommendedActions,
+                    });
+                    const rankedSetBinding = buildSearchRankedSetBinding(bindingInput);
+                    const baseEnvelope = {
+                        ...baseEnvelopeDraft,
+                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                        ...(frozenHints ? { hints: frozenHints } : {}),
+                    } as FrozenSearchResultSet["baseEnvelope"];
+                    let boundEnvelope: SearchGroupedResponseEnvelope;
+                    if (envelope.continuation) {
+                        const stored = this.searchContinuationCoordinator.store(this, {
+                            value: {
+                                canonicalRoot: effectiveRoot,
+                                vectorReceipt,
+                                ...(generationReceipt ? { generationReceipt } : {}),
+                                preparedObservation,
+                                sourceObservation: finalSourceObservation.sourceObservation,
+                                queryPolicyDigest,
+                                rankedSetBinding,
+                                responseByteLimit,
+                                pageSize: retrievalPolicy.disclosureResultLimit,
+                                baseEnvelope,
+                                orderedResults: [...resultSet.orderedResults],
+                                recommendedActions: [...resultSet.recommendedActions],
+                            },
+                            nextOffset: resultSet.initialReturnedCount,
+                            reservedReplayBytes: responseByteLimit,
+                            nowMs: this.now(),
+                        });
+                        if (stored.status === "not_admissible") {
+                            const initialEnvelope = { ...envelope };
+                            delete initialEnvelope.continuation;
+                            delete initialEnvelope.rankedSetDigest;
+                            delete initialEnvelope.resultIndex;
+                            return {
+                                ...initialEnvelope,
+                                pagination: {
+                                    totalGroupCount: resultSet.orderedResults.length,
+                                    returnedGroupCount: resultSet.initialReturnedCount,
+                                    continuation: "not_admissible" as const,
+                                },
+                                warnings: buildSearchWarningDetails([
+                                    ...(envelope.warnings?.map((warning) => warning.code) ?? []),
+                                    WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
+                                ]),
+                            };
+                        }
+                        boundEnvelope = {
+                            ...successfulEnvelope,
+                            rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                            pagination: {
+                                totalGroupCount: resultSet.orderedResults.length,
+                                returnedGroupCount: resultSet.initialReturnedCount,
+                                continuation: "attached" as const,
+                            },
+                            continuation: {
+                                ...envelope.continuation,
+                                handle: stored.handle,
+                            },
+                        };
+                    } else {
+                        boundEnvelope = {
+                            ...successfulEnvelope,
+                            rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                        };
+                    }
+                    if (input.includeResultIndex !== true) return boundEnvelope;
+                    const indexed = attachCompactSearchResultIndex({
+                        envelope: boundEnvelope,
+                        orderedResults: resultSet.orderedResults,
+                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                        maxResponseBytes: responseByteLimit,
+                    });
+                    if (indexed.status === "attached") return indexed.envelope;
+                    const warnedEnvelope: SearchGroupedResponseEnvelope = {
+                        ...successfulEnvelope,
+                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                        ...(boundEnvelope.continuation
+                            ? { continuation: boundEnvelope.continuation }
+                            : {}),
+                        warnings: buildSearchWarningDetails([
+                            ...(boundEnvelope.warnings?.map((warning) => warning.code) ?? []),
+                            WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE,
+                        ]),
+                    };
+                    return Buffer.byteLength(JSON.stringify(warnedEnvelope), "utf8")
+                        <= responseByteLimit
+                        ? warnedEnvelope
+                        : boundEnvelope;
+                };
+                if (
+                    preparedObservation
+                    && this.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
+                ) {
+                    this.evictPreparedRead(effectiveRoot);
+                    const payload = this.buildNotReadySearchPayload(effectiveRoot, {
                         path: absolutePath,
                         query: input.query,
                         scope: input.scope,
                         groupBy: input.groupBy,
                         resultMode: input.resultMode,
                         limit: input.limit,
-                    },
-                    "Satori could not verify the active publication against the current source.",
-                    "source_state_unverified",
-                    {
-                        debugMode,
-                        freshnessDecision,
-                        readiness: readinessDebug,
-                    },
-                );
-                return {
-                    content: [{ type: "text", text: this.stringifyToolJson(payload) }],
-                    meta: { searchDiagnostics },
-                };
-            }
-            const sourceBarrierChanged = async (): Promise<boolean> => {
-                if (requestSourceBarrier.mode === 'watcher') {
-                    const currentBarrier = this.getPreparedReadCacheObservation(effectiveRoot);
-                    return currentBarrier.observation !== requestSourceBarrier.observation
-                        || currentBarrier.sourceObservation !== requestSourceBarrier.sourceObservation
-                        || currentBarrier.unavailableReason !== undefined;
-                }
-                if (
-                    this.getPreparedAuthorityObservation(effectiveRoot)
-                    !== requestSourceBarrier.authorityObservation
-                ) {
-                    return true;
-                }
-                const comparison = await this.measureSearchPhase(
-                    phaseTimings,
-                    'finalSourceValidation',
-                    () => this.context.compareSourceObservationToFreshnessCheckpoint(
-                        effectiveRoot,
-                        vectorReceipt,
-                    ),
-                );
-                if (readinessDebug.requestProof) {
-                    readinessDebug.requestProof.finalFullComparisons += 1;
-                }
-                return comparison.status !== 'matches';
-            };
-            if (debugMode === 'full' && finalSourceObservation.unavailableReason) {
-                readinessDebug.observationUnavailableReason = finalSourceObservation.unavailableReason;
-            }
-            if (debugMode === 'full') {
-                const getPreparedReadDiagnostics = (
-                    this.syncManager as SyncManager & {
-                        getPreparedReadDiagnostics?: SyncManager['getPreparedReadDiagnostics'];
-                    }
-                ).getPreparedReadDiagnostics;
-                if (typeof getPreparedReadDiagnostics === 'function') {
-                    readinessDebug.watcher = getPreparedReadDiagnostics.call(
-                        this.syncManager,
-                        effectiveRoot,
-                    );
-                }
-            }
-            const sourceFreshnessWasEstablished = freshnessDecision.mode === 'synced'
-                || freshnessDecision.mode === 'reconciled_ignore_change'
-                || freshnessDecision.mode === 'skipped_source_unchanged';
-            const checkpointWarningAlreadyPresent = frontDoorWarnings.includes(
-                WARNING_CODES.SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE,
-            );
-            const partialIndexSearchWarnings = !sourceFreshnessWasEstablished
-                && !checkpointWarningAlreadyPresent
-                && finalSourceObservation.unavailableReason
-                ? [...frontDoorWarnings, WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED]
-                : frontDoorWarnings;
-
-            if (searchableRoot.path !== absolutePath) {
-                console.log(`[SEARCH] Auto-resolved subdirectory '${absolutePath}' to indexed root '${searchableRoot.path}'`);
-            }
-            const requestedSubdirectory = resolveRequestedSearchSubdirectory({
-                indexedRoot: effectiveRoot,
-                requestedPath: absolutePath,
-            });
-            const encoderEngine = this.context.getEmbeddingEngine();
-            const rootTag = `[SEARCH][root=${effectiveRoot}]`;
-            const requestId = crypto.randomUUID();
-            console.log(`${rootTag} Searching (requestedPath='${absolutePath}')`);
-            console.log(`${rootTag} Query metadata: length=${input.query.length}, requestId=${requestId}`);
-            console.log(`${rootTag} Indexing status: Completed`);
-            console.log(`${rootTag} 🧠 Using embedding provider: ${encoderEngine.getProvider()} for search`);
-
-            const semanticQuery = parsedOperators.semanticQuery;
-            const queryPlan = this.searchQuerySupport.buildSearchQueryPlan(semanticQuery, parsedOperators);
-            const entrypointOwnerSeeking = queryPlan.entrypointIntent.kinds.some((kind) => (
-                kind === "installed_command_ownership"
-                || kind === "application_startup_ownership"
-            ));
-            searchDiagnostics.routeKind = queryPlan.route.kind;
-            searchDiagnostics.retrievalMode = queryPlan.retrievalMode;
-            const retrievalPolicy = resolveSearchPolicy({
-                resultLimit: input.limit,
-                ...(input.disclosureLimit !== undefined
-                    ? { disclosureResultLimit: input.disclosureLimit }
-                    : {}),
-                hasMustOperators: parsedOperators.must.length > 0,
-                ...(input.debugCandidateLimit !== undefined
-                    ? { diagnosticCandidateLimit: input.debugCandidateLimit }
-                    : {}),
-            });
-            const maxAttempts = retrievalPolicy.maxAttempts;
-            const candidateLimit = retrievalPolicy.candidateLimit;
-            const initialFilterSummary: SearchFilterSummary = {
-                removedByRequestedSubdirectory: 0,
-                removedByScope: 0,
-                removedByLanguage: 0,
-                removedByPathInclude: 0,
-                removedByPathExclude: 0,
-                removedByMust: 0,
-                removedByExclude: 0,
-            };
-            const initialOperatorSummary = this.searchQuerySupport.buildOperatorSummary(parsedOperators);
-            const initialObservedChangedFilesState = observedChangedFilesForSearch
-                ?? this.getChangedFilesForCodebase(effectiveRoot);
-            const initialChangedFilesState = initialObservedChangedFilesState;
-            const initialDebugChangedFilesState = debugMode === 'freshness' || debugMode === 'full'
-                ? initialObservedChangedFilesState
-                : undefined;
-            const initialObservedChangedFilesCount = initialObservedChangedFilesState.files.size;
-            const initialChangedFilesCount = initialObservedChangedFilesCount;
-            const initialChangedFilesBoostSkippedForLargeChangeSet = false;
-            const initialFreshnessSummary: SearchFreshnessSummary = {
-                syncMode: freshnessDecision.mode,
-                lastSyncAt: typeof freshnessDecision.lastSyncAt === 'string' ? freshnessDecision.lastSyncAt : null,
-                changedFileCount: initialObservedChangedFilesCount,
-                gitDirtyFilesConsidered: initialObservedChangedFilesState.available,
-                changedFilesBoostApplied: false,
-                changedFilesBoostSkippedForLargeChangeSet: initialChangedFilesBoostSkippedForLargeChangeSet,
-            };
-            const initialDirtyFilesNotFreshened = initialObservedChangedFilesState.available
-                && initialObservedChangedFilesCount > 0
-                && freshnessDecision.mode !== 'synced'
-                && freshnessDecision.mode !== 'skipped_source_unchanged'
-                && freshnessDecision.mode !== 'reconciled_ignore_change';
-            const initialRankingProvenance = {
-                semanticPassesUsed: [] as string[],
-                lexicalPassesUsed: [] as string[],
-                livePathSupplementUsed: false,
-                lexicalFileScanUsed: false,
-                rerankApplied: false,
-                exactMatchPinningApplied: false,
-                registryRepairGroupCount: 0,
-            };
-            const navigationAuthority = navigationStatus === 'valid'
-                && generationReceipt?.navigation
-                && generationReceipt.navigation.navigationSealHash
-                ? 'valid' as const
-                : 'unavailable' as const;
-            const preparedReadState: Extract<TrackedRootReadinessState, { state: 'ready' }> = {
-                state: 'ready',
-                root: searchableRoot,
-                navigationAuthorityMode: 'canonical_v4',
-                proofDebugHint,
-                vectorReceipt,
-                generationReceipt,
-                navigationStatus,
-                preparedObservation,
-            };
-            const attachSearchResultSet = (
-                envelope: SearchGroupedResponseEnvelope,
-                resultSet: FinalizedSearchResultSet | undefined,
-                rerankerApplied: boolean,
-                orderAuthority: SearchOrderAuthority,
-            ): SearchGroupedResponseEnvelope => {
-                if (!resultSet) return envelope;
-                if (!vectorReceipt) {
-                    throw new Error("Search result-set binding requires a proven vector publication.");
-                }
-                if (!preparedObservation) {
-                    throw new Error("Search result-set binding requires a prepared publication and source observation.");
-                }
-                const responseByteLimit = debugMode === "full"
-                    ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
-                    : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES;
-                const successfulEnvelope = removeCacheAdmissionWarning(envelope);
-                const baseEnvelopeDraft: Partial<SearchGroupedResponseEnvelope> = structuredClone(
-                    successfulEnvelope,
-                );
-                const resultSpecificHints = baseEnvelopeDraft.hints;
-                delete baseEnvelopeDraft.results;
-                delete baseEnvelopeDraft.disclosure;
-                delete baseEnvelopeDraft.continuation;
-                delete baseEnvelopeDraft.recommendedNextAction;
-                delete baseEnvelopeDraft.rankedSetDigest;
-                delete baseEnvelopeDraft.resultIndex;
-                delete baseEnvelopeDraft.hints;
-                const frozenHints = freezeContinuationHints(resultSpecificHints);
-                const queryPolicyDigest = crypto.createHash("sha256").update(serializeCanonicalJson([
-                    input.query,
-                    input.scope,
-                    input.groupBy,
-                    input.rankingMode,
-                    retrievalPolicy,
-                    queryPlan,
-                ]), "utf8").digest("hex");
-                const rerankerIdentity = resolveSearchRerankerBindingIdentity(
-                    this.reranker,
-                    rerankerApplied,
-                );
-                const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
-                    this.reranker,
-                    rerankerApplied,
-                );
-                const rerankerRequestIdentity = resolveSearchRerankRequestIdOrNone(
-                    this.reranker,
-                    rerankerApplied,
-                );
-                const bindingInput = buildFrozenSearchRankedSetBindingInput({
-                    vectorReceipt,
-                    ...(generationReceipt ? { generationReceipt } : {}),
-                    preparedObservation,
-                    sourceObservation: finalSourceObservation.sourceObservation,
-                    queryPolicyDigest,
-                    rerankerIdentity,
-                    rerankerProjectionIdentity,
-                    rerankerRequestIdentity,
-                    rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
-                        orderAuthority,
-                    }),
-                    orderedResults: resultSet.orderedResults,
-                    recommendedActions: resultSet.recommendedActions,
-                });
-                const rankedSetBinding = buildSearchRankedSetBinding(bindingInput);
-                const baseEnvelope = {
-                    ...baseEnvelopeDraft,
-                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
-                    ...(frozenHints ? { hints: frozenHints } : {}),
-                } as FrozenSearchResultSet["baseEnvelope"];
-                let boundEnvelope: SearchGroupedResponseEnvelope;
-                if (envelope.continuation) {
-                    const stored = this.searchContinuationCoordinator.store(this, {
-                        value: {
-                            canonicalRoot: effectiveRoot,
-                            vectorReceipt,
-                            ...(generationReceipt ? { generationReceipt } : {}),
-                            preparedObservation,
-                            sourceObservation: finalSourceObservation.sourceObservation,
-                            queryPolicyDigest,
-                            rankedSetBinding,
-                            responseByteLimit,
-                            pageSize: retrievalPolicy.disclosureResultLimit,
-                            baseEnvelope,
-                            orderedResults: [...resultSet.orderedResults],
-                            recommendedActions: [...resultSet.recommendedActions],
-                        },
-                        nextOffset: resultSet.initialReturnedCount,
-                        reservedReplayBytes: responseByteLimit,
-                        nowMs: this.now(),
                     });
-                    if (stored.status === "not_admissible") {
-                        const initialEnvelope = { ...envelope };
-                        delete initialEnvelope.continuation;
-                        delete initialEnvelope.rankedSetDigest;
-                        delete initialEnvelope.resultIndex;
-                        return {
-                            ...initialEnvelope,
-                            pagination: {
-                                totalGroupCount: resultSet.orderedResults.length,
-                                returnedGroupCount: resultSet.initialReturnedCount,
-                                continuation: "not_admissible" as const,
-                            },
-                            warnings: buildSearchWarningDetails([
-                                ...(envelope.warnings?.map((warning) => warning.code) ?? []),
-                                WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE,
-                            ]),
-                        };
-                    }
-                    boundEnvelope = {
-                        ...successfulEnvelope,
-                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
-                        pagination: {
-                            totalGroupCount: resultSet.orderedResults.length,
-                            returnedGroupCount: resultSet.initialReturnedCount,
-                            continuation: "attached" as const,
-                        },
-                        continuation: {
-                            ...envelope.continuation,
-                            handle: stored.handle,
-                        },
-                    };
-                } else {
-                    boundEnvelope = {
-                        ...successfulEnvelope,
-                        rankedSetDigest: rankedSetBinding.rankedSetDigest,
+                    return {
+                        content: [{ type: 'text', text: this.stringifyToolJson(payload) }],
+                        meta: { searchDiagnostics },
                     };
                 }
-                if (input.includeResultIndex !== true) return boundEnvelope;
-                const indexed = attachCompactSearchResultIndex({
-                    envelope: boundEnvelope,
-                    orderedResults: resultSet.orderedResults,
-                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
-                    maxResponseBytes: responseByteLimit,
-                });
-                if (indexed.status === "attached") return indexed.envelope;
-                const warnedEnvelope: SearchGroupedResponseEnvelope = {
-                    ...successfulEnvelope,
-                    rankedSetDigest: rankedSetBinding.rankedSetDigest,
-                    ...(boundEnvelope.continuation
-                        ? { continuation: boundEnvelope.continuation }
-                        : {}),
-                    warnings: buildSearchWarningDetails([
-                        ...(boundEnvelope.warnings?.map((warning) => warning.code) ?? []),
-                        WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE,
-                    ]),
-                };
-                return Buffer.byteLength(JSON.stringify(warnedEnvelope), "utf8")
-                    <= responseByteLimit
-                    ? warnedEnvelope
-                    : boundEnvelope;
-            };
-            if (
-                preparedObservation
-                && this.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
-            ) {
-                this.evictPreparedRead(effectiveRoot);
-                const payload = this.buildNotReadySearchPayload(effectiveRoot, {
-                    path: absolutePath,
+                const exactFastPath = await runExactRegistryFastPath({
+                    absolutePath,
+                    effectiveRoot,
+                    requestedSubdirectory,
                     query: input.query,
                     scope: input.scope,
                     groupBy: input.groupBy,
                     resultMode: input.resultMode,
                     limit: input.limit,
+                    disclosureLimit: retrievalPolicy.disclosureResultLimit,
+                    includeResultIndex: input.includeResultIndex === true,
+                    debugMode,
+                    rankingMode: input.rankingMode,
+                    semanticQuery,
+                    parsedOperators,
+                    queryPlan,
+                    freshnessDecision,
+                    freshnessSummary: initialFreshnessSummary,
+                    proofDebugHint,
+                    partialIndexSearchWarnings,
+                    phaseTimings,
+                    readiness: readinessDebug,
+                    candidateLimit,
+                    maxAttempts,
+                    operatorSummary: initialOperatorSummary,
+                    filterSummary: initialFilterSummary,
+                    changedFilesState: initialChangedFilesState,
+                    observedChangedFilesState: initialObservedChangedFilesState,
+                    debugChangedFilesState: initialDebugChangedFilesState,
+                    changedFilesCount: initialChangedFilesCount,
+                    changedFilesBoostSkippedForLargeChangeSet: initialChangedFilesBoostSkippedForLargeChangeSet,
+                    dirtyFilesNotFreshened: initialDirtyFilesNotFreshened,
+                    rankingProvenance: initialRankingProvenance,
+                    previewMaxBytes: SEARCH_GROUP_PREVIEW_MAX_BYTES,
+                    navigationAuthority,
+                }, {
+                    searchQuerySupport: this.searchQuerySupport,
+                    measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
+                    loadRegistryManifest: () => this.loadPreparedNavigationManifest(
+                        preparedReadState,
+                        readinessDebug.operations,
+                    ),
+                    loadRegistryValidatedCallGraphSidecar: (exactInput) => this.loadRegistryValidatedCallGraphSidecar({
+                        ...exactInput,
+                        preparedRead: preparedReadState,
+                        operations: readinessDebug.operations,
+                    }),
+                    buildRelationshipBackedCallGraph: (exactInput) => this.buildRelationshipBackedCallGraph({
+                        ...exactInput,
+                        ...(generationReceipt
+                            ? { generationId: generationReceipt.navigation.generationId }
+                            : {}),
+                    }),
+                    buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.buildChangedCodeDebug(preparedReadState, changedFilesState),
+                    buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
+                    getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
+                    now: this.now,
                 });
-                return {
-                    content: [{ type: 'text', text: this.stringifyToolJson(payload) }],
-                    meta: { searchDiagnostics },
-                };
-            }
-            const exactFastPath = await runExactRegistryFastPath({
-                absolutePath,
-                effectiveRoot,
-                requestedSubdirectory,
-                query: input.query,
-                scope: input.scope,
-                groupBy: input.groupBy,
-                resultMode: input.resultMode,
-                limit: input.limit,
-                disclosureLimit: retrievalPolicy.disclosureResultLimit,
-                includeResultIndex: input.includeResultIndex === true,
-                debugMode,
-                rankingMode: input.rankingMode,
-                semanticQuery,
-                parsedOperators,
-                queryPlan,
-                freshnessDecision,
-                freshnessSummary: initialFreshnessSummary,
-                proofDebugHint,
-                partialIndexSearchWarnings,
-                phaseTimings,
-                readiness: readinessDebug,
-                candidateLimit,
-                maxAttempts,
-                operatorSummary: initialOperatorSummary,
-                filterSummary: initialFilterSummary,
-                changedFilesState: initialChangedFilesState,
-                observedChangedFilesState: initialObservedChangedFilesState,
-                debugChangedFilesState: initialDebugChangedFilesState,
-                changedFilesCount: initialChangedFilesCount,
-                changedFilesBoostSkippedForLargeChangeSet: initialChangedFilesBoostSkippedForLargeChangeSet,
-                dirtyFilesNotFreshened: initialDirtyFilesNotFreshened,
-                rankingProvenance: initialRankingProvenance,
-                previewMaxBytes: SEARCH_GROUP_PREVIEW_MAX_BYTES,
-                navigationAuthority,
-            }, {
-                searchQuerySupport: this.searchQuerySupport,
-                measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
-                loadRegistryManifest: () => this.loadPreparedNavigationManifest(
-                    preparedReadState,
-                    readinessDebug.operations,
-                ),
-                loadRegistryValidatedCallGraphSidecar: (exactInput) => this.loadRegistryValidatedCallGraphSidecar({
-                    ...exactInput,
-                    preparedRead: preparedReadState,
-                    operations: readinessDebug.operations,
-                }),
-                buildRelationshipBackedCallGraph: (exactInput) => this.buildRelationshipBackedCallGraph({
-                    ...exactInput,
-                    ...(generationReceipt
-                        ? { generationId: generationReceipt.navigation.generationId }
-                        : {}),
-                }),
-                buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.buildChangedCodeDebug(preparedReadState, changedFilesState),
-                buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
-                getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
-                now: this.now,
-            });
-            let exactRegistryDebug: ExactRegistryLookupDebug | undefined = exactFastPath.exactRegistryDebug;
-            let searchSymbolRegistry: SymbolRegistry | undefined = exactFastPath.searchSymbolRegistry;
-            let searchSymbolRegistryManifestHash: string | undefined = exactFastPath.searchSymbolRegistryManifestHash;
-            let preparedSearchRerankStructuralRelationships: PreparedSearchRerankStructuralRelationships | undefined;
-            let structuralContextLoad: Promise<Readonly<{
-                status: "available" | "unavailable" | "incompatible";
-                preparedRelationships?: PreparedSearchRerankStructuralRelationships;
-            }>> | undefined;
-            let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
+                let exactRegistryDebug: ExactRegistryLookupDebug | undefined = exactFastPath.exactRegistryDebug;
+                let searchSymbolRegistry: SymbolRegistry | undefined = exactFastPath.searchSymbolRegistry;
+                let searchSymbolRegistryManifestHash: string | undefined = exactFastPath.searchSymbolRegistryManifestHash;
+                let preparedSearchRerankStructuralRelationships: PreparedSearchRerankStructuralRelationships | undefined;
+                let structuralContextLoad: Promise<Readonly<{
+                    status: "available" | "unavailable" | "incompatible";
+                    preparedRelationships?: PreparedSearchRerankStructuralRelationships;
+                }>> | undefined;
+                let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
 
-            if (exactFastPath.kind === 'handled') {
-                const barrierChanged = await sourceBarrierChanged();
+                if (exactFastPath.kind === 'handled') {
+                    const barrierChanged = await sourceBarrierChanged();
+                    if (barrierChanged) {
+                        releaseLease();
+                        if (sourceDriftRetryCount === 0) {
+                            return this.handleSearchCodeAttempt(args, 1);
+                        }
+                        const payload = this.toolResponseBuilders.buildSourceStateUnverifiedSearchPayload(
+                            effectiveRoot,
+                            {
+                                path: absolutePath,
+                                query: input.query,
+                                scope: input.scope,
+                                groupBy: input.groupBy,
+                                resultMode: input.resultMode,
+                                limit: input.limit,
+                            },
+                            "Source changed again while Satori was preparing this response.",
+                            "source_changed_during_request",
+                            {
+                                debugMode,
+                                freshnessDecision,
+                                readiness: readinessDebug,
+                            },
+                        );
+                        return {
+                            content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                            meta: { searchDiagnostics },
+                        };
+                    }
+                    let exactEnvelope = exactFastPath.finalized.envelope;
+                    if (
+                        (debugMode === 'freshness' || debugMode === 'full')
+                        && exactEnvelope.hints?.debugSearch
+                    ) {
+                        exactEnvelope = {
+                            ...exactEnvelope,
+                            hints: {
+                                ...exactEnvelope.hints,
+                                debugSearch: {
+                                    ...exactEnvelope.hints.debugSearch,
+                                    readiness: structuredClone(readinessDebug),
+                                },
+                            },
+                        };
+                    }
+                    if (
+                        exactFastPath.finalized.kind === "ok"
+                        && exactEnvelope.resultMode === "grouped"
+                    ) {
+                        if (vectorReceipt && preparedObservation) {
+                            exactEnvelope = attachSearchResultSet(
+                                exactEnvelope,
+                                exactFastPath.finalized.resultSet,
+                                false,
+                                "retrieval_order",
+                            );
+                        } else if (exactFastPath.finalized.resultSet) {
+                            const unboundEnvelope = { ...exactEnvelope };
+                            delete unboundEnvelope.continuation;
+                            delete unboundEnvelope.rankedSetDigest;
+                            delete unboundEnvelope.resultIndex;
+                            exactEnvelope = {
+                                ...unboundEnvelope,
+                                warnings: buildSearchWarningDetails([
+                                    ...(exactEnvelope.warnings?.map((warning) => warning.code) ?? []),
+                                    ...(exactEnvelope.continuation
+                                        ? [WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE]
+                                        : []),
+                                    ...(input.includeResultIndex === true
+                                        ? [WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE]
+                                        : []),
+                                ]),
+                            };
+                        }
+                    }
+                    await this.touchWatchedCodebaseBestEffort(effectiveRoot);
+                    this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
+                    return {
+                        content: [{ type: "text", text: this.stringifyToolJson(exactEnvelope) }],
+                        ...(exactFastPath.finalized.kind === "page_too_large" ? { isError: true } : {}),
+                        meta: {
+                            searchDiagnostics: {
+                                ...searchDiagnostics,
+                                resultsBeforeFilter: exactFastPath.resultsBeforeFilter,
+                                resultsAfterFilter: exactFastPath.resultsAfterFilter,
+                                searchPassCount: 0,
+                                searchPassSuccessCount: 0,
+                                searchPassFailureCount: 0,
+                            }
+                        }
+                    };
+                }
+
+                if (
+                    preparedObservation
+                    && this.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
+                ) {
+                    this.evictPreparedRead(effectiveRoot);
+                    const payload = this.buildNotReadySearchPayload(effectiveRoot, {
+                        path: absolutePath,
+                        query: input.query,
+                        scope: input.scope,
+                        groupBy: input.groupBy,
+                        resultMode: input.resultMode,
+                        limit: input.limit,
+                    });
+                    return {
+                        content: [{ type: 'text', text: this.stringifyToolJson(payload) }],
+                        meta: { searchDiagnostics },
+                    };
+                }
+
+                let entrypointOwnerEvidence: EntrypointOwnerEvidenceResolution | undefined;
+                const completeEntrypointPublicationBinding = Boolean(
+                    generationReceipt
+                    && typeof generationReceipt.collectionName === "string"
+                    && typeof generationReceipt.marker?.runId === "string"
+                    && typeof generationReceipt.policyDocumentDigest === "string"
+                    && typeof generationReceipt.policy?.policyHash === "string"
+                    && typeof generationReceipt.navigation?.generationId === "string"
+                    && typeof generationReceipt.navigation?.symbolRegistryManifestHash === "string",
+                );
+                if (
+                    entrypointOwnerSeeking
+                    && completeEntrypointPublicationBinding
+                    && generationReceipt
+                    && navigationStatus === "valid"
+                ) {
+                    if (
+                        !searchSymbolRegistry
+                        || searchSymbolRegistryManifestHash
+                            !== generationReceipt.navigation.symbolRegistryManifestHash
+                    ) {
+                        const registryState = await this.loadPreparedNavigationManifest(
+                            preparedReadState,
+                            readinessDebug.operations,
+                        );
+                        if (
+                            registryState.status === "ok"
+                            && registryState.manifestHash
+                                === generationReceipt.navigation.symbolRegistryManifestHash
+                        ) {
+                            searchSymbolRegistry = registryState.registry;
+                            searchSymbolRegistryManifestHash = registryState.manifestHash;
+                        }
+                    }
+                    if (
+                        searchSymbolRegistry
+                        && searchSymbolRegistryManifestHash
+                            === generationReceipt.navigation.symbolRegistryManifestHash
+                    ) {
+                        const preparedEvidence = await prepareEntrypointOwnerEvidence({
+                            codebaseRoot: effectiveRoot,
+                            registry: searchSymbolRegistry,
+                            publication: {
+                                collectionName: generationReceipt.collectionName,
+                                markerRunId: generationReceipt.marker.runId,
+                                policyDocumentDigest: generationReceipt.policyDocumentDigest,
+                                policyHash: generationReceipt.policy.policyHash,
+                                navigationGenerationId: generationReceipt.navigation.generationId,
+                                symbolRegistryManifestHash:
+                                    generationReceipt.navigation.symbolRegistryManifestHash,
+                            },
+                        });
+                        if ("resolution" in preparedEvidence) {
+                            preparedEntrypointOwnerEvidence = preparedEvidence;
+                            const manifestComparison = await this.context
+                                .compareSourcePathsToFreshnessCheckpoint(
+                                    effectiveRoot,
+                                    ["pyproject.toml"],
+                                    generationReceipt,
+                                );
+                            if (manifestComparison.status === "matches") {
+                                entrypointOwnerEvidence = preparedEvidence.resolution;
+                            } else {
+                                entrypointOwnerEvidence = {
+                                    ...preparedEvidence.resolution,
+                                    status: "publication_incompatible",
+                                    owners: [],
+                                    resolvedOwnerCount: 0,
+                                    resolutionComplete: false,
+                                };
+                                await preparedEvidence.release();
+                                preparedEntrypointOwnerEvidence = undefined;
+                            }
+                        } else {
+                            entrypointOwnerEvidence = preparedEvidence;
+                        }
+                    }
+                }
+
+                const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
+                const resolvedRerankQuery = resolveSearchRerankQuery({
+                    semanticQuery: parsedOperators.semanticQuery,
+                    focusedQueryV1: buildSearchRerankQuery({
+                        semanticQuery: parsedOperators.semanticQuery,
+                        answerFocus,
+                    }),
+                    focusedQueryV2: buildSearchRerankQueryV2({
+                        semanticQuery: parsedOperators.semanticQuery,
+                        answerFocus,
+                    }),
+                    projectionIdentity: this.reranker?.getQueryProjectionVersion?.(),
+                });
+                const rerankerDocumentProjectionVersion: string | undefined = this.reranker?.getDocumentProjectionVersion?.();
+                const wantsV4StructuralContext = rerankerDocumentProjectionVersion
+                    === SEARCH_RERANK_DOCUMENT_V4_POLICY.id;
+                const execution = await runSearchExecution({
+                    effectiveRoot,
+                    scope: input.scope,
+                    rankingMode: input.rankingMode,
+                    resultMode: input.resultMode,
+                    limit: input.limit,
+                    debugMode,
+                    semanticQuery,
+                    answerFocus,
+                    rerankQuery: resolvedRerankQuery.query,
+                    rerankQueryProjectionIdentity: resolvedRerankQuery.queryProjectionIdentity,
+                    parsedOperators,
+                    queryPlan,
+                    exactRegistryEligible: exactRegistryFallbackForTrackedLexical,
+                    exactRegistryFallbackForTrackedLexical,
+                    freshnessMode: freshnessDecision.mode,
+                    observedChangedFilesState: initialObservedChangedFilesState,
+                    retrievalPolicy,
+                    entrypointOwnerEvidence,
+                    requestedSubdirectory,
+                }, {
+                    searchQuerySupport: this.searchQuerySupport,
+                    semanticSearch: (request) => {
+                        const lifecycle = this.contextLifecycle();
+                        if (
+                            vectorReceipt
+                            && debugMode === 'full'
+                            && lifecycle.semanticSearchWithCandidateTraceInProvenGeneration
+                        ) {
+                            return lifecycle.semanticSearchWithCandidateTraceInProvenGeneration(
+                                vectorReceipt,
+                                request,
+                                SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
+                                retrievalPolicy.diagnosticCandidateLimit !== undefined
+                                    ? {
+                                        captureLexicalFallback: true,
+                                        diagnosticCandidateLimit: retrievalPolicy.diagnosticCandidateLimit,
+                                        ...(request.diagnosticLexicalFallbackTerms
+                                            ? { lexicalFallbackTerms: request.diagnosticLexicalFallbackTerms }
+                                            : {}),
+                                    }
+                                    : {},
+                            );
+                        }
+                        return vectorReceipt
+                            ? lifecycle.semanticSearchInProvenGeneration!(vectorReceipt, request)
+                            : this.context.semanticSearch(request);
+                    },
+                    reranker: this.reranker,
+                    ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
+                        || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
+                        || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
+                        ? {
+                            buildRerankDocument: async (
+                                rerankQuery: string,
+                                result: SearchResultLike,
+                            ): Promise<SearchRerankProjectionResult> => {
+                                const candidateId = searchRerankCandidateId(result);
+                                if (!generationReceipt) {
+                                    return {
+                                        ok: false,
+                                        candidateId,
+                                        reason: "generation_receipt_missing",
+                                    };
+                                }
+                                if (navigationStatus !== "valid") {
+                                    return {
+                                        ok: false,
+                                        candidateId,
+                                        reason: "navigation_status_invalid",
+                                    };
+                                }
+                                if (
+                                    !searchSymbolRegistry
+                                    || searchSymbolRegistryManifestHash
+                                        !== generationReceipt.navigation.symbolRegistryManifestHash
+                                ) {
+                                    const registryState = await this.loadPreparedNavigationManifest(
+                                        preparedReadState,
+                                        readinessDebug.operations,
+                                    );
+                                    if (registryState.status !== "ok") {
+                                        return {
+                                            ok: false,
+                                            candidateId,
+                                            reason: "registry_load_failed",
+                                        };
+                                    }
+                                    if (
+                                        registryState.manifestHash
+                                            !== generationReceipt.navigation.symbolRegistryManifestHash
+                                    ) {
+                                        return {
+                                            ok: false,
+                                            candidateId,
+                                            reason: "registry_manifest_mismatch",
+                                        };
+                                    }
+                                    searchSymbolRegistry = registryState.registry;
+                                    searchSymbolRegistryManifestHash = registryState.manifestHash;
+                                }
+                                const structuralContext = wantsV4StructuralContext
+                                    ? await (structuralContextLoad ??= (async () => {
+                                        const compatibility = await this.loadPreparedNavigationCompatibility(
+                                            preparedReadState,
+                                            searchSymbolRegistryManifestHash
+                                                ?? generationReceipt.navigation.symbolRegistryManifestHash,
+                                            readinessDebug.operations,
+                                        );
+                                        const status = resolveSearchRerankStructuralContextStatus({
+                                            relationshipStatus: compatibility.relationships.status,
+                                            ...(compatibility.relationships.status === "ok"
+                                                ? { relationshipManifestHash: compatibility.relationships.manifestHash }
+                                                : {}),
+                                            expectedRelationshipManifestHash:
+                                                generationReceipt.navigation.relationshipManifestHash,
+                                        });
+                                        if (status !== "available" || compatibility.relationships.status !== "ok") {
+                                            return { status };
+                                        }
+                                        preparedSearchRerankStructuralRelationships
+                                            = prepareSearchRerankStructuralRelationships(
+                                                compatibility.relationships.records,
+                                            );
+                                        return {
+                                            status,
+                                            preparedRelationships: preparedSearchRerankStructuralRelationships,
+                                        };
+                                    })())
+                                    : undefined;
+                                return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
+                                    ? projectPublicationBoundSearchRerankDocumentV4
+                                    : rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
+                                        ? projectPublicationBoundSearchRerankDocumentV3
+                                        : projectPublicationBoundSearchRerankDocumentV2)({
+                                    candidateId,
+                                    codebaseRoot: effectiveRoot,
+                                    semanticQuery: rerankQuery,
+                                    maxSourceBytes: this.readFileMaxBytes,
+                                    result,
+                                    registry: searchSymbolRegistry,
+                                    ...(structuralContext?.preparedRelationships
+                                        ? { preparedStructuralRelationships: structuralContext.preparedRelationships }
+                                        : {}),
+                                    ...(structuralContext
+                                        ? { structuralContextStatus: structuralContext.status }
+                                        : {}),
+                                });
+                            },
+                        }
+                        : {}),
+                    shouldForceSearchPassFailure: (passId) => this.shouldForceSearchPassFailure(passId),
+                    classifyEmbeddingProviderError,
+                    classifyVectorBackendError,
+                    measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
+                }, searchDiagnostics);
+
+                if (execution.kind === 'vector_backend_unavailable') {
+                    const payload = this.buildVectorBackendSearchPayload(execution.diagnostic, {
+                        path: absolutePath,
+                        query: input.query,
+                        scope: input.scope,
+                        groupBy: input.groupBy,
+                        resultMode: input.resultMode,
+                        limit: input.limit
+                    });
+                    return {
+                        content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                        meta: {
+                            searchDiagnostics: {
+                                ...searchDiagnostics,
+                                error: execution.diagnostic.code
+                            }
+                        }
+                    };
+                }
+
+                if (execution.kind === 'embedding_provider_unavailable') {
+                    const payload = this.buildEmbeddingProviderSearchPayload(execution.diagnostic, {
+                        path: absolutePath,
+                        query: input.query,
+                        scope: input.scope,
+                        groupBy: input.groupBy,
+                        resultMode: input.resultMode,
+                        limit: input.limit,
+                    });
+                    return {
+                        content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                        isError: !execution.diagnostic.retryable,
+                        meta: {
+                            searchDiagnostics: {
+                                ...searchDiagnostics,
+                                error: execution.diagnostic.code,
+                            },
+                        },
+                    };
+                }
+
+                if (execution.kind === 'all_semantic_passes_failed') {
+                    const payload = this.buildInvalidSearchRequestPayload({
+                        path: absolutePath,
+                        query: input.query,
+                        scope: input.scope,
+                        groupBy: input.groupBy,
+                        resultMode: input.resultMode,
+                        limit: input.limit
+                    }, "Search backend failed: all semantic search passes failed. Retry and verify embedding/vector backends are reachable.", "not_ready", "search_backend_failed");
+                    if (debugMode === 'full') {
+                        payload.hints = {
+                            ...(payload.hints || {}),
+                            debugSearch: {
+                                semanticPassFailures: execution.semanticPassFailures.map((failure) => ({ ...failure })),
+                            },
+                        };
+                    }
+                    return {
+                        content: [{ type: "text", text: this.stringifyToolJson(payload) }],
+                        isError: true,
+                        meta: { searchDiagnostics }
+                    };
+                }
+
+                if (exactFastPath.warning) {
+                    execution.searchWarnings.push(exactFastPath.warning);
+                }
+
+                const finalized = await finalizeSearchResults({
+                    absolutePath,
+                    effectiveRoot,
+                    query: input.query,
+                    scope: input.scope,
+                    groupBy: input.groupBy,
+                    resultMode: input.resultMode,
+                    limit: input.limit,
+                    disclosureLimit: retrievalPolicy.disclosureResultLimit,
+                    includeResultIndex: input.includeResultIndex === true,
+                    rerankerResultLimit: retrievalPolicy.rerankerResultLimit,
+                    debugMode,
+                    rankingMode: input.rankingMode,
+                    freshnessDecision,
+                    freshnessSummary: {
+                        ...execution.freshnessSummary,
+                        lastSyncAt: typeof freshnessDecision.lastSyncAt === 'string' ? freshnessDecision.lastSyncAt : null,
+                    },
+                    proofDebugHint,
+                    partialIndexSearchWarnings,
+                    phaseTimings,
+                    readiness: readinessDebug,
+                    parsedOperators,
+                    queryPlan,
+                    maxAttempts,
+                    exactRegistryDebug,
+                    searchSymbolRegistry,
+                    searchSymbolRegistryManifestHash,
+                    execution,
+                    navigationAuthority,
+                    navigationStatus,
+                }, {
+                    searchQuerySupport: this.searchQuerySupport,
+                    measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
+                    loadRegistryManifest: () => this.loadPreparedNavigationManifest(
+                        preparedReadState,
+                        readinessDebug.operations,
+                    ),
+                    loadRegistryValidatedCallGraphSidecar: (finalizationInput) => this.loadRegistryValidatedCallGraphSidecar({
+                        ...finalizationInput,
+                        preparedRead: preparedReadState,
+                        operations: readinessDebug.operations,
+                    }),
+                    buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope,
+                    buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.buildChangedCodeDebug(preparedReadState, changedFilesState),
+                    buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
+                    getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
+                    parseIndexedAtMs: (indexedAt?: string) => this.parseIndexedAtMs(indexedAt),
+                    resolveSearchOwnerFromRegistry: (result, registry, plan) => this.resolveSearchOwnerFromRegistry(result, registry, plan),
+                    now: this.now,
+                });
+                let envelope = finalized.envelope;
+                const initialPageTooLarge = finalized.kind === "page_too_large";
+                let barrierChanged = false;
+                if (preparedEntrypointOwnerEvidence) {
+                    const finalizedEntrypointEvidence = await preparedEntrypointOwnerEvidence.finalize({
+                        validatePreparedAuthority: async () => {
+                            barrierChanged = await sourceBarrierChanged();
+                            if (!barrierChanged) {
+                                const manifestComparison = await this.context
+                                    .compareSourcePathsToFreshnessCheckpoint(
+                                        effectiveRoot,
+                                        ["pyproject.toml"],
+                                        generationReceipt,
+                                    );
+                                barrierChanged = manifestComparison.status !== "matches";
+                            }
+                        },
+                    });
+                    if (finalizedEntrypointEvidence.status !== "available") {
+                        barrierChanged = true;
+                    }
+                } else {
+                    barrierChanged = await sourceBarrierChanged();
+                }
+                finalBarrierChanged = barrierChanged;
                 if (barrierChanged) {
-                    releasePublicationReadLease?.();
-                    releasePublicationReadLease = undefined;
+                    await preparedEntrypointOwnerEvidence?.release();
+                    preparedEntrypointOwnerEvidence = undefined;
+                    releaseLease();
                     if (sourceDriftRetryCount === 0) {
                         return this.handleSearchCodeAttempt(args, 1);
                     }
@@ -4828,490 +5375,24 @@ export class ToolHandlers {
                         meta: { searchDiagnostics },
                     };
                 }
-                let exactEnvelope = exactFastPath.finalized.envelope;
-                if (
-                    (debugMode === 'freshness' || debugMode === 'full')
-                    && exactEnvelope.hints?.debugSearch
-                ) {
-                    exactEnvelope = {
-                        ...exactEnvelope,
-                        hints: {
-                            ...exactEnvelope.hints,
-                            debugSearch: {
-                                ...exactEnvelope.hints.debugSearch,
-                                readiness: structuredClone(readinessDebug),
-                            },
-                        },
-                    };
+                if (finalized.kind === "ok" && envelope.resultMode === "grouped") {
+                    envelope = attachSearchResultSet(
+                        envelope,
+                        finalized.resultSet,
+                        searchDiagnostics.rerankerUsed,
+                        execution.orderAuthority,
+                    );
                 }
-                if (
-                    exactFastPath.finalized.kind === "ok"
-                    && exactEnvelope.resultMode === "grouped"
-                ) {
-                    if (vectorReceipt && preparedObservation) {
-                        exactEnvelope = attachSearchResultSet(
-                            exactEnvelope,
-                            exactFastPath.finalized.resultSet,
-                            false,
-                            "retrieval_order",
-                        );
-                    } else if (exactFastPath.finalized.resultSet) {
-                        const unboundEnvelope = { ...exactEnvelope };
-                        delete unboundEnvelope.continuation;
-                        delete unboundEnvelope.rankedSetDigest;
-                        delete unboundEnvelope.resultIndex;
-                        exactEnvelope = {
-                            ...unboundEnvelope,
-                            warnings: buildSearchWarningDetails([
-                                ...(exactEnvelope.warnings?.map((warning) => warning.code) ?? []),
-                                ...(exactEnvelope.continuation
-                                    ? [WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE]
-                                    : []),
-                                ...(input.includeResultIndex === true
-                                    ? [WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE]
-                                    : []),
-                            ]),
-                        };
-                    }
-                }
+
                 await this.touchWatchedCodebaseBestEffort(effectiveRoot);
                 this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
                 return {
-                    content: [{ type: "text", text: this.stringifyToolJson(exactEnvelope) }],
-                    ...(exactFastPath.finalized.kind === "page_too_large" ? { isError: true } : {}),
-                    meta: {
-                        searchDiagnostics: {
-                            ...searchDiagnostics,
-                            resultsBeforeFilter: exactFastPath.resultsBeforeFilter,
-                            resultsAfterFilter: exactFastPath.resultsAfterFilter,
-                            searchPassCount: 0,
-                            searchPassSuccessCount: 0,
-                            searchPassFailureCount: 0,
-                        }
-                    }
-                };
-            }
-
-            if (
-                preparedObservation
-                && this.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
-            ) {
-                this.evictPreparedRead(effectiveRoot);
-                const payload = this.buildNotReadySearchPayload(effectiveRoot, {
-                    path: absolutePath,
-                    query: input.query,
-                    scope: input.scope,
-                    groupBy: input.groupBy,
-                    resultMode: input.resultMode,
-                    limit: input.limit,
-                });
-                return {
-                    content: [{ type: 'text', text: this.stringifyToolJson(payload) }],
-                    meta: { searchDiagnostics },
-                };
-            }
-
-            let entrypointOwnerEvidence: EntrypointOwnerEvidenceResolution | undefined;
-            const completeEntrypointPublicationBinding = Boolean(
-                generationReceipt
-                && typeof generationReceipt.collectionName === "string"
-                && typeof generationReceipt.marker?.runId === "string"
-                && typeof generationReceipt.policyDocumentDigest === "string"
-                && typeof generationReceipt.policy?.policyHash === "string"
-                && typeof generationReceipt.navigation?.generationId === "string"
-                && typeof generationReceipt.navigation?.symbolRegistryManifestHash === "string",
-            );
-            if (
-                entrypointOwnerSeeking
-                && completeEntrypointPublicationBinding
-                && generationReceipt
-                && navigationStatus === "valid"
-            ) {
-                if (
-                    !searchSymbolRegistry
-                    || searchSymbolRegistryManifestHash
-                        !== generationReceipt.navigation.symbolRegistryManifestHash
-                ) {
-                    const registryState = await this.loadPreparedNavigationManifest(
-                        preparedReadState,
-                        readinessDebug.operations,
-                    );
-                    if (
-                        registryState.status === "ok"
-                        && registryState.manifestHash
-                            === generationReceipt.navigation.symbolRegistryManifestHash
-                    ) {
-                        searchSymbolRegistry = registryState.registry;
-                        searchSymbolRegistryManifestHash = registryState.manifestHash;
-                    }
-                }
-                if (
-                    searchSymbolRegistry
-                    && searchSymbolRegistryManifestHash
-                        === generationReceipt.navigation.symbolRegistryManifestHash
-                ) {
-                    const preparedEvidence = await prepareEntrypointOwnerEvidence({
-                        codebaseRoot: effectiveRoot,
-                        registry: searchSymbolRegistry,
-                        publication: {
-                            collectionName: generationReceipt.collectionName,
-                            markerRunId: generationReceipt.marker.runId,
-                            policyDocumentDigest: generationReceipt.policyDocumentDigest,
-                            policyHash: generationReceipt.policy.policyHash,
-                            navigationGenerationId: generationReceipt.navigation.generationId,
-                            symbolRegistryManifestHash:
-                                generationReceipt.navigation.symbolRegistryManifestHash,
-                        },
-                    });
-                    if ("resolution" in preparedEvidence) {
-                        preparedEntrypointOwnerEvidence = preparedEvidence;
-                        const manifestComparison = await this.context
-                            .compareSourcePathsToFreshnessCheckpoint(
-                                effectiveRoot,
-                                ["pyproject.toml"],
-                                generationReceipt,
-                            );
-                        if (manifestComparison.status === "matches") {
-                            entrypointOwnerEvidence = preparedEvidence.resolution;
-                        } else {
-                            entrypointOwnerEvidence = {
-                                ...preparedEvidence.resolution,
-                                status: "publication_incompatible",
-                                owners: [],
-                                resolvedOwnerCount: 0,
-                                resolutionComplete: false,
-                            };
-                            await preparedEvidence.release();
-                            preparedEntrypointOwnerEvidence = undefined;
-                        }
-                    } else {
-                        entrypointOwnerEvidence = preparedEvidence;
-                    }
-                }
-            }
-
-            const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
-            const resolvedRerankQuery = resolveSearchRerankQuery({
-                semanticQuery: parsedOperators.semanticQuery,
-                focusedQueryV1: buildSearchRerankQuery({
-                    semanticQuery: parsedOperators.semanticQuery,
-                    answerFocus,
-                }),
-                focusedQueryV2: buildSearchRerankQueryV2({
-                    semanticQuery: parsedOperators.semanticQuery,
-                    answerFocus,
-                }),
-                projectionIdentity: this.reranker?.getQueryProjectionVersion?.(),
-            });
-            const rerankerDocumentProjectionVersion: string | undefined = this.reranker?.getDocumentProjectionVersion?.();
-            const wantsV4StructuralContext = rerankerDocumentProjectionVersion
-                === SEARCH_RERANK_DOCUMENT_V4_POLICY.id;
-            const execution = await runSearchExecution({
-                effectiveRoot,
-                scope: input.scope,
-                rankingMode: input.rankingMode,
-                resultMode: input.resultMode,
-                limit: input.limit,
-                debugMode,
-                semanticQuery,
-                answerFocus,
-                rerankQuery: resolvedRerankQuery.query,
-                rerankQueryProjectionIdentity: resolvedRerankQuery.queryProjectionIdentity,
-                parsedOperators,
-                queryPlan,
-                exactRegistryEligible: exactRegistryFallbackForTrackedLexical,
-                exactRegistryFallbackForTrackedLexical,
-                freshnessMode: freshnessDecision.mode,
-                observedChangedFilesState: initialObservedChangedFilesState,
-                retrievalPolicy,
-                entrypointOwnerEvidence,
-                requestedSubdirectory,
-            }, {
-                searchQuerySupport: this.searchQuerySupport,
-                semanticSearch: (request) => {
-                    const lifecycle = this.contextLifecycle();
-                    if (
-                        vectorReceipt
-                        && debugMode === 'full'
-                        && lifecycle.semanticSearchWithCandidateTraceInProvenGeneration
-                    ) {
-                        return lifecycle.semanticSearchWithCandidateTraceInProvenGeneration(
-                            vectorReceipt,
-                            request,
-                            SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
-                            retrievalPolicy.diagnosticCandidateLimit !== undefined
-                                ? {
-                                    captureLexicalFallback: true,
-                                    diagnosticCandidateLimit: retrievalPolicy.diagnosticCandidateLimit,
-                                    ...(request.diagnosticLexicalFallbackTerms
-                                        ? { lexicalFallbackTerms: request.diagnosticLexicalFallbackTerms }
-                                        : {}),
-                                }
-                                : {},
-                        );
-                    }
-                    return vectorReceipt
-                        ? lifecycle.semanticSearchInProvenGeneration!(vectorReceipt, request)
-                        : this.context.semanticSearch(request);
-                },
-                reranker: this.reranker,
-                ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
-                    || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
-                    || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
-                    ? {
-                        buildRerankDocument: async (
-                            rerankQuery: string,
-                            result: SearchResultLike,
-                        ): Promise<SearchRerankProjectionResult> => {
-                            const candidateId = searchRerankCandidateId(result);
-                            if (!generationReceipt) {
-                                return {
-                                    ok: false,
-                                    candidateId,
-                                    reason: "generation_receipt_missing",
-                                };
-                            }
-                            if (navigationStatus !== "valid") {
-                                return {
-                                    ok: false,
-                                    candidateId,
-                                    reason: "navigation_status_invalid",
-                                };
-                            }
-                            if (
-                                !searchSymbolRegistry
-                                || searchSymbolRegistryManifestHash
-                                    !== generationReceipt.navigation.symbolRegistryManifestHash
-                            ) {
-                                const registryState = await this.loadPreparedNavigationManifest(
-                                    preparedReadState,
-                                    readinessDebug.operations,
-                                );
-                                if (registryState.status !== "ok") {
-                                    return {
-                                        ok: false,
-                                        candidateId,
-                                        reason: "registry_load_failed",
-                                    };
-                                }
-                                if (
-                                    registryState.manifestHash
-                                        !== generationReceipt.navigation.symbolRegistryManifestHash
-                                ) {
-                                    return {
-                                        ok: false,
-                                        candidateId,
-                                        reason: "registry_manifest_mismatch",
-                                    };
-                                }
-                                searchSymbolRegistry = registryState.registry;
-                                searchSymbolRegistryManifestHash = registryState.manifestHash;
-                            }
-                            const structuralContext = wantsV4StructuralContext
-                                ? await (structuralContextLoad ??= (async () => {
-                                    const compatibility = await this.loadPreparedNavigationCompatibility(
-                                        preparedReadState,
-                                        searchSymbolRegistryManifestHash
-                                            ?? generationReceipt.navigation.symbolRegistryManifestHash,
-                                        readinessDebug.operations,
-                                    );
-                                    const status = resolveSearchRerankStructuralContextStatus({
-                                        relationshipStatus: compatibility.relationships.status,
-                                        ...(compatibility.relationships.status === "ok"
-                                            ? { relationshipManifestHash: compatibility.relationships.manifestHash }
-                                            : {}),
-                                        expectedRelationshipManifestHash:
-                                            generationReceipt.navigation.relationshipManifestHash,
-                                    });
-                                    if (status !== "available" || compatibility.relationships.status !== "ok") {
-                                        return { status };
-                                    }
-                                    preparedSearchRerankStructuralRelationships
-                                        = prepareSearchRerankStructuralRelationships(
-                                            compatibility.relationships.records,
-                                        );
-                                    return {
-                                        status,
-                                        preparedRelationships: preparedSearchRerankStructuralRelationships,
-                                    };
-                                })())
-                                : undefined;
-                            return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
-                                ? projectPublicationBoundSearchRerankDocumentV4
-                                : rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
-                                    ? projectPublicationBoundSearchRerankDocumentV3
-                                    : projectPublicationBoundSearchRerankDocumentV2)({
-                                candidateId,
-                                codebaseRoot: effectiveRoot,
-                                semanticQuery: rerankQuery,
-                                maxSourceBytes: this.readFileMaxBytes,
-                                result,
-                                registry: searchSymbolRegistry,
-                                ...(structuralContext?.preparedRelationships
-                                    ? { preparedStructuralRelationships: structuralContext.preparedRelationships }
-                                    : {}),
-                                ...(structuralContext
-                                    ? { structuralContextStatus: structuralContext.status }
-                                    : {}),
-                            });
-                        },
-                    }
-                    : {}),
-                shouldForceSearchPassFailure: (passId) => this.shouldForceSearchPassFailure(passId),
-                classifyEmbeddingProviderError,
-                classifyVectorBackendError,
-                measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
-            }, searchDiagnostics);
-
-            if (execution.kind === 'vector_backend_unavailable') {
-                const payload = this.buildVectorBackendSearchPayload(execution.diagnostic, {
-                    path: absolutePath,
-                    query: input.query,
-                    scope: input.scope,
-                    groupBy: input.groupBy,
-                    resultMode: input.resultMode,
-                    limit: input.limit
-                });
-                return {
-                    content: [{ type: "text", text: this.stringifyToolJson(payload) }],
-                    meta: {
-                        searchDiagnostics: {
-                            ...searchDiagnostics,
-                            error: execution.diagnostic.code
-                        }
-                    }
-                };
-            }
-
-            if (execution.kind === 'embedding_provider_unavailable') {
-                const payload = this.buildEmbeddingProviderSearchPayload(execution.diagnostic, {
-                    path: absolutePath,
-                    query: input.query,
-                    scope: input.scope,
-                    groupBy: input.groupBy,
-                    resultMode: input.resultMode,
-                    limit: input.limit,
-                });
-                return {
-                    content: [{ type: "text", text: this.stringifyToolJson(payload) }],
-                    isError: !execution.diagnostic.retryable,
-                    meta: {
-                        searchDiagnostics: {
-                            ...searchDiagnostics,
-                            error: execution.diagnostic.code,
-                        },
-                    },
-                };
-            }
-
-            if (execution.kind === 'all_semantic_passes_failed') {
-                const payload = this.buildInvalidSearchRequestPayload({
-                    path: absolutePath,
-                    query: input.query,
-                    scope: input.scope,
-                    groupBy: input.groupBy,
-                    resultMode: input.resultMode,
-                    limit: input.limit
-                }, "Search backend failed: all semantic search passes failed. Retry and verify embedding/vector backends are reachable.", "not_ready", "search_backend_failed");
-                if (debugMode === 'full') {
-                    payload.hints = {
-                        ...(payload.hints || {}),
-                        debugSearch: {
-                            semanticPassFailures: execution.semanticPassFailures.map((failure) => ({ ...failure })),
-                        },
-                    };
-                }
-                return {
-                    content: [{ type: "text", text: this.stringifyToolJson(payload) }],
-                    isError: true,
+                    content: [{ type: "text", text: this.stringifyToolJson(envelope) }],
+                    ...(initialPageTooLarge ? { isError: true } : {}),
                     meta: { searchDiagnostics }
                 };
-            }
-
-            if (exactFastPath.warning) {
-                execution.searchWarnings.push(exactFastPath.warning);
-            }
-
-            const finalized = await finalizeSearchResults({
-                absolutePath,
-                effectiveRoot,
-                query: input.query,
-                scope: input.scope,
-                groupBy: input.groupBy,
-                resultMode: input.resultMode,
-                limit: input.limit,
-                disclosureLimit: retrievalPolicy.disclosureResultLimit,
-                includeResultIndex: input.includeResultIndex === true,
-                rerankerResultLimit: retrievalPolicy.rerankerResultLimit,
-                debugMode,
-                rankingMode: input.rankingMode,
-                freshnessDecision,
-                freshnessSummary: {
-                    ...execution.freshnessSummary,
-                    lastSyncAt: typeof freshnessDecision.lastSyncAt === 'string' ? freshnessDecision.lastSyncAt : null,
-                },
-                proofDebugHint,
-                partialIndexSearchWarnings,
-                phaseTimings,
-                readiness: readinessDebug,
-                parsedOperators,
-                queryPlan,
-                maxAttempts,
-                exactRegistryDebug,
-                searchSymbolRegistry,
-                searchSymbolRegistryManifestHash,
-                execution,
-                navigationAuthority,
-                navigationStatus,
-            }, {
-                searchQuerySupport: this.searchQuerySupport,
-                measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
-                loadRegistryManifest: () => this.loadPreparedNavigationManifest(
-                    preparedReadState,
-                    readinessDebug.operations,
-                ),
-                loadRegistryValidatedCallGraphSidecar: (finalizationInput) => this.loadRegistryValidatedCallGraphSidecar({
-                    ...finalizationInput,
-                    preparedRead: preparedReadState,
-                    operations: readinessDebug.operations,
-                }),
-                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope,
-                buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.buildChangedCodeDebug(preparedReadState, changedFilesState),
-                buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
-                getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
-                parseIndexedAtMs: (indexedAt?: string) => this.parseIndexedAtMs(indexedAt),
-                resolveSearchOwnerFromRegistry: (result, registry, plan) => this.resolveSearchOwnerFromRegistry(result, registry, plan),
-                now: this.now,
             });
-            let envelope = finalized.envelope;
-            const initialPageTooLarge = finalized.kind === "page_too_large";
-            let barrierChanged = false;
-            if (preparedEntrypointOwnerEvidence) {
-                const finalizedEntrypointEvidence = await preparedEntrypointOwnerEvidence.finalize({
-                    validatePreparedAuthority: async () => {
-                        barrierChanged = await sourceBarrierChanged();
-                        if (!barrierChanged) {
-                            const manifestComparison = await this.context
-                                .compareSourcePathsToFreshnessCheckpoint(
-                                    effectiveRoot,
-                                    ["pyproject.toml"],
-                                    generationReceipt,
-                                );
-                            barrierChanged = manifestComparison.status !== "matches";
-                        }
-                    },
-                });
-                if (finalizedEntrypointEvidence.status !== "available") {
-                    barrierChanged = true;
-                }
-            } else {
-                barrierChanged = await sourceBarrierChanged();
-            }
-            if (barrierChanged) {
-                await preparedEntrypointOwnerEvidence?.release();
-                preparedEntrypointOwnerEvidence = undefined;
-                releasePublicationReadLease?.();
-                releasePublicationReadLease = undefined;
+            if (outcome.status === 'stale') {
                 if (sourceDriftRetryCount === 0) {
                     return this.handleSearchCodeAttempt(args, 1);
                 }
@@ -5338,22 +5419,7 @@ export class ToolHandlers {
                     meta: { searchDiagnostics },
                 };
             }
-            if (finalized.kind === "ok" && envelope.resultMode === "grouped") {
-                envelope = attachSearchResultSet(
-                    envelope,
-                    finalized.resultSet,
-                    searchDiagnostics.rerankerUsed,
-                    execution.orderAuthority,
-                );
-            }
-
-            await this.touchWatchedCodebaseBestEffort(effectiveRoot);
-            this.seedPreparedRead(preparedReadState, preservePreparedProofAge);
-            return {
-                content: [{ type: "text", text: this.stringifyToolJson(envelope) }],
-                ...(initialPageTooLarge ? { isError: true } : {}),
-                meta: { searchDiagnostics }
-            };
+            return outcome.result;
         } catch (error) {
             const vectorBackendDiagnostic = classifyVectorBackendError(error);
             if (vectorBackendDiagnostic) {
@@ -5418,7 +5484,6 @@ export class ToolHandlers {
             };
         } finally {
             await preparedEntrypointOwnerEvidence?.release();
-            releasePublicationReadLease?.();
         }
     }
 

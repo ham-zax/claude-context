@@ -28,6 +28,7 @@ import {
     findExactRegistrySymbols,
 } from "./registry-file-outline.js";
 import { prepareRelationshipTraversals } from "./prepared-relationship-traversal.js";
+import { PreparedPublicationReadSession } from "./prepared-publication-read-session.js";
 import type {
     CompletionProbeDebugHint,
     TrackedRootReadiness,
@@ -497,7 +498,9 @@ export class NavigationHandlers {
             ? args.detail
             : "summary";
 
-        let releasePublicationReadLease: (() => void) | undefined;
+        let effectiveRoot = "";
+        let preparedNavigationReadWasCurrent = false;
+        let navigationSourceBarrier: NavigationSourceBarrier | undefined;
         try {
             const absoluteRootResult = requireAbsoluteFilesystemPath(args.path, "path");
             if (!absoluteRootResult.ok) {
@@ -579,7 +582,26 @@ export class NavigationHandlers {
 
             trackCodebasePath(absoluteRoot);
 
-            const trackedRootState = await this.host.prepareNavigationRead(absoluteRoot);
+            const session = new PreparedPublicationReadSession<TrackedRootReadinessState>({
+                prepareReadiness: () => this.host.prepareNavigationRead(absoluteRoot),
+                acquirePublicationReadLease: (prepared) => (
+                    prepared.state === 'ready'
+                        ? this.host.acquirePublicationReadLease(prepared.root.path)
+                        : Promise.resolve(undefined)
+                ),
+                revalidateAuthority: (prepared) => (
+                    prepared.state !== 'ready'
+                    || (navigationSourceBarrier !== undefined
+                        && preparedNavigationBarrierMatches(
+                            preparedNavigationReadWasCurrent,
+                            this.host.isPreparedNavigationReadCurrent(prepared),
+                        ) && navigationSourceBarrierMatches(
+                            navigationSourceBarrier,
+                            this.host.getWatcherObservation(prepared.root.path),
+                        ))
+                ),
+            });
+            const outcome = await session.read(async (trackedRootState): Promise<ToolTextResponse> => {
             if (trackedRootState.state === "requires_reindex") {
                 const payload = this.host.buildRequiresReindexFileOutlinePayload(trackedRootState.codebasePath, {
                     ...args,
@@ -639,10 +661,9 @@ export class NavigationHandlers {
             }
 
             const matchedRoot = trackedRootState.root;
-            const effectiveRoot = matchedRoot.path;
-            releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
-            const navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-            const preparedNavigationReadWasCurrent =
+            effectiveRoot = matchedRoot.path;
+            navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+            preparedNavigationReadWasCurrent =
                 this.host.isPreparedNavigationReadCurrent(trackedRootState);
             if (sourceObservationUnavailable(this.host, effectiveRoot)) {
                 await this.host.touchWatchedCodebase(effectiveRoot);
@@ -800,6 +821,14 @@ export class NavigationHandlers {
             return {
                 content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
             };
+            });
+            return outcome.status === 'stale'
+                ? {
+                    content: [{ type: "text" as const, text: this.host.stringifyToolJson(
+                        buildSourceStateUnverifiedFileOutlinePayload(this.host, effectiveRoot, normalizedFile),
+                    ) }],
+                }
+                : outcome.result;
         } catch (error: unknown) {
             const pathResult = typeof args?.path === "string"
                 ? requireAbsoluteFilesystemPath(args.path)
@@ -815,8 +844,6 @@ export class NavigationHandlers {
                 content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
                 isError: true,
             };
-        } finally {
-            releasePublicationReadLease?.();
         }
     }
 
@@ -892,7 +919,9 @@ export class NavigationHandlers {
             };
         }
 
-        let releasePublicationReadLease: (() => void) | undefined;
+        let effectiveRoot = "";
+        let preparedNavigationReadWasCurrent = false;
+        let navigationSourceBarrier: NavigationSourceBarrier | undefined;
         try {
             const absolutePath = absolutePathResult.absolutePath;
             if (!fs.existsSync(absolutePath)) {
@@ -936,7 +965,26 @@ export class NavigationHandlers {
 
             trackCodebasePath(absolutePath);
 
-            const trackedRootState = await this.host.prepareNavigationRead(absolutePath);
+            const session = new PreparedPublicationReadSession<TrackedRootReadinessState>({
+                prepareReadiness: () => this.host.prepareNavigationRead(absolutePath),
+                acquirePublicationReadLease: (prepared) => (
+                    prepared.state === 'ready'
+                        ? this.host.acquirePublicationReadLease(prepared.root.path)
+                        : Promise.resolve(undefined)
+                ),
+                revalidateAuthority: (prepared) => (
+                    prepared.state !== 'ready'
+                    || (navigationSourceBarrier !== undefined
+                        && preparedNavigationBarrierMatches(
+                            preparedNavigationReadWasCurrent,
+                            this.host.isPreparedNavigationReadCurrent(prepared),
+                        ) && navigationSourceBarrierMatches(
+                            navigationSourceBarrier,
+                            this.host.getWatcherObservation(prepared.root.path),
+                        ))
+                ),
+            });
+            const outcome = await session.read(async (trackedRootState): Promise<ToolTextResponse> => {
             if (trackedRootState.state === "requires_reindex") {
                 const payload = this.host.buildRequiresReindexCallGraphPayload(
                     trackedRootState.codebasePath,
@@ -1030,10 +1078,9 @@ export class NavigationHandlers {
             }
 
             const searchableRoot = trackedRootState.root;
-            const effectiveRoot = searchableRoot.path;
-            releasePublicationReadLease = await this.host.acquirePublicationReadLease(effectiveRoot);
-            const navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-            const preparedNavigationReadWasCurrent =
+            effectiveRoot = searchableRoot.path;
+            navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
+            preparedNavigationReadWasCurrent =
                 this.host.isPreparedNavigationReadCurrent(trackedRootState);
             const proofDebugHint = trackedRootState.proofDebugHint;
 
@@ -1337,28 +1384,21 @@ export class NavigationHandlers {
                 ...(navigationAuthority ? { navigationAuthority } : {}),
                 ...relationshipBackedGraph,
             } satisfies CallGraphResponseEnvelope, proofDebugHint);
-            const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-            const guidedPayload = !preparedNavigationBarrierMatches(
-                preparedNavigationReadWasCurrent,
-                this.host.isPreparedNavigationReadCurrent(trackedRootState),
-            ) || !navigationSourceBarrierMatches(
-                    navigationSourceBarrier,
-                    finalNavigationSourceBarrier,
-                )
-                ? buildSourceStateUnverifiedCallGraphPayload(
-                    this.host,
-                    effectiveRoot,
-                    {
-                        symbolRef,
-                        direction,
-                        depth,
-                        limit,
-                    },
-                )
-                : payload;
             return {
-                content: [{ type: "text", text: this.host.stringifyToolJson(guidedPayload) }],
+                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
             };
+            });
+            return outcome.status === 'stale'
+                ? {
+                    content: [{ type: "text" as const, text: this.host.stringifyToolJson(
+                        buildSourceStateUnverifiedCallGraphPayload(
+                            this.host,
+                            effectiveRoot,
+                            { symbolRef, direction, depth, limit },
+                        ),
+                    ) }],
+                }
+                : outcome.result;
         } catch (error: unknown) {
             const pathResult = typeof args?.path === "string"
                 ? requireAbsoluteFilesystemPath(args.path)
@@ -1378,8 +1418,6 @@ export class NavigationHandlers {
                 content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
                 isError: true,
             };
-        } finally {
-            releasePublicationReadLease?.();
         }
     }
 
