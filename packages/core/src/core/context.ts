@@ -92,6 +92,7 @@ import {
     type SourceFreshnessCheckpointEvidence,
     type SourceFreshnessPathComparison,
 } from '../sync/synchronizer';
+import { SynchronizerRegistry } from '../sync/synchronizer-registry';
 import type {
     RepairIndexResult,
     RepairProof,
@@ -624,8 +625,16 @@ export class Context {
     private readonly indexPolicyMutationCoordinator: IndexPolicyMutationCoordinator;
     private readonly indexPolicyDocumentStore: IndexPolicyDocumentStore;
     private readonly restoreTransactionMechanics: DurableAuthorityRestoreTransactionMechanics;
-    private synchronizers = new Map<string, FileSynchronizer>();
-    private synchronizerMutationTargets = new Map<string, string>();
+    private readonly synchronizerRegistry = new SynchronizerRegistry({
+        canonicalizeCodebasePath: (codebasePath) => this.canonicalizeCodebasePath(codebasePath),
+        getActiveIgnorePatterns: (codebasePath) => this.getActiveIgnorePatterns(codebasePath),
+        getIndexedExtensionsForCodebase: (codebasePath) => this.getIndexedExtensionsForCodebase(codebasePath),
+        getIsHybrid: () => this.getIsHybrid(),
+        indexCompletionMarkersEqual: (left, right) => this.indexCompletionMarkersEqual(left, right),
+        loadIndexProfileForCodebase: (codebasePath) => this.loadIndexProfileForCodebase(codebasePath),
+        proveIndexedGeneration: (codebasePath) => this.proveIndexedGeneration(codebasePath),
+        resolveCollectionName: (codebasePath) => this.resolveCollectionName(codebasePath),
+    });
     private reindexByChangeQueues = new Map<string, Promise<void>>();
     private get publicationRetentionQueues(): PublicationRetentionQueue {
         return this.indexAuthorityCoordinator.publicationRetentionQueues;
@@ -936,8 +945,8 @@ export class Context {
             subtractVectorWriteMetrics: (after, before) => subtractVectorWriteMetrics(after, before),
             summarizeVectorWriteMetrics: (metrics, logicalRows) => summarizeVectorWriteMetrics(metrics, logicalRows),
             symbolRegistryStateRoot: this.symbolRegistryStateRoot,
-            synchronizerMutationTargets: this.synchronizerMutationTargets,
-            synchronizers: this.synchronizers,
+            synchronizerMutationTargets: this.synchronizerRegistry.mutationTargetMap,
+            synchronizers: this.synchronizerRegistry.synchronizerMap,
             vectorDatabase: this.vectorDatabase,
             verifyCollectionPayloadMatchesCurrentSource: (collectionName, codeFiles, expectedChunks) => (
                 this.verifyCollectionPayloadMatchesCurrentSource(collectionName, codeFiles, expectedChunks)
@@ -1083,15 +1092,22 @@ export class Context {
      * Get synchronizers map
      */
     getActiveSynchronizers(): Map<string, FileSynchronizer> {
-        return new Map(this.synchronizers);
+        return this.synchronizerRegistry.getActiveSynchronizers();
     }
 
+
+
     /**
+     * Test-visible compatibility accessor for the synchronizer mutation-target
+     * map (Phase 4.6 registry extraction keeps the map inside SynchronizerRegistry).
+     */
+    get synchronizerMutationTargets(): Map<string, string> {
+        return this.synchronizerRegistry.mutationTargetMap;
+    }    /**
      * Set synchronizer for a collection
      */
     registerSynchronizer(collectionName: string, synchronizer: FileSynchronizer): void {
-        this.synchronizers.set(collectionName, synchronizer);
-        this.synchronizerMutationTargets.delete(collectionName);
+        this.synchronizerRegistry.registerSynchronizer(collectionName, synchronizer);
     }
 
     /**
@@ -1120,44 +1136,12 @@ export class Context {
         publishMutation?: (publish: () => void) => void,
         options: { requireAuthorityCheckpoint?: boolean } = {},
     ): Promise<void> {
-        this.loadIndexProfileForCodebase(codebasePath);
-        const collectionName = this.resolveCollectionName(codebasePath);
-        const authorityBefore = options.requireAuthorityCheckpoint
-            ? await this.proveIndexedGeneration(codebasePath)
-            : null;
-        if (options.requireAuthorityCheckpoint && !authorityBefore) {
-            throw new Error(`Cannot recreate source freshness state for '${codebasePath}': no authoritative indexed generation is available.`);
-        }
-        const synchronizer = new FileSynchronizer(
+        return this.synchronizerRegistry.recreateSynchronizerForCodebase(
             codebasePath,
-            this.getActiveIgnorePatterns(codebasePath),
-            this.getIndexedExtensionsForCodebase(codebasePath),
-            authorityBefore ? {
-                checkpointIdentity: authorityBefore.collectionName,
-                checkpointAuthority: {
-                    collectionName: authorityBefore.collectionName,
-                    markerRunId: authorityBefore.marker.runId,
-                    indexPolicyHash: authorityBefore.marker.indexPolicyHash,
-                },
-            } : {},
+            assertMutationCurrent,
+            publishMutation,
+            options,
         );
-        await synchronizer.initialize(assertMutationCurrent, publishMutation, {
-            requireExistingCheckpoint: authorityBefore !== null,
-        });
-        if (authorityBefore) {
-            assertMutationCurrent?.();
-            const authorityAfter = await this.proveIndexedGeneration(codebasePath);
-            if (
-                !authorityAfter
-                || authorityAfter.collectionName !== authorityBefore.collectionName
-                || authorityAfter.policyDocumentDigest !== authorityBefore.policyDocumentDigest
-                || !this.indexCompletionMarkersEqual(authorityAfter.marker, authorityBefore.marker)
-            ) {
-                throw new Error(`Cannot register source freshness state for '${codebasePath}': indexed authority changed while its checkpoint was loading.`);
-            }
-        }
-        this.synchronizers.set(collectionName, synchronizer);
-        this.synchronizerMutationTargets.delete(collectionName);
     }
 
     /**
@@ -1166,7 +1150,7 @@ export class Context {
      */
     getTrackedRelativePaths(codebasePath: string): string[] {
         const collectionName = this.resolveCollectionName(codebasePath);
-        const synchronizer = this.synchronizers.get(collectionName);
+        const synchronizer = this.synchronizerRegistry.synchronizerMap.get(collectionName);
         if (!synchronizer) {
             return [];
         }
@@ -1174,7 +1158,7 @@ export class Context {
     }
 
     hasSynchronizerForCodebase(codebasePath: string): boolean {
-        return this.synchronizers.has(this.resolveCollectionName(codebasePath));
+        return this.synchronizerRegistry.hasSynchronizerForCodebase(codebasePath);
     }
 
     async inspectSourceFreshnessCheckpoint(
@@ -1347,8 +1331,7 @@ export class Context {
     }
 
     getRegisteredSourceFreshnessCheckpointObservation(codebasePath: string): string | null {
-        const synchronizer = this.synchronizers.get(this.resolveCollectionName(codebasePath));
-        return synchronizer?.getOwnedSnapshotObservationToken() ?? null;
+        return this.synchronizerRegistry.getRegisteredSourceFreshnessCheckpointObservation(codebasePath);
     }
 
     private async resolveCheckpointComparisonSynchronizer(
@@ -1356,46 +1339,11 @@ export class Context {
         receipt: ProvenGenerationReceipt,
         observationToken: string,
     ): Promise<FileSynchronizer | null> {
-        const checkpointAuthority = {
-            collectionName: receipt.collectionName,
-            markerRunId: receipt.marker.runId,
-            indexPolicyHash: receipt.marker.indexPolicyHash,
-        };
-        const registered = this.synchronizers.get(this.resolveCollectionName(canonicalRoot));
-        if (
-            registered
-            && registered.ownsCheckpointIdentity(receipt.collectionName)
-            && registered.ownsCheckpointAuthority(checkpointAuthority)
-            && registered.getOwnedSnapshotObservationToken() === observationToken
-        ) {
-            return registered;
-        }
-
-        const inspector = new FileSynchronizer(
+        return this.synchronizerRegistry.resolveCheckpointComparisonSynchronizer(
             canonicalRoot,
-            [],
-            [],
-            {
-                checkpointIdentity: receipt.collectionName,
-                checkpointAuthority,
-            },
+            receipt,
+            observationToken,
         );
-        try {
-            await inspector.initialize(
-                undefined,
-                undefined,
-                { requireExistingCheckpoint: true },
-            );
-        } catch {
-            return null;
-        }
-        if (inspector.getOwnedSnapshotObservationToken() !== observationToken) {
-            return null;
-        }
-        const collectionName = this.resolveCollectionName(canonicalRoot);
-        this.synchronizers.set(collectionName, inspector);
-        this.synchronizerMutationTargets.delete(collectionName);
-        return inspector;
     }
 
     /**
@@ -3285,8 +3233,7 @@ export class Context {
             options.assertMutationCurrent?.();
             await FileSynchronizer.deleteSnapshot(codebasePath);
             const familyCollectionName = this.resolveCollectionName(codebasePath);
-            this.synchronizers.delete(familyCollectionName);
-            this.synchronizerMutationTargets.delete(familyCollectionName);
+            this.synchronizerRegistry.clearSynchronizerForCollection(familyCollectionName);
             this.ignoreRuleService.deleteCodebaseState(codebasePath);
             this.writeCollectionOverrides.delete(canonicalRoot);
             this.indexPolicyRuntimeService.deleteIndexProfile(canonicalRoot);
