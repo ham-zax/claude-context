@@ -130,4 +130,128 @@ export class IndexAuthorityCoordinator {
     deletePreparedGenerationReceipt(receipt: ProvenGenerationReceipt): boolean {
         return this.state.preparedReceipts.delete(receipt);
     }
+
+    readonly publicationRetentionQueues: PublicationRetentionQueue = new Map();
+
+    private readonly publicationReadGates = new Map<string, PublicationReadGate>();
+
+    hasPublicationRetention(canonicalRoot: string): boolean {
+        return this.publicationRetentionQueues.has(canonicalRoot);
+    }
+
+    async waitForPublicationRetention(canonicalRoot: string): Promise<void> {
+        await this.publicationRetentionQueues.get(canonicalRoot);
+    }
+
+    hasActivePublicationReaders(canonicalRoot: string): boolean {
+        return (this.publicationReadGates.get(canonicalRoot)?.activeReaders ?? 0) > 0;
+    }
+
+    private getPublicationReadGate(canonicalRoot: string): PublicationReadGate {
+        let gate = this.publicationReadGates.get(canonicalRoot);
+        if (!gate) {
+            gate = {
+                activeReaders: 0,
+                activePublicationIds: new Set(),
+                retentionPending: false,
+                retentionCleaning: false,
+            };
+            this.publicationReadGates.set(canonicalRoot, gate);
+        }
+        return gate;
+    }
+
+    async acquirePublicationReadLease(canonicalRoot: string): Promise<() => void> {
+        const gate = this.getPublicationReadGate(canonicalRoot);
+        while (gate.retentionPending) {
+            await gate.retentionFinished;
+        }
+        gate.activeReaders += 1;
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            gate!.activeReaders -= 1;
+            if (gate!.activeReaders === 0) {
+                gate!.resolveReadersDrained?.();
+                gate!.readersDrained = undefined;
+                gate!.resolveReadersDrained = undefined;
+            }
+        };
+    }
+
+    async acquireStagedPublicationLease(
+        canonicalRoot: string,
+        activationId: string,
+    ): Promise<() => void> {
+        const gate = this.getPublicationReadGate(canonicalRoot);
+        while (gate.retentionCleaning) {
+            await gate.retentionFinished;
+        }
+        gate.activePublicationIds.add(activationId);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            gate.activePublicationIds.delete(activationId);
+        };
+    }
+
+    async acquirePublicationRetentionLease(
+        canonicalRoot: string,
+        activationId: string,
+    ): Promise<(() => void) | null> {
+        const gate = this.getPublicationReadGate(canonicalRoot);
+        if (gate.retentionPending) {
+            throw new Error(`Publication retention is already active for '${canonicalRoot}'.`);
+        }
+        gate.retentionPending = true;
+        gate.retentionFinished = new Promise<void>((resolve) => {
+            gate!.resolveRetentionFinished = resolve;
+        });
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            gate.retentionCleaning = false;
+            gate.retentionPending = false;
+            gate.resolveRetentionFinished?.();
+            gate.retentionFinished = undefined;
+            gate.resolveRetentionFinished = undefined;
+        };
+        if (gate.activeReaders > 0) {
+            gate.readersDrained = new Promise<void>((resolve) => {
+                gate!.resolveReadersDrained = resolve;
+            });
+            await gate.readersDrained;
+        }
+        if ([...gate.activePublicationIds].some((id) => id !== activationId)) {
+            release();
+            return null;
+        }
+        gate.retentionCleaning = true;
+        return release;
+    }
 }
+
+/**
+ * Phase 4.3 — publication/read/retention gate state machine.
+ *
+ * The read gate serializes the Q/R publication invariant (6a5ee87): retention is
+ * the only owner allowed to remove inactive physical generations, a
+ * publication-bound reader holds a lease for its complete operation, and a
+ * second activation cannot prune the collection or navigation generation a
+ * reader uses. The retention queue serializes deferred generation cleanup.
+ */
+export type PublicationReadGate = {
+    activeReaders: number;
+    activePublicationIds: Set<string>;
+    retentionPending: boolean;
+    retentionCleaning: boolean;
+    readersDrained?: Promise<void>;
+    resolveReadersDrained?: () => void;
+    retentionFinished?: Promise<void>;
+    resolveRetentionFinished?: () => void;
+};
+
+export type PublicationRetentionQueue = Map<string, Promise<void>>;

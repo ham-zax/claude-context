@@ -143,6 +143,7 @@ import {
     createGenerationProofCoordinator,
     type CachedGenerationProof,
     type GenerationProofCoordinator,
+    type PublicationRetentionQueue,
 } from '../generation/index-authority-coordinator';
 
 export {
@@ -601,16 +602,6 @@ type CollectionPayloadVerification =
     | { ok: true; indexedFiles: number; totalChunks: number }
     | { ok: false; message: string };
 
-type PublicationReadGate = {
-    activeReaders: number;
-    activePublicationIds: Set<string>;
-    retentionPending: boolean;
-    retentionCleaning: boolean;
-    readersDrained?: Promise<void>;
-    resolveReadersDrained?: () => void;
-    retentionFinished?: Promise<void>;
-    resolveRetentionFinished?: () => void;
-};
 
 
 type VectorGenerationProofResult = {
@@ -654,8 +645,9 @@ export class Context {
     private synchronizers = new Map<string, FileSynchronizer>();
     private synchronizerMutationTargets = new Map<string, string>();
     private reindexByChangeQueues = new Map<string, Promise<void>>();
-    private publicationRetentionQueues = new Map<string, Promise<void>>();
-    private publicationReadGates = new Map<string, PublicationReadGate>();
+    private get publicationRetentionQueues(): PublicationRetentionQueue {
+        return this.indexAuthorityCoordinator.publicationRetentionQueues;
+    }
     private readonly indexAuthorityCoordinator: IndexAuthorityCoordinator;
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
@@ -3268,21 +3260,7 @@ export class Context {
     }
 
     private async waitForPublicationRetention(canonicalRoot: string): Promise<void> {
-        await this.publicationRetentionQueues.get(canonicalRoot);
-    }
-
-    private getPublicationReadGate(canonicalRoot: string): PublicationReadGate {
-        let gate = this.publicationReadGates.get(canonicalRoot);
-        if (!gate) {
-            gate = {
-                activeReaders: 0,
-                activePublicationIds: new Set(),
-                retentionPending: false,
-                retentionCleaning: false,
-            };
-            this.publicationReadGates.set(canonicalRoot, gate);
-        }
-        return gate;
+        await this.indexAuthorityCoordinator.waitForPublicationRetention(canonicalRoot);
     }
 
     /**
@@ -3292,75 +3270,7 @@ export class Context {
      */
     public async acquirePublicationReadLease(codebasePath: string): Promise<() => void> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const gate = this.getPublicationReadGate(canonicalRoot);
-        while (gate.retentionPending) {
-            await gate.retentionFinished;
-        }
-        gate.activeReaders += 1;
-        let released = false;
-        return () => {
-            if (released) return;
-            released = true;
-            gate!.activeReaders -= 1;
-            if (gate!.activeReaders === 0) {
-                gate!.resolveReadersDrained?.();
-                gate!.readersDrained = undefined;
-                gate!.resolveReadersDrained = undefined;
-            }
-        };
-    }
-
-    private async acquireStagedPublicationLease(
-        canonicalRoot: string,
-        activationId: string,
-    ): Promise<() => void> {
-        const gate = this.getPublicationReadGate(canonicalRoot);
-        while (gate.retentionCleaning) {
-            await gate.retentionFinished;
-        }
-        gate.activePublicationIds.add(activationId);
-        let released = false;
-        return () => {
-            if (released) return;
-            released = true;
-            gate.activePublicationIds.delete(activationId);
-        };
-    }
-
-    private async acquirePublicationRetentionLease(
-        canonicalRoot: string,
-        activationId: string,
-    ): Promise<(() => void) | null> {
-        const gate = this.getPublicationReadGate(canonicalRoot);
-        if (gate.retentionPending) {
-            throw new Error(`Publication retention is already active for '${canonicalRoot}'.`);
-        }
-        gate.retentionPending = true;
-        gate.retentionFinished = new Promise<void>((resolve) => {
-            gate!.resolveRetentionFinished = resolve;
-        });
-        let released = false;
-        const release = () => {
-            if (released) return;
-            released = true;
-            gate.retentionCleaning = false;
-            gate.retentionPending = false;
-            gate.resolveRetentionFinished?.();
-            gate.retentionFinished = undefined;
-            gate.resolveRetentionFinished = undefined;
-        };
-        if (gate.activeReaders > 0) {
-            gate.readersDrained = new Promise<void>((resolve) => {
-                gate!.resolveReadersDrained = resolve;
-            });
-            await gate.readersDrained;
-        }
-        if ([...gate.activePublicationIds].some((id) => id !== activationId)) {
-            release();
-            return null;
-        }
-        gate.retentionCleaning = true;
-        return release;
+        return this.indexAuthorityCoordinator.acquirePublicationReadLease(canonicalRoot);
     }
 
     private async rebindGenerationProofAfterRetention(input: {
@@ -3439,7 +3349,7 @@ export class Context {
         const retention = previous
             .catch(() => undefined)
             .then(async () => {
-                const releaseRetention = await this.acquirePublicationRetentionLease(
+                const releaseRetention = await this.indexAuthorityCoordinator.acquirePublicationRetentionLease(
                     input.canonicalRoot,
                     input.activationId,
                 );
@@ -3632,7 +3542,7 @@ export class Context {
         let navigationCandidate: StagedNavigationSidecarGeneration | undefined;
         let checkpointStaged = false;
         let activated = false;
-        const releaseStagedPublication = await this.acquireStagedPublicationLease(
+        const releaseStagedPublication = await this.indexAuthorityCoordinator.acquireStagedPublicationLease(
             input.canonicalRoot,
             activationId,
         );
@@ -3894,7 +3804,7 @@ export class Context {
                             : {}),
                     });
                     if (
-                        (this.publicationReadGates.get(input.canonicalRoot)?.activeReaders ?? 0) > 0
+                        this.indexAuthorityCoordinator.hasActivePublicationReaders(input.canonicalRoot)
                     ) {
                         return activationResult.generationReceipt;
                     }
