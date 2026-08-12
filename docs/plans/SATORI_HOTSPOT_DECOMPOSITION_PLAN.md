@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `6bde22a`
+Checkpoint HEAD: `c43ff1a`
 
 Completed ownership-bounded batches:
 
@@ -25,9 +25,11 @@ Completed ownership-bounded batches:
 - Phase 1.3 / stateless synchronizer snapshot codec: `9f77131`;
 - Phase 1.4 / CLI install boundaries: `cec0d14`;
 - Phase 2.1 / complete sidecar read boundary: `06bb5db`;
-- Phase 2.2 / synchronizer scan boundary: `6bde22a`.
+- Phase 2.2 / synchronizer scan boundary: `6bde22a`;
+- Phase 2.3 / extract the Python relationship-resolution engine: `4389fe0`;
+- Phase 2.4 / complete sidecar write/lifecycle decomposition: `c43ff1a`.
 
-Next open batch at this checkpoint: Phase 2.3. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 3.1. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
