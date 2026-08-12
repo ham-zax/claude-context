@@ -93,6 +93,7 @@ import {
     type SourceFreshnessPathComparison,
 } from '../sync/synchronizer';
 import { SynchronizerRegistry } from '../sync/synchronizer-registry';
+import { createSourceFreshnessPort, type SourceFreshnessPort } from '../sync/source-freshness-port';
 import type {
     RepairIndexResult,
     RepairProof,
@@ -635,6 +636,8 @@ export class Context {
         proveIndexedGeneration: (codebasePath) => this.proveIndexedGeneration(codebasePath),
         resolveCollectionName: (codebasePath) => this.resolveCollectionName(codebasePath),
     });
+
+    private sourceFreshnessPort: SourceFreshnessPort | null = null;
     private reindexByChangeQueues = new Map<string, Promise<void>>();
     private get publicationRetentionQueues(): PublicationRetentionQueue {
         return this.indexAuthorityCoordinator.publicationRetentionQueues;
@@ -1332,6 +1335,37 @@ export class Context {
 
     getRegisteredSourceFreshnessCheckpointObservation(codebasePath: string): string | null {
         return this.synchronizerRegistry.getRegisteredSourceFreshnessCheckpointObservation(codebasePath);
+    }
+
+    /**
+     * Phase 5.1 — narrow read-facing source freshness port (preparation and
+     * revalidation), built on the checkpoint-evidence methods.
+     */
+    getSourceFreshnessPort(): SourceFreshnessPort {
+        if (!this.sourceFreshnessPort) {
+            this.sourceFreshnessPort = createSourceFreshnessPort({
+                inspectSourceFreshnessCheckpoint: (
+                    codebasePath,
+                    checkpointIdentity,
+                    requestBoundReceipt,
+                ) => this.inspectSourceFreshnessCheckpoint(
+                    codebasePath,
+                    checkpointIdentity,
+                    requestBoundReceipt,
+                ),
+                compareSourceObservationToFreshnessCheckpoint: (
+                    codebasePath,
+                    requestBoundReceipt,
+                ) => this.compareSourceObservationToFreshnessCheckpoint(
+                    codebasePath,
+                    requestBoundReceipt,
+                ),
+                getRegisteredSourceFreshnessCheckpointObservation: (codebasePath) => (
+                    this.getRegisteredSourceFreshnessCheckpointObservation(codebasePath)
+                ),
+            });
+        }
+        return this.sourceFreshnessPort;
     }
 
     private async resolveCheckpointComparisonSynchronizer(

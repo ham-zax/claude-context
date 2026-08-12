@@ -231,6 +231,7 @@ export class SharedRuntimeHost {
             watchEnabled: this.watchSyncEnabled,
             watchDebounceMs: this.watchDebounceMs,
             mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+            sourceFreshnessPort: this.localContext.getSourceFreshnessPort(),
         });
         this.providerRuntime = new ProviderRuntime({
             config,

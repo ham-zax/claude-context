@@ -6,6 +6,7 @@ import {
     AtomicIncrementalPublicationUnsupportedError,
     computeIndexPolicyControlSignature,
     Context,
+    type SourceFreshnessPort,
     type ProvenGenerationReceipt,
     type ProvenVectorGenerationReceipt,
 } from "@zokizuan/satori-core";
@@ -34,6 +35,7 @@ interface SyncManagerOptions {
         assertMutationCurrent: () => void,
     ) => Promise<void> | void;
     mutationLeaseCoordinator?: MutationLeaseCoordinator;
+    sourceFreshnessPort?: SourceFreshnessPort;
     crossProcessJoinTimeoutMs?: number;
     crossProcessJoinPollMs?: number;
     onLifecycleActivityChanged?: () => void;
@@ -294,6 +296,7 @@ export class SyncOperationError extends Error {
 export class SyncManager {
     private context: Context;
     private snapshotManager: SnapshotManager;
+    private sourceFreshnessPort: SourceFreshnessPort | null;
     private activeSyncs: Map<string, Promise<SyncExecutionOutcome>> = new Map();
     private lastSyncTimes: Map<string, number> = new Map();
     private backgroundSyncTimer: NodeJS.Timeout | null = null;
@@ -330,6 +333,7 @@ export class SyncManager {
         this.now = options.now || (() => Date.now());
         this.onSyncCompleted = options.onSyncCompleted;
         this.mutationLeaseCoordinator = options.mutationLeaseCoordinator;
+        this.sourceFreshnessPort = options.sourceFreshnessPort ?? null;
         this.onLifecycleActivityChanged = options.onLifecycleActivityChanged;
         this.crossProcessJoinTimeoutMs = Math.max(
             1,
@@ -761,6 +765,13 @@ export class SyncManager {
         if (status !== 'indexed' && status !== 'sync_completed') return null;
         const info = this.snapshotManager.getCodebaseInfo?.(codebasePath) as { indexStatus?: unknown } | undefined;
         if (info?.indexStatus === 'limit_reached') return null;
+        if (this.sourceFreshnessPort) {
+            const prepared = await this.sourceFreshnessPort.prepareCurrentSourceObservation(
+                codebasePath,
+                { requestBoundReceipt: preparedVectorReceipt },
+            );
+            return prepared.available ? prepared.evidence : null;
+        }
         const inspect = this.context.inspectSourceFreshnessCheckpoint as (
             this: Context,
             codebasePath: string,

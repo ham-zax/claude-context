@@ -9,6 +9,7 @@ export * from './core/search-projections';
 export { LexicalRetrievalModeUnsupportedError } from './core/semantic-search-service';
 export { VECTOR_CANDIDATE_RRF_K_V1 } from './core/vector-candidate-fusion';
 export * from './sync/synchronizer';
+export * from './sync/source-freshness-port';
 export * from './sync/root-bound-fs';
 export * from './sync/root-bound-file-window';
 export * from './net/fetch-with-deadline';

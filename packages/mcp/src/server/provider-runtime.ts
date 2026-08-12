@@ -403,7 +403,8 @@ export class ProviderRuntime {
                 watchEnabled: this.watchSyncEnabled,
                 watchDebounceMs: this.watchDebounceMs,
                 onSyncCompleted: this.createSyncCompletionHook(context),
-                mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+                sourceFreshnessPort: context.getSourceFreshnessPort(),
+            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
                 onLifecycleActivityChanged: this.onLifecycleActivityChanged,
             });
             reranker = this.createReranker(bootstrap);
