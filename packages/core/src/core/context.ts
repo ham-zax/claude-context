@@ -59,7 +59,6 @@ import {
     resolveNavigationSidecarRoot,
     discardNavigationSidecarGeneration,
     publishNavigationSidecarGeneration,
-    pruneNavigationSidecarGenerations,
     stageNavigationSidecarGeneration,
     verifyNavigationGenerationSealArtifacts,
 } from '../symbols';
@@ -134,8 +133,6 @@ import {
     DurableAuthorityRestoreTransactionMechanics,
     type DurableAuthorityMutationOwner,
     type DurableAuthorityRecoveryPublisher,
-    type DurableAuthorityRestoreEntry,
-    type DurableAuthorityRestoreTransaction,
     type DurableIndexAuthorityArtifact,
 } from '../generation/restore-transaction';
 import {
@@ -636,8 +633,6 @@ export class Context {
     private readonly languageAnalyzer: LanguageAnalysisPort;
     private supportedExtensions: string[];
     private readonly indexPolicyRuntimeService: IndexPolicyRuntimeService;
-    private publishedPolicyBindingsByCodebase: Map<string, IndexPolicyBinding & { policyHash: string }>;
-    private publishedResolvedPoliciesByCodebase: Map<string, ResolvedIndexPolicy>;
     private readonly indexPolicyStateRoot: string;
     private readonly indexPolicyMutationCoordinator: IndexPolicyMutationCoordinator;
     private readonly indexPolicyDocumentStore: IndexPolicyDocumentStore;
@@ -647,6 +642,14 @@ export class Context {
     private reindexByChangeQueues = new Map<string, Promise<void>>();
     private get publicationRetentionQueues(): PublicationRetentionQueue {
         return this.indexAuthorityCoordinator.publicationRetentionQueues;
+    }
+
+    private get publishedResolvedPoliciesByCodebase(): Map<string, ResolvedIndexPolicy> {
+        return new Map(this.indexAuthorityCoordinator.publishedResolvedPolicySnapshot());
+    }
+
+    private get publishedPolicyBindingsByCodebase(): Map<string, IndexPolicyBinding & { policyHash: string }> {
+        return new Map(this.indexAuthorityCoordinator.publishedPolicyBindingSnapshot());
     }
     private readonly indexAuthorityCoordinator: IndexAuthorityCoordinator;
     // Derived warm-path state only. The durable generation remains authoritative,
@@ -663,9 +666,7 @@ export class Context {
     private vectorStoreProvider: VectorStoreProviderIdentity;
 
     constructor(config: ContextConfig = {}) {
-        this.indexAuthorityCoordinator = new IndexAuthorityCoordinator(
-            config.generationProofCoordinator ?? createGenerationProofCoordinator(),
-        );
+
         // Initialize services
         if (config.embedding) {
             this.embedding = config.embedding;
@@ -724,13 +725,15 @@ export class Context {
                 this.resolveFilesystemObservationToken(targetPath)
             ),
             onActivateResolvedIndexPolicy: (policy, binding) => (
-                this.activatePublishedIndexPolicy(policy, binding)
+                this.indexAuthorityCoordinator.activatePublishedIndexPolicy(policy, binding)
             ),
             onClearPublishedIndexPolicy: (canonicalRoot) => (
-                this.clearPublishedIndexPolicyRuntime(canonicalRoot)
+                this.indexAuthorityCoordinator.clearPublishedIndexPolicyRuntime(canonicalRoot)
             ),
         });
         this.supportedExtensions = this.indexPolicyRuntimeService.buildSupportedExtensions('default');
+
+
 
         // Load custom ignore patterns from environment variables
         const envCustomIgnorePatterns = getCustomIgnorePatternsFromEnvironment();
@@ -742,8 +745,6 @@ export class Context {
             ...(config.customIgnorePatterns || []),
             ...envCustomIgnorePatterns
         ];
-        this.publishedPolicyBindingsByCodebase = new Map();
-        this.publishedResolvedPoliciesByCodebase = new Map();
         this.indexPolicyStateRoot = config.indexPolicyStateRoot
             ?? path.join(
                 process.env.SATORI_STATE_ROOT || path.join(os.homedir(), '.satori'),
@@ -777,6 +778,7 @@ export class Context {
             ),
         });
         this.ignoreRuleService = new IgnoreRuleService({
+
             basePatterns: allIgnorePatterns,
             canonicalizeCodebasePath: (codebasePath) => (
                 this.canonicalizeCodebasePath(codebasePath)
@@ -788,6 +790,59 @@ export class Context {
                 this.indexPolicyRuntimeService.loadCustomIndexPolicy(canonicalRoot)
             ),
         });
+        this.indexAuthorityCoordinator = new IndexAuthorityCoordinator(
+            config.generationProofCoordinator ?? createGenerationProofCoordinator(),
+            {
+                canonicalizeCodebasePath: (codebasePath) => this.canonicalizeCodebasePath(codebasePath),
+                clearResolvedIndexPolicyRuntime: (canonicalRoot) => this.clearResolvedIndexPolicyRuntime(canonicalRoot),
+                fsyncPath: (targetPath) => this.fsyncPath(targetPath),
+                indexPolicyDocumentStore: {
+                    captureDocument: (canonicalRoot) => this.indexPolicyDocumentStore.captureDocument(canonicalRoot),
+                    resolvePolicyPath: (canonicalRoot) => this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot),
+                },
+                indexPolicyMutationCoordinator: {
+                    withLock: (canonicalRoot, operation) => this.indexPolicyMutationCoordinator.withLock(canonicalRoot, operation),
+                },
+                indexPolicyRuntimeService: {
+                    deletePolicyFileToken: (canonicalRoot) => this.indexPolicyRuntimeService.deletePolicyFileToken(canonicalRoot),
+                    getPolicyDocumentDigest: (canonicalRoot) => this.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot),
+                    resolveCustomIndexPolicyFileToken: (canonicalRoot) => this.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot),
+                },
+                refreshRuntimePolicyAuthority: (canonicalRoot) => this.refreshRuntimePolicyAuthority(canonicalRoot),
+                restoreTransactionMechanics: this.restoreTransactionMechanics,
+                symbolRegistryStateRoot: this.symbolRegistryStateRoot,
+                listRelatedCollectionNames: (canonicalRoot) => this.listRelatedCollectionNames(canonicalRoot),
+                vectorDatabase: {
+                    getCollectionDataObservation: this.vectorDatabase.getCollectionDataObservation,
+                    dropCollection: (collectionName) => this.vectorDatabase.dropCollection(collectionName),
+                    hasCollection: (collectionName) => this.vectorDatabase.hasCollection(collectionName),
+                },
+                indexCompletionMarkersEqual: (left, right) => this.indexCompletionMarkersEqual(left, right),
+                isPreparedVectorReceiptBoundToCurrentAuthority: (canonicalRoot, receipt) => (
+                    this.isPreparedVectorReceiptBoundToCurrentAuthority(canonicalRoot, receipt)
+                ),
+                resolveCompletionMarkerForCollection: (canonicalRoot, collectionName) => (
+                    this.resolveCompletionMarkerForCollection(canonicalRoot, collectionName)
+                ),
+                resolveGenerationProofIdentity: (canonicalRoot) => this.resolveGenerationProofIdentity(canonicalRoot),
+                resolveEffectiveNavigationAuthority: (marker, policy, binding) => (
+                    this.resolveEffectiveNavigationAuthority(marker, policy, binding)
+                ),
+                resolveNavigationObservationToken: (canonicalRoot, generationId, strict) => (
+                    this.resolveNavigationObservationToken(canonicalRoot, generationId, strict)
+                ),
+                resolveRepoConfigObservationToken: (canonicalRoot) => this.resolveRepoConfigObservationToken(canonicalRoot),
+                cloneIndexCompletionMarker: (marker) => this.cloneIndexCompletionMarker(marker),
+                cloneProvenGenerationReceipt: (receipt) => this.cloneProvenGenerationReceipt(receipt),
+                cloneProvenVectorGenerationReceipt: (receipt) => this.cloneProvenVectorGenerationReceipt(receipt),
+                publishResolvedIndexPolicy: (policy, binding, publishMutation) => (
+                    this.publishResolvedIndexPolicy(policy, binding, publishMutation)
+                ),
+                resolveProvenGeneration: (canonicalRoot) => this.resolveProvenGeneration(canonicalRoot),
+                policyNavigationBindingsEqual: (left, right) => policyNavigationBindingsEqual(left, right),
+            },
+        );
+
         this.indexingPipeline = new IndexingPipeline({
             getVectorDatabase: () => this.vectorDatabase,
             languageAnalyzer: this.languageAnalyzer,
@@ -1121,8 +1176,8 @@ export class Context {
         canonicalRoot: string,
         receipt: ProvenVectorGenerationReceipt,
     ): boolean {
-        const policy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const binding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const policy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const binding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         const policyDocumentDigest = this.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot);
         if (!policy || !binding || !policyDocumentDigest) return false;
 
@@ -1149,8 +1204,8 @@ export class Context {
         if (!preparedIdentity) return null;
         this.refreshRuntimePolicyAuthority(canonicalRoot);
         if (!this.isPreparedVectorReceiptBoundToCurrentAuthority(canonicalRoot, receipt)) return null;
-        const policy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const binding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const policy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const binding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         const authority = policy && binding
             ? this.resolveEffectiveNavigationAuthority(receipt.marker, policy, binding)
             : null;
@@ -1876,8 +1931,8 @@ export class Context {
     ): Promise<{ collectionName: string; marker: IndexCompletionMarkerDocument } | null> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         this.refreshRuntimePolicyAuthority(canonicalRoot);
-        const publishedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const policyBinding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const publishedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const policyBinding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         if (
             !publishedPolicy
             || !policyBinding
@@ -2045,8 +2100,8 @@ export class Context {
         const policyFileToken = this.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot);
         const cachedPolicyFileToken = this.indexPolicyRuntimeService.getPolicyFileToken(canonicalRoot);
         const policyDocumentDigest = this.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot);
-        const policy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const binding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const policy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const binding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         if (
             !policyFileToken
             || cachedPolicyFileToken !== policyFileToken
@@ -2109,8 +2164,8 @@ export class Context {
         } else {
             this.refreshRuntimePolicyAuthority(canonicalRoot);
         }
-        const publishedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const policyBinding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const publishedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const policyBinding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         const policyDocumentDigest = this.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot);
         if (
             !publishedPolicy
@@ -2220,8 +2275,8 @@ export class Context {
                 !initialNavigationAuthority.useBoundGeneration,
             )
             : navigationToken;
-        const finalPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const finalBinding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const finalPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const finalBinding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         const finalNavigationAuthority = finalMarker && finalPolicy && finalBinding
             ? this.resolveEffectiveNavigationAuthority(
                 finalMarker,
@@ -2319,7 +2374,7 @@ export class Context {
     ): Promise<string | null> {
         const observations = this.getIndexAuthorityObservations(canonicalRoot);
         if (!observations) return null;
-        const collectionName = this.publishedPolicyBindingsByCodebase.get(canonicalRoot)?.collectionName;
+        const collectionName = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot)?.collectionName;
         const observePublication = this.vectorDatabase.getPublicationObservation;
         if (!collectionName || typeof observePublication !== 'function') return null;
         const publicationObservation = await observePublication.call(this.vectorDatabase, collectionName);
@@ -2331,71 +2386,7 @@ export class Context {
         });
     }
 
-    private async recordActivatedGenerationProof(input: {
-        canonicalRoot: string;
-        marker: IndexCompletionMarkerDocument;
-        policy: ResolvedIndexPolicy;
-        navigation: CurrentNavigationGeneration;
-        exactPayloadCount: number;
-    }): Promise<ProvenGenerationReceipt | null> {
-        const policyDocumentDigest = this.indexPolicyRuntimeService.getPolicyDocumentDigest(input.canonicalRoot);
-        const policyBinding = this.publishedPolicyBindingsByCodebase.get(input.canonicalRoot);
-        const navigationAuthority = policyBinding
-            ? this.resolveEffectiveNavigationAuthority(
-                input.marker,
-                input.policy,
-                policyBinding,
-            )
-            : null;
-        if (
-            !navigationAuthority
-            || navigationAuthority.status !== 'sealed'
-            || navigationAuthority.generationId !== input.navigation.generationId
-            || navigationAuthority.sealHash !== input.navigation.navigationSealHash
-        ) return null;
-        const navigationToken = this.resolveNavigationObservationToken(
-            input.canonicalRoot,
-            input.navigation.generationId,
-            false,
-        );
-        const identity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
-        if (!policyDocumentDigest || !navigationToken || !identity) return null;
-        const receipt: ProvenGenerationReceipt = {
-            collectionName: this.publishedPolicyBindingsByCodebase.get(input.canonicalRoot)?.collectionName ?? '',
-            marker: this.cloneIndexCompletionMarker(input.marker),
-            policy: {
-                ...input.policy,
-                customExtensions: [...input.policy.customExtensions],
-                customIgnorePatterns: [...input.policy.customIgnorePatterns],
-                fileBasedIgnorePatterns: [...input.policy.fileBasedIgnorePatterns],
-                supportedExtensions: [...input.policy.supportedExtensions],
-                effectiveIgnorePatterns: [...input.policy.effectiveIgnorePatterns],
-            },
-            policyDocumentDigest,
-            exactPayloadCount: input.exactPayloadCount,
-            navigation: { ...input.navigation },
-            observations: {
-                profileFileToken: this.resolveRepoConfigObservationToken(input.canonicalRoot),
-                policyFileToken: this.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(input.canonicalRoot)!,
-                navigationToken,
-            },
-        };
-        if (
-            receipt.collectionName.length === 0
-            || !receipt.observations.policyFileToken
-            || !this.isPreparedVectorReceiptBoundToCurrentAuthority(input.canonicalRoot, receipt)
-        ) return null;
-        this.indexAuthorityCoordinator.setGenerationProof(input.canonicalRoot, {
-            identity,
-            vectorReceipt: this.cloneProvenVectorGenerationReceipt(receipt),
-            generationReceipt: this.cloneProvenGenerationReceipt(receipt),
-            navigationArtifactsValidated: true,
-            source: 'activation',
-        });
-        const preparedReceipt = this.cloneProvenGenerationReceipt(receipt);
-        this.indexAuthorityCoordinator.setPreparedGenerationReceipt(preparedReceipt, identity);
-        return preparedReceipt;
-    }
+
 
     private invalidateGenerationProofForCollection(collectionName: string): void {
         this.indexAuthorityCoordinator.forEachGenerationProof((canonicalRoot, proof) => {
@@ -2440,8 +2431,8 @@ export class Context {
         ) return null;
 
         this.refreshRuntimePolicyAuthority(canonicalRoot);
-        const policy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const binding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const policy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const binding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         if (
             !policy
             || !binding
@@ -2700,8 +2691,8 @@ export class Context {
         validateArtifacts = false,
     ): Promise<NavigationGenerationProof> {
         this.refreshRuntimePolicyAuthority(canonicalRoot);
-        const policy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
-        const policyBinding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const policy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
+        const policyBinding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         if (!policy || !policyBinding) return { status: 'incompatible' };
         const authority = this.resolveEffectiveNavigationAuthority(
             marker,
@@ -2787,46 +2778,7 @@ export class Context {
         return this.proveIndexedGeneration(codebasePath);
     }
 
-    private async publishResolvedIndexPolicyForMarker(
-        policy: ResolvedIndexPolicy,
-        binding: IndexPolicyBinding,
-        marker: IndexCompletionMarkerDocument,
-        publishMutation?: (publish: () => void) => void,
-    ): Promise<void> {
-        try {
-            this.publishResolvedIndexPolicy(policy, binding, publishMutation);
-            return;
-        } catch (error) {
-            const receipt = error instanceof IndexPolicyPublicationError
-                ? error.receipt
-                : null;
-            if (
-                !receipt
-                || receipt.operation !== 'publish'
-                || receipt.canonicalRoot !== policy.canonicalRoot
-                || receipt.policyHash !== policy.policyHash
-                || receipt.collectionName !== binding.collectionName
-                || !policyNavigationBindingsEqual(receipt.navigation, binding.navigation)
-            ) {
-                throw error;
-            }
-            let proven: Awaited<ReturnType<Context['resolveProvenGeneration']>>;
-            try {
-                proven = await this.resolveProvenGeneration(policy.canonicalRoot);
-            } catch {
-                throw error;
-            }
-            if (
-                !proven
-                || proven.collectionName !== binding.collectionName
-                || proven.marker.runId !== marker.runId
-                || proven.marker.indexPolicyHash !== marker.indexPolicyHash
-                || JSON.stringify(proven.marker.navigation) !== JSON.stringify(marker.navigation)
-            ) {
-                throw error;
-            }
-        }
-    }
+
 
     private async publishSealedPolicyBindingForMarker(
         codebasePath: string,
@@ -2836,14 +2788,14 @@ export class Context {
     ): Promise<void> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         this.refreshRuntimePolicyAuthority(canonicalRoot);
-        const policy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
+        const policy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
         if (!policy || this.indexPolicyRuntimeService.getPolicyRuntimeCompatibility(canonicalRoot) !== true) {
             throw new Error(`Cannot publish generation '${collectionName}': no runtime-compatible sealed index policy is available.`);
         }
         if (policy.policyHash !== marker.indexPolicyHash) {
             throw new Error(`Cannot publish generation '${collectionName}': completion marker and sealed policy hashes differ.`);
         }
-        const currentBinding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const currentBinding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         const navigationBinding = policyNavigationBindingFromMarker(marker.navigation);
         if (
             currentBinding?.policyHash === marker.indexPolicyHash
@@ -2852,7 +2804,7 @@ export class Context {
         ) {
             return;
         }
-        await this.publishResolvedIndexPolicyForMarker(policy, {
+        await this.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(policy, {
             collectionName,
             navigation: navigationBinding,
         }, marker, publishMutation);
@@ -3047,7 +2999,7 @@ export class Context {
                 if (!marker) {
                     throw new Error(`Completed index did not produce a completion marker for '${this.getWriteCollectionName(codebasePath)}'.`);
                 }
-                await this.publishResolvedIndexPolicyForMarker(indexPolicy, {
+                await this.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
                     collectionName: this.getWriteCollectionName(codebasePath),
                     navigation: navigationCandidate ? {
                         status: 'sealed',
@@ -3124,7 +3076,7 @@ export class Context {
                 if (!marker) {
                     throw new Error(`Completed index did not produce a completion marker for '${this.getWriteCollectionName(codebasePath)}'.`);
                 }
-                await this.publishResolvedIndexPolicyForMarker(indexPolicy, {
+                await this.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
                     collectionName: this.getWriteCollectionName(codebasePath),
                     navigation: navigationCandidate ? {
                         status: 'sealed',
@@ -3149,7 +3101,7 @@ export class Context {
                 if (!marker) {
                     throw new Error(`Partial index did not produce a completion marker for '${this.getWriteCollectionName(codebasePath)}'.`);
                 }
-                await this.publishResolvedIndexPolicyForMarker(indexPolicy, {
+                await this.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
                     collectionName: this.getWriteCollectionName(codebasePath),
                     navigation: { status: 'not_bound' },
                 }, marker, options.publishMutation);
@@ -3273,144 +3225,9 @@ export class Context {
         return this.indexAuthorityCoordinator.acquirePublicationReadLease(canonicalRoot);
     }
 
-    private async rebindGenerationProofAfterRetention(input: {
-        canonicalRoot: string;
-        activationId: string;
-        activeCollectionName: string;
-        expectedDataObservation?: string;
-    }): Promise<void> {
-        const cached = this.indexAuthorityCoordinator.getGenerationProof(input.canonicalRoot);
-        if (!cached || cached.vectorReceipt.collectionName !== input.activeCollectionName) return;
-        const invalidate = () => {
-            if (this.indexAuthorityCoordinator.getGenerationProof(input.canonicalRoot) === cached) {
-                this.indexAuthorityCoordinator.deleteGenerationProof(input.canonicalRoot);
-            }
-        };
 
-        this.refreshRuntimePolicyAuthority(input.canonicalRoot);
-        const binding = this.publishedPolicyBindingsByCodebase.get(input.canonicalRoot);
-        if (
-            binding?.collectionName !== input.activeCollectionName
-            || binding.publication?.activationId !== input.activationId
-            || !this.isPreparedVectorReceiptBoundToCurrentAuthority(
-                input.canonicalRoot,
-                cached.vectorReceipt,
-            )
-        ) {
-            invalidate();
-            return;
-        }
 
-        const observeData = this.vectorDatabase.getCollectionDataObservation;
-        if (!input.expectedDataObservation || !observeData) {
-            invalidate();
-            return;
-        }
-        const activeStateMatches = async (): Promise<boolean> => {
-            const [dataObservation, marker] = await Promise.all([
-                observeData.call(this.vectorDatabase, input.activeCollectionName),
-                this.resolveCompletionMarkerForCollection(
-                    input.canonicalRoot,
-                    input.activeCollectionName,
-                ),
-            ]);
-            return dataObservation === input.expectedDataObservation
-                && marker !== null
-                && this.indexCompletionMarkersEqual(marker, cached.vectorReceipt.marker);
-        };
-        if (!await activeStateMatches()) {
-            invalidate();
-            return;
-        }
 
-        const identity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
-        if (!identity || !await activeStateMatches()) {
-            invalidate();
-            return;
-        }
-
-        // Lance generations share a control table. Removing an inactive sibling
-        // advances that table's manifest. Carry the proof only after independently
-        // proving that both the active data manifest and its marker remained exact
-        // across the combined-observation read.
-        this.indexAuthorityCoordinator.setGenerationProof(input.canonicalRoot, { ...cached, identity });
-    }
-
-    private schedulePublicationRetention(input: {
-        canonicalRoot: string;
-        activationId: string;
-        activeCollectionName: string;
-        previousCollectionName: string;
-        activeNavigationGenerationId: string;
-        previousNavigationGenerationId: string;
-        activeDataObservation?: string;
-    }): void {
-        const previous = this.publicationRetentionQueues.get(input.canonicalRoot) ?? Promise.resolve();
-        const retention = previous
-            .catch(() => undefined)
-            .then(async () => {
-                const releaseRetention = await this.indexAuthorityCoordinator.acquirePublicationRetentionLease(
-                    input.canonicalRoot,
-                    input.activationId,
-                );
-                if (!releaseRetention) return;
-                try {
-                    this.refreshRuntimePolicyAuthority(input.canonicalRoot);
-                    const activeBinding = this.publishedPolicyBindingsByCodebase.get(input.canonicalRoot);
-                    if (
-                        activeBinding?.collectionName !== input.activeCollectionName
-                        || activeBinding.publication?.activationId !== input.activationId
-                    ) return;
-
-                    const retainedCollections = new Set([
-                        input.activeCollectionName,
-                        input.previousCollectionName,
-                    ]);
-                    for (const collectionName of await this.listRelatedCollectionNames(input.canonicalRoot)) {
-                        if (retainedCollections.has(collectionName)) continue;
-                        this.refreshRuntimePolicyAuthority(input.canonicalRoot);
-                        const currentBinding = this.publishedPolicyBindingsByCodebase.get(input.canonicalRoot);
-                        if (
-                            currentBinding?.collectionName !== input.activeCollectionName
-                            || currentBinding.publication?.activationId !== input.activationId
-                        ) return;
-                        await deleteCollectionWithVerification(this.vectorDatabase, collectionName);
-                    }
-
-                    await pruneNavigationSidecarGenerations({
-                        stateRoot: this.symbolRegistryStateRoot,
-                        normalizedRootPath: input.canonicalRoot,
-                        keepGenerationIds: new Set([
-                            input.activeNavigationGenerationId,
-                            input.previousNavigationGenerationId,
-                        ]),
-                    });
-                    await FileSynchronizer.pruneSnapshotsForGenerations(
-                        input.canonicalRoot,
-                        retainedCollections,
-                    );
-                    await this.rebindGenerationProofAfterRetention({
-                        canonicalRoot: input.canonicalRoot,
-                        activationId: input.activationId,
-                        activeCollectionName: input.activeCollectionName,
-                        expectedDataObservation: input.activeDataObservation,
-                    });
-                } finally {
-                    releaseRetention();
-                }
-            })
-            .catch((error) => {
-                console.warn(
-                    `[Context] ⚠️  Deferred publication generation cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-                );
-            });
-        this.publicationRetentionQueues.set(input.canonicalRoot, retention);
-        void retention.finally(() => {
-            if (this.publicationRetentionQueues.get(input.canonicalRoot) === retention) {
-                this.publicationRetentionQueues.delete(input.canonicalRoot);
-            }
-        });
-    }
 
     private resolveReusableNavigationDeltaState(
         canonicalRoot: string,
@@ -3758,7 +3575,7 @@ export class Context {
                         }
                         : undefined;
 
-                    const generationReceipt = await this.recordActivatedGenerationProof({
+                    const generationReceipt = await this.indexAuthorityCoordinator.recordActivatedGenerationProof({
                         canonicalRoot: input.canonicalRoot,
                         marker: publishedMarker,
                         policy: input.sealedPolicy,
@@ -3792,7 +3609,7 @@ export class Context {
                     await nextSynchronizer.initialize(undefined, undefined, { requireExistingCheckpoint: true });
                     this.synchronizers.set(input.synchronizerKey, nextSynchronizer);
                     this.synchronizerMutationTargets.delete(input.synchronizerKey);
-                    this.schedulePublicationRetention({
+                    this.indexAuthorityCoordinator.schedulePublicationRetention({
                         canonicalRoot: input.canonicalRoot,
                         activationId,
                         activeCollectionName: candidateCollectionName,
@@ -3878,7 +3695,7 @@ export class Context {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         this.refreshRuntimePolicyAuthority(canonicalRoot);
         if (
-            this.publishedResolvedPoliciesByCodebase.has(canonicalRoot)
+            this.indexAuthorityCoordinator.hasPublishedResolvedPolicy(canonicalRoot)
             && this.indexPolicyRuntimeService.getPolicyRuntimeCompatibility(canonicalRoot) !== true
         ) {
             throw new Error(`Cannot incrementally synchronize '${codebasePath}': no runtime-compatible sealed index policy is available; reindex is required.`);
@@ -3965,7 +3782,7 @@ export class Context {
         if (!collectionName) {
             throw new Error(`Expected an indexed collection for '${codebasePath}' after sync preflight.`);
         }
-        const sealedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
+        const sealedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
         if (
             !sealedPolicy
             || this.indexPolicyRuntimeService.getPolicyRuntimeCompatibility(canonicalRoot) !== true
@@ -4520,8 +4337,8 @@ export class Context {
             if (error instanceof IndexPolicyAuthorityError) policyAuthorityInvalid = true;
         }
         if (policyAuthorityInvalid) return { status: 'policy_authority_invalid' };
-        const boundCollection = this.publishedPolicyBindingsByCodebase.get(canonicalRoot)?.collectionName;
-        const publishedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
+        const boundCollection = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot)?.collectionName;
+        const publishedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
         if (
             boundCollection
             && publishedPolicy
@@ -4784,11 +4601,11 @@ export class Context {
     ): boolean {
         const canonicalRoot = this.canonicalizeCodebasePath(policy.canonicalRoot);
         this.indexPolicyRuntimeService.loadCustomIndexPolicy(canonicalRoot);
-        const publishedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
+        const publishedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
         if (!publishedPolicy || publishedPolicy.policyHash !== policy.policyHash) {
             return false;
         }
-        const binding = this.publishedPolicyBindingsByCodebase.get(canonicalRoot);
+        const binding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot);
         if (publishedPolicy.controlSignature !== policy.controlSignature) {
             if (!binding?.publication) {
                 return false;
@@ -4818,26 +4635,24 @@ export class Context {
         );
     }
 
+
+
     public captureDurableIndexAuthority(codebasePath: string): DurableIndexAuthoritySnapshot {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const navigationRoot = resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot);
-        const capture = (artifactPath: string): DurableIndexAuthorityArtifact | null => {
-            try {
-                const content = fs.readFileSync(artifactPath, 'utf8');
-                return {
-                    content,
-                    digest: crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
-                };
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-                throw error;
-            }
-        };
-        return {
-            canonicalRoot,
-            policyDocument: this.indexPolicyDocumentStore.captureDocument(canonicalRoot),
-            navigationPointer: capture(path.join(navigationRoot, 'current.json')),
-        };
+        return this.indexAuthorityCoordinator.captureDurableIndexAuthority(codebasePath);
+    }
+
+    public async restoreDurableIndexAuthority(
+        snapshot: DurableIndexAuthoritySnapshot,
+        publishMutation: (publish: () => void) => void,
+        expectedCurrent: DurableIndexAuthoritySnapshot,
+        mutationOwner?: DurableAuthorityMutationOwner,
+    ): Promise<DurableIndexAuthorityRestoreResult> {
+        return this.indexAuthorityCoordinator.restoreDurableIndexAuthority(
+            snapshot,
+            publishMutation,
+            expectedCurrent,
+            mutationOwner,
+        );
     }
 
     private fsyncPath(targetPath: string): void {
@@ -4849,155 +4664,7 @@ export class Context {
         }
     }
 
-    public async restoreDurableIndexAuthority(
-        snapshot: DurableIndexAuthoritySnapshot,
-        publishMutation: (publish: () => void) => void,
-        expectedCurrent: DurableIndexAuthoritySnapshot,
-        mutationOwner?: DurableAuthorityMutationOwner,
-    ): Promise<DurableIndexAuthorityRestoreResult> {
-        const canonicalRoot = this.canonicalizeCodebasePath(snapshot.canonicalRoot);
-        if (canonicalRoot !== snapshot.canonicalRoot) {
-            throw new Error('Durable index authority snapshot root is not canonical.');
-        }
-        const validateArtifact = (
-            name: string,
-            artifact: DurableIndexAuthorityArtifact | null,
-        ): void => {
-            if (!artifact) return;
-            if (!/^[a-f0-9]{64}$/.test(artifact.digest)) {
-                throw new Error(`Captured ${name} digest is invalid.`);
-            }
-            const digest = crypto.createHash('sha256').update(artifact.content, 'utf8').digest('hex');
-            if (digest !== artifact.digest) {
-                throw new Error(`Captured ${name} bytes do not match their digest.`);
-            }
-        };
-        validateArtifact('index policy', snapshot.policyDocument);
-        validateArtifact('navigation pointer', snapshot.navigationPointer);
-        if (expectedCurrent.canonicalRoot !== canonicalRoot) {
-            throw new Error('Expected durable index authority root does not match the restoration root.');
-        }
-        validateArtifact('expected index policy', expectedCurrent.policyDocument);
-        validateArtifact('expected navigation pointer', expectedCurrent.navigationPointer);
 
-        const policyPath = this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot);
-        const navigationRoot = resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot);
-        const pointerPath = path.join(navigationRoot, 'current.json');
-        fs.mkdirSync(path.dirname(policyPath), { recursive: true });
-        fs.mkdirSync(navigationRoot, { recursive: true });
-        const id = crypto.randomUUID();
-        const entries: DurableAuthorityRestoreEntry[] = [
-            { targetPath: policyPath, artifact: snapshot.policyDocument, expected: expectedCurrent.policyDocument },
-            { targetPath: pointerPath, artifact: snapshot.navigationPointer, expected: expectedCurrent.navigationPointer },
-        ].map((entry) => ({
-            targetPath: entry.targetPath,
-            temporaryPath: `${entry.targetPath}.restore-${id}`,
-            displacedPath: `${entry.targetPath}.rollback-${id}`,
-            content: entry.artifact?.content ?? null,
-            digest: entry.artifact?.digest ?? null,
-            expectedDigest: entry.expected?.digest ?? null,
-        }));
-        for (const entry of entries) {
-            if (entry.content !== null) {
-                fs.writeFileSync(entry.temporaryPath, entry.content, 'utf8');
-                this.fsyncPath(entry.temporaryPath);
-            }
-        }
-        const journalRoot = this.restoreTransactionMechanics.journalRoot();
-        fs.mkdirSync(journalRoot, { recursive: true });
-        const journalPath = path.join(journalRoot, `${id}.json`);
-        const transaction: DurableAuthorityRestoreTransaction = {
-            schemaVersion: 1,
-            id,
-            canonicalRoot,
-            phase: 'prepared',
-            nextEntry: 0,
-            ...(mutationOwner ? { mutationOwner: { ...mutationOwner } } : {}),
-            entries,
-        };
-        this.restoreTransactionMechanics.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
-
-        let publicationCount = 0;
-        let committed = false;
-        try {
-            publishMutation(() => {
-                publicationCount += 1;
-                if (publicationCount > 1) {
-                    throw new Error('Durable index authority restoration invoked publish more than once.');
-                }
-                this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
-                    const current = this.captureDurableIndexAuthority(canonicalRoot);
-                    if (
-                        !this.restoreTransactionMechanics.artifactMatchesPath(policyPath, expectedCurrent.policyDocument)
-                        || !this.restoreTransactionMechanics.artifactMatchesPath(pointerPath, expectedCurrent.navigationPointer)
-                        || current.canonicalRoot !== expectedCurrent.canonicalRoot
-                    ) {
-                        throw new Error('Durable index authority changed after rollback capture; refusing stale restoration.');
-                    }
-                    this.restoreTransactionMechanics.completeDurableAuthorityRestoreTransaction(journalPath, transaction);
-                    committed = true;
-                });
-            });
-            if (publicationCount !== 1 || !committed) {
-                throw new Error('Durable index authority restoration returned without publishing.');
-            }
-        } catch (error) {
-            if (transaction.phase === 'prepared') {
-                for (const entry of entries) fs.rmSync(entry.temporaryPath, { force: true });
-                fs.rmSync(journalPath, { force: true });
-                this.fsyncPath(journalRoot);
-            }
-            throw error;
-        }
-
-        this.clearResolvedIndexPolicyRuntime(canonicalRoot);
-        this.indexPolicyRuntimeService.deletePolicyFileToken(canonicalRoot);
-        const sqlitePath = resolveNavigationSqlitePath(this.symbolRegistryStateRoot, canonicalRoot);
-        try {
-            this.refreshRuntimePolicyAuthority(canonicalRoot);
-        } catch (error) {
-            if (
-                error instanceof IndexFormatRequiresReindexError
-                || error instanceof UnsupportedIndexAuthorityError
-            ) {
-                this.clearResolvedIndexPolicyRuntime(canonicalRoot);
-                this.indexPolicyRuntimeService.deletePolicyFileToken(canonicalRoot);
-                fs.rmSync(sqlitePath, { force: true });
-                return error instanceof UnsupportedIndexAuthorityError
-                    ? { status: 'restored_unsupported_authority' }
-                    : { status: 'restored_requires_reindex' };
-            }
-            throw error;
-        }
-        fs.rmSync(sqlitePath, { force: true });
-        try {
-            await resolveCurrentNavigationGeneration(this.symbolRegistryStateRoot, canonicalRoot);
-        } catch (error) {
-            if (
-                error instanceof RetiredNavigationPointerError
-                || error instanceof UnsupportedNavigationPointerError
-            ) {
-                this.clearResolvedIndexPolicyRuntime(canonicalRoot);
-                this.indexPolicyRuntimeService.deletePolicyFileToken(canonicalRoot);
-                return error instanceof UnsupportedNavigationPointerError
-                    ? { status: 'restored_unsupported_authority' }
-                    : { status: 'restored_requires_reindex' };
-            }
-            throw error;
-        }
-        try {
-            await importNavigationToSqlite({
-                stateRoot: this.symbolRegistryStateRoot,
-                normalizedRootPath: canonicalRoot,
-            });
-        } catch (error) {
-            fs.rmSync(sqlitePath, { force: true });
-            console.warn(
-                `[Context] ⚠️  Durable authority was restored for '${canonicalRoot}', but its derived navigation sqlite cache could not be rebuilt: ${error instanceof Error ? error.message : String(error)}`,
-            );
-        }
-        return { status: 'restored_current' };
-    }
 
     clearPublishedIndexPolicy(
         codebasePath: string,
@@ -5075,35 +4742,13 @@ export class Context {
      * after a resolved policy is activated. Context owns published bindings
      * and the published resolved policy; the runtime service owns the rest.
      */
-    private activatePublishedIndexPolicy(
-        policy: ResolvedIndexPolicy,
-        binding: IndexPolicyRuntimeBinding,
-    ): void {
-        const canonicalRoot = policy.canonicalRoot;
-        this.publishedPolicyBindingsByCodebase.set(canonicalRoot, {
-            policyHash: policy.policyHash,
-            collectionName: binding.collectionName,
-            navigation: { ...binding.navigation },
-            ...(binding.publication ? { publication: structuredClone(binding.publication) } : {}),
-        });
-        this.publishedResolvedPoliciesByCodebase.set(canonicalRoot, {
-            ...policy,
-            customExtensions: [...policy.customExtensions],
-            customIgnorePatterns: [...policy.customIgnorePatterns],
-            fileBasedIgnorePatterns: [...policy.fileBasedIgnorePatterns],
-            supportedExtensions: [...policy.supportedExtensions],
-            effectiveIgnorePatterns: [...policy.effectiveIgnorePatterns],
-        });
-    }
+
 
     /**
      * Published-state clear hook invoked by the runtime policy service when
      * the runtime view of a codebase policy is cleared.
      */
-    private clearPublishedIndexPolicyRuntime(canonicalRoot: string): void {
-        this.publishedPolicyBindingsByCodebase.delete(canonicalRoot);
-        this.publishedResolvedPoliciesByCodebase.delete(canonicalRoot);
-    }
+
 
     /**
      * Read-only runtime compatibility view (integration oracle; state owned by
@@ -5116,7 +4761,7 @@ export class Context {
     private recomputePublishedPolicyRuntimeCompatibility(canonicalRoot: string): void {
         this.indexPolicyRuntimeService.recomputePolicyRuntimeCompatibility(
             canonicalRoot,
-            this.publishedResolvedPoliciesByCodebase.get(canonicalRoot),
+            this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot),
         );
     }
 
@@ -5137,7 +4782,7 @@ export class Context {
     }
 
     private recomputeAllPublishedPolicyRuntimeCompatibility(): void {
-        for (const canonicalRoot of this.publishedResolvedPoliciesByCodebase.keys()) {
+        for (const canonicalRoot of this.indexAuthorityCoordinator.publishedResolvedPolicyRoots()) {
             this.recomputePublishedPolicyRuntimeCompatibility(canonicalRoot);
         }
     }
@@ -5767,7 +5412,7 @@ export class Context {
         const familyCollectionNames = await this.listRelatedCollectionNames(canonicalPath);
         const activeCollectionName = this.getWriteCollectionName(canonicalPath);
         const sealedCollectionName =
-            this.publishedPolicyBindingsByCodebase.get(canonicalPath)?.collectionName;
+            this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalPath)?.collectionName;
         const preferredCollectionName = options.preferredCollectionName?.trim();
         let selectedCollection: string | null = null;
         let collectionSelectionBasis = 'selected_active_collection';
@@ -5917,7 +5562,7 @@ export class Context {
             }
             throw error;
         }
-        const repairPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalPath);
+        const repairPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalPath);
         if (!repairPolicy || this.indexPolicyRuntimeService.getPolicyRuntimeCompatibility(canonicalPath) !== true) {
             proof.marker = { status: 'failed', basis: 'sealed_policy_unavailable' };
             return withProof({
@@ -5926,7 +5571,7 @@ export class Context {
                 message: `Repair cannot publish collection '${selectedCollection}' because its sealed index policy is missing or runtime-incompatible.`,
             });
         }
-        const repairBinding = this.publishedPolicyBindingsByCodebase.get(canonicalPath);
+        const repairBinding = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalPath);
         let v4RepairSource: {
             marker: IndexCompletionMarkerDocument;
             binding: IndexPolicyBinding & { policyHash: string };
@@ -6543,7 +6188,7 @@ export class Context {
                     relationshipManifestHash: navigationCandidate.relationshipManifestHash,
                     navigationSealHash: navigationCandidate.navigationSealHash,
                 };
-                await this.recordActivatedGenerationProof({
+                await this.indexAuthorityCoordinator.recordActivatedGenerationProof({
                     canonicalRoot: canonicalPath,
                     marker,
                     policy: repairPolicy,
@@ -6567,7 +6212,7 @@ export class Context {
                 const activeDataObservation = this.vectorDatabase.getCollectionDataObservation
                     ? await this.vectorDatabase.getCollectionDataObservation(selectedCollection)
                     : undefined;
-                this.schedulePublicationRetention({
+                this.indexAuthorityCoordinator.schedulePublicationRetention({
                     canonicalRoot: canonicalPath,
                     activationId: publication.activationId,
                     activeCollectionName: selectedCollection,
@@ -6659,7 +6304,7 @@ export class Context {
     private buildIndexPolicyHash(codebasePath: string): string {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         this.indexPolicyRuntimeService.loadCustomIndexPolicy(canonicalRoot);
-        const publishedPolicy = this.publishedResolvedPoliciesByCodebase.get(canonicalRoot);
+        const publishedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
         if (publishedPolicy) {
             return publishedPolicy.policyHash;
         }
@@ -7313,13 +6958,13 @@ export class Context {
         ignore().add(policy.effectiveIgnorePatterns);
         const previousRuntimeState = {
             ...this.indexPolicyRuntimeService.captureRuntimePolicyState(canonicalRoot),
-            binding: this.publishedPolicyBindingsByCodebase.get(canonicalRoot),
-            resolvedPolicy: this.publishedResolvedPoliciesByCodebase.get(canonicalRoot),
+            binding: this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot),
+            resolvedPolicy: this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot),
         };
         const restoreRuntimeState = () => {
             this.indexPolicyRuntimeService.restoreRuntimePolicyState(canonicalRoot, previousRuntimeState);
             if (previousRuntimeState.binding) {
-                this.publishedPolicyBindingsByCodebase.set(canonicalRoot, {
+                this.indexAuthorityCoordinator.setPublishedPolicyBinding(canonicalRoot, {
                     ...previousRuntimeState.binding,
                     navigation: { ...previousRuntimeState.binding.navigation },
                     ...(previousRuntimeState.binding.publication
@@ -7327,10 +6972,10 @@ export class Context {
                         : {}),
                 });
             } else {
-                this.publishedPolicyBindingsByCodebase.delete(canonicalRoot);
+                this.indexAuthorityCoordinator.deletePublishedPolicyBinding(canonicalRoot);
             }
             if (previousRuntimeState.resolvedPolicy) {
-                this.publishedResolvedPoliciesByCodebase.set(canonicalRoot, {
+                this.indexAuthorityCoordinator.setPublishedResolvedPolicy(canonicalRoot, {
                     ...previousRuntimeState.resolvedPolicy,
                     customExtensions: [...previousRuntimeState.resolvedPolicy.customExtensions],
                     customIgnorePatterns: [...previousRuntimeState.resolvedPolicy.customIgnorePatterns],
@@ -7339,7 +6984,7 @@ export class Context {
                     effectiveIgnorePatterns: [...previousRuntimeState.resolvedPolicy.effectiveIgnorePatterns],
                 });
             } else {
-                this.publishedResolvedPoliciesByCodebase.delete(canonicalRoot);
+                this.indexAuthorityCoordinator.deletePublishedResolvedPolicy(canonicalRoot);
             }
         };
         const policyBase = {
