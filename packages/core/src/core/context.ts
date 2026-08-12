@@ -130,6 +130,14 @@ import {
     type ProjectedChunkEntry,
 } from './indexing-pipeline';
 import { IndexPolicyMutationCoordinator } from './index-policy-mutation-coordinator';
+import {
+    DurableAuthorityRestoreTransactionMechanics,
+    type DurableAuthorityMutationOwner,
+    type DurableAuthorityRecoveryPublisher,
+    type DurableAuthorityRestoreEntry,
+    type DurableAuthorityRestoreTransaction,
+    type DurableIndexAuthorityArtifact,
+} from '../generation/restore-transaction';
 import { IndexPolicyDocumentStore } from '../policy/index-policy-document-store';
 import {
     IgnoreRuleService,
@@ -151,6 +159,11 @@ import {
 } from '../policy/index-policy-runtime-service';
 import type { ResolvedIndexPolicy } from '../policy/index-policy-runtime-service';
 export type { ResolvedIndexPolicy } from '../policy/index-policy-runtime-service';
+export type {
+    DurableAuthorityMutationOwner,
+    DurableAuthorityRecoveryPublisher,
+    DurableIndexAuthorityArtifact,
+} from '../generation/restore-transaction';
 
 export type {
     MutationGenerationObservation,
@@ -259,18 +272,6 @@ function summarizeVectorWriteMetrics(
             : initialProviderRequests - theoreticalMinimumRequests,
     };
 }
-
-export type DurableAuthorityMutationOwner = {
-    ownerId: string;
-    generation: number;
-    operationId: string;
-};
-
-export type DurableAuthorityRecoveryPublisher = (
-    canonicalRoot: string,
-    mutationOwner: DurableAuthorityMutationOwner | undefined,
-    publish: () => void,
-) => boolean;
 
 declare const generationProofCoordinatorBrand: unique symbol;
 export type GenerationProofCoordinator = {
@@ -451,11 +452,6 @@ export type IndexAuthorityObservations = {
     navigation: string;
 };
 
-export type DurableIndexAuthorityArtifact = {
-    content: string;
-    digest: string;
-};
-
 export type DurableIndexAuthoritySnapshot = {
     canonicalRoot: string;
     policyDocument: DurableIndexAuthorityArtifact | null;
@@ -466,25 +462,6 @@ type DurableIndexAuthorityRestoreResult =
     | { status: 'restored_current' }
     | { status: 'restored_requires_reindex' }
     | { status: 'restored_unsupported_authority' };
-
-type DurableAuthorityRestoreEntry = {
-    targetPath: string;
-    temporaryPath: string;
-    displacedPath: string;
-    content: string | null;
-    digest: string | null;
-    expectedDigest: string | null;
-};
-
-type DurableAuthorityRestoreTransaction = {
-    schemaVersion: 1;
-    id: string;
-    canonicalRoot: string;
-    phase: 'prepared' | 'swapping' | 'committed';
-    nextEntry: number;
-    mutationOwner?: { ownerId: string; generation: number; operationId: string };
-    entries: DurableAuthorityRestoreEntry[];
-};
 
 type RepairIndexOptions = {
     snapshotEvidence?: RepairSnapshotEvidence;
@@ -693,6 +670,7 @@ export class Context {
     private readonly indexPolicyStateRoot: string;
     private readonly indexPolicyMutationCoordinator: IndexPolicyMutationCoordinator;
     private readonly indexPolicyDocumentStore: IndexPolicyDocumentStore;
+    private readonly restoreTransactionMechanics: DurableAuthorityRestoreTransactionMechanics;
     private synchronizers = new Map<string, FileSynchronizer>();
     private synchronizerMutationTargets = new Map<string, string>();
     private reindexByChangeQueues = new Map<string, Promise<void>>();
@@ -822,6 +800,19 @@ export class Context {
             fsyncPath: (targetPath) => this.fsyncPath(targetPath),
         });
         this.symbolRegistryStateRoot = config.symbolRegistryStateRoot;
+        this.restoreTransactionMechanics = new DurableAuthorityRestoreTransactionMechanics({
+            indexPolicyStateRoot: this.indexPolicyStateRoot,
+            canonicalizeCodebasePath: (codebasePath) => this.canonicalizeCodebasePath(codebasePath),
+            resolvePolicyPath: (canonicalRoot) => (
+                this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot)
+            ),
+            resolveNavigationPointerPath: (canonicalRoot) => (
+                path.join(resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot), 'current.json')
+            ),
+            withMutationLock: (canonicalRoot, operation) => (
+                this.indexPolicyMutationCoordinator.withLock(canonicalRoot, operation)
+            ),
+        });
         this.ignoreRuleService = new IgnoreRuleService({
             basePatterns: allIgnorePatterns,
             canonicalizeCodebasePath: (codebasePath) => (
@@ -877,7 +868,7 @@ export class Context {
             ),
             mutationGenerationObserver: config.mutationGenerationObserver,
         });
-        this.recoverDurableIndexAuthorityTransactions(config.durableAuthorityRecoveryPublisher);
+        this.restoreTransactionMechanics.recoverDurableIndexAuthorityTransactions(config.durableAuthorityRecoveryPublisher);
 
         console.log(`[Context] 🔧 Initialized with ${this.supportedExtensions.length} supported extensions and ${this.ignoreRuleService.getBasePatterns().length} base ignore patterns`);
         if (envCustomExtensions.length > 0) {
@@ -4968,279 +4959,12 @@ export class Context {
         };
     }
 
-    private durableAuthorityRestoreRoot(): string {
-        return path.join(this.indexPolicyStateRoot, 'restore-transactions');
-    }
-
     private fsyncPath(targetPath: string): void {
         const fd = fs.openSync(targetPath, 'r');
         try {
             fs.fsyncSync(fd);
         } finally {
             fs.closeSync(fd);
-        }
-    }
-
-    private writeDurableAuthorityRestoreTransaction(
-        journalPath: string,
-        transaction: DurableAuthorityRestoreTransaction,
-    ): void {
-        const temporaryJournalPath = `${journalPath}.tmp-${process.pid}-${crypto.randomUUID()}`;
-        fs.writeFileSync(temporaryJournalPath, JSON.stringify(transaction), 'utf8');
-        this.fsyncPath(temporaryJournalPath);
-        fs.renameSync(temporaryJournalPath, journalPath);
-        this.fsyncPath(path.dirname(journalPath));
-    }
-
-    private artifactMatchesPath(
-        artifactPath: string,
-        artifact: DurableIndexAuthorityArtifact | null,
-    ): boolean {
-        try {
-            const content = fs.readFileSync(artifactPath, 'utf8');
-            return Boolean(
-                artifact
-                && crypto.createHash('sha256').update(content, 'utf8').digest('hex') === artifact.digest
-            );
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return artifact === null;
-            throw error;
-        }
-    }
-
-    private validateDurableAuthorityRestoreTransactionState(
-        transaction: DurableAuthorityRestoreTransaction,
-    ): void {
-        if (
-            (transaction.phase === 'prepared' && transaction.nextEntry !== 0)
-            || (transaction.phase === 'committed'
-                && transaction.nextEntry !== transaction.entries.length)
-        ) {
-            throw new Error(
-                `Durable authority restoration '${transaction.id}' no longer owns current authority.`,
-            );
-        }
-
-        const matchesDigest = (artifactPath: string, digest: string | null): boolean => (
-            this.artifactMatchesPath(
-                artifactPath,
-                digest === null ? null : { content: '', digest },
-            )
-        );
-
-        for (const [index, entry] of transaction.entries.entries()) {
-            const targetExpected = matchesDigest(entry.targetPath, entry.expectedDigest);
-            const targetDesired = matchesDigest(entry.targetPath, entry.digest);
-            const targetAbsent = matchesDigest(entry.targetPath, null);
-            const temporaryDesired = matchesDigest(entry.temporaryPath, entry.digest);
-            const temporaryAbsent = matchesDigest(entry.temporaryPath, null);
-            const displacedExpected = matchesDigest(entry.displacedPath, entry.expectedDigest);
-            const displacedAbsent = matchesDigest(entry.displacedPath, null);
-
-            let validState = false;
-            if (transaction.phase === 'prepared') {
-                // The journal is durable only after every desired temporary has
-                // been written and before any target is touched.
-                validState = targetExpected && temporaryDesired && displacedAbsent;
-            } else if (transaction.phase === 'committed') {
-                // Committed authority is final. Cleanup may have removed any
-                // subset of the transaction's temporary and displaced paths.
-                validState = targetDesired
-                    && (temporaryDesired || temporaryAbsent)
-                    && (displacedExpected || displacedAbsent);
-            } else if (index < transaction.nextEntry) {
-                // An entry whose progress is durable has its desired bytes at
-                // the target. Its temporary may remain until final cleanup,
-                // and its displaced bytes are either absent or the captured
-                // pre-restore authority.
-                validState = targetDesired
-                    && (temporaryDesired || temporaryAbsent)
-                    && (displacedExpected || displacedAbsent)
-                    && (
-                        entry.expectedDigest === null
-                        || targetExpected
-                        || displacedExpected
-                    );
-            } else if (index === transaction.nextEntry) {
-                // The current entry may have been observed before, during, or
-                // after its swap, but every surviving path must still contain
-                // bytes recorded by this transaction.
-                const targetIsOwned = targetExpected
-                    || (
-                        targetDesired
-                        && (
-                            entry.expectedDigest === null
-                            || entry.digest !== null
-                            || displacedExpected
-                        )
-                    )
-                    || (targetAbsent && displacedExpected);
-                validState = targetIsOwned
-                    && (temporaryDesired || temporaryAbsent)
-                    && (displacedExpected || displacedAbsent);
-            } else {
-                // Entries after the interruption point have not been touched.
-                validState = targetExpected && temporaryDesired && displacedAbsent;
-            }
-
-            if (!validState) {
-                throw new Error(
-                    `Durable authority restoration '${transaction.id}' no longer owns current authority for entry ${index}.`,
-                );
-            }
-        }
-    }
-
-    private completeDurableAuthorityRestoreTransaction(
-        journalPath: string,
-        transaction: DurableAuthorityRestoreTransaction,
-    ): void {
-        this.validateDurableAuthorityRestoreTransactionState(transaction);
-        if (transaction.phase === 'committed') {
-            const removeOwnedArtifact = (artifactPath: string, digest: string | null): void => {
-                const expected = digest === null ? null : { content: '', digest };
-                if (!this.artifactMatchesPath(artifactPath, expected) && fs.existsSync(artifactPath)) {
-                    throw new Error(
-                        `Durable authority restoration '${transaction.id}' no longer owns cleanup artifact '${artifactPath}'.`,
-                    );
-                }
-                fs.rmSync(artifactPath, { force: true });
-            };
-
-            for (const entry of transaction.entries) {
-                removeOwnedArtifact(entry.temporaryPath, entry.digest);
-                removeOwnedArtifact(entry.displacedPath, entry.expectedDigest);
-                this.fsyncPath(path.dirname(entry.targetPath));
-            }
-            fs.rmSync(journalPath, { force: true });
-            this.fsyncPath(path.dirname(journalPath));
-            return;
-        }
-        transaction.phase = 'swapping';
-        this.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
-        this.validateDurableAuthorityRestoreTransactionState(transaction);
-        for (let index = transaction.nextEntry; index < transaction.entries.length; index += 1) {
-            const entry = transaction.entries[index];
-            if (!entry) throw new Error('Durable authority restoration entry is missing.');
-            const desired = entry.content === null
-                ? null
-                : { content: entry.content, digest: entry.digest! };
-            if (!this.artifactMatchesPath(entry.targetPath, desired)) {
-                if (!fs.existsSync(entry.displacedPath) && fs.existsSync(entry.targetPath)) {
-                    fs.renameSync(entry.targetPath, entry.displacedPath);
-                    this.fsyncPath(path.dirname(entry.targetPath));
-                }
-                if (entry.content === null) {
-                    fs.rmSync(entry.targetPath, { force: true });
-                } else if (fs.existsSync(entry.temporaryPath)) {
-                    fs.renameSync(entry.temporaryPath, entry.targetPath);
-                } else {
-                    fs.writeFileSync(entry.targetPath, entry.content, 'utf8');
-                }
-                if (entry.content !== null) this.fsyncPath(entry.targetPath);
-                this.fsyncPath(path.dirname(entry.targetPath));
-            }
-            if (!this.artifactMatchesPath(entry.targetPath, desired)) {
-                throw new Error(`Durable authority restoration digest verification failed for '${entry.targetPath}'.`);
-            }
-            transaction.nextEntry = index + 1;
-            this.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
-        }
-        transaction.phase = 'committed';
-        this.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
-        for (const entry of transaction.entries) {
-            fs.rmSync(entry.temporaryPath, { force: true });
-            fs.rmSync(entry.displacedPath, { force: true });
-            this.fsyncPath(path.dirname(entry.targetPath));
-        }
-        fs.rmSync(journalPath, { force: true });
-        this.fsyncPath(path.dirname(journalPath));
-    }
-
-    private parseDurableAuthorityRestoreTransaction(
-        journalPath: string,
-    ): DurableAuthorityRestoreTransaction {
-        const parsed = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as DurableAuthorityRestoreTransaction;
-        if (
-            parsed?.schemaVersion !== 1
-            || typeof parsed.id !== 'string'
-            || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.id)
-            || typeof parsed.canonicalRoot !== 'string'
-            || !['prepared', 'swapping', 'committed'].includes(parsed.phase)
-            || !Number.isSafeInteger(parsed.nextEntry)
-            || parsed.nextEntry < 0
-            || !Array.isArray(parsed.entries)
-            || parsed.entries.length !== 2
-            || parsed.nextEntry > parsed.entries.length
-        ) throw new Error(`Durable authority restoration journal '${journalPath}' is invalid.`);
-        const canonicalRoot = this.canonicalizeCodebasePath(parsed.canonicalRoot);
-        const expectedJournalPath = path.join(this.durableAuthorityRestoreRoot(), `${parsed.id}.json`);
-        if (
-            canonicalRoot !== parsed.canonicalRoot
-            || path.resolve(journalPath) !== path.resolve(expectedJournalPath)
-        ) throw new Error(`Durable authority restoration journal '${journalPath}' is invalid.`);
-        const expectedTargets = [
-            this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot),
-            path.join(resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot), 'current.json'),
-        ];
-        for (const [index, entry] of parsed.entries.entries()) {
-            const expectedTarget = expectedTargets[index];
-            if (
-                !entry
-                || !expectedTarget
-                || entry.targetPath !== expectedTarget
-                || entry.temporaryPath !== `${expectedTarget}.restore-${parsed.id}`
-                || entry.displacedPath !== `${expectedTarget}.rollback-${parsed.id}`
-                || (entry.content !== null && typeof entry.content !== 'string')
-                || (entry.digest !== null && !/^[a-f0-9]{64}$/.test(entry.digest))
-                || (entry.expectedDigest !== null && !/^[a-f0-9]{64}$/.test(entry.expectedDigest))
-                || ((entry.content === null) !== (entry.digest === null))
-                || (entry.content !== null
-                    && crypto.createHash('sha256').update(entry.content, 'utf8').digest('hex') !== entry.digest)
-            ) throw new Error(`Durable authority restoration journal '${journalPath}' has an invalid entry.`);
-        }
-        return parsed;
-    }
-
-    private recoverDurableIndexAuthorityTransactions(
-        recoveryPublisher: DurableAuthorityRecoveryPublisher | undefined,
-    ): void {
-        const journalRoot = this.durableAuthorityRestoreRoot();
-        if (!fs.existsSync(journalRoot)) return;
-        const journalNames = fs.readdirSync(journalRoot)
-            .filter((entry) => entry.endsWith('.json'))
-            .sort();
-        if (journalNames.length === 0) return;
-        if (!recoveryPublisher) {
-            throw new Error(
-                `Durable authority recovery is required for ${journalNames.length} pending transaction(s), but no fenced recovery publisher is configured.`,
-            );
-        }
-        for (const name of journalNames) {
-            const journalPath = path.join(journalRoot, name);
-            const transaction = this.parseDurableAuthorityRestoreTransaction(journalPath);
-            let publicationCount = 0;
-            const recovered = recoveryPublisher(
-                transaction.canonicalRoot,
-                transaction.mutationOwner,
-                () => {
-                    publicationCount += 1;
-                    if (publicationCount > 1) {
-                        throw new Error(`Durable authority recovery '${transaction.id}' published more than once.`);
-                    }
-                    this.indexPolicyMutationCoordinator.withLock(transaction.canonicalRoot, () => {
-                        this.completeDurableAuthorityRestoreTransaction(journalPath, transaction);
-                    });
-                },
-            );
-            if ((recovered && publicationCount !== 1) || (!recovered && publicationCount !== 0)) {
-                throw new Error(`Durable authority recovery publisher violated the publication contract for '${transaction.id}'.`);
-            }
-            if (!recovered) {
-                throw new Error(
-                    `Durable authority recovery '${transaction.id}' could not acquire the mutation fence.`,
-                );
-            }
         }
     }
 
@@ -5298,7 +5022,7 @@ export class Context {
                 this.fsyncPath(entry.temporaryPath);
             }
         }
-        const journalRoot = this.durableAuthorityRestoreRoot();
+        const journalRoot = this.restoreTransactionMechanics.journalRoot();
         fs.mkdirSync(journalRoot, { recursive: true });
         const journalPath = path.join(journalRoot, `${id}.json`);
         const transaction: DurableAuthorityRestoreTransaction = {
@@ -5310,7 +5034,7 @@ export class Context {
             ...(mutationOwner ? { mutationOwner: { ...mutationOwner } } : {}),
             entries,
         };
-        this.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
+        this.restoreTransactionMechanics.writeDurableAuthorityRestoreTransaction(journalPath, transaction);
 
         let publicationCount = 0;
         let committed = false;
@@ -5323,13 +5047,13 @@ export class Context {
                 this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
                     const current = this.captureDurableIndexAuthority(canonicalRoot);
                     if (
-                        !this.artifactMatchesPath(policyPath, expectedCurrent.policyDocument)
-                        || !this.artifactMatchesPath(pointerPath, expectedCurrent.navigationPointer)
+                        !this.restoreTransactionMechanics.artifactMatchesPath(policyPath, expectedCurrent.policyDocument)
+                        || !this.restoreTransactionMechanics.artifactMatchesPath(pointerPath, expectedCurrent.navigationPointer)
                         || current.canonicalRoot !== expectedCurrent.canonicalRoot
                     ) {
                         throw new Error('Durable index authority changed after rollback capture; refusing stale restoration.');
                     }
-                    this.completeDurableAuthorityRestoreTransaction(journalPath, transaction);
+                    this.restoreTransactionMechanics.completeDurableAuthorityRestoreTransaction(journalPath, transaction);
                     committed = true;
                 });
             });
