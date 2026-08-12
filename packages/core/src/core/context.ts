@@ -130,6 +130,7 @@ import {
     type ProjectedChunkEntry,
 } from './indexing-pipeline';
 import { IndexPolicyMutationCoordinator } from './index-policy-mutation-coordinator';
+import { IndexPolicyDocumentStore } from '../policy/index-policy-document-store';
 import {
     IgnoreRuleService,
     getCustomExtensionsFromEnvironment,
@@ -691,6 +692,7 @@ export class Context {
     private publishedResolvedPoliciesByCodebase: Map<string, ResolvedIndexPolicy>;
     private readonly indexPolicyStateRoot: string;
     private readonly indexPolicyMutationCoordinator: IndexPolicyMutationCoordinator;
+    private readonly indexPolicyDocumentStore: IndexPolicyDocumentStore;
     private synchronizers = new Map<string, FileSynchronizer>();
     private synchronizerMutationTargets = new Map<string, string>();
     private reindexByChangeQueues = new Map<string, Promise<void>>();
@@ -811,6 +813,13 @@ export class Context {
             verifyPolicyDocumentDigest: (policyPath) => (
                 this.indexPolicyRuntimeService.resolveVerifiedIndexPolicyDocumentDigest(policyPath)
             ),
+        });
+        this.indexPolicyDocumentStore = new IndexPolicyDocumentStore({
+            mutationCoordinator: this.indexPolicyMutationCoordinator,
+            verifyPolicyDocumentDigest: (policyPath) => (
+                this.indexPolicyRuntimeService.resolveVerifiedIndexPolicyDocumentDigest(policyPath)
+            ),
+            fsyncPath: (targetPath) => this.fsyncPath(targetPath),
         });
         this.symbolRegistryStateRoot = config.symbolRegistryStateRoot;
         this.ignoreRuleService = new IgnoreRuleService({
@@ -4770,8 +4779,7 @@ export class Context {
 
         progressCallback?.({ phase: 'Removing index data...', current: 50, total: 100, percentage: 50 });
         await this.indexPolicyMutationCoordinator.withLockAsync(canonicalRoot, async () => {
-            const policyPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
-            this.indexPolicyMutationCoordinator.recoverTombstonesWhileLocked(policyPath);
+            this.indexPolicyDocumentStore.recoverTombstonesWhileLocked(canonicalRoot);
 
             for (const collectionName of await this.listRelatedCollectionNames(codebasePath)) {
                 await deleteCollectionWithVerification(this.vectorDatabase, collectionName, {
@@ -4783,7 +4791,7 @@ export class Context {
             // every related collection is confirmed absent, remove durable authority
             // before reconciling the process-local policy state.
             options.assertMutationCurrent?.();
-            fs.rmSync(policyPath, { force: true });
+            this.indexPolicyDocumentStore.deleteDocumentWhileLocked(canonicalRoot);
             this.clearResolvedIndexPolicyRuntime(canonicalRoot);
             this.indexPolicyRuntimeService.setPolicyFileToken(canonicalRoot, null);
 
@@ -4955,7 +4963,7 @@ export class Context {
         };
         return {
             canonicalRoot,
-            policyDocument: capture(this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot)),
+            policyDocument: this.indexPolicyDocumentStore.captureDocument(canonicalRoot),
             navigationPointer: capture(path.join(navigationRoot, 'current.json')),
         };
     }
@@ -5172,7 +5180,7 @@ export class Context {
             || path.resolve(journalPath) !== path.resolve(expectedJournalPath)
         ) throw new Error(`Durable authority restoration journal '${journalPath}' is invalid.`);
         const expectedTargets = [
-            this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot),
+            this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot),
             path.join(resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot), 'current.json'),
         ];
         for (const [index, entry] of parsed.entries.entries()) {
@@ -5267,7 +5275,7 @@ export class Context {
         validateArtifact('expected index policy', expectedCurrent.policyDocument);
         validateArtifact('expected navigation pointer', expectedCurrent.navigationPointer);
 
-        const policyPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
+        const policyPath = this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot);
         const navigationRoot = resolveNavigationSidecarRoot(this.symbolRegistryStateRoot, canonicalRoot);
         const pointerPath = path.join(navigationRoot, 'current.json');
         fs.mkdirSync(path.dirname(policyPath), { recursive: true });
@@ -5410,7 +5418,6 @@ export class Context {
         expectedDocumentDigest?: string,
     ): IndexPolicyPublicationReceipt {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const targetPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
         const receipt: IndexPolicyPublicationReceipt = {
             status: 'committed',
             operation: 'clear',
@@ -5424,65 +5431,10 @@ export class Context {
             if (publicationCount > 1) {
                 throw new Error('Index policy removal invoked more than once.');
             }
-            this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
-                let tombstonePath = `${targetPath}.removed-${process.pid}-${crypto.randomUUID()}`;
-                let movedPolicy = false;
-                let cleanupCommittedTombstone = false;
-                try {
-                    this.indexPolicyMutationCoordinator.recoverTombstonesWhileLocked(targetPath);
-                    try {
-                        fs.renameSync(targetPath, tombstonePath);
-                        movedPolicy = true;
-                    } catch (error) {
-                        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-                    }
-                    if (!movedPolicy && expectedDocumentDigest !== undefined) {
-                        throw new Error(
-                            `Index policy changed before removal; expected document '${expectedDocumentDigest}' but no document was present.`,
-                        );
-                    }
-
-                    let removedDocumentDigest: string | null = null;
-                    let digestError: unknown;
-                    if (movedPolicy) {
-                        try {
-                            removedDocumentDigest = this.indexPolicyRuntimeService.resolveVerifiedIndexPolicyDocumentDigest(tombstonePath);
-                        } catch (error) {
-                            digestError = error;
-                        }
-                    }
-                    if (
-                        expectedDocumentDigest !== undefined
-                        && (digestError || removedDocumentDigest !== expectedDocumentDigest)
-                    ) {
-                        const observed = digestError
-                            ? (digestError instanceof Error ? digestError.message : String(digestError))
-                            : `'${removedDocumentDigest}'`;
-                        if (!fs.existsSync(targetPath)) {
-                            try {
-                                fs.renameSync(tombstonePath, targetPath);
-                                movedPolicy = false;
-                            } catch (restoreError) {
-                                throw new Error(
-                                    `Index policy changed before removal and restoration failed; preserved tombstone '${tombstonePath}': ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
-                                );
-                            }
-                        } else {
-                            throw new Error(
-                                `Index policy changed before removal; preserved conflicting tombstone '${tombstonePath}' because '${targetPath}' is occupied.`,
-                            );
-                        }
-                        throw new Error(
-                            `Index policy changed before removal; expected document '${expectedDocumentDigest}' but tombstoned ${observed}.`,
-                        );
-                    }
-
-                    if (movedPolicy) {
-                        const committedTombstonePath = `${targetPath}.removed-committed-${process.pid}-${crypto.randomUUID()}`;
-                        fs.renameSync(tombstonePath, committedTombstonePath);
-                        tombstonePath = committedTombstonePath;
-                        cleanupCommittedTombstone = true;
-                    }
+            this.indexPolicyDocumentStore.removeDocument(
+                canonicalRoot,
+                expectedDocumentDigest,
+                (removedDocumentDigest) => {
                     committed = true;
                     receipt.previousDocumentDigest = removedDocumentDigest;
                     let reconciliationError: unknown;
@@ -5492,12 +5444,9 @@ export class Context {
                         reconciliationError = error;
                     }
                     this.indexPolicyRuntimeService.setPolicyFileToken(canonicalRoot, null);
-                    if (digestError) throw digestError;
                     if (reconciliationError) throw reconciliationError;
-                } finally {
-                    if (cleanupCommittedTombstone) fs.rmSync(tombstonePath, { force: true });
-                }
-            });
+                },
+            );
         };
         try {
             publishMutation(publish);
@@ -5516,7 +5465,6 @@ export class Context {
         }
         return receipt;
     }
-
     /**
      * Published-state activation hook invoked by the runtime policy service
      * after a resolved policy is activated. Context owns published bindings
@@ -7758,9 +7706,6 @@ export class Context {
             throw new Error('Resolved index policy hash does not match its effective inputs.');
         }
         ignore().add(policy.effectiveIgnorePatterns);
-        fs.mkdirSync(this.indexPolicyStateRoot, { recursive: true });
-        const targetPath = this.indexPolicyMutationCoordinator.resolvePolicyPath(canonicalRoot);
-        const temporaryPath = `${targetPath}.tmp-${process.pid}-${crypto.randomUUID()}`;
         const previousRuntimeState = {
             ...this.indexPolicyRuntimeService.captureRuntimePolicyState(canonicalRoot),
             binding: this.publishedPolicyBindingsByCodebase.get(canonicalRoot),
@@ -7832,8 +7777,6 @@ export class Context {
             navigation: { ...binding.navigation },
             ...(binding.publication ? { publication: structuredClone(binding.publication) } : {}),
         };
-        fs.writeFileSync(temporaryPath, JSON.stringify(policyDocument, null, 2));
-        this.fsyncPath(temporaryPath);
         let publicationCount = 0;
         let activationVisible = false;
         try {
@@ -7843,12 +7786,9 @@ export class Context {
                     throw new Error('Index policy publication invoked more than once.');
                 }
                 try {
-                    this.indexPolicyMutationCoordinator.withLock(canonicalRoot, () => {
-                        this.indexPolicyMutationCoordinator.recoverTombstonesWhileLocked(targetPath);
-                        fs.renameSync(temporaryPath, targetPath);
+                    this.indexPolicyDocumentStore.persistDocument(canonicalRoot, policyDocument, () => {
                         activationVisible = true;
                         activate?.();
-                        this.fsyncPath(path.dirname(targetPath));
                         this.indexPolicyRuntimeService.setPolicyFileToken(
                             canonicalRoot,
                             this.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot),
@@ -7878,8 +7818,6 @@ export class Context {
                 );
             }
             throw error;
-        } finally {
-            fs.rmSync(temporaryPath, { force: true });
         }
         return receipt;
     }
