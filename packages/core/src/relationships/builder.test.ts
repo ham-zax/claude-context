@@ -2173,3 +2173,143 @@ test('buildRelationshipDelta invalidates callers through persisted Python flow d
         true,
     );
 });
+
+test('buildRelationshipDelta full-rebuild oracle keeps records, claims, proof steps, and deterministic order identical', async () => {
+    const ledgerSource = [
+        'class SignalLedger:',
+        '    def record(self): pass',
+        '',
+        'class OtherLedger:',
+        '    def record(self): pass',
+    ].join('\n');
+    const servicesSource = [
+        'class Services:',
+        '    pass',
+        '',
+        'def consume(services: Services):',
+        '    services.signal_ledger.record()',
+    ].join('\n');
+    const engineSource = (ledgerType: 'SignalLedger' | 'OtherLedger') => [
+        'from .ledger import OtherLedger, SignalLedger',
+        'from .services import Services',
+        '',
+        'class Engine:',
+        '    def __init__(self):',
+        `        self.signal_ledger = ${ledgerType}()`,
+        '',
+        'def build_services(engine: Engine):',
+        '    return Services(signal_ledger=engine.signal_ledger)',
+        '',
+        'def run():',
+        '    engine = Engine()',
+        '    build_services(engine=engine)',
+    ].join('\n');
+    const previousSources = {
+        'src/ledger.py': ledgerSource,
+        'src/services.py': servicesSource,
+        'src/engine.py': engineSource('SignalLedger'),
+    };
+    const nextSources = {
+        'src/ledger.py': ledgerSource,
+        'src/services.py': servicesSource,
+        'src/engine.py': engineSource('OtherLedger'),
+    };
+    const previous = await buildAnalyzedPythonRegistry(previousSources);
+    const next = await buildAnalyzedPythonRegistry(nextSources);
+    const previousRecords = buildRelationshipsForRegistry(previous);
+
+    const claimsFor = (analysis: Map<string, RelationshipAnalysisEvidence>, file: string) => (
+        (analysis.get(file) as { resolutionClaims?: readonly ResolutionClaim[] } | undefined)
+            ?.resolutionClaims ?? []
+    );
+
+    const fullAnalysis = await analyzeFiles(nextSources);
+    const fullRecords = buildRelationshipsForRegistry({ registry: next.registry, analysisByFile: fullAnalysis });
+
+    const deltaAnalysis = await analyzeFiles(nextSources);
+    const delta = buildRelationshipDelta({
+        previousRegistry: previous.registry,
+        registry: next.registry,
+        existingRecords: previousRecords,
+        analysisByFile: deltaAnalysis,
+        previousAnalysisByFile: previous.analysisByFile,
+        changedFiles: new Set(['src/engine.py']),
+    });
+
+    assert.deepEqual(delta.affectedFiles, ['src/engine.py', 'src/services.py']);
+    assert.deepEqual(delta.records, fullRecords);
+
+    // The rebuilt delta evidence carries the identical claims as the full
+    // rebuild for every affected file: same decisions, authorities, proof
+    // steps (kind and order), dependency keys, and claim ordering.
+    for (const file of delta.affectedFiles) {
+        assert.deepEqual(claimsFor(deltaAnalysis, file), claimsFor(fullAnalysis, file));
+    }
+
+    // The oracle is not vacuous: it covers an origin-flow claim with ordered
+    // flow_hop steps and direct-binding claims with import/definition proof.
+    const servicesClaims = claimsFor(deltaAnalysis, 'src/services.py');
+    assert.equal(servicesClaims.length, 1);
+    const [flowClaim] = servicesClaims;
+    assert.equal(flowClaim.decision, 'resolved');
+    assert.equal(flowClaim.relationshipType, 'CALLS');
+    assert.equal(flowClaim.resolutionAuthority, 'origin_flow');
+    assert.equal(flowClaim.flowHops, 2);
+    assert.deepEqual(flowClaim.proofSteps.map((step) => step.kind), [
+        'call_site',
+        'containing_caller',
+        'parameter_annotation',
+        'allocation_origin',
+        'constructor_origin',
+        'flow_hop',
+        'field_origin',
+        'flow_hop',
+        'allocation_origin',
+    ]);
+    assert.deepEqual(
+        flowClaim.proofSteps.filter((step) => step.kind === 'flow_hop').map((step) => step.hop),
+        [1, 2],
+    );
+    assert.equal(flowClaim.dependencyKeys.length, 2);
+    assert.ok(flowClaim.dependencyKeys.every((key) => key.startsWith('src/engine.py:')));
+    const engineClaims = claimsFor(deltaAnalysis, 'src/engine.py');
+    assert.equal(engineClaims.length, 4);
+    assert.ok(engineClaims.every((claim) => (
+        claim.decision === 'resolved' && claim.resolutionAuthority === 'direct_binding'
+    )));
+
+    // Claim attachment is deterministically ordered by call span.
+    for (const file of delta.affectedFiles) {
+        const claims = claimsFor(deltaAnalysis, file);
+        const sorted = [...claims].sort((left, right) => (
+            left.callSpan.startByte - right.callSpan.startByte
+        ));
+        assert.deepEqual(claims, sorted);
+    }
+
+    // Deterministic order: a second full rebuild and a second delta on fresh
+    // analysis produce identical records, affected files, and claims.
+    const determinismAnalysis = await analyzeFiles(nextSources);
+    const determinismRecords = buildRelationshipsForRegistry({
+        registry: next.registry,
+        analysisByFile: determinismAnalysis,
+    });
+    assert.deepEqual(determinismRecords, fullRecords);
+    for (const file of delta.affectedFiles) {
+        assert.deepEqual(claimsFor(determinismAnalysis, file), claimsFor(fullAnalysis, file));
+    }
+    const deltaAnalysis2 = await analyzeFiles(nextSources);
+    const delta2 = buildRelationshipDelta({
+        previousRegistry: previous.registry,
+        registry: next.registry,
+        existingRecords: previousRecords,
+        analysisByFile: deltaAnalysis2,
+        previousAnalysisByFile: previous.analysisByFile,
+        changedFiles: new Set(['src/engine.py']),
+    });
+    assert.deepEqual(delta2.records, delta.records);
+    assert.deepEqual(delta2.affectedFiles, delta.affectedFiles);
+    for (const file of delta.affectedFiles) {
+        assert.deepEqual(claimsFor(deltaAnalysis2, file), claimsFor(deltaAnalysis, file));
+    }
+});
