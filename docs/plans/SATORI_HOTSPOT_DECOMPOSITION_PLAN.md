@@ -94,7 +94,7 @@ Completed ownership-bounded batches:
 - Phase 9.4 / close Phase 9.4 dead compatibility runtime: deleted 8 obsolete LateOn profile JSON assets (v1, v2-d16, v2-d32, v3-d32, v3-d32-v2); deleted search-rerank-contract-evidence.ts (inlined V3 evidence literals directly into search-rerank-request-contract.ts); simplified LateOn runtime profile types and reranker execution to V4 exclusively; removed retired hasBoundedExecutionContract and legacy profile execution branches; verified clean typecheck (tsc --noEmit) and lint (eslint src) across core and mcp: aef98f8.
 - Phase 9.5 / structural architecture guard: added phase9-architecture-boundary.test.ts scanning production source tree in packages/core/src and packages/mcp/src for forbidden retired module imports, retired index policy generation branching, and retired LateOn profile schema branching outside designated boundary files. Unit tests cover full tree scan (0 violations), synthetic planted import failure, synthetic planted policy branch failure, synthetic planted LateOn branch failure, and positive acceptance of current versioned identities (e.g. SearchGroupedResultV2): ee9c02e.
 
-Next open batch at this checkpoint: Phase 9.5 complete (`ee9c02e`). Next batch = Batch 6 (Final Phase 9 Seal).
+Next open batch at this checkpoint: Phase 9 implementation complete; pending final review.
 Phase 8 is sealed (`bc53cb4 → 0963ca9`, review-approved). Refresh this checkpoint only after an accepted batch is
 committed; preserve the original baseline above as historical lineage.
 
