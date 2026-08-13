@@ -1298,7 +1298,6 @@ async function withPreparedCollectionContext(
             symbolRegistryStateRoot: path.join(tempRoot, 'state'),
         });
         const stagedCollectionName = context.resolveStagedCollectionName(codebasePath, `run_${label}`);
-        context.setWriteCollectionOverride(codebasePath, stagedCollectionName);
         await work({ codebasePath, context, vectorDatabase, stagedCollectionName });
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -1331,7 +1330,7 @@ test('Context prepared collection receipt avoids a second create/drop cycle and 
 
         const receipt = await context.prepareIndexCollection(
             codebasePath,
-            { generation: 1, operationId: 'operation-single-create' },
+            { generation: 1, operationId: 'operation-single-create', collectionName: stagedCollectionName },
             () => events.push('guard'),
         );
         assert.deepEqual(events.slice(0, 5), [
@@ -1345,7 +1344,7 @@ test('Context prepared collection receipt avoids a second create/drop cycle and 
         events.length = 0;
         await context.indexCodebase(codebasePath, undefined, false, {
             preparedCollectionReceipt: receipt,
-            preparedCollectionBinding: { generation: 1, operationId: 'operation-single-create' },
+            preparedCollectionBinding: { generation: 1, operationId: 'operation-single-create', collectionName: stagedCollectionName },
             assertMutationCurrent: () => events.push('guard'),
         });
 
@@ -1360,20 +1359,20 @@ test('Context prepared collection receipt avoids a second create/drop cycle and 
 });
 
 test('Context prepared collection receipt is one-shot', async () => {
-    await withPreparedCollectionContext('one-shot', async ({ codebasePath, context }) => {
+    await withPreparedCollectionContext('one-shot', async ({ codebasePath, context, stagedCollectionName }) => {
         const receipt = await context.prepareIndexCollection(
             codebasePath,
-            { generation: 1, operationId: 'operation-one-shot' },
+            { generation: 1, operationId: 'operation-one-shot', collectionName: stagedCollectionName },
         );
         await context.indexCodebase(codebasePath, undefined, false, {
             preparedCollectionReceipt: receipt,
-            preparedCollectionBinding: { generation: 1, operationId: 'operation-one-shot' },
+            preparedCollectionBinding: { generation: 1, operationId: 'operation-one-shot', collectionName: stagedCollectionName },
         });
 
         await assert.rejects(
             () => context.indexCodebase(codebasePath, undefined, false, {
                 preparedCollectionReceipt: receipt,
-                preparedCollectionBinding: { generation: 1, operationId: 'operation-one-shot' },
+                preparedCollectionBinding: { generation: 1, operationId: 'operation-one-shot', collectionName: stagedCollectionName },
             }),
             /receipt is unknown or already consumed/,
         );
@@ -1381,20 +1380,20 @@ test('Context prepared collection receipt is one-shot', async () => {
 });
 
 test('Context prepared collection receipt rejects a different staged collection', async () => {
-    await withPreparedCollectionContext('mismatch', async ({ codebasePath, context }) => {
+    await withPreparedCollectionContext('mismatch', async ({ codebasePath, context, stagedCollectionName }) => {
         const receipt = await context.prepareIndexCollection(
             codebasePath,
-            { generation: 1, operationId: 'operation-mismatch' },
-        );
-        context.setWriteCollectionOverride(
-            codebasePath,
-            context.resolveStagedCollectionName(codebasePath, 'run_replacement'),
+            { generation: 1, operationId: 'operation-mismatch', collectionName: stagedCollectionName },
         );
 
         await assert.rejects(
             () => context.indexCodebase(codebasePath, undefined, false, {
                 preparedCollectionReceipt: receipt,
-                preparedCollectionBinding: { generation: 1, operationId: 'operation-mismatch' },
+                preparedCollectionBinding: {
+                    generation: 1,
+                    operationId: 'operation-mismatch',
+                    collectionName: context.resolveStagedCollectionName(codebasePath, 'run_replacement'),
+                },
             }),
             /does not match the current mutation and staged collection/,
         );
@@ -1402,16 +1401,16 @@ test('Context prepared collection receipt rejects a different staged collection'
 });
 
 test('Context prepared collection receipt rejects a stale mutation binding', async () => {
-    await withPreparedCollectionContext('stale', async ({ codebasePath, context }) => {
+    await withPreparedCollectionContext('stale', async ({ codebasePath, context, stagedCollectionName }) => {
         const receipt = await context.prepareIndexCollection(
             codebasePath,
-            { generation: 1, operationId: 'operation-stale' },
+            { generation: 1, operationId: 'operation-stale', collectionName: stagedCollectionName },
         );
 
         await assert.rejects(
             () => context.indexCodebase(codebasePath, undefined, false, {
                 preparedCollectionReceipt: receipt,
-                preparedCollectionBinding: { generation: 2, operationId: 'operation-replacement' },
+                preparedCollectionBinding: { generation: 2, operationId: 'operation-replacement', collectionName: stagedCollectionName },
             }),
             /does not match the current mutation and staged collection/,
         );
@@ -1427,14 +1426,14 @@ test('Context prepared collection receipt rejects a deleted staged collection', 
     }) => {
         const receipt = await context.prepareIndexCollection(
             codebasePath,
-            { generation: 1, operationId: 'operation-deleted' },
+            { generation: 1, operationId: 'operation-deleted', collectionName: stagedCollectionName },
         );
         await vectorDatabase.dropCollection(stagedCollectionName);
 
         await assert.rejects(
             () => context.indexCodebase(codebasePath, undefined, false, {
                 preparedCollectionReceipt: receipt,
-                preparedCollectionBinding: { generation: 1, operationId: 'operation-deleted' },
+                preparedCollectionBinding: { generation: 1, operationId: 'operation-deleted', collectionName: stagedCollectionName },
             }),
             /prepared staged collection .* no longer exists/i,
         );
@@ -9540,9 +9539,20 @@ test('Context.reindexByChange retries the exact staged mutation target after mar
             symbolRegistryStateRoot: stateRoot,
         });
         const stagedCollection = context.resolveStagedCollectionName(codebasePath, 'retry-stage');
-        context.setWriteCollectionOverride(codebasePath, stagedCollection);
+        const stagedReceipt = await context.prepareIndexCollection(codebasePath, {
+            generation: 1,
+            operationId: 'staged-initial',
+            collectionName: stagedCollection,
+        });
         await context.recreateSynchronizerForCodebase(codebasePath);
-        await context.indexCodebase(codebasePath);
+        await context.indexCodebase(codebasePath, undefined, false, {
+            preparedCollectionReceipt: stagedReceipt,
+            preparedCollectionBinding: {
+                generation: 1,
+                operationId: 'staged-initial',
+                collectionName: stagedCollection,
+            },
+        });
         await publishCurrentAuthorityCheckpoint(context, codebasePath);
         assert.equal(await context.getActiveIndexedCollectionName(codebasePath), stagedCollection);
 

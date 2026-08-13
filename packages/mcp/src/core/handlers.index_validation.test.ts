@@ -140,7 +140,7 @@ function createHandlersForValidation(options: ValidationHarnessOptions): {
         },
         ...(options.omitPreparedCollectionCapability !== 'prepareIndexCollection' ? { prepareIndexCollection: async (
             codebasePath: string,
-            binding: { generation: number; operationId: string },
+            binding: { generation: number; operationId: string; collectionName: string },
             assertMutationCurrent?: () => void,
         ) => {
             assertMutationCurrent?.();
@@ -148,13 +148,11 @@ function createHandlersForValidation(options: ValidationHarnessOptions): {
                 throw new Error(COLLECTION_LIMIT_MESSAGE);
             }
             assertMutationCurrent?.();
-            if (!writeCollectionOverride) {
-                throw new Error('Test harness has no staged write collection.');
-            }
+            writeCollectionOverride = binding.collectionName;
             liveCollections.add(writeCollectionOverride);
             preparedReceipt = Object.freeze({
                 canonicalRoot: path.resolve(codebasePath),
-                collectionName: writeCollectionOverride,
+                collectionName: binding.collectionName,
                 generation: binding.generation,
                 operationId: binding.operationId,
             });

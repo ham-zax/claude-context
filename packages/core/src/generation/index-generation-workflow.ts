@@ -120,6 +120,7 @@ type MutationGuardOptions = {
     indexPolicy?: ResolvedIndexPolicy;
     preparedCollectionReceipt?: PreparedIndexCollectionReceipt;
     preparedCollectionBinding?: PreparedIndexCollectionBinding;
+    writeCollectionName?: string;
 };
 type ReindexByChangeResult = {
     added: number;
@@ -210,7 +211,6 @@ export interface IndexGenerationWorkflowPorts {
     getLanguageRouterVersion(): string;
     getRelationshipVersion(): string;
     getSymbolExtractorVersion(): string;
-    getWriteCollectionName(codebasePath: string): string;
     indexCompletionMarkersEqual(
             left: IndexCompletionMarkerDocument,
             right: IndexCompletionMarkerDocument,
@@ -238,6 +238,7 @@ export interface IndexGenerationWorkflowPorts {
             codebasePath: string,
             forceReindex?: boolean,
             assertMutationCurrent?: () => void,
+            collectionNameOverride?: string,
         ): Promise<void>;
     processFileList(
             filePaths: string[],
@@ -416,7 +417,7 @@ export class IndexGenerationWorkflow {
     }
 
     async clearIndexCompletionMarker(codebasePath: string, assertMutationCurrent?: () => void): Promise<void> {
-        const collectionName = this.ports.getWriteCollectionName(codebasePath);
+        const collectionName = this.ports.resolveCollectionName(codebasePath);
         const hasCollection = await this.ports.vectorDatabase.hasCollection(collectionName);
         if (!hasCollection) {
             const activeCollectionName = await this.ports.getActiveIndexedCollectionName(codebasePath);
@@ -444,10 +445,9 @@ export class IndexGenerationWorkflow {
         }
 
         const canonicalRoot = this.ports.canonicalizeCodebasePath(codebasePath);
-        const expectedCollectionName = this.ports.getWriteCollectionName(canonicalRoot);
         if (
             receipt.canonicalRoot !== canonicalRoot
-            || receipt.collectionName !== expectedCollectionName
+            || receipt.collectionName !== expectedBinding.collectionName
             || receipt.generation !== expectedBinding.generation
             || receipt.operationId !== expectedBinding.operationId
         ) {
@@ -462,7 +462,7 @@ export class IndexGenerationWorkflow {
     }
 
     private async finalizePreparedCollection(
-        codebasePath: string,
+        collectionName: string,
         assertMutationCurrent?: () => void,
     ): Promise<void> {
         if (!this.ports.getIsHybrid() || !this.ports.vectorDatabase.finalizeCollectionForSearch) {
@@ -471,7 +471,7 @@ export class IndexGenerationWorkflow {
         // Authority publication must remain after this boundary. Before finalization the
         // collection accepts writes but is intentionally neither indexed nor searchable.
         assertMutationCurrent?.();
-        await this.ports.vectorDatabase.finalizeCollectionForSearch(this.ports.getWriteCollectionName(codebasePath));
+        await this.ports.vectorDatabase.finalizeCollectionForSearch(collectionName);
     }
 
     async indexCodebase(
@@ -515,6 +515,12 @@ export class IndexGenerationWorkflow {
         // Forced preparation replaces the collection, so the new schema cannot contain
         // an old completion marker. Do not query it to clear one: hybrid rebuilds keep
         // this collection deliberately indexless until all payload writes are complete.
+        // Phase 8.5 - the operation-scoped write target: the consumed receipt
+        // names the staged collection; an explicit option covers receipt-less
+        // staged rebuilds; otherwise the family name is the target.
+        const writeCollectionName = options.preparedCollectionReceipt?.collectionName
+            ?? options.writeCollectionName
+            ?? this.ports.resolveCollectionName(codebasePath);
         const prepareStartedAt = Date.now();
         if (options.preparedCollectionReceipt) {
             if (!options.preparedCollectionBinding) {
@@ -529,7 +535,12 @@ export class IndexGenerationWorkflow {
         } else if (options.preparedCollectionBinding) {
             throw new Error('Prepared index collection receipt is required with its binding.');
         } else {
-            await this.ports.prepareCollection(codebasePath, true, options.assertMutationCurrent);
+            await this.ports.prepareCollection(
+                codebasePath,
+                true,
+                options.assertMutationCurrent,
+                writeCollectionName,
+            );
         }
         prepareCollectionMs = Date.now() - prepareStartedAt;
 
@@ -541,7 +552,7 @@ export class IndexGenerationWorkflow {
         console.log(`[Context] 📁 Found ${codeFiles.length} code files`);
 
         if (codeFiles.length === 0) {
-            await this.finalizePreparedCollection(codebasePath, options.assertMutationCurrent);
+            await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
             const navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
                 codebasePath,
                 [],
@@ -553,16 +564,16 @@ export class IndexGenerationWorkflow {
                 indexPolicy,
             );
             if (!options.deferFullIndexPublication) {
-                await this.ports.writeCompletedIndexMarker(codebasePath, 0, 0, undefined, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
+                await this.ports.writeCompletedIndexMarker(codebasePath, 0, 0, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
                 const marker = await this.ports.resolveCompletionMarkerForCollection(
                     codebasePath,
-                    this.ports.getWriteCollectionName(codebasePath),
+                    writeCollectionName,
                 );
                 if (!marker) {
-                    throw new Error(`Completed index did not produce a completion marker for '${this.ports.getWriteCollectionName(codebasePath)}'.`);
+                    throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
                 }
                 await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
-                    collectionName: this.ports.getWriteCollectionName(codebasePath),
+                    collectionName: writeCollectionName,
                     navigation: navigationCandidate ? {
                         status: 'sealed',
                         generationId: navigationCandidate.generationId,
@@ -602,14 +613,14 @@ export class IndexGenerationWorkflow {
                     percentage: Math.round(progressPercentage)
                 });
             },
-            undefined,
+            writeCollectionName,
             options.assertMutationCurrent,
             indexPolicy,
         );
         payloadPipelineMs = Date.now() - payloadStartedAt;
 
         const finalizeStartedAt = Date.now();
-        await this.finalizePreparedCollection(codebasePath, options.assertMutationCurrent);
+        await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
         finalizeCollectionMs = Date.now() - finalizeStartedAt;
 
         console.log(`[Context] ✅ Codebase indexing completed! Processed ${result.processedFiles} files in total, generated ${result.totalChunks} code chunks`);
@@ -630,16 +641,16 @@ export class IndexGenerationWorkflow {
             navigationMs = Date.now() - navigationStartedAt;
             if (!options.deferFullIndexPublication) {
                 const publicationStartedAt = Date.now();
-                await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, undefined, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
+                await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
                 const marker = await this.ports.resolveCompletionMarkerForCollection(
                     codebasePath,
-                    this.ports.getWriteCollectionName(codebasePath),
+                    writeCollectionName,
                 );
                 if (!marker) {
-                    throw new Error(`Completed index did not produce a completion marker for '${this.ports.getWriteCollectionName(codebasePath)}'.`);
+                    throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
                 }
                 await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
-                    collectionName: this.ports.getWriteCollectionName(codebasePath),
+                    collectionName: writeCollectionName,
                     navigation: navigationCandidate ? {
                         status: 'sealed',
                         generationId: navigationCandidate.generationId,
@@ -655,16 +666,16 @@ export class IndexGenerationWorkflow {
             console.warn('[Context] ⚠️  Skipping symbol registry sidecar write because indexing stopped before processing the full file set.');
             if (!options.deferFullIndexPublication) {
                 const publicationStartedAt = Date.now();
-                await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, undefined, 'limit_reached', options.assertMutationCurrent, undefined, indexPolicy.policyHash);
+                await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, writeCollectionName, 'limit_reached', options.assertMutationCurrent, undefined, indexPolicy.policyHash);
                 const marker = await this.ports.resolveCompletionMarkerForCollection(
                     codebasePath,
-                    this.ports.getWriteCollectionName(codebasePath),
+                    writeCollectionName,
                 );
                 if (!marker) {
-                    throw new Error(`Partial index did not produce a completion marker for '${this.ports.getWriteCollectionName(codebasePath)}'.`);
+                    throw new Error(`Partial index did not produce a completion marker for '${writeCollectionName}'.`);
                 }
                 await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
-                    collectionName: this.ports.getWriteCollectionName(codebasePath),
+                    collectionName: writeCollectionName,
                     navigation: { status: 'not_bound' },
                 }, marker, options.publishMutation);
                 console.warn('[Context] ⚠️  Wrote completion marker for limit_reached partial index (navigation remains unpublished).');
@@ -1243,7 +1254,7 @@ export class IndexGenerationWorkflow {
                 removed: 0,
                 modified: 0,
                 changedFiles,
-                collectionName: this.ports.getWriteCollectionName(codebasePath),
+                collectionName: options.targetCollectionName ?? this.ports.resolveCollectionName(codebasePath),
                 indexedFiles: indexResult.indexedFiles,
                 totalChunks: indexResult.totalChunks,
                 indexStatus: indexResult.status,
@@ -1994,7 +2005,7 @@ export class IndexGenerationWorkflow {
             // authority after collection-family evidence has been recorded.
         }
         const familyCollectionNames = await this.ports.listRelatedCollectionNames(canonicalPath);
-        const activeCollectionName = this.ports.getWriteCollectionName(canonicalPath);
+        const activeCollectionName = this.ports.resolveCollectionName(canonicalPath);
         const sealedCollectionName =
             this.ports.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalPath)?.collectionName;
         const preferredCollectionName = options.preferredCollectionName?.trim();

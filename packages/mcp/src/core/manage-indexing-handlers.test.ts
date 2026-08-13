@@ -488,7 +488,6 @@ function createFailedIndexingHarness(
     let publishedCustomIgnorePatterns = [...(options.initialCustomIgnorePatterns ?? [])];
     let standardPolicyResolutionCalls = 0;
     let reindexPolicyResolutionCalls = 0;
-    let writeCollectionOverride: string | null = null;
     let indexedSnapshots = 0;
     let registeredSynchronizers = 0;
     let completionMarkerClearCalls = 0;
@@ -658,8 +657,9 @@ function createFailedIndexingHarness(
             // The production Context full-rebuild owner creates the staged
             // collection. Keep failure-cleanup fixtures faithful without
             // reintroducing the removed background-worker pre-create.
-            if (writeCollectionOverride) {
-                existingCollections.add(writeCollectionOverride);
+            const indexOptions = args[3] as { writeCollectionName?: string } | undefined;
+            if (indexOptions?.writeCollectionName) {
+                existingCollections.add(indexOptions.writeCollectionName);
             }
             const result = options.indexCodebase
                 ? await options.indexCodebase(...args)
@@ -856,9 +856,6 @@ function createFailedIndexingHarness(
         },
         runtimeFingerprint: RUNTIME_FINGERPRINT,
         resolveCollectionName,
-        setWriteCollectionOverride: (_codebasePath: string, collectionName: string | null) => {
-            writeCollectionOverride = collectionName;
-        },
         loadIndexProfileForCodebase: () => ({ profile: "default" }),
         getContextActiveIgnorePatterns: () => [],
         getContextIndexedExtensions: () => [".ts"],
@@ -968,16 +965,14 @@ function createIndexLaunchHarness(
             },
             prepareIndexCollection: async (
                 codebasePath: string,
-                binding: { generation: number; operationId: string },
+                binding: { generation: number; operationId: string; collectionName: string },
                 assertMutationCurrent?: () => void,
             ) => {
                 assertMutationCurrent?.();
-                if (!writeCollectionOverride) {
-                    throw new Error('Test harness has no staged write collection.');
-                }
+                writeCollectionOverride = binding.collectionName;
                 preparedReceipt = Object.freeze({
                     canonicalRoot: path.resolve(codebasePath),
-                    collectionName: writeCollectionOverride,
+                    collectionName: binding.collectionName,
                     generation: binding.generation,
                     operationId: binding.operationId,
                 });

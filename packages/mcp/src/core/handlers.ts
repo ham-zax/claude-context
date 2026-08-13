@@ -260,7 +260,6 @@ type ContextLifecycleCapabilities = IndexCompletionMarkerContext & {
     } | null;
     resolveCollectionName?: (codebasePath: string) => string;
     resolveStagedCollectionName?: (codebasePath: string, generationId: string) => string;
-    setWriteCollectionOverride?: (codebasePath: string, collectionName: string | null) => void;
     loadIndexProfileForCodebase?: (codebasePath: string) => IndexProfileView;
     getActiveIgnorePatterns?: (codebasePath?: string) => string[];
     getIndexedExtensionsForCodebase?: (codebasePath: string) => string[];
@@ -974,7 +973,6 @@ export class ToolHandlers {
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
             saveSnapshotIfSupported: this.saveSnapshotIfSupported.bind(this),
             touchWatchedCodebase: this.touchWatchedCodebase.bind(this),
-            setWriteCollectionOverride: this.setWriteCollectionOverride.bind(this),
             loadIndexProfileForCodebase: this.loadIndexProfileForCodebase.bind(this),
             getContextActiveIgnorePatterns: this.getContextActiveIgnorePatterns.bind(this),
             getContextIndexedExtensions: this.getContextIndexedExtensions.bind(this),
@@ -2144,7 +2142,6 @@ export class ToolHandlers {
         const requiredContextCapabilities = [
             'resolveCollectionName',
             'resolveStagedCollectionName',
-            'setWriteCollectionOverride',
             'prepareIndexCollection',
             'discardPreparedIndexCollection',
             'getActiveIndexedCollectionName',
@@ -2187,14 +2184,6 @@ export class ToolHandlers {
             throw new Error('Context lifecycle capability resolveStagedCollectionName is required.');
         }
         return resolve.call(this.context, codebasePath, generationId);
-    }
-
-    private setWriteCollectionOverride(codebasePath: string, collectionName: string | null): void {
-        const setOverride = this.contextLifecycle().setWriteCollectionOverride;
-        if (typeof setOverride !== 'function') {
-            throw new Error('Context lifecycle capability setWriteCollectionOverride is required.');
-        }
-        setOverride.call(this.context, codebasePath, collectionName);
     }
 
     private loadIndexProfileForCodebase(codebasePath: string): IndexProfileView {

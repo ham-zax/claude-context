@@ -44,6 +44,7 @@ export type IndexMutationOptions = {
     indexPolicy?: ResolvedIndexPolicy;
     preparedCollectionReceipt?: PreparedIndexCollectionReceipt;
     preparedCollectionBinding?: PreparedIndexCollectionBinding;
+    writeCollectionName?: string;
 };
 
 export type IndexMutationRepairOptions = {

@@ -79,16 +79,16 @@ test('prepareIndexCollection passes the generation binding and mutation guard th
     }));
     const receipt = await port.prepareIndexCollection(
         '/tmp/root',
-        { generation: 1, operationId: 'operation-1' },
+        { generation: 1, operationId: 'operation-1', collectionName: 'staged' },
         guard,
     );
     assert.equal(receipt.collectionName, 'staged');
     const [, binding, assertMutationCurrent] = (seen as [
         string,
-        { generation: number; operationId: string },
+        { generation: number; operationId: string; collectionName: string },
         () => void,
     ]);
-    assert.deepEqual(binding, { generation: 1, operationId: 'operation-1' });
+    assert.deepEqual(binding, { generation: 1, operationId: 'operation-1', collectionName: 'staged' });
     assert.equal(assertMutationCurrent, guard);
 });
 

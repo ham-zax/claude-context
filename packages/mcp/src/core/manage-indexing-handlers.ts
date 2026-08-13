@@ -199,7 +199,6 @@ type ManageIndexingHandlersHost = {
     ): ToolTextResponse;
     saveSnapshotIfSupported(): void;
     touchWatchedCodebase(codebasePath: string): Promise<void>;
-    setWriteCollectionOverride(codebasePath: string, collectionName: string | null): void;
     loadIndexProfileForCodebase(codebasePath: string): IndexProfileView;
     getContextActiveIgnorePatterns(codebasePath: string): string[];
     getContextIndexedExtensions(codebasePath: string): string[];
@@ -747,13 +746,15 @@ export class ManageIndexingHandlers {
                     // dummy create/delete adds remote deletion latency and still
                     // leaves the actual schema creation unproven. Context issues
                     // a one-shot generation-bound receipt for the background
-                    // owner to consume before it may skip preparation.
-                    this.host.setWriteCollectionOverride(absolutePath, stagedCollectionName);
+                    // owner to consume before it may skip preparation. The
+                    // staged write target travels inside the binding, not in
+                    // ambient host state.
                     preparedCollectionReceipt = await this.host.indexMutationPort.prepareIndexCollection(
                         absolutePath,
                         {
                             generation: mutationLease.generation,
                             operationId: mutationLease.operationId,
+                            collectionName: stagedCollectionName,
                         },
                         () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
                     );
@@ -783,7 +784,6 @@ export class ManageIndexingHandlers {
                         () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
                     );
                 }
-                this.host.setWriteCollectionOverride(absolutePath, null);
                 if (isCollectionLimitError(validationError)) {
                     const guidanceMessage = await this.host.buildCollectionLimitMessage(absolutePath);
                     return this.host.manageResponse(manageAction, absolutePath, "error", guidanceMessage, operationOptions("failed", preflightOptions));
@@ -932,9 +932,6 @@ export class ManageIndexingHandlers {
                     stagedCollectionName,
                     () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
                 );
-                if (this.host.mutationLeaseCoordinator?.isCurrent(mutationLease)) {
-                    this.host.setWriteCollectionOverride(failurePath, null);
-                }
             }
             const previousFingerprint = parseIndexFingerprint(existingInfo?.indexFingerprint);
             const previousCollectionName = typeof existingInfo?.collectionName === "string"
@@ -1636,7 +1633,6 @@ export class ManageIndexingHandlers {
             targetCollectionName = typeof writeCollectionName === "string" && writeCollectionName.trim().length > 0
                 ? writeCollectionName
                 : this.host.resolveCollectionName(absolutePath);
-            this.host.setWriteCollectionOverride(absolutePath, targetCollectionName);
 
             if (forceReindex) {
                 console.log("[BACKGROUND-INDEX] ℹ️  Force reindex mode - building a staged generation before retiring the previous proven collection.");
@@ -1726,11 +1722,13 @@ export class ManageIndexingHandlers {
                 publishMutation,
                 deferFullIndexPublication: true,
                 indexPolicy: candidatePolicy,
+                writeCollectionName: targetCollectionName,
                 ...(preparedCollectionReceipt && mutationLease ? {
                     preparedCollectionReceipt,
                     preparedCollectionBinding: {
                         generation: mutationLease.generation,
                         operationId: mutationLease.operationId,
+                        collectionName: targetCollectionName,
                     },
                 } : {}),
             });
@@ -2222,8 +2220,6 @@ export class ManageIndexingHandlers {
                 console.error(`[BACKGROUND-INDEX] Failed to persist terminal failure for '${absolutePath}': ${formatUnknownError(snapshotError)}`);
             }
             console.error(`[BACKGROUND-INDEX] Indexing failed for ${absolutePath}: ${errorMessage}`);
-        } finally {
-            this.host.setWriteCollectionOverride(absolutePath, null);
         }
     }
 }

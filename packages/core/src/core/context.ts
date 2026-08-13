@@ -592,7 +592,6 @@ export class Context {
     private indexGenerationWorkflow: IndexGenerationWorkflow;
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
-    private writeCollectionOverrides = new Map<string, string>();
     private symbolRegistryStateRoot?: string;
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
     private readonly indexingPipeline: IndexingPipeline;
@@ -815,7 +814,6 @@ export class Context {
             getLanguageRouterVersion: () => this.getLanguageRouterVersion(),
             getRelationshipVersion: () => this.getRelationshipVersion(),
             getSymbolExtractorVersion: () => this.getSymbolExtractorVersion(),
-            getWriteCollectionName: (codebasePath) => this.getWriteCollectionName(codebasePath),
             indexAuthorityCoordinator: this.indexAuthorityCoordinator,
             indexCompletionMarkersEqual: (left, right) => this.indexCompletionMarkersEqual(left, right),
             indexPolicyRuntimeService: this.indexPolicyRuntimeService,
@@ -833,8 +831,8 @@ export class Context {
             ),
             policyNavigationBindingFromMarker: (navigation) => policyNavigationBindingFromMarker(navigation),
             policyNavigationBindingsEqual: (left, right) => policyNavigationBindingsEqual(left, right),
-            prepareCollection: (codebasePath, forceReindex, assertMutationCurrent) => (
-                this.prepareCollection(codebasePath, forceReindex, assertMutationCurrent)
+            prepareCollection: (codebasePath, forceReindex, assertMutationCurrent, collectionNameOverride) => (
+                this.prepareCollection(codebasePath, forceReindex, assertMutationCurrent, collectionNameOverride)
             ),
             processFileList: (filePaths, codebasePath, onFileProcessed, collectionName, assertMutationCurrent, indexPolicy) => (
                 this.processFileList(
@@ -1559,7 +1557,7 @@ export class Context {
         relativePaths: string[],
         assertMutationCurrent?: () => void,
     ): Promise<number> {
-        const collectionName = await this.getActiveIndexedCollectionName(codebasePath) || this.getWriteCollectionName(codebasePath);
+        const collectionName = await this.getActiveIndexedCollectionName(codebasePath) || this.resolveCollectionName(codebasePath);
         const uniquePaths = Array.from(new Set(this.normalizeRelativePathsForCodebase(codebasePath, relativePaths)));
 
         for (const relativePath of uniquePaths) {
@@ -1603,11 +1601,6 @@ export class Context {
             activeFamilyName,
             alternateFamilyName,
         };
-    }
-
-    private getWriteCollectionName(codebasePath: string): string {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        return this.writeCollectionOverrides.get(canonicalRoot) || this.resolveCollectionName(codebasePath);
     }
 
     private async listRelatedCollectionNames(codebasePath: string): Promise<string[]> {
@@ -2123,12 +2116,13 @@ export class Context {
     }
 
     public setWriteCollectionOverride(codebasePath: string, collectionName: string | null): void {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        if (!collectionName || collectionName.trim().length === 0) {
-            this.writeCollectionOverrides.delete(canonicalRoot);
-            return;
-        }
-        this.writeCollectionOverrides.set(canonicalRoot, collectionName.trim());
+        // Phase 8.5 - the write target is operation-scoped: the prepared index
+        // collection receipt carries the staged collection name for its own
+        // operation, and every indexing entry point takes an explicit target.
+        // This setter remains only for published-surface compatibility and no
+        // longer maintains ambient write-target state.
+        void codebasePath;
+        void collectionName;
     }
 
     /**
@@ -2150,14 +2144,14 @@ export class Context {
         }
 
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const collectionName = this.getWriteCollectionName(canonicalRoot);
+        const collectionName = binding.collectionName.trim();
         const stagedPrefix = `${this.resolveCollectionName(canonicalRoot)}${GENERATION_COLLECTION_SEPARATOR}`;
         if (!collectionName.startsWith(stagedPrefix)) {
             throw new Error(`Prepared index collection '${collectionName}' is not a staged generation for '${canonicalRoot}'.`);
         }
 
         assertMutationCurrent?.();
-        await this.prepareCollection(canonicalRoot, true, assertMutationCurrent);
+        await this.prepareCollection(canonicalRoot, true, assertMutationCurrent, collectionName);
         assertMutationCurrent?.();
 
         const receipt = Object.freeze({
@@ -3068,7 +3062,7 @@ export class Context {
         collectionNameOverride?: string,
         assertMutationCurrent?: () => void,
     ): Promise<void> {
-        const collectionName = collectionNameOverride || this.getWriteCollectionName(codebasePath);
+        const collectionName = collectionNameOverride || this.resolveCollectionName(codebasePath);
         const hasCollection = await this.vectorDatabase.hasCollection(collectionName);
         if (!hasCollection) {
             throw new Error(`Cannot write completion marker: collection '${collectionName}' does not exist.`);
@@ -3266,7 +3260,6 @@ export class Context {
             const familyCollectionName = this.resolveCollectionName(codebasePath);
             this.synchronizerRegistry.clearSynchronizerForCollection(familyCollectionName);
             this.ignoreRuleService.deleteCodebaseState(codebasePath);
-            this.writeCollectionOverrides.delete(canonicalRoot);
             this.indexPolicyRuntimeService.deleteIndexProfile(canonicalRoot);
         });
 
@@ -3661,6 +3654,7 @@ export class Context {
         codebasePath: string,
         forceReindex: boolean = false,
         assertMutationCurrent?: () => void,
+        collectionNameOverride?: string,
     ): Promise<void> {
         // Identity drift must fail before a valid published collection is
         // dropped or a staged generation is otherwise mutated.
@@ -3668,7 +3662,7 @@ export class Context {
         const isHybrid = this.getIsHybrid();
         const collectionType = isHybrid === true ? 'hybrid vector' : 'vector';
         console.log(`[Context] 🔧 Preparing ${collectionType} collection for codebase: ${codebasePath}${forceReindex ? ' (FORCE REINDEX)' : ''}`);
-        const collectionName = this.getWriteCollectionName(codebasePath);
+        const collectionName = collectionNameOverride ?? this.resolveCollectionName(codebasePath);
 
         // Check if collection already exists
         const collectionExists = await this.vectorDatabase.hasCollection(collectionName);
@@ -3769,7 +3763,7 @@ export class Context {
         filePaths: string[],
         codebasePath: string,
         onFileProcessed?: (filePath: string, fileIndex: number, totalFiles: number) => void,
-        collectionName: string = this.getWriteCollectionName(codebasePath),
+        collectionName: string = this.resolveCollectionName(codebasePath),
         assertMutationCurrent?: () => void,
         indexPolicy?: ResolvedIndexPolicy,
     ): Promise<ProcessedFileList> {
