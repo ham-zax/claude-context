@@ -2925,6 +2925,36 @@ test("install all smoke writes launcher-backed config for every supported client
     });
 });
 
+test("install plan mutation records are frozen after planning", async () => {
+    await withTempHome(async (homeDir) => {
+        const plan = createInstallPlan({
+            kind: "install",
+            client: "claude",
+            runtime: "voyage",
+            dryRun: true,
+        }, installOptions(homeDir));
+
+        assert.equal(Object.isFrozen(plan), true);
+        assert.equal(Object.isFrozen(plan.options), true);
+        assert.equal(Object.isFrozen(plan.prepared), true);
+        assert.equal(Object.isFrozen(plan.profileMutation), true);
+        for (const entry of plan.prepared) {
+            assert.equal(Object.isFrozen(entry), true);
+            assert.equal(Object.isFrozen(entry.configMutation), true);
+            assert.equal(Object.isFrozen(entry.companionMutations), true);
+            for (const companion of entry.companionMutations) {
+                assert.equal(Object.isFrozen(companion), true);
+            }
+            assert.throws(() => { entry.configMutation.changed = false; }, TypeError);
+            assert.throws(() => { entry.configMutation.apply = () => {}; }, TypeError);
+            for (const companion of entry.companionMutations) {
+                assert.throws(() => { companion.changed = false; }, TypeError);
+            }
+        }
+        assert.throws(() => { plan.profileMutation.changed = false; }, TypeError);
+    });
+});
+
 test("auto client selection uses client markers and PATH executables", async () => {
     await withTempHome(async (homeDir) => {
         const plan = (env: NodeJS.ProcessEnv) => createInstallPlan({

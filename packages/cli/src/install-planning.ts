@@ -63,7 +63,10 @@ export function createInstallPlan(
             .map((target) => prepareMutation(target, command, clientCommand))
             .map((mutation) => Object.freeze({
                 ...mutation,
-                companionMutations: Object.freeze([...mutation.companionMutations]),
+                configMutation: Object.freeze({ ...mutation.configMutation }),
+                companionMutations: Object.freeze(
+                    mutation.companionMutations.map((companion) => Object.freeze({ ...companion })),
+                ),
             })),
     );
 
@@ -89,7 +92,7 @@ export function createInstallPlan(
             command: clientCommand.command,
             args: Object.freeze([...clientCommand.args]) as unknown as string[],
         }),
-        profileMutation,
+        profileMutation: Object.freeze({ ...profileMutation }),
         prepared,
         options: planOptions,
     });
