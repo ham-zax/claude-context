@@ -20,10 +20,17 @@ import {
     SEARCH_RERANK_DOCUMENT_POLICY,
     buildSearchRerankDocument,
 } from "./search-rerank-document.js";
-import {
-    SEARCH_RERANK_DOCUMENT_V3_CONTRACT_EVIDENCE,
-    SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE,
-} from "./search-rerank-contract-evidence.js";
+const SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE = Object.freeze({
+    id: "search_rerank_document_v3",
+    previousVersion: "search_rerank_document_v2",
+    maximumUtf8Bytes: 4_000,
+    serialization: "canonical_json_utf8",
+    serializedKeyOrder: "lexicographic_recursive_canonical_json_v1",
+    addedField: "candidate_role",
+});
+
+const SEARCH_RERANK_DOCUMENT_V3_CONTRACT_EVIDENCE =
+    "{\"candidate_role\":\"implementation\",\"canonical_symbol_label\":\"validate_order\",\"documentation_excerpt\":\"\",\"language\":\"typescript\",\"query_relevant_source_excerpt\":\"function validate_order(order) {\\n    return check_shariah_compliance(order);\\n}\",\"repository_relative_path\":\"src/core/veto.ts\",\"required_owner_siblings\":[],\"signature_or_declaration\":\"function validate_order(order) {\",\"symbol_kind\":\"function\"}";
 import { resolveSearchRerankDocumentProjectionIdentity } from "./search-rerank-document-routing.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import type { SearchAnswerFocus } from "./search-rerank-context.js";

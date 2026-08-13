@@ -6,7 +6,7 @@
  * (`search_rerank_document_v4`); `buildSearchRerankDocument` is its single
  * executable implementation. Historical V2/V3 builders are retired, and their
  * fixture material survives only as inert contract evidence in
- * `search-rerank-contract-evidence.ts`.
+ * `search-rerank-request-contract.ts`.
  */
 import { compareContractStrings } from "@zokizuan/satori-core";
 import { serializeCanonicalJson } from "./canonical-json.js";

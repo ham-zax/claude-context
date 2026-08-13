@@ -2,7 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { fork } from "node:child_process";
 import * as crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -16,9 +15,6 @@ import { loadSearchRerankRequestContract } from "../core/search-rerank-request-c
 import type {
     LateOnEffectiveOperationalBounds,
     LateOnRuntimeProfile,
-    LateOnRuntimeProfileV2,
-    LateOnRuntimeProfileV3,
-    LateOnRuntimeProfileV4,
     LateOnWorkerRequest,
     LateOnWorkerResponse,
 } from "./lateon-reranker-protocol.js";
@@ -119,14 +115,6 @@ function assertReducibleBound(
     return effective;
 }
 
-function hasBoundedExecutionContract(
-    profile: LateOnRuntimeProfile,
-): profile is LateOnRuntimeProfileV2 | LateOnRuntimeProfileV3 | LateOnRuntimeProfileV4 {
-    return profile.schemaVersion === "satori_lateon_runtime_profile_v2"
-        || profile.schemaVersion === "satori_lateon_runtime_profile_v3"
-        || profile.schemaVersion === "satori_lateon_runtime_profile_v4";
-}
-
 function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
     if (
         profile.identity?.license !== "Apache-2.0"
@@ -182,9 +170,7 @@ export function loadLateOnRuntimeProfile(
 }
 
 function validateBoundedExecutionContract(
-    parsed: Partial<
-        LateOnRuntimeProfileV2 | LateOnRuntimeProfileV3 | LateOnRuntimeProfileV4
-    >,
+    parsed: Partial<LateOnRuntimeProfile>,
 ): void {
     if (
         parsed.execution?.workerProcesses !== 1
@@ -272,25 +258,15 @@ export class LateOnReranker implements Reranker {
         this.modelDirectory = path.resolve(config.modelDirectory);
         this.intraOpThreads = this.resolveIntraOpThreads(config.intraOpThreads);
         this.effectiveBounds = this.resolveOperationalBounds(config);
-        this.readinessDeadlineMilliseconds = hasBoundedExecutionContract(this.profile)
-            ? this.profile.operationalBounds.maximumReadinessMilliseconds
-            : this.profile.measuredProfile.maximumModelLoadMilliseconds;
-        const isUnmodifiedLegacyProfile = !hasBoundedExecutionContract(this.profile)
-            && config.requestDeadlineMilliseconds === undefined
-            && config.maximumQueueWaitMilliseconds === undefined
-            && config.rerankerStageDeadlineMilliseconds === undefined
-            && config.maximumActiveReranks === undefined
-            && config.maximumQueuedReranks === undefined
-            && config.intraOpThreads === undefined;
-        const effectiveProfileDigest = isUnmodifiedLegacyProfile
-            ? this.rawProfileDigest
-            : crypto.createHash("sha256")
-                .update(serializeCanonicalJson({
-                    profile: this.profile,
-                    effectiveOperationalBounds: this.effectiveBounds,
-                    intraOpThreads: this.intraOpThreads,
-                }), "utf8")
-                .digest("hex");
+        this.readinessDeadlineMilliseconds =
+            this.profile.operationalBounds.maximumReadinessMilliseconds;
+        const effectiveProfileDigest = crypto.createHash("sha256")
+            .update(serializeCanonicalJson({
+                profile: this.profile,
+                effectiveOperationalBounds: this.effectiveBounds,
+                intraOpThreads: this.intraOpThreads,
+            }), "utf8")
+            .digest("hex");
         this.identity = Object.freeze({
             provider: "lateon",
             model: `${this.profile.identity.repository}@${this.profile.identity.revision}`,
@@ -316,16 +292,11 @@ export class LateOnReranker implements Reranker {
     }
 
     getQueryProjectionVersion(): string {
-        return this.profile.schemaVersion === "satori_lateon_runtime_profile_v3"
-            || this.profile.schemaVersion === "satori_lateon_runtime_profile_v4"
-            ? this.profile.identity.queryProjectionVersion
-            : "semantic_query_raw_v1";
+        return this.profile.identity.queryProjectionVersion;
     }
 
     getProfileId(): LateOnRuntimeProfileId {
-        return hasBoundedExecutionContract(this.profile)
-            ? this.profile.profileId
-            : LATEON_RUNTIME_PROFILE_IDS.legacyD16;
+        return this.profile.profileId;
     }
 
     getOperationalState(): WorkerState {
@@ -403,9 +374,6 @@ export class LateOnReranker implements Reranker {
         if (signal?.aborted) {
             throw operationalError("lateon_cancelled", "LateOn rerank was cancelled.");
         }
-        if (this.workerState === "loading" && !hasBoundedExecutionContract(this.profile)) {
-            await this.readinessPromise;
-        }
         if (this.workerState !== "ready") {
             if (this.terminalBootstrapFailure) {
                 throw this.terminalBootstrapFailure;
@@ -473,35 +441,13 @@ export class LateOnReranker implements Reranker {
 
     private resolveIntraOpThreads(requested: number | undefined): number {
         const frozen = this.profile.inference.profileIntraOpThreads;
-        if (hasBoundedExecutionContract(this.profile)) {
-            if (requested !== undefined && requested !== frozen) {
-                throw new Error(`LateOn bounded thread policy is immutable at ${frozen} intra-op threads.`);
-            }
-            return frozen;
+        if (requested !== undefined && requested !== frozen) {
+            throw new Error(`LateOn bounded thread policy is immutable at ${frozen} intra-op threads.`);
         }
-        return positiveSafeInteger(
-            requested ?? Math.min(frozen, Math.max(1, os.availableParallelism())),
-            "LateOn intra-op thread count",
-        );
+        return frozen;
     }
 
     private resolveOperationalBounds(config: LateOnRerankerConfig): LateOnEffectiveOperationalBounds {
-        if (!hasBoundedExecutionContract(this.profile)) {
-            const requestDeadline = positiveSafeInteger(
-                config.requestDeadlineMilliseconds
-                    ?? this.profile.measuredProfile.requestDeadlineMilliseconds,
-                "LateOn request deadline",
-            );
-            return Object.freeze({
-                maximumActiveReranks: config.maximumActiveReranks ?? 1,
-                maximumQueuedReranks: config.maximumQueuedReranks ?? 1,
-                maximumQueueWaitMilliseconds:
-                    config.maximumQueueWaitMilliseconds ?? requestDeadline,
-                maximumScoreMilliseconds: requestDeadline,
-                maximumRerankerStageMilliseconds:
-                    config.rerankerStageDeadlineMilliseconds ?? requestDeadline,
-            });
-        }
         const frozen = this.profile.operationalBounds;
         return Object.freeze({
             maximumActiveReranks: assertReducibleBound(

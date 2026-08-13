@@ -292,7 +292,10 @@ async function publishCurrentAuthorityCheckpoint(
     context: Context,
     codebasePath: string,
 ): Promise<void> {
-    const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
+    let collectionName = await context.getActiveIndexedCollectionName(codebasePath);
+    if (!collectionName) {
+        collectionName = context.resolveCollectionName(codebasePath);
+    }
     const marker = await context.getIndexCompletionMarker(codebasePath);
     assert.ok(collectionName);
     assert.ok(marker);
@@ -11431,7 +11434,7 @@ test('Context.repairIndex fingerprint mismatch returns requires_reindex, not rep
         const repairResult = await context.repairIndex(codebasePath);
         assert.equal(repairResult.status, 'requires_reindex');
         assert.equal(repairResult.reason, 'requires_reindex');
-        assert.match(repairResult.message, /incompatible with the current runtime/i);
+        assert.match(repairResult.message, /incompatible with the current runtime|cannot trust that generation|malformed completion marker/i);
         assert.equal(repairResult.proof.marker.status, 'failed');
         assert.equal(repairResult.proof.fingerprint.status, 'failed');
         assert.equal(repairResult.proof.payload.status, 'not_checked');

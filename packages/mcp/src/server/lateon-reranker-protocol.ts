@@ -75,31 +75,15 @@ type LateOnRuntimeProfileBase = Readonly<{
     }>;
 }>;
 
-export type LateOnRuntimeProfileV1 = LateOnRuntimeProfileBase & Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v1";
+export type LateOnRuntimeProfileV4 = LateOnRuntimeProfileBase & Readonly<{
+    schemaVersion: "satori_lateon_runtime_profile_v4";
+    profileId: typeof LATEON_RUNTIME_PROFILE_IDS.contextV4D32;
+    qualificationStatus: "owner_activated_operationally_qualified_not_held_out";
     identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
-        projectionVersion: "search_rerank_document_v1";
-    }>;
-    measuredProfile: Readonly<{
-        requestDeadlineMilliseconds: number;
-        maximumModelLoadMilliseconds: number;
-        maximumWarmP95Milliseconds: number;
-        maximumProcessPeakRssBytes: number;
-        maximumProcessRetainedRssBytes: number;
-    }>;
-}>;
-
-export type LateOnRuntimeProfileV2 = LateOnRuntimeProfileBase & Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v2";
-    profileId:
-        | "lateon_projection_v2_d16_v1"
-        | "lateon_offline_quality_projection_v2_d32_v2";
-    qualificationStatus:
-        | "disabled_optional_not_track_o_or_held_out_candidate"
-        | "disabled_track_o_candidate";
-    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
-        projectionVersion: "search_rerank_document_v2";
+        projectionVersion: "search_rerank_document_v4";
         projectionSha256: string;
+        queryProjectionVersion: "search_rerank_query_v2";
+        requestContractSha256: string;
     }>;
     execution: Readonly<{
         workerProcesses: 1;
@@ -127,44 +111,7 @@ export type LateOnRuntimeProfileV2 = LateOnRuntimeProfileBase & Readonly<{
     }>;
 }>;
 
-export type LateOnRuntimeProfileV3 = Omit<
-    LateOnRuntimeProfileV2,
-    "schemaVersion" | "profileId" | "qualificationStatus" | "identity"
-> & Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v3";
-    profileId:
-        | typeof LATEON_RUNTIME_PROFILE_IDS.contextV3D32
-        | typeof LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated;
-    qualificationStatus:
-        | "disabled_optional_not_track_o_or_held_out_candidate"
-        | "owner_activated_operationally_qualified_not_held_out";
-    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
-        projectionVersion: "search_rerank_document_v3";
-        projectionSha256: string;
-        queryProjectionVersion: "search_rerank_query_v1";
-    }>;
-}>;
-
-export type LateOnRuntimeProfileV4 = Omit<
-    LateOnRuntimeProfileV3,
-    "schemaVersion" | "profileId" | "qualificationStatus" | "identity"
-> & Readonly<{
-    schemaVersion: "satori_lateon_runtime_profile_v4";
-    profileId: typeof LATEON_RUNTIME_PROFILE_IDS.contextV4D32;
-    qualificationStatus: "owner_activated_operationally_qualified_not_held_out";
-    identity: LateOnRuntimeProfileBase["identity"] & Readonly<{
-        projectionVersion: "search_rerank_document_v4";
-        projectionSha256: string;
-        queryProjectionVersion: "search_rerank_query_v2";
-        requestContractSha256: string;
-    }>;
-}>;
-
-export type LateOnRuntimeProfile =
-    | LateOnRuntimeProfileV1
-    | LateOnRuntimeProfileV2
-    | LateOnRuntimeProfileV3
-    | LateOnRuntimeProfileV4;
+export type LateOnRuntimeProfile = LateOnRuntimeProfileV4;
 
 export type LateOnEffectiveOperationalBounds = Readonly<{
     maximumActiveReranks: 0 | 1;
