@@ -62,8 +62,6 @@ import {
     NonOkReason,
     SearchDebugHint,
     SearchGroupResult,
-    SearchGroupedResponseEnvelope,
-    SearchGroupedResultV2,
     SearchReadinessDebugHint,
     SearchReadinessInvalidationReason,
     SearchRecommendedNextAction,
@@ -132,7 +130,17 @@ import { prepareRelationshipTraversals } from "./prepared-relationship-traversal
 import { findExactRegistrySymbols } from "./registry-file-outline.js";
 import { ManageMaintenanceHandlers } from "./manage-maintenance-handlers.js";
 import { ManageIndexingHandlers } from "./manage-indexing-handlers.js";
-import { SearchRequestCoordinator } from "./search-request-coordinator.js";
+import {
+    SearchContinuationCoordinator,
+    SearchContinuationCoordinatorPool,
+    SearchRequestCoordinator,
+    type FrozenSearchResultSet,
+} from "./search-request-coordinator.js";
+export {
+    SearchContinuationCoordinator,
+    SearchContinuationCoordinatorPool,
+    type FrozenSearchResultSet,
+};
 import { VectorBackendMaintenance } from "./vector-backend-maintenance.js";
 import { RelationshipBackedCallGraph } from "./relationship-backed-call-graph.js";
 import { ToolResponseBuilders } from "./tool-response-builders.js";
@@ -155,14 +163,6 @@ import {
 } from "./completion-proof.js";
 import type {
 } from "./backend-diagnostics.js";
-import {
-    SearchResultSetCoordinator,
-    SearchResultSetCoordinatorPool,
-    type SearchResultSetCoordinatorLookup,
-} from "./search-result-set-cache.js";
-import {
-    type SearchRankedSetBinding,
-} from "./search-result-set-identity.js";
 import { READ_FILE_MAX_BYTES_DEFAULT } from "./published-source-reader.js";
 import type {
 } from "./search-lexical-scoring.js";
@@ -187,42 +187,6 @@ type CallGraphUnavailableReason = Extract<CallGraphHint, { supported: false }>['
 // Recovery probe threshold for "likely interrupted" indexing states.
 // Keep this shorter than snapshot merge stale semantics for better operator UX.
 const STALE_INDEXING_RECOVERY_GRACE_MS = 2 * 60_000;
-
-export type FrozenSearchResultSet = {
-    canonicalRoot: string;
-    vectorReceipt: ProvenVectorGenerationReceipt;
-    generationReceipt?: ProvenGenerationReceipt;
-    preparedObservation: string;
-    sourceObservation: string | null;
-    queryPolicyDigest: string;
-    rankedSetBinding: SearchRankedSetBinding;
-    responseByteLimit: number;
-    pageSize: number;
-    baseEnvelope: Omit<
-        SearchGroupedResponseEnvelope,
-        "results" | "disclosure" | "continuation" | "recommendedNextAction" | "resultIndex"
-    >;
-    orderedResults: SearchGroupedResultV2[];
-    recommendedActions: Array<SearchRecommendedNextAction | null>;
-};
-
-export class SearchContinuationCoordinatorPool extends SearchResultSetCoordinatorPool<
-    FrozenSearchResultSet
-> {}
-
-export class SearchContinuationCoordinator extends SearchResultSetCoordinator<
-    FrozenSearchResultSet,
-    ToolHandlers
-> {
-    constructor(pool: SearchContinuationCoordinatorPool = new SearchContinuationCoordinatorPool()) {
-        super(pool);
-    }
-}
-
-type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
-    FrozenSearchResultSet,
-    ToolHandlers
->;
 
 type CodebaseStatus = CodebaseInfo['status'];
 type TrackedCodebaseInfo = Record<string, unknown> & {
@@ -585,7 +549,7 @@ export class ToolHandlers {
     private readonly preparedReadCache = new PreparedReadCache<Extract<TrackedRootReadinessState, { state: 'ready' }>>();
     private readonly statusPreparedReadObservations = new Map<string, StatusPreparedReadObservation>();
     private readonly preparedNavigationCache = new Map<string, PreparedNavigationCacheEntry>();
-    private readonly searchContinuationCoordinator: SearchContinuationCoordinator;
+
     private readonly gitignoreForceReloadEveryN: number;
     private readonly searchQuerySupport: SearchQuerySupport;
     private readonly trackedRootReadiness: TrackedRootReadiness;
@@ -624,9 +588,6 @@ export class ToolHandlers {
         this.callGraphManager = callGraphManager || new CallGraphSidecarManager(runtimeFingerprint, { now });
         this.reranker = reranker || null;
         this.readFileMaxBytes = Math.max(1, options?.readFileMaxBytes ?? READ_FILE_MAX_BYTES_DEFAULT);
-        this.searchContinuationCoordinator = searchContinuationCoordinator
-            ?? new SearchContinuationCoordinator();
-        this.searchContinuationCoordinator.registerOwner(this);
         this.gitignoreForceReloadEveryN = Math.max(1, Math.trunc(gitignoreForceReloadEveryN));
         this.navigationStore = navigationStore;
         this.canonicalNavigationAuthorityAvailable = Boolean(
@@ -1170,35 +1131,13 @@ export class ToolHandlers {
                 parseIndexedAtMs: (indexedAt) => this.parseIndexedAtMs(indexedAt),
                 getEmbeddingProviderName: () => this.context.getEmbeddingEngine().getProvider(),
                 semanticSearch: (request: import("@zokizuan/satori-core").SemanticSearchRequest) => this.context.semanticSearch(request),
-            },
-            continuationStore: {
-                storeFrozenSearchResultSet: (input) => this.searchContinuationCoordinator.store(this, input),
-                lookupFrozenSearchResultSet: (handle, nowMs) => (
-                    this.searchContinuationCoordinator.lookup(handle, nowMs)
-                ),
-                removeFrozenSearchResultSet: (handle) => (
-                    this.searchContinuationCoordinator.remove(handle)
-                ),
-                advanceFrozenSearchResultSet: (input) => (
-                    this.searchContinuationCoordinator.advance(input)
-                ),
-                isSearchContinuationOwner: (owner) => owner === this,
-                continueSearchRoutedToOwner: (args, lookup) => {
-                    if (lookup.status !== "hit") {
-                        throw new Error("Routed search continuation lookup is not a hit.");
-                    }
-                    const owner = lookup.owner as unknown as ToolHandlers;
-                    return owner.handleContinueSearchOwned(
-                        args,
-                        lookup as unknown as SearchContinuationLookup,
-                    );
-                },
             }
         };;
         this.searchRequestCoordinator = new SearchRequestCoordinator(
             searchRequestCoordinatorCollaborators,
             this.searchQuerySupport,
             this.reranker,
+            searchContinuationCoordinator,
         );
         console.log(`[WORKSPACE] Current workspace: ${this.currentWorkspace}`);
     }
@@ -3735,18 +3674,11 @@ export class ToolHandlers {
     }
 
     public async handleContinueSearch(args: ToolArgs) {
-        return this.handleContinueSearchOwned(args);
-    }
-
-    public async handleContinueSearchOwned(
-        args: ToolArgs,
-        routedLookup?: SearchContinuationLookup,
-    ) {
-        return this.searchRequestCoordinator.continueOwned(args, routedLookup);
+        return this.searchRequestCoordinator.continueOwned(args);
     }
 
     public releaseSearchContinuationOwnership(): void {
-        this.searchContinuationCoordinator.unregisterOwner(this);
+        this.searchRequestCoordinator.releaseContinuationOwnership();
     }
 
     /** Internal Phase 4 entry point. MCP schema/transport wiring belongs to Phase 5. */

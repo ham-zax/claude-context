@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { SearchContinuationCoordinator } from "../core/handlers.js";
+import type { SearchRequestCoordinator } from "../core/search-request-coordinator.js";
 import { CallGraphSidecarManager } from "../core/call-graph.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import {
@@ -162,7 +163,13 @@ test("LanceDB runtime selection seals backend identity without requiring Milvus"
     assert.equal(contextFingerprint.vectorStoreProvider, "LanceDB");
     assert.equal(contextFingerprint.embeddingArtifactDigest, "a".repeat(64));
 
-    const stored = searchContinuationCoordinator.store(toolContext.toolHandlers, {
+    const stored = searchContinuationCoordinator.store(
+        (
+            toolContext.toolHandlers as unknown as {
+                searchRequestCoordinator: SearchRequestCoordinator;
+            }
+        ).searchRequestCoordinator,
+        {
         value: {} as never,
         nextOffset: 0,
         reservedReplayBytes: 0,

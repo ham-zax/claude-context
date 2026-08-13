@@ -15,6 +15,7 @@ import {
     ToolHandlers,
     type FrozenSearchResultSet,
 } from "../core/handlers.js";
+import type { SearchRequestCoordinator } from "../core/search-request-coordinator.js";
 import { toolRegistry } from "../tools/registry.js";
 import type { MissingProviderConfigIssue, ToolContext } from "../tools/types.js";
 import {
@@ -179,7 +180,11 @@ test("one runtime host serves independent MCP sessions over separate transports"
         "indexing",
     );
     const stored = firstInternals.continuationCoordinator.store(
-        firstInternals.resources.localHandlers,
+        (
+            firstInternals.resources.localHandlers as unknown as {
+                searchRequestCoordinator: SearchRequestCoordinator;
+            }
+        ).searchRequestCoordinator,
         {
             value: {} as FrozenSearchResultSet,
             nextOffset: 1,

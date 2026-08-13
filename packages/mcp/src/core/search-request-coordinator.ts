@@ -119,8 +119,9 @@ import {
 } from "./search-result-finalization.js";
 import { attachCompactSearchResultIndex } from "./search-result-index.js";
 import {
+    SearchResultSetCoordinator,
+    SearchResultSetCoordinatorPool,
     type SearchResultSetCoordinatorLookup,
-    type SearchResultSetStoreResult,
 } from "./search-result-set-cache.js";
 import {
     SEARCH_DISCLOSURE_POLICY_VERSION,
@@ -219,6 +220,24 @@ export type FrozenSearchResultSet = {
     orderedResults: SearchGroupedResultV2[];
     recommendedActions: Array<SearchRecommendedNextAction | null>;
 };
+
+/**
+ * Phase 8 gate correction C - the search request coordinator owns the
+ * continuation store. The coordinator registers itself as the owner token;
+ * ToolHandlers only injects the shared pool/coordinator instance.
+ */
+export class SearchContinuationCoordinatorPool extends SearchResultSetCoordinatorPool<
+    FrozenSearchResultSet
+> {}
+
+export class SearchContinuationCoordinator extends SearchResultSetCoordinator<
+    FrozenSearchResultSet,
+    SearchRequestCoordinator
+> {
+    constructor(pool: SearchContinuationCoordinatorPool = new SearchContinuationCoordinatorPool()) {
+        super(pool);
+    }
+}
 
 function freezeContinuationHints(
     hints: SearchResponseHints | undefined,
@@ -710,49 +729,17 @@ export interface SearchEnvironmentCollaborator {
     semanticSearch(request: SemanticSearchRequest): Promise<SemanticSearchResult[]>;
 }
 
-export interface SearchContinuationStoreCollaborator {
-    storeFrozenSearchResultSet(input: {
-        value: FrozenSearchResultSet;
-        nextOffset: number;
-        reservedReplayBytes: number;
-        nowMs: number;
-    }): SearchResultSetStoreResult;
-
-    lookupFrozenSearchResultSet(handle: string, nowMs: number): SearchContinuationLookup;
-
-    removeFrozenSearchResultSet(handle: string): void;
-
-    advanceFrozenSearchResultSet(input: {
-        handle: string;
-        expectedOffset: number;
-        nextOffset: number;
-        nowMs: number;
-        replay: { expectedOffset: number; pageSize: number; responseText: string };
-    }): "advanced" | "conflict" | "expired" | "not_found" | "too_large";
-
-    isSearchContinuationOwner(owner: object): boolean;
-
-    continueSearchRoutedToOwner(
-        args: ToolArgs,
-        lookup: SearchContinuationLookup,
-    ): Promise<{
-        content: Array<{ type: "text"; text: string }>;
-        isError?: boolean;
-    }>;
-}
-
 export interface SearchRequestCoordinatorCollaborators {
     readonly readiness: SearchReadinessCollaborator;
     readonly hints: SearchHintPayloadCollaborator;
     readonly preparedRead: SearchPreparedReadCollaborator;
     readonly freshness: SearchFreshnessCollaborator;
     readonly environment: SearchEnvironmentCollaborator;
-    readonly continuationStore: SearchContinuationStoreCollaborator;
 }
 
 type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
     FrozenSearchResultSet,
-    object
+    SearchRequestCoordinator
 >;
 
 /**
@@ -767,19 +754,26 @@ export class SearchRequestCoordinator {
     private readonly preparedRead: SearchPreparedReadCollaborator;
     private readonly freshness: SearchFreshnessCollaborator;
     private readonly environment: SearchEnvironmentCollaborator;
-    private readonly continuationStore: SearchContinuationStoreCollaborator;
 
     constructor(
         collaborators: SearchRequestCoordinatorCollaborators,
         private readonly searchQuerySupport: SearchQuerySupport,
         private readonly reranker: Reranker | null,
+        private readonly continuationCoordinator: SearchResultSetCoordinator<
+            FrozenSearchResultSet,
+            SearchRequestCoordinator
+        > = new SearchContinuationCoordinator(),
     ) {
         this.readiness = collaborators.readiness;
         this.hints = collaborators.hints;
         this.preparedRead = collaborators.preparedRead;
         this.freshness = collaborators.freshness;
         this.environment = collaborators.environment;
-        this.continuationStore = collaborators.continuationStore;
+        this.continuationCoordinator.registerOwner(this);
+    }
+
+    public releaseContinuationOwnership(): void {
+        this.continuationCoordinator.unregisterOwner(this);
     }
     private createSearchPhaseTimings(): SearchPhaseTimings {
         return {
@@ -1738,7 +1732,7 @@ export class SearchRequestCoordinator {
                     } as FrozenSearchResultSet["baseEnvelope"];
                     let boundEnvelope: SearchGroupedResponseEnvelope;
                     if (envelope.continuation) {
-                        const stored = this.continuationStore.storeFrozenSearchResultSet({
+                        const stored = this.continuationCoordinator.store(this, {
                             value: {
                                 canonicalRoot: effectiveRoot,
                                 vectorReceipt,
@@ -2598,7 +2592,7 @@ export class SearchRequestCoordinator {
         }
 
         const nowMs = this.environment.now();
-        const lookup = routedLookup ?? this.continuationStore.lookupFrozenSearchResultSet(handle, nowMs);
+        const lookup = routedLookup ?? this.continuationCoordinator.lookup(handle, nowMs);
         if (lookup.status === "expired") {
             return fail("SEARCH_RESULT_SET_EXPIRED", "Search continuation handle has expired. Run search_codebase again.");
         }
@@ -2608,8 +2602,8 @@ export class SearchRequestCoordinator {
         if (lookup.status === "owner_unavailable") {
             return fail("SEARCH_RESULT_SET_STALE", "Search continuation runtime is no longer available. Run search_codebase again.");
         }
-        if (!this.continuationStore.isSearchContinuationOwner(lookup.owner)) {
-            return this.continuationStore.continueSearchRoutedToOwner(args, lookup);
+        if (lookup.owner !== this) {
+            return lookup.owner.continueOwned(args, lookup);
         }
 
         const entry = lookup.entry;
@@ -2655,7 +2649,7 @@ export class SearchRequestCoordinator {
             bindingValid = false;
         }
         if (!bindingValid) {
-            this.continuationStore.removeFrozenSearchResultSet(handle);
+            this.continuationCoordinator.remove(handle);
             return fail(
                 "SEARCH_RESULT_SET_STALE",
                 "Search result-set identity changed. Run search_codebase again.",
@@ -2669,7 +2663,7 @@ export class SearchRequestCoordinator {
             || observationBefore.sourceObservation !== entry.sourceObservation
             || typeof revalidate !== "function"
         ) {
-            this.continuationStore.removeFrozenSearchResultSet(handle);
+            this.continuationCoordinator.remove(handle);
             return fail("SEARCH_RESULT_SET_STALE", "Search publication or source observation changed. Run search_codebase again.");
         }
         const proof = await revalidate(entry.canonicalRoot, entry.vectorReceipt, {
@@ -2683,7 +2677,7 @@ export class SearchRequestCoordinator {
             || observationAfter.observation !== observationBefore.observation
             || observationAfter.sourceObservation !== observationBefore.sourceObservation
         ) {
-            this.continuationStore.removeFrozenSearchResultSet(handle);
+            this.continuationCoordinator.remove(handle);
             return fail("SEARCH_RESULT_SET_STALE", "Search publication changed while continuation was being prepared. Run search_codebase again.");
         }
 
@@ -2796,7 +2790,7 @@ export class SearchRequestCoordinator {
             || observationAfterProjection.observation !== observationAfter.observation
             || observationAfterProjection.sourceObservation !== observationAfter.sourceObservation
         ) {
-            this.continuationStore.removeFrozenSearchResultSet(handle);
+            this.continuationCoordinator.remove(handle);
             return fail(
                 "SEARCH_RESULT_SET_STALE",
                 "Search publication or source observation changed while the continuation page was being projected. Run search_codebase again.",
@@ -2804,7 +2798,7 @@ export class SearchRequestCoordinator {
         }
         const nextOffset = lookup.nextOffset + projection.results.length;
         const responseText = this.hints.stringifyToolJson(projection.envelope);
-        const advanced = this.continuationStore.advanceFrozenSearchResultSet({
+        const advanced = this.continuationCoordinator.advance({
             handle,
             expectedOffset: lookup.nextOffset,
             nextOffset,
@@ -2817,7 +2811,7 @@ export class SearchRequestCoordinator {
         });
         if (advanced !== "advanced") {
             if (advanced === "conflict") {
-                const concurrent = this.continuationStore.lookupFrozenSearchResultSet(handle, this.environment.now());
+                const concurrent = this.continuationCoordinator.lookup(handle, this.environment.now());
                 if (
                     concurrent.status === "hit"
                     && concurrent.lastPage?.expectedOffset === expectedOffset
