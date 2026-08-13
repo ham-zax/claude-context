@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `2155f72`
+Checkpoint HEAD: `c718ce8`
 
 Completed ownership-bounded batches:
 
@@ -47,8 +47,9 @@ Completed ownership-bounded batches:
 - Phase 6.4 / call-graph request handling verified in NavigationHandlers: `011f054` (constraint check).
 - Phase 6.5 / cohesive owners left intact: `011f054` (constraint check).
 - Phase 7.1 / client config mutation builders: `2155f72`.
+- Phase 7.2 / client config inspection and runtime authority: `c718ce8`.
 
-Next open batch at this checkpoint: Phase 7.2. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 7.3. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
