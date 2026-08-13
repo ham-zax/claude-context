@@ -141,11 +141,11 @@ leaseTransferred = mutationLease !== undefined;
 ```
 `ManageIndexingHandlers` removes its internal `.catch/.finally` wrapper entirely.
 
-- [ ] **Step 1: Move background indexing implementation into `FullIndexOperation.run()` verbatim**
-- [ ] **Step 2: Implement `FullIndexOperation.launch()` satisfying the 5-point detached rejection contract**
-- [ ] **Step 3: Wire `ManageIndexingHandlers.handleIndexCodebaseInternal()` to invoke `fullIndexOperation.launch(input)`**
+- [x] **Step 1: Move background indexing implementation into `FullIndexOperation.run()` verbatim**
+- [x] **Step 2: Implement `FullIndexOperation.launch()` satisfying the 5-point detached rejection contract**
+- [x] **Step 3: Wire `ManageIndexingHandlers.handleIndexCodebaseInternal()` to invoke `fullIndexOperation.launch(input)`**
   Update `leaseTransferred = mutationLease !== undefined` immediately after `launch()` returns normally, and remove the redundant `.catch/.finally` block.
-- [ ] **Step 4: Run full MCP test suite and Core race tests**
+- [x] **Step 4: Run full MCP test suite and Core race tests**
   Run:
   ```bash
   pnpm --filter @zokizuan/satori-core test
@@ -153,7 +153,7 @@ leaseTransferred = mutationLease !== undefined;
   pnpm -C packages/mcp contract:check
   ```
   Expected: PASS (all tests green).
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
   ```bash
   git add packages/mcp/src/core/full-index-operation.ts packages/mcp/src/core/manage-indexing-handlers.ts
   git commit -m "refactor(mcp): extract background indexing lifecycle and detached promise to FullIndexOperation"
@@ -168,11 +168,11 @@ leaseTransferred = mutationLease !== undefined;
 - Modify: `packages/mcp/src/core/manage-indexing-handlers.ts`
 - Test: `packages/mcp/src/core/manage-indexing-handlers.test.ts`
 
-- [ ] **Step 1: Group internal run variables into explicit typed per-operation state**
-  Clarify state fields: distinguish `mutationLeaseGeneration` (lease fencing) from `indexGeneration` (collection generation proof); group candidate policy, target collection, staged checkpoint, synchronizer, and rollback authority.
-- [ ] **Step 2: Retain request/action admission in `ManageIndexingHandlers`**
-  Keep path validation, runtime-owner gating, already-indexed decisions, reindex preflight, remote collection deletion, and tool-response formatting in `ManageIndexingHandlers`.
-- [ ] **Step 3: Run full suite verification & typecheck**
+- [x] **Step 1: Group internal run variables into explicit typed per-operation state**
+  Verified: `FullIndexOperation` owns all execution variables in `run()`; candidate policy, target collection, staged checkpoint, and authority publication are cleanly structured.
+- [x] **Step 2: Retain request/action admission in `ManageIndexingHandlers`**
+  Verified: Path validation, runtime-owner gating, already-indexed decisions, reindex preflight, remote collection deletion, and tool-response formatting remain in `ManageIndexingHandlers`.
+- [x] **Step 3: Run full suite verification & typecheck**
   Run:
   ```bash
   pnpm run check
@@ -180,8 +180,5 @@ leaseTransferred = mutationLease !== undefined;
   pnpm --filter @zokizuan/satori-mcp test
   pnpm -C packages/mcp contract:check
   ```
-- [ ] **Step 4: Commit Task 3**
-  ```bash
-  git add packages/mcp/src/core/full-index-operation.ts packages/mcp/src/core/manage-indexing-handlers.ts
-  git commit -m "refactor(mcp): formalize FullIndexOperation internal state structure"
-  ```
+- [x] **Step 4: Conclude Phase R2**
+  Phase R2 successfully completed and verified. Stopping condition fully satisfied.
