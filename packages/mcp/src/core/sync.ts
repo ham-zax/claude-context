@@ -26,7 +26,6 @@ import {
 } from "./mutation-lease.js";
 import {
     SourceObservationState,
-    type SourceCheckpointObservationStatus,
 } from "./source-observation-state.js";
 
 interface SyncManagerOptions {

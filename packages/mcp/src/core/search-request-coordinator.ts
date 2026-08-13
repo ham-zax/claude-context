@@ -505,32 +505,22 @@ export type RelationshipBackedCallGraphResult = {
 } | null;
 
 /**
- * Phase 6.1 — bounded collaborators for the search request coordinator.
- * The coordinator receives this named interface, never ToolHandlers itself.
+ * Phase 8 gate correction B - grouped narrow collaborator seams for the
+ * search request coordinator. Each collaborator owns one dependency cluster;
+ * the coordinator receives the composed set, never ToolHandlers itself.
  */
-export interface SearchRequestCoordinatorHost {
-    stringifyToolJson(payload: unknown): string;
-    getToolResponseBuilders(): ToolResponseBuilders;
-    now(): number;
-    loadPreparedNavigationManifest(
-        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
-        operations?: SearchReadinessDebugHint['operations'],
-    ): Promise<NavigationManifestState>;
-    getSourceFreshnessPort(): SourceFreshnessPort | undefined;
-    getPreparedReadCacheObservation(codebasePath: string): PreparedReadCacheObservationResult;
-    getPreparedAuthorityObservation(codebasePath: string): string | null;
+
+export interface SearchReadinessCollaborator {
     touchWatchedCodebaseBestEffort(codebasePath: string): Promise<void>;
+
     getSyncManager(): SyncManager;
-    seedPreparedRead(
-        state: Extract<TrackedRootReadinessState, { state: 'ready' }>,
-        preserveProofAge: boolean,
-        statusPrepared?: boolean,
-    ): void;
+
     prepareTrackedRootReadWithObservation(
         absolutePath: string,
         onPhase: (phase: ReadinessPhase, durationMs: number) => void,
         accessMode?: 'semantic' | 'navigation',
     ): Promise<TrackedRootReadinessState>;
+
     loadRegistryValidatedCallGraphSidecar(input: {
         codebaseRoot: string;
         registryManifestHash?: string;
@@ -543,19 +533,46 @@ export interface SearchRequestCoordinatorHost {
         relationshipUnavailableReason?: CallGraphUnavailableReason;
         warning?: string;
     }>;
+
     getWatcherObservation(codebasePath: string): WatcherObservationSnapshot;
+
+    getChangedFilesForCodebase(
+        codebasePath: string,
+        options?: { forceRefresh?: boolean },
+    ): { available: boolean; files: Set<string> };
+
+    waitForSearchableSync(codebasePath: string, timeoutMs: number): Promise<boolean>;
+
+    getTrackedRootReadiness(): TrackedRootReadiness;
+
+    isPartialIndexNavigationUnavailable(info: unknown): boolean;
+
+    getIndexingOperationForReadiness(codebasePath: string):
+        | { action: "create" | "reindex" | "sync" | "repair"; phase: string; generation: number }
+        | undefined;
+
+    contextLifecycle(): ContextLifecycleCapabilities;
+
+    canSyncStaleLocal(codebasePath: string, reason: CompletionProofReason): boolean;
+
+    probeLocalSearchCollectionState(codebasePath: string): Promise<{
+        state: 'ready' | 'missing' | 'unknown';
+        collectionName?: string;
+    }>;
+}
+
+export interface SearchHintPayloadCollaborator {
+    stringifyToolJson(payload: unknown): string;
+
+    getToolResponseBuilders(): ToolResponseBuilders;
+
     getSearchNavigationHelpers(): {
         now: () => number;
         sanitizeIndexedRelativeFilePath: (relativeFilePath: string) => string | undefined;
         isCallGraphLanguageSupported: (language: string, file: string) => boolean;
         getOutlineStatusForLanguage: (relativeFilePath: string) => FileOutlineStatus;
     };
-    getChangedFilesForCodebase(
-        codebasePath: string,
-        options?: { forceRefresh?: boolean },
-    ): { available: boolean; files: Set<string> };
-    evictPreparedRead(codebasePath: string): void;
-    getCapabilities(): CapabilityResolver;
+
     buildRequiresReindexPayload(
         codebasePath: string,
         detail?: string,
@@ -568,39 +585,27 @@ export interface SearchRequestCoordinatorHost {
             limit: number;
         },
     ): Record<string, unknown>;
+
     buildGeneratedArtifactsVerificationHint(
         codebaseRoot: string,
         results: Array<{ file: string; span: SearchSpan }>,
     ): NonNullable<NonNullable<SearchResponseEnvelope['hints']>['verification']>['generatedArtifacts'] | undefined;
+
     buildChangedCodeDebug(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         changedFilesState: { available: boolean; files: Set<string> },
     ): Promise<SearchDebugHint['changedCode'] | undefined>;
+
     withProofDebugHint<T extends object>(payload: T, proofDebugHint?: CompletionProbeDebugHint): T;
-    waitForSearchableSync(codebasePath: string, timeoutMs: number): Promise<boolean>;
-    getTrackedRootReadiness(): TrackedRootReadiness;
-    getReadFileMaxBytes(): number;
-    parseIndexedAtMs(indexedAt?: string): number | undefined;
-    loadPreparedNavigationCompatibility(
-        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
-        expectedSymbolRegistryManifestHash: string,
-        operations?: SearchReadinessDebugHint['operations'],
-    ): Promise<NavigationCompatibilityState>;
-    isPartialIndexNavigationUnavailable(info: unknown): boolean;
-    getIndexingOperationForReadiness(codebasePath: string):
-        | { action: "create" | "reindex" | "sync" | "repair"; phase: string; generation: number }
-        | undefined;
-    getCachedPreparedRead(
-        absolutePath: string,
-        operations: SearchReadinessDebugHint['operations'],
-        requireNavigation?: boolean,
-    ): Promise<CachedPreparedReadResult>;
-    contextLifecycle(): ContextLifecycleCapabilities;
-    canSyncStaleLocal(codebasePath: string, reason: CompletionProofReason): boolean;
+
     buildSyncHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
+
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: CompletionProofReason): string;
+
     buildStaleLocalHint(codebasePath: string, reason: CompletionProofReason): Record<string, unknown>;
+
     buildRepairHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
+
     buildRelationshipBackedCallGraph(input: {
         codebaseRoot: string;
         generationId?: string;
@@ -613,46 +618,110 @@ export interface SearchRequestCoordinatorHost {
         limit: number;
         readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
     }): Promise<RelationshipBackedCallGraphResult>;
+
     buildManageIndexRecommendedAction(
         action: Extract<ManageIndexAction, "create" | "reindex" | "status" | "sync" | "repair">,
         codebasePath: string,
         reason: string,
     ): SearchRecommendedNextAction;
+
     buildCreateHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
-    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
-    probeLocalSearchCollectionState(codebasePath: string): Promise<{
-        state: 'ready' | 'missing' | 'unknown';
-        collectionName?: string;
-    }>;
+
     sanitizeIndexedRelativeFilePath(relativeFilePath: string): string | undefined;
+}
+
+export interface SearchPreparedReadCollaborator {
+    loadPreparedNavigationManifest(
+        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
+        operations?: SearchReadinessDebugHint['operations'],
+    ): Promise<NavigationManifestState>;
+
+    getPreparedReadCacheObservation(codebasePath: string): PreparedReadCacheObservationResult;
+
+    getPreparedAuthorityObservation(codebasePath: string): string | null;
+
+    seedPreparedRead(
+        state: Extract<TrackedRootReadinessState, { state: 'ready' }>,
+        preserveProofAge: boolean,
+        statusPrepared?: boolean,
+    ): void;
+
+    evictPreparedRead(codebasePath: string): void;
+
+    loadPreparedNavigationCompatibility(
+        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
+        expectedSymbolRegistryManifestHash: string,
+        operations?: SearchReadinessDebugHint['operations'],
+    ): Promise<NavigationCompatibilityState>;
+
+    getCachedPreparedRead(
+        absolutePath: string,
+        operations: SearchReadinessDebugHint['operations'],
+        requireNavigation?: boolean,
+    ): Promise<CachedPreparedReadResult>;
+
+    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
+}
+
+export interface SearchFreshnessCollaborator {
+    getSourceFreshnessPort(): SourceFreshnessPort | undefined;
+
     inspectSourceFreshnessCheckpoint(
         codebasePath: string,
         checkpointIdentity?: string,
         requestBoundReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<ProvenSourceFreshnessCheckpointEvidence>;
+
     compareAllSourceToFreshnessCheckpoint(
         codebasePath: string,
         requestBoundReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<SourceFreshnessPathComparison>;
+
     compareSourceObservationToFreshnessCheckpoint(
         codebasePath: string,
         requestBoundReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<SourceFreshnessPathComparison>;
+
     compareSourcePathsToFreshnessCheckpoint(
         codebasePath: string,
         relativePaths: readonly string[],
         requestBoundReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<SourceFreshnessPathComparison>;
+
+    getPreparedGenerationRevalidator():
+        | ((codebasePath: string, receipt: ProvenVectorGenerationReceipt, options?: {
+            priorGenerationReceipt?: ProvenGenerationReceipt;
+            navigationObservationChanged?: boolean;
+        }) => Promise<PreparedGenerationRevalidation | null>)
+        | undefined;
+}
+
+export interface SearchEnvironmentCollaborator {
+    now(): number;
+
+    getCapabilities(): CapabilityResolver;
+
+    getReadFileMaxBytes(): number;
+
+    parseIndexedAtMs(indexedAt?: string): number | undefined;
+
     getEmbeddingProviderName(): string;
+
     semanticSearch(request: SemanticSearchRequest): Promise<SemanticSearchResult[]>;
+}
+
+export interface SearchContinuationStoreCollaborator {
     storeFrozenSearchResultSet(input: {
         value: FrozenSearchResultSet;
         nextOffset: number;
         reservedReplayBytes: number;
         nowMs: number;
     }): SearchResultSetStoreResult;
+
     lookupFrozenSearchResultSet(handle: string, nowMs: number): SearchContinuationLookup;
+
     removeFrozenSearchResultSet(handle: string): void;
+
     advanceFrozenSearchResultSet(input: {
         handle: string;
         expectedOffset: number;
@@ -660,7 +729,9 @@ export interface SearchRequestCoordinatorHost {
         nowMs: number;
         replay: { expectedOffset: number; pageSize: number; responseText: string };
     }): "advanced" | "conflict" | "expired" | "not_found" | "too_large";
+
     isSearchContinuationOwner(owner: object): boolean;
+
     continueSearchRoutedToOwner(
         args: ToolArgs,
         lookup: SearchContinuationLookup,
@@ -668,12 +739,15 @@ export interface SearchRequestCoordinatorHost {
         content: Array<{ type: "text"; text: string }>;
         isError?: boolean;
     }>;
-    getPreparedGenerationRevalidator():
-        | ((codebasePath: string, receipt: ProvenVectorGenerationReceipt, options?: {
-            priorGenerationReceipt?: ProvenGenerationReceipt;
-            navigationObservationChanged?: boolean;
-        }) => Promise<PreparedGenerationRevalidation | null>)
-        | undefined;
+}
+
+export interface SearchRequestCoordinatorCollaborators {
+    readonly readiness: SearchReadinessCollaborator;
+    readonly hints: SearchHintPayloadCollaborator;
+    readonly preparedRead: SearchPreparedReadCollaborator;
+    readonly freshness: SearchFreshnessCollaborator;
+    readonly environment: SearchEnvironmentCollaborator;
+    readonly continuationStore: SearchContinuationStoreCollaborator;
 }
 
 type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
@@ -688,11 +762,25 @@ type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
  * interface and leaf collaborators only.
  */
 export class SearchRequestCoordinator {
+    private readonly readiness: SearchReadinessCollaborator;
+    private readonly hints: SearchHintPayloadCollaborator;
+    private readonly preparedRead: SearchPreparedReadCollaborator;
+    private readonly freshness: SearchFreshnessCollaborator;
+    private readonly environment: SearchEnvironmentCollaborator;
+    private readonly continuationStore: SearchContinuationStoreCollaborator;
+
     constructor(
-        private readonly host: SearchRequestCoordinatorHost,
+        collaborators: SearchRequestCoordinatorCollaborators,
         private readonly searchQuerySupport: SearchQuerySupport,
         private readonly reranker: Reranker | null,
-    ) {}
+    ) {
+        this.readiness = collaborators.readiness;
+        this.hints = collaborators.hints;
+        this.preparedRead = collaborators.preparedRead;
+        this.freshness = collaborators.freshness;
+        this.environment = collaborators.environment;
+        this.continuationStore = collaborators.continuationStore;
+    }
     private createSearchPhaseTimings(): SearchPhaseTimings {
         return {
             prepareRead: 0,
@@ -761,7 +849,7 @@ export class SearchRequestCoordinator {
             limit: number;
         }
     ): SearchResponseEnvelope {
-        return this.host.getToolResponseBuilders().buildNotReadySearchPayload(codebasePath, searchContext);
+        return this.hints.getToolResponseBuilders().buildNotReadySearchPayload(codebasePath, searchContext);
     }
 
     private buildFreshnessBlockedSearchPayload(
@@ -776,7 +864,7 @@ export class SearchRequestCoordinator {
             limit: number;
         }
     ): SearchResponseEnvelope | null {
-        return this.host.getToolResponseBuilders().buildFreshnessBlockedSearchPayload(codebasePath, freshnessDecision, searchContext);
+        return this.hints.getToolResponseBuilders().buildFreshnessBlockedSearchPayload(codebasePath, freshnessDecision, searchContext);
     }
 
     private buildVectorBackendSearchPayload(
@@ -790,7 +878,7 @@ export class SearchRequestCoordinator {
             limit: number;
         }
     ): SearchResponseEnvelope {
-        return this.host.getToolResponseBuilders().buildVectorBackendSearchPayload(diagnostic, searchContext);
+        return this.hints.getToolResponseBuilders().buildVectorBackendSearchPayload(diagnostic, searchContext);
     }
 
     private buildEmbeddingProviderSearchPayload(
@@ -804,7 +892,7 @@ export class SearchRequestCoordinator {
             limit: number;
         },
     ): SearchResponseEnvelope {
-        return this.host.getToolResponseBuilders().buildEmbeddingProviderSearchPayload(diagnostic, searchContext);
+        return this.hints.getToolResponseBuilders().buildEmbeddingProviderSearchPayload(diagnostic, searchContext);
     }
 
     private buildInvalidSearchRequestPayload(
@@ -820,7 +908,7 @@ export class SearchRequestCoordinator {
         status: SearchResponseEnvelope["status"] = "not_ready",
         reason?: NonOkReason
     ): SearchResponseEnvelope {
-        return this.host.getToolResponseBuilders().buildInvalidSearchRequestPayload(searchContext, message, status, reason);
+        return this.hints.getToolResponseBuilders().buildInvalidSearchRequestPayload(searchContext, message, status, reason);
     }
 
     private resolveSearchOwnerFromRegistry(result: SearchResultLike, registry?: SymbolRegistry, plan?: SearchQueryPlan): SearchOwnerResolution {
@@ -828,7 +916,7 @@ export class SearchRequestCoordinator {
             result,
             registry,
             lexicalTerms: plan?.lexicalTerms,
-            sanitizeIndexedRelativeFilePath: (relativeFilePath: string) => this.host.sanitizeIndexedRelativeFilePath(relativeFilePath),
+            sanitizeIndexedRelativeFilePath: (relativeFilePath: string) => this.hints.sanitizeIndexedRelativeFilePath(relativeFilePath),
             hasTokenBoundaryMatch: (haystack: string, needle: string) => this.searchQuerySupport.hasTokenBoundaryMatch(haystack, needle),
             isWriterActionTerm: (value: string) => isWriterActionTermHelper(value),
         });
@@ -881,7 +969,7 @@ export class SearchRequestCoordinator {
         const isRankingModeValid = input.rankingMode === 'default' || input.rankingMode === 'auto_changed_first';
         const isLimitValid = Number.isSafeInteger(input.limit)
             && input.limit > 0
-            && input.limit <= this.host.getCapabilities().getMaxSearchResultTotal();
+            && input.limit <= this.environment.getCapabilities().getMaxSearchResultTotal();
 
         const isDebugCandidateLimitValid = input.debugCandidateLimit === undefined
             || (debugMode === 'full'
@@ -891,7 +979,7 @@ export class SearchRequestCoordinator {
             || (input.resultMode === 'grouped'
                 && Number.isInteger(input.disclosureLimit)
                 && input.disclosureLimit > 0
-                && input.disclosureLimit <= this.host.getCapabilities().getMaxSearchPageSize()
+                && input.disclosureLimit <= this.environment.getCapabilities().getMaxSearchPageSize()
                 && input.disclosureLimit <= input.limit);
         const isResultIndexValid = args.includeResultIndex === undefined
             || (typeof args.includeResultIndex === "boolean"
@@ -907,7 +995,7 @@ export class SearchRequestCoordinator {
                 limit: input.limit
             }, 'Invalid search arguments. Required: path, query. Valid scope: runtime|mixed|docs. Valid resultMode: grouped|raw. Valid groupBy: symbol|file. Valid rankingMode: default|auto_changed_first. disclosureLimit is a grouped-result integer no greater than limit. includeResultIndex is a grouped-result boolean. debugCandidateLimit is an integer from 1 to 160 and requires debugMode=full.');
             return {
-                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                 isError: true,
             };
         }
@@ -923,7 +1011,7 @@ export class SearchRequestCoordinator {
                 limit: input.limit,
             }, 'Operator-only search requires semantic text or a positive must:, path:, or lang: value.');
             return {
-                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                 isError: true,
             };
         }
@@ -994,9 +1082,9 @@ export class SearchRequestCoordinator {
                 resultMode: input.resultMode,
                 limit: input.limit,
             }, {
-                trackedRootReadiness: this.host.getTrackedRootReadiness(),
+                trackedRootReadiness: this.readiness.getTrackedRootReadiness(),
                 prepareInitialTrackedRootRead: async (absolutePath) => {
-                    const cached = await this.host.getCachedPreparedRead(absolutePath, readinessDebug.operations);
+                    const cached = await this.preparedRead.getCachedPreparedRead(absolutePath, readinessDebug.operations);
                     if (cached.status === "hit") {
                         preservePreparedProofAge = true;
                         readinessDebug.proofMode = "warm";
@@ -1014,7 +1102,7 @@ export class SearchRequestCoordinator {
                     }
                     readinessDebug.operations.coldReadinessChecks += 1;
                     const prepareReadStartedAtMs = this.searchPhaseNowMs();
-                    const trackedRootState = await this.host.prepareTrackedRootReadWithObservation(
+                    const trackedRootState = await this.readiness.prepareTrackedRootReadWithObservation(
                         absolutePath,
                         (phase, durationMs) => {
                             phaseTimings[readinessPhaseToSearchPhase[phase]] += durationMs;
@@ -1023,7 +1111,7 @@ export class SearchRequestCoordinator {
                     if (trackedRootState.state === "ready") {
                         readinessDebug.operations.exactPayloadRecounts += trackedRootState.exactPayloadRecounts ?? 0;
                         if (debugMode === 'full') {
-                            const sourceObservation = this.host.getPreparedReadCacheObservation(trackedRootState.root.path);
+                            const sourceObservation = this.preparedRead.getPreparedReadCacheObservation(trackedRootState.root.path);
                             if (sourceObservation.unavailableReason) {
                                 readinessDebug.observationUnavailableReason = sourceObservation.unavailableReason;
                             }
@@ -1042,7 +1130,7 @@ export class SearchRequestCoordinator {
                         phaseTimings,
                         'prepareRead',
                         async () => {
-                            const trackedRootState = await this.host.prepareTrackedRootReadWithObservation(
+                            const trackedRootState = await this.readiness.prepareTrackedRootReadWithObservation(
                                 absolutePath,
                                 (phase, durationMs) => {
                                     phaseTimings[readinessPhaseToSearchPhase[phase]] += durationMs;
@@ -1055,20 +1143,20 @@ export class SearchRequestCoordinator {
                         },
                     );
                 },
-                getPreparedReadObservation: (canonicalRoot) => this.host.getPreparedAuthorityObservation(canonicalRoot),
-                getIndexingOperation: (codebasePath) => this.host.getIndexingOperationForReadiness(codebasePath),
+                getPreparedReadObservation: (canonicalRoot) => this.preparedRead.getPreparedAuthorityObservation(canonicalRoot),
+                getIndexingOperation: (codebasePath) => this.readiness.getIndexingOperationForReadiness(codebasePath),
                 ensureSearchFreshness: (effectiveRoot, preparedRead) => this.measureSearchPhase(
                     phaseTimings,
                     'ensureFreshness',
                     async () => {
-                        const watcherObservation = this.host.getWatcherObservation(effectiveRoot);
+                        const watcherObservation = this.readiness.getWatcherObservation(effectiveRoot);
                         if (watcherObservation.coverage !== 'ready') {
-                            await this.host.touchWatchedCodebaseBestEffort(effectiveRoot);
+                            await this.readiness.touchWatchedCodebaseBestEffort(effectiveRoot);
                         }
-                        const effectiveWatcherObservation = this.host.getWatcherObservation(effectiveRoot);
+                        const effectiveWatcherObservation = this.readiness.getWatcherObservation(effectiveRoot);
                         const fullSourceComparisonRequired = effectiveWatcherObservation.coverage !== 'ready'
                             || effectiveWatcherObservation.coverageGapSinceEpoch !== undefined;
-                        const changedFilesState = this.host.getChangedFilesForCodebase(
+                        const changedFilesState = this.readiness.getChangedFilesForCodebase(
                             effectiveRoot,
                             { forceRefresh: fullSourceComparisonRequired },
                         );
@@ -1080,7 +1168,7 @@ export class SearchRequestCoordinator {
                             ? Array.from(changedFilesState.files).sort()
                             : undefined;
                         const statusPreparedSourceObservation = preparedRead?.statusPrepared === true
-                            ? this.host.getPreparedReadCacheObservation(effectiveRoot)
+                            ? this.preparedRead.getPreparedReadCacheObservation(effectiveRoot)
                             : null;
 
                         // A recent sync timestamp does not prove that Git-dirty files still
@@ -1099,12 +1187,12 @@ export class SearchRequestCoordinator {
                         ) {
                             return Promise.resolve({
                                 mode: 'skipped_recent' as const,
-                                checkedAt: new Date(this.host.now()).toISOString(),
+                                checkedAt: new Date(this.environment.now()).toISOString(),
                                 thresholdMs: SEARCH_FRESHNESS_THRESHOLD_MS,
                             });
                         }
 
-                        const decision = await this.host.getSyncManager().ensureFreshness(
+                        const decision = await this.readiness.getSyncManager().ensureFreshness(
                             effectiveRoot,
                             exactSourceComparisonRequired || fullSourceComparisonRequired
                                 ? 0
@@ -1181,10 +1269,10 @@ export class SearchRequestCoordinator {
                                 || decision.mode === 'reconciled_ignore_change'
                             )
                         ) {
-                            const sourceFreshnessPort = this.host.getSourceFreshnessPort();
+                            const sourceFreshnessPort = this.freshness.getSourceFreshnessPort();
                             const checkpoint = sourceFreshnessPort
                                 ? (await sourceFreshnessPort.prepareCurrentSourceObservation(effectiveRoot)).evidence
-                                : await this.host.inspectSourceFreshnessCheckpoint(
+                                : await this.freshness.inspectSourceFreshnessCheckpoint(
                                     effectiveRoot,
                                 );
                             if (checkpoint.status === 'valid' && checkpoint.generationReceipt) {
@@ -1219,7 +1307,7 @@ export class SearchRequestCoordinator {
                     status,
                     reason
                 ),
-                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.host.buildRequiresReindexPayload(
+                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.hints.buildRequiresReindexPayload(
                     codebasePath,
                     detail,
                     searchContext
@@ -1228,7 +1316,7 @@ export class SearchRequestCoordinator {
                     codebasePath,
                     searchContext
                 ),
-                waitForSearchableSync: (codebasePath, timeoutMs) => this.host.waitForSearchableSync(
+                waitForSearchableSync: (codebasePath, timeoutMs) => this.readiness.waitForSearchableSync(
                     codebasePath,
                     timeoutMs
                 ),
@@ -1237,23 +1325,23 @@ export class SearchRequestCoordinator {
                     freshnessDecision,
                     searchContext
                 ),
-                buildManageIndexRecommendedAction: (action, codebasePath, rationale) => this.host.buildManageIndexRecommendedAction(
+                buildManageIndexRecommendedAction: (action, codebasePath, rationale) => this.hints.buildManageIndexRecommendedAction(
                     action,
                     codebasePath,
                     rationale
                 ),
-                buildCreateHint: (codebasePath) => this.host.buildCreateHint(codebasePath),
-                buildSyncHint: (codebasePath) => this.host.buildSyncHint(codebasePath),
-                buildRepairHint: (codebasePath) => this.host.buildRepairHint(codebasePath),
-                buildStaleLocalHint: (codebasePath, reason) => this.host.buildStaleLocalHint(codebasePath, reason),
-                buildStaleLocalMessage: (codebasePath, requestedPath, reason) => this.host.buildStaleLocalMessage(
+                buildCreateHint: (codebasePath) => this.hints.buildCreateHint(codebasePath),
+                buildSyncHint: (codebasePath) => this.hints.buildSyncHint(codebasePath),
+                buildRepairHint: (codebasePath) => this.hints.buildRepairHint(codebasePath),
+                buildStaleLocalHint: (codebasePath, reason) => this.hints.buildStaleLocalHint(codebasePath, reason),
+                buildStaleLocalMessage: (codebasePath, requestedPath, reason) => this.hints.buildStaleLocalMessage(
                     codebasePath,
                     requestedPath,
                     reason
                 ),
-                canSyncStaleLocal: (codebasePath, reason) => this.host.canSyncStaleLocal(codebasePath, reason),
-                withProofDebugHint: (payload, proofDebugHint) => this.host.withProofDebugHint(payload, proofDebugHint),
-                isPartialIndexNavigationUnavailable: (info) => this.host.isPartialIndexNavigationUnavailable(info),
+                canSyncStaleLocal: (codebasePath, reason) => this.readiness.canSyncStaleLocal(codebasePath, reason),
+                withProofDebugHint: (payload, proofDebugHint) => this.hints.withProofDebugHint(payload, proofDebugHint),
+                isPartialIndexNavigationUnavailable: (info) => this.readiness.isPartialIndexNavigationUnavailable(info),
                 partialIndexWarnings: [
                     SEARCH_PARTIAL_INDEX_LIMIT_REACHED_WARNING,
                     SEARCH_PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_WARNING,
@@ -1262,7 +1350,7 @@ export class SearchRequestCoordinator {
 
             if (frontDoor.kind === 'blocked') {
                 return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(frontDoor.payload) }],
+                    content: [{ type: "text", text: this.hints.stringifyToolJson(frontDoor.payload) }],
                     ...(frontDoor.isError ? { isError: true } : {}),
                     meta: { searchDiagnostics }
                 };
@@ -1280,7 +1368,7 @@ export class SearchRequestCoordinator {
                 // The publication read lease is acquired only after readiness
                 // (the front door) resolves.
                 acquirePublicationReadLease: (prepared) => (
-                    this.host.acquirePublicationReadLease(prepared.effectiveRoot)
+                    this.preparedRead.acquirePublicationReadLease(prepared.effectiveRoot)
                 ),
                 // Final authority revalidation: the prepared source barrier must
                 // still match. Handled mid-execute drift paths release the lease
@@ -1319,7 +1407,7 @@ export class SearchRequestCoordinator {
                     absolutePath = absolutePathFromFrontDoor;
                     effectiveRoot = effectiveRootFromFrontDoor;
                     freshnessDecision = freshnessDecisionFromFrontDoor;
-                const finalSourceObservation = this.host.getPreparedReadCacheObservation(effectiveRoot);
+                const finalSourceObservation = this.preparedRead.getPreparedReadCacheObservation(effectiveRoot);
                 let requestSourceBarrier: RequestSourceBarrier | undefined;
                 if (
                     finalSourceObservation.observation !== null
@@ -1338,7 +1426,7 @@ export class SearchRequestCoordinator {
                 ) {
                     let freshnessProofBound = false;
                     if (completedFreshnessRequestProof) {
-                        const freshnessPort = this.host.getSourceFreshnessPort();
+                        const freshnessPort = this.freshness.getSourceFreshnessPort();
                         const checkpoint = await this.measureSearchPhase(
                             phaseTimings,
                             'freshnessCheckpointProof',
@@ -1347,7 +1435,7 @@ export class SearchRequestCoordinator {
                                     effectiveRoot,
                                     { requestBoundReceipt: vectorReceipt },
                                 ).then((prepared) => prepared.evidence)
-                                : () => this.host.inspectSourceFreshnessCheckpoint(
+                                : () => this.freshness.inspectSourceFreshnessCheckpoint(
                                     effectiveRoot,
                                     undefined,
                                     vectorReceipt,
@@ -1378,13 +1466,13 @@ export class SearchRequestCoordinator {
                             finalFullComparisons: 0,
                         };
                     } else {
-                        const comparisonPort = this.host.getSourceFreshnessPort();
+                        const comparisonPort = this.freshness.getSourceFreshnessPort();
                         const comparison = comparisonPort
                             ? await comparisonPort.compareAllCurrentSourceToCheckpoint(
                                 effectiveRoot,
                                 vectorReceipt,
                             )
-                            : await this.host.compareAllSourceToFreshnessCheckpoint(
+                            : await this.freshness.compareAllSourceToFreshnessCheckpoint(
                                 effectiveRoot,
                                 vectorReceipt,
                             );
@@ -1404,7 +1492,7 @@ export class SearchRequestCoordinator {
                     }
                 }
                 if (!requestSourceBarrier) {
-                    const payload = this.host.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
+                    const payload = this.hints.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
                         effectiveRoot,
                         {
                             path: absolutePath,
@@ -1423,24 +1511,24 @@ export class SearchRequestCoordinator {
                         },
                     );
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                         meta: { searchDiagnostics },
                     };
                 }
                 sourceBarrierChanged = async (): Promise<boolean> => {
                     if (requestSourceBarrier.mode === 'watcher') {
-                        const currentBarrier = this.host.getPreparedReadCacheObservation(effectiveRoot);
+                        const currentBarrier = this.preparedRead.getPreparedReadCacheObservation(effectiveRoot);
                         return currentBarrier.observation !== requestSourceBarrier.observation
                             || currentBarrier.sourceObservation !== requestSourceBarrier.sourceObservation
                             || currentBarrier.unavailableReason !== undefined;
                     }
                     if (
-                        this.host.getPreparedAuthorityObservation(effectiveRoot)
+                        this.preparedRead.getPreparedAuthorityObservation(effectiveRoot)
                         !== requestSourceBarrier.authorityObservation
                     ) {
                         return true;
                     }
-                    const validationPort = this.host.getSourceFreshnessPort();
+                    const validationPort = this.freshness.getSourceFreshnessPort();
                     const comparison = await this.measureSearchPhase(
                         phaseTimings,
                         'finalSourceValidation',
@@ -1449,7 +1537,7 @@ export class SearchRequestCoordinator {
                                 effectiveRoot,
                                 vectorReceipt,
                             )
-                            : () => this.host.compareSourceObservationToFreshnessCheckpoint(
+                            : () => this.freshness.compareSourceObservationToFreshnessCheckpoint(
                                 effectiveRoot,
                                 vectorReceipt,
                             ),
@@ -1464,13 +1552,13 @@ export class SearchRequestCoordinator {
                 }
                 if (debugMode === 'full') {
                     const getPreparedReadDiagnostics = (
-                        this.host.getSyncManager() as SyncManager & {
+                        this.readiness.getSyncManager() as SyncManager & {
                             getPreparedReadDiagnostics?: SyncManager['getPreparedReadDiagnostics'];
                         }
                     ).getPreparedReadDiagnostics;
                     if (typeof getPreparedReadDiagnostics === 'function') {
                         readinessDebug.watcher = getPreparedReadDiagnostics.call(
-                            this.host.getSyncManager(),
+                            this.readiness.getSyncManager(),
                             effectiveRoot,
                         );
                     }
@@ -1494,7 +1582,7 @@ export class SearchRequestCoordinator {
                     indexedRoot: effectiveRoot,
                     requestedPath: absolutePath,
                 });
-            const encoderProviderName = this.host.getEmbeddingProviderName();
+            const encoderProviderName = this.environment.getEmbeddingProviderName();
                 const rootTag = `[SEARCH][root=${effectiveRoot}]`;
                 const requestId = crypto.randomUUID();
                 console.log(`${rootTag} Searching (requestedPath='${absolutePath}')`);
@@ -1533,7 +1621,7 @@ export class SearchRequestCoordinator {
                 };
                 const initialOperatorSummary = this.searchQuerySupport.buildOperatorSummary(parsedOperators);
                 const initialObservedChangedFilesState = observedChangedFilesForSearch
-                    ?? this.host.getChangedFilesForCodebase(effectiveRoot);
+                    ?? this.readiness.getChangedFilesForCodebase(effectiveRoot);
                 const initialChangedFilesState = initialObservedChangedFilesState;
                 const initialDebugChangedFilesState = debugMode === 'freshness' || debugMode === 'full'
                     ? initialObservedChangedFilesState
@@ -1650,7 +1738,7 @@ export class SearchRequestCoordinator {
                     } as FrozenSearchResultSet["baseEnvelope"];
                     let boundEnvelope: SearchGroupedResponseEnvelope;
                     if (envelope.continuation) {
-                        const stored = this.host.storeFrozenSearchResultSet({
+                        const stored = this.continuationStore.storeFrozenSearchResultSet({
                             value: {
                                 canonicalRoot: effectiveRoot,
                                 vectorReceipt,
@@ -1667,7 +1755,7 @@ export class SearchRequestCoordinator {
                             },
                             nextOffset: resultSet.initialReturnedCount,
                             reservedReplayBytes: responseByteLimit,
-                            nowMs: this.host.now(),
+                            nowMs: this.environment.now(),
                         });
                         if (stored.status === "not_admissible") {
                             const initialEnvelope = { ...envelope };
@@ -1732,9 +1820,9 @@ export class SearchRequestCoordinator {
                 };
                 if (
                     preparedObservation
-                    && this.host.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
+                    && this.preparedRead.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
                 ) {
-                    this.host.evictPreparedRead(effectiveRoot);
+                    this.preparedRead.evictPreparedRead(effectiveRoot);
                     const payload = this.buildNotReadySearchPayload(effectiveRoot, {
                         path: absolutePath,
                         query: input.query,
@@ -1744,7 +1832,7 @@ export class SearchRequestCoordinator {
                         limit: input.limit,
                     });
                     return {
-                        content: [{ type: 'text', text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: 'text', text: this.hints.stringifyToolJson(payload) }],
                         meta: { searchDiagnostics },
                     };
                 }
@@ -1786,25 +1874,25 @@ export class SearchRequestCoordinator {
                 }, {
                     searchQuerySupport: this.searchQuerySupport,
                     measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
-                    loadRegistryManifest: () => this.host.loadPreparedNavigationManifest(
+                    loadRegistryManifest: () => this.preparedRead.loadPreparedNavigationManifest(
                         preparedReadState,
                         readinessDebug.operations,
                     ),
-                    loadRegistryValidatedCallGraphSidecar: (exactInput) => this.host.loadRegistryValidatedCallGraphSidecar({
+                    loadRegistryValidatedCallGraphSidecar: (exactInput) => this.readiness.loadRegistryValidatedCallGraphSidecar({
                         ...exactInput,
                         preparedRead: preparedReadState,
                         operations: readinessDebug.operations,
                     }),
-                    buildRelationshipBackedCallGraph: (exactInput) => this.host.buildRelationshipBackedCallGraph({
+                    buildRelationshipBackedCallGraph: (exactInput) => this.hints.buildRelationshipBackedCallGraph({
                         ...exactInput,
                         ...(generationReceipt
                             ? { generationId: generationReceipt.navigation.generationId }
                             : {}),
                     }),
-                    buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.host.buildChangedCodeDebug(preparedReadState, changedFilesState),
-                    buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.host.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
-                    getSearchNavigationHelpers: () => this.host.getSearchNavigationHelpers(),
-                    now: this.host.now,
+                    buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.hints.buildChangedCodeDebug(preparedReadState, changedFilesState),
+                    buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.hints.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
+                    getSearchNavigationHelpers: () => this.hints.getSearchNavigationHelpers(),
+                    now: this.environment.now,
                 });
                 let exactRegistryDebug: ExactRegistryLookupDebug | undefined = exactFastPath.exactRegistryDebug;
                 let searchSymbolRegistry: SymbolRegistry | undefined = exactFastPath.searchSymbolRegistry;
@@ -1823,7 +1911,7 @@ export class SearchRequestCoordinator {
                         if (sourceDriftRetryCount === 0) {
                             return this.attempt(args, 1);
                         }
-                        const payload = this.host.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
+                        const payload = this.hints.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
                             effectiveRoot,
                             {
                                 path: absolutePath,
@@ -1842,7 +1930,7 @@ export class SearchRequestCoordinator {
                             },
                         );
                         return {
-                            content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                            content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                             meta: { searchDiagnostics },
                         };
                     }
@@ -1892,10 +1980,10 @@ export class SearchRequestCoordinator {
                             };
                         }
                     }
-                    await this.host.touchWatchedCodebaseBestEffort(effectiveRoot);
-                    this.host.seedPreparedRead(preparedReadState, preservePreparedProofAge);
+                    await this.readiness.touchWatchedCodebaseBestEffort(effectiveRoot);
+                    this.preparedRead.seedPreparedRead(preparedReadState, preservePreparedProofAge);
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(exactEnvelope) }],
+                        content: [{ type: "text", text: this.hints.stringifyToolJson(exactEnvelope) }],
                         ...(exactFastPath.finalized.kind === "page_too_large" ? { isError: true } : {}),
                         meta: {
                             searchDiagnostics: {
@@ -1912,9 +2000,9 @@ export class SearchRequestCoordinator {
 
                 if (
                     preparedObservation
-                    && this.host.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
+                    && this.preparedRead.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
                 ) {
-                    this.host.evictPreparedRead(effectiveRoot);
+                    this.preparedRead.evictPreparedRead(effectiveRoot);
                     const payload = this.buildNotReadySearchPayload(effectiveRoot, {
                         path: absolutePath,
                         query: input.query,
@@ -1924,7 +2012,7 @@ export class SearchRequestCoordinator {
                         limit: input.limit,
                     });
                     return {
-                        content: [{ type: 'text', text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: 'text', text: this.hints.stringifyToolJson(payload) }],
                         meta: { searchDiagnostics },
                     };
                 }
@@ -1950,7 +2038,7 @@ export class SearchRequestCoordinator {
                         || searchSymbolRegistryManifestHash
                             !== generationReceipt.navigation.symbolRegistryManifestHash
                     ) {
-                        const registryState = await this.host.loadPreparedNavigationManifest(
+                        const registryState = await this.preparedRead.loadPreparedNavigationManifest(
                             preparedReadState,
                             readinessDebug.operations,
                         );
@@ -1983,8 +2071,7 @@ export class SearchRequestCoordinator {
                         });
                         if ("resolution" in preparedEvidence) {
                             preparedEntrypointOwnerEvidence = preparedEvidence;
-                            const manifestComparison = await this.host
-                                .compareSourcePathsToFreshnessCheckpoint(
+                            const manifestComparison = await this.freshness.compareSourcePathsToFreshnessCheckpoint(
                                     effectiveRoot,
                                     ["pyproject.toml"],
                                     generationReceipt,
@@ -2047,7 +2134,7 @@ export class SearchRequestCoordinator {
                 }, {
                     searchQuerySupport: this.searchQuerySupport,
                     semanticSearch: (request) => {
-                        const lifecycle = this.host.contextLifecycle();
+                        const lifecycle = this.readiness.contextLifecycle();
                         if (
                             vectorReceipt
                             && debugMode === 'full'
@@ -2070,7 +2157,7 @@ export class SearchRequestCoordinator {
                         }
                         return vectorReceipt
                             ? lifecycle.semanticSearchInProvenGeneration!(vectorReceipt, request)
-                            : this.host.semanticSearch(request);
+                            : this.environment.semanticSearch(request);
                     },
                     reranker: this.reranker,
                     ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
@@ -2101,7 +2188,7 @@ export class SearchRequestCoordinator {
                                     || searchSymbolRegistryManifestHash
                                         !== generationReceipt.navigation.symbolRegistryManifestHash
                                 ) {
-                                    const registryState = await this.host.loadPreparedNavigationManifest(
+                                    const registryState = await this.preparedRead.loadPreparedNavigationManifest(
                                         preparedReadState,
                                         readinessDebug.operations,
                                     );
@@ -2127,7 +2214,7 @@ export class SearchRequestCoordinator {
                                 }
                                 const structuralContext = wantsV4StructuralContext
                                     ? await (structuralContextLoad ??= (async () => {
-                                        const compatibility = await this.host.loadPreparedNavigationCompatibility(
+                                        const compatibility = await this.preparedRead.loadPreparedNavigationCompatibility(
                                             preparedReadState,
                                             searchSymbolRegistryManifestHash
                                                 ?? generationReceipt.navigation.symbolRegistryManifestHash,
@@ -2162,7 +2249,7 @@ export class SearchRequestCoordinator {
                                     candidateId,
                                     codebaseRoot: effectiveRoot,
                                     semanticQuery: rerankQuery,
-                                    maxSourceBytes: this.host.getReadFileMaxBytes(),
+                                    maxSourceBytes: this.environment.getReadFileMaxBytes(),
                                     result,
                                     registry: searchSymbolRegistry,
                                     ...(structuralContext?.preparedRelationships
@@ -2190,7 +2277,7 @@ export class SearchRequestCoordinator {
                         limit: input.limit
                     });
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                         meta: {
                             searchDiagnostics: {
                                 ...searchDiagnostics,
@@ -2210,7 +2297,7 @@ export class SearchRequestCoordinator {
                         limit: input.limit,
                     });
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                         isError: !execution.diagnostic.retryable,
                         meta: {
                             searchDiagnostics: {
@@ -2239,7 +2326,7 @@ export class SearchRequestCoordinator {
                         };
                     }
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                         isError: true,
                         meta: { searchDiagnostics }
                     };
@@ -2283,22 +2370,22 @@ export class SearchRequestCoordinator {
                 }, {
                     searchQuerySupport: this.searchQuerySupport,
                     measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
-                    loadRegistryManifest: () => this.host.loadPreparedNavigationManifest(
+                    loadRegistryManifest: () => this.preparedRead.loadPreparedNavigationManifest(
                         preparedReadState,
                         readinessDebug.operations,
                     ),
-                    loadRegistryValidatedCallGraphSidecar: (finalizationInput) => this.host.loadRegistryValidatedCallGraphSidecar({
+                    loadRegistryValidatedCallGraphSidecar: (finalizationInput) => this.readiness.loadRegistryValidatedCallGraphSidecar({
                         ...finalizationInput,
                         preparedRead: preparedReadState,
                         operations: readinessDebug.operations,
                     }),
-                    buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.host.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope,
-                    buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.host.buildChangedCodeDebug(preparedReadState, changedFilesState),
-                    buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.host.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
-                    getSearchNavigationHelpers: () => this.host.getSearchNavigationHelpers(),
-                    parseIndexedAtMs: (indexedAt?: string) => this.host.parseIndexedAtMs(indexedAt),
+                    buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.hints.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope,
+                    buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.hints.buildChangedCodeDebug(preparedReadState, changedFilesState),
+                    buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.hints.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
+                    getSearchNavigationHelpers: () => this.hints.getSearchNavigationHelpers(),
+                    parseIndexedAtMs: (indexedAt?: string) => this.environment.parseIndexedAtMs(indexedAt),
                     resolveSearchOwnerFromRegistry: (result, registry, plan) => this.resolveSearchOwnerFromRegistry(result, registry, plan),
-                    now: this.host.now,
+                    now: this.environment.now,
                 });
                 let envelope = finalized.envelope;
                 const initialPageTooLarge = finalized.kind === "page_too_large";
@@ -2308,8 +2395,7 @@ export class SearchRequestCoordinator {
                         validatePreparedAuthority: async () => {
                             barrierChanged = await sourceBarrierChanged();
                             if (!barrierChanged) {
-                                const manifestComparison = await this.host
-                                    .compareSourcePathsToFreshnessCheckpoint(
+                                const manifestComparison = await this.freshness.compareSourcePathsToFreshnessCheckpoint(
                                         effectiveRoot,
                                         ["pyproject.toml"],
                                         generationReceipt,
@@ -2332,7 +2418,7 @@ export class SearchRequestCoordinator {
                     if (sourceDriftRetryCount === 0) {
                         return this.attempt(args, 1);
                     }
-                    const payload = this.host.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
+                    const payload = this.hints.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
                         effectiveRoot,
                         {
                             path: absolutePath,
@@ -2351,7 +2437,7 @@ export class SearchRequestCoordinator {
                         },
                     );
                     return {
-                        content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                        content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                         meta: { searchDiagnostics },
                     };
                 }
@@ -2364,10 +2450,10 @@ export class SearchRequestCoordinator {
                     );
                 }
 
-                await this.host.touchWatchedCodebaseBestEffort(effectiveRoot);
-                this.host.seedPreparedRead(preparedReadState, preservePreparedProofAge);
+                await this.readiness.touchWatchedCodebaseBestEffort(effectiveRoot);
+                this.preparedRead.seedPreparedRead(preparedReadState, preservePreparedProofAge);
                 return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(envelope) }],
+                    content: [{ type: "text", text: this.hints.stringifyToolJson(envelope) }],
                     ...(initialPageTooLarge ? { isError: true } : {}),
                     meta: { searchDiagnostics }
                 };
@@ -2376,7 +2462,7 @@ export class SearchRequestCoordinator {
                 if (sourceDriftRetryCount === 0) {
                     return this.attempt(args, 1);
                 }
-                const payload = this.host.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
+                const payload = this.hints.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
                     effectiveRoot,
                     {
                         path: absolutePath,
@@ -2395,7 +2481,7 @@ export class SearchRequestCoordinator {
                     },
                 );
                 return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                    content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                     meta: { searchDiagnostics },
                 };
             }
@@ -2412,7 +2498,7 @@ export class SearchRequestCoordinator {
                     limit: input.limit
                 });
                 return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                    content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                     meta: {
                         searchDiagnostics: {
                             tool: 'search_codebase',
@@ -2445,7 +2531,7 @@ export class SearchRequestCoordinator {
                     },
                 };
                 return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                    content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                     isError: true
                 };
             }
@@ -2459,7 +2545,7 @@ export class SearchRequestCoordinator {
                 limit: input.limit
             }, `Unexpected search_codebase failure: ${errorMessage}`, 'not_ready');
             return {
-                content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
                 isError: true
             };
         } finally {
@@ -2482,7 +2568,7 @@ export class SearchRequestCoordinator {
         const fail = (code: string, message: string) => ({
             content: [{
                 type: "text" as const,
-                text: this.host.stringifyToolJson({ status: "not_ready", code, message }),
+                text: this.hints.stringifyToolJson({ status: "not_ready", code, message }),
             }],
             isError: true,
         });
@@ -2492,27 +2578,27 @@ export class SearchRequestCoordinator {
         if (
             !Number.isSafeInteger(expectedOffset)
             || expectedOffset < 0
-            || expectedOffset > this.host.getCapabilities().getMaxFrozenSearchResults()
+            || expectedOffset > this.environment.getCapabilities().getMaxFrozenSearchResults()
         ) {
             return fail(
                 "SEARCH_RESULT_SET_OFFSET_INVALID",
-                `Search continuation expectedOffset must be an integer from 0 to ${this.host.getCapabilities().getMaxFrozenSearchResults()}.`,
+                `Search continuation expectedOffset must be an integer from 0 to ${this.environment.getCapabilities().getMaxFrozenSearchResults()}.`,
             );
         }
         if (
             args.limit !== undefined
             && (!Number.isSafeInteger(requestedLimit)
                 || requestedLimit <= 0
-                || requestedLimit > this.host.getCapabilities().getMaxSearchPageSize())
+                || requestedLimit > this.environment.getCapabilities().getMaxSearchPageSize())
         ) {
             return fail(
                 "SEARCH_RESULT_SET_LIMIT_INVALID",
-                `Search continuation limit must be an integer from 1 to ${this.host.getCapabilities().getMaxSearchPageSize()}.`,
+                `Search continuation limit must be an integer from 1 to ${this.environment.getCapabilities().getMaxSearchPageSize()}.`,
             );
         }
 
-        const nowMs = this.host.now();
-        const lookup = routedLookup ?? this.host.lookupFrozenSearchResultSet(handle, nowMs);
+        const nowMs = this.environment.now();
+        const lookup = routedLookup ?? this.continuationStore.lookupFrozenSearchResultSet(handle, nowMs);
         if (lookup.status === "expired") {
             return fail("SEARCH_RESULT_SET_EXPIRED", "Search continuation handle has expired. Run search_codebase again.");
         }
@@ -2522,8 +2608,8 @@ export class SearchRequestCoordinator {
         if (lookup.status === "owner_unavailable") {
             return fail("SEARCH_RESULT_SET_STALE", "Search continuation runtime is no longer available. Run search_codebase again.");
         }
-        if (!this.host.isSearchContinuationOwner(lookup.owner)) {
-            return this.host.continueSearchRoutedToOwner(args, lookup);
+        if (!this.continuationStore.isSearchContinuationOwner(lookup.owner)) {
+            return this.continuationStore.continueSearchRoutedToOwner(args, lookup);
         }
 
         const entry = lookup.entry;
@@ -2569,27 +2655,27 @@ export class SearchRequestCoordinator {
             bindingValid = false;
         }
         if (!bindingValid) {
-            this.host.removeFrozenSearchResultSet(handle);
+            this.continuationStore.removeFrozenSearchResultSet(handle);
             return fail(
                 "SEARCH_RESULT_SET_STALE",
                 "Search result-set identity changed. Run search_codebase again.",
             );
         }
-        const observationBefore = this.host.getPreparedReadCacheObservation(entry.canonicalRoot);
-        const revalidate = this.host.getPreparedGenerationRevalidator();
+        const observationBefore = this.preparedRead.getPreparedReadCacheObservation(entry.canonicalRoot);
+        const revalidate = this.freshness.getPreparedGenerationRevalidator();
         if (
             !observationBefore.observation
             || observationBefore.observation !== entry.preparedObservation
             || observationBefore.sourceObservation !== entry.sourceObservation
             || typeof revalidate !== "function"
         ) {
-            this.host.removeFrozenSearchResultSet(handle);
+            this.continuationStore.removeFrozenSearchResultSet(handle);
             return fail("SEARCH_RESULT_SET_STALE", "Search publication or source observation changed. Run search_codebase again.");
         }
         const proof = await revalidate(entry.canonicalRoot, entry.vectorReceipt, {
             ...(entry.generationReceipt ? { priorGenerationReceipt: entry.generationReceipt } : {}),
         }).catch(() => null);
-        const observationAfter = this.host.getPreparedReadCacheObservation(entry.canonicalRoot);
+        const observationAfter = this.preparedRead.getPreparedReadCacheObservation(entry.canonicalRoot);
         if (
             !proof
             || proof.navigationProof.status === "requires_reindex"
@@ -2597,7 +2683,7 @@ export class SearchRequestCoordinator {
             || observationAfter.observation !== observationBefore.observation
             || observationAfter.sourceObservation !== observationBefore.sourceObservation
         ) {
-            this.host.removeFrozenSearchResultSet(handle);
+            this.continuationStore.removeFrozenSearchResultSet(handle);
             return fail("SEARCH_RESULT_SET_STALE", "Search publication changed while continuation was being prepared. Run search_codebase again.");
         }
 
@@ -2650,7 +2736,7 @@ export class SearchRequestCoordinator {
                     entry.baseEnvelope.scope,
                     this.searchQuerySupport.parseSearchOperators(entry.baseEnvelope.query),
                 );
-                const generatedArtifactsHint = this.host.buildGeneratedArtifactsVerificationHint(
+                const generatedArtifactsHint = this.hints.buildGeneratedArtifactsVerificationHint(
                     entry.canonicalRoot,
                     results.map((result) => ({
                         file: result.target.file,
@@ -2702,7 +2788,7 @@ export class SearchRequestCoordinator {
                     : {}),
             },
         ).catch(() => null);
-        const observationAfterProjection = this.host.getPreparedReadCacheObservation(entry.canonicalRoot);
+        const observationAfterProjection = this.preparedRead.getPreparedReadCacheObservation(entry.canonicalRoot);
         if (
             !proofAfterProjection
             || proofAfterProjection.navigationProof.status === "requires_reindex"
@@ -2710,19 +2796,19 @@ export class SearchRequestCoordinator {
             || observationAfterProjection.observation !== observationAfter.observation
             || observationAfterProjection.sourceObservation !== observationAfter.sourceObservation
         ) {
-            this.host.removeFrozenSearchResultSet(handle);
+            this.continuationStore.removeFrozenSearchResultSet(handle);
             return fail(
                 "SEARCH_RESULT_SET_STALE",
                 "Search publication or source observation changed while the continuation page was being projected. Run search_codebase again.",
             );
         }
         const nextOffset = lookup.nextOffset + projection.results.length;
-        const responseText = this.host.stringifyToolJson(projection.envelope);
-        const advanced = this.host.advanceFrozenSearchResultSet({
+        const responseText = this.hints.stringifyToolJson(projection.envelope);
+        const advanced = this.continuationStore.advanceFrozenSearchResultSet({
             handle,
             expectedOffset: lookup.nextOffset,
             nextOffset,
-            nowMs: this.host.now(),
+            nowMs: this.environment.now(),
             replay: {
                 expectedOffset,
                 pageSize,
@@ -2731,7 +2817,7 @@ export class SearchRequestCoordinator {
         });
         if (advanced !== "advanced") {
             if (advanced === "conflict") {
-                const concurrent = this.host.lookupFrozenSearchResultSet(handle, this.host.now());
+                const concurrent = this.continuationStore.lookupFrozenSearchResultSet(handle, this.environment.now());
                 if (
                     concurrent.status === "hit"
                     && concurrent.lastPage?.expectedOffset === expectedOffset

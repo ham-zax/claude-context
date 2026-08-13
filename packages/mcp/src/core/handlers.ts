@@ -1040,151 +1040,163 @@ export class ToolHandlers {
             mutationLeaseCoordinator: this.mutationLeaseCoordinator,
         };
         this.manageIndexingHandlers = new ManageIndexingHandlers(manageIndexingHandlersHost);
-        const searchRequestCoordinatorHost: ConstructorParameters<typeof SearchRequestCoordinator>[0] = {
-            stringifyToolJson: (payload) => this.stringifyToolJson(payload),
-            getToolResponseBuilders: () => this.toolResponseBuilders,
-            now: () => this.now(),
-            loadPreparedNavigationManifest: (preparedRead, operations) => (
-                this.loadPreparedNavigationManifest(preparedRead, operations)
-            ),
-            getSourceFreshnessPort: () => this.getSourceFreshnessPort(),
-            getPreparedReadCacheObservation: (codebasePath) => (
-                this.getPreparedReadCacheObservation(codebasePath)
-            ),
-            getPreparedAuthorityObservation: (codebasePath) => (
-                this.getPreparedAuthorityObservation(codebasePath)
-            ),
-            touchWatchedCodebaseBestEffort: (codebasePath) => (
-                this.touchWatchedCodebaseBestEffort(codebasePath)
-            ),
-            getSyncManager: () => this.syncManager,
-            seedPreparedRead: (state, preserveProofAge, statusPrepared) => (
-                this.seedPreparedRead(state, preserveProofAge, statusPrepared)
-            ),
-            prepareTrackedRootReadWithObservation: (absolutePath, onPhase, accessMode) => (
-                this.prepareTrackedRootReadWithObservation(absolutePath, onPhase, accessMode)
-            ),
-            loadRegistryValidatedCallGraphSidecar: (input) => (
-                this.loadRegistryValidatedCallGraphSidecar(input)
-            ),
-            getWatcherObservation: (codebasePath) => this.getWatcherObservation(codebasePath),
-            getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
-            getChangedFilesForCodebase: (codebasePath, options) => (
-                this.getChangedFilesForCodebase(codebasePath, options)
-            ),
-            evictPreparedRead: (codebasePath) => this.evictPreparedRead(codebasePath),
-            getCapabilities: () => this.capabilities,
-            buildRequiresReindexPayload: (codebasePath, detail, searchContext) => (
-                this.buildRequiresReindexPayload(codebasePath, detail, searchContext)
-            ),
-            buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => (
-                this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results)
-            ),
-            buildChangedCodeDebug: (preparedRead, changedFilesState) => (
-                this.buildChangedCodeDebug(preparedRead, changedFilesState)
-            ),
-            withProofDebugHint: (payload, proofDebugHint) => (
-                this.withProofDebugHint(payload, proofDebugHint)
-            ),
-            waitForSearchableSync: (codebasePath, timeoutMs) => (
-                this.waitForSearchableSync(codebasePath, timeoutMs)
-            ),
-            getTrackedRootReadiness: () => this.trackedRootReadiness,
-            getReadFileMaxBytes: () => this.readFileMaxBytes,
-            parseIndexedAtMs: (indexedAt) => this.parseIndexedAtMs(indexedAt),
-            loadPreparedNavigationCompatibility: (preparedRead, expectedHash, operations) => (
-                this.loadPreparedNavigationCompatibility(preparedRead, expectedHash, operations)
-            ),
-            isPartialIndexNavigationUnavailable: (info) => (
-                this.isPartialIndexNavigationUnavailable(info)
-            ),
-            getIndexingOperationForReadiness: (codebasePath) => (
-                this.getIndexingOperationForReadiness(codebasePath)
-            ),
-            getCachedPreparedRead: (absolutePath, operations, requireNavigation) => (
-                this.getCachedPreparedRead(absolutePath, operations, requireNavigation)
-            ),
-            contextLifecycle: () => this.contextLifecycle(),
-            canSyncStaleLocal: (codebasePath, reason) => (
-                this.canSyncStaleLocal(codebasePath, reason)
-            ),
-            buildSyncHint: (codebasePath) => this.buildSyncHint(codebasePath),
-            buildStaleLocalMessage: (codebasePath, requestedPath, reason) => (
-                this.buildStaleLocalMessage(codebasePath, requestedPath, reason)
-            ),
-            buildStaleLocalHint: (codebasePath, reason) => (
-                this.buildStaleLocalHint(codebasePath, reason)
-            ),
-            buildRepairHint: (codebasePath) => this.buildRepairHint(codebasePath),
-            buildRelationshipBackedCallGraph: (input) => (
-                this.buildRelationshipBackedCallGraph(input)
-            ),
-            buildManageIndexRecommendedAction: (action, codebasePath, reason) => (
-                this.buildManageIndexRecommendedAction(action, codebasePath, reason)
-            ),
-            buildCreateHint: (codebasePath) => this.buildCreateHint(codebasePath),
-            acquirePublicationReadLease: (codebasePath) => (
-                this.acquirePublicationReadLease(codebasePath)
-            ),
-            probeLocalSearchCollectionState: (codebasePath) => (
-                this.probeLocalSearchCollectionState(codebasePath)
-            ),
-            sanitizeIndexedRelativeFilePath: (relativeFilePath) => (
-                this.sanitizeIndexedRelativeFilePath(relativeFilePath)
-            ),
-            inspectSourceFreshnessCheckpoint: (
-                codebasePath: string,
-                checkpointIdentity?: string,
-                requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-            ) => this.context.inspectSourceFreshnessCheckpoint(codebasePath, checkpointIdentity, requestBoundReceipt),
-            compareAllSourceToFreshnessCheckpoint: (
-                codebasePath: string,
-                requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-            ) => this.context.compareAllSourceToFreshnessCheckpoint(codebasePath, requestBoundReceipt),
-            compareSourceObservationToFreshnessCheckpoint: (
-                codebasePath: string,
-                requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-            ) => this.context.compareSourceObservationToFreshnessCheckpoint(codebasePath, requestBoundReceipt),
-            compareSourcePathsToFreshnessCheckpoint: (
-                codebasePath: string,
-                relativePaths: readonly string[],
-                requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-            ) => this.context.compareSourcePathsToFreshnessCheckpoint(codebasePath, relativePaths, requestBoundReceipt),
-            getEmbeddingProviderName: () => this.context.getEmbeddingEngine().getProvider(),
-            semanticSearch: (request: import("@zokizuan/satori-core").SemanticSearchRequest) => this.context.semanticSearch(request),
-            storeFrozenSearchResultSet: (input) => this.searchContinuationCoordinator.store(this, input),
-            lookupFrozenSearchResultSet: (handle, nowMs) => (
-                this.searchContinuationCoordinator.lookup(handle, nowMs)
-            ),
-            removeFrozenSearchResultSet: (handle) => (
-                this.searchContinuationCoordinator.remove(handle)
-            ),
-            advanceFrozenSearchResultSet: (input) => (
-                this.searchContinuationCoordinator.advance(input)
-            ),
-            isSearchContinuationOwner: (owner) => owner === this,
-            continueSearchRoutedToOwner: (args, lookup) => {
-                if (lookup.status !== "hit") {
-                    throw new Error("Routed search continuation lookup is not a hit.");
-                }
-                const owner = lookup.owner as unknown as ToolHandlers;
-                return owner.handleContinueSearchOwned(
-                    args,
-                    lookup as unknown as SearchContinuationLookup,
-                );
+        const searchRequestCoordinatorCollaborators: ConstructorParameters<typeof SearchRequestCoordinator>[0] = {
+            readiness: {
+                touchWatchedCodebaseBestEffort: (codebasePath) => (
+                    this.touchWatchedCodebaseBestEffort(codebasePath)
+                ),
+                getSyncManager: () => this.syncManager,
+                prepareTrackedRootReadWithObservation: (absolutePath, onPhase, accessMode) => (
+                    this.prepareTrackedRootReadWithObservation(absolutePath, onPhase, accessMode)
+                ),
+                loadRegistryValidatedCallGraphSidecar: (input) => (
+                    this.loadRegistryValidatedCallGraphSidecar(input)
+                ),
+                getWatcherObservation: (codebasePath) => this.getWatcherObservation(codebasePath),
+                getChangedFilesForCodebase: (codebasePath, options) => (
+                    this.getChangedFilesForCodebase(codebasePath, options)
+                ),
+                waitForSearchableSync: (codebasePath, timeoutMs) => (
+                    this.waitForSearchableSync(codebasePath, timeoutMs)
+                ),
+                getTrackedRootReadiness: () => this.trackedRootReadiness,
+                isPartialIndexNavigationUnavailable: (info) => (
+                    this.isPartialIndexNavigationUnavailable(info)
+                ),
+                getIndexingOperationForReadiness: (codebasePath) => (
+                    this.getIndexingOperationForReadiness(codebasePath)
+                ),
+                contextLifecycle: () => this.contextLifecycle(),
+                canSyncStaleLocal: (codebasePath, reason) => (
+                    this.canSyncStaleLocal(codebasePath, reason)
+                ),
+                probeLocalSearchCollectionState: (codebasePath) => (
+                    this.probeLocalSearchCollectionState(codebasePath)
+                ),
             },
-            getPreparedGenerationRevalidator: () => {
-                const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
-                if (typeof revalidate !== "function") {
-                    return undefined;
-                }
-                return (codebasePath, receipt, options) => (
-                    revalidate.call(this.context, codebasePath, receipt, options)
-                );
+            hints: {
+                stringifyToolJson: (payload) => this.stringifyToolJson(payload),
+                getToolResponseBuilders: () => this.toolResponseBuilders,
+                getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
+                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => (
+                    this.buildRequiresReindexPayload(codebasePath, detail, searchContext)
+                ),
+                buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => (
+                    this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results)
+                ),
+                buildChangedCodeDebug: (preparedRead, changedFilesState) => (
+                    this.buildChangedCodeDebug(preparedRead, changedFilesState)
+                ),
+                withProofDebugHint: (payload, proofDebugHint) => (
+                    this.withProofDebugHint(payload, proofDebugHint)
+                ),
+                buildSyncHint: (codebasePath) => this.buildSyncHint(codebasePath),
+                buildStaleLocalMessage: (codebasePath, requestedPath, reason) => (
+                    this.buildStaleLocalMessage(codebasePath, requestedPath, reason)
+                ),
+                buildStaleLocalHint: (codebasePath, reason) => (
+                    this.buildStaleLocalHint(codebasePath, reason)
+                ),
+                buildRepairHint: (codebasePath) => this.buildRepairHint(codebasePath),
+                buildRelationshipBackedCallGraph: (input) => (
+                    this.buildRelationshipBackedCallGraph(input)
+                ),
+                buildManageIndexRecommendedAction: (action, codebasePath, reason) => (
+                    this.buildManageIndexRecommendedAction(action, codebasePath, reason)
+                ),
+                buildCreateHint: (codebasePath) => this.buildCreateHint(codebasePath),
+                sanitizeIndexedRelativeFilePath: (relativeFilePath) => (
+                    this.sanitizeIndexedRelativeFilePath(relativeFilePath)
+                ),
             },
-        };
+            preparedRead: {
+                loadPreparedNavigationManifest: (preparedRead, operations) => (
+                    this.loadPreparedNavigationManifest(preparedRead, operations)
+                ),
+                getPreparedReadCacheObservation: (codebasePath) => (
+                    this.getPreparedReadCacheObservation(codebasePath)
+                ),
+                getPreparedAuthorityObservation: (codebasePath) => (
+                    this.getPreparedAuthorityObservation(codebasePath)
+                ),
+                seedPreparedRead: (state, preserveProofAge, statusPrepared) => (
+                    this.seedPreparedRead(state, preserveProofAge, statusPrepared)
+                ),
+                evictPreparedRead: (codebasePath) => this.evictPreparedRead(codebasePath),
+                loadPreparedNavigationCompatibility: (preparedRead, expectedHash, operations) => (
+                    this.loadPreparedNavigationCompatibility(preparedRead, expectedHash, operations)
+                ),
+                getCachedPreparedRead: (absolutePath, operations, requireNavigation) => (
+                    this.getCachedPreparedRead(absolutePath, operations, requireNavigation)
+                ),
+                acquirePublicationReadLease: (codebasePath) => (
+                    this.acquirePublicationReadLease(codebasePath)
+                ),
+            },
+            freshness: {
+                getSourceFreshnessPort: () => this.getSourceFreshnessPort(),
+                inspectSourceFreshnessCheckpoint: (
+                    codebasePath: string,
+                    checkpointIdentity?: string,
+                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
+                ) => this.context.inspectSourceFreshnessCheckpoint(codebasePath, checkpointIdentity, requestBoundReceipt),
+                compareAllSourceToFreshnessCheckpoint: (
+                    codebasePath: string,
+                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
+                ) => this.context.compareAllSourceToFreshnessCheckpoint(codebasePath, requestBoundReceipt),
+                compareSourceObservationToFreshnessCheckpoint: (
+                    codebasePath: string,
+                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
+                ) => this.context.compareSourceObservationToFreshnessCheckpoint(codebasePath, requestBoundReceipt),
+                compareSourcePathsToFreshnessCheckpoint: (
+                    codebasePath: string,
+                    relativePaths: readonly string[],
+                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
+                ) => this.context.compareSourcePathsToFreshnessCheckpoint(codebasePath, relativePaths, requestBoundReceipt),
+                getPreparedGenerationRevalidator: () => {
+                    const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
+                    if (typeof revalidate !== "function") {
+                        return undefined;
+                    }
+                    return (codebasePath, receipt, options) => (
+                        revalidate.call(this.context, codebasePath, receipt, options)
+                    );
+                },
+            },
+            environment: {
+                now: () => this.now(),
+                getCapabilities: () => this.capabilities,
+                getReadFileMaxBytes: () => this.readFileMaxBytes,
+                parseIndexedAtMs: (indexedAt) => this.parseIndexedAtMs(indexedAt),
+                getEmbeddingProviderName: () => this.context.getEmbeddingEngine().getProvider(),
+                semanticSearch: (request: import("@zokizuan/satori-core").SemanticSearchRequest) => this.context.semanticSearch(request),
+            },
+            continuationStore: {
+                storeFrozenSearchResultSet: (input) => this.searchContinuationCoordinator.store(this, input),
+                lookupFrozenSearchResultSet: (handle, nowMs) => (
+                    this.searchContinuationCoordinator.lookup(handle, nowMs)
+                ),
+                removeFrozenSearchResultSet: (handle) => (
+                    this.searchContinuationCoordinator.remove(handle)
+                ),
+                advanceFrozenSearchResultSet: (input) => (
+                    this.searchContinuationCoordinator.advance(input)
+                ),
+                isSearchContinuationOwner: (owner) => owner === this,
+                continueSearchRoutedToOwner: (args, lookup) => {
+                    if (lookup.status !== "hit") {
+                        throw new Error("Routed search continuation lookup is not a hit.");
+                    }
+                    const owner = lookup.owner as unknown as ToolHandlers;
+                    return owner.handleContinueSearchOwned(
+                        args,
+                        lookup as unknown as SearchContinuationLookup,
+                    );
+                },
+            }
+        };;
         this.searchRequestCoordinator = new SearchRequestCoordinator(
-            searchRequestCoordinatorHost,
+            searchRequestCoordinatorCollaborators,
             this.searchQuerySupport,
             this.reranker,
         );
