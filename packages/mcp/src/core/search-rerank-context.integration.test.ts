@@ -13,9 +13,9 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import {
-    buildSearchRerankQuery,
-    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
-} from "./search-rerank-query.js";
+    buildSearchRerankQueryV2,
+    SEARCH_RERANK_QUERY_PROJECTION_V2,
+} from "./search-rerank-query-v2.js";
 import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { resolveSearchPolicy } from "./search-policy.js";
@@ -81,11 +81,11 @@ function buildInput(query: string): SearchExecutionInput {
         debugMode: "full",
         semanticQuery: parsedOperators.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQuery({
+        rerankQuery: buildSearchRerankQueryV2({
             semanticQuery: parsedOperators.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
         parsedOperators,
         queryPlan,
         exactRegistryEligible: false,
@@ -112,7 +112,7 @@ function typedProjection(result: FixtureCandidate): SearchRerankProjectionResult
         utf8Bytes: Buffer.byteLength(document, "utf8"),
         sha256: crypto.createHash("sha256").update(document, "utf8").digest("hex"),
         candidateRole,
-        projectionIdentity: "search_rerank_document_v3",
+        projectionIdentity: "search_rerank_document_v4",
     };
 }
 
@@ -271,8 +271,8 @@ test("survival metadata carries answer focus and query projection identity", asy
     assert.ok((rerankInputStage!.candidates.length) >= 2);
     for (const occurrence of rerankInputStage!.candidates) {
         assert.equal(occurrence.rerankInput?.answerFocus, "implementation");
-        assert.equal(occurrence.rerankInput?.queryProjectionIdentity, "search_rerank_query_v1");
-        assert.equal(occurrence.rerankInput?.projectionIdentity, "search_rerank_document_v3");
+        assert.equal(occurrence.rerankInput?.queryProjectionIdentity, "search_rerank_query_v2");
+        assert.equal(occurrence.rerankInput?.projectionIdentity, "search_rerank_document_v4");
     }
 });
 
@@ -297,7 +297,7 @@ test("explicit historical reranker profile receives the raw question byte-exact"
     const base = buildInput(question);
     const resolved = resolveSearchRerankQuery({
         semanticQuery: base.semanticQuery,
-        focusedQueryV1: base.rerankQuery,
+        focusedQueryV2: base.rerankQuery,
         projectionIdentity: reranker.getQueryProjectionVersion?.(),
     });
     const results = [
@@ -325,15 +325,15 @@ test("explicit historical reranker profile receives the raw question byte-exact"
     }
 });
 
-test("v3 profile identity resolves to the focused query v1 bytes", () => {
+test("retired v1 query projection identity is rejected", () => {
     const base = buildInput("how does Shariah compliance checking block trades");
-    const resolved = resolveSearchRerankQuery({
-        semanticQuery: base.semanticQuery,
-        focusedQueryV1: base.rerankQuery,
-        projectionIdentity: "search_rerank_query_v1",
-    });
-    assert.equal(resolved.query, base.rerankQuery);
-    assert.equal(resolved.queryProjectionIdentity, "search_rerank_query_v1");
+    assert.throws(
+        () => resolveSearchRerankQuery({
+            semanticQuery: base.semanticQuery,
+            projectionIdentity: "search_rerank_query_v1",
+        }),
+        /search_rerank_query_projection_identity_unknown:search_rerank_query_v1/,
+    );
 });
 
 test("source excerpt projection receives the exact semantic question rather than the expanded provider query", async () => {

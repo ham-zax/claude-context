@@ -24,7 +24,6 @@ import {
     SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE,
     buildSearchRerankDocumentV3ContractEvidence,
 } from "./search-rerank-contract-evidence.js";
-import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
 import {
@@ -396,8 +395,8 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         const parsedOperators = parseSearchOperators(question);
         const queryPlan = buildSearchQueryPlan(parsedOperators.semanticQuery, true, parsedOperators);
         answerFocusResolution[question] = resolveSearchAnswerFocus(queryPlan).focus;
-        const answerFocus = focus as Parameters<typeof buildSearchRerankQuery>[0]["answerFocus"];
-        queryProjectionV1[focus] = buildSearchRerankQuery({
+        const answerFocus = focus as Parameters<typeof buildSearchRerankQueryV2>[0]["answerFocus"];
+        queryProjectionV1[focus] = buildSearchRerankQueryV1ContractEvidence({
             semanticQuery: question,
             answerFocus,
         });
@@ -450,6 +449,48 @@ export function buildSearchRerankRequestContractManifest(): SearchRerankRequestC
         contractSha256: computeSearchRerankRequestContractSha256(fixtures),
         fixtures,
     };
+}
+
+/**
+ * Inert historical contract evidence (Phase 9.2D): the frozen request contract
+ * serializes the retired v1 query projection. Production routing never
+ * executes this builder; it exists only to keep `contractSha256` byte-stable.
+ */
+const SEARCH_RERANK_QUERY_V1_GUIDANCE: Record<
+    Parameters<typeof buildSearchRerankQueryV2>[0]["answerFocus"],
+    string
+> = {
+    implementation:
+        "Rank the production mechanism and its integration path first. Tests and documentation are supporting evidence unless they are the clearest direct answer.",
+    tests:
+        "Rank tests that directly prove the requested behavior first. Production code may be supporting context.",
+    documentation:
+        "Rank documentation that directly explains the requested topic first. Code may be supporting context.",
+    configuration:
+        "Rank active configuration declarations and the code that loads or applies them first.",
+    references:
+        "Rank direct callers, callees, references, and integration sites that answer the relationship question first.",
+    neutral:
+        "Rank the candidate that most directly answers the question. Candidate role is evidence, not a fixed preference.",
+};
+
+function buildSearchRerankQueryV1ContractEvidence(input: {
+    semanticQuery: string;
+    answerFocus: Parameters<typeof buildSearchRerankQueryV2>[0]["answerFocus"];
+}): string {
+    const semanticQuery = input.semanticQuery.trim();
+    if (semanticQuery.length === 0) {
+        throw new Error("search rerank query requires a non-empty semantic query");
+    }
+    return [
+        "Question:",
+        semanticQuery,
+        "",
+        `Answer focus: ${input.answerFocus}`,
+        "",
+        "Guidance:",
+        SEARCH_RERANK_QUERY_V1_GUIDANCE[input.answerFocus],
+    ].join("\n");
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

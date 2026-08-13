@@ -31,9 +31,9 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import {
-    buildSearchRerankQuery,
-    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
-} from "./search-rerank-query.js";
+    buildSearchRerankQueryV2,
+    SEARCH_RERANK_QUERY_PROJECTION_V2,
+} from "./search-rerank-query-v2.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { resolveSearchPolicy } from "./search-policy.js";
 import { searchRerankCandidateId } from "./search-rerank-projection.js";
@@ -103,11 +103,11 @@ function buildInput(query: string): SearchExecutionInput {
         debugMode: "none",
         semanticQuery: parsedOperators.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQuery({
+        rerankQuery: buildSearchRerankQueryV2({
             semanticQuery: parsedOperators.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
         parsedOperators,
         queryPlan,
         exactRegistryEligible: false,
@@ -214,7 +214,8 @@ test("Scenario A: exact question and factual roles reach the provider without nu
     assert.equal(outcome.kind, "ok");
     if (outcome.kind !== "ok") return;
     const query = captured.query ?? "";
-    assert.ok(query.includes("Answer focus: implementation"));
+    assert.ok(query.includes("Requested answer type:"));
+    assert.ok(query.includes("production implementation, control flow, and integration path"));
     assert.equal(query.split(question).length - 1, 1, "question appears exactly once");
     assert.equal(/multiplier|weight|boost|preference\s*\d/i.test(query), false);
     assert.equal(/\d\.\d+/.test(query), false);
@@ -254,7 +255,8 @@ test("Scenario B: test-seeking query publishes tests focus while provider order 
 
     assert.equal(outcome.kind, "ok");
     if (outcome.kind !== "ok") return;
-    assert.ok((captured.query ?? "").includes("Answer focus: tests"));
+    assert.ok((captured.query ?? "").includes("Requested answer type:"));
+    assert.ok((captured.query ?? "").includes("tests that directly verify the requested behavior"));
     assert.equal(outcome.rerankerApplied, true);
     assert.equal(outcome.orderAuthority, "reranker_order");
     assert.deepEqual(

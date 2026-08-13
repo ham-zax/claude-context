@@ -85,13 +85,16 @@ Completed ownership-bounded batches:
   - Deprecated compatibility seams (current): `Context.setWriteCollectionOverride` (legacy adapter), `navigation/runtime.ts:41` `servingStore` alias, `config.ts:55` `WATCHER_DEBOUNCE_MS` alias, `MCP_WATCH_DEBOUNCE_MS` (ignored).
   - No other versioned production symbol families found beyond these and their test-only fixtures.
 - Phase 9.1 / retired LateOn runtime profiles: only `lateon_offline_quality_projection_v4_d32_v1` can execute. `createMcpConfig` rejects every other known profile with a clear `Unsupported SATORI_LATEON_PROFILE` error carrying `satori upgrade` migration guidance, and the two historical activation policies are rejected the same way. `loadLateOnRuntimeProfile` rejects retired profile IDs and non-v4 schema assets; `PROFILE_PATHS` keeps only the v4 asset; the v1-v3 validation branches are deleted (`LATEON_RETIRED_RUNTIME_PROFILE_IDS` records the retired set). CLI upgrade/migration fixtures for historical managed profile IDs unchanged. Full MCP suite 1554 pass / 1 skip; CLI suite 364/364: `bcc2460`.
+- Phase 9.2A / extract canonical rerank projection primitives: the neutral projection primitives and constants that V2/V3/V4 shared (validation, source-selection, physical-line/excerpt bounds, sibling normalization) are extracted out of the historical modules into `search-rerank-projection-primitives.ts`. Pure move/refactor; no supported route, projection bytes, request-contract fixture, or `requestContractSha256` change. Request-contract fixture still pins the recomputed `contractSha256` (search-rerank-request-contract.test.ts): `d622cff`.
+- Phase 9.2B / retire executable historical rerank document projections: production search uses one canonical document projector; the executable V2/V3 builders and their projection dispatch are removed; historical V3 fixture/policy material required only to preserve the frozen current request-contract identity becomes inert contract evidence, not executable implementation: `304c87a`.
+- Phase 9.2C / remove bounded-source selector v1: after no executable supported path selects it, the legacy CRLF newline branch is gone and `selectBoundedSource(...)` is one canonical algorithm; `bounded_source_selection_v2` remains the immutable current identity: `24a89d5`.
 
-Next open batch at this checkpoint: Phase 9.2A (extract canonical rerank
-projection primitives). 9.2B may start only after this 9.1 retirement batch
-passes review. Phase 8 is sealed (`bc53cb4 → 0963ca9`, review-approved).
-The durable-format floor (9.3) requires separate authorization. Refresh this
-checkpoint only after an accepted batch is committed; preserve the original
-baseline above as historical lineage.
+Next open batch at this checkpoint: Phase 9.2D (canonicalize query projection
+routing) — in progress by the implementing session. Full-suite verification for
+9.2A–9.2C on a settled tree is pending 9.2D's commit. Phase 8 is sealed
+(`bc53cb4 → 0963ca9`, review-approved). The durable-format floor (9.3) requires
+separate authorization. Refresh this checkpoint only after an accepted batch is
+committed; preserve the original baseline above as historical lineage.
 
 ## Goal
 

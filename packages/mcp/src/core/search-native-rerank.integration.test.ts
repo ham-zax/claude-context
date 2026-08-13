@@ -17,9 +17,9 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import {
-    buildSearchRerankQuery,
-    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
-} from "./search-rerank-query.js";
+    buildSearchRerankQueryV2,
+    SEARCH_RERANK_QUERY_PROJECTION_V2,
+} from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_INPUT_MAX_UTF8_BYTES } from "./search-constants.js";
 import { searchRerankCandidateId } from "./search-rerank-projection.js";
 import type {
@@ -110,11 +110,11 @@ function buildInput(
         debugMode: overrides.debugMode ?? "none",
         semanticQuery: parsedOperators.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQuery({
+        rerankQuery: buildSearchRerankQueryV2({
             semanticQuery: parsedOperators.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
         parsedOperators,
         queryPlan,
         exactRegistryEligible: false,
@@ -951,7 +951,7 @@ test("full debug records bounded per-document rerank input provenance without te
             candidateRole: "unknown",
             answerFocus: "implementation",
             projectionIdentity: "search_rerank_document_v2",
-            queryProjectionIdentity: "search_rerank_query_v1",
+            queryProjectionIdentity: "search_rerank_query_v2",
         });
     }
     for (const stage of stages) {

@@ -4,9 +4,9 @@ import { LexicalRetrievalModeUnsupportedError } from '@zokizuan/satori-core';
 import { parseSearchOperators, buildSearchQueryPlan } from './search-query-planning.js';
 import { resolveSearchAnswerFocus } from './search-answer-focus.js';
 import {
-    buildSearchRerankQuery,
-    SEARCH_RERANK_QUERY_PROJECTION_VERSION,
-} from './search-rerank-query.js';
+    buildSearchRerankQueryV2,
+    SEARCH_RERANK_QUERY_PROJECTION_V2,
+} from './search-rerank-query-v2.js';
 import { resolveSearchPolicy } from './search-policy.js';
 import {
     runSearchExecution,
@@ -72,11 +72,11 @@ function buildInput(overrides: Partial<SearchExecutionInput> = {}): SearchExecut
         debugMode: 'none',
         semanticQuery: parsed.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQuery({
+        rerankQuery: buildSearchRerankQueryV2({
             semanticQuery: parsed.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_VERSION,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
         parsedOperators: parsed,
         queryPlan,
         exactRegistryEligible: false,

@@ -216,12 +216,10 @@ test("LateOn advertised query identities route to the promised query projection"
     t.after(() => contextV4.close());
 
     const rawQuestion = "how does Shariah compliance checking block trades";
-    const focusedV1 = "Question:\nhow does Shariah compliance checking block trades\n\nAnswer focus: implementation";
     const focusedV2 = "Question:\nhow does Shariah compliance checking block trades\n\nRequested answer type:\nproduction implementation, control flow, and integration path";
 
     const v4 = resolveSearchRerankQuery({
         semanticQuery: rawQuestion,
-        focusedQueryV1: focusedV1,
         focusedQueryV2: focusedV2,
         projectionIdentity: contextV4.getQueryProjectionVersion(),
     });
@@ -230,7 +228,6 @@ test("LateOn advertised query identities route to the promised query projection"
 
     const raw = resolveSearchRerankQuery({
         semanticQuery: rawQuestion,
-        focusedQueryV1: focusedV1,
         focusedQueryV2: focusedV2,
         projectionIdentity: "semantic_query_raw_v1",
     });
