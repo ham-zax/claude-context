@@ -9,11 +9,11 @@ import {
 } from "./published-surface.js";
 
 /**
- * Phase 8.1 — freezes the published Core package surface as a NAME set
- * (barrel export names + Context public member names). Regenerate
+ * Phase 8.1 — freezes the published Core package surface (barrel export names
+ * plus Context public member names and signatures). Regenerate
  * contracts/published-surface.json only under breaking-API authorization.
  */
-test("published Core surface matches the frozen name set", () => {
+test("published Core surface matches the frozen contract", () => {
     // tsx executes these tests as ESM; the CJS build typing does not apply.
     // @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
     const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));

@@ -5,8 +5,10 @@ export * from './types';
 export * from './context';
 export * from './core/persisted-index-authority';
 export * from './core/index-policy-input-observer';
-export * from './core/collection-naming';
-export * from './core/collection-family-listing';
+export {
+    SATORI_COLLECTION_FAMILY_PREFIXES,
+    isStagedGenerationCollectionName,
+} from './core/collection-naming';
 export * from './core/search-projections';
 export { LexicalRetrievalModeUnsupportedError } from './core/semantic-search-service';
 export { VECTOR_CANDIDATE_RRF_K_V1 } from './core/vector-candidate-fusion';

@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import {
     COLLECTION_LIMIT_MESSAGE,
-    type IndexCompletionMarkerDocument,
     type ProvenGenerationReceipt,
     type ProvenVectorGenerationReceipt,
     type PreparedGenerationRevalidation,
@@ -9,7 +8,7 @@ import {
     type NavigationStore,
     type Reranker,
 } from "@zokizuan/satori-core";
-import type { ProvenSourceFreshnessCheckpointEvidence, SemanticSearchRequest, SemanticSearchResult, SourceFreshnessPathComparison } from "@zokizuan/satori-core";
+import type { ProvenSourceFreshnessCheckpointEvidence, SemanticSearchCandidateTraceOptions, SemanticSearchExecutionResult, SemanticSearchRequest, SemanticSearchResult, SourceFreshnessPathComparison } from "@zokizuan/satori-core";
 import type { SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "./capabilities.js";
 import { absolutePathOrRaw } from "../utils.js";
@@ -17,6 +16,7 @@ import {
     SyncManager,
     type FreshnessDecision,
     type PreparedReadObservationUnavailableReason,
+    type PreparedReadWatcherDiagnostics,
     type WatcherObservationSnapshot,
 } from "./sync.js";
 import {
@@ -377,18 +377,7 @@ type SearchOwnerResolution = {
     ownerSource?: Extract<SearchOwnerSource, 'owner_metadata' | 'registry_repair'>;
 };
 
-type IndexCompletionMarkerContext = {
-    getIndexCompletionMarker?: (codebasePath: string) => Promise<IndexCompletionMarkerDocument | null>;
-    getIndexCompletionMarkerForValidation?: (codebasePath: string) => Promise<unknown>;
-    getActiveIndexedCollectionName?: (codebasePath: string) => Promise<string | null>;
-    getCompletionProofCollectionName?: (codebasePath: string) => Promise<string | null>;
-    clearIndexCompletionMarker?: (codebasePath: string, assertMutationCurrent?: () => void) => Promise<void>;
-    pruneIndexedCollectionFamily?: (codebasePath: string, keepCollectionName: string, options?: { assertMutationCurrent?: () => void }) => Promise<string[]>;
-    pruneUnprovenStagedCollectionFamily?: (codebasePath: string, options?: {
-        assertMutationCurrent?: () => void;
-        discardUnprovenPayload?: boolean;
-    }) => Promise<string[]>;
-};
+type ToolArgs = Record<string, unknown>;
 
 type ToolTextResponse = {
     content: Array<{ type: "text"; text: string }>;
@@ -429,51 +418,6 @@ const WATCHER_UNAVAILABLE_SOURCE_REASONS = new Set([
     'root_watcher_not_active',
     'watcher_observation_gap',
 ]);
-
-type ToolArgs = Record<string, unknown>;
-
-type IndexProfileView = {
-    profile: string;
-    configPath?: string;
-};
-
-type ContextLifecycleCapabilities = IndexCompletionMarkerContext & {
-    getIndexAuthorityObservations?: (codebasePath: string) => {
-        vector: string;
-        navigation: string;
-    } | null;
-    resolveCollectionName?: (codebasePath: string) => string;
-    resolveStagedCollectionName?: (codebasePath: string, generationId: string) => string;
-    setWriteCollectionOverride?: (codebasePath: string, collectionName: string | null) => void;
-    loadIndexProfileForCodebase?: (codebasePath: string) => IndexProfileView;
-    getActiveIgnorePatterns?: (codebasePath?: string) => string[];
-    getIndexedExtensionsForCodebase?: (codebasePath: string) => string[];
-    getIndexedExtensions?: () => string[];
-    getTrackedRelativePaths?: (codebasePath: string) => string[];
-    isPreparedVectorReceiptBoundToCurrentAuthority?: (
-        codebasePath: string,
-        receipt: ProvenVectorGenerationReceipt,
-    ) => boolean;
-    revalidatePreparedGeneration?: (
-        codebasePath: string,
-        receipt: ProvenVectorGenerationReceipt,
-        options?: {
-            priorGenerationReceipt?: import('@zokizuan/satori-core').ProvenGenerationReceipt;
-            navigationObservationChanged?: boolean;
-        },
-    ) => Promise<PreparedGenerationRevalidation | null>;
-    semanticSearchInProvenGeneration?: (
-        receipt: ProvenVectorGenerationReceipt,
-        request: import('@zokizuan/satori-core').SemanticSearchRequest,
-    ) => Promise<import('@zokizuan/satori-core').SemanticSearchResult[]>;
-    semanticSearchWithCandidateTraceInProvenGeneration?: (
-        receipt: ProvenVectorGenerationReceipt,
-        request: import('@zokizuan/satori-core').SemanticSearchRequest,
-        maxEntriesPerStage: number,
-        options?: import('@zokizuan/satori-core').SemanticSearchCandidateTraceOptions,
-    ) => Promise<import('@zokizuan/satori-core').SemanticSearchExecutionResult>;
-    acquirePublicationReadLease?: (codebasePath: string) => Promise<() => void>;
-};
 
 type PreparedReadCacheObservationResult = {
     observation: string | null;
@@ -531,7 +475,10 @@ export type RelationshipBackedCallGraphResult = {
 export interface SearchReadinessCollaborator {
     touchWatchedCodebaseBestEffort(codebasePath: string): Promise<void>;
 
-    getSyncManager(): SyncManager;
+    ensureFreshness(
+        ...args: Parameters<SyncManager['ensureFreshness']>
+    ): Promise<FreshnessDecision>;
+    getPreparedReadDiagnostics?(codebasePath: string): PreparedReadWatcherDiagnostics;
 
     prepareTrackedRootReadWithObservation(
         absolutePath: string,
@@ -569,7 +516,6 @@ export interface SearchReadinessCollaborator {
         | { action: "create" | "reindex" | "sync" | "repair"; phase: string; generation: number }
         | undefined;
 
-    contextLifecycle(): ContextLifecycleCapabilities;
 
     canSyncStaleLocal(codebasePath: string, reason: CompletionProofReason): boolean;
 
@@ -714,6 +660,16 @@ export interface SearchEnvironmentCollaborator {
     getEmbeddingProviderName(): string;
 
     semanticSearch(request: SemanticSearchRequest): Promise<SemanticSearchResult[]>;
+    semanticSearchInProvenGeneration?: (
+        receipt: ProvenVectorGenerationReceipt,
+        request: SemanticSearchRequest,
+    ) => Promise<SemanticSearchResult[]>;
+    semanticSearchWithCandidateTraceInProvenGeneration?: (
+        receipt: ProvenVectorGenerationReceipt,
+        request: SemanticSearchRequest,
+        maxEntriesPerStage: number,
+        options?: SemanticSearchCandidateTraceOptions,
+    ) => Promise<SemanticSearchExecutionResult>;
 }
 
 export interface SearchRequestCoordinatorCollaborators {
@@ -1173,7 +1129,7 @@ export class SearchRequestCoordinator {
                             });
                         }
 
-                        const decision = await this.readiness.getSyncManager().ensureFreshness(
+                        const decision = await this.readiness.ensureFreshness(
                             effectiveRoot,
                             exactSourceComparisonRequired || fullSourceComparisonRequired
                                 ? 0
@@ -1532,14 +1488,10 @@ export class SearchRequestCoordinator {
                     readinessDebug.observationUnavailableReason = finalSourceObservation.unavailableReason;
                 }
                 if (debugMode === 'full') {
-                    const getPreparedReadDiagnostics = (
-                        this.readiness.getSyncManager() as SyncManager & {
-                            getPreparedReadDiagnostics?: SyncManager['getPreparedReadDiagnostics'];
-                        }
-                    ).getPreparedReadDiagnostics;
+                    const getPreparedReadDiagnostics = this.readiness.getPreparedReadDiagnostics;
                     if (typeof getPreparedReadDiagnostics === 'function') {
                         readinessDebug.watcher = getPreparedReadDiagnostics.call(
-                            this.readiness.getSyncManager(),
+                            this.readiness,
                             effectiveRoot,
                         );
                     }
@@ -2115,13 +2067,12 @@ export class SearchRequestCoordinator {
                 }, {
                     searchQuerySupport: this.searchQuerySupport,
                     semanticSearch: (request) => {
-                        const lifecycle = this.readiness.contextLifecycle();
                         if (
                             vectorReceipt
                             && debugMode === 'full'
-                            && lifecycle.semanticSearchWithCandidateTraceInProvenGeneration
+                            && this.environment.semanticSearchWithCandidateTraceInProvenGeneration
                         ) {
-                            return lifecycle.semanticSearchWithCandidateTraceInProvenGeneration(
+                            return this.environment.semanticSearchWithCandidateTraceInProvenGeneration(
                                 vectorReceipt,
                                 request,
                                 SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
@@ -2137,7 +2088,7 @@ export class SearchRequestCoordinator {
                             );
                         }
                         return vectorReceipt
-                            ? lifecycle.semanticSearchInProvenGeneration!(vectorReceipt, request)
+                            ? this.environment.semanticSearchInProvenGeneration!(vectorReceipt, request)
                             : this.environment.semanticSearch(request);
                     },
                     reranker: this.reranker,

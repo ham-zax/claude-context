@@ -1358,6 +1358,36 @@ test('Context prepared collection receipt avoids a second create/drop cycle and 
     });
 });
 
+test('Context preserves legacy staged writes through the compatibility façade', async () => {
+    await withPreparedCollectionContext('legacy-override', async ({
+        codebasePath,
+        context,
+        vectorDatabase,
+        stagedCollectionName,
+    }) => {
+        context.setWriteCollectionOverride(codebasePath, stagedCollectionName);
+
+        const receipt = await context.prepareIndexCollection(codebasePath, {
+            generation: 1,
+            operationId: 'legacy-operation',
+        });
+        assert.equal(receipt.collectionName, stagedCollectionName);
+
+        await context.indexCodebase(codebasePath, undefined, false, {
+            preparedCollectionReceipt: receipt,
+            preparedCollectionBinding: {
+                generation: 1,
+                operationId: 'legacy-operation',
+            },
+        });
+
+        assert.equal(
+            vectorDatabase.collections.get(stagedCollectionName)?.has(INDEX_COMPLETION_MARKER_DOC_ID),
+            true,
+        );
+    });
+});
+
 test('Context prepared collection receipt is one-shot', async () => {
     await withPreparedCollectionContext('one-shot', async ({ codebasePath, context, stagedCollectionName }) => {
         const receipt = await context.prepareIndexCollection(

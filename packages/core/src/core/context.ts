@@ -473,6 +473,7 @@ type MutationGuardOptions = {
     indexPolicy?: ResolvedIndexPolicy;
     preparedCollectionReceipt?: PreparedIndexCollectionReceipt;
     preparedCollectionBinding?: PreparedIndexCollectionBinding;
+    writeCollectionName?: string;
 };
 
 type StagedCollectionPruneOptions = {
@@ -592,6 +593,9 @@ export class Context {
     private indexGenerationWorkflow: IndexGenerationWorkflow;
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
+    // Compatibility-only state for the frozen setter. New mutation callers pass
+    // the target through their operation options instead of consulting this map.
+    private readonly legacyWriteCollectionOverrides = new Map<string, string>();
     private symbolRegistryStateRoot?: string;
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
     private readonly indexingPipeline: IndexingPipeline;
@@ -1557,7 +1561,9 @@ export class Context {
         relativePaths: string[],
         assertMutationCurrent?: () => void,
     ): Promise<number> {
-        const collectionName = await this.getActiveIndexedCollectionName(codebasePath) || this.resolveCollectionName(codebasePath);
+        const collectionName = await this.getActiveIndexedCollectionName(codebasePath)
+            || this.getLegacyWriteCollectionName(codebasePath)
+            || this.resolveCollectionName(codebasePath);
         const uniquePaths = Array.from(new Set(this.normalizeRelativePathsForCodebase(codebasePath, relativePaths)));
 
         for (const relativePath of uniquePaths) {
@@ -2115,14 +2121,21 @@ export class Context {
         return resolveStagedCollectionName(this.resolveCollectionName(codebasePath), generationId);
     }
 
+    private getLegacyWriteCollectionName(codebasePath: string): string | undefined {
+        return this.legacyWriteCollectionOverrides.get(this.canonicalizeCodebasePath(codebasePath));
+    }
+
+    /**
+     * @deprecated Use operation-scoped write targets on index mutation options.
+     * This state is retained only for callers of the frozen compatibility API.
+     */
     public setWriteCollectionOverride(codebasePath: string, collectionName: string | null): void {
-        // Phase 8.5 - the write target is operation-scoped: the prepared index
-        // collection receipt carries the staged collection name for its own
-        // operation, and every indexing entry point takes an explicit target.
-        // This setter remains only for published-surface compatibility and no
-        // longer maintains ambient write-target state.
-        void codebasePath;
-        void collectionName;
+        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
+        if (!collectionName || collectionName.trim().length === 0) {
+            this.legacyWriteCollectionOverrides.delete(canonicalRoot);
+            return;
+        }
+        this.legacyWriteCollectionOverrides.set(canonicalRoot, collectionName.trim());
     }
 
     /**
@@ -2144,7 +2157,9 @@ export class Context {
         }
 
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const collectionName = binding.collectionName.trim();
+        const collectionName = binding.collectionName?.trim()
+            ?? this.getLegacyWriteCollectionName(canonicalRoot)
+            ?? this.resolveCollectionName(canonicalRoot);
         const stagedPrefix = `${this.resolveCollectionName(canonicalRoot)}${GENERATION_COLLECTION_SEPARATOR}`;
         if (!collectionName.startsWith(stagedPrefix)) {
             throw new Error(`Prepared index collection '${collectionName}' is not a staged generation for '${canonicalRoot}'.`);
@@ -3062,7 +3077,9 @@ export class Context {
         collectionNameOverride?: string,
         assertMutationCurrent?: () => void,
     ): Promise<void> {
-        const collectionName = collectionNameOverride || this.resolveCollectionName(codebasePath);
+        const collectionName = collectionNameOverride
+            || this.getLegacyWriteCollectionName(codebasePath)
+            || this.resolveCollectionName(codebasePath);
         const hasCollection = await this.vectorDatabase.hasCollection(collectionName);
         if (!hasCollection) {
             throw new Error(`Cannot write completion marker: collection '${collectionName}' does not exist.`);
@@ -3260,6 +3277,7 @@ export class Context {
             const familyCollectionName = this.resolveCollectionName(codebasePath);
             this.synchronizerRegistry.clearSynchronizerForCollection(familyCollectionName);
             this.ignoreRuleService.deleteCodebaseState(codebasePath);
+            this.legacyWriteCollectionOverrides.delete(canonicalRoot);
             this.indexPolicyRuntimeService.deleteIndexProfile(canonicalRoot);
         });
 
@@ -4079,7 +4097,11 @@ export class Context {
     }
 
     async clearIndexCompletionMarker(codebasePath: string, assertMutationCurrent?: () => void): Promise<void> {
-        return this.indexGenerationWorkflow.clearIndexCompletionMarker(codebasePath, assertMutationCurrent);
+        return this.indexGenerationWorkflow.clearIndexCompletionMarker(
+            codebasePath,
+            assertMutationCurrent,
+            this.getLegacyWriteCollectionName(codebasePath),
+        );
     }
 
     async resolveIndexPolicyForCodebase(
@@ -4108,11 +4130,30 @@ export class Context {
         forceReindex: boolean = false,
         options: MutationGuardOptions = {},
     ): Promise<IndexCodebaseResult> {
+        const legacyWriteCollectionName = this.getLegacyWriteCollectionName(codebasePath);
+        const normalizedBinding = options.preparedCollectionBinding
+            ? {
+                ...options.preparedCollectionBinding,
+                collectionName: options.preparedCollectionBinding.collectionName
+                    ?? legacyWriteCollectionName
+                    ?? options.preparedCollectionReceipt?.collectionName
+                    ?? this.resolveCollectionName(codebasePath),
+            }
+            : undefined;
+        const normalizedOptions: MutationGuardOptions = {
+            ...options,
+            ...(normalizedBinding ? { preparedCollectionBinding: normalizedBinding } : {}),
+            ...(!options.preparedCollectionReceipt
+                && options.writeCollectionName === undefined
+                && legacyWriteCollectionName !== undefined
+                ? { writeCollectionName: legacyWriteCollectionName }
+                : {}),
+        };
         return this.indexGenerationWorkflow.indexCodebase(
             codebasePath,
             progressCallback,
             forceReindex,
-            options,
+            normalizedOptions,
         );
     }
 
@@ -4121,7 +4162,12 @@ export class Context {
         progressCallback?: (progress: { phase: string; current: number; total: number; percentage: number }) => void,
         options: ReindexByChangeOptions = {}
     ): Promise<ReindexByChangeResult> {
-        return this.indexGenerationWorkflow.reindexByChange(codebasePath, progressCallback, options);
+        const legacyWriteCollectionName = this.getLegacyWriteCollectionName(codebasePath);
+        const normalizedOptions: ReindexByChangeOptions = options.targetCollectionName === undefined
+            && legacyWriteCollectionName !== undefined
+            ? { ...options, targetCollectionName: legacyWriteCollectionName }
+            : options;
+        return this.indexGenerationWorkflow.reindexByChange(codebasePath, progressCallback, normalizedOptions);
     }
 
     public async repairIndex(

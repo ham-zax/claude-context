@@ -416,8 +416,12 @@ export class IndexGenerationWorkflow {
         await this.clearIndexCompletionMarker(codebasePath, assertMutationCurrent);
     }
 
-    async clearIndexCompletionMarker(codebasePath: string, assertMutationCurrent?: () => void): Promise<void> {
-        const collectionName = this.ports.resolveCollectionName(codebasePath);
+    async clearIndexCompletionMarker(
+        codebasePath: string,
+        assertMutationCurrent?: () => void,
+        collectionNameOverride?: string,
+    ): Promise<void> {
+        const collectionName = collectionNameOverride ?? this.ports.resolveCollectionName(codebasePath);
         const hasCollection = await this.ports.vectorDatabase.hasCollection(collectionName);
         if (!hasCollection) {
             const activeCollectionName = await this.ports.getActiveIndexedCollectionName(codebasePath);
@@ -518,21 +522,29 @@ export class IndexGenerationWorkflow {
         // Phase 8.5 - the operation-scoped write target: the consumed receipt
         // names the staged collection; an explicit option covers receipt-less
         // staged rebuilds; otherwise the family name is the target.
+        const preparedCollectionBinding = options.preparedCollectionBinding
+            ? {
+                ...options.preparedCollectionBinding,
+                collectionName: options.preparedCollectionBinding.collectionName
+                    ?? options.preparedCollectionReceipt?.collectionName
+                    ?? this.ports.resolveCollectionName(codebasePath),
+            }
+            : undefined;
         const writeCollectionName = options.preparedCollectionReceipt?.collectionName
             ?? options.writeCollectionName
             ?? this.ports.resolveCollectionName(codebasePath);
         const prepareStartedAt = Date.now();
         if (options.preparedCollectionReceipt) {
-            if (!options.preparedCollectionBinding) {
+            if (!preparedCollectionBinding) {
                 throw new Error('Prepared index collection binding is required with its receipt.');
             }
             await this.consumePreparedIndexCollection(
                 codebasePath,
                 options.preparedCollectionReceipt,
-                options.preparedCollectionBinding,
+                preparedCollectionBinding,
                 options.assertMutationCurrent,
             );
-        } else if (options.preparedCollectionBinding) {
+        } else if (preparedCollectionBinding) {
             throw new Error('Prepared index collection receipt is required with its binding.');
         } else {
             await this.ports.prepareCollection(

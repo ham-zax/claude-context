@@ -76,7 +76,7 @@ export type DurableIndexAuthoritySnapshot = {
 export type PreparedIndexCollectionBinding = Readonly<{
     generation: number;
     operationId: string;
-    collectionName: string;
+    collectionName?: string;
 }>;
 
 export type PreparedIndexCollectionReceipt = Readonly<PreparedIndexCollectionBinding & {

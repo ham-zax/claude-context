@@ -989,12 +989,24 @@ export class ToolHandlers {
             mutationLeaseCoordinator: this.mutationLeaseCoordinator,
         };
         this.manageIndexingHandlers = new ManageIndexingHandlers(manageIndexingHandlersHost);
+        const searchContext = this.context;
+        const getSearchContextLifecycle = (): ContextLifecycleCapabilities => this.contextLifecycle();
+        const getSearchSyncManager = (): SyncManager => this.syncManager;
         const searchRequestCoordinatorCollaborators: ConstructorParameters<typeof SearchRequestCoordinator>[0] = {
             readiness: {
                 touchWatchedCodebaseBestEffort: (codebasePath) => (
                     this.touchWatchedCodebaseBestEffort(codebasePath)
                 ),
-                getSyncManager: () => this.syncManager,
+                ensureFreshness: (codebasePath, thresholdMs, options) => (
+                    getSearchSyncManager().ensureFreshness(codebasePath, thresholdMs, options)
+                ),
+                get getPreparedReadDiagnostics() {
+                    const syncManager = getSearchSyncManager();
+                    const implementation = syncManager.getPreparedReadDiagnostics;
+                    return typeof implementation === 'function'
+                        ? (codebasePath: string) => implementation.call(syncManager, codebasePath)
+                        : undefined;
+                },
                 prepareTrackedRootReadWithObservation: (absolutePath, onPhase, accessMode) => (
                     this.prepareTrackedRootReadWithObservation(absolutePath, onPhase, accessMode)
                 ),
@@ -1015,7 +1027,6 @@ export class ToolHandlers {
                 getIndexingOperationForReadiness: (codebasePath) => (
                     this.getIndexingOperationForReadiness(codebasePath)
                 ),
-                contextLifecycle: () => this.contextLifecycle(),
                 canSyncStaleLocal: (codebasePath, reason) => (
                     this.canSyncStaleLocal(codebasePath, reason)
                 ),
@@ -1116,6 +1127,25 @@ export class ToolHandlers {
                 parseIndexedAtMs: (indexedAt) => this.parseIndexedAtMs(indexedAt),
                 getEmbeddingProviderName: () => this.context.getEmbeddingEngine().getProvider(),
                 semanticSearch: (request: import("@zokizuan/satori-core").SemanticSearchRequest) => this.context.semanticSearch(request),
+                get semanticSearchInProvenGeneration() {
+                    const implementation = getSearchContextLifecycle().semanticSearchInProvenGeneration;
+                    return typeof implementation === 'function'
+                        ? (receipt: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt, request: import("@zokizuan/satori-core").SemanticSearchRequest) => (
+                            implementation.call(searchContext, receipt, request)
+                        )
+                        : undefined;
+                },
+                get semanticSearchWithCandidateTraceInProvenGeneration() {
+                    const implementation = getSearchContextLifecycle().semanticSearchWithCandidateTraceInProvenGeneration;
+                    return typeof implementation === 'function'
+                        ? (
+                            receipt: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
+                            request: import("@zokizuan/satori-core").SemanticSearchRequest,
+                            maxEntriesPerStage: number,
+                            options?: import("@zokizuan/satori-core").SemanticSearchCandidateTraceOptions,
+                        ) => implementation.call(searchContext, receipt, request, maxEntriesPerStage, options)
+                        : undefined;
+                },
             }
         };;
         this.searchRequestCoordinator = new SearchRequestCoordinator(
