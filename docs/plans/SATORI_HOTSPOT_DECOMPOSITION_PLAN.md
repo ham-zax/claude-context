@@ -44,8 +44,9 @@ Completed ownership-bounded batches:
 - Phase 6.1 / SearchRequestCoordinator extraction: `63e718e`.
 - Phase 6.2 / search continuation in the bounded search owner: `7571fb5`.
 - Phase 6.3 / retrieval-pass ownership in the pass executor: `011f054`.
+- Phase 6.4 / call-graph request handling verified in NavigationHandlers: `011f054` (constraint check).
 
-Next open batch at this checkpoint: Phase 6.4. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 6.5. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
@@ -682,6 +683,14 @@ Risk: M.
 
 Stopping condition: exact-symbol resolution, depth, continuation, sealed authority,
 and partial-coverage behavior remain unchanged.
+
+Completed as a constraint check at `011f054`. Call-graph request handling is already
+owned by `NavigationHandlers` (1737-line bounded owner with a narrow
+`NavigationHandlersHost` and the Phase 5.2 `PreparedPublicationReadSession`);
+`ToolHandlers` only delegates `handleCallGraph`/`handleFileOutline` and supplies
+bounded payload-builder collaborators. No broad readiness/currentness host is
+recreated. Behavior pinned by handlers.call_graph, call-graph, file_outline,
+current-source-symbols, and canonical-symbol-identity fixtures (115 tests).
 
 ### 6.5 Leave cohesive owners alone
 
