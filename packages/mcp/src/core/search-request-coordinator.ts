@@ -133,17 +133,15 @@ import {
     type SearchRankedSetBindingInput,
     type SearchRerankerBindingIdentity,
 } from "./search-result-set-identity.js";
-import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
 import {
-    projectPublicationBoundSearchRerankDocumentV2,
-    projectPublicationBoundSearchRerankDocumentV3,
-    projectPublicationBoundSearchRerankDocumentV4,
+    SEARCH_RERANK_DOCUMENT_POLICY,
+    SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION,
+} from "./search-rerank-document.js";
+import {
+    projectPublicationBoundSearchRerankDocument,
     searchRerankCandidateId,
 } from "./search-rerank-projection.js";
 import type { SearchRerankProjectionResult } from "./search-rerank-projection-result.js";
-import { SEARCH_RERANK_DOCUMENT_V2_POLICY } from "./search-rerank-document-v2.js";
-import { SEARCH_RERANK_DOCUMENT_V3_POLICY } from "./search-rerank-document-v3.js";
-import { SEARCH_RERANK_DOCUMENT_V4_POLICY } from "./search-rerank-document-v4.js";
 import {
     prepareSearchRerankStructuralRelationships,
     type PreparedSearchRerankStructuralRelationships,
@@ -2042,8 +2040,8 @@ export class SearchRequestCoordinator {
                     projectionIdentity: this.reranker?.getQueryProjectionVersion?.(),
                 });
                 const rerankerDocumentProjectionVersion: string | undefined = this.reranker?.getDocumentProjectionVersion?.();
-                const wantsV4StructuralContext = rerankerDocumentProjectionVersion
-                    === SEARCH_RERANK_DOCUMENT_V4_POLICY.id;
+                const wantsStructuralContext = rerankerDocumentProjectionVersion
+                    === SEARCH_RERANK_DOCUMENT_POLICY.id;
                 const execution = await runSearchExecution({
                     effectiveRoot,
                     scope: input.scope,
@@ -2092,9 +2090,7 @@ export class SearchRequestCoordinator {
                             : this.environment.semanticSearch(request);
                     },
                     reranker: this.reranker,
-                    ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V2_POLICY.id
-                        || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
-                        || rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
+                    ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_POLICY.id
                         ? {
                             buildRerankDocument: async (
                                 rerankQuery: string,
@@ -2144,7 +2140,7 @@ export class SearchRequestCoordinator {
                                     searchSymbolRegistry = registryState.registry;
                                     searchSymbolRegistryManifestHash = registryState.manifestHash;
                                 }
-                                const structuralContext = wantsV4StructuralContext
+                                const structuralContext = wantsStructuralContext
                                     ? await (structuralContextLoad ??= (async () => {
                                         const compatibility = await this.preparedRead.loadPreparedNavigationCompatibility(
                                             preparedReadState,
@@ -2173,11 +2169,7 @@ export class SearchRequestCoordinator {
                                         };
                                     })())
                                     : undefined;
-                                return (rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V4_POLICY.id
-                                    ? projectPublicationBoundSearchRerankDocumentV4
-                                    : rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_V3_POLICY.id
-                                        ? projectPublicationBoundSearchRerankDocumentV3
-                                        : projectPublicationBoundSearchRerankDocumentV2)({
+                                return projectPublicationBoundSearchRerankDocument({
                                     candidateId,
                                     codebaseRoot: effectiveRoot,
                                     semanticQuery: rerankQuery,

@@ -16,17 +16,9 @@ import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import type { SearchCandidateRole } from "./search-rerank-context.js";
 import type { SearchResultLike } from "./search-lexical-scoring.js";
 import {
-    buildSearchRerankDocumentV2,
-    SEARCH_RERANK_DOCUMENT_V2_POLICY,
-} from "./search-rerank-document-v2.js";
-import {
-    buildSearchRerankDocumentV3,
-    SEARCH_RERANK_DOCUMENT_V3_POLICY,
-} from "./search-rerank-document-v3.js";
-import {
-    buildSearchRerankDocumentV4,
-    SEARCH_RERANK_DOCUMENT_V4_POLICY,
-} from "./search-rerank-document-v4.js";
+    buildSearchRerankDocument,
+    SEARCH_RERANK_DOCUMENT_POLICY,
+} from "./search-rerank-document.js";
 import {
     buildSearchRerankStructuralContext,
     type PreparedSearchRerankStructuralRelationships,
@@ -83,9 +75,10 @@ function failure(
 }
 
 /**
- * Project the frozen projection-v2 bytes only from a registry-owned candidate and
- * hash-matched current source. The candidate span is retained because it is part
- * of the qualified L3 projection, but it must remain inside the canonical owner.
+ * Project the frozen canonical projection bytes only from a registry-owned
+ * candidate and hash-matched current source. The candidate span is retained
+ * because it is part of the qualified L3 projection, but it must remain inside
+ * the canonical owner.
  */
 async function resolvePublicationBoundEvidence(input: {
     codebaseRoot: string;
@@ -212,81 +205,7 @@ function success(
     };
 }
 
-export async function projectPublicationBoundSearchRerankDocumentV2(input: {
-    candidateId: string;
-    codebaseRoot: string;
-    semanticQuery: string;
-    result: SearchResultLike;
-    registry: SymbolRegistry;
-    relationships?: readonly RelationshipRecord[];
-    maxSourceBytes?: number;
-    readSourceEvidence?: CurrentSourceEvidenceReader;
-}): Promise<SearchRerankProjectionResult> {
-    const { candidateId } = input;
-    const resolved = await resolvePublicationBoundEvidence(input);
-    if (!resolved.ok) return failure(candidateId, resolved.reason);
-
-    let document: string;
-    try {
-        document = buildSearchRerankDocumentV2({
-            relativePath: input.result.relativePath,
-            language: input.result.language,
-            symbolKind: input.result.symbolKind ?? "file",
-            canonicalSymbolLabel:
-                input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
-            content: resolved.evidence.source,
-            symbolSpan: localCandidateSpan({ result: input.result, evidence: resolved.evidence }),
-            query: input.semanticQuery,
-        }).text;
-    } catch {
-        return failure(candidateId, "projection_contract_failed");
-    }
-    return success(document, "unknown", SEARCH_RERANK_DOCUMENT_V2_POLICY.id);
-}
-
-export async function projectPublicationBoundSearchRerankDocumentV3(input: {
-    candidateId: string;
-    codebaseRoot: string;
-    semanticQuery: string;
-    result: SearchResultLike;
-    registry: SymbolRegistry;
-    relationships?: readonly RelationshipRecord[];
-    maxSourceBytes?: number;
-    readSourceEvidence?: CurrentSourceEvidenceReader;
-}): Promise<SearchRerankProjectionResult> {
-    const { candidateId } = input;
-    const resolved = await resolvePublicationBoundEvidence(input);
-    if (!resolved.ok) return failure(candidateId, resolved.reason);
-
-    const candidateRole = resolveSearchCandidateRole({
-        relativePath: input.result.relativePath,
-        ...(typeof input.result.language === "string"
-            ? { language: input.result.language }
-            : {}),
-        ...(typeof input.result.symbolKind === "string"
-            ? { symbolKind: input.result.symbolKind }
-            : {}),
-    });
-    let document: string;
-    try {
-        document = buildSearchRerankDocumentV3({
-            relativePath: input.result.relativePath,
-            language: input.result.language,
-            candidateRole,
-            symbolKind: input.result.symbolKind ?? "file",
-            canonicalSymbolLabel:
-                input.result.symbolLabel ?? path.posix.basename(input.result.relativePath),
-            content: resolved.evidence.source,
-            symbolSpan: localCandidateSpan({ result: input.result, evidence: resolved.evidence }),
-            query: input.semanticQuery,
-        }).text;
-    } catch {
-        return failure(candidateId, "projection_contract_failed");
-    }
-    return success(document, candidateRole, SEARCH_RERANK_DOCUMENT_V3_POLICY.id);
-}
-
-export async function projectPublicationBoundSearchRerankDocumentV4(input: {
+export async function projectPublicationBoundSearchRerankDocument(input: {
     candidateId: string;
     codebaseRoot: string;
     semanticQuery: string;
@@ -320,7 +239,7 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
     });
     let document: string;
     try {
-        document = buildSearchRerankDocumentV4({
+        document = buildSearchRerankDocument({
             relativePath: input.result.relativePath,
             language: input.result.language,
             candidateRole,
@@ -338,25 +257,10 @@ export async function projectPublicationBoundSearchRerankDocumentV4(input: {
     return success(
         document,
         candidateRole,
-        SEARCH_RERANK_DOCUMENT_V4_POLICY.id,
+        SEARCH_RERANK_DOCUMENT_POLICY.id,
         input.structuralContextStatus
             ?? (input.preparedStructuralRelationships !== undefined || input.relationships !== undefined
                 ? "available"
                 : "unavailable"),
     );
-}
-
-export async function buildPublicationBoundSearchRerankDocumentV2(input: {
-    codebaseRoot: string;
-    semanticQuery: string;
-    result: SearchResultLike;
-    registry: SymbolRegistry;
-    maxSourceBytes?: number;
-    readSourceEvidence?: CurrentSourceEvidenceReader;
-}): Promise<string | undefined> {
-    const result = await projectPublicationBoundSearchRerankDocumentV2({
-        ...input,
-        candidateId: searchRerankCandidateId(input.result),
-    });
-    return result.ok ? result.document : undefined;
 }

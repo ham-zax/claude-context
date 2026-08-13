@@ -1,9 +1,16 @@
+/**
+ * Inert historical contract evidence (Phase 9.2B).
+ *
+ * The frozen rerank request contract serializes a V3 document projection and
+ * the V3 source-selection policy. Production search must never execute these;
+ * they exist only so the current contract identity (`contractSha256` in
+ * `assets/lateon/rerank-request-contract-v1.json`) stays byte-identical.
+ * Nothing outside `search-rerank-request-contract.ts` may import this module.
+ */
 import { serializeCanonicalJson } from "./canonical-json.js";
-import type { SearchCandidateRole } from "./search-rerank-context.js";
 import {
-    SEARCH_RERANK_DOCUMENT_V2_POLICY,
-    isRecord,
     firstStructuralDeclaration,
+    isRecord,
     normalizeEvidenceSpans,
     normalizeRequiredOwnerSiblings,
     requireBoundedDocumentation,
@@ -16,42 +23,17 @@ import {
     sourceLinesInSpan,
     type NormalizedProjectionInput,
     type SearchRerankDocumentV2Sibling,
-} from "./search-rerank-document-v2.js";
+} from "./search-rerank-projection-primitives.js";
 import type { SourceLineSpan } from "./bounded-source-selector.js";
 
-export const SEARCH_RERANK_DOCUMENT_V3_POLICY = Object.freeze({
+export const SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE = Object.freeze({
     id: "search_rerank_document_v3",
-    previousVersion: SEARCH_RERANK_DOCUMENT_V2_POLICY.id,
-    maximumUtf8Bytes: SEARCH_RERANK_DOCUMENT_V2_POLICY.maximumUtf8Bytes,
+    previousVersion: "search_rerank_document_v2",
+    maximumUtf8Bytes: 4_000,
     serialization: "canonical_json_utf8",
-    serializedKeyOrder: SEARCH_RERANK_DOCUMENT_V2_POLICY.serializedKeyOrder,
+    serializedKeyOrder: "lexicographic_recursive_canonical_json_v1",
     addedField: "candidate_role",
 });
-
-export interface SearchRerankDocumentV3Input {
-    readonly relativePath: string;
-    readonly language: string;
-    readonly candidateRole: SearchCandidateRole;
-    readonly symbolKind: string;
-    readonly canonicalSymbolLabel: string;
-    readonly symbolSpan: SourceLineSpan;
-    readonly content: string;
-    readonly signatureOrDeclaration?: string;
-    readonly documentationExcerpt?: string;
-    readonly query?: string;
-    readonly evidenceSpans?: readonly SourceLineSpan[];
-    readonly requiredOwnerSiblings?: readonly SearchRerankDocumentV2Sibling[];
-}
-
-export interface SearchRerankDocumentV3Result {
-    readonly version: typeof SEARCH_RERANK_DOCUMENT_V3_POLICY.id;
-    readonly text: string;
-    readonly utf8Bytes: number;
-    readonly selectedSourceLineCount: number;
-    readonly selectedSourceExcerptCount: number;
-    readonly sourceTruncated: boolean;
-    readonly selectionAttemptCount: number;
-}
 
 interface SearchRerankDocumentV3Projection {
     readonly repository_relative_path: string;
@@ -68,7 +50,24 @@ interface SearchRerankDocumentV3Projection {
     }[];
 }
 
-export function buildSearchRerankDocumentV3(rawInput: unknown): SearchRerankDocumentV3Result {
+export interface SearchRerankDocumentV3ContractInput {
+    readonly relativePath: string;
+    readonly language: string;
+    readonly candidateRole: string;
+    readonly symbolKind: string;
+    readonly canonicalSymbolLabel: string;
+    readonly symbolSpan: SourceLineSpan;
+    readonly content: string;
+    readonly signatureOrDeclaration?: string;
+    readonly documentationExcerpt?: string;
+    readonly query?: string;
+    readonly evidenceSpans?: readonly SourceLineSpan[];
+    readonly requiredOwnerSiblings?: readonly SearchRerankDocumentV2Sibling[];
+}
+
+export function buildSearchRerankDocumentV3ContractEvidence(
+    rawInput: unknown,
+): string {
     if (!isRecord(rawInput)) throw new TypeError("Projection input must be an object.");
     const candidateRole = requireString(rawInput.candidateRole, "candidateRole");
     const content = requireString(rawInput.content, "content", { allowEmpty: true });
@@ -93,12 +92,12 @@ export function buildSearchRerankDocumentV3(rawInput: unknown): SearchRerankDocu
         ? requireBoundedPhysicalLine(
             inferredOrFileHeading,
             "inferred signatureOrDeclaration",
-            SEARCH_RERANK_DOCUMENT_V2_POLICY.declarationMaximumUtf8Bytes,
+            1_000,
         )
         : requireBoundedPhysicalLine(
             rawInput.signatureOrDeclaration,
             "signatureOrDeclaration",
-            SEARCH_RERANK_DOCUMENT_V2_POLICY.declarationMaximumUtf8Bytes,
+            1_000,
         );
     const normalized: NormalizedProjectionInput = {
         relativePath,
@@ -135,9 +134,12 @@ export function buildSearchRerankDocumentV3(rawInput: unknown): SearchRerankDocu
 
     const minimumText = buildProjectionText("");
     const minimumBytes = Buffer.byteLength(minimumText, "utf8");
-    if (!signatureOrDeclaration || minimumBytes > SEARCH_RERANK_DOCUMENT_V3_POLICY.maximumUtf8Bytes) {
+    if (
+        !signatureOrDeclaration
+        || minimumBytes > SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE.maximumUtf8Bytes
+    ) {
         throw new RangeError(
-            `Projection v3 mandatory projection exceeds ${SEARCH_RERANK_DOCUMENT_V3_POLICY.maximumUtf8Bytes} UTF-8 bytes.`,
+            `Projection v3 mandatory projection exceeds ${SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE.maximumUtf8Bytes} UTF-8 bytes.`,
         );
     }
 
@@ -147,13 +149,5 @@ export function buildSearchRerankDocumentV3(rawInput: unknown): SearchRerankDocu
         buildProjectionText,
     });
 
-    return {
-        version: SEARCH_RERANK_DOCUMENT_V3_POLICY.id,
-        text: selection.text,
-        utf8Bytes: Buffer.byteLength(selection.text, "utf8"),
-        selectedSourceLineCount: selection.selectedSource?.returnedLines ?? 0,
-        selectedSourceExcerptCount: selection.selectedSource?.excerptCount ?? 0,
-        sourceTruncated: selection.selectedSource?.truncated ?? content.length > 0,
-        selectionAttemptCount: selection.selectionAttemptCount,
-    };
+    return selection.text;
 }

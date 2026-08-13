@@ -26,7 +26,6 @@ import {
     type SearchNoiseCategory,
     type SearchScope,
 } from "./search-constants.js";
-import { buildSearchRerankDocument } from "./search-rerank-document.js";
 import type { SearchNoiseMitigationHint, SearchOperatorSummary } from "./search-types.js";
 import { candidateWithinRequestedSubdirectory, type RequestedSearchSubdirectory } from "./search-requested-scope.js";
 import type { ExactRegistryLookupDebug } from "./search/exact-registry.js";
@@ -1335,9 +1334,6 @@ export class SearchQuerySupport {
             filteredSymbolCount: 0,
             registryUnavailableReason: reason,
         };
-    }
-    public buildRerankDocument(result: SearchResultLike): string {
-        return buildSearchRerankDocument(result);
     }
     public buildOperatorSummary(operators: ParsedSearchOperators): SearchOperatorSummary {
         return {

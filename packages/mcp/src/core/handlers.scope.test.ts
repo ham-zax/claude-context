@@ -13798,7 +13798,7 @@ test('handleSearchCode publishes projection degradation only in ranking and full
         }));
         const reranker = {
             getIdentity: () => ({ provider: 'voyage', model: 'test', profile: 'degradation' }),
-            getDocumentProjectionVersion: () => 'search_rerank_document_v3',
+            getDocumentProjectionVersion: () => 'search_rerank_document_v4',
             rerank: async (_query: string, documents: unknown[]) => (
                 documents.map((_document, index) => ({ index, relevanceScore: 0.5 }))
             ),

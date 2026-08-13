@@ -11,6 +11,8 @@ import {
     type RerankerFailureKind,
 } from "@zokizuan/satori-core";
 import {
+    SEARCH_RERANK_DOC_MAX_CHARS,
+    SEARCH_RERANK_DOC_MAX_LINES,
     SEARCH_RERANK_INPUT_MAX_UTF8_BYTES,
     SEARCH_RRF_K,
     type PathCategory,
@@ -733,7 +735,7 @@ async function rerankSearchCandidates(
                 let selectedDocuments: string[];
                 try {
                     selectedDocuments = await Promise.all(providerBoundedSelection.map(async (candidate) => {
-                        const document = host.searchQuerySupport.buildRerankDocument(candidate.result);
+                        const document = buildNativeProviderRerankDocument(candidate.result);
                         if (typeof document !== "string" || document.length === 0) {
                             throw new Error("reranker_document_projection_unavailable");
                         }
@@ -933,6 +935,31 @@ function buildEmptyFilterSummary(): SearchFilterSummary {
         removedByMust: 0,
         removedByExclude: 0,
     };
+}
+
+/**
+ * Plain rerank document for providers that do not receive the publication-bound
+ * canonical projection (native rerankers). This is an unversioned provider
+ * document, not a document projection: no projection policy or identity
+ * attaches to it.
+ */
+function buildNativeProviderRerankDocument(result: SearchResultLike): string {
+    const relativePath = typeof result?.relativePath === "string"
+        ? result.relativePath
+        : "";
+    const language = typeof result?.language === "string"
+        ? result.language
+        : "unknown";
+    const symbolLabel = typeof result?.symbolLabel === "string"
+        ? result.symbolLabel
+        : "";
+    const content = typeof result?.content === "string" ? result.content : "";
+    const contentLines = content.split(/\r?\n/).slice(0, SEARCH_RERANK_DOC_MAX_LINES);
+    let normalizedContent = contentLines.join("\n");
+    if (normalizedContent.length > SEARCH_RERANK_DOC_MAX_CHARS) {
+        normalizedContent = normalizedContent.slice(0, SEARCH_RERANK_DOC_MAX_CHARS);
+    }
+    return `${relativePath}\n${language}\n${symbolLabel}\n${normalizedContent}`;
 }
 
 export async function runSearchExecution(

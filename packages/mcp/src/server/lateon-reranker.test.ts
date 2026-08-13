@@ -12,7 +12,7 @@ import {
 } from "./lateon-reranker.js";
 import { resolveSearchRerankQuery } from "../core/search-rerank-query-routing.js";
 import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
-import { buildSearchRerankDocumentV4 } from "../core/search-rerank-document-v4.js";
+import { buildSearchRerankDocument } from "../core/search-rerank-document.js";
 import { buildSearchRerankQueryV2 } from "../core/search-rerank-query-v2.js";
 
 type FakeWorkerOptions = Readonly<{
@@ -743,7 +743,7 @@ test("LateOn diagnostics callback failure never changes rerank behavior", async 
 });
 
 const realLateOnModelDirectory = process.env.SATORI_LATEON_MODEL_PATH;
-test("LateOn v4 accepts query-v2 and document-v4 through the real tokenizer and model", {
+test("LateOn v4 accepts query-v2 and the canonical document projection through the real tokenizer and model", {
     skip: !realLateOnModelDirectory || !fs.existsSync(path.join(realLateOnModelDirectory, "model.onnx")),
 }, async (t) => {
     const reranker = new LateOnReranker({
@@ -757,7 +757,7 @@ test("LateOn v4 accepts query-v2 and document-v4 through the real tokenizer and 
         answerFocus: "implementation",
     });
     const documents = [
-        buildSearchRerankDocumentV4({
+        buildSearchRerankDocument({
             relativePath: "src/veto.ts",
             language: "typescript",
             candidateRole: "implementation",
@@ -771,7 +771,7 @@ test("LateOn v4 accepts query-v2 and document-v4 through the real tokenizer and 
             ].join("\n"),
             query: "how does Shariah compliance checking block trades",
         }).text,
-        buildSearchRerankDocumentV4({
+        buildSearchRerankDocument({
             relativePath: "tests/veto.test.ts",
             language: "typescript",
             candidateRole: "test",

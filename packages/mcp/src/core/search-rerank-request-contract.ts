@@ -16,11 +16,14 @@ import { BOUNDED_SOURCE_SELECTION_POLICY_VERSION } from "./bounded-source-select
 import { serializeCanonicalJson } from "./canonical-json.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
-import { SEARCH_RERANK_DOCUMENT_V3_POLICY, buildSearchRerankDocumentV3 } from "./search-rerank-document-v3.js";
 import {
-    SEARCH_RERANK_DOCUMENT_V4_POLICY,
-    buildSearchRerankDocumentV4,
-} from "./search-rerank-document-v4.js";
+    SEARCH_RERANK_DOCUMENT_POLICY,
+    buildSearchRerankDocument,
+} from "./search-rerank-document.js";
+import {
+    SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE,
+    buildSearchRerankDocumentV3ContractEvidence,
+} from "./search-rerank-contract-evidence.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
@@ -409,18 +412,20 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         queryProjectionV1,
         queryProjectionV2,
         candidateRoleClassification,
-        documentProjectionV3: buildSearchRerankDocumentV3(DOCUMENT_PROJECTION_FIXTURE).text,
-        documentProjectionV4: buildSearchRerankDocumentV4(DOCUMENT_PROJECTION_FIXTURE).text,
-        documentProjectionV4Structural: buildSearchRerankDocumentV4(
+        documentProjectionV3: buildSearchRerankDocumentV3ContractEvidence(
+            DOCUMENT_PROJECTION_FIXTURE,
+        ),
+        documentProjectionV4: buildSearchRerankDocument(DOCUMENT_PROJECTION_FIXTURE).text,
+        documentProjectionV4Structural: buildSearchRerankDocument(
             DOCUMENT_PROJECTION_STRUCTURAL_FIXTURE,
         ).text,
-        documentProjectionV4SourceFirst: buildSearchRerankDocumentV4(
+        documentProjectionV4SourceFirst: buildSearchRerankDocument(
             DOCUMENT_PROJECTION_SOURCE_FIRST_FIXTURE,
         ).text,
         sourceSelectionPolicyIdentity: serializeCanonicalJson({
             boundedSourceSelection: BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
-            sourceSelection: SEARCH_RERANK_DOCUMENT_V3_POLICY,
-            answerPacketBudget: SEARCH_RERANK_DOCUMENT_V4_POLICY,
+            sourceSelection: SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE,
+            answerPacketBudget: SEARCH_RERANK_DOCUMENT_POLICY,
         }),
         canonicalJsonIdentity: serializeCanonicalJson({ b: 1, a: [2, { d: "x", c: null }] }),
         structuralContext: SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
