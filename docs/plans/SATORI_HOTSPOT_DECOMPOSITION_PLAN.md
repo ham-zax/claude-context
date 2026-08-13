@@ -1155,8 +1155,8 @@ teardown
 Status: planned, not implemented. Goal: every domain has ONE canonical current
 implementation; legacy versions shrink to a tiny compatibility boundary (recognize
 → classify → requires_reindex / unsupported) or are rejected outright.
-Version-aware code must stop at the boundary — workflows, coordinators, and search
-must never branch on `schemaVersion` or import `SomethingV2`.
+Version-awareness terminates at boundaries — workflows, coordinators, and search
+must never branch on `schemaVersion` or import retired compatibility modules.
 
 Depends on Phase 8 being sealed (the durable-floor decision lives in the authority
 owner that 8.8/8.9 establish). Starts only after Phase 8 is sealed and reviewed.
@@ -1164,8 +1164,8 @@ owner that 8.8/8.9 establish). Starts only after Phase 8 is sealed and reviewed.
 ### Phase 9 global rules
 
 - Not every `v1`/`v2` string is dead code. Some are the CURRENT contract identity
-  (`canonical_json_v1`, `relationship_manifest_v2`, `search_rerank_document_v4`).
-  A `v1` suffix says nothing about obsolescence.
+  (`canonical_json_v1`, `relationship_manifest_v2`, `search_rerank_document_v4`,
+  `SearchGroupedResultV2`). A `v1`/`V2` suffix says nothing about obsolescence.
 - Deletion criterion: is there a supported input/output/runtime path that still
   requires this implementation?
   - No → delete.
@@ -1173,6 +1173,9 @@ owner that 8.8/8.9 establish). Starts only after Phase 8 is sealed and reviewed.
     boundary.
   - Current stable identity → keep the identity; the implementation may become
     unversioned.
+- Contract identity is frozen unless separately authorized: the current
+  reranker request-contract SHA-256 is part of the active request identity.
+  Retiring executable implementations must not change it.
 - Public npm APIs keep semver compatibility until an explicitly authorized
   breaking Core release. Internal renames must preserve published names (keep
   export aliases or confine renames to unpublished internals).
@@ -1181,56 +1184,96 @@ owner that 8.8/8.9 establish). Starts only after Phase 8 is sealed and reviewed.
 
 ### 9.0 Version-support inventory (S)
 
-Search `_v1/_v2/_v3/_v4/_v5`, `schemaVersion`, `previousVersion`, profile IDs,
-policy IDs. Classify every hit: `wire/provider identity` | `durable disk format`
-| `public API` | `process-local/internal` | `test-only`. Record current writer,
-current reader, and whether anything actually selects it. This inventory is the
-batch-sheet source for every later 9.x batch; the plan does not predetermine
-deletions beyond the named targets below.
+Search: `V[0-9]`, `-v[0-9]`, `_v[0-9]`, `formatVersion`, `schemaVersion`,
+`previousVersion`, `LEGACY`, `deprecated`, profile IDs, policy IDs, and package
+export barrels/maps — plus known filename families the suffix patterns miss
+(`search-rerank-query-v2.ts`, `CodebaseSnapshotV1/V2/V3`,
+`CallGraphSidecarInfo.version`, `SearchGroupedResultV2`).
+
+Classify every hit: `wire/provider identity` | `durable disk format` |
+`persisted operator/config state` | `public API` | `process-local/internal` |
+`test-only`. Record current writer, current reader, and whether anything
+actually selects it. `SATORI_LATEON_PROFILE`-style state is persisted
+operator/config, not durable index format and not process-local.
 
 Stopping condition: every versioned symbol classified with writer/reader/
-selector evidence; the inventory is recorded in the batch sheet, not guessed.
+selector evidence, including the named filename families above; the inventory
+is recorded in the batch sheet, not guessed.
 
 ### 9.1 Retire old LateOn/runtime profiles (L)
 
-Today `loadLateOnRuntimeProfile()` parses and accepts all four profile
-generations (v1–v4), including old projection and query-projection identities.
-Support the current profile only; old explicit profiles fail with a clear
-`unsupported_profile`-equivalent error instead of invoking old behavior.
-LateOn profile files are derived runtime state (refreshable), so this is
-retirement, not durable-format migration.
+Retired LateOn profiles are packaged runtime contracts, not durable index
+generations. `runtime-profile-v1.json` is a checked-in packaged authority asset
+carrying model identity, artifact digests, and runtime bounds. MCP/LateOn
+runtime supports only the current profile; old explicit profiles fail with a
+clear `unsupported_profile`-equivalent error instead of invoking old behavior.
 
-Stopping condition: current-profile runtime fixtures unchanged; each retired
-profile receives the intended unsupported error (rejection tests); no v1–v3
-runtime path remains.
+Historical managed profile IDs may remain recognized exclusively at the CLI
+upgrade/migration boundary so existing managed installations can be migrated to
+the current profile; they must never become executable runtime profiles.
 
-### 9.2 Canonicalize the rerank implementation (L)
+Stopping condition: no retired profile can execute in MCP/LateOn runtime
+(rejection tests per retired profile); current-profile runtime fixtures and
+current profile digest/identity unchanged; CLI upgrade migration fixtures for
+historical managed profile IDs unchanged.
+
+### 9.2 Canonicalize the rerank implementation
 
 V4 currently imports implementation machinery out of the V2 module, and V3 is
-built on V2 helpers. Do NOT delete V2/V3 files first. Order:
+built on V2 helpers. Do NOT delete V2/V3 files first.
 
-```text
-9.2A  extract neutral projection primitives out of V2/V3
-      (search-rerank-document.ts / search-rerank-projection-validation.ts /
-      search-rerank-source-selection.ts) — pure moves, zero behavior change
-      → V4 imports the primitives
-      → V2/V3 production builders and projection dispatch removed
+#### 9.2A Extract canonical projection primitives (S/L)
 
-9.2B  remove selector V1
-```
+Extract the neutral primitives out of the historical modules
+(`search-rerank-document.ts` / `search-rerank-projection-validation.ts` /
+`search-rerank-source-selection.ts`). Pure move/refactor only. No supported
+route, projection bytes, request-contract fixture, or `requestContractSha256`
+changes.
 
-9.2B is gated on 9.2A: `LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION` is
-selected by V2/V3 rerank documents, so the legacy newline algorithm (CRLF
-special-case) can only disappear after those documents are retired.
+Stopping condition: current projection bytes and current request-contract SHA
+byte-identical; suite green with no behavior delta.
+
+#### 9.2B Retire executable historical document projections (L)
+
+After 9.1 guarantees old LateOn profiles cannot execute:
+
+- production search uses one canonical document projector;
+- ToolHandlers has no V2/V3 projection dispatch;
+- historical V3 fixture/policy material required solely to preserve the frozen
+  current request-contract identity becomes inert contract evidence, not
+  executable implementation;
+- V2/V3 builders are deleted.
+
+Stopping condition: current projection bytes unchanged; current
+`requestContractSha256` unchanged; current LateOn profile digest/identity
+unchanged; no executable V2/V3 document-projection route remains.
+
+#### 9.2C Remove bounded-selector V1 (M)
+
+Only after no executable supported path selects it (9.2B). Keep
+`bounded_source_selection_v2` as the immutable current identity, but expose one
+unversioned implementation (`selectBoundedSource(...)` → one canonical
+algorithm; the CRLF legacy branch disappears).
+
+Stopping condition: selector V2 fixtures unchanged; no legacy selection branch
+remains.
+
+#### 9.2D Canonicalize query projection routing (L)
+
+Inventory raw/v1/v2 query-projection identities first. Remove executable
+historical query projection only where no supported provider path selects it.
+Frozen request-contract evidence may retain historical fixture bytes without
+retaining historical executable code.
+
+Stopping condition: current query-projection bytes and request-contract SHA
+unchanged; no executable historical query-projection route remains.
 
 Terminology: production names become `SearchRerankDocumentInput`,
-`SearchRerankDocumentResult`, `buildSearchRerankDocument()`; the immutable
-contract constant stays `SEARCH_RERANK_DOCUMENT_CONTRACT_ID =
-"search_rerank_document_v4"`. Internal renames only where names are unpublished.
-
-Stopping condition: current V4 projection bytes/order identical (policy-id and
-projection fixtures); V2/V3 paths gone; selector has one canonical algorithm
-with V2 fixtures unchanged.
+`SearchRerankDocumentResult`, `buildSearchRerankDocument()`. Keep a canonical
+policy object — `SEARCH_RERANK_DOCUMENT_POLICY` with
+`id: "search_rerank_document_v4"` and its full frozen policy semantics — not
+merely a contract-ID constant, because the current request contract serializes
+that policy. Internal renames only where names are unpublished.
 
 ### 9.3 Durable compatibility floor — separately authorized (XL)
 
@@ -1243,13 +1286,16 @@ Proposed policy (requires explicit product authorization — it forces a one-tim
 reindex on upgrade):
 
 ```text
-current durable generation  → supported
-recognized old generation   → requires_reindex (never "corrupt")
-unknown malformed           → corrupt
+full semantic reader/validator → V5 only
+retired-version classifier    → recognizes V3/V4 enough to return requires_reindex
+writer                        → V5 only
+
+recognized old generation     → requires_reindex (never "corrupt")
+unknown malformed             → corrupt
 ```
 
-Target: writer V5 only, reader V5 only for policy documents; current completion
-marker V3; current full fingerprint only. This supersedes the v3/v4/v5 document
+Target: policy documents V5-only writer/validator; current completion marker
+V3; current full fingerprint only. This supersedes the v3/v4/v5 document
 fixtures pinned by Phase 8.9 — the batch sheet must explicitly replace those
 oracles with rejection tests.
 
@@ -1266,13 +1312,18 @@ retired versions have rejection coverage.
 
 ### 9.5 Architecture guard (M)
 
-Version-specific schema code may live only in codec/profile-loader/compatibility
-boundary modules. A workflow/coordinator importing `SomethingV2` or branching on
-`schemaVersion` must fail an enforceable check (eslint rule or architectural
-test added with the first boundary that exists).
+Version/compatibility parsing may exist only in explicitly designated boundary
+modules (codec / profile-loader / compatibility). Production
+workflow/coordinator/search modules may not import retired compatibility
+modules or branch on persisted schema/profile generations.
 
-Stopping condition: the guard exists and fails on a planted violation; current
-suite green.
+The guard is structural — dependency boundaries and a classified deny-list of
+retired modules — NOT a regex on V1/V2/V3 naming. Active types such as
+`SearchGroupedResultV2` must pass. Add the guard with the first boundary that
+exists (eslint rule or architectural test).
+
+Stopping condition: the guard exists, fails on a planted violation (retired
+module import), and passes on active versioned types; current suite green.
 
 ### Recommended aggressiveness for Satori
 
