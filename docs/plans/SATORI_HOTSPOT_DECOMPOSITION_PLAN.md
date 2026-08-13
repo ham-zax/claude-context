@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `7571fb5`
+Checkpoint HEAD: `011f054`
 
 Completed ownership-bounded batches:
 
@@ -43,8 +43,9 @@ Completed ownership-bounded batches:
 - Phase 5.3 / operation-level IndexMutationPort boundary: `319ea00`.
 - Phase 6.1 / SearchRequestCoordinator extraction: `63e718e`.
 - Phase 6.2 / search continuation in the bounded search owner: `7571fb5`.
+- Phase 6.3 / retrieval-pass ownership in the pass executor: `011f054`.
 
-Next open batch at this checkpoint: Phase 6.3. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 6.4. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
@@ -661,6 +662,16 @@ Risk: L.
 
 Stopping condition: canonical request/ranking/diagnostic fixtures and provider-order
 tests remain byte/order equivalent; no request/profile digest changes occur.
+
+Completed by `011f054`. The pure retrieval-pass executor already existed as
+`search-execution.ts` (ordered, labelled `SearchExecutionOutcome`; fusion,
+filtering, must-admission, survival diagnostics, reranker admission, and provider
+ordering all owned there with dedicated fixtures). The Phase 6.1 move made the
+coordinator consume it through a bounded call, and this batch moved the last
+pass-level concern (SATORI_TEST_FAIL_SEARCH_PASS fault injection) from the
+coordinator into the pass executor as its default host fallback. Behavior verified
+by execution-policy, must-lane, native-order, expansion, rerank-integration, and
+fault-injection fixtures.
 
 ### 6.4 Extract call-graph request handling
 
