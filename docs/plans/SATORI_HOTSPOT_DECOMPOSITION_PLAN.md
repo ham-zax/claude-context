@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `29db70d`
+Checkpoint HEAD: `0963ca9`
 
 Completed ownership-bounded batches:
 
@@ -70,13 +70,15 @@ Completed ownership-bounded batches:
 - Phase 8.7 compatibility repair / guarded `getIndexingCodebases` capability reads restored (recovery silently skips hosts without the capability, matching the pre-extraction optional behavior) and `extractIndexedRecoveryFromCompletionProof` restored as a thin `ToolHandlers` delegate: `2386ad3`.
 - Phase 8.9 / policy publication transaction ownership: `publishResolvedIndexPolicy` / `clearPublishedIndexPolicy` / `forceClearPublishedIndexPolicy` (validation, v3/v4/v5 document selection, rollback, and committed-before-receipt acknowledgement) moved into `IndexAuthorityCoordinator` over primitive document-store/runtime-service ports; Context keeps thin delegates; `IndexGenerationWorkflow` uses the port publication plus the coordinator's marker-bound reconciliation. Owner-level publication test constructs the coordinator without Context: `31e60db`.
 - Phase 8.10 / index teardown workflow: `IndexTeardownWorkflow` owns the cross-domain clear ordering under the shared policy-mutation lock (collections → durable policy → runtime policy → navigation sidecars → synchronizer checkpoint/registry → ignore state → compatibility state → index profile), wired through the new `IndexMutationPort.clearIndex` operation; `ManageMaintenanceHandlers` routes clears through the port; Context `clearIndex` is a thin delegate: `29db70d`.
+- Phase 8 surface-guard P2 / the published-surface freeze now also pins the deliberately public port interfaces (`IndexMutationPort`, `IndexMutationPortDependencies`, `SourceFreshnessPort`): `0963ca9`.
 
-Next open batch at this checkpoint: none. Phase 8 is implemented through 8.10;
-the Phase 8 seal review is the next gate. Phase 9 is planned only; it starts
-after the Phase 8 seal review approves the final state, and its durable-format
-floor (9.3) requires separate authorization. Refresh this checkpoint only after
-an accepted batch is committed; preserve the original baseline above as historical
-lineage.
+Next open batch at this checkpoint: Phase 9.0 (version-support inventory).
+Phase 8 is sealed: implementation `bc53cb4 → 0963ca9`, seal review approved
+(`2386ad3`, `31e60db`, `29db70d`, `8d919dc`, `0963ca9` — no P0/P1; the only
+open item, surface-guard transitivity, closed by `0963ca9`). Phase 9 starts
+with the 9.0 inventory; its durable-format floor (9.3) requires separate
+authorization. Refresh this checkpoint only after an accepted batch is
+committed; preserve the original baseline above as historical lineage.
 
 ## Goal
 
