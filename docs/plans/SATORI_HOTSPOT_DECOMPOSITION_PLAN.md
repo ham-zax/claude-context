@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `bc0e038`
+Checkpoint HEAD: `7901f4d`
 
 Completed ownership-bounded batches:
 
@@ -62,9 +62,9 @@ Completed ownership-bounded batches:
 - Phase 8.3 / single-source collection naming: `collection-naming.ts` (pure grammar: family prefixes, `__gen_` separator, active/alternate family names, staged names, generation-id normalization, family membership, family-name parsing) and `collection-family-listing.ts` (I/O: list + hasCollection probe fallback over a narrow port). Context delegates; grammar call sites consolidated in `lancedb-vectordb.ts` (local `collectionFamilyName` deleted), `index-generation-workflow.ts`, MCP `manage-indexing-handlers.ts`, and `vector-backend-maintenance.ts` (`SATORI_COLLECTION_FAMILY_PREFIXES` now imported). Barrel expanded (+11 names, fixture regenerated to 492). Core suite 802 pass / 1 skip; full MCP suite 1554 pass / 1 skip: `777551d`.
 - Phase 8.4A / workflow operation/capability warm state: `reindexByChangeQueues` and `preparedIndexCollectionReceipts` now declared and written only by `IndexGenerationWorkflow` (`registerPreparedIndexCollectionReceipt` / `discardPreparedIndexCollectionReceipt` / internal consume); Context delegates; raw-collection port members removed: `783a874`.
 - Phase 8.4B / workflow navigation warm state: `navigationDeltaState` + `preparedNavigationDeltaStates` moved into `IndexGenerationWorkflow` with the complete stage -> promote -> delete lifecycle (`stagePreparedNavigationDelta` / `promotePreparedNavigationDelta`); the token resolver is passed to promote so observation resolution still happens only for staged candidates; `getNavigationDeltaState`/`setNavigationDeltaState` port members removed: `bc0e038`.
+- Phase 8.5 / operation-scoped write-target authority: the ambient `writeCollectionOverrides` map is deleted. `PreparedIndexCollectionBinding` now carries `collectionName`; the receipt/binding/explicit `writeCollectionName` option (`IndexMutationOptions`/`MutationGuardOptions`) is threaded through `prepareCollection`, payload writes, completion markers, and finalization in `IndexGenerationWorkflow`. `ManageIndexingHandlers` no longer toggles `setWriteCollectionOverride` (host member, lifecycle capability, and required-capability entry removed); the staged target travels in the binding. `Context.setWriteCollectionOverride` remains as a documented no-op compatibility stub (8.1C). Core suite 802 pass / 1 skip; full MCP suite 1554 pass / 1 skip; CLI suite 364/364: `7901f4d`.
 
-Next open batch at this checkpoint: Phase 8.5 (operation-scoped
-write-target authority).
+Next open batch at this checkpoint: Phase 8.6 (PreparedReadCacheOwner).
 Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
 planned only; it starts after Phase 8 is sealed, and its durable-format floor
 (9.3) requires separate authorization. Refresh this checkpoint only after an
