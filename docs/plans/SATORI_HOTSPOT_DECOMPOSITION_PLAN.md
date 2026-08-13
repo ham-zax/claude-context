@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `8737e8e`
+Checkpoint HEAD: `e109651`
 
 Completed ownership-bounded batches:
 
@@ -53,10 +53,11 @@ Completed ownership-bounded batches:
 - Phase 7.5 / install application executor: `01bff81`.
 - Phase 7.6 / runtime upgrade orchestration: `95cc653`.
 - Phase 4.7 / review-driven ownership seal: neutral `generation/contracts` + `generation/errors` (no `generation/*` or synchronizer-registry imports of `core/context`), `SynchronizerRegistry` raw-map getters replaced by a narrow mutation port, Context compatibility accessor narrowed: `8737e8e`.
+- Phase 8 gate correction A / neutral `SourceFreshnessPort` + `IndexMutationPort` contracts (no `core/context` import from the port modules; `ProvenSourceFreshnessCheckpointEvidence` now owned by the freshness port module), plus D-adjacent P2 cleanup (SourceObservationState dead mutable-map getters removed; test-only Context accessor removed; `InstallPlan` options snapshot + frozen prepared array): `e109651`.
 
-Next open batch at this checkpoint: Phase 8 gate correction A (neutral
-SourceFreshnessPort/IndexMutationPort contracts). Phase 8 is planned and
-authorized; L/XL batches stop for review. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 8 gate correction B (narrow
+`SearchRequestCoordinatorHost`), then C (continuation owner identity).
+Phase 8 is planned and authorized; L/XL batches stop for review. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
