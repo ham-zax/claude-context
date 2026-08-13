@@ -5,6 +5,7 @@ import {
     INDEX_COMPLETION_MARKER_DOC_ID,
     inspectCompletionMarker,
     type VectorDatabase,
+    SATORI_COLLECTION_FAMILY_PREFIXES,
 } from "@zokizuan/satori-core";
 import path from "node:path";
 import type { SnapshotManager } from "./snapshot.js";
@@ -13,7 +14,6 @@ import {
     type RootMutationLease,
 } from "./mutation-lease.js";
 
-const SATORI_COLLECTION_PREFIXES = ["code_chunks_", "hybrid_code_chunks_"];
 const MIN_RELIABLE_COLLECTION_CREATED_AT_MS = Date.UTC(2000, 0, 1);
 
 type CandidateCollection = {
@@ -71,7 +71,7 @@ export class VectorBackendMaintenance {
     }
 
     private isSatoriCodeCollection(collectionName: string): boolean {
-        return SATORI_COLLECTION_PREFIXES.some((prefix) => collectionName.startsWith(prefix));
+        return SATORI_COLLECTION_FAMILY_PREFIXES.some((prefix) => collectionName.startsWith(prefix));
     }
 
     private getVectorBackendInfo(): VectorStoreBackendInfoView | null {
@@ -386,7 +386,7 @@ Agent instructions:
         }
 
         if (!this.isSatoriCodeCollection(trimmedName)) {
-            throw new Error(`zillizDropCollection '${trimmedName}' is not a Satori-managed collection (expected prefix ${SATORI_COLLECTION_PREFIXES.join(" or ")}).`);
+            throw new Error(`zillizDropCollection '${trimmedName}' is not a Satori-managed collection (expected prefix ${SATORI_COLLECTION_FAMILY_PREFIXES.join(" or ")}).`);
         }
 
         const vectorDb = this.getVectorStore();

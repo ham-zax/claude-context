@@ -5,6 +5,7 @@ import {
     IndexPolicyPublicationError,
     RemoteCollectionDeletePendingError,
     SynchronizerCheckpointPublicationError,
+    isStagedGenerationCollectionName,
 } from "@zokizuan/satori-core";
 import type {
     CanonicalPublicationBinding,
@@ -353,7 +354,8 @@ export class ManageIndexingHandlers {
     constructor(private readonly host: ManageIndexingHandlersHost) {}
 
     private isStagedCollectionName(collectionName: string | undefined): collectionName is string {
-        return typeof collectionName === "string" && collectionName.includes("__gen_");
+        return typeof collectionName === "string"
+            && isStagedGenerationCollectionName(collectionName);
     }
 
     private async cleanupFailedStagedCollection(

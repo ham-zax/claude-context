@@ -7,6 +7,7 @@
  * acquires authority state by reachability through Context.
  */
 import * as crypto from 'crypto';
+import { isStagedGenerationCollectionName } from '../core/collection-naming.js';
 import * as path from 'path';
 import type { ProvenGenerationReceipt } from './contracts';
 import type { IndexPolicyPublicationReceipt } from './contracts';
@@ -1983,7 +1984,7 @@ export class IndexGenerationWorkflow {
                 selectedCollection = alternateFamilyName;
                 collectionSelectionBasis = 'selected_alternate_collection';
             } else {
-                const stagedCollections = familyCollectionNames.filter((collectionName) => collectionName.includes('__gen_'));
+                const stagedCollections = familyCollectionNames.filter((collectionName) => isStagedGenerationCollectionName(collectionName));
                 if (stagedCollections.length === 1) {
                     selectedCollection = stagedCollections[0];
                     collectionSelectionBasis = 'selected_single_staged_collection';

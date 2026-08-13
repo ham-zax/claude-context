@@ -190,6 +190,15 @@ import {
     readIgnorePatternsFile,
 } from './ignore-rule-service';
 import {
+    GENERATION_COLLECTION_SEPARATOR,
+    belongsToCollectionFamily,
+    isStagedGenerationCollectionName,
+    resolveActiveCollectionFamilyName,
+    resolveAlternateCollectionFamilyName,
+    resolveStagedCollectionName,
+} from './collection-naming';
+import { listRelatedCollectionNames } from './collection-family-listing';
+import {
     computeIndexPolicyControlSignature,
     observeIndexPolicyInputs,
 } from './index-policy-input-observer';
@@ -1585,11 +1594,8 @@ export class Context {
      * Generate collection name based on codebase path and hybrid mode
      */
     public resolveCollectionName(codebasePath: string): string {
-        const isHybrid = this.getIsHybrid();
         const canonicalPath = this.canonicalizeCodebasePath(codebasePath);
-        const hash = crypto.createHash('md5').update(canonicalPath).digest('hex');
-        const prefix = isHybrid === true ? 'hybrid_code_chunks' : 'code_chunks';
-        return `${prefix}_${hash.substring(0, 8)}`;
+        return resolveActiveCollectionFamilyName(this.getIsHybrid(), canonicalPath);
     }
 
     private buildCollectionFamilies(codebasePath: string): {
@@ -1601,19 +1607,13 @@ export class Context {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         const hash = crypto.createHash('md5').update(canonicalRoot).digest('hex').substring(0, 8);
         const activeFamilyName = this.resolveCollectionName(codebasePath);
-        const alternateFamilyName = activeFamilyName.startsWith('hybrid_code_chunks_')
-            ? `code_chunks_${hash}`
-            : `hybrid_code_chunks_${hash}`;
+        const alternateFamilyName = resolveAlternateCollectionFamilyName(activeFamilyName);
         return {
             canonicalRoot,
             hash,
             activeFamilyName,
             alternateFamilyName,
         };
-    }
-
-    private isRelatedCollectionName(collectionName: string, familyName: string): boolean {
-        return collectionName === familyName || collectionName.startsWith(`${familyName}__gen_`);
     }
 
     private getWriteCollectionName(codebasePath: string): string {
@@ -1623,29 +1623,14 @@ export class Context {
 
     private async listRelatedCollectionNames(codebasePath: string): Promise<string[]> {
         const { activeFamilyName, alternateFamilyName } = this.buildCollectionFamilies(codebasePath);
-
-        try {
-            const collectionNames = await this.vectorDatabase.listCollections();
-            return collectionNames
-                .filter((collectionName) =>
-                    this.isRelatedCollectionName(collectionName, activeFamilyName)
-                    || this.isRelatedCollectionName(collectionName, alternateFamilyName)
-                )
-                .sort((left, right) => left.localeCompare(right));
-        } catch {
-            const fallbackNames = [activeFamilyName, alternateFamilyName];
-            const existingNames: string[] = [];
-            for (const familyName of fallbackNames) {
-                try {
-                    if (await this.vectorDatabase.hasCollection(familyName)) {
-                        existingNames.push(familyName);
-                    }
-                } catch {
-                    continue;
-                }
-            }
-            return existingNames.sort((left, right) => left.localeCompare(right));
-        }
+        return listRelatedCollectionNames(
+            {
+                listCollections: () => this.vectorDatabase.listCollections(),
+                hasCollection: (collectionName) => this.vectorDatabase.hasCollection(collectionName),
+            },
+            activeFamilyName,
+            alternateFamilyName,
+        );
     }
 
     private parseCompletionMarker(
@@ -2112,9 +2097,9 @@ export class Context {
                 continue;
             }
 
-            const familyPriority = this.isRelatedCollectionName(collectionName, activeFamilyName)
+            const familyPriority = belongsToCollectionFamily(collectionName, activeFamilyName)
                 ? 0
-                : this.isRelatedCollectionName(collectionName, alternateFamilyName)
+                : belongsToCollectionFamily(collectionName, alternateFamilyName)
                     ? 1
                     : 2;
             candidates.push({ collectionName, marker, familyPriority });
@@ -2145,14 +2130,7 @@ export class Context {
     }
 
     public resolveStagedCollectionName(codebasePath: string, generationId: string): string {
-        const normalizedGenerationId = generationId
-            .trim()
-            .replace(/[^a-zA-Z0-9_]+/g, '_')
-            .replace(/^_+|_+$/g, '');
-        if (normalizedGenerationId.length === 0) {
-            throw new Error('generationId must contain at least one alphanumeric character.');
-        }
-        return `${this.resolveCollectionName(codebasePath)}__gen_${normalizedGenerationId}`;
+        return resolveStagedCollectionName(this.resolveCollectionName(codebasePath), generationId);
     }
 
     public setWriteCollectionOverride(codebasePath: string, collectionName: string | null): void {
@@ -2184,7 +2162,7 @@ export class Context {
 
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         const collectionName = this.getWriteCollectionName(canonicalRoot);
-        const stagedPrefix = `${this.resolveCollectionName(canonicalRoot)}__gen_`;
+        const stagedPrefix = `${this.resolveCollectionName(canonicalRoot)}${GENERATION_COLLECTION_SEPARATOR}`;
         if (!collectionName.startsWith(stagedPrefix)) {
             throw new Error(`Prepared index collection '${collectionName}' is not a staged generation for '${canonicalRoot}'.`);
         }
@@ -2957,7 +2935,7 @@ export class Context {
         const droppedCollections: string[] = [];
 
         for (const collectionName of familyCollectionNames) {
-            if (!collectionName.includes('__gen_')) {
+            if (!isStagedGenerationCollectionName(collectionName)) {
                 continue;
             }
             // Hybrid rebuilds intentionally leave staged collections indexless until

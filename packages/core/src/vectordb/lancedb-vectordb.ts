@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
+import { collectionFamilyName } from '../core/collection-naming.js';
+
 import {
     connect,
     Index,
@@ -304,13 +306,6 @@ function assertCollectionName(collectionName: string): void {
     if (collectionName.startsWith(CONTROL_TABLE_PREFIX)) {
         throw new Error(`Collection name '${collectionName}' uses the reserved LanceDB control prefix.`);
     }
-}
-
-function collectionFamilyName(collectionName: string): string {
-    const generationSeparator = collectionName.indexOf('__gen_');
-    return generationSeparator === -1
-        ? collectionName
-        : collectionName.slice(0, generationSeparator);
 }
 
 function controlTableName(collectionName: string): string {
