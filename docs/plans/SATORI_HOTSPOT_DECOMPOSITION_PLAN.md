@@ -54,8 +54,9 @@ Completed ownership-bounded batches:
 - Phase 7.6 / runtime upgrade orchestration: `95cc653`.
 - Phase 4.7 / review-driven ownership seal: neutral `generation/contracts` + `generation/errors` (no `generation/*` or synchronizer-registry imports of `core/context`), `SynchronizerRegistry` raw-map getters replaced by a narrow mutation port, Context compatibility accessor narrowed: `8737e8e`.
 
-Next open batch at this checkpoint: Phase 8.1 (planned at `95cc653`; not started —
-awaiting review of Phases 5.3–7.6 and of this Phase 8 plan). Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 8 gate correction A (neutral
+SourceFreshnessPort/IndexMutationPort contracts). Phase 8 is planned and
+authorized; L/XL batches stop for review. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
@@ -746,165 +747,402 @@ runtime authority, selection, or launcher behavior moves.
 
 ## Phase 8 — Facade/host deepening
 
-Status: planned, not implemented. Candidates below come from a post-Phase-7
-architecture review of the two largest production modules (`context.ts`, 4,720
-lines; `handlers.ts`, 3,775 lines). Evidence was verified at checkpoint `95cc653`.
-No batch starts until reviewed and authorized; each batch still requires its own
-fresh batch sheet per the required protocol.
+Status: planned, not implemented. Authorized revision (replaces the `5db7b4e`
+draft and its first revision). Evidence re-verified at checkpoint `8737e8e`.
+Plan every batch from its immediate parent HEAD; old line numbers and callback
+counts are evidence, not implementation authority.
 
-Execute in this order unless the disjoint-file preflight proves parallel batches:
+### Phase 8 global rules
 
-### 8.1 Remove dead and write-only surface (S)
+- Public Core façade compatibility is frozen unless a separately authorized
+  breaking API change says otherwise.
+- Move mutable state **with every writer**, never state first and writers later.
+- No temporary mirrored Maps/WeakMaps/caches.
+- `Context` and `ToolHandlers` may delegate but must not remain hidden secondary
+  owners.
+- Do not create generic "manager", "shared", or "utils" modules when a
+  demonstrated domain owner exists.
+- Every extraction keeps its existing public/integration oracle and adds
+  owner-level contracts; façade-test removal requires equivalent or stronger
+  owner/public coverage.
+- No ranking, admission, provider order, fusion, grouping, pagination,
+  projection, ignore-policy, or persisted-format changes.
+- The destructive/authority-heavy batches (L/XL) stop independently for review
+  after they pass their stopping condition; the next batch starts only after
+  that review. (This supersedes the pre-Phase-8 "no per-batch review" mode.)
 
-Owners: `Context` façade, `ToolHandlers` host.
+### Gate — Phase 5–7 review corrections (must precede Phase 8)
 
-Remove the verified zero-caller and test-only delegates from `context.ts`
-(`getLanguageAnalyzer*`, `isLanguageSupported`, `getLanguageAnalysisStrategy`,
-`updateEmbedding`, `hasIndexedCollection`, `loadResolvedIgnorePatterns`,
-`resetIgnorePatternsToDefaults`, `getIndexedExtensions`, `withIndexPolicyMutationLockAsync`,
-`readIndexableFileObservationInsideRoot`, unused private policy-map getters) and the
-test-only delegates (`reloadIgnoreRulesForCodebase`, `updateIgnorePatterns`,
-`getIgnorePatternsFromFile`, `getActiveSynchronizers`, `hasSynchronizerForCodebase`,
-`getIndexAuthorityObservation`, `clearPublishedIndexPolicy`,
-`forceClearPublishedIndexPolicy`, `updateVectorDatabase`, `resolveProvenGeneration`,
-`revalidateProvenGeneration`, `getCurrentNavigationGeneration`,
-`restoreNavigationGeneration`, `withIndexPolicyMutationLock`,
-`getIgnoreMatcherForCodebase`, `processChunkBatch`,
-`resolveReusableNavigationDeltaState`). For test-only delegates, move the oracle to
-the owning service or delete with the test. From `handlers.ts` remove the test-only
-`sortGroupedSearchResults` (grouping owner is search-group-ordering) and the
-write-only `indexingStats` field plus its two setters.
+Blockers from the Phase 5–7 review; Phase 8 would otherwise build on boundaries
+already known to be transitional. Use the Phase 4.7 pattern (`8737e8e`: neutral
+contracts/errors in the generation domain, no `core/context` imports).
 
-Risk: S.
+A. Neutral Core contracts for `SourceFreshnessPort` / `IndexMutationPort` (L).
+   The ports still depend on Context contract types. Give each port neutral
+   contract/error types in its own domain so Core ports no longer import
+   `core/context`. Stopping condition: no `core/context` import from the port
+   modules or their contracts; port fixtures unchanged.
 
-Stopping condition: barrel (`packages/core/src/index.ts`) and cross-package grep
-prove no remaining callers; core/MCP/CLI suites green.
+B. Narrow the `SearchRequestCoordinatorHost` (L). The Phase 6.1 host is still a
+   giant callback bag. Replace with grouped narrow collaborators (readiness,
+   hints/payloads, prepared-read, freshness). Stopping condition is a
+   placeholder until the full Phase 6 review issue list lands; the batch sheet
+   must resolve it to exact fixtures before starting.
 
-### 8.2 Single writer for workflow warm collections (L)
+C. Make `SearchRequestCoordinator` the continuation owner (M).
+   `SearchContinuationCoordinator` still types `ToolHandlers` as its owner token
+   and store/unregister route through the host. Move ownership (register/store/
+   unregister) to the coordinator so ToolHandlers is no longer the token.
+   Stopping condition: frozen-set identity, offset, revalidation, cache
+   mutation, and response projection fixtures remain exact.
 
-Move `reindexByChangeQueues`, `preparedIndexCollectionReceipts`,
-`navigationDeltaState`, `preparedNavigationDeltaStates` (context.ts:643,659–663) so
-`IndexGenerationWorkflow` is the sole declarer/writer. `Context` keeps read/seed
-delegates only.
+D. Cheap P2 cleanup where naturally adjacent (S). Only when the file is already
+   open in a correction batch.
 
-Risk: L.
+### 8.1 Freeze the façade/API contract, then remove only genuinely internal dead surface (S)
 
-Stopping condition: exactly one writer per collection (grep-verified); warm-cache,
-prepared-receipt, and reindex-by-change fixtures unchanged.
+Generate/freeze the published package surface first: Core ships
+`dist/index.d.ts`; the root barrel exports `context`; that exports `Context`.
+Freeze the member-NAME set (barrel export names + `Context` public member
+names), not the full d.ts text — type-shape churn from unrelated edits must not
+fail the fixture. Regeneration only under breaking-API authorization.
 
-### 8.3 Route write-target selection through the prepared-collection operation (L)
+Classify candidates:
 
-`writeCollectionOverrides` (context.ts:662) is currently mutated by
-ManageIndexingHandlers (5 sites) and `clearIndex`. Route the decision through the
-existing prepared-collection receipt operation (IndexMutationPort op or workflow
-input); teardown invalidates through the same owner.
+```text
+A. private + zero caller
+   → safe deletion
 
-Risk: L.
+B. test-only façade
+   → move oracle to actual owner
+   → keep façade if public
 
-Stopping condition: ManageIndexingHandlers no longer mutates any Context-owned map;
-operation phase order and responses unchanged.
+C. public Context method
+   → keep thin compatibility delegate
+   → removal only under separate breaking-API authorization
+```
 
-### 8.4 Single-source collection naming/family policy (M)
+Methods such as `getLanguageAnalyzer`, `isLanguageSupported`, `updateEmbedding`,
+`hasIndexedCollection` are not automatically dead merely because repository grep
+finds no callers.
 
-Extract a pure naming module (active/alternate/staged names, `__gen_`, HYBRID_MODE)
-plus a family-listing function over a narrow vector adapter. Consumers
-(synchronizer-registry, ignore-rule-service ×6, workflow, manage-maintenance,
-manage-indexing, vector-backend-maintenance) import it instead of calling Context.
+Stopping condition: no dead private implementation remains; no unintended change
+to the generated/public Core API (surface fixture green); no behavior oracle
+deleted merely to make a façade smaller.
 
-Risk: M.
+### 8.2 Remove shallow ToolHandlers indirection (S)
 
-Stopping condition: format knowledge single-sourced; all current collection-name
-fixtures and family-enumeration outputs unchanged.
+Pass the already-existing `ToolResponseBuilders` capabilities directly to
+`NavigationHandlers` / `TrackedRootReadiness` hosts and remove the one-line
+ToolHandlers wrappers. No new owner; no behavior change. Do this early: it
+reduces the host surface before the deeper extractions.
 
-### 8.5 Teardown workflow behind a seam (XL)
+Stopping condition: identical payload fixtures for every outline/call-graph/
+requires-reindex path; fewer ToolHandlers delegates.
 
-Give `clearIndex` (context.ts:3331–3376, seven-domain teardown) the Phase 4.5
-repair treatment: a Core teardown/clear workflow depending on narrow ports; Context
-keeps a compatibility delegate; ManageMaintenanceHandlers and SyncManager call the
-workflow.
+### 8.3 Single-source collection naming (M)
 
-Risk: XL.
+Two deliberately different seams:
 
-Stopping condition: clear/rename teardown order, rollback, and F023/F024 fixtures
-exact; no double-write of any cleared domain state.
+```text
+collection-naming.ts
+    pure:
+    active family name
+    alternate family name
+    staged generation name
+    belongsToFamily()
+    __gen_ formatting
 
-### 8.6 Relocate policy publication orchestration (M) — explored
+collection-family-listing.ts
+    I/O:
+    list collections through a narrow vector-store port
+    apply collection-naming policy
+```
 
-Evidence: `persistCustomIndexPolicy` (context.ts:4554–4695) owns binding/navigation
-validation, policy-hash recompute, v3/v4/v5 document selection, runtime-state
-capture/restore, and activation through `IndexPolicyDocumentStore.persistDocument`.
-`index-authority-coordinator.ts` imports only types from context.ts, so the move is
-cycle-safe. Move the flow next to the document store or into the authority
-coordinator; no second policy coordinator type.
+The listing layer is I/O, not pure. Later workflow, teardown, registry, and
+indexing batches get a stable naming authority instead of asking `Context`.
+Preserve the current backend-enumeration fallback/probe behavior.
 
-Risk: M.
+Stopping condition: only one production module knows the naming grammar; all
+existing naming/family fixtures remain byte-for-byte/element-for-element
+equivalent.
+
+### 8.4 Move IndexGenerationWorkflow's warm mutable state (L)
+
+#### 8.4A — operation/capability state
+
+Move `reindexByChangeQueues` and `preparedIndexCollectionReceipts` into
+`IndexGenerationWorkflow` — and move their operations too, not merely the
+collections. The workflow must own the complete prepared-receipt lifecycle:
+create/register, validate, consume, discard. Today `Context` still adds/deletes
+the receipt while the workflow consumes it.
+
+After the batch:
+
+```text
+Context
+    → prepare/discard delegate
+
+IndexGenerationWorkflow
+    → owns the WeakSet and the complete receipt lifecycle
+```
+
+#### 8.4B — navigation warm state
+
+Move `navigationDeltaState` and `preparedNavigationDeltaStates` with the entire
+stage → publish → promote/delete lifecycle (today that lifecycle crosses several
+Context methods). Do not leave Context writing one side of the state while the
+workflow owns the map. A dedicated warm-state owner only if multiple navigation
+operations genuinely need it.
+
+Stopping condition: grep shows exactly one declarer/writer per collection and no
+mirrored writes.
+
+### 8.5 Make the write target operation-scoped (L)
+
+Today:
+
+```text
+codebase root
+→ Context.writeCollectionOverrides Map
+→ getWriteCollectionName()
+```
+
+Instead:
+
+```text
+prepare staged collection
+→ produce operation-bound receipt
+    { canonicalRoot, generation, operationId, writeCollectionName }
+
+indexing operation
+→ consumes receipt
+
+completion / failure / cancel / clear
+→ invalidates receipt
+```
+
+No global ambient write-target state that handlers toggle.
+`ManageIndexingHandlers` must not know how a Core write-target override is
+represented. The receipt already carries the needed fields; the batch is mostly
+deletion of the map plus threading the receipt through the four
+`getWriteCollectionName` readers and the workflow port.
+`setWriteCollectionOverride` is published `Context` surface; treat per 8.1C.
+
+Stopping condition: no handler mutates Context-owned write-target state;
+write-target authority cannot outlive the operation that created it; operation
+phase order and responses unchanged.
+
+### 8.6 PreparedReadCacheOwner (M/L)
+
+The cluster is cohesive: authority observation, source observation, cache
+identity, navigation identity, status-prepared observations, eviction, and warm
+revalidation belong to one concept (invariant: cached/prepared read evidence may
+only be reused while its authority and source observations remain current).
+
+Create `PreparedReadCacheOwner` owning:
+
+```text
+preparedReadCache
+statusPreparedReadObservations
+preparedNavigationCache
+
+build cache identity
+lookup
+store
+evict
+warm revalidation decision
+navigation cache identity
+```
+
+Depend on narrow interfaces — `GenerationAuthorityReader`,
+`SourceFreshnessPort`, `PreparedGenerationRevalidator`, `NavigationStore`,
+`Clock` — never `ToolHandlers`. Search and navigation consume it. Do this after
+gate correction B so the owner is not designed around the old giant host bag.
+
+Stopping condition: one writer for all three caches; same ABA/source-freshness/
+navigation invalidation behavior.
+
+### 8.7 InterruptedIndexRecoveryCoordinator (M)
+
+One explicit owner in the MCP recovery domain:
+
+```text
+InterruptedIndexRecoveryCoordinator
+```
+
+Keep `decideInterruptedIndexingRecovery()` as the existing pure decision leaf.
+The coordinator owns: stale/grace determination, mutation lease acquisition,
+operation phase persistence, completion marker probe, snapshot promotion/
+failure, lease release (~190 lines currently on ToolHandlers). Preserve
+`skipGrace` semantics (an existing lease skips the grace window) and keep
+`recoverInterruptedIndexingAtStartup` as a thin delegate so the server entry
+point does not churn.
+
+Consumers: startup recovery, `ManageIndexingHandlers`,
+`ManageMaintenanceHandlers` — the same owner.
+
+Stopping condition: exactly one implementation of recovery orchestration;
+identical lease/receipt/snapshot behavior across all three consumers.
+
+### 8.8 Move authority decisions into the authority owner (L)
+
+Before policy publication orchestration. Move bodies such as:
+
+```text
+resolveEffectiveNavigationAuthority
+proveEffectiveNavigationAuthority
+isPreparedVectorReceiptBoundToCurrentAuthority
+resolveGenerationProofIdentity
+receipt/marker clone/equality rules where domain-specific
+```
+
+into `IndexAuthorityCoordinator` / its proof collaborator.
+
+Target:
+
+```text
+Context
+    → supplies primitive adapters/state stores
+
+IndexAuthorityCoordinator
+    → decides generation authority itself
+```
+
+No second authority coordinator.
+
+Stopping condition: authority coordinator tests exercise authority decisions
+without constructing a live `Context`; warm proof, marker ABA, navigation token,
+and publication fixtures unchanged.
+
+### 8.9 Move policy publication orchestration (L)
+
+After 8.8, so the authority owner already understands its own decision
+semantics and this does not produce another callback-heavy façade inside the
+coordinator. Split:
+
+```text
+IndexPolicyDocumentStore
+    owns durable policy document bytes
+
+IndexPolicyRuntimeService
+    owns effective runtime policy
+
+IndexAuthorityCoordinator
+    owns whether/how policy binds to the current generation
+    and publication acknowledgement semantics
+```
+
+Do not create a `PolicyPublicationCoordinator` unless evidence forces another
+distinct owner. Preserve: v3/v4/v5 document interpretation, policy hash
+computation, binding validation, committed-before-acknowledgement semantics,
+runtime rollback on failed publication, generation binding rules.
+
+Evidence note: at `95cc653` the coordinator had a runtime
+`IndexPolicyPublicationError` import from `core/context`, not type-only imports;
+`8737e8e` moved contracts/errors into the generation domain, so plan from the
+current HEAD, not the stale checkpoint.
 
 Stopping condition: publication receipts, committed-before-acknowledgement
 semantics, and v3/v4/v5 document fixtures unchanged.
 
-### 8.7 Authority decision bodies into the authority/proof module (L) — explored
+### 8.10 Index teardown workflow — LAST (XL)
 
-Evidence: the coordinator is constructed with ~28 Context callbacks
-(context.ts:795–845); ~10 carry decision bodies (`resolveEffectiveNavigationAuthority`,
-`proveEffectiveNavigationAuthority`, `isPreparedVectorReceiptBoundToCurrentAuthority`,
-`resolveGenerationProofIdentity`, marker equality and clone helpers). Move the
-bodies into the authority/proof module; Context only wires them.
+Do not extract `clearIndex` while its dependencies are transitional. By now its
+collaborators are: `IndexGenerationWorkflow`, `IndexAuthorityCoordinator`,
+`IndexPolicyRuntime/DocumentStore`, `SynchronizerRegistry`, collection
+naming/family owner, navigation lifecycle, source/checkpoint owner.
 
-Risk: L.
+Introduce a Core `IndexTeardownWorkflow` that owns **ordering only**:
 
-Stopping condition: coordinator behavior testable without a live Context; warm
-proof, ABA, marker, and observation-token fixtures unchanged.
+```text
+fence mutation
+→ withdraw authority as required
+→ clear generation/vector artifacts
+→ clear navigation lifecycle
+→ clear checkpoint/synchronizer state
+→ clear policy/runtime state
+→ final durable proof
+```
 
-### 8.8 Prepared-read cache owner (M)
+The exact order must come from the current implementation and F023/F024
+regressions, not from this illustrative sequence. The workflow clears Core state
+only — MCP-side warm/operation state (the 8.6 caches) stays with MCP owners
+invoked by the MCP caller; Core must not reach MCP.
 
-`handlers.ts`:1357–1967 (~600 lines, 17 methods) owns three maps
-(`preparedReadCache`, `statusPreparedReadObservations`, `preparedNavigationCache`)
-served to three hosts (SearchRequestCoordinator, NavigationHandlers,
-TrackedRootReadiness). Extract a PreparedReadCacheOwner with the identity,
-cache-entry, and status-prepared observation logic; ToolHandlers becomes a delegate.
+MCP calls through the existing Core operation boundary:
 
-Risk: M.
+```text
+ManageMaintenanceHandlers
+    ↓
+IndexMutationPort.clearIndex(...)
+    ↓
+IndexTeardownWorkflow
+```
 
-Stopping condition: one writer per map; search, outline, call-graph, continuation,
-and freshness fixtures unchanged.
+not by importing the workflow implementation directly.
 
-### 8.9 Remove shallow payload-builder pass-throughs (S)
+Stopping condition: exact current teardown ordering and rollback/failure behavior
+survives; no domain state has two writers; F023/F024 remain green.
 
-~12 one-line methods on ToolHandlers delegate to ToolResponseBuilders and are
-consumed only by the NavigationHandlers and TrackedRootReadiness hosts. Give those
-hosts the narrow builders directly and delete the pass-throughs.
+### Execution order
 
-Risk: S.
+| Order | Batch                                           | Risk |
+| ----: | ----------------------------------------------- | ---- |
+|  Gate | Phase 5–7 review corrections A–D                | M/L  |
+|   8.1 | Private dead surface + API compatibility freeze | S    |
+|   8.2 | Shallow ToolHandlers pass-through removal       | S    |
+|   8.3 | Collection naming/family policy                 | M    |
+|  8.4A | Workflow queue + receipt capability ownership   | L    |
+|  8.4B | Navigation delta warm-state ownership           | L    |
+|   8.5 | Operation-scoped write-target authority         | L    |
+|   8.6 | PreparedReadCacheOwner                          | M/L  |
+|   8.7 | InterruptedIndexRecoveryCoordinator             | M    |
+|   8.8 | Authority decision bodies                       | L    |
+|   8.9 | Policy publication orchestration                | L    |
+|  8.10 | Index teardown workflow                         | XL   |
 
-Stopping condition: identical payloads for every outline/call-graph/requires-reindex
-fixture; ToolHandlers surface shrinks by the removed methods only.
+Stop and review after every L/XL batch, especially 8.4, 8.5, 8.8, 8.9, 8.10.
 
-### 8.10 Stale-recovery engine to a recovery owner (M) — explored
+### Phase 8 endpoint
 
-Evidence: `recoverStaleIndexingStateIfNeeded` (handlers.ts:2457–2670, ~190 lines of
-grace-window/lease/snapshot decision logic) is consumed by both
-ManageMaintenanceHandlers and ManageIndexingHandlers hosts; `indexing-recovery.ts`
-covers only the startup path. Move the engine into the recovery owner or a shared
-module (two consumers = real seam).
+```text
+Context
+    = public compatibility/composition façade
 
-Risk: M.
+ToolHandlers
+    = MCP wiring/public request façade
 
-Stopping condition: abandoned-indexing recovery fixtures for both coordinator
-consumers unchanged.
+mutable domain state
+    = one demonstrated owner each
+
+authority decisions
+    = IndexAuthorityCoordinator
+
+generation workflows
+    = IndexGenerationWorkflow
+
+read cache
+    = PreparedReadCacheOwner
+
+recovery
+    = InterruptedIndexRecoveryCoordinator
+
+teardown
+    = composition of those owners, not another owner of their state
+```
 
 ### 8.11 Explored and dismissed (recorded so they are not re-suggested)
 
-- Payload probing + observation-token relocation (`context.ts`:1768–1809, 3934–4013,
-  4459–4548): move is feasible (sidecar layout helpers already live in
-  `symbols/`), but leverage is low while the code is stable. Revisit when the probe
-  or observation format next changes.
-- Completion-proof orchestration on the host (H5): the leaf
-  `completion-proof.ts` already owns validation; only ~80 lines of
-  snapshot-recovery glue remain on ToolHandlers. Fold that glue into 8.5 if it is
-  touched, otherwise leave.
-- Path predicates (H6): no duplication — the ToolHandlers predicates are aliases of
-  `search-ranking-policy.ts` exports; the owner is correct. Covered by 8.9 only as
-  pass-through cleanup if desired.
+- Payload probing + observation-token relocation (`context.ts`:1768–1809,
+  3934–4013, 4459–4548): move is feasible (sidecar layout helpers already live
+  in `symbols/`), but leverage is low while the code is stable. Revisit when the
+  probe or observation format next changes.
+- Completion-proof orchestration on the host: the leaf `completion-proof.ts`
+  already owns validation; only ~80 lines of snapshot-recovery glue remain on
+  ToolHandlers. Fold that glue into 8.7/8.10 if touched, otherwise leave.
+- Path predicates: no duplication — the ToolHandlers predicates are aliases of
+  `search-ranking-policy.ts` exports; the owner is correct.
 
 
 ## Test migration policy
