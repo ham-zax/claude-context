@@ -1,12 +1,9 @@
 import { compareContractStrings } from "@zokizuan/satori-core";
 
 export const BOUNDED_SOURCE_SELECTION_POLICY_VERSION = "bounded_source_selection_v2" as const;
-export const LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION =
-    "bounded_source_selection_v1" as const;
 
 export type BoundedSourceSelectionPolicyVersion =
-    | typeof LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION
-    | typeof BOUNDED_SOURCE_SELECTION_POLICY_VERSION;
+    typeof BOUNDED_SOURCE_SELECTION_POLICY_VERSION;
 
 export type SourceSelectionCapabilityStatus =
     | "available"
@@ -157,29 +154,12 @@ function validateBudgets(budgets: BoundedSourceBudgets): void {
     }
 }
 
-function readPhysicalLines(
-    sourceBytes: Buffer,
-    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion,
-): PhysicalLine[] {
+function readPhysicalLines(sourceBytes: Buffer): PhysicalLine[] {
     new TextDecoder("utf-8", { fatal: true }).decode(sourceBytes);
     const lines: PhysicalLine[] = [];
     let startByte = 0;
     for (let index = 0; index < sourceBytes.length; index += 1) {
         const byte = sourceBytes[index];
-        if (selectionPolicyVersion === LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION) {
-            if (byte !== 0x0a) continue;
-            const contentEndByte = index > startByte && sourceBytes[index - 1] === 0x0d
-                ? index - 1
-                : index;
-            lines.push({
-                line: lines.length + 1,
-                startByte,
-                contentEndByte,
-                text: sourceBytes.subarray(startByte, contentEndByte).toString("utf8"),
-            });
-            startByte = index + 1;
-            continue;
-        }
         if (byte !== 0x0a && byte !== 0x0d) continue;
         const lineEndByte = byte === 0x0d && sourceBytes[index + 1] === 0x0a
             ? index + 2
@@ -550,13 +530,10 @@ export function selectBoundedSource(
     const sourceBytes = Buffer.from(input.sourceBytes);
     const selectionPolicyVersion = input.selectionPolicyVersion
         ?? BOUNDED_SOURCE_SELECTION_POLICY_VERSION;
-    if (
-        selectionPolicyVersion !== LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION
-        && selectionPolicyVersion !== BOUNDED_SOURCE_SELECTION_POLICY_VERSION
-    ) {
+    if (selectionPolicyVersion !== BOUNDED_SOURCE_SELECTION_POLICY_VERSION) {
         throw new TypeError("Unsupported bounded source selection policy version.");
     }
-    const lines = readPhysicalLines(sourceBytes, selectionPolicyVersion);
+    const lines = readPhysicalLines(sourceBytes);
     validateSymbolSpan(input.symbolSpan, lines.length);
     const fullSpan = byteRangeForLines(lines, input.symbolSpan.endLine, input.symbolSpan);
     const totalLines = input.symbolSpan.endLine - input.symbolSpan.startLine + 1;

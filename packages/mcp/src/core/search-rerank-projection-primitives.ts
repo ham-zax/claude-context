@@ -11,6 +11,7 @@ import {
     isRepositoryRelativePath,
 } from "@zokizuan/satori-core";
 import {
+    BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
     selectBoundedSource,
     type BoundedSourceSelectionPolicyVersion,
     type SelectedSourceProjection,
@@ -226,7 +227,7 @@ export function selectedExcerptText(source: SelectedSourceProjection): string {
 export function selectSource(
     input: NormalizedProjectionInput,
     maxSourceBytes: number,
-    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion = "bounded_source_selection_v1",
+    selectionPolicyVersion: BoundedSourceSelectionPolicyVersion = BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
 ) {
     return selectBoundedSource({
         sourceBytes: Buffer.from(input.content, "utf8"),
