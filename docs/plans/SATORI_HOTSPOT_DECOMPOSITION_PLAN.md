@@ -782,6 +782,59 @@ counts are evidence, not implementation authority.
   after they pass their stopping condition; the next batch starts only after
   that review. (This supersedes the pre-Phase-8 "no per-batch review" mode.)
 
+### Execution amendment — sequencing and anti-overarchitecture guardrails
+
+The remaining decomposition work follows this order:
+
+```text
+finish Phase 8
+    → final Phase 8 ownership review/seal
+    → Phase 9 canonicalization and executable-history retirement
+    → fresh architecture rebaseline
+    → only then consider deeper simplification
+```
+
+Do not run a new architectural campaign in parallel with Phase 8 or Phase 9.
+The purpose of the sequence is to distinguish ownership repairs from intentional
+redesign and to avoid designing against complexity that the canonicalization
+phase may remove.
+
+For every remaining Phase 8/9 batch:
+
+> Do not interpret decomposition as a requirement to introduce more
+> coordinators, ports, managers, adapters, or stores. A new abstraction must own
+> an invariant, mutable state, lifecycle, transaction, or genuine variable
+> external boundary. Prefer direct domain dependencies otherwise. Delete mere
+> forwarding.
+
+Use this classification before adding a named abstraction:
+
+```text
+persistent/shared state → named owner
+per-operation state      → operation/session data
+pure transformation      → function/module
+external variability      → port/interface
+mere forwarding           → delete it
+```
+
+The abstraction must have an explicit owner, invariant, lifecycle, persistence or
+transaction boundary, and callers. If none of those exist, keep the code direct
+or make the transformation a function. This is a design constraint, not a
+request to flatten an owner that genuinely holds state or lifecycle authority.
+
+Phase 8.8 and 8.9 settle the final authority shape before teardown is considered:
+
+```text
+8.8/8.9 → stabilize IndexAuthorityCoordinator ownership
+8.10    → prove final owners compose under destructive teardown
+Phase 9 → remove historical executable variants
+then    → rebaseline and decide what can be deleted or flattened
+```
+
+Do not pre-authorize a Phase 10/11/12 series for search pipelines, mutation
+sessions, public APIs, or port flattening. Those are hypotheses for the fresh
+post-Phase-9 review, not current implementation scope.
+
 ### Gate — Phase 5–7 review corrections (must precede Phase 8)
 
 Blockers from the Phase 5–7 review; Phase 8 would otherwise build on boundaries
@@ -1330,6 +1383,63 @@ exists (eslint rule or architectural test).
 
 Stopping condition: the guard exists, fails on a planted violation (retired
 module import), and passes on active versioned types; current suite green.
+
+### Post-Phase-9 architecture rebaseline (review input, not an authorized phase)
+
+After Phase 9, reread the surviving architecture from current source. Do not
+carry today's decomposition assumptions forward without evidence. Ask:
+
+1. Which abstractions now have only one trivial implementation?
+2. Which coordinators own no state or invariant and merely forward calls?
+3. Which ports exist only because an older `Context`/`ToolHandlers` boundary
+   required them?
+4. Which parameter groups always travel together and should become operation or
+   session data?
+5. Which mutable values are operation-local rather than application-global?
+6. Which public exports are accidental rather than established contract?
+7. Which workflows can become explicit data pipelines?
+
+The likely simplification candidates are hypotheses to test after the rebaseline,
+not commitments made now:
+
+```text
+SearchRequest
+    → PreparedSearchRequest
+    → RetrievedSearch
+    → RankedSearch
+    → FrozenSearchResult
+    → Response
+
+prepareIndexMutation()
+    → IndexMutationSession
+    → execute(session)
+```
+
+An operation/session candidate may bind root, generation, operation ID,
+collection, policy, lease, and receipts once, but only if those values already
+form one lifecycle boundary. Prepared reads may use the same principle when the
+post-Phase-9 evidence shows a genuine operation/session invariant.
+
+Potential flattening must be evidence-led:
+
+```text
+Coordinator → Port → Adapter → single concrete Owner
+        may become
+Coordinator → Owner
+        or
+workflow function → Owner
+```
+
+Flatten only when the removed layers own no independent state, invariant,
+lifecycle, transaction, or external variability. Preserve the canonical owner
+and its proofs when they do.
+
+Phase 9 itself remains deliberately narrow: remove historical executable
+variants and converge on one canonical internal model. Compatibility parsing
+stays at the boundary, followed by the canonical model and one implementation;
+do not widen the public API by exporting every neutral helper created during
+canonicalization. Do not turn Phase 9 into the search-pipeline or mutation-
+session redesign.
 
 ### Recommended aggressiveness for Satori
 

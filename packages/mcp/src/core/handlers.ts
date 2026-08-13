@@ -31,7 +31,6 @@ import { CapabilityResolver } from "./capabilities.js";
 import { AccessGateReason, SnapshotManager } from "./snapshot.js";
 import {
     SyncManager,
-    type PreparedReadObservationUnavailableReason,
     type WatcherObservationSnapshot,
 } from "./sync.js";
 import {
@@ -59,7 +58,6 @@ import {
     SearchDebugHint,
     SearchGroupResult,
     SearchReadinessDebugHint,
-    SearchReadinessInvalidationReason,
     SearchRecommendedNextAction,
     SearchResponseEnvelope,
     SearchSpan,
@@ -76,7 +74,6 @@ import {
     CallGraphSymbolRef,
     CallGraphTestReference,
 } from "./call-graph.js";
-import { decideInterruptedIndexingRecovery } from "./indexing-recovery.js";
 import {
     type PythonSourceBackedSpanRepair,
 } from "./python-call-fallback.js";
@@ -140,7 +137,12 @@ export {
 import { VectorBackendMaintenance } from "./vector-backend-maintenance.js";
 import { RelationshipBackedCallGraph } from "./relationship-backed-call-graph.js";
 import { ToolResponseBuilders } from "./tool-response-builders.js";
-import { PreparedReadCache } from "./prepared-read-cache.js";
+import {
+    PreparedReadCacheOwner,
+    type CachedPreparedReadResult,
+    type PreparedReadCacheObservationResult,
+    type PreparedReadSourceFreshnessPort,
+} from "./prepared-read-cache-owner.js";
 import {
     evaluateReindexPreflight as evaluateReindexPreflightHelper,
     getChangedFilesForCodebase as getChangedFilesForCodebaseHelper,
@@ -170,20 +172,14 @@ import {
     type RuntimeOwnerMutationGateResult,
 } from "./runtime-owner.js";
 import { MutationLeaseCoordinator, type RootMutationLease } from "./mutation-lease.js";
+import { InterruptedIndexRecoveryCoordinator } from "./interrupted-index-recovery-coordinator.js";
 import { PreparedPublicationReadSession } from "./prepared-publication-read-session.js";
 import type { SessionWorkspacePolicy } from "./session-workspace-policy.js";
 
 const SEARCH_DEBUG_CHANGED_CODE_MAX_FILES = 10;
 const SEARCH_DEBUG_CHANGED_CODE_MAX_SYMBOLS = 20;
 const SEARCH_DEBUG_CHANGED_CODE_MAX_DIRECT_CALLERS = 20;
-const PREPARED_NAVIGATION_CACHE_MAX_ROOTS = 32;
-const PREPARED_NAVIGATION_CACHE_MAX_FILES_PER_ROOT = 64;
-const PREPARED_NAVIGATION_CACHE_MAX_COMPATIBILITY_RESULTS_PER_ROOT = 8;
 type CallGraphUnavailableReason = Extract<CallGraphHint, { supported: false }>['reason'];
-// Recovery probe threshold for "likely interrupted" indexing states.
-// Keep this shorter than snapshot merge stale semantics for better operator UX.
-const STALE_INDEXING_RECOVERY_GRACE_MS = 2 * 60_000;
-
 type CodebaseStatus = CodebaseInfo['status'];
 type TrackedCodebaseInfo = Record<string, unknown> & {
     status: CodebaseStatus;
@@ -289,123 +285,6 @@ type ContextLifecycleCapabilities = IndexCompletionMarkerContext & {
     ) => Promise<import('@zokizuan/satori-core').SemanticSearchExecutionResult>;
     acquirePublicationReadLease?: (codebasePath: string) => Promise<() => void>;
 };
-
-type PreparedReadObservationSnapshot = {
-    vectorAuthority: string;
-    navigationAuthority: string;
-    mutationGeneration: number;
-};
-
-type PreparedReadCacheObservationResult = {
-    observation: string | null;
-    sourceObservation: string | null;
-    unavailableReason?: PreparedReadObservationUnavailableReason;
-};
-
-type StatusPreparedReadObservation = {
-    observation: string;
-    sourceObservation: string | null;
-    unavailableReason: PreparedReadObservationUnavailableReason | null;
-};
-
-type CachedPreparedReadResult =
-    | {
-        status: "hit";
-        state: Extract<TrackedRootReadinessState, { state: "ready" }>;
-    }
-    | {
-        status: "miss";
-        reason: SearchReadinessInvalidationReason;
-        observationUnavailableReason?: PreparedReadObservationUnavailableReason;
-    };
-
-type NavigationManifestState = Awaited<ReturnType<NavigationStore['getManifest']>>;
-type NavigationManifestOk = Extract<NavigationManifestState, { status: 'ok' }>;
-type NavigationSymbolsByFileState = Awaited<ReturnType<NavigationStore['getSymbolsByFile']>>;
-type NavigationSymbolsByFileOk = Extract<NavigationSymbolsByFileState, { status: 'ok' }>;
-type NavigationCompatibilityState = Awaited<ReturnType<NavigationStore['getCompatibilityState']>>;
-
-type PreparedNavigationCacheEntry = {
-    identity: string;
-    manifest?: NavigationManifestOk;
-    symbolsByFile: Map<string, NavigationSymbolsByFileOk>;
-    compatibilityByManifestHash: Map<string, NavigationCompatibilityState>;
-};
-
-function setBoundedCacheEntry<K, V>(
-    cache: Map<K, V>,
-    key: K,
-    value: V,
-    maxEntries: number,
-): void {
-    cache.delete(key);
-    cache.set(key, value);
-    while (cache.size > maxEntries) {
-        const oldestKey = cache.keys().next().value as K | undefined;
-        if (oldestKey === undefined) return;
-        cache.delete(oldestKey);
-    }
-}
-
-function parsePreparedReadObservation(value: string): PreparedReadObservationSnapshot | null {
-    try {
-        const parsed = JSON.parse(value) as Partial<PreparedReadObservationSnapshot>;
-        return typeof parsed.vectorAuthority === 'string'
-            && typeof parsed.navigationAuthority === 'string'
-            && typeof parsed.mutationGeneration === 'number'
-            ? parsed as PreparedReadObservationSnapshot
-            : null;
-    } catch {
-        return null;
-    }
-}
-
-function sourceBackedBindingMatchesPreparedObservation(
-    binding: NonNullable<
-        Extract<
-            TrackedRootReadinessState,
-            { state: "ready" }
-        >["sourceBackedNavigationBinding"]
-    >,
-    preparedObservation: string,
-): boolean {
-    const observation = parsePreparedReadObservation(preparedObservation);
-    if (!observation) return false;
-    try {
-        const navigationAuthority = JSON.parse(observation.navigationAuthority) as {
-            binding?: {
-                status?: unknown;
-                generationId?: unknown;
-                sealHash?: unknown;
-            };
-            observation?: {
-                status?: unknown;
-                token?: unknown;
-            };
-        };
-        const authorityBinding = navigationAuthority.binding;
-        const authorityObservation = navigationAuthority.observation;
-        if (
-            authorityBinding?.status !== "sealed"
-            || authorityBinding.generationId !== binding.generationId
-            || authorityBinding.sealHash !== binding.navigationSealHash
-            || authorityObservation?.status !== "valid"
-            || typeof authorityObservation.token !== "string"
-        ) {
-            return false;
-        }
-        const token = JSON.parse(authorityObservation.token) as {
-            symbolRegistryManifestHash?: unknown;
-            relationshipManifestHash?: unknown;
-            navigationSealHash?: unknown;
-        };
-        return token.symbolRegistryManifestHash === binding.symbolRegistryManifestHash
-            && token.relationshipManifestHash === binding.relationshipManifestHash
-            && token.navigationSealHash === binding.navigationSealHash;
-    } catch {
-        return false;
-    }
-}
 
 type SnapshotAccessGateResult = {
     allowed: boolean;
@@ -541,9 +420,13 @@ export class ToolHandlers {
     private readonly navigationStore: NavigationStore;
     private readonly canonicalNavigationAuthorityAvailable: boolean;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
-    private readonly preparedReadCache = new PreparedReadCache<Extract<TrackedRootReadinessState, { state: 'ready' }>>();
-    private readonly statusPreparedReadObservations = new Map<string, StatusPreparedReadObservation>();
-    private readonly preparedNavigationCache = new Map<string, PreparedNavigationCacheEntry>();
+    private readonly preparedReadCacheOwner: PreparedReadCacheOwner;
+    private readonly interruptedIndexRecoveryCoordinator: InterruptedIndexRecoveryCoordinator;
+    private get preparedReadCache() {
+        // Compatibility-only view retained for existing focused tests. The owner
+        // remains the sole writer for all prepared-read cache state.
+        return this.preparedReadCacheOwner.cache;
+    }
 
     private readonly gitignoreForceReloadEveryN: number;
     private readonly searchQuerySupport: SearchQuerySupport;
@@ -593,6 +476,70 @@ export class ToolHandlers {
                 }
             ).getIndexAuthorityObservations === "function"
         );
+        const sourceFreshnessPort = this.getSourceFreshnessPort() ?? createSourceFreshnessPort({
+            inspectSourceFreshnessCheckpoint: (
+                codebasePath,
+                checkpointIdentity,
+                requestBoundReceipt,
+            ) => this.context.inspectSourceFreshnessCheckpoint(
+                codebasePath,
+                checkpointIdentity,
+                requestBoundReceipt,
+            ),
+            compareSourceObservationToFreshnessCheckpoint: (
+                codebasePath,
+                requestBoundReceipt,
+            ) => this.context.compareSourceObservationToFreshnessCheckpoint(
+                codebasePath,
+                requestBoundReceipt,
+            ),
+            compareAllSourceToFreshnessCheckpoint: (
+                codebasePath,
+                requestBoundReceipt,
+            ) => this.context.compareAllSourceToFreshnessCheckpoint(
+                codebasePath,
+                requestBoundReceipt,
+            ),
+            getRegisteredSourceFreshnessCheckpointObservation: (codebasePath) => (
+                this.context.getRegisteredSourceFreshnessCheckpointObservation(codebasePath)
+            ),
+        });
+        this.preparedReadCacheOwner = new PreparedReadCacheOwner({
+            authority: {
+                getPreparedAuthorityObservation: (codebasePath) => (
+                    this.getPreparedAuthorityObservation(codebasePath)
+                ),
+                isPreparedVectorReceiptBoundToCurrentAuthority: (codebasePath, receipt) => (
+                    this.contextLifecycle().isPreparedVectorReceiptBoundToCurrentAuthority?.(codebasePath, receipt)
+                        === true
+                ),
+            },
+            sourceFreshness: Object.assign(sourceFreshnessPort, {
+                getPreparedReadObservation: (codebasePath: string) => (
+                    this.syncManager.getPreparedReadObservation(codebasePath)
+                ),
+            }) as PreparedReadSourceFreshnessPort,
+            getGenerationRevalidator: () => {
+                const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
+                if (typeof revalidate !== "function") return undefined;
+                return {
+                    revalidatePreparedGeneration: (codebasePath, receipt, options) => (
+                        revalidate.call(this.context, codebasePath, receipt, options)
+                    ),
+                };
+            },
+            navigationStore: this.navigationStore,
+            clock: { now: () => this.now() },
+            isPathWithinCodebase: (targetPath, root) => this.isPathWithinCodebase(targetPath, root),
+            canonicalNavigationAuthorityAvailable: this.canonicalNavigationAuthorityAvailable,
+        });
+        this.interruptedIndexRecoveryCoordinator = new InterruptedIndexRecoveryCoordinator({
+            context: this.context,
+            snapshotManager: this.snapshotManager,
+            runtimeFingerprint: this.runtimeFingerprint,
+            now: this.now,
+            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+        });
         const searchQuerySupportHost: ConstructorParameters<typeof SearchQuerySupport>[0] = {
             normalizeSearchPath: this.normalizeSearchPath.bind(this),
             hasPathSegment: this.hasPathSegment.bind(this),
@@ -762,7 +709,9 @@ export class ToolHandlers {
                 ? this.snapshotManager.getSnapshotCorruptionWarning.bind(this.snapshotManager)
                 : () => undefined,
             buildRuntimeOwnerConflictResponseIfBlocked: this.buildRuntimeOwnerConflictResponseIfBlocked.bind(this),
-            recoverStaleIndexingStateIfNeeded: this.recoverStaleIndexingStateIfNeeded.bind(this),
+            recoverStaleIndexingStateIfNeeded: this.interruptedIndexRecoveryCoordinator.recoverStaleIndexingStateIfNeeded.bind(
+                this.interruptedIndexRecoveryCoordinator,
+            ),
             manageResponse: this.toolResponseBuilders.manageResponse.bind(this.toolResponseBuilders),
             buildCreateHint: this.buildCreateHint.bind(this),
             buildRepairHint: this.buildRepairHint.bind(this),
@@ -951,7 +900,9 @@ export class ToolHandlers {
             },
             manageResponse: this.toolResponseBuilders.manageResponse.bind(this.toolResponseBuilders),
             buildRuntimeOwnerConflictResponseIfBlocked: this.buildRuntimeOwnerConflictResponseIfBlocked.bind(this),
-            recoverStaleIndexingStateIfNeeded: this.recoverStaleIndexingStateIfNeeded.bind(this),
+            recoverStaleIndexingStateIfNeeded: this.interruptedIndexRecoveryCoordinator.recoverStaleIndexingStateIfNeeded.bind(
+                this.interruptedIndexRecoveryCoordinator,
+            ),
             getSnapshotIndexingCodebases: this.getSnapshotIndexingCodebases.bind(this),
             getSnapshotCodebaseInfo: this.getSnapshotCodebaseInfo.bind(this),
             getSnapshotIndexedCodebases: this.getSnapshotIndexedCodebases.bind(this),
@@ -964,7 +915,9 @@ export class ToolHandlers {
             buildReindexInstruction: this.buildReindexInstruction.bind(this),
             buildManageRequiresReindexHints: this.buildManageRequiresReindexHints.bind(this),
             validateCompletionProof: (codebasePath: string) => this.validateCompletionProof(codebasePath),
-            recoverIndexedSnapshotFromCompletionProof: this.recoverIndexedSnapshotFromCompletionProof.bind(this),
+            recoverIndexedSnapshotFromCompletionProof: this.interruptedIndexRecoveryCoordinator.recoverIndexedSnapshotFromCompletionProof.bind(
+                this.interruptedIndexRecoveryCoordinator,
+            ),
             isZillizBackend: this.isZillizBackend.bind(this),
             resolveCollectionName: this.resolveCollectionName.bind(this),
             dropZillizCollectionForCreate: this.dropZillizCollectionForCreate.bind(this),
@@ -1338,327 +1291,49 @@ export class ToolHandlers {
     }
 
     private getPreparedReadCacheObservation(codebasePath: string): PreparedReadCacheObservationResult {
-        const authorityObservation = this.getPreparedAuthorityObservation(codebasePath);
-        if (!authorityObservation) return { observation: null, sourceObservation: null };
-
-        try {
-            const sourceObservation = this.syncManager.getPreparedReadObservation(codebasePath);
-            if (!sourceObservation.available) {
-                return {
-                    observation: authorityObservation,
-                    sourceObservation: null,
-                    unavailableReason: sourceObservation.reason,
-                };
-            }
-            return {
-                observation: authorityObservation,
-                sourceObservation: JSON.stringify(sourceObservation.observation),
-            };
-        } catch {
-            return {
-                observation: authorityObservation,
-                sourceObservation: null,
-                unavailableReason: 'source_observation_failed',
-            };
-        }
+        return this.preparedReadCacheOwner.getPreparedReadCacheObservation(codebasePath);
     }
 
     private evictPreparedRead(codebasePath: string): void {
-        this.preparedReadCache.evict(codebasePath);
-        this.statusPreparedReadObservations.delete(codebasePath);
-        this.preparedNavigationCache.delete(codebasePath);
+        this.preparedReadCacheOwner.evictPreparedRead(codebasePath);
     }
 
     private getPreparedNavigationIdentity(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
     ): string | null {
-        try {
-            const receipt = preparedRead.generationReceipt;
-            const preparedObservation = preparedRead.preparedObservation;
-            const root = preparedRead.root.path;
-            if (
-                preparedRead.navigationStatus !== 'valid'
-                || !receipt
-                || !preparedObservation
-                || receipt.policy.canonicalRoot !== root
-                || this.getPreparedAuthorityObservation(root) !== preparedObservation
-            ) {
-                return null;
-            }
-            const identityParts = [
-                receipt.collectionName,
-                receipt.marker.runId,
-                receipt.policyDocumentDigest,
-                receipt.policy.policyHash,
-                receipt.navigation.generationId,
-                receipt.navigation.symbolRegistryManifestHash,
-                receipt.navigation.relationshipManifestHash,
-                receipt.navigation.navigationSealHash,
-                receipt.observations.navigationToken,
-            ];
-            if (identityParts.some((value) => typeof value !== 'string' || value.length === 0)) {
-                return null;
-            }
-            const observation = parsePreparedReadObservation(preparedObservation);
-            if (!observation) return null;
-
-            return JSON.stringify({
-                canonicalRoot: root,
-                collectionName: receipt.collectionName,
-                markerRunId: receipt.marker.runId,
-                policyDocumentDigest: receipt.policyDocumentDigest,
-                policyHash: receipt.policy.policyHash,
-                navigationGenerationId: receipt.navigation.generationId,
-                symbolRegistryManifestHash: receipt.navigation.symbolRegistryManifestHash,
-                relationshipManifestHash: receipt.navigation.relationshipManifestHash,
-                navigationSealHash: receipt.navigation.navigationSealHash,
-                navigationObservationToken: receipt.observations.navigationToken,
-                mutationGeneration: observation.mutationGeneration,
-            });
-        } catch {
-            return null;
-        }
+        return this.preparedReadCacheOwner.getPreparedNavigationIdentity(preparedRead);
     }
 
     private isPreparedNavigationReadCurrent(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
     ): boolean {
-        if (!this.canonicalNavigationAuthorityAvailable) {
-            // Lightweight injected hosts explicitly do not expose Core's publication
-            // authority. Their navigation contract is owned by the injected store.
-            return true;
-        }
-        if (
-            preparedRead.navigationAuthorityMode === "source_backed_fingerprint_compatibility"
-        ) {
-            return Boolean(
-                preparedRead.sourceBackedNavigationBinding
-                && preparedRead.sourceBackedNavigationBindingValidated
-                && preparedRead.preparedObservation
-                && sourceBackedBindingMatchesPreparedObservation(
-                    preparedRead.sourceBackedNavigationBinding,
-                    preparedRead.preparedObservation,
-                )
-                && this.getPreparedAuthorityObservation(preparedRead.root.path)
-                    === preparedRead.preparedObservation
-            );
-        }
-        if (!preparedRead.generationReceipt || !preparedRead.preparedObservation) {
-            return false;
-        }
-        return this.getPreparedNavigationIdentity(preparedRead) !== null;
-    }
-
-    private getPreparedNavigationCacheEntry(
-        root: string,
-        identity: string,
-    ): PreparedNavigationCacheEntry | undefined {
-        const entry = this.preparedNavigationCache.get(root);
-        if (!entry || entry.identity !== identity) return undefined;
-        setBoundedCacheEntry(
-            this.preparedNavigationCache,
-            root,
-            entry,
-            PREPARED_NAVIGATION_CACHE_MAX_ROOTS,
-        );
-        return entry;
-    }
-
-    private storePreparedNavigationCacheEntry(
-        root: string,
-        identity: string,
-        update: (entry: PreparedNavigationCacheEntry) => void,
-    ): void {
-        const existing = this.preparedNavigationCache.get(root);
-        const entry = existing?.identity === identity
-            ? existing
-            : {
-                identity,
-                symbolsByFile: new Map<string, NavigationSymbolsByFileOk>(),
-                compatibilityByManifestHash: new Map<string, NavigationCompatibilityState>(),
-            };
-        update(entry);
-        setBoundedCacheEntry(
-            this.preparedNavigationCache,
-            root,
-            entry,
-            PREPARED_NAVIGATION_CACHE_MAX_ROOTS,
-        );
+        return this.preparedReadCacheOwner.isPreparedNavigationReadCurrent(preparedRead);
     }
 
     private async loadPreparedNavigationManifest(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         operations?: SearchReadinessDebugHint['operations'],
-    ): Promise<NavigationManifestState> {
-        const root = preparedRead.root.path;
-        const identityBefore = this.getPreparedNavigationIdentity(preparedRead);
-        const cached = identityBefore
-            ? this.getPreparedNavigationCacheEntry(root, identityBefore)?.manifest
-            : undefined;
-        if (
-            cached
-            && this.getPreparedNavigationIdentity(preparedRead) === identityBefore
-        ) return cached;
-
-        if (operations) operations.registryLoads += 1;
-        const result = await this.navigationStore.getManifest({
-            normalizedRootPath: root,
-            ...(preparedRead.generationReceipt || preparedRead.sourceBackedNavigationBinding
-                ? {
-                    generationId: preparedRead.generationReceipt?.navigation.generationId
-                        ?? preparedRead.sourceBackedNavigationBinding?.generationId,
-                }
-                : {}),
-        });
-        if (
-            result.status === "ok"
-            && preparedRead.sourceBackedNavigationBinding
-            && result.manifestHash
-                !== preparedRead.sourceBackedNavigationBinding.symbolRegistryManifestHash
-        ) {
-            return {
-                status: "incompatible",
-                rootPath: result.rootPath,
-                reason: "symbol registry manifest does not match the completion marker binding",
-            };
-        }
-        if (
-            result.status === 'ok'
-            && identityBefore
-            && this.getPreparedNavigationIdentity(preparedRead) === identityBefore
-        ) {
-            this.storePreparedNavigationCacheEntry(root, identityBefore, (entry) => {
-                entry.manifest = result;
-            });
-        }
-        return result;
+    ): Promise<Awaited<ReturnType<NavigationStore['getManifest']>>> {
+        return this.preparedReadCacheOwner.loadPreparedNavigationManifest(preparedRead, operations);
     }
 
     private async loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         file: string,
-    ): Promise<NavigationSymbolsByFileState> {
-        const root = preparedRead.root.path;
-        const identityBefore = this.getPreparedNavigationIdentity(preparedRead);
-        const cached = identityBefore
-            ? this.getPreparedNavigationCacheEntry(root, identityBefore)?.symbolsByFile.get(file)
-            : undefined;
-        if (
-            cached
-            && this.getPreparedNavigationIdentity(preparedRead) === identityBefore
-        ) return cached;
-
-        const result = await this.navigationStore.getSymbolsByFile({
-            normalizedRootPath: root,
-            ...(preparedRead.generationReceipt || preparedRead.sourceBackedNavigationBinding
-                ? {
-                    generationId: preparedRead.generationReceipt?.navigation.generationId
-                        ?? preparedRead.sourceBackedNavigationBinding?.generationId,
-                }
-                : {}),
-            file,
-        });
-        if (
-            result.status === "ok"
-            && preparedRead.sourceBackedNavigationBinding
-            && result.manifestHash
-                !== preparedRead.sourceBackedNavigationBinding.symbolRegistryManifestHash
-        ) {
-            return {
-                status: "incompatible",
-                rootPath: result.rootPath,
-                reason: "symbol registry manifest does not match the completion marker binding",
-            };
-        }
-        if (
-            result.status === 'ok'
-            && identityBefore
-            && this.getPreparedNavigationIdentity(preparedRead) === identityBefore
-        ) {
-            this.storePreparedNavigationCacheEntry(root, identityBefore, (entry) => {
-                setBoundedCacheEntry(
-                    entry.symbolsByFile,
-                    file,
-                    result,
-                    PREPARED_NAVIGATION_CACHE_MAX_FILES_PER_ROOT,
-                );
-            });
-        }
-        return result;
+    ): Promise<Awaited<ReturnType<NavigationStore['getSymbolsByFile']>>> {
+        return this.preparedReadCacheOwner.loadPreparedNavigationSymbolsByFile(preparedRead, file);
     }
 
     private async loadPreparedNavigationCompatibility(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         expectedSymbolRegistryManifestHash: string,
         operations?: SearchReadinessDebugHint['operations'],
-    ): Promise<NavigationCompatibilityState> {
-        const root = preparedRead.root.path;
-        const identityBefore = this.getPreparedNavigationIdentity(preparedRead);
-        const cached = identityBefore
-            ? this.getPreparedNavigationCacheEntry(root, identityBefore)
-                ?.compatibilityByManifestHash.get(expectedSymbolRegistryManifestHash)
-            : undefined;
-        if (
-            cached
-            && this.getPreparedNavigationIdentity(preparedRead) === identityBefore
-        ) return cached;
-
-        if (operations) operations.navigationValidationRuns += 1;
-        const result = await this.navigationStore.getCompatibilityState({
-            normalizedRootPath: root,
-            ...(preparedRead.generationReceipt || preparedRead.sourceBackedNavigationBinding
-                ? {
-                    generationId: preparedRead.generationReceipt?.navigation.generationId
-                        ?? preparedRead.sourceBackedNavigationBinding?.generationId,
-                }
-                : {}),
+    ): Promise<Awaited<ReturnType<NavigationStore['getCompatibilityState']>>> {
+        return this.preparedReadCacheOwner.loadPreparedNavigationCompatibility(
+            preparedRead,
             expectedSymbolRegistryManifestHash,
-        });
-        if (preparedRead.sourceBackedNavigationBinding) {
-            const binding = preparedRead.sourceBackedNavigationBinding;
-            if (
-                result.registry.status === "ok"
-                && result.registry.manifestHash !== binding.symbolRegistryManifestHash
-            ) {
-                return {
-                    ...result,
-                    registry: {
-                        status: "incompatible",
-                        rootPath: result.registry.rootPath,
-                        reason: "symbol registry manifest does not match the completion marker binding",
-                    },
-                };
-            }
-            if (
-                result.relationships.status === "ok"
-                && result.relationships.manifestHash !== binding.relationshipManifestHash
-            ) {
-                return {
-                    ...result,
-                    relationships: {
-                        status: "incompatible",
-                        rootPath: result.relationships.rootPath,
-                        reason: "relationship manifest does not match the completion marker binding",
-                    },
-                };
-            }
-        }
-        if (
-            result.registry?.status === 'ok'
-            && result.relationships.status === 'ok'
-            && identityBefore
-            && this.getPreparedNavigationIdentity(preparedRead) === identityBefore
-        ) {
-            this.storePreparedNavigationCacheEntry(root, identityBefore, (entry) => {
-                setBoundedCacheEntry(
-                    entry.compatibilityByManifestHash,
-                    expectedSymbolRegistryManifestHash,
-                    result,
-                    PREPARED_NAVIGATION_CACHE_MAX_COMPATIBILITY_RESULTS_PER_ROOT,
-                );
-            });
-        }
-        return result;
+            operations,
+        );
     }
 
     private async getCachedPreparedRead(
@@ -1666,112 +1341,11 @@ export class ToolHandlers {
         operations: SearchReadinessDebugHint["operations"],
         requireNavigation = false,
     ): Promise<CachedPreparedReadResult> {
-        operations.preparedCacheLookups += 1;
-        const lookup = this.preparedReadCache.lookupCandidate(
+        return this.preparedReadCacheOwner.getCachedPreparedRead(
             absolutePath,
-            this.now(),
-            (targetPath, root) => this.isPathWithinCodebase(targetPath, root),
+            operations,
+            requireNavigation,
         );
-        if (lookup.status === "miss") {
-            return { status: "miss", reason: lookup.reason };
-        }
-        const cached = lookup.state;
-        if (!cached.vectorReceipt) {
-            this.evictPreparedRead(lookup.root);
-            return { status: "miss", reason: "cache_miss" };
-        }
-        const root = cached.root.path;
-        const observationBeforeResult = this.getPreparedReadCacheObservation(root);
-        const observationBefore = observationBeforeResult.observation;
-        const statusPreparedObservation = this.statusPreparedReadObservations.get(root);
-        if (statusPreparedObservation) {
-            this.statusPreparedReadObservations.delete(root);
-            const receiptIsCurrent = this.contextLifecycle()
-                .isPreparedVectorReceiptBoundToCurrentAuthority?.(root, cached.vectorReceipt) === true;
-            if (
-                !observationBefore
-                || observationBefore !== lookup.observation
-                || observationBefore !== statusPreparedObservation.observation
-                || observationBeforeResult.sourceObservation !== statusPreparedObservation.sourceObservation
-                || (observationBeforeResult.unavailableReason ?? null)
-                    !== statusPreparedObservation.unavailableReason
-                || !receiptIsCurrent
-            ) {
-                this.evictPreparedRead(root);
-                return {
-                    status: "miss",
-                    reason: observationBefore ? "observation_changed" : "observation_unavailable",
-                    ...(observationBeforeResult.unavailableReason
-                        ? { observationUnavailableReason: observationBeforeResult.unavailableReason }
-                        : {}),
-                };
-            }
-            operations.preparedCacheHits += 1;
-            return {
-                status: "hit",
-                state: {
-                    ...cached,
-                    preparedObservation: observationBefore,
-                    statusPrepared: true,
-                },
-            };
-        }
-        const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
-        if (!observationBefore || typeof revalidate !== 'function') {
-            this.evictPreparedRead(root);
-            return {
-                status: "miss",
-                reason: "observation_unavailable",
-                ...(observationBeforeResult.unavailableReason
-                    ? { observationUnavailableReason: observationBeforeResult.unavailableReason }
-                    : {}),
-            };
-        }
-        const cachedObservation = parsePreparedReadObservation(lookup.observation);
-        const currentObservation = observationBefore ? parsePreparedReadObservation(observationBefore) : null;
-        if (
-            !cachedObservation
-            || !currentObservation
-            || cachedObservation.vectorAuthority !== currentObservation.vectorAuthority
-            || cachedObservation.mutationGeneration !== currentObservation.mutationGeneration
-        ) {
-            this.evictPreparedRead(root);
-            return { status: "miss", reason: "observation_changed" };
-        }
-        const navigationObservationChanged =
-            cachedObservation.navigationAuthority !== currentObservation.navigationAuthority;
-        operations.warmReceiptRevalidations += 1;
-        const proof = await revalidate.call(this.context, root, cached.vectorReceipt, {
-            ...(cached.generationReceipt ? { priorGenerationReceipt: cached.generationReceipt } : {}),
-            navigationObservationChanged,
-        }).catch(() => null);
-        const observationAfter = this.getPreparedReadCacheObservation(root).observation;
-        if (
-            !proof
-            || proof.navigationProof.status === 'requires_reindex'
-            || proof.navigationProof.status === 'unsupported'
-            || (requireNavigation && proof.navigationProof.status !== 'valid')
-            || observationAfter !== observationBefore
-        ) {
-            this.evictPreparedRead(root);
-            return {
-                status: "miss",
-                reason: observationAfter !== observationBefore
-                    ? "observation_changed"
-                    : "revalidation_failed",
-            };
-        }
-        operations.preparedCacheHits += 1;
-        return {
-            status: "hit",
-            state: {
-                ...cached,
-                vectorReceipt: proof.vectorReceipt,
-                generationReceipt: proof.generationReceipt,
-                navigationStatus: proof.navigationProof.status,
-                preparedObservation: observationBefore,
-            },
-        };
     }
 
     private seedPreparedRead(
@@ -1779,55 +1353,7 @@ export class ToolHandlers {
         preserveProofAge: boolean,
         statusPrepared = false,
     ): void {
-        const root = state.root.path;
-        if (!state.vectorReceipt || !state.preparedObservation) {
-            // A warm hit already proved the prior entry. Do not discard it when the
-            // end-of-search snapshot is incomplete; the next search revalidates live.
-            if (!preserveProofAge) {
-                this.evictPreparedRead(root);
-            }
-            return;
-        }
-        const observationResult = this.getPreparedReadCacheObservation(root);
-        const observation = observationResult.observation;
-        if (!observation || observation !== state.preparedObservation) {
-            // Mid-search authority/registry/navigation work can transiently change the
-            // prepared-read observation string after a successful warm revalidation.
-            // Evicting here turns the next identical search into a full cold recount
-            // (proofMode=cold, invalidationReason=cache_miss) and breaks warm recording.
-            // Cold seeds (preserveProofAge=false) still fail closed by eviction.
-            if (!preserveProofAge) {
-                this.evictPreparedRead(root);
-            }
-            return;
-        }
-        if (statusPrepared) {
-            setBoundedCacheEntry(
-                this.statusPreparedReadObservations,
-                root,
-                {
-                    observation,
-                    sourceObservation: observationResult.sourceObservation,
-                    unavailableReason: observationResult.unavailableReason ?? null,
-                },
-                PREPARED_NAVIGATION_CACHE_MAX_ROOTS,
-            );
-        } else {
-            this.statusPreparedReadObservations.delete(root);
-        }
-        const navigationIdentity = this.getPreparedNavigationIdentity(state);
-        if (this.preparedNavigationCache.get(root)?.identity !== navigationIdentity) {
-            this.preparedNavigationCache.delete(root);
-        }
-        const cacheableState = { ...state };
-        delete cacheableState.statusPrepared;
-        this.preparedReadCache.seed(
-            root,
-            cacheableState,
-            observation,
-            this.now(),
-            preserveProofAge,
-        );
+        this.preparedReadCacheOwner.seedPreparedRead(state, preserveProofAge, statusPrepared);
     }
 
     private async prepareStatusTrackedRootRead(
@@ -2411,248 +1937,25 @@ export class ToolHandlers {
         }
     }
 
-    private isIndexingStateStale(codebasePath: string, graceMs: number = STALE_INDEXING_RECOVERY_GRACE_MS): boolean {
-        const info = this.getSnapshotCodebaseInfo(codebasePath);
-        if (!info || info.status !== "indexing") {
-            return false;
-        }
-
-        const lastUpdatedMs = typeof info.lastUpdated === 'string'
-            ? Date.parse(info.lastUpdated)
-            : Number.NaN;
-        if (!Number.isFinite(lastUpdatedMs)) {
-            return true;
-        }
-
-        return (this.now() - lastUpdatedMs) > graceMs;
-    }
-
-    /**
-     * Recover abandoned `indexing` lifecycle rows.
-     *
-     * Wall-clock grace applies only before exclusive ownership is proven. When
-     * `existingLease` is held (or startup forces exclusive acquisition), recovery
-     * runs immediately because a live compliant writer cannot share the root.
-     */
-    private async recoverStaleIndexingStateIfNeeded(
-        codebasePath: string,
-        existingLease?: RootMutationLease,
-        options?: { skipGrace?: boolean },
-    ): Promise<RootMutationLease | undefined> {
-        const indexingCodebases = this.getSnapshotIndexingCodebases();
-        if (!Array.isArray(indexingCodebases) || !indexingCodebases.includes(codebasePath)) {
-            return;
-        }
-        if (!this.mutationLeaseCoordinator) {
-            return;
-        }
-        const skipGrace = Boolean(existingLease) || options?.skipGrace === true;
-        if (!skipGrace && !this.isIndexingStateStale(codebasePath)) {
-            return;
-        }
-        const completionMarkerContext = this.context as unknown as IndexCompletionMarkerContext;
-        if (typeof completionMarkerContext.getIndexCompletionMarker !== "function") {
-            return;
-        }
-
-        let recoveryLease = existingLease;
-        let releaseRecoveryLease = false;
-        let operationTerminal = false;
-        const persistRecoverySnapshot = (mutateSnapshot: () => void): void => {
-            if (!recoveryLease) {
-                throw new Error(`Interrupted-index recovery for '${codebasePath}' requires a mutation lease.`);
-            }
-            this.mutationLeaseCoordinator!.assertCurrent(recoveryLease);
-            if (typeof this.snapshotManager.commitCodebaseLifecycleMutation !== 'function') {
-                throw new Error('Missing required mutation capability: SnapshotManager.commitCodebaseLifecycleMutation.');
-            }
-            const assertCurrent = () => this.mutationLeaseCoordinator!.assertCurrent(recoveryLease!);
-            const committed = this.snapshotManager.commitCodebaseLifecycleMutation(
-                mutateSnapshot,
-                assertCurrent,
-            );
-            if (!committed) {
-                throw new Error(`Failed to persist interrupted-index recovery for '${codebasePath}'.`);
-            }
-        };
-        const persistRecoveryPhase = (
-            phase: import("../config.js").IndexOperationPhase,
-            mutateSnapshot?: () => void,
-        ): void => {
-            if (!releaseRecoveryLease || !recoveryLease || typeof this.snapshotManager.transitionOperation !== "function") {
-                if (mutateSnapshot) {
-                    persistRecoverySnapshot(mutateSnapshot);
-                }
-                return;
-            }
-            this.mutationLeaseCoordinator?.assertCurrent(recoveryLease);
-            if (typeof this.snapshotManager.commitOperationPhase === "function") {
-                this.snapshotManager.commitOperationPhase(
-                    recoveryLease,
-                    phase,
-                    mutateSnapshot,
-                    () => this.mutationLeaseCoordinator?.assertCurrent(recoveryLease!),
-                );
-            } else {
-                this.snapshotManager.transitionOperation(recoveryLease, phase);
-                mutateSnapshot?.();
-                if (this.snapshotManager.saveCodebaseSnapshot(
-                    false,
-                    () => this.mutationLeaseCoordinator?.assertCurrent(recoveryLease!),
-                ) === false) {
-                    throw new Error(`Failed to persist stale-index recovery phase '${phase}' for '${codebasePath}'.`);
-                }
-            }
-            operationTerminal = phase === "completed" || phase === "failed" || phase === "blocked";
-        };
-        if (this.mutationLeaseCoordinator) {
-            if (recoveryLease) {
-                this.mutationLeaseCoordinator.assertCurrent(recoveryLease);
-            } else {
-                const leaseResult = this.mutationLeaseCoordinator.acquire(codebasePath, "repair");
-                if (!leaseResult.acquired) {
-                    return leaseResult.activeLease;
-                }
-                recoveryLease = leaseResult.lease;
-                releaseRecoveryLease = true;
-            }
-        }
-
-        try {
-            if (releaseRecoveryLease && recoveryLease && typeof this.snapshotManager.startOperation === "function") {
-                if (typeof this.snapshotManager.commitOperationPhase === "function") {
-                    this.snapshotManager.commitOperationPhase(
-                        recoveryLease,
-                        "accepted",
-                        undefined,
-                        () => this.mutationLeaseCoordinator?.assertCurrent(recoveryLease!),
-                    );
-                } else {
-                    this.snapshotManager.startOperation(recoveryLease);
-                }
-                if (
-                    typeof this.snapshotManager.commitOperationPhase !== "function"
-                    && this.snapshotManager.saveCodebaseSnapshot(
-                        false,
-                        () => this.mutationLeaseCoordinator?.assertCurrent(recoveryLease!),
-                    ) === false
-                ) {
-                    throw new Error(`Failed to persist accepted stale-index recovery receipt for '${codebasePath}'.`);
-                }
-            }
-            this.refreshSnapshotStateFromDisk();
-            // Exclusive ownership (caller lease or self-acquired) supersedes wall-clock grace.
-            if (!this.getSnapshotIndexingCodebases().includes(codebasePath)) {
-                persistRecoveryPhase("completed");
-                return;
-            }
-            const holdsExclusiveOwnership = Boolean(recoveryLease);
-            if (!holdsExclusiveOwnership && !this.isIndexingStateStale(codebasePath)) {
-                return;
-            }
-
-            let marker: IndexCompletionMarkerDocument | null = null;
-            try {
-                persistRecoveryPhase("proving");
-                marker = await completionMarkerContext.getIndexCompletionMarker(codebasePath);
-            } catch (error: unknown) {
-                console.warn(`[INDEX-RECOVERY] Stale indexing recovery probe failed for '${codebasePath}': ${formatUnknownError(error)}`);
-                persistRecoveryPhase("failed");
-                return;
-            }
-
-            if (recoveryLease) {
-                this.mutationLeaseCoordinator?.assertCurrent(recoveryLease);
-            }
-            const decision = decideInterruptedIndexingRecovery(marker, this.runtimeFingerprint);
-            if (decision.action === "promote_indexed") {
-                const collectionName = await this.getActiveIndexedCollectionNameForSnapshotRecovery(codebasePath);
-                if (recoveryLease) {
-                    this.mutationLeaseCoordinator?.assertCurrent(recoveryLease);
-                }
-                if (releaseRecoveryLease) {
-                    persistRecoveryPhase("publishing");
-                }
-                if (releaseRecoveryLease) {
-                    persistRecoveryPhase("completed", () => {
-                        this.snapshotManager.setCodebaseIndexed(codebasePath, decision.stats, decision.indexFingerprint, "verified", collectionName);
-                    });
-                } else {
-                    persistRecoverySnapshot(() => {
-                        this.snapshotManager.setCodebaseIndexed(codebasePath, decision.stats, decision.indexFingerprint, "verified", collectionName);
-                    });
-                }
-                const recoveryMode = decision.reason === "valid_marker_runtime_mismatch"
-                    ? " using completion marker proof from a different runtime fingerprint"
-                    : " using completion marker proof";
-                console.log(`[INDEX-RECOVERY] Promoted stale indexing state to indexed for '${codebasePath}'${recoveryMode}.`);
-                return;
-            }
-
-            const lastProgress = this.getSnapshotIndexingProgress(codebasePath);
-            if (releaseRecoveryLease) {
-                persistRecoveryPhase("failed", () => {
-                    this.snapshotManager.setCodebaseIndexFailed(codebasePath, decision.message, lastProgress);
-                });
-            } else {
-                persistRecoverySnapshot(() => {
-                    this.snapshotManager.setCodebaseIndexFailed(codebasePath, decision.message, lastProgress);
-                });
-            }
-            console.log(`[INDEX-RECOVERY] Marked stale indexing state as failed for '${codebasePath}' (${decision.reason}).`);
-        } catch (error) {
-            if (
-                releaseRecoveryLease
-                && recoveryLease
-                && !operationTerminal
-                && this.mutationLeaseCoordinator?.isCurrent(recoveryLease)
-            ) {
-                try {
-                    persistRecoveryPhase("failed");
-                } catch {
-                    // Preserve the last durable receipt owned by this recovery operation.
-                }
-            }
-            throw error;
-        } finally {
-            if (releaseRecoveryLease && recoveryLease) {
-                this.mutationLeaseCoordinator?.release(recoveryLease);
-            }
-        }
-    }
-
     /**
      * Startup entry for interrupted-index recovery. Acquires a mutation lease per
      * root, skips live writers, and reuses the fenced recovery path (no unfenced
      * snapshot lifecycle publication).
      */
     public async recoverInterruptedIndexingAtStartup(): Promise<void> {
-        const indexingCodebases = this.getSnapshotIndexingCodebases();
-        if (indexingCodebases.length === 0) {
-            console.log("[STARTUP] No interrupted indexing states required recovery");
-            return;
-        }
+        return this.interruptedIndexRecoveryCoordinator.recoverInterruptedIndexingAtStartup();
+    }
 
-        let attempted = 0;
-        let skippedLive = 0;
-        for (const codebasePath of indexingCodebases) {
-            const activeLease = await this.recoverStaleIndexingStateIfNeeded(
-                codebasePath,
-                undefined,
-                { skipGrace: true },
-            );
-            if (activeLease) {
-                skippedLive += 1;
-                console.log(
-                    `[STARTUP] Skipping interrupted indexing recovery for '${codebasePath}': `
-                    + `live mutation lease held (action=${activeLease.action}, `
-                    + `pid=${activeLease.pid}, generation=${activeLease.generation})`,
-                );
-                continue;
-            }
-            attempted += 1;
-        }
-        console.log(`[STARTUP] Recovery summary: attempted=${attempted}, skippedLiveWriter=${skippedLive}`);
+    public async recoverIndexedSnapshotFromCompletionProof(
+        codebasePath: string,
+        completionProof: CompletionProofValidationResult,
+        lease: RootMutationLease,
+    ): Promise<boolean> {
+        return this.interruptedIndexRecoveryCoordinator.recoverIndexedSnapshotFromCompletionProof(
+            codebasePath,
+            completionProof,
+            lease,
+        );
     }
 
     private buildManageActionBlockedMessage(codebasePath: string, action: RuntimeOwnerMutationAction): string {
@@ -2762,95 +2065,6 @@ export class ToolHandlers {
                 console.warn(`[INDEX-PROOF] Completion marker probe failed for '${codebasePath}': ${formatUnknownError(error)}`);
             }
         });
-    }
-
-    private extractIndexedRecoveryFromCompletionProof(
-        completionProof: CompletionProofValidationResult
-    ): {
-        stats: {
-            indexedFiles: number;
-            totalChunks: number;
-            status: 'completed' | 'limit_reached';
-        };
-        indexFingerprint: IndexFingerprint;
-    } | null {
-        if (completionProof.outcome !== 'valid' && completionProof.outcome !== 'fingerprint_mismatch') {
-            return null;
-        }
-
-        const marker = completionProof.marker;
-        if (!marker) {
-            return null;
-        }
-
-        const decision = decideInterruptedIndexingRecovery(
-            marker as IndexCompletionMarkerDocument,
-            this.runtimeFingerprint,
-        );
-        if (decision.action !== 'promote_indexed') {
-            return null;
-        }
-
-        return {
-            stats: decision.stats,
-            indexFingerprint: decision.indexFingerprint,
-        };
-    }
-
-    private async recoverIndexedSnapshotFromCompletionProof(
-        codebasePath: string,
-        completionProof: CompletionProofValidationResult,
-        lease: import('./mutation-lease.js').RootMutationLease,
-    ): Promise<boolean> {
-        const coordinator = this.mutationLeaseCoordinator;
-        if (!coordinator) {
-            return false;
-        }
-        if (!coordinator.isLeaseForRoot(lease, codebasePath)) {
-            throw new Error(`Completion-proof recovery lease does not own '${codebasePath}'.`);
-        }
-        const assertCurrent = () => coordinator.assertCurrent(lease);
-        assertCurrent();
-        const recovered = this.extractIndexedRecoveryFromCompletionProof(completionProof);
-        if (!recovered) {
-            return false;
-        }
-
-        assertCurrent();
-        const collectionName = await this.getActiveIndexedCollectionNameForSnapshotRecovery(codebasePath);
-        assertCurrent();
-        if (!collectionName) {
-            return false;
-        }
-        if (typeof this.snapshotManager.commitCodebaseLifecycleMutation !== 'function') {
-            throw new Error('Missing required mutation capability: SnapshotManager.commitCodebaseLifecycleMutation.');
-        }
-        const committed = this.snapshotManager.commitCodebaseLifecycleMutation(
-            () => this.snapshotManager.setCodebaseIndexed(
-                codebasePath,
-                recovered.stats,
-                recovered.indexFingerprint,
-                'verified',
-                collectionName,
-            ),
-            assertCurrent,
-        );
-        if (!committed) {
-            throw new Error(`Failed to persist completion-proof recovery for '${codebasePath}'.`);
-        }
-        return true;
-    }
-
-    private async getActiveIndexedCollectionNameForSnapshotRecovery(codebasePath: string): Promise<string | undefined> {
-        const context = this.context as unknown as IndexCompletionMarkerContext;
-        const resolver = context.getCompletionProofCollectionName ?? context.getActiveIndexedCollectionName;
-        if (typeof resolver !== 'function') {
-            return undefined;
-        }
-        const collectionName = await resolver.call(context, codebasePath);
-        return typeof collectionName === 'string' && collectionName.trim().length > 0
-            ? collectionName.trim()
-            : undefined;
     }
 
     private refreshSnapshotStateFromDisk(): void {

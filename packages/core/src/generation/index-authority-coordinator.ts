@@ -18,8 +18,11 @@ import type { DurableIndexAuthoritySnapshot } from './contracts';
 import { IndexPolicyPublicationError } from './errors';
 import {
     type IndexCompletionMarkerDocument,
+    type IndexCompletionFingerprint,
 } from '../vectordb/types';
 import {
+    classifyRepairIndexCompatibility,
+    indexFingerprintsEqual,
     type CanonicalPolicyNavigationBinding,
 } from '../core/persisted-index-authority';
 import {
@@ -49,6 +52,10 @@ import {
     type CurrentNavigationGeneration,
     resolveNavigationSidecarRoot,
     resolveCurrentNavigationGeneration,
+    resolveNavigationGeneration,
+    readSymbolRegistrySidecar,
+    readRelationshipSidecar,
+    verifyNavigationGenerationSealArtifacts,
 } from '../symbols/sidecar-reads';
 import {
     resolveNavigationSqlitePath,
@@ -112,30 +119,28 @@ const EMPTY_AUTHORITY_PORTS: IndexAuthorityDecisionPorts = {
     },
     indexPolicyRuntimeService: {
         deletePolicyFileToken: () => { throw new Error('authority ports not configured'); },
+        getPolicyFileToken: () => { throw new Error('authority ports not configured'); },
         getPolicyDocumentDigest: () => { throw new Error('authority ports not configured'); },
+        getPolicyRuntimeCompatibility: () => { throw new Error('authority ports not configured'); },
         resolveCustomIndexPolicyFileToken: () => { throw new Error('authority ports not configured'); },
     },
     refreshRuntimePolicyAuthority: () => { throw new Error('authority ports not configured'); },
     restoreTransactionMechanics: undefined as never,
     symbolRegistryStateRoot: undefined,
+    getRelationshipVersion: () => { throw new Error('authority ports not configured'); },
+    buildIndexCompletionFingerprint: () => { throw new Error('authority ports not configured'); },
     listRelatedCollectionNames: async () => { throw new Error('authority ports not configured'); },
     vectorDatabase: {
         dropCollection: async () => { throw new Error('authority ports not configured'); },
         hasCollection: async () => { throw new Error('authority ports not configured'); },
+        getPublicationObservation: async () => null,
     },
-    indexCompletionMarkersEqual: () => { throw new Error('authority ports not configured'); },
-    isPreparedVectorReceiptBoundToCurrentAuthority: () => { throw new Error('authority ports not configured'); },
     resolveCompletionMarkerForCollection: async () => { throw new Error('authority ports not configured'); },
-    resolveGenerationProofIdentity: async () => { throw new Error('authority ports not configured'); },
-    resolveEffectiveNavigationAuthority: () => { throw new Error('authority ports not configured'); },
+    resolveNavigationObservation: () => { throw new Error('authority ports not configured'); },
     resolveNavigationObservationToken: () => { throw new Error('authority ports not configured'); },
     resolveRepoConfigObservationToken: () => { throw new Error('authority ports not configured'); },
-    cloneIndexCompletionMarker: (marker) => marker,
-    cloneProvenGenerationReceipt: (receipt) => receipt,
-    cloneProvenVectorGenerationReceipt: (receipt) => receipt,
     publishResolvedIndexPolicy: () => { throw new Error('authority ports not configured'); },
     resolveProvenGeneration: async () => { throw new Error('authority ports not configured'); },
-    policyNavigationBindingsEqual: () => { throw new Error('authority ports not configured'); },
 };
 
 export class IndexAuthorityCoordinator {
@@ -190,6 +195,361 @@ export class IndexAuthorityCoordinator {
 
     hasPublishedResolvedPolicy(canonicalRoot: string): boolean {
         return this.publishedResolvedPoliciesByCodebase.has(canonicalRoot);
+    }
+
+    public getIndexAuthorityObservations(
+        canonicalRoot: string,
+    ): IndexAuthorityObservations | null {
+        const profileFileToken = this.ports.resolveRepoConfigObservationToken(canonicalRoot);
+        const policyFileToken = this.ports.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot);
+        const cachedPolicyFileToken = this.ports.indexPolicyRuntimeService.getPolicyFileToken(canonicalRoot);
+        const policyDocumentDigest = this.ports.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot);
+        const policy = this.getPublishedResolvedPolicy(canonicalRoot);
+        const binding = this.getPublishedPolicyBinding(canonicalRoot);
+        if (
+            !policyFileToken
+            || cachedPolicyFileToken !== policyFileToken
+            || !policyDocumentDigest
+            || !policy
+            || !binding
+            || policy.canonicalRoot !== canonicalRoot
+            || policy.policyHash !== binding.policyHash
+        ) {
+            return null;
+        }
+
+        const navigationObservation = binding.navigation.status === 'sealed'
+            ? this.ports.resolveNavigationObservation(
+                canonicalRoot,
+                binding.navigation.generationId,
+                binding.publication === undefined,
+            )
+            : { status: 'not_bound' as const };
+        return {
+            vector: JSON.stringify({
+                canonicalRoot,
+                profileFileToken,
+                policyFileToken,
+                policyDocumentDigest,
+                policyHash: policy.policyHash,
+                collectionName: binding.collectionName,
+            }),
+            navigation: JSON.stringify({
+                binding: binding.navigation,
+                observation: navigationObservation,
+            }),
+        };
+    }
+
+    public indexCompletionMarkersEqual(
+        left: IndexCompletionMarkerDocument,
+        right: IndexCompletionMarkerDocument,
+    ): boolean {
+        const navigationEqual = left.navigation.status === right.navigation.status
+            && (left.navigation.status === 'not_bound'
+                || (right.navigation.status === 'sealed'
+                    && left.navigation.generationId === right.navigation.generationId
+                    && left.navigation.symbolRegistryManifestHash === right.navigation.symbolRegistryManifestHash
+                    && left.navigation.relationshipManifestHash === right.navigation.relationshipManifestHash
+                    && left.navigation.sealHash === right.navigation.sealHash));
+        return left.codebasePath === right.codebasePath
+            && left.runId === right.runId
+            && left.indexedFiles === right.indexedFiles
+            && left.totalChunks === right.totalChunks
+            && left.completedAt === right.completedAt
+            && left.indexPolicyHash === right.indexPolicyHash
+            && left.indexStatus === right.indexStatus
+            && navigationEqual
+            && indexFingerprintsEqual(left.fingerprint, right.fingerprint)
+            && indexFingerprintsEqual(right.fingerprint, left.fingerprint);
+    }
+
+    public resolveEffectiveNavigationAuthority(
+        marker: IndexCompletionMarkerDocument,
+        policy: ResolvedIndexPolicy,
+        binding: IndexPolicyRuntimeBinding & { policyHash: string },
+    ): EffectiveNavigationAuthority | null {
+        if (
+            marker.indexPolicyHash !== policy.policyHash
+            || binding.policyHash !== marker.indexPolicyHash
+        ) return null;
+
+        const compatibility = classifyRepairIndexCompatibility(
+            marker.fingerprint,
+            this.ports.buildIndexCompletionFingerprint(),
+        );
+        if (
+            compatibility.status !== 'compatible'
+            && compatibility.status !== 'relationship_only_upgrade'
+        ) return null;
+
+        const publication = binding.publication;
+        if (publication && (
+            publication.sourceCheckpoint.collectionName !== binding.collectionName
+            || publication.sourceCheckpoint.markerRunId !== marker.runId
+            || publication.sourceCheckpoint.indexPolicyHash !== marker.indexPolicyHash
+        )) return null;
+
+        if (compatibility.status === 'compatible') {
+            if (publication) {
+                if (
+                    marker.indexStatus !== 'completed'
+                    || marker.navigation.status !== 'sealed'
+                    || binding.navigation.status !== 'sealed'
+                ) return null;
+                if (
+                    policyNavigationBindingsEqual(
+                        binding.navigation,
+                        policyNavigationBindingFromMarker(marker.navigation),
+                    )
+                    && publication.graph.manifestHash
+                        === marker.navigation.relationshipManifestHash
+                ) {
+                    return {
+                        status: 'sealed',
+                        generationId: marker.navigation.generationId,
+                        sealHash: marker.navigation.sealHash,
+                        expectedSymbolRegistryManifestHash:
+                            marker.navigation.symbolRegistryManifestHash,
+                        expectedRelationshipManifestHash:
+                            marker.navigation.relationshipManifestHash,
+                        relationshipOnlyUpgrade: false,
+                        useBoundGeneration: true,
+                    };
+                }
+                return {
+                    status: 'sealed',
+                    generationId: binding.navigation.generationId,
+                    sealHash: binding.navigation.sealHash,
+                    expectedRelationshipManifestHash: publication.graph.manifestHash,
+                    relationshipOnlyUpgrade: false,
+                    useBoundGeneration: true,
+                };
+            }
+            if (!policyNavigationBindingsEqual(
+                binding.navigation,
+                policyNavigationBindingFromMarker(marker.navigation),
+            )) return null;
+            if (marker.navigation.status === 'not_bound') {
+                return {
+                    status: 'not_bound',
+                    relationshipOnlyUpgrade: false,
+                    useBoundGeneration: false,
+                };
+            }
+            return {
+                status: 'sealed',
+                generationId: marker.navigation.generationId,
+                sealHash: marker.navigation.sealHash,
+                expectedSymbolRegistryManifestHash: marker.navigation.symbolRegistryManifestHash,
+                expectedRelationshipManifestHash: marker.navigation.relationshipManifestHash,
+                relationshipOnlyUpgrade: false,
+                useBoundGeneration: false,
+            };
+        }
+
+        if (
+            !publication
+            || marker.indexStatus !== 'completed'
+            || marker.navigation.status !== 'sealed'
+            || binding.navigation.status !== 'sealed'
+        ) return null;
+        return {
+            status: 'sealed',
+            generationId: binding.navigation.generationId,
+            sealHash: binding.navigation.sealHash,
+            expectedRelationshipManifestHash: publication.graph.manifestHash,
+            relationshipOnlyUpgrade: true,
+            useBoundGeneration: true,
+        };
+    }
+
+    public effectiveNavigationAuthoritiesEqual(
+        left: EffectiveNavigationAuthority,
+        right: EffectiveNavigationAuthority,
+    ): boolean {
+        return JSON.stringify(left) === JSON.stringify(right);
+    }
+
+    public async proveEffectiveNavigationAuthority(
+        canonicalRoot: string,
+        authority: EffectiveNavigationAuthority,
+        validateArtifacts = false,
+    ): Promise<NavigationGenerationProof> {
+        if (authority.status === 'not_bound') return { status: 'not_bound' };
+        let generation: CurrentNavigationGeneration | null;
+        try {
+            generation = await (authority.useBoundGeneration
+                ? resolveNavigationGeneration(
+                    this.ports.symbolRegistryStateRoot,
+                    canonicalRoot,
+                    authority.generationId,
+                )
+                : resolveCurrentNavigationGeneration(
+                    this.ports.symbolRegistryStateRoot,
+                    canonicalRoot,
+                ));
+        } catch (error) {
+            return {
+                status: error instanceof RetiredNavigationPointerError
+                    ? 'requires_reindex'
+                    : error instanceof UnsupportedNavigationPointerError
+                        ? 'unsupported'
+                        : 'corrupt',
+            };
+        }
+        if (!generation) return { status: 'missing' };
+        if (
+            generation.generationId !== authority.generationId
+            || generation.navigationSealHash !== authority.sealHash
+            || (
+                authority.expectedSymbolRegistryManifestHash !== undefined
+                && generation.symbolRegistryManifestHash
+                    !== authority.expectedSymbolRegistryManifestHash
+            )
+            || generation.relationshipManifestHash
+                !== authority.expectedRelationshipManifestHash
+        ) return { status: 'incompatible' };
+
+        if (validateArtifacts || authority.relationshipOnlyUpgrade) {
+            const registryRead = await readSymbolRegistrySidecar({
+                normalizedRootPath: canonicalRoot,
+                stateRoot: this.ports.symbolRegistryStateRoot,
+                ...(authority.useBoundGeneration
+                    ? { generationId: authority.generationId }
+                    : {}),
+            });
+            if (registryRead.status !== 'ok') return { status: registryRead.status };
+            const relationshipRead = await readRelationshipSidecar({
+                normalizedRootPath: canonicalRoot,
+                expectedSymbolRegistryManifestHash: generation.symbolRegistryManifestHash,
+                stateRoot: this.ports.symbolRegistryStateRoot,
+                ...(authority.useBoundGeneration
+                    ? { generationId: authority.generationId }
+                    : {}),
+            });
+            if (relationshipRead.status !== 'ok') return { status: relationshipRead.status };
+            if (
+                authority.relationshipOnlyUpgrade
+                && (
+                    registryRead.registry.manifest.relationshipVersion
+                        !== this.ports.getRelationshipVersion()
+                    || relationshipRead.manifest.relationshipVersion
+                        !== this.ports.getRelationshipVersion()
+                )
+            ) return { status: 'incompatible' };
+            const sealProof = await verifyNavigationGenerationSealArtifacts({
+                stateRoot: this.ports.symbolRegistryStateRoot,
+                normalizedRootPath: canonicalRoot,
+                ...(authority.useBoundGeneration
+                    ? { generationId: authority.generationId }
+                    : {}),
+                registry: registryRead.registry,
+                relationshipManifest: relationshipRead.manifest,
+            });
+            if (sealProof.status !== 'ok') return { status: sealProof.status };
+        }
+
+        try {
+            const observation = this.ports.resolveNavigationObservation(
+                canonicalRoot,
+                generation.generationId,
+                !authority.useBoundGeneration,
+            );
+            return observation.status === 'valid'
+                ? {
+                    status: 'valid',
+                    generation: { ...generation },
+                    observationToken: observation.token,
+                }
+                : { status: observation.status };
+        } catch {
+            return { status: 'corrupt' };
+        }
+    }
+
+    public isPreparedVectorReceiptBoundToCurrentAuthority(
+        canonicalRoot: string,
+        receipt: ProvenVectorGenerationReceipt,
+    ): boolean {
+        const policy = this.getPublishedResolvedPolicy(canonicalRoot);
+        const binding = this.getPublishedPolicyBinding(canonicalRoot);
+        const policyDocumentDigest = this.ports.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot);
+        if (!policy || !binding || !policyDocumentDigest) return false;
+
+        return receipt.policy.canonicalRoot === canonicalRoot
+            && receipt.marker.codebasePath === canonicalRoot
+            && receipt.collectionName === binding.collectionName
+            && receipt.policy.policyHash === policy.policyHash
+            && receipt.policyDocumentDigest === policyDocumentDigest
+            && receipt.marker.indexPolicyHash === policy.policyHash
+            && receipt.exactPayloadCount === receipt.marker.totalChunks
+            && receipt.observations.profileFileToken
+                === this.ports.resolveRepoConfigObservationToken(canonicalRoot)
+            && receipt.observations.policyFileToken
+                === this.ports.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot)
+            && this.ports.indexPolicyRuntimeService.getPolicyRuntimeCompatibility(canonicalRoot) === true
+            && this.resolveEffectiveNavigationAuthority(receipt.marker, policy, binding) !== null;
+    }
+
+    public async resolveGenerationProofIdentity(
+        canonicalRoot: string,
+    ): Promise<string | null> {
+        const observations = this.getIndexAuthorityObservations(canonicalRoot);
+        if (!observations) return null;
+        const collectionName = this.getPublishedPolicyBinding(canonicalRoot)?.collectionName;
+        const observePublication = this.ports.vectorDatabase.getPublicationObservation;
+        if (!collectionName || typeof observePublication !== 'function') return null;
+        const publicationObservation = await observePublication.call(
+            this.ports.vectorDatabase,
+            collectionName,
+        );
+        if (!publicationObservation) return null;
+        return JSON.stringify({
+            vector: observations.vector,
+            navigation: observations.navigation,
+            publicationObservation,
+        });
+    }
+
+    public cloneIndexCompletionMarker(
+        marker: IndexCompletionMarkerDocument,
+    ): IndexCompletionMarkerDocument {
+        return {
+            ...marker,
+            fingerprint: { ...marker.fingerprint },
+            navigation: { ...marker.navigation },
+        };
+    }
+
+    public cloneProvenVectorGenerationReceipt(
+        receipt: ProvenVectorGenerationReceipt,
+    ): ProvenVectorGenerationReceipt {
+        return {
+            collectionName: receipt.collectionName,
+            marker: this.cloneIndexCompletionMarker(receipt.marker),
+            policy: {
+                ...receipt.policy,
+                customExtensions: [...receipt.policy.customExtensions],
+                customIgnorePatterns: [...receipt.policy.customIgnorePatterns],
+                fileBasedIgnorePatterns: [...receipt.policy.fileBasedIgnorePatterns],
+                supportedExtensions: [...receipt.policy.supportedExtensions],
+                effectiveIgnorePatterns: [...receipt.policy.effectiveIgnorePatterns],
+            },
+            policyDocumentDigest: receipt.policyDocumentDigest,
+            exactPayloadCount: receipt.exactPayloadCount,
+            observations: { ...receipt.observations },
+        };
+    }
+
+    public cloneProvenGenerationReceipt(
+        receipt: ProvenGenerationReceipt,
+    ): ProvenGenerationReceipt {
+        return {
+            ...this.cloneProvenVectorGenerationReceipt(receipt),
+            navigation: { ...receipt.navigation },
+            observations: { ...receipt.observations },
+        };
     }
 
     publishedResolvedPolicyRoots(): IterableIterator<string> {
@@ -653,7 +1013,7 @@ export class IndexAuthorityCoordinator {
         if (
             binding?.collectionName !== input.activeCollectionName
             || binding.publication?.activationId !== input.activationId
-            || !this.ports.isPreparedVectorReceiptBoundToCurrentAuthority(
+            || !this.isPreparedVectorReceiptBoundToCurrentAuthority(
                 input.canonicalRoot,
                 cached.vectorReceipt,
             )
@@ -677,14 +1037,14 @@ export class IndexAuthorityCoordinator {
             ]);
             return dataObservation === input.expectedDataObservation
                 && marker !== null
-                && this.ports.indexCompletionMarkersEqual(marker, cached.vectorReceipt.marker);
+                && this.indexCompletionMarkersEqual(marker, cached.vectorReceipt.marker);
         };
         if (!await activeStateMatches()) {
             invalidate();
             return;
         }
 
-        const identity = await this.ports.resolveGenerationProofIdentity(input.canonicalRoot);
+        const identity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
         if (!identity || !await activeStateMatches()) {
             invalidate();
             return;
@@ -706,7 +1066,7 @@ export class IndexAuthorityCoordinator {
         const policyDocumentDigest = this.ports.indexPolicyRuntimeService.getPolicyDocumentDigest(input.canonicalRoot);
         const policyBinding = this.getPublishedPolicyBinding(input.canonicalRoot);
         const navigationAuthority = policyBinding
-            ? this.ports.resolveEffectiveNavigationAuthority(
+            ? this.resolveEffectiveNavigationAuthority(
                 input.marker,
                 input.policy,
                 policyBinding,
@@ -723,11 +1083,11 @@ export class IndexAuthorityCoordinator {
             input.navigation.generationId,
             false,
         );
-        const identity = await this.ports.resolveGenerationProofIdentity(input.canonicalRoot);
+        const identity = await this.resolveGenerationProofIdentity(input.canonicalRoot);
         if (!policyDocumentDigest || !navigationToken || !identity) return null;
         const receipt: ProvenGenerationReceipt = {
             collectionName: this.getPublishedPolicyBinding(input.canonicalRoot)?.collectionName ?? '',
-            marker: this.ports.cloneIndexCompletionMarker(input.marker),
+            marker: this.cloneIndexCompletionMarker(input.marker),
             policy: {
                 ...input.policy,
                 customExtensions: [...input.policy.customExtensions],
@@ -748,16 +1108,16 @@ export class IndexAuthorityCoordinator {
         if (
             receipt.collectionName.length === 0
             || !receipt.observations.policyFileToken
-            || !this.ports.isPreparedVectorReceiptBoundToCurrentAuthority(input.canonicalRoot, receipt)
+            || !this.isPreparedVectorReceiptBoundToCurrentAuthority(input.canonicalRoot, receipt)
         ) return null;
         this.setGenerationProof(input.canonicalRoot, {
             identity,
-            vectorReceipt: this.ports.cloneProvenVectorGenerationReceipt(receipt),
-            generationReceipt: this.ports.cloneProvenGenerationReceipt(receipt),
+            vectorReceipt: this.cloneProvenVectorGenerationReceipt(receipt),
+            generationReceipt: this.cloneProvenGenerationReceipt(receipt),
             navigationArtifactsValidated: true,
             source: 'activation',
         });
-        const preparedReceipt = this.ports.cloneProvenGenerationReceipt(receipt);
+        const preparedReceipt = this.cloneProvenGenerationReceipt(receipt);
         this.setPreparedGenerationReceipt(preparedReceipt, identity);
         return preparedReceipt;
     }
@@ -780,7 +1140,7 @@ export class IndexAuthorityCoordinator {
                 || receipt.canonicalRoot !== policy.canonicalRoot
                 || receipt.policyHash !== policy.policyHash
                 || receipt.collectionName !== binding.collectionName
-                || !this.ports.policyNavigationBindingsEqual(receipt.navigation, binding.navigation)
+                || !policyNavigationBindingsEqual(receipt.navigation, binding.navigation)
             ) {
                 throw error;
             }
@@ -836,7 +1196,7 @@ type DurableIndexAuthorityRestoreResult =
  * rollback, retention, durable restoration) and published binding state.
  */
 
-type EffectiveNavigationAuthority =
+export type EffectiveNavigationAuthority =
     | {
         status: 'not_bound';
         relationshipOnlyUpgrade: false;
@@ -852,6 +1212,40 @@ type EffectiveNavigationAuthority =
         useBoundGeneration: boolean;
     };
 
+export type IndexAuthorityObservations = {
+    vector: string;
+    navigation: string;
+};
+
+type NavigationObservation =
+    | { status: 'valid'; token: string }
+    | { status: 'missing' | 'incompatible' | 'corrupt' | 'not_bound' };
+
+function policyNavigationBindingFromMarker(
+    navigation: IndexCompletionMarkerDocument['navigation'],
+): CanonicalPolicyNavigationBinding {
+    return navigation.status === 'sealed'
+        ? {
+            status: 'sealed',
+            generationId: navigation.generationId,
+            sealHash: navigation.sealHash,
+        }
+        : { status: 'not_bound' };
+}
+
+function policyNavigationBindingsEqual(
+    left: CanonicalPolicyNavigationBinding,
+    right: CanonicalPolicyNavigationBinding,
+): boolean {
+    return left.status === right.status
+        && (left.status === 'not_bound'
+            || (
+                right.status === 'sealed'
+                && left.generationId === right.generationId
+                && left.sealHash === right.sealHash
+            ));
+}
+
 export type IndexAuthorityDecisionPorts = Readonly<{
     canonicalizeCodebasePath: (codebasePath: string) => string;
     clearResolvedIndexPolicyRuntime: (canonicalRoot: string) => void;
@@ -865,49 +1259,38 @@ export type IndexAuthorityDecisionPorts = Readonly<{
     };
     indexPolicyRuntimeService: {
         deletePolicyFileToken: (canonicalRoot: string) => void;
+        getPolicyFileToken: (canonicalRoot: string) => string | null | undefined;
         getPolicyDocumentDigest: (canonicalRoot: string) => string | undefined;
+        getPolicyRuntimeCompatibility: (canonicalRoot: string) => boolean | undefined;
         resolveCustomIndexPolicyFileToken: (canonicalRoot: string) => string | null;
     };
     refreshRuntimePolicyAuthority: (canonicalRoot: string) => void;
     restoreTransactionMechanics: DurableAuthorityRestoreTransactionMechanics;
     symbolRegistryStateRoot: string | undefined;
+    getRelationshipVersion: () => string;
+    buildIndexCompletionFingerprint: () => IndexCompletionFingerprint;
     listRelatedCollectionNames: (canonicalRoot: string) => Promise<string[]>;
     vectorDatabase: {
         getCollectionDataObservation?: (collectionName: string) => Promise<string | null> | undefined;
+        getPublicationObservation?: (collectionName: string) => Promise<string | null> | string | null;
         dropCollection: (collectionName: string) => Promise<void>;
         hasCollection: (collectionName: string) => Promise<boolean>;
     };
-    indexCompletionMarkersEqual: (
-        left: IndexCompletionMarkerDocument,
-        right: IndexCompletionMarkerDocument,
-    ) => boolean;
-    isPreparedVectorReceiptBoundToCurrentAuthority: (
-        canonicalRoot: string,
-        receipt: ProvenVectorGenerationReceipt,
-    ) => boolean;
     resolveCompletionMarkerForCollection: (
         canonicalRoot: string,
         collectionName: string,
     ) => Promise<IndexCompletionMarkerDocument | null>;
-    resolveGenerationProofIdentity: (canonicalRoot: string) => Promise<string | null>;
-    resolveEffectiveNavigationAuthority: (
-        marker: IndexCompletionMarkerDocument,
-        policy: ResolvedIndexPolicy,
-        binding: IndexPolicyRuntimeBinding & { policyHash: string },
-    ) => EffectiveNavigationAuthority | null;
+    resolveNavigationObservation: (
+        canonicalRoot: string,
+        generationId: string,
+        requireCurrentPointer: boolean,
+    ) => NavigationObservation;
     resolveNavigationObservationToken: (
         canonicalRoot: string,
         generationId: string,
         strict: boolean,
     ) => string | null;
     resolveRepoConfigObservationToken: (canonicalRoot: string) => string | null;
-    cloneIndexCompletionMarker: (
-        marker: IndexCompletionMarkerDocument,
-    ) => IndexCompletionMarkerDocument;
-    cloneProvenGenerationReceipt: (receipt: ProvenGenerationReceipt) => ProvenGenerationReceipt;
-    cloneProvenVectorGenerationReceipt: (
-        receipt: ProvenVectorGenerationReceipt,
-    ) => ProvenVectorGenerationReceipt;
     publishResolvedIndexPolicy: (
         policy: ResolvedIndexPolicy,
         binding: IndexPolicyRuntimeBinding,
@@ -916,8 +1299,4 @@ export type IndexAuthorityDecisionPorts = Readonly<{
     resolveProvenGeneration: (
         canonicalRoot: string,
     ) => Promise<ProvenGenerationReceipt | null>;
-    policyNavigationBindingsEqual: (
-        left: CanonicalPolicyNavigationBinding,
-        right: CanonicalPolicyNavigationBinding,
-    ) => boolean;
 }>;
