@@ -88,13 +88,13 @@ Completed ownership-bounded batches:
 - Phase 9.2A / extract canonical rerank projection primitives: the neutral projection primitives and constants that V2/V3/V4 shared (validation, source-selection, physical-line/excerpt bounds, sibling normalization) are extracted out of the historical modules into `search-rerank-projection-primitives.ts`. Pure move/refactor; no supported route, projection bytes, request-contract fixture, or `requestContractSha256` change. Request-contract fixture still pins the recomputed `contractSha256` (search-rerank-request-contract.test.ts): `d622cff`.
 - Phase 9.2B / retire executable historical rerank document projections: production search uses one canonical document projector; the executable V2/V3 builders and their projection dispatch are removed; historical V3 fixture/policy material required only to preserve the frozen current request-contract identity becomes inert contract evidence, not executable implementation: `304c87a`.
 - Phase 9.2C / remove bounded-source selector v1: after no executable supported path selects it, the legacy CRLF newline branch is gone and `selectBoundedSource(...)` is one canonical algorithm; `bounded_source_selection_v2` remains the immutable current identity: `24a89d5`.
+- Phase 9.2D / retire query projection v1 (review-driven close): production routing accepts only raw (`semantic_query_raw_v1`) or current (`search_rerank_query_v2`) and rejects the retired v1 identity (`search_rerank_query_projection_identity_unknown`). The current projector is canonical (`buildSearchRerankQuery`, `SEARCH_RERANK_QUERY_PROJECTION_IDENTITY`, `search-rerank-query.ts`; immutable serialized identity stays `search_rerank_query_v2`). The retired v1 query bytes survive only as frozen inert literal contract evidence in `search-rerank-request-contract.ts`, decoupled from the current answer-focus model; `contractSha256` unchanged (contract test pins recomputation against the committed asset). A coordinator-level boundary test proves `handleSearchCode` fails closed with provider rerank call count 0 when a reranker advertises `search_rerank_query_v1`. Full MCP suite 1525 pass / 1 skip: `0564384`.
 
-Next open batch at this checkpoint: Phase 9.2D (canonicalize query projection
-routing) — in progress by the implementing session. Full-suite verification for
-9.2A–9.2C on a settled tree is pending 9.2D's commit. Phase 8 is sealed
-(`bc53cb4 → 0963ca9`, review-approved). The durable-format floor (9.3) requires
-separate authorization. Refresh this checkpoint only after an accepted batch is
-committed; preserve the original baseline above as historical lineage.
+Next open batch at this checkpoint: Phase 9.2 is complete pending the 9.2D
+review. The durable-format floor (9.3) requires separate authorization. Phase 8
+is sealed (`bc53cb4 → 0963ca9`, review-approved). Refresh this checkpoint only
+after an accepted batch is committed; preserve the original baseline above as
+historical lineage.
 
 ## Goal
 
