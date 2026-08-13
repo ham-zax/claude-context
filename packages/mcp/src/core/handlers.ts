@@ -7,6 +7,7 @@ import {
     type ProvenGenerationReceipt,
     type ProvenVectorGenerationReceipt,
     type PreparedGenerationRevalidation,
+    type SourceFreshnessPort,
     createRuntimeNavigationStore,
     type NavigationStore,
     type Reranker,
@@ -1406,6 +1407,21 @@ export class ToolHandlers {
         if (typeof syncManager.unregisterCodebaseWatcher === 'function') {
             await syncManager.unregisterCodebaseWatcher(codebasePath);
         }
+    }
+
+    /**
+     * Phase 5.1 — the narrow read-facing source freshness port, when the host
+     * context provides it. Test hosts may construct ToolHandlers with context
+     * mocks that lack the port; callers must fall back to the direct context
+     * checkpoint methods in that case and never throw.
+     */
+    private getSourceFreshnessPort(): SourceFreshnessPort | undefined {
+        const context = this.context as Context & {
+            getSourceFreshnessPort?: () => SourceFreshnessPort;
+        };
+        return typeof context.getSourceFreshnessPort === 'function'
+            ? context.getSourceFreshnessPort()
+            : undefined;
     }
 
     private getPreparedAuthorityObservation(codebasePath: string): string | null {
@@ -4233,9 +4249,12 @@ export class ToolHandlers {
                                 || decision.mode === 'reconciled_ignore_change'
                             )
                         ) {
-                            const checkpoint = await this.context.inspectSourceFreshnessCheckpoint(
-                                effectiveRoot,
-                            );
+                            const sourceFreshnessPort = this.getSourceFreshnessPort();
+                            const checkpoint = sourceFreshnessPort
+                                ? (await sourceFreshnessPort.prepareCurrentSourceObservation(effectiveRoot)).evidence
+                                : await this.context.inspectSourceFreshnessCheckpoint(
+                                    effectiveRoot,
+                                );
                             if (checkpoint.status === 'valid' && checkpoint.generationReceipt) {
                                 completedFreshnessRequestProof = {
                                     checkpointObservation: checkpoint.observationToken,
@@ -4375,14 +4394,20 @@ export class ToolHandlers {
                 ) {
                     let freshnessProofBound = false;
                     if (completedFreshnessRequestProof) {
+                        const freshnessPort = this.getSourceFreshnessPort();
                         const checkpoint = await this.measureSearchPhase(
                             phaseTimings,
                             'freshnessCheckpointProof',
-                            () => this.context.inspectSourceFreshnessCheckpoint(
-                                effectiveRoot,
-                                undefined,
-                                vectorReceipt,
-                            ),
+                            freshnessPort
+                                ? () => freshnessPort.prepareCurrentSourceObservation(
+                                    effectiveRoot,
+                                    { requestBoundReceipt: vectorReceipt },
+                                ).then((prepared) => prepared.evidence)
+                                : () => this.context.inspectSourceFreshnessCheckpoint(
+                                    effectiveRoot,
+                                    undefined,
+                                    vectorReceipt,
+                                ),
                         );
                         freshnessProofBound = checkpoint.status === 'valid'
                             && checkpoint.observationToken
@@ -4409,10 +4434,16 @@ export class ToolHandlers {
                             finalFullComparisons: 0,
                         };
                     } else {
-                        const comparison = await this.context.compareAllSourceToFreshnessCheckpoint(
-                            effectiveRoot,
-                            vectorReceipt,
-                        );
+                        const comparisonPort = this.getSourceFreshnessPort();
+                        const comparison = comparisonPort
+                            ? await comparisonPort.compareAllCurrentSourceToCheckpoint(
+                                effectiveRoot,
+                                vectorReceipt,
+                            )
+                            : await this.context.compareAllSourceToFreshnessCheckpoint(
+                                effectiveRoot,
+                                vectorReceipt,
+                            );
                         if (comparison.status === 'matches') {
                             requestSourceBarrier = {
                                 mode: 'full_comparison',
@@ -4465,13 +4496,19 @@ export class ToolHandlers {
                     ) {
                         return true;
                     }
+                    const validationPort = this.getSourceFreshnessPort();
                     const comparison = await this.measureSearchPhase(
                         phaseTimings,
                         'finalSourceValidation',
-                        () => this.context.compareSourceObservationToFreshnessCheckpoint(
-                            effectiveRoot,
-                            vectorReceipt,
-                        ),
+                        validationPort
+                            ? () => validationPort.compareCurrentSourceToCheckpoint(
+                                effectiveRoot,
+                                vectorReceipt,
+                            )
+                            : () => this.context.compareSourceObservationToFreshnessCheckpoint(
+                                effectiveRoot,
+                                vectorReceipt,
+                            ),
                     );
                     if (readinessDebug.requestProof) {
                         readinessDebug.requestProof.finalFullComparisons += 1;

@@ -1360,6 +1360,13 @@ export class Context {
                     codebasePath,
                     requestBoundReceipt,
                 ),
+                compareAllSourceToFreshnessCheckpoint: (
+                    codebasePath,
+                    requestBoundReceipt,
+                ) => this.compareAllSourceToFreshnessCheckpoint(
+                    codebasePath,
+                    requestBoundReceipt,
+                ),
                 getRegisteredSourceFreshnessCheckpointObservation: (codebasePath) => (
                     this.getRegisteredSourceFreshnessCheckpointObservation(codebasePath)
                 ),

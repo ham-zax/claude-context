@@ -1269,11 +1269,25 @@ export class ManageIndexingHandlers {
                     throw new Error(`Repair completion for '${absolutePath}' did not match an exact proven generation.`);
                 }
                 assertMutationCurrent?.();
-                const checkpoint = await this.host.context.inspectSourceFreshnessCheckpoint(
-                    absolutePath,
-                    proven.collectionName,
-                    proven,
-                );
+                const checkpoint = await (async () => {
+                    if (typeof this.host.context.getSourceFreshnessPort === "function") {
+                        const prepared = await this.host.context
+                            .getSourceFreshnessPort()
+                            .prepareCurrentSourceObservation(
+                                absolutePath,
+                                {
+                                    checkpointIdentity: proven.collectionName,
+                                    requestBoundReceipt: proven,
+                                },
+                            );
+                        return prepared.evidence;
+                    }
+                    return this.host.context.inspectSourceFreshnessCheckpoint(
+                        absolutePath,
+                        proven.collectionName,
+                        proven,
+                    );
+                })();
                 if (checkpoint.status !== "valid") {
                     throw new Error(`Repair completion for '${absolutePath}' did not preserve a valid source checkpoint.`);
                 }

@@ -102,3 +102,6 @@ piolium/confirm-workspace/
 piolium/confirmation-report.md
 piolium/**
 .qoder/**
+.atl/
+.pi/subagents/
+.pi/fabric/

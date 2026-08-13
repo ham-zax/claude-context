@@ -24,6 +24,10 @@ import {
     MutationLeaseCoordinator,
     type RootMutationLease,
 } from "./mutation-lease.js";
+import {
+    SourceObservationState,
+    type SourceCheckpointObservationStatus,
+} from "./source-observation-state.js";
 
 interface SyncManagerOptions {
     watchEnabled?: boolean;
@@ -316,9 +320,7 @@ export class SyncManager {
     private activeIgnoreReconciles: Map<string, Promise<FreshnessDecision>> = new Map();
     private freshnessEpochs: Map<string, number> = new Map();
     private watcherObservations: Map<string, RootWatcherObservation> = new Map();
-    private sourceCheckpointObservations: Map<string, string> = new Map();
-    private sourceCheckpointStatuses: Map<string, 'valid' | 'missing' | 'corrupt'> = new Map();
-    private fullIndexSourceHandoffBarriers: Map<string, FullIndexSourceHandoffBarrierInput> = new Map();
+    private readonly sourceObservationState: SourceObservationState;
     private readonly now: () => number;
     private readonly onSyncCompleted?: SyncManagerOptions['onSyncCompleted'];
     private readonly mutationLeaseCoordinator?: MutationLeaseCoordinator;
@@ -335,6 +337,25 @@ export class SyncManager {
         this.mutationLeaseCoordinator = options.mutationLeaseCoordinator;
         this.sourceFreshnessPort = options.sourceFreshnessPort ?? null;
         this.onLifecycleActivityChanged = options.onLifecycleActivityChanged;
+        this.sourceObservationState = new SourceObservationState({
+            assertMutationCurrent: (lease) => this.assertMutationCurrent(lease),
+            hasCurrentWatcherCapture: (root, capture) => this.hasCurrentWatcherCapture(root, capture),
+            coverWatcherObservation: (root, observedEventEpoch) => (
+                this.coverWatcherObservation(root, observedEventEpoch)
+            ),
+            proveVectorGeneration: (root) => this.context.proveVectorGeneration(root),
+            inspectSourceFreshnessCheckpoint: (root, checkpointIdentity, requestBoundReceipt) => (
+                this.context.inspectSourceFreshnessCheckpoint(
+                    root,
+                    checkpointIdentity,
+                    requestBoundReceipt,
+                )
+            ),
+            getRegisteredSourceFreshnessCheckpointObservation: (root) => (
+                this.context.getRegisteredSourceFreshnessCheckpointObservation(root)
+            ),
+            isPreparedReadAvailable: (root) => this.getPreparedReadObservation(root).available,
+        });
         this.crossProcessJoinTimeoutMs = Math.max(
             1,
             options.crossProcessJoinTimeoutMs ?? DEFAULT_CROSS_PROCESS_JOIN_TIMEOUT_MS,
@@ -343,6 +364,34 @@ export class SyncManager {
             1,
             options.crossProcessJoinPollMs ?? DEFAULT_CROSS_PROCESS_JOIN_POLL_MS,
         );
+    }
+
+    /**
+     * Phase 5.1 — the single mutable owner of checkpoint observation and
+     * full-index handoff state. Legacy private-field access forwards to it.
+     */
+    private get sourceCheckpointObservations(): Map<string, string> {
+        return this.sourceObservationState.checkpointObservations;
+    }
+
+    private get sourceCheckpointStatuses(): Map<string, SourceCheckpointObservationStatus> {
+        return this.sourceObservationState.checkpointStatuses;
+    }
+
+    private hasCurrentWatcherCapture(
+        root: string,
+        capture: WatcherBootstrapCapture,
+    ): boolean {
+        const observation = this.watcherObservations.get(root);
+        return this.watchEnabled
+            && this.watcherModeStarted
+            && this.watchedCodebases.has(root)
+            && this.watchers.has(root)
+            && this.watcherLifecycleStates.get(root) === 'ready'
+            && observation?.coverage === 'ready'
+            && observation.observedEventEpoch >= capture.observedEventEpoch
+            && this.watcherGenerations.get(root) === capture.watcherGeneration
+            && this.watcherCandidatePolicies.get(root)?.policyHash === capture.candidatePolicyHash;
     }
 
     private bumpFreshnessEpoch(codebasePath: string): void {
@@ -495,11 +544,7 @@ export class SyncManager {
         mutationLease?: RootMutationLease,
     ): void {
         const root = this.canonicalWatcherRoot(codebasePath);
-        this.assertMutationCurrent(mutationLease);
-        if (input.candidatePolicyHash.length === 0 || input.markerRunId.length === 0) {
-            throw new TypeError('Full-index source handoff requires a candidate policy hash and marker run ID.');
-        }
-        this.fullIndexSourceHandoffBarriers.set(root, Object.freeze({ ...input }));
+        this.sourceObservationState.beginHandoff(root, input, mutationLease);
     }
 
     public rejectFullIndexSourceHandoff(
@@ -508,16 +553,7 @@ export class SyncManager {
         mutationLease?: RootMutationLease,
     ): boolean {
         const root = this.canonicalWatcherRoot(codebasePath);
-        this.assertMutationCurrent(mutationLease);
-        const barrier = this.fullIndexSourceHandoffBarriers.get(root);
-        if (
-            barrier?.candidatePolicyHash !== input.candidatePolicyHash
-            || barrier.markerRunId !== input.markerRunId
-        ) {
-            return false;
-        }
-        this.fullIndexSourceHandoffBarriers.delete(root);
-        return true;
+        return this.sourceObservationState.rejectHandoff(root, input, mutationLease);
     }
 
     private supersedeFullIndexSourceHandoffAfterSync(
@@ -525,19 +561,7 @@ export class SyncManager {
         provenGeneration: ProvenVectorGenerationReceipt | undefined,
     ): boolean {
         const root = this.canonicalWatcherRoot(codebasePath);
-        const barrier = this.fullIndexSourceHandoffBarriers.get(root);
-        if (
-            !barrier
-            || provenGeneration?.marker.runId !== barrier.markerRunId
-            || provenGeneration.marker.indexStatus !== 'completed'
-            || provenGeneration.marker.indexPolicyHash !== barrier.candidatePolicyHash
-            || provenGeneration.policy.canonicalRoot !== root
-            || provenGeneration.policy.policyHash !== barrier.candidatePolicyHash
-        ) {
-            return false;
-        }
-        this.fullIndexSourceHandoffBarriers.delete(root);
-        return true;
+        return this.sourceObservationState.supersedeHandoffAfterSync(root, provenGeneration);
     }
 
     /**
@@ -553,89 +577,7 @@ export class SyncManager {
         mutationLease?: RootMutationLease,
     ): Promise<boolean> {
         const root = this.canonicalWatcherRoot(codebasePath);
-        this.assertMutationCurrent(mutationLease);
-        const barrier = this.fullIndexSourceHandoffBarriers.get(root);
-        if (
-            barrier?.candidatePolicyHash !== input.candidatePolicyHash
-            || barrier.markerRunId !== input.provenGeneration.marker.runId
-            || input.capture.canonicalRoot !== root
-            || input.capture.candidatePolicyHash !== input.candidatePolicyHash
-            || input.checkpointObservation.length === 0
-            || input.provenGeneration.collectionName.length === 0
-            || input.provenGeneration.policy.canonicalRoot !== root
-            || input.provenGeneration.marker.indexStatus !== 'completed'
-            || input.provenGeneration.marker.indexPolicyHash !== input.candidatePolicyHash
-        ) {
-            return false;
-        }
-
-        const matchesProvenGeneration = (
-            current: ProvenVectorGenerationReceipt,
-        ): boolean => current.collectionName === input.provenGeneration.collectionName
-            && current.marker.runId === input.provenGeneration.marker.runId
-            && current.marker.indexStatus === 'completed'
-            && current.marker.indexedFiles === input.provenGeneration.marker.indexedFiles
-            && current.marker.totalChunks === input.provenGeneration.marker.totalChunks
-            && current.marker.indexPolicyHash === input.candidatePolicyHash
-            && current.policyDocumentDigest === input.provenGeneration.policyDocumentDigest
-            && current.policy.canonicalRoot === input.provenGeneration.policy.canonicalRoot
-            && current.policy.policyHash === input.provenGeneration.policy.policyHash
-            && current.policy.controlSignature === input.provenGeneration.policy.controlSignature
-            && current.exactPayloadCount === input.provenGeneration.exactPayloadCount
-            && current.observations.profileFileToken === input.provenGeneration.observations.profileFileToken
-            && current.observations.policyFileToken === input.provenGeneration.observations.policyFileToken;
-
-        const hasCurrentWatcherCapture = (): boolean => {
-            const observation = this.watcherObservations.get(root);
-            return this.watchEnabled
-                && this.watcherModeStarted
-                && this.watchedCodebases.has(root)
-                && this.watchers.has(root)
-                && this.watcherLifecycleStates.get(root) === 'ready'
-                && observation?.coverage === 'ready'
-                && observation.observedEventEpoch >= input.capture.observedEventEpoch
-                && this.watcherGenerations.get(root) === input.capture.watcherGeneration
-                && this.watcherCandidatePolicies.get(root)?.policyHash === input.candidatePolicyHash;
-        };
-
-        if (!hasCurrentWatcherCapture()) return false;
-
-        try {
-            const currentGeneration = await this.context.proveVectorGeneration(root);
-            if (!currentGeneration || !matchesProvenGeneration(currentGeneration)) {
-                return false;
-            }
-
-            const currentCheckpoint = await this.context.inspectSourceFreshnessCheckpoint(
-                root,
-                input.provenGeneration.collectionName,
-                input.provenGeneration,
-            );
-            if (
-                currentCheckpoint.status !== 'valid'
-                || currentCheckpoint.observationToken !== input.checkpointObservation
-                || (
-                    currentCheckpoint.generationReceipt !== undefined
-                    && !matchesProvenGeneration(currentCheckpoint.generationReceipt)
-                )
-            ) {
-                return false;
-            }
-
-            const registeredObservation = this.context
-                .getRegisteredSourceFreshnessCheckpointObservation(root);
-            if (registeredObservation !== input.checkpointObservation) return false;
-        } catch {
-            return false;
-        }
-
-        this.assertMutationCurrent(mutationLease);
-        if (!hasCurrentWatcherCapture()) return false;
-        this.sourceCheckpointStatuses.set(root, 'valid');
-        this.sourceCheckpointObservations.set(root, input.checkpointObservation);
-        this.coverWatcherObservation(root, input.capture.observedEventEpoch);
-        this.fullIndexSourceHandoffBarriers.delete(root);
-        return this.getPreparedReadObservation(root).available;
+        return this.sourceObservationState.completeHandoff(root, input, mutationLease);
     }
 
     private hasPendingWatcherObservation(codebasePath: string): boolean {
@@ -701,12 +643,14 @@ export class SyncManager {
         }
         if (this.activeSyncs.has(root)) return unavailable('sync_active');
         if (this.activeIgnoreReconciles.has(root)) return unavailable('ignore_reconcile_active');
-        if (this.fullIndexSourceHandoffBarriers.has(root)) return unavailable('checkpoint_unverified');
+        if (this.sourceObservationState.hasHandoffBarrier(root)) return unavailable('checkpoint_unverified');
 
         const checkpointInspectionSupported = typeof this.context.inspectSourceFreshnessCheckpoint === 'function';
-        const checkpointObservation = this.sourceCheckpointObservations.get(root);
-        const currentCheckpointObservation = this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
-        const checkpointStatus = this.sourceCheckpointStatuses.get(root);
+        const checkpointObservation = this.sourceObservationState.getCheckpointObservation(root);
+        const currentCheckpointObservation = this.sourceFreshnessPort
+            ? this.sourceFreshnessPort.currentObservationToken(root)
+            : this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
+        const checkpointStatus = this.sourceObservationState.getCheckpointStatus(root);
         if (checkpointInspectionSupported && checkpointStatus === 'missing') {
             return unavailable('checkpoint_missing');
         }
@@ -734,12 +678,13 @@ export class SyncManager {
 
     public getPreparedReadDiagnostics(codebasePath: string): PreparedReadWatcherDiagnostics {
         const root = this.canonicalWatcherRoot(codebasePath);
-        const checkpointState = this.fullIndexSourceHandoffBarriers.has(root)
+        const checkpointState = this.sourceObservationState.hasHandoffBarrier(root)
             ? 'unverified' as const
-            : this.sourceCheckpointStatuses.get(root) ?? 'unverified';
-        const checkpointObservation = this.sourceCheckpointObservations.get(root);
-        const registeredCheckpointObservation =
-            this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
+            : this.sourceObservationState.getCheckpointStatus(root) ?? 'unverified';
+        const checkpointObservation = this.sourceObservationState.getCheckpointObservation(root);
+        const registeredCheckpointObservation = this.sourceFreshnessPort
+            ? this.sourceFreshnessPort.currentObservationToken(root)
+            : this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
         const checkpointStatus = checkpointState === 'valid'
             && (!checkpointObservation || registeredCheckpointObservation !== checkpointObservation)
             ? 'observation_mismatch'
@@ -798,9 +743,10 @@ export class SyncManager {
             preparedVectorReceipt,
         );
         if (checkpointEvidence?.status === 'valid') {
-            this.sourceCheckpointStatuses.set(codebasePath, 'valid');
-            const previousObservation = this.sourceCheckpointObservations.get(codebasePath);
-            this.sourceCheckpointObservations.set(codebasePath, checkpointEvidence.observationToken);
+            const previousObservation = this.sourceObservationState.recordValidCheckpointObservation(
+                codebasePath,
+                checkpointEvidence.observationToken,
+            );
             if (previousObservation && previousObservation !== checkpointEvidence.observationToken) {
                 this.bumpFreshnessEpoch(codebasePath);
             }
@@ -808,8 +754,7 @@ export class SyncManager {
         }
         if (!checkpointEvidence) return { checkpoint: null };
 
-        this.sourceCheckpointStatuses.set(codebasePath, checkpointEvidence.status);
-        this.sourceCheckpointObservations.delete(codebasePath);
+        this.sourceObservationState.recordUnavailableCheckpoint(codebasePath, checkpointEvidence.status);
         this.lastSyncTimes.delete(codebasePath);
         this.bumpFreshnessEpoch(codebasePath);
         return {
@@ -1196,13 +1141,16 @@ export class SyncManager {
             Math.max(0, Date.now() - committedCheckpointStartedAt),
         );
         if (committedCheckpoint?.status === 'valid') {
-            this.sourceCheckpointStatuses.set(codebasePath, 'valid');
-            this.sourceCheckpointObservations.set(codebasePath, committedCheckpoint.observationToken);
+            this.sourceObservationState.recordValidCheckpointObservation(
+                codebasePath,
+                committedCheckpoint.observationToken,
+            );
         } else {
             if (committedCheckpoint?.status === 'missing' || committedCheckpoint?.status === 'corrupt') {
-                this.sourceCheckpointStatuses.set(codebasePath, committedCheckpoint.status);
+                this.sourceObservationState.recordUnavailableCheckpoint(codebasePath, committedCheckpoint.status);
+            } else {
+                this.sourceObservationState.clearCheckpointObservation(codebasePath);
             }
-            this.sourceCheckpointObservations.delete(codebasePath);
         }
         const lastSyncedAt = this.lastSyncTimes.get(codebasePath);
         const decision: FreshnessDecision = {
@@ -1600,7 +1548,10 @@ export class SyncManager {
                 );
             }
             if (fencedCheckpoint?.status === 'valid') {
-                this.sourceCheckpointObservations.set(codebasePath, fencedCheckpoint.observationToken);
+                this.sourceObservationState.recordCheckpointObservation(
+                    codebasePath,
+                    fencedCheckpoint.observationToken,
+                );
                 const registeredObservation = this.context.getRegisteredSourceFreshnessCheckpointObservation?.(codebasePath);
                 if (
                     registeredObservation !== fencedCheckpoint.observationToken
@@ -1894,8 +1845,10 @@ export class SyncManager {
                         };
                     }
 
-                    this.sourceCheckpointStatuses.set(codebasePath, 'valid');
-                    this.sourceCheckpointObservations.set(codebasePath, checkpoint.observationToken);
+                    this.sourceObservationState.recordValidCheckpointObservation(
+                        codebasePath,
+                        checkpoint.observationToken,
+                    );
                     this.lastSyncTimes.set(codebasePath, this.now());
                     return {
                         mode: 'coalesced',
@@ -2256,9 +2209,7 @@ export class SyncManager {
         this.ignoreRulesVersions.delete(codebasePath);
         this.freshnessEpochs.delete(codebasePath);
         this.watcherObservations.delete(codebasePath);
-        this.sourceCheckpointObservations.delete(codebasePath);
-        this.sourceCheckpointStatuses.delete(codebasePath);
-        this.fullIndexSourceHandoffBarriers.delete(codebasePath);
+        this.sourceObservationState.clearCodebase(codebasePath);
         this.watcherCandidatePolicies.delete(codebasePath);
         this.watcherGenerations.delete(codebasePath);
         this.activeIgnoreReconciles.delete(codebasePath);
@@ -2417,9 +2368,7 @@ export class SyncManager {
         this.ignoreRulesVersions.clear();
         this.freshnessEpochs.clear();
         this.watcherObservations.clear();
-        this.sourceCheckpointObservations.clear();
-        this.sourceCheckpointStatuses.clear();
-        this.fullIndexSourceHandoffBarriers.clear();
+        this.sourceObservationState.clearAll();
         this.watchedCodebases.clear();
 
         const watchers = Array.from(this.watchers.values());

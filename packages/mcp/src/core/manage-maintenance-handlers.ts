@@ -60,7 +60,7 @@ type ToolTextResponse = {
 };
 
 type ManageMaintenanceHandlersHost = {
-    context: Pick<Context, "clearIndex"> & Partial<Pick<Context, "inspectSourceFreshnessCheckpoint">>;
+    context: Pick<Context, "clearIndex"> & Partial<Pick<Context, "inspectSourceFreshnessCheckpoint" | "getSourceFreshnessPort">>;
     snapshotManager: Pick<SnapshotManager, "removeCodebaseCompletely" | "getLatestOperation" | "startOperation" | "transitionOperation" | "commitOperationPhase" | "saveCodebaseSnapshot">;
     syncManager: Pick<SyncManager, "ensureFreshness"> & Partial<Pick<
         SyncManager,
@@ -566,11 +566,25 @@ export class ManageMaintenanceHandlers {
 
             const sourceCheckpointEvidence = trackedRootState.state === "ready"
                 && trackedRootState.vectorReceipt?.marker.indexStatus === "completed"
-                && typeof this.host.context.inspectSourceFreshnessCheckpoint === "function"
-                ? await this.host.context.inspectSourceFreshnessCheckpoint(
-                    trackedRootState.root.path,
-                    trackedRootState.vectorReceipt.collectionName,
+                && (
+                    typeof this.host.context.getSourceFreshnessPort === "function"
+                    || typeof this.host.context.inspectSourceFreshnessCheckpoint === "function"
                 )
+                ? await (async () => {
+                    if (typeof this.host.context.getSourceFreshnessPort === "function") {
+                        const prepared = await this.host.context
+                            .getSourceFreshnessPort()
+                            .prepareCurrentSourceObservation(
+                                trackedRootState.root.path,
+                                { checkpointIdentity: trackedRootState.vectorReceipt!.collectionName },
+                            );
+                        return prepared.evidence;
+                    }
+                    return this.host.context.inspectSourceFreshnessCheckpoint!(
+                        trackedRootState.root.path,
+                        trackedRootState.vectorReceipt!.collectionName,
+                    );
+                })()
                 : null;
 
             let sourceObservationUnavailableReason: PreparedReadObservationUnavailableReason | undefined;

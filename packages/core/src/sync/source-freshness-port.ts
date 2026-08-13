@@ -38,6 +38,10 @@ export interface SourceFreshnessPortDependencies {
         codebasePath: string,
         requestBoundReceipt?: ProvenVectorGenerationReceipt,
     ): Promise<SourceFreshnessPathComparison>;
+    compareAllSourceToFreshnessCheckpoint(
+        codebasePath: string,
+        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+    ): Promise<SourceFreshnessPathComparison>;
     getRegisteredSourceFreshnessCheckpointObservation(codebasePath: string): string | null;
 }
 
@@ -73,6 +77,16 @@ export interface SourceFreshnessPort {
     ): Promise<SourceFreshnessPathComparison>;
 
     /**
+     * Compare the entire current source tree against the owned checkpoint,
+     * forcing full-path hashing (the strongest drift proof). Used on the
+     * fallback path where a partial comparison would be insufficient.
+     */
+    compareAllCurrentSourceToCheckpoint(
+        codebasePath: string,
+        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+    ): Promise<SourceFreshnessPathComparison>;
+
+    /**
      * The currently registered observation token for a codebase, or null.
      */
     currentObservationToken(codebasePath: string): string | null;
@@ -101,6 +115,10 @@ export function createSourceFreshnessPort(
 
         async compareCurrentSourceToCheckpoint(codebasePath, requestBoundReceipt) {
             return deps.compareSourceObservationToFreshnessCheckpoint(codebasePath, requestBoundReceipt);
+        },
+
+        async compareAllCurrentSourceToCheckpoint(codebasePath, requestBoundReceipt) {
+            return deps.compareAllSourceToFreshnessCheckpoint(codebasePath, requestBoundReceipt);
         },
 
         currentObservationToken(codebasePath) {
