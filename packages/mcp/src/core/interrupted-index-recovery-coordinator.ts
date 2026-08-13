@@ -152,12 +152,18 @@ export class InterruptedIndexRecoveryCoordinator {
         }
     }
 
+    private getIndexingCodebases(): string[] {
+        return typeof this.snapshotManager.getIndexingCodebases === "function"
+            ? this.snapshotManager.getIndexingCodebases()
+            : [];
+    }
+
     public async recoverStaleIndexingStateIfNeeded(
         codebasePath: string,
         existingLease?: RootMutationLease,
         options?: { skipGrace?: boolean },
     ): Promise<RootMutationLease | undefined> {
-        const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+        const indexingCodebases = this.getIndexingCodebases();
         if (!Array.isArray(indexingCodebases) || !indexingCodebases.includes(codebasePath)) {
             return undefined;
         }
@@ -228,7 +234,7 @@ export class InterruptedIndexRecoveryCoordinator {
                 this.snapshotManager.refreshFromDiskIfChanged();
             }
             // Exclusive ownership (caller lease or self-acquired) supersedes grace.
-            if (!this.snapshotManager.getIndexingCodebases().includes(codebasePath)) {
+            if (!this.getIndexingCodebases().includes(codebasePath)) {
                 persistPhase("completed");
                 return undefined;
             }
@@ -318,7 +324,7 @@ export class InterruptedIndexRecoveryCoordinator {
     }
 
     public async recoverInterruptedIndexingAtStartup(): Promise<void> {
-        const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+        const indexingCodebases = this.getIndexingCodebases();
         if (indexingCodebases.length === 0) {
             console.log("[STARTUP] No interrupted indexing states required recovery");
             return;
@@ -346,7 +352,7 @@ export class InterruptedIndexRecoveryCoordinator {
         console.log(`[STARTUP] Recovery summary: attempted=${attempted}, skippedLiveWriter=${skippedLive}`);
     }
 
-    private extractIndexedRecoveryFromCompletionProof(
+    public extractIndexedRecoveryFromCompletionProof(
         completionProof: CompletionProofValidationResult,
     ): RecoveredIndex | null {
         if (completionProof.outcome !== "valid" && completionProof.outcome !== "fingerprint_mismatch") {

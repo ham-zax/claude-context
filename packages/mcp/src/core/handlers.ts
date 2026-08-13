@@ -1958,6 +1958,14 @@ export class ToolHandlers {
         );
     }
 
+    public extractIndexedRecoveryFromCompletionProof(
+        completionProof: CompletionProofValidationResult,
+    ): ReturnType<InterruptedIndexRecoveryCoordinator["extractIndexedRecoveryFromCompletionProof"]> {
+        return this.interruptedIndexRecoveryCoordinator.extractIndexedRecoveryFromCompletionProof(
+            completionProof,
+        );
+    }
+
     private buildManageActionBlockedMessage(codebasePath: string, action: RuntimeOwnerMutationAction): string {
         const indexing = this.buildIndexingMetadata(codebasePath);
         const retryAfterMs = this.getManageRetryAfterMs();
