@@ -301,7 +301,14 @@ test('loadCustomIndexPolicy rejects malformed documents with wrapped authority e
         );
 
         // v2 documents require reindex; future versions are unsupported.
-        fs.writeFileSync(harness.policyPath, JSON.stringify({ schemaVersion: 'satori_index_policy_v2' }));
+        fs.writeFileSync(
+            harness.policyPath,
+            JSON.stringify({
+                schemaVersion: 'satori_index_policy_v2',
+                canonicalRoot: root,
+                policyHash: '0'.repeat(64),
+            }),
+        );
         assert.throws(
             () => service.loadCustomIndexPolicy(root),
             (error: unknown) => error instanceof IndexFormatRequiresReindexError,
@@ -391,7 +398,14 @@ test('resolveVerifiedIndexPolicyDocumentDigest resolves and rejects invalid docu
             /Index policy document digest is invalid/,
         );
 
-        fs.writeFileSync(harness.policyPath, JSON.stringify({ schemaVersion: 'satori_index_policy_v2' }));
+        fs.writeFileSync(
+            harness.policyPath,
+            JSON.stringify({
+                schemaVersion: 'satori_index_policy_v2',
+                canonicalRoot: root,
+                policyHash: '0'.repeat(64),
+            }),
+        );
         assert.throws(
             () => service.resolveVerifiedIndexPolicyDocumentDigest(harness.policyPath),
             (error: unknown) => error instanceof IndexFormatRequiresReindexError,

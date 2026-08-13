@@ -10,6 +10,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import { isStagedGenerationCollectionName } from '../core/collection-naming.js';
 import { normalizeSupportedExtensions } from '../config/index-policy';
+import { computeMerkleRoot } from '../sync/merkle';
 import type { ProvenGenerationReceipt } from './contracts';
 import type { IndexPolicyPublicationReceipt } from './contracts';
 import type { PreparedIndexCollectionReceipt } from './contracts';
@@ -545,60 +546,66 @@ export class IndexGenerationWorkflow {
         const indexPolicy = options.indexPolicy
             ?? await this.resolveIndexPolicyForCodebase(codebasePath);
 
+        let preparedSourceContract: {
+            readonly canonicalRoot: string;
+            readonly supportedExtensions: readonly string[];
+            readonly effectiveIgnorePatterns: readonly string[];
+            readonly fullHashRun: boolean;
+            readonly partialScan: boolean;
+            readonly unscannedDirPrefixes: readonly string[];
+            readonly merkleRoot: string;
+        } | null = null;
+        let localPreparedFileHashes: Map<string, string> | null = null;
+
         if (options.preparedChanges) {
-            if (options.preparedChanges.assertCompatible) {
-                options.preparedChanges.assertCompatible({
-                    canonicalRoot: indexPolicy.canonicalRoot,
-                    effectiveIgnorePatterns: indexPolicy.effectiveIgnorePatterns,
-                    supportedExtensions: indexPolicy.supportedExtensions,
-                });
-            } else if (options.preparedChanges.sourceContract) {
-                const contract = options.preparedChanges.sourceContract;
-                const canonicalTarget = FileSynchronizer.canonicalizeSnapshotIdentityPath(codebasePath);
-                if (contract.canonicalRoot !== canonicalTarget) {
-                    throw new Error(
-                        `[Context] Prepared change set was created for canonical root '${contract.canonicalRoot}', not '${canonicalTarget}'.`,
-                    );
-                }
-                const normalizedTargetExtensions = normalizeSupportedExtensions(indexPolicy.supportedExtensions);
-                const sourceExts = new Set(contract.supportedExtensions);
-                const targetExts = new Set(normalizedTargetExtensions);
-                if (
-                    sourceExts.size !== targetExts.size
-                    || !Array.from(sourceExts).every((ext) => targetExts.has(ext))
-                ) {
-                    throw new Error(
-                        '[Context] Prepared change set supported extensions do not match the active index policy.',
-                    );
-                }
-                if (
-                    contract.effectiveIgnorePatterns.length !== indexPolicy.effectiveIgnorePatterns.length
-                    || !contract.effectiveIgnorePatterns.every((p, i) => p === indexPolicy.effectiveIgnorePatterns[i])
-                ) {
-                    throw new Error(
-                        '[Context] Prepared change set ignore patterns do not match the active index policy.',
-                    );
-                }
-                if (!contract.fullHashRun) {
-                    throw new Error('[Context] Prepared change set must be a full-hash scan.');
-                }
-                if (contract.partialScan) {
-                    throw new Error('[Context] Prepared change set must not be a partial scan.');
-                }
-                if (contract.unscannedDirPrefixes.length > 0) {
-                    throw new Error('[Context] Prepared change set has unscanned directory prefixes.');
-                }
-            } else if (options.preparedChanges.changes) {
-                if (options.preparedChanges.changes.fullHashRun !== true) {
-                    throw new Error('[Context] Prepared change set must be a full-hash scan.');
-                }
-                if (options.preparedChanges.changes.partialScan === true) {
-                    throw new Error('[Context] Prepared change set must not be a partial scan.');
-                }
-                if ((options.preparedChanges.changes.unscannedDirPrefixes?.length ?? 0) > 0) {
-                    throw new Error('[Context] Prepared change set has unscanned directory prefixes.');
-                }
+            if (!options.preparedChanges.sourceContract) {
+                throw new Error('[Context] Prepared change set is not authority-bound (missing sourceContract).');
             }
+            const contract = options.preparedChanges.sourceContract;
+            const canonicalTarget = FileSynchronizer.canonicalizeSnapshotIdentityPath(codebasePath);
+            if (contract.canonicalRoot !== canonicalTarget) {
+                throw new Error(
+                    `[Context] Prepared change set was created for canonical root '${contract.canonicalRoot}', not '${canonicalTarget}'.`,
+                );
+            }
+            const normalizedTargetExtensions = normalizeSupportedExtensions(indexPolicy.supportedExtensions);
+            const sourceExts = new Set(contract.supportedExtensions);
+            const targetExts = new Set(normalizedTargetExtensions);
+            if (
+                sourceExts.size !== targetExts.size
+                || !Array.from(sourceExts).every((ext) => targetExts.has(ext))
+            ) {
+                throw new Error(
+                    '[Context] Prepared change set supported extensions do not match the active index policy.',
+                );
+            }
+            if (
+                contract.effectiveIgnorePatterns.length !== indexPolicy.effectiveIgnorePatterns.length
+                || !contract.effectiveIgnorePatterns.every((p, i) => p === indexPolicy.effectiveIgnorePatterns[i])
+            ) {
+                throw new Error(
+                    '[Context] Prepared change set ignore patterns do not match the active index policy.',
+                );
+            }
+            if (!contract.fullHashRun) {
+                throw new Error('[Context] Prepared change set must be a full-hash scan.');
+            }
+            if (contract.partialScan) {
+                throw new Error('[Context] Prepared change set must not be a partial scan.');
+            }
+            if (contract.unscannedDirPrefixes.length > 0) {
+                throw new Error('[Context] Prepared change set has unscanned directory prefixes.');
+            }
+
+            const snapshottedHashes = new Map(options.preparedChanges.fileHashes);
+            const computedRoot = computeMerkleRoot(snapshottedHashes);
+            if (computedRoot !== contract.merkleRoot) {
+                throw new Error(
+                    `[Context] Prepared change set file hashes do not match bound source contract merkle root (expected '${contract.merkleRoot}', got '${computedRoot}').`,
+                );
+            }
+            preparedSourceContract = contract;
+            localPreparedFileHashes = snapshottedHashes;
         }
 
         // 2. Check and prepare vector collection
@@ -657,7 +664,13 @@ export class IndexGenerationWorkflow {
         );
         const preparedChanges = options.preparedChanges
             ?? await synchronizer!.prepareChanges({ forceFullHash: true });
-        const codeFiles = Array.from(preparedChanges.fileHashes.keys())
+        if (!preparedSourceContract) {
+            preparedSourceContract = preparedChanges.sourceContract!;
+        }
+        if (!localPreparedFileHashes) {
+            localPreparedFileHashes = new Map(preparedChanges.fileHashes);
+        }
+        const codeFiles = Array.from(localPreparedFileHashes.keys())
             .sort()
             .map((relativePath) => path.join(codebasePath, relativePath));
         scanFilesMs = Date.now() - scanStartedAt;
@@ -701,6 +714,11 @@ export class IndexGenerationWorkflow {
                         };
                         checkpoint = await preparedChanges.stageCheckpoint(checkpointAuthority);
                         checkpointStaged = true;
+                        if (checkpoint.merkleRoot !== preparedSourceContract.merkleRoot) {
+                            throw new Error(
+                                `[Context] Staged source checkpoint merkle root '${checkpoint.merkleRoot}' does not match bound source contract '${preparedSourceContract.merkleRoot}'.`,
+                            );
+                        }
                         await preparedChanges.assertSourceObservationCurrent();
                         options.assertMutationCurrent?.();
                         publication = {
@@ -812,7 +830,7 @@ export class IndexGenerationWorkflow {
             payloadPipelineMs = Date.now() - payloadStartedAt;
 
             if (result.status === 'completed') {
-                assertExactIndexedFileHashesMatchPrepared(result.indexedFileHashes, preparedChanges.fileHashes);
+                assertExactIndexedFileHashesMatchPrepared(result.indexedFileHashes, localPreparedFileHashes);
             }
 
             const finalizeStartedAt = Date.now();
@@ -856,6 +874,11 @@ export class IndexGenerationWorkflow {
                         };
                         checkpoint = await preparedChanges.stageCheckpoint(checkpointAuthority);
                         checkpointStaged = true;
+                        if (checkpoint.merkleRoot !== preparedSourceContract.merkleRoot) {
+                            throw new Error(
+                                `[Context] Staged source checkpoint merkle root '${checkpoint.merkleRoot}' does not match bound source contract '${preparedSourceContract.merkleRoot}'.`,
+                            );
+                        }
                         await preparedChanges.assertSourceObservationCurrent();
                         options.assertMutationCurrent?.();
                         publication = {

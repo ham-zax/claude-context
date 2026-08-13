@@ -701,6 +701,28 @@ export function buildCanonicalIndexPolicyDocument(
     return { ...parsed, documentDigest: digestPolicyPayload(parsed) };
 }
 
+function isRecognizableRetiredPolicyDocument(value: Record<string, unknown>, expectedRoot: string): boolean {
+    if (!isNonemptyString(value.canonicalRoot) || value.canonicalRoot !== expectedRoot) {
+        return false;
+    }
+    if (typeof value.policyHash !== 'string' || !SHA256.test(value.policyHash)) {
+        return false;
+    }
+    if (value.schemaVersion === 'satori_index_policy_v2') {
+        return true;
+    }
+    if (!isNonemptyString(value.collectionName)) {
+        return false;
+    }
+    if (!Array.isArray(value.supportedExtensions) || !Array.isArray(value.effectiveIgnorePatterns)) {
+        return false;
+    }
+    if (!isRecord(value.navigation) || typeof value.navigation.status !== 'string') {
+        return false;
+    }
+    return true;
+}
+
 export function inspectIndexPolicyDocument(
     value: unknown,
     expectedRoot: string,
@@ -709,13 +731,13 @@ export function inspectIndexPolicyDocument(
         return { status: 'corrupt', reason: 'index policy document is not an object' };
     }
     if (value.schemaVersion === 'satori_index_policy_v2') {
-        if (isNonemptyString(value.canonicalRoot) && value.canonicalRoot !== expectedRoot) {
+        if (!isRecognizableRetiredPolicyDocument(value, expectedRoot)) {
             return { status: 'corrupt', reason: 'canonical index policy payload is invalid' };
         }
         return { status: 'requires_reindex', reason: 'index policy v2 requires reindex' };
     }
     if (value.schemaVersion === 'satori_index_policy_v3' || value.schemaVersion === 'satori_index_policy_v4') {
-        if (isNonemptyString(value.canonicalRoot) && value.canonicalRoot !== expectedRoot) {
+        if (!isRecognizableRetiredPolicyDocument(value, expectedRoot)) {
             return { status: 'corrupt', reason: 'canonical index policy payload is invalid' };
         }
         return { status: 'requires_reindex', reason: `index policy ${value.schemaVersion === 'satori_index_policy_v3' ? 'v3' : 'v4'} requires reindex` };
