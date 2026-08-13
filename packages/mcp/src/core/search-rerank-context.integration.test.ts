@@ -13,9 +13,9 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import {
-    buildSearchRerankQueryV2,
-    SEARCH_RERANK_QUERY_PROJECTION_V2,
-} from "./search-rerank-query-v2.js";
+    buildSearchRerankQuery,
+    SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
+} from "./search-rerank-query.js";
 import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { resolveSearchPolicy } from "./search-policy.js";
@@ -81,11 +81,11 @@ function buildInput(query: string): SearchExecutionInput {
         debugMode: "full",
         semanticQuery: parsedOperators.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQueryV2({
+        rerankQuery: buildSearchRerankQuery({
             semanticQuery: parsedOperators.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
         parsedOperators,
         queryPlan,
         exactRegistryEligible: false,
@@ -202,7 +202,9 @@ test("the reranker receives the exact focused question and factual documents", a
 
     const query = captured.query ?? "";
     assert.equal(query.split(question).length - 1, 1, "question appears exactly once");
-    assert.ok(query.includes("Answer focus: implementation"));
+    assert.ok(query.includes("Requested answer type:"));
+    assert.ok(query.includes("production implementation, control flow, and integration path"));
+    assert.equal(query.includes("Answer focus:"), false, "current query must not carry the retired v1 focus label");
     assert.equal(query.includes("implementation runtime source entrypoint"), false);
     assert.equal(/multiplier|weight|boost|preference\s*\d/i.test(query), false);
     assert.equal(/\d\.\d+/.test(query), false);

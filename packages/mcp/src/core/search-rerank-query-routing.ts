@@ -6,14 +6,13 @@
  * retired; its frozen fixture bytes survive only as inert contract evidence in
  * `search-rerank-request-contract.ts`.
  */
-import { SEARCH_RERANK_QUERY_PROJECTION_V2 } from "./search-rerank-query-v2.js";
+import { SEARCH_RERANK_QUERY_PROJECTION_IDENTITY } from "./search-rerank-query.js";
 
 export const SEARCH_RERANK_QUERY_RAW_IDENTITY = "semantic_query_raw_v1" as const;
-export const SEARCH_RERANK_QUERY_PROJECTION_V2_IDENTITY = SEARCH_RERANK_QUERY_PROJECTION_V2;
 
 export type SearchRerankQueryProjectionIdentity =
     | typeof SEARCH_RERANK_QUERY_RAW_IDENTITY
-    | typeof SEARCH_RERANK_QUERY_PROJECTION_V2_IDENTITY;
+    | typeof SEARCH_RERANK_QUERY_PROJECTION_IDENTITY;
 
 export function resolveSearchRerankQuery(input: {
     semanticQuery: string;
@@ -30,13 +29,13 @@ export function resolveSearchRerankQuery(input: {
             queryProjectionIdentity: SEARCH_RERANK_QUERY_RAW_IDENTITY,
         };
     }
-    if (identity === SEARCH_RERANK_QUERY_PROJECTION_V2_IDENTITY) {
+    if (identity === SEARCH_RERANK_QUERY_PROJECTION_IDENTITY) {
         if (typeof input.focusedQueryV2 !== "string" || input.focusedQueryV2.trim().length === 0) {
             throw new Error("search_rerank_query_v2_projection_unavailable");
         }
         return {
             query: input.focusedQueryV2,
-            queryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2_IDENTITY,
+            queryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
         };
     }
     throw new Error(`search_rerank_query_projection_identity_unknown:${identity}`);

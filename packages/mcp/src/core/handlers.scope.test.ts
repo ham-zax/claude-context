@@ -10648,6 +10648,53 @@ test('handleSearchCode rejects an incomplete or invalid reranker order atomicall
     });
 });
 
+test('handleSearchCode fails closed before any provider rerank call when the reranker advertises a retired query projection', async () => {
+    await withTempRepo(async (repoPath) => {
+        let rerankCalls = 0;
+        const reranker = {
+            getIdentity: () => ({
+                provider: 'lateon',
+                model: 'test-model',
+                profile: 'test-profile',
+            }),
+            getQueryProjectionVersion: () => 'search_rerank_query_v1',
+            rerank: async () => {
+                rerankCalls += 1;
+                return [];
+            }
+        };
+        const handlers = createHandlers(repoPath, [
+            {
+                content: 'primary runtime path',
+                relativePath: 'src/one.ts',
+                startLine: 1,
+                endLine: 3,
+                language: 'typescript',
+                score: 0.99,
+                indexedAt: '2026-01-01T00:30:00.000Z',
+                symbolId: 'sym_one',
+                symbolLabel: 'function one()'
+            }
+        ], reranker as unknown as HandlerReranker);
+
+        const response = await handlers.handleSearchCode({
+            path: repoPath,
+            query: 'runtime path',
+            scope: 'runtime',
+            resultMode: 'grouped',
+            groupBy: 'symbol',
+            limit: 2,
+            debugMode: 'full'
+        });
+
+        assert.equal(response.isError, true);
+        const payload = JSON.parse(response.content[0]?.text || '{}');
+        assert.equal(payload.status, 'not_ready');
+        assert.equal(payload.message.includes('search_rerank_query_projection_identity_unknown:search_rerank_query_v1'), true);
+        assert.equal(rerankCalls, 0, 'retired query projection must fail closed before the provider rerank call');
+    });
+});
+
 test('handleSearchCode emits deterministic noiseMitigation hint when top grouped results are noise-dominant', async () => {
     await withTempRepo(async (repoPath) => {
         const handlers = createHandlers(repoPath, [

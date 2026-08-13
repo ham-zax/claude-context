@@ -13,7 +13,7 @@ import {
 import { resolveSearchRerankQuery } from "../core/search-rerank-query-routing.js";
 import { loadSearchRerankRequestContract } from "../core/search-rerank-request-contract.js";
 import { buildSearchRerankDocument } from "../core/search-rerank-document.js";
-import { buildSearchRerankQueryV2 } from "../core/search-rerank-query-v2.js";
+import { buildSearchRerankQuery } from "../core/search-rerank-query.js";
 
 type FakeWorkerOptions = Readonly<{
     readyDelayMilliseconds?: number;
@@ -749,7 +749,7 @@ test("LateOn v4 accepts query-v2 and the canonical document projection through t
     });
     t.after(async () => reranker.close());
     await reranker.waitUntilReady();
-    const query = buildSearchRerankQueryV2({
+    const query = buildSearchRerankQuery({
         semanticQuery: "how does Shariah compliance checking block trades",
         answerFocus: "implementation",
     });

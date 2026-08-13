@@ -5,9 +5,9 @@ import { CapabilityResolver } from "./capabilities.js";
 import { parseSearchOperators, buildSearchQueryPlan } from "./search-query-planning.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import {
-    buildSearchRerankQueryV2,
-    SEARCH_RERANK_QUERY_PROJECTION_V2,
-} from "./search-rerank-query-v2.js";
+    buildSearchRerankQuery,
+    SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
+} from "./search-rerank-query.js";
 import { resolveSearchPolicy } from "./search-policy.js";
 import {
     runSearchExecution,
@@ -73,11 +73,11 @@ function buildInput(): SearchExecutionInput {
         debugMode: "none",
         semanticQuery: parsedOperators.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQueryV2({
+        rerankQuery: buildSearchRerankQuery({
             semanticQuery: parsedOperators.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
         parsedOperators,
         queryPlan,
         exactRegistryEligible: false,

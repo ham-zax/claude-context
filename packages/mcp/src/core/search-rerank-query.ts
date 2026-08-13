@@ -1,6 +1,6 @@
 import type { SearchAnswerFocus } from "./search-rerank-context.js";
 
-export const SEARCH_RERANK_QUERY_PROJECTION_V2 = "search_rerank_query_v2" as const;
+export const SEARCH_RERANK_QUERY_PROJECTION_IDENTITY = "search_rerank_query_v2" as const;
 
 /**
  * Positive-only answer-type descriptions. The implementation description
@@ -17,7 +17,7 @@ const ANSWER_TYPE: Record<SearchAnswerFocus, string> = {
     neutral: "the most direct answer to the question",
 };
 
-export function buildSearchRerankQueryV2(input: {
+export function buildSearchRerankQuery(input: {
     semanticQuery: string;
     answerFocus: SearchAnswerFocus;
 }): string {

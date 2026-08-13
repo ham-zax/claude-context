@@ -24,7 +24,8 @@ import {
     SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE,
     buildSearchRerankDocumentV3ContractEvidence,
 } from "./search-rerank-contract-evidence.js";
-import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
+import { buildSearchRerankQuery } from "./search-rerank-query.js";
+import type { SearchAnswerFocus } from "./search-rerank-context.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
 import {
     SEARCH_RERANK_STRUCTURAL_CONTEXT_POLICY,
@@ -395,12 +396,9 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         const parsedOperators = parseSearchOperators(question);
         const queryPlan = buildSearchQueryPlan(parsedOperators.semanticQuery, true, parsedOperators);
         answerFocusResolution[question] = resolveSearchAnswerFocus(queryPlan).focus;
-        const answerFocus = focus as Parameters<typeof buildSearchRerankQueryV2>[0]["answerFocus"];
-        queryProjectionV1[focus] = buildSearchRerankQueryV1ContractEvidence({
-            semanticQuery: question,
-            answerFocus,
-        });
-        queryProjectionV2[focus] = buildSearchRerankQueryV2({
+        const answerFocus = focus as SearchAnswerFocus;
+        queryProjectionV1[focus] = SEARCH_RERANK_QUERY_V1_CONTRACT_EVIDENCE[answerFocus];
+        queryProjectionV2[focus] = buildSearchRerankQuery({
             semanticQuery: question,
             answerFocus,
         });
@@ -454,44 +452,65 @@ export function buildSearchRerankRequestContractManifest(): SearchRerankRequestC
 /**
  * Inert historical contract evidence (Phase 9.2D): the frozen request contract
  * serializes the retired v1 query projection. Production routing never
- * executes this builder; it exists only to keep `contractSha256` byte-stable.
+ * executes this data; it exists only to keep `contractSha256` byte-stable.
+ * The bytes are frozen literals, not regenerated from any executable builder.
  */
-const SEARCH_RERANK_QUERY_V1_GUIDANCE: Record<
-    Parameters<typeof buildSearchRerankQueryV2>[0]["answerFocus"],
-    string
-> = {
-    implementation:
-        "Rank the production mechanism and its integration path first. Tests and documentation are supporting evidence unless they are the clearest direct answer.",
-    tests:
-        "Rank tests that directly prove the requested behavior first. Production code may be supporting context.",
-    documentation:
-        "Rank documentation that directly explains the requested topic first. Code may be supporting context.",
-    configuration:
-        "Rank active configuration declarations and the code that loads or applies them first.",
-    references:
-        "Rank direct callers, callees, references, and integration sites that answer the relationship question first.",
-    neutral:
-        "Rank the candidate that most directly answers the question. Candidate role is evidence, not a fixed preference.",
-};
-
-function buildSearchRerankQueryV1ContractEvidence(input: {
-    semanticQuery: string;
-    answerFocus: Parameters<typeof buildSearchRerankQueryV2>[0]["answerFocus"];
-}): string {
-    const semanticQuery = input.semanticQuery.trim();
-    if (semanticQuery.length === 0) {
-        throw new Error("search rerank query requires a non-empty semantic query");
-    }
-    return [
+const SEARCH_RERANK_QUERY_V1_CONTRACT_EVIDENCE: Record<SearchAnswerFocus, string> = {
+    implementation: [
         "Question:",
-        semanticQuery,
+        "how does Shariah compliance checking block trades",
         "",
-        `Answer focus: ${input.answerFocus}`,
+        "Answer focus: implementation",
         "",
         "Guidance:",
-        SEARCH_RERANK_QUERY_V1_GUIDANCE[input.answerFocus],
-    ].join("\n");
-}
+        "Rank the production mechanism and its integration path first. Tests and documentation are supporting evidence unless they are the clearest direct answer.",
+    ].join("\n"),
+    tests: [
+        "Question:",
+        "find tests for trade veto behavior",
+        "",
+        "Answer focus: tests",
+        "",
+        "Guidance:",
+        "Rank tests that directly prove the requested behavior first. Production code may be supporting context.",
+    ].join("\n"),
+    documentation: [
+        "Question:",
+        "what do the docs say about order validation",
+        "",
+        "Answer focus: documentation",
+        "",
+        "Guidance:",
+        "Rank documentation that directly explains the requested topic first. Code may be supporting context.",
+    ].join("\n"),
+    configuration: [
+        "Question:",
+        "where is the risk threshold configured",
+        "",
+        "Answer focus: configuration",
+        "",
+        "Guidance:",
+        "Rank active configuration declarations and the code that loads or applies them first.",
+    ].join("\n"),
+    references: [
+        "Question:",
+        "who calls validate_order",
+        "",
+        "Answer focus: references",
+        "",
+        "Guidance:",
+        "Rank direct callers, callees, references, and integration sites that answer the relationship question first.",
+    ].join("\n"),
+    neutral: [
+        "Question:",
+        "order validation overview",
+        "",
+        "Answer focus: neutral",
+        "",
+        "Guidance:",
+        "Rank the candidate that most directly answers the question. Candidate role is evidence, not a fixed preference.",
+    ].join("\n"),
+};
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {

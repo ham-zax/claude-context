@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    SEARCH_RERANK_QUERY_PROJECTION_V2,
-    buildSearchRerankQueryV2,
-} from "./search-rerank-query-v2.js";
+    SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
+    buildSearchRerankQuery,
+} from "./search-rerank-query.js";
 import type { SearchAnswerFocus } from "./search-rerank-context.js";
 
 const QUESTION = "how does Shariah compliance checking block trades";
@@ -16,8 +16,8 @@ const FORBIDDEN_COMPETING_ROLE_WORDS = [
     "score",
 ];
 
-test("implementation focus query v2 is positive-only and byte-exact", () => {
-    const query = buildSearchRerankQueryV2({
+test("implementation focus query is positive-only and byte-exact", () => {
+    const query = buildSearchRerankQuery({
         semanticQuery: QUESTION,
         answerFocus: "implementation",
     });
@@ -38,7 +38,7 @@ test("implementation focus query v2 is positive-only and byte-exact", () => {
     assert.equal(/lateon|voyage|openai|provider/i.test(query), false, "query must not name providers");
 });
 
-test("every answer focus query v2 follows the positive-only Question/Requested answer type shape", () => {
+test("every answer focus query follows the positive-only Question/Requested answer type shape", () => {
     const expectedDescriptions: Record<SearchAnswerFocus, string> = {
         implementation: "production implementation, control flow, and integration path",
         tests: "tests that directly verify the requested behavior",
@@ -48,7 +48,7 @@ test("every answer focus query v2 follows the positive-only Question/Requested a
         neutral: "the most direct answer to the question",
     };
     for (const focus of Object.keys(expectedDescriptions) as SearchAnswerFocus[]) {
-        const query = buildSearchRerankQueryV2({ semanticQuery: QUESTION, answerFocus: focus });
+        const query = buildSearchRerankQuery({ semanticQuery: QUESTION, answerFocus: focus });
         assert.equal(
             query,
             ["Question:", QUESTION, "", "Requested answer type:", expectedDescriptions[focus]].join("\n"),
@@ -59,13 +59,13 @@ test("every answer focus query v2 follows the positive-only Question/Requested a
     }
 });
 
-test("query v2 projection identity is the canonical search_rerank_query_v2 string", () => {
-    assert.equal(SEARCH_RERANK_QUERY_PROJECTION_V2, "search_rerank_query_v2");
+test("query projection identity is the canonical search_rerank_query_v2 string", () => {
+    assert.equal(SEARCH_RERANK_QUERY_PROJECTION_IDENTITY, "search_rerank_query_v2");
 });
 
-test("query v2 requires a non-empty semantic query", () => {
+test("query requires a non-empty semantic query", () => {
     assert.throws(
-        () => buildSearchRerankQueryV2({ semanticQuery: "   ", answerFocus: "neutral" }),
+        () => buildSearchRerankQuery({ semanticQuery: "   ", answerFocus: "neutral" }),
         /non-empty semantic query/,
     );
 });

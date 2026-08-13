@@ -31,9 +31,9 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import { buildSearchQueryPlan, parseSearchOperators } from "./search-query-planning.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
 import {
-    buildSearchRerankQueryV2,
-    SEARCH_RERANK_QUERY_PROJECTION_V2,
-} from "./search-rerank-query-v2.js";
+    buildSearchRerankQuery,
+    SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
+} from "./search-rerank-query.js";
 import { resolveSearchCandidateRole } from "./search-candidate-role.js";
 import { resolveSearchPolicy } from "./search-policy.js";
 import { searchRerankCandidateId } from "./search-rerank-projection.js";
@@ -103,11 +103,11 @@ function buildInput(query: string): SearchExecutionInput {
         debugMode: "none",
         semanticQuery: parsedOperators.semanticQuery,
         answerFocus,
-        rerankQuery: buildSearchRerankQueryV2({
+        rerankQuery: buildSearchRerankQuery({
             semanticQuery: parsedOperators.semanticQuery,
             answerFocus,
         }),
-        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_V2,
+        rerankQueryProjectionIdentity: SEARCH_RERANK_QUERY_PROJECTION_IDENTITY,
         parsedOperators,
         queryPlan,
         exactRegistryEligible: false,

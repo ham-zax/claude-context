@@ -148,7 +148,7 @@ import {
 } from "./search-rerank-structural-context.js";
 import { resolveSearchRerankStructuralContextStatus } from "./search-rerank-structural-status.js";
 import { resolveSearchAnswerFocus } from "./search-answer-focus.js";
-import { buildSearchRerankQueryV2 } from "./search-rerank-query-v2.js";
+import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import { resolveSearchRerankQuery } from "./search-rerank-query-routing.js";
 import {
     resolveSearchRerankRequestIdentity,
@@ -2028,7 +2028,7 @@ export class SearchRequestCoordinator {
                 const answerFocus = resolveSearchAnswerFocus(queryPlan).focus;
                 const resolvedRerankQuery = resolveSearchRerankQuery({
                     semanticQuery: parsedOperators.semanticQuery,
-                    focusedQueryV2: buildSearchRerankQueryV2({
+                    focusedQueryV2: buildSearchRerankQuery({
                         semanticQuery: parsedOperators.semanticQuery,
                         answerFocus,
                     }),
