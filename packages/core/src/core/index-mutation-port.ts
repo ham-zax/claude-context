@@ -16,8 +16,8 @@ import type {
     PreparedIndexCollectionReceipt,
     ProvenGenerationReceipt,
     ProvenVectorGenerationReceipt,
-    ResolvedIndexPolicy,
-} from './context';
+} from '../generation/contracts';
+import type { ResolvedIndexPolicy } from '../policy/index-policy-runtime-service';
 import type {
     RepairIndexResult,
     RepairProof,

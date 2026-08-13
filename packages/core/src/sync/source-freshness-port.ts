@@ -5,11 +5,21 @@
  * built on the existing checkpoint-evidence types. MCP read paths depend on this
  * port instead of reaching into Context or SyncManager readiness internals.
  */
+import type { ProvenVectorGenerationReceipt } from '../generation/contracts';
 import type {
-    ProvenSourceFreshnessCheckpointEvidence,
-    ProvenVectorGenerationReceipt,
-} from '../core/context';
-import type { SourceFreshnessPathComparison } from './synchronizer';
+    SourceFreshnessCheckpointEvidence,
+    SourceFreshnessPathComparison,
+} from './synchronizer';
+
+/**
+ * Proven source-freshness checkpoint evidence: a valid owned checkpoint
+ * optionally bound to an exact proven generation receipt.
+ */
+export type ProvenSourceFreshnessCheckpointEvidence =
+    | (Extract<SourceFreshnessCheckpointEvidence, { status: 'valid' }> & {
+        readonly generationReceipt?: import('../generation/contracts').ProvenGenerationReceipt;
+    })
+    | Exclude<SourceFreshnessCheckpointEvidence, { status: 'valid' }>;
 
 export interface PrepareCurrentSourceObservationOptions {
     checkpointIdentity?: string;

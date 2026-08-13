@@ -4636,10 +4636,6 @@ test('Context incremental sync clears its mutation target after a matching commi
 
         assert.equal(result.modified, 1);
         assert.equal(await context.getActiveIndexedCollectionName(codebasePath), context.resolveCollectionName(codebasePath));
-        assert.equal(
-            context.getSynchronizerMutationTarget(context.resolveCollectionName(codebasePath)),
-            undefined,
-        );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

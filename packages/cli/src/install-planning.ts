@@ -18,6 +18,13 @@ import {
     type PreparedMutation,
 } from "./client-config-mutations.js";
 
+export type InstallPlanOptions = Readonly<
+    Pick<
+        InstallCommandOptions,
+        'runtimeCommand' | 'execFileSyncImpl' | 'platform' | 'architecture' | 'libc'
+    >
+>;
+
 export interface InstallPlan {
     readonly command: InstallCommandInput;
     readonly homeDir: string;
@@ -25,8 +32,8 @@ export interface InstallPlan {
     readonly plannedRuntimeCommand: ManagedRuntimeCommand;
     readonly clientCommand: ManagedRuntimeCommand;
     readonly profileMutation: FileMutation & { filePath?: string };
-    readonly prepared: PreparedMutation[];
-    readonly options: InstallCommandOptions;
+    readonly prepared: readonly PreparedMutation[];
+    readonly options: InstallPlanOptions;
 }
 
 export function resolveDefaultPackageSpecifier(): string {
@@ -51,9 +58,24 @@ export function createInstallPlan(
         ? prepareProjectProfileInstall(repoDir, command.profile)
         : { changed: false, apply: () => {} };
 
-    const prepared = selectClientTargets(homeDir, command.client, options.env ?? process.env).map((target) => (
-        prepareMutation(target, command, clientCommand)
-    ));
+    const prepared = Object.freeze(
+        selectClientTargets(homeDir, command.client, options.env ?? process.env)
+            .map((target) => prepareMutation(target, command, clientCommand))
+            .map((mutation) => Object.freeze({
+                ...mutation,
+                companionMutations: Object.freeze([...mutation.companionMutations]),
+            })),
+    );
+
+    // Snapshot only the application-relevant option fields so application is
+    // bound to the plan that was created, not to the caller's mutable object.
+    const planOptions = Object.freeze({
+        runtimeCommand: options.runtimeCommand,
+        execFileSyncImpl: options.execFileSyncImpl,
+        platform: options.platform,
+        architecture: options.architecture,
+        libc: options.libc,
+    });
 
     return Object.freeze({
         command: Object.freeze({ ...command }),
@@ -69,6 +91,6 @@ export function createInstallPlan(
         }),
         profileMutation,
         prepared,
-        options,
+        options: planOptions,
     });
 }

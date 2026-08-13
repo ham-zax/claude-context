@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSourceFreshnessPort } from './source-freshness-port';
 import type { SourceFreshnessPortDependencies } from './source-freshness-port';
-import type { ProvenSourceFreshnessCheckpointEvidence } from '../core/context';
+import type { ProvenSourceFreshnessCheckpointEvidence } from './source-freshness-port';
 import type {
     SourceFreshnessPathComparison,
 } from './synchronizer';

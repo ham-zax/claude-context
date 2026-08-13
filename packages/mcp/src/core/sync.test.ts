@@ -98,8 +98,10 @@ type SyncManagerTestAccess = {
     lastSyncTimes: Map<string, number>;
     ignoreRulesVersions: Map<string, number>;
     freshnessEpochs: Map<string, number>;
-    sourceCheckpointObservations: Map<string, string>;
-    sourceCheckpointStatuses: Map<string, 'valid' | 'missing' | 'corrupt'>;
+    sourceObservationState: {
+        recordValidCheckpointObservation(codebasePath: string, observationToken: string): string | undefined;
+        getCheckpointObservation(codebasePath: string): string | undefined;
+    };
     handleWatcherError(codebasePath: string, error: unknown): Promise<void>;
 };
 
@@ -1807,16 +1809,14 @@ test('stopWatcherMode closes active watchers and clears observation state', asyn
     access.watcherModeStarted = true;
     access.setWatcherCoverage('/tmp/repo', 'ready');
     manager.recordWatcherEvent('/tmp/repo', 'source_changed');
-    access.sourceCheckpointObservations.set('/tmp/repo', 'checkpoint-v1');
-    access.sourceCheckpointStatuses.set('/tmp/repo', 'valid');
+    access.sourceObservationState.recordValidCheckpointObservation('/tmp/repo', 'checkpoint-v1');
 
     await manager.stopWatcherMode();
 
     assert.equal(closeCalls, 1);
     assert.equal(access.watchers.size, 0);
     assert.equal(access.watcherObservations.size, 0);
-    assert.equal(access.sourceCheckpointObservations.size, 0);
-    assert.equal(access.sourceCheckpointStatuses.size, 0);
+    assert.equal(access.sourceObservationState.getCheckpointObservation('/tmp/repo'), undefined);
 });
 
 test('stopAndDrainLifecycle joins active background work without watcher-owned mutation', async () => {

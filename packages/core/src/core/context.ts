@@ -89,11 +89,15 @@ import * as os from 'os';
 import ignore from 'ignore';
 import {
     FileSynchronizer,
-    type SourceFreshnessCheckpointEvidence,
     type SourceFreshnessPathComparison,
 } from '../sync/synchronizer';
 import { SynchronizerRegistry } from '../sync/synchronizer-registry';
-import { createSourceFreshnessPort, type SourceFreshnessPort } from '../sync/source-freshness-port';
+import {
+    createSourceFreshnessPort,
+    type ProvenSourceFreshnessCheckpointEvidence,
+    type SourceFreshnessPort,
+} from '../sync/source-freshness-port';
+export type { ProvenSourceFreshnessCheckpointEvidence } from '../sync/source-freshness-port';
 
 import type {
     CustomIndexPolicyUpdate,
@@ -382,12 +386,6 @@ function publicationBindingsEqual(
         ? right === undefined
         : right !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
-
-export type ProvenSourceFreshnessCheckpointEvidence =
-    | (Extract<SourceFreshnessCheckpointEvidence, { status: 'valid' }> & {
-        readonly generationReceipt?: ProvenGenerationReceipt;
-    })
-    | Exclude<SourceFreshnessCheckpointEvidence, { status: 'valid' }>;
 
 export type CompletionMarkerValidationEvidence =
     | {
@@ -1049,14 +1047,7 @@ export class Context {
     }
 
 
-
     /**
-     * Test-visible compatibility accessor for the synchronizer mutation-target
-     * state (Phase 4.6 registry extraction keeps the map inside SynchronizerRegistry).
-     */
-    getSynchronizerMutationTarget(synchronizerKey: string): string | undefined {
-        return this.synchronizerRegistry.getMutationTarget(synchronizerKey);
-    }    /**
      * Set synchronizer for a collection
      */
     registerSynchronizer(collectionName: string, synchronizer: FileSynchronizer): void {

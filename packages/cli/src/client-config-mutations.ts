@@ -54,7 +54,7 @@ export interface PreparedMutation {
     target: ClientTarget;
     configMutation: FileMutation;
     configChanged: boolean;
-    companionMutations: CompanionMutation[];
+    companionMutations: readonly CompanionMutation[];
 }
 export interface FileMutation {
     changed: boolean;

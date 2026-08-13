@@ -20,15 +20,16 @@ function stubPorts(overrides: Partial<SynchronizerRegistryPorts> = {}): Synchron
     };
 }
 
-function stubSynchronizer(label: string): FileSynchronizer {
-    return { label } as unknown as FileSynchronizer;
+function stubSynchronizer(): FileSynchronizer {
+    return {} as unknown as FileSynchronizer;
 }
 
 test('registerSynchronizer stores the synchronizer and clears any pending mutation target', () => {
     const registry = new SynchronizerRegistry(stubPorts());
+    const first = stubSynchronizer();
     registry.setMutationTarget('collection-1', 'staged-1');
-    registry.registerSynchronizer('collection-1', stubSynchronizer('first'));
-    assert.equal(registry.getSynchronizer('collection-1')?.label, 'first');
+    registry.registerSynchronizer('collection-1', first);
+    assert.equal(registry.getSynchronizer('collection-1'), first);
     assert.equal(registry.getMutationTarget('collection-1'), undefined);
 });
 
@@ -47,7 +48,8 @@ test('set/get/clearMutationTarget round-trips per collection', () => {
 
 test('clearSynchronizerForCollection removes synchronizer and mutation target', () => {
     const registry = new SynchronizerRegistry(stubPorts());
-    registry.registerSynchronizer('collection-1', stubSynchronizer('first'));
+    const first = stubSynchronizer();
+    registry.registerSynchronizer('collection-1', first);
     registry.setMutationTarget('collection-1', 'staged-1');
     registry.clearSynchronizerForCollection('collection-1');
     assert.equal(registry.getSynchronizer('collection-1'), undefined);
@@ -56,11 +58,12 @@ test('clearSynchronizerForCollection removes synchronizer and mutation target', 
 
 test('getActiveSynchronizers returns a defensive copy that cannot mutate the registry', () => {
     const registry = new SynchronizerRegistry(stubPorts());
-    registry.registerSynchronizer('collection-1', stubSynchronizer('first'));
+    const first = stubSynchronizer();
+    registry.registerSynchronizer('collection-1', first);
     const snapshot = registry.getActiveSynchronizers();
-    snapshot.set('collection-1', stubSynchronizer('tampered'));
+    snapshot.set('collection-1', stubSynchronizer());
     snapshot.clear();
-    assert.equal(registry.getSynchronizer('collection-1')?.label, 'first');
+    assert.equal(registry.getSynchronizer('collection-1'), first);
 });
 
 test('hasSynchronizerForCodebase resolves through the collection-name port', () => {
@@ -68,6 +71,6 @@ test('hasSynchronizerForCodebase resolves through the collection-name port', () 
         resolveCollectionName: (codebasePath) => `resolved:${codebasePath}`,
     }));
     assert.equal(registry.hasSynchronizerForCodebase('/tmp/root'), false);
-    registry.registerSynchronizer('resolved:/tmp/root', stubSynchronizer('first'));
+    registry.registerSynchronizer('resolved:/tmp/root', stubSynchronizer());
     assert.equal(registry.hasSynchronizerForCodebase('/tmp/root'), true);
 });

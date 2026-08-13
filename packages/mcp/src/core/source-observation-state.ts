@@ -56,24 +56,6 @@ export class SourceObservationState {
         this.deps = deps;
     }
 
-    /**
-     * The owned checkpoint observation map. Exposed for SyncManager's legacy
-     * private-field compatibility; all production mutation goes through the
-     * named methods below.
-     */
-    get checkpointObservations(): Map<string, string> {
-        return this.sourceCheckpointObservations;
-    }
-
-    /**
-     * The owned checkpoint status map. Exposed for SyncManager's legacy
-     * private-field compatibility; all production mutation goes through the
-     * named methods below.
-     */
-    get checkpointStatuses(): Map<string, SourceCheckpointObservationStatus> {
-        return this.sourceCheckpointStatuses;
-    }
-
     // ------------------------------------------------------------------
     // Checkpoint observation recording (generation-scoped)
     // ------------------------------------------------------------------

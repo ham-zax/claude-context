@@ -366,18 +366,6 @@ export class SyncManager {
         );
     }
 
-    /**
-     * Phase 5.1 — the single mutable owner of checkpoint observation and
-     * full-index handoff state. Legacy private-field access forwards to it.
-     */
-    private get sourceCheckpointObservations(): Map<string, string> {
-        return this.sourceObservationState.checkpointObservations;
-    }
-
-    private get sourceCheckpointStatuses(): Map<string, SourceCheckpointObservationStatus> {
-        return this.sourceObservationState.checkpointStatuses;
-    }
-
     private hasCurrentWatcherCapture(
         root: string,
         capture: WatcherBootstrapCapture,
