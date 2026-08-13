@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `63e718e`
+Checkpoint HEAD: `7571fb5`
 
 Completed ownership-bounded batches:
 
@@ -42,8 +42,9 @@ Completed ownership-bounded batches:
 - Phase 5.2 / prepared publication-read session: `505358b`.
 - Phase 5.3 / operation-level IndexMutationPort boundary: `319ea00`.
 - Phase 6.1 / SearchRequestCoordinator extraction: `63e718e`.
+- Phase 6.2 / search continuation in the bounded search owner: `7571fb5`.
 
-Next open batch at this checkpoint: Phase 6.2. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 6.3. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
