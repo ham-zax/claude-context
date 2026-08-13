@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `8c8ab51`
+Checkpoint HEAD: `447b048`
 
 Completed ownership-bounded batches:
 
@@ -58,9 +58,10 @@ Completed ownership-bounded batches:
 - Phase 8 gate correction B / grouped narrow search collaborator seams: the 54-member `SearchRequestCoordinatorHost` callback bag is replaced by six named collaborators (`SearchReadinessCollaborator`, `SearchHintPayloadCollaborator`, `SearchPreparedReadCollaborator`, `SearchFreshnessCollaborator`, `SearchEnvironmentCollaborator`, `SearchContinuationStoreCollaborator`) composed in `SearchRequestCoordinatorCollaborators`. All 54 member signatures and all 54 `ToolHandlers` bindings preserved verbatim (machine-verified); MCP core suite 1257/1257 green: `a58590e`.
 - Phase 8 gate correction C / continuation owner identity: `SearchContinuationCoordinator` (and its pool) moved into the search module with the `SearchRequestCoordinator` as the registered owner token; store/lookup/advance/remove called directly (the `SearchContinuationStoreCollaborator` group left the collaborator set), routing hops coordinator-to-coordinator via `owner.continueOwned`, `ToolHandlers` keeps only constructor injection, the release delegate, and the `handleContinueSearch` entry point. Full MCP suite 1554 pass / 1 pre-existing skip: `eb42601`.
 - Phase 8.1 / published-surface freeze + dead private façade removal: `contracts/published-surface.json` freezes the NAME set (481 barrel export names + 79 `Context` public member names) with a regenerating guard test (`src/core/published-surface.ts` computes via the TS API); five zero-caller private Context members deleted (two policy warm-state snapshot getters, `getIgnoreMatcherForCodebase`, both `withIndexPolicyMutationLock` wrappers) plus the two now-dead coordinator snapshot methods; oracles preserved (matcher-cache test moved to `ignore-rule-service.test.ts`, fenced-lock test now holds a synthetic lock file, warm-state asserts dropped where public `getActiveIgnorePatterns` oracles already prove the outcome). Dead-private scan now reports 0 candidates. Core suite 802 pass / 1 skip; MCP core suite 1257/1257: `8c8ab51`.
+- Phase 8.2 / shallow ToolHandlers pass-through removal: `NavigationHandlersHost` now receives the `ToolResponseBuilders` capability directly instead of seven one-line payload-builder callbacks; the search hints collaborator's `buildRequiresReindexPayload` member removed in favor of the existing `getToolResponseBuilders()` accessor; eight private `ToolHandlers` wrapper methods deleted. The previously-masked runtime payload value `reason: "invalid_request"` is now declared in the `FileOutlineResponseEnvelope`/builder contracts. Outline/call-graph/requires-reindex payload fixtures identical; full MCP suite 1554 pass / 1 skip: `447b048`.
 
-Next open batch at this checkpoint: Phase 8.2 (remove shallow
-ToolHandlers pass-through indirection), then 8.3.
+Next open batch at this checkpoint: Phase 8.3 (single-source
+collection naming), then 8.4A.
 Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
 planned only; it starts after Phase 8 is sealed, and its durable-format floor
 (9.3) requires separate authorization. Refresh this checkpoint only after an
