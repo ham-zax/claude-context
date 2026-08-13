@@ -53,7 +53,8 @@ Completed ownership-bounded batches:
 - Phase 7.5 / install application executor: `01bff81`.
 - Phase 7.6 / runtime upgrade orchestration: `95cc653`.
 
-Next open batch at this checkpoint: none; Phase 7 complete. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 8.1 (planned at `95cc653`; not started —
+awaiting review of Phases 5.3–7.6 and of this Phase 8 plan). Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
@@ -741,6 +742,169 @@ discovery, run the relevant packed-artifact proof in addition to source-tree tes
 
 Privacy-safe doctor output remains a cross-batch public oracle whenever inspection,
 runtime authority, selection, or launcher behavior moves.
+
+## Phase 8 — Facade/host deepening
+
+Status: planned, not implemented. Candidates below come from a post-Phase-7
+architecture review of the two largest production modules (`context.ts`, 4,720
+lines; `handlers.ts`, 3,775 lines). Evidence was verified at checkpoint `95cc653`.
+No batch starts until reviewed and authorized; each batch still requires its own
+fresh batch sheet per the required protocol.
+
+Execute in this order unless the disjoint-file preflight proves parallel batches:
+
+### 8.1 Remove dead and write-only surface (S)
+
+Owners: `Context` façade, `ToolHandlers` host.
+
+Remove the verified zero-caller and test-only delegates from `context.ts`
+(`getLanguageAnalyzer*`, `isLanguageSupported`, `getLanguageAnalysisStrategy`,
+`updateEmbedding`, `hasIndexedCollection`, `loadResolvedIgnorePatterns`,
+`resetIgnorePatternsToDefaults`, `getIndexedExtensions`, `withIndexPolicyMutationLockAsync`,
+`readIndexableFileObservationInsideRoot`, unused private policy-map getters) and the
+test-only delegates (`reloadIgnoreRulesForCodebase`, `updateIgnorePatterns`,
+`getIgnorePatternsFromFile`, `getActiveSynchronizers`, `hasSynchronizerForCodebase`,
+`getIndexAuthorityObservation`, `clearPublishedIndexPolicy`,
+`forceClearPublishedIndexPolicy`, `updateVectorDatabase`, `resolveProvenGeneration`,
+`revalidateProvenGeneration`, `getCurrentNavigationGeneration`,
+`restoreNavigationGeneration`, `withIndexPolicyMutationLock`,
+`getIgnoreMatcherForCodebase`, `processChunkBatch`,
+`resolveReusableNavigationDeltaState`). For test-only delegates, move the oracle to
+the owning service or delete with the test. From `handlers.ts` remove the test-only
+`sortGroupedSearchResults` (grouping owner is search-group-ordering) and the
+write-only `indexingStats` field plus its two setters.
+
+Risk: S.
+
+Stopping condition: barrel (`packages/core/src/index.ts`) and cross-package grep
+prove no remaining callers; core/MCP/CLI suites green.
+
+### 8.2 Single writer for workflow warm collections (L)
+
+Move `reindexByChangeQueues`, `preparedIndexCollectionReceipts`,
+`navigationDeltaState`, `preparedNavigationDeltaStates` (context.ts:643,659–663) so
+`IndexGenerationWorkflow` is the sole declarer/writer. `Context` keeps read/seed
+delegates only.
+
+Risk: L.
+
+Stopping condition: exactly one writer per collection (grep-verified); warm-cache,
+prepared-receipt, and reindex-by-change fixtures unchanged.
+
+### 8.3 Route write-target selection through the prepared-collection operation (L)
+
+`writeCollectionOverrides` (context.ts:662) is currently mutated by
+ManageIndexingHandlers (5 sites) and `clearIndex`. Route the decision through the
+existing prepared-collection receipt operation (IndexMutationPort op or workflow
+input); teardown invalidates through the same owner.
+
+Risk: L.
+
+Stopping condition: ManageIndexingHandlers no longer mutates any Context-owned map;
+operation phase order and responses unchanged.
+
+### 8.4 Single-source collection naming/family policy (M)
+
+Extract a pure naming module (active/alternate/staged names, `__gen_`, HYBRID_MODE)
+plus a family-listing function over a narrow vector adapter. Consumers
+(synchronizer-registry, ignore-rule-service ×6, workflow, manage-maintenance,
+manage-indexing, vector-backend-maintenance) import it instead of calling Context.
+
+Risk: M.
+
+Stopping condition: format knowledge single-sourced; all current collection-name
+fixtures and family-enumeration outputs unchanged.
+
+### 8.5 Teardown workflow behind a seam (XL)
+
+Give `clearIndex` (context.ts:3331–3376, seven-domain teardown) the Phase 4.5
+repair treatment: a Core teardown/clear workflow depending on narrow ports; Context
+keeps a compatibility delegate; ManageMaintenanceHandlers and SyncManager call the
+workflow.
+
+Risk: XL.
+
+Stopping condition: clear/rename teardown order, rollback, and F023/F024 fixtures
+exact; no double-write of any cleared domain state.
+
+### 8.6 Relocate policy publication orchestration (M) — explored
+
+Evidence: `persistCustomIndexPolicy` (context.ts:4554–4695) owns binding/navigation
+validation, policy-hash recompute, v3/v4/v5 document selection, runtime-state
+capture/restore, and activation through `IndexPolicyDocumentStore.persistDocument`.
+`index-authority-coordinator.ts` imports only types from context.ts, so the move is
+cycle-safe. Move the flow next to the document store or into the authority
+coordinator; no second policy coordinator type.
+
+Risk: M.
+
+Stopping condition: publication receipts, committed-before-acknowledgement
+semantics, and v3/v4/v5 document fixtures unchanged.
+
+### 8.7 Authority decision bodies into the authority/proof module (L) — explored
+
+Evidence: the coordinator is constructed with ~28 Context callbacks
+(context.ts:795–845); ~10 carry decision bodies (`resolveEffectiveNavigationAuthority`,
+`proveEffectiveNavigationAuthority`, `isPreparedVectorReceiptBoundToCurrentAuthority`,
+`resolveGenerationProofIdentity`, marker equality and clone helpers). Move the
+bodies into the authority/proof module; Context only wires them.
+
+Risk: L.
+
+Stopping condition: coordinator behavior testable without a live Context; warm
+proof, ABA, marker, and observation-token fixtures unchanged.
+
+### 8.8 Prepared-read cache owner (M)
+
+`handlers.ts`:1357–1967 (~600 lines, 17 methods) owns three maps
+(`preparedReadCache`, `statusPreparedReadObservations`, `preparedNavigationCache`)
+served to three hosts (SearchRequestCoordinator, NavigationHandlers,
+TrackedRootReadiness). Extract a PreparedReadCacheOwner with the identity,
+cache-entry, and status-prepared observation logic; ToolHandlers becomes a delegate.
+
+Risk: M.
+
+Stopping condition: one writer per map; search, outline, call-graph, continuation,
+and freshness fixtures unchanged.
+
+### 8.9 Remove shallow payload-builder pass-throughs (S)
+
+~12 one-line methods on ToolHandlers delegate to ToolResponseBuilders and are
+consumed only by the NavigationHandlers and TrackedRootReadiness hosts. Give those
+hosts the narrow builders directly and delete the pass-throughs.
+
+Risk: S.
+
+Stopping condition: identical payloads for every outline/call-graph/requires-reindex
+fixture; ToolHandlers surface shrinks by the removed methods only.
+
+### 8.10 Stale-recovery engine to a recovery owner (M) — explored
+
+Evidence: `recoverStaleIndexingStateIfNeeded` (handlers.ts:2457–2670, ~190 lines of
+grace-window/lease/snapshot decision logic) is consumed by both
+ManageMaintenanceHandlers and ManageIndexingHandlers hosts; `indexing-recovery.ts`
+covers only the startup path. Move the engine into the recovery owner or a shared
+module (two consumers = real seam).
+
+Risk: M.
+
+Stopping condition: abandoned-indexing recovery fixtures for both coordinator
+consumers unchanged.
+
+### 8.11 Explored and dismissed (recorded so they are not re-suggested)
+
+- Payload probing + observation-token relocation (`context.ts`:1768–1809, 3934–4013,
+  4459–4548): move is feasible (sidecar layout helpers already live in
+  `symbols/`), but leverage is low while the code is stable. Revisit when the probe
+  or observation format next changes.
+- Completion-proof orchestration on the host (H5): the leaf
+  `completion-proof.ts` already owns validation; only ~80 lines of
+  snapshot-recovery glue remain on ToolHandlers. Fold that glue into 8.5 if it is
+  touched, otherwise leave.
+- Path predicates (H6): no duplication — the ToolHandlers predicates are aliases of
+  `search-ranking-policy.ts` exports; the owner is correct. Covered by 8.9 only as
+  pass-through cleanup if desired.
+
 
 ## Test migration policy
 
