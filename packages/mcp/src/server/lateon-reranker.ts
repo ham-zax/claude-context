@@ -23,11 +23,12 @@ import type {
     LateOnWorkerResponse,
 } from "./lateon-reranker-protocol.js";
 import {
+    LATEON_RETIRED_RUNTIME_PROFILE_IDS,
     LATEON_RUNTIME_PROFILE_IDS,
     type LateOnRuntimeProfileId,
 } from "./lateon-reranker-protocol.js";
 
-export { LATEON_RUNTIME_PROFILE_IDS } from "./lateon-reranker-protocol.js";
+export { LATEON_RETIRED_RUNTIME_PROFILE_IDS, LATEON_RUNTIME_PROFILE_IDS } from "./lateon-reranker-protocol.js";
 export type { LateOnRuntimeProfileId } from "./lateon-reranker-protocol.js";
 
 export type LateOnOperationalReason =
@@ -51,22 +52,7 @@ export class LateOnOperationalError extends Error {
     }
 }
 
-const PROFILE_PATHS: Readonly<Record<LateOnRuntimeProfileId, string>> = Object.freeze({
-    [LATEON_RUNTIME_PROFILE_IDS.legacyD16]: fileURLToPath(
-        new URL("../../assets/lateon/runtime-profile-v1.json", import.meta.url),
-    ),
-    [LATEON_RUNTIME_PROFILE_IDS.projectionV2D16]: fileURLToPath(
-        new URL("../../assets/lateon/runtime-profile-v2-d16.json", import.meta.url),
-    ),
-    [LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32]: fileURLToPath(
-        new URL("../../assets/lateon/runtime-profile-v2-d32.json", import.meta.url),
-    ),
-    [LATEON_RUNTIME_PROFILE_IDS.contextV3D32]: fileURLToPath(
-        new URL("../../assets/lateon/runtime-profile-v3-d32.json", import.meta.url),
-    ),
-    [LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated]: fileURLToPath(
-        new URL("../../assets/lateon/runtime-profile-v3-d32-v2.json", import.meta.url),
-    ),
+const PROFILE_PATHS: Readonly<Partial<Record<LateOnRuntimeProfileId, string>>> = Object.freeze({
     [LATEON_RUNTIME_PROFILE_IDS.contextV4D32]: fileURLToPath(
         new URL("../../assets/lateon/runtime-profile-v4-d32.json", import.meta.url),
     ),
@@ -159,86 +145,40 @@ function validateCommonProfile(profile: Partial<LateOnRuntimeProfile>): void {
 export function loadLateOnRuntimeProfile(
     profileIdOrPath: LateOnRuntimeProfileId | string = LATEON_RUNTIME_PROFILE_IDS.contextV4D32,
 ): LateOnRuntimeProfile {
+    // Phase 9.1 — retired profiles are recognized only to produce a clear
+    // rejection; they never load or execute.
+    if (
+        (LATEON_RETIRED_RUNTIME_PROFILE_IDS as readonly string[]).includes(profileIdOrPath)
+    ) {
+        throw new Error(
+            `LateOn runtime profile '${profileIdOrPath}' is retired and unsupported. `
+            + `Run \`satori upgrade\` to migrate to ${LATEON_RUNTIME_PROFILE_IDS.contextV4D32}.`,
+        );
+    }
     const profilePath = PROFILE_PATHS[profileIdOrPath as LateOnRuntimeProfileId]
         ?? path.resolve(profileIdOrPath);
     const parsed = JSON.parse(fs.readFileSync(profilePath, "utf8")) as Partial<LateOnRuntimeProfile>;
     validateCommonProfile(parsed);
-    if (parsed.schemaVersion === "satori_lateon_runtime_profile_v1") {
-        if (parsed.identity?.projectionVersion !== "search_rerank_document_v1") {
-            throw new Error("LateOn v1 runtime profile has an incompatible projection.");
-        }
-        positiveSafeInteger(
-            parsed.measuredProfile?.requestDeadlineMilliseconds,
-            "LateOn request deadline",
-        );
-        positiveSafeInteger(
-            parsed.measuredProfile?.maximumModelLoadMilliseconds,
-            "LateOn readiness deadline",
-        );
-        return parsed as LateOnRuntimeProfile;
+    if (parsed.schemaVersion !== "satori_lateon_runtime_profile_v4") {
+        throw new Error("LateOn runtime profile schema is retired or unsupported.");
     }
-    if (parsed.schemaVersion === "satori_lateon_runtime_profile_v2") {
-        if (
-            (parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.projectionV2D16
-                && parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32)
-            || parsed.identity?.projectionVersion !== "search_rerank_document_v2"
-            || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
-        ) {
-            throw new Error("LateOn v2 runtime profile is malformed or unsupported.");
-        }
-        validateBoundedExecutionContract(parsed);
-        const expectedDepth = parsed.profileId === LATEON_RUNTIME_PROFILE_IDS.projectionV2D16
-            ? 16
-            : 32;
-        if (parsed.inference?.candidateDepth !== expectedDepth) {
-            throw new Error(`LateOn ${parsed.profileId} must use candidate depth ${expectedDepth}.`);
-        }
-        return parsed as LateOnRuntimeProfile;
+    if (
+        parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV4D32
+        || parsed.identity?.projectionVersion !== "search_rerank_document_v4"
+        || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
+        || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v2"
+        || parsed.identity?.requestContractSha256
+            !== loadSearchRerankRequestContract().contractSha256
+        || parsed.qualificationStatus
+            !== "owner_activated_operationally_qualified_not_held_out"
+    ) {
+        throw new Error("LateOn v4 runtime profile is malformed or unsupported.");
     }
-    if (parsed.schemaVersion === "satori_lateon_runtime_profile_v3") {
-        if (
-            (parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32
-                && parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated)
-            || parsed.identity?.projectionVersion !== "search_rerank_document_v3"
-            || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
-            || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v1"
-        ) {
-            throw new Error("LateOn v3 runtime profile is malformed or unsupported.");
-        }
-        const expectedQualification = parsed.profileId === LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated
-            ? "owner_activated_operationally_qualified_not_held_out"
-            : "disabled_optional_not_track_o_or_held_out_candidate";
-        if (parsed.qualificationStatus !== expectedQualification) {
-            throw new Error(
-                `LateOn ${parsed.profileId} carries an untrusted qualification status.`,
-            );
-        }
-        validateBoundedExecutionContract(parsed);
-        if (parsed.inference?.candidateDepth !== 32) {
-            throw new Error(`LateOn ${parsed.profileId} must use candidate depth 32.`);
-        }
-        return parsed as LateOnRuntimeProfile;
+    validateBoundedExecutionContract(parsed);
+    if (parsed.inference?.candidateDepth !== 32) {
+        throw new Error(`LateOn ${parsed.profileId} must use candidate depth 32.`);
     }
-    if (parsed.schemaVersion === "satori_lateon_runtime_profile_v4") {
-        if (
-            parsed.profileId !== LATEON_RUNTIME_PROFILE_IDS.contextV4D32
-            || parsed.identity?.projectionVersion !== "search_rerank_document_v4"
-            || !/^[a-f0-9]{64}$/.test(parsed.identity?.projectionSha256 ?? "")
-            || parsed.identity?.queryProjectionVersion !== "search_rerank_query_v2"
-            || parsed.identity?.requestContractSha256
-                !== loadSearchRerankRequestContract().contractSha256
-            || parsed.qualificationStatus
-                !== "owner_activated_operationally_qualified_not_held_out"
-        ) {
-            throw new Error("LateOn v4 runtime profile is malformed or unsupported.");
-        }
-        validateBoundedExecutionContract(parsed);
-        if (parsed.inference?.candidateDepth !== 32) {
-            throw new Error(`LateOn ${parsed.profileId} must use candidate depth 32.`);
-        }
-        return parsed as LateOnRuntimeProfile;
-    }
-    throw new Error("LateOn runtime profile schema is unsupported.");
+    return parsed as LateOnRuntimeProfile;
 }
 
 function validateBoundedExecutionContract(

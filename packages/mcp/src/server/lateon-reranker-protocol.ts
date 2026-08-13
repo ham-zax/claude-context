@@ -10,6 +10,19 @@ export const LATEON_RUNTIME_PROFILE_IDS = Object.freeze({
 export type LateOnRuntimeProfileId =
     typeof LATEON_RUNTIME_PROFILE_IDS[keyof typeof LATEON_RUNTIME_PROFILE_IDS];
 
+/**
+ * Phase 9.1 — historical profile IDs recognized exclusively for rejection in
+ * the MCP runtime and for migration at the CLI upgrade boundary. None of these
+ * may execute.
+ */
+export const LATEON_RETIRED_RUNTIME_PROFILE_IDS = Object.freeze([
+    LATEON_RUNTIME_PROFILE_IDS.legacyD16,
+    LATEON_RUNTIME_PROFILE_IDS.projectionV2D16,
+    LATEON_RUNTIME_PROFILE_IDS.offlineQualityD32,
+    LATEON_RUNTIME_PROFILE_IDS.contextV3D32,
+    LATEON_RUNTIME_PROFILE_IDS.contextV3D32Activated,
+] as const);
+
 export const LATEON_ACTIVATION_POLICY_IDS = Object.freeze({
     ownerDefaultD32V2: "lateon_d32_owner_default_v1",
     ownerDefaultContextV3: "lateon_context_v3_d32_owner_default_v1",
