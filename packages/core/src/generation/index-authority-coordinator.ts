@@ -196,14 +196,6 @@ export class IndexAuthorityCoordinator {
         return this.publishedResolvedPoliciesByCodebase.keys();
     }
 
-    publishedResolvedPolicySnapshot(): ReadonlyMap<string, ResolvedIndexPolicy> {
-        return this.publishedResolvedPoliciesByCodebase;
-    }
-
-    publishedPolicyBindingSnapshot(): ReadonlyMap<string, IndexPolicyRuntimeBinding & { policyHash: string }> {
-        return this.publishedPolicyBindingsByCodebase;
-    }
-
     getGenerationProof(canonicalRoot: string): CachedGenerationProof | undefined {
         return this.state.proofs.get(canonicalRoot);
     }

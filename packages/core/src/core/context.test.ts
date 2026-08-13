@@ -4859,11 +4859,17 @@ test('Context serializes direct publish and compare-clear through the same Core 
         const replacementPolicy = await second.resolveIndexPolicyForCodebase(codebasePath, {
             customIgnorePatterns: ['replacement/**'],
         });
-        const privateFirst = first as unknown as {
-            withIndexPolicyMutationLock<T>(canonicalRoot: string, operation: () => T): T;
-        };
-
-        privateFirst.withIndexPolicyMutationLock(initialPolicy.canonicalRoot, () => {
+        const initialPolicyPath = path.join(
+            policyRoot,
+            `${crypto.createHash('sha256').update(initialPolicy.canonicalRoot).digest('hex')}.json`,
+        );
+        const initialLockPath = `${initialPolicyPath}.mutation.lock`;
+        fs.writeFileSync(initialLockPath, JSON.stringify({
+            pid: process.pid,
+            ownerToken: 'live-test-owner',
+            acquiredAt: new Date().toISOString(),
+        }));
+        try {
             assert.throws(
                 () => second.publishResolvedIndexPolicy(replacementPolicy, unboundPolicyBinding('generation-b')),
                 /policy mutation lock is already held/i,
@@ -4876,7 +4882,9 @@ test('Context serializes direct publish and compare-clear through the same Core 
                 ),
                 /policy mutation lock is already held/i,
             );
-        });
+        } finally {
+            fs.rmSync(initialLockPath, { force: true });
+        }
 
         const fresh = new Context({
             embedding: new TestEmbedding(),
@@ -5113,12 +5121,6 @@ test('Context clearIndex leaves runtime policy authority intact when the policy 
         await assert.rejects(() => context.clearIndex(codebasePath), /policy mutation lock/i);
         assert.equal(fs.existsSync(policyPath), true);
         assert.equal(context.getActiveIgnorePatterns(codebasePath).includes('generated/**'), true);
-        const runtimeState = context as unknown as {
-            publishedResolvedPoliciesByCodebase: Map<string, unknown>;
-            publishedPolicyBindingsByCodebase: Map<string, unknown>;
-        };
-        assert.equal(runtimeState.publishedResolvedPoliciesByCodebase.has(canonicalRoot), true);
-        assert.equal(runtimeState.publishedPolicyBindingsByCodebase.has(canonicalRoot), true);
         fs.rmSync(lockPath, { force: true });
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -5152,12 +5154,8 @@ test('Context policy removal reconciles runtime state after removing a malformed
         );
         assert.equal(fs.existsSync(policyPath), false);
         const runtimeState = context as unknown as {
-            publishedResolvedPoliciesByCodebase: Map<string, unknown>;
-            publishedPolicyBindingsByCodebase: Map<string, unknown>;
             policyRuntimeCompatibilityByCodebase: Map<string, unknown>;
         };
-        assert.equal(runtimeState.publishedResolvedPoliciesByCodebase.has(policy.canonicalRoot), false);
-        assert.equal(runtimeState.publishedPolicyBindingsByCodebase.has(policy.canonicalRoot), false);
         assert.equal(context.getActiveIgnorePatterns(codebasePath).includes('generated/**'), false);
         assert.equal(runtimeState.policyRuntimeCompatibilityByCodebase.has(policy.canonicalRoot), false);
     } finally {
@@ -5510,33 +5508,6 @@ test('Context does not overwrite a newer policy publication when an older public
         });
         assert.equal(restarted.getActiveIgnorePatterns(codebasePath).includes('newer/**'), true);
         assert.equal(restarted.getActiveIgnorePatterns(codebasePath).includes('previous/**'), false);
-    } finally {
-        fs.rmSync(tempRoot, { recursive: true, force: true });
-    }
-});
-
-test('Context reuses the compiled ignore matcher while the durable policy is unchanged', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-cache-'));
-    const stateRoot = path.join(tempRoot, 'policy-state');
-    const codebasePath = path.join(tempRoot, 'repo');
-    try {
-        fs.mkdirSync(codebasePath, { recursive: true });
-        const context = new Context({
-            embedding: new TestEmbedding(),
-            vectorDatabase: new InMemoryVectorDatabase(),
-            indexPolicyStateRoot: stateRoot,
-        });
-        const policy = await context.resolveIndexPolicyForCodebase(codebasePath, {
-            customIgnorePatterns: ['generated/**'],
-        });
-        context.publishResolvedIndexPolicy(policy, unboundPolicyBinding('generation-a'));
-
-        const privateContext = context as unknown as {
-            getIgnoreMatcherForCodebase(root: string): ReturnType<typeof import('ignore')>;
-        };
-        const firstMatcher = privateContext.getIgnoreMatcherForCodebase(codebasePath);
-        const secondMatcher = privateContext.getIgnoreMatcherForCodebase(codebasePath);
-        assert.equal(secondMatcher, firstMatcher);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

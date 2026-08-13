@@ -580,13 +580,6 @@ export class Context {
         return this.indexAuthorityCoordinator.publicationRetentionQueues;
     }
 
-    private get publishedResolvedPoliciesByCodebase(): Map<string, ResolvedIndexPolicy> {
-        return new Map(this.indexAuthorityCoordinator.publishedResolvedPolicySnapshot());
-    }
-
-    private get publishedPolicyBindingsByCodebase(): Map<string, IndexPolicyBinding & { policyHash: string }> {
-        return new Map(this.indexAuthorityCoordinator.publishedPolicyBindingSnapshot());
-    }
     private readonly indexAuthorityCoordinator: IndexAuthorityCoordinator;
     private indexGenerationWorkflow: IndexGenerationWorkflow;
     // Derived warm-path state only. The durable generation remains authoritative,
@@ -3597,10 +3590,6 @@ export class Context {
         console.log(`[Context] 🔄 Reset ignore patterns to defaults: ${this.ignoreRuleService.getBasePatterns().length} patterns`);
     }
 
-    private getIgnoreMatcherForCodebase(codebasePath: string): ReturnType<typeof ignore> {
-        return this.ignoreRuleService.getMatcher(codebasePath);
-    }
-
     private canonicalizeCodebasePath(codebasePath: string): string {
         const resolved = path.resolve(codebasePath);
         try {
@@ -4360,23 +4349,6 @@ export class Context {
             codebasePath,
             isDirectory,
             matcherOverride,
-        );
-    }
-
-    private withIndexPolicyMutationLock<T>(
-        canonicalRoot: string,
-        operation: () => T,
-    ): T {
-        return this.indexPolicyMutationCoordinator.withLock(canonicalRoot, operation);
-    }
-
-    private async withIndexPolicyMutationLockAsync<T>(
-        canonicalRoot: string,
-        operation: () => Promise<T>,
-    ): Promise<T> {
-        return this.indexPolicyMutationCoordinator.withLockAsync(
-            canonicalRoot,
-            operation,
         );
     }
 
