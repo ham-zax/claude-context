@@ -8,11 +8,11 @@
  */
 import * as crypto from 'crypto';
 import * as path from 'path';
-import type { ProvenGenerationReceipt } from '../core/context';
-import type { IndexPolicyPublicationReceipt } from '../core/context';
-import type { PreparedIndexCollectionReceipt } from '../core/context';
-import type { PreparedIndexCollectionBinding } from '../core/context';
-import type { IndexCodebaseResult } from '../core/context';
+import type { ProvenGenerationReceipt } from './contracts';
+import type { IndexPolicyPublicationReceipt } from './contracts';
+import type { PreparedIndexCollectionReceipt } from './contracts';
+import type { PreparedIndexCollectionBinding } from './contracts';
+import type { IndexCodebaseResult } from './contracts';
 import type { CurrentNavigationGeneration } from '../symbols/sidecar-reads';
 import type { CanonicalPolicyNavigationBinding } from '../core/persisted-index-authority';
 import type { StagedNavigationSidecarGeneration } from '../symbols/sidecar-lifecycle';
@@ -33,7 +33,7 @@ import type { CanonicalPublicationBinding } from '../core/persisted-index-author
 import type { DurableAuthorityMutationOwner } from './restore-transaction';
 import type { SatoriRepoConfig } from '../config/repo-config';
 import type { RepositoryRelativePath } from '../paths/repository-path';
-import type { CustomIndexPolicyUpdate, ObservedResolvedIndexPolicy } from '../core/context';
+import type { CustomIndexPolicyUpdate, ObservedResolvedIndexPolicy } from './contracts';
 
 import {
     IndexFormatRequiresReindexError,
@@ -66,7 +66,7 @@ import {
 import {
     AtomicIncrementalPublicationUnsupportedError,
     IndexPolicyPublicationError,
-} from '../core/context';
+} from './errors';
 
 // ---- Moved private types (Phase 4.5) ----
 type NavigationDeltaBuildResult = {
@@ -332,8 +332,11 @@ export interface IndexGenerationWorkflowPorts {
     getNavigationDeltaState: () => CachedNavigationDeltaState | undefined;
     setNavigationDeltaState: (state: CachedNavigationDeltaState | undefined) => void;
     preparedIndexCollectionReceipts: WeakSet<PreparedIndexCollectionReceipt>;
-    synchronizers: Map<string, FileSynchronizer>;
-    synchronizerMutationTargets: Map<string, string>;
+    getSynchronizer(synchronizerKey: string): FileSynchronizer | undefined;
+    registerSynchronizer(synchronizerKey: string, synchronizer: FileSynchronizer): void;
+    getSynchronizerMutationTarget(synchronizerKey: string): string | undefined;
+    setSynchronizerMutationTarget(synchronizerKey: string, collectionName: string): void;
+    clearSynchronizerMutationTarget(synchronizerKey: string): void;
     reindexByChangeQueues: Map<string, Promise<void>>;
 }
 
@@ -1025,8 +1028,7 @@ export class IndexGenerationWorkflow {
                         { checkpointIdentity: candidateCollectionName, checkpointAuthority },
                     );
                     await nextSynchronizer.initialize(undefined, undefined, { requireExistingCheckpoint: true });
-                    this.ports.synchronizers.set(input.synchronizerKey, nextSynchronizer);
-                    this.ports.synchronizerMutationTargets.delete(input.synchronizerKey);
+                    this.ports.registerSynchronizer(input.synchronizerKey, nextSynchronizer);
                     this.ports.indexAuthorityCoordinator.schedulePublicationRetention({
                         canonicalRoot: input.canonicalRoot,
                         activationId,
@@ -1119,7 +1121,7 @@ export class IndexGenerationWorkflow {
             throw new Error(`Cannot incrementally synchronize '${codebasePath}': no runtime-compatible sealed index policy is available; reindex is required.`);
         }
         const synchronizerKey = this.ports.resolveCollectionName(codebasePath);
-        let synchronizer = this.ports.synchronizers.get(synchronizerKey);
+        let synchronizer = this.ports.getSynchronizer(synchronizerKey);
         const synchronizerAlreadyExisted = synchronizer !== undefined;
         const externallyManagedPublication = options.externallyManagedPublication === true;
         if (externallyManagedPublication && options.maintainCompletionMarker === true) {
@@ -1162,7 +1164,7 @@ export class IndexGenerationWorkflow {
                 }
             }
             if (!collectionName && synchronizerAlreadyExisted) {
-                const retryCollectionName = this.ports.synchronizerMutationTargets.get(synchronizerKey);
+                const retryCollectionName = this.ports.getSynchronizerMutationTarget(synchronizerKey);
                 if (retryCollectionName && await this.ports.vectorDatabase.hasCollection(retryCollectionName)) {
                     // A failed incremental mutation deliberately withdraws its marker while
                     // retaining the prepared filesystem delta for retry. Reuse that known
@@ -1219,7 +1221,7 @@ export class IndexGenerationWorkflow {
             indexPolicyHash: previousMarker.indexPolicyHash,
         } : null;
         const reusingWithdrawnMutationTarget = previousMarker === null
-            && this.ports.synchronizerMutationTargets.get(synchronizerKey) === collectionName
+            && this.ports.getSynchronizerMutationTarget(synchronizerKey) === collectionName
             && synchronizer?.ownsCheckpointIdentity(collectionName) === true;
         const restoringMissingMarkerFromOwnedCheckpoint = previousMarker === null
             && maintainCompletionMarker
@@ -1248,8 +1250,7 @@ export class IndexGenerationWorkflow {
             await synchronizer.initialize(options.assertMutationCurrent, options.publishMutation, {
                 requireExistingCheckpoint: true,
             });
-            this.ports.synchronizers.set(synchronizerKey, synchronizer);
-            this.ports.synchronizerMutationTargets.delete(synchronizerKey);
+            this.ports.registerSynchronizer(synchronizerKey, synchronizer);
         }
 
         if (!synchronizer) {
@@ -1266,13 +1267,12 @@ export class IndexGenerationWorkflow {
             await newSynchronizer.initialize(options.assertMutationCurrent, options.publishMutation, {
                 requireExistingCheckpoint: true,
             });
-            this.ports.synchronizers.set(synchronizerKey, newSynchronizer);
-            this.ports.synchronizerMutationTargets.delete(synchronizerKey);
+            this.ports.registerSynchronizer(synchronizerKey, newSynchronizer);
         }
 
-        const currentSynchronizer = this.ports.synchronizers.get(synchronizerKey)!;
+        const currentSynchronizer = this.ports.getSynchronizer(synchronizerKey)!;
         const targetCollectionName = collectionName;
-        this.ports.synchronizerMutationTargets.set(synchronizerKey, targetCollectionName);
+        this.ports.setSynchronizerMutationTarget(synchronizerKey, targetCollectionName);
         const markerWasMissing = maintainCompletionMarker && previousMarker === null;
 
         progressCallback?.({ phase: 'Checking for file changes...', current: 0, total: 100, percentage: 0 });
@@ -1314,7 +1314,7 @@ export class IndexGenerationWorkflow {
                     options.publishMutation,
                 );
             }
-            this.ports.synchronizerMutationTargets.delete(synchronizerKey);
+            this.ports.clearSynchronizerMutationTarget(synchronizerKey);
             return {
                 added: 0,
                 removed: 0,
@@ -1599,7 +1599,7 @@ export class IndexGenerationWorkflow {
                     options.publishMutation,
                 );
             }
-            this.ports.synchronizerMutationTargets.delete(synchronizerKey);
+            this.ports.clearSynchronizerMutationTarget(synchronizerKey);
         }
 
         console.log(`[Context] ✅ Re-indexing complete. Added: ${added.length}, Removed: ${removed.length}, Modified: ${modified.length}`);

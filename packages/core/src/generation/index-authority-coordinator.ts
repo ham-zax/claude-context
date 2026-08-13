@@ -7,17 +7,15 @@
  * registry (Phase 4.1 frozen contract: proofCacheCount=1, proofFlightRegistryCount=1).
  * Context delegates through `IndexAuthorityCoordinator`; public API unchanged.
  */
-import type { ProvenVectorGenerationReceipt } from '../core/context';
-import type { ProvenGenerationReceipt } from '../core/context';
-import type { NavigationGenerationProof } from '../core/context';
+import type { ProvenVectorGenerationReceipt } from './contracts';
+import type { ProvenGenerationReceipt } from './contracts';
+import type { NavigationGenerationProof } from './contracts';
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import {
-    IndexPolicyPublicationError,
-    type DurableIndexAuthoritySnapshot,
-} from '../core/context';
+import type { DurableIndexAuthoritySnapshot } from './contracts';
+import { IndexPolicyPublicationError } from './errors';
 import {
     type IndexCompletionMarkerDocument,
 } from '../vectordb/types';

@@ -94,6 +94,39 @@ import {
 } from '../sync/synchronizer';
 import { SynchronizerRegistry } from '../sync/synchronizer-registry';
 import { createSourceFreshnessPort, type SourceFreshnessPort } from '../sync/source-freshness-port';
+
+import type {
+    CustomIndexPolicyUpdate,
+    DurableIndexAuthoritySnapshot,
+    IndexCodebaseResult,
+    IndexPolicyPublicationReceipt,
+    NavigationGenerationProof,
+    ObservedResolvedIndexPolicy,
+    PreparedIndexCollectionBinding,
+    PreparedIndexCollectionReceipt,
+    ProvenGenerationReceipt,
+    ProvenVectorGenerationReceipt,
+} from '../generation/contracts';
+import {
+    IndexPolicyPublicationError,
+} from '../generation/errors';
+
+export type {
+    CustomIndexPolicyUpdate,
+    DurableIndexAuthoritySnapshot,
+    IndexCodebaseResult,
+    IndexPolicyPublicationReceipt,
+    NavigationGenerationProof,
+    ObservedResolvedIndexPolicy,
+    PreparedIndexCollectionBinding,
+    PreparedIndexCollectionReceipt,
+    ProvenGenerationReceipt,
+    ProvenVectorGenerationReceipt,
+} from '../generation/contracts';
+export {
+    AtomicIncrementalPublicationUnsupportedError,
+    IndexPolicyPublicationError,
+} from '../generation/errors';
 import { createIndexMutationPort, type IndexMutationPort } from './index-mutation-port';
 import type {
     RepairIndexResult,
@@ -130,7 +163,6 @@ import {
     DurableAuthorityRestoreTransactionMechanics,
     type DurableAuthorityMutationOwner,
     type DurableAuthorityRecoveryPublisher,
-    type DurableIndexAuthorityArtifact,
 } from '../generation/restore-transaction';
 import {
     IndexAuthorityCoordinator,
@@ -299,15 +331,6 @@ export interface ContextConfig {
     generationProofCoordinator?: GenerationProofCoordinator;
 }
 
-export interface CustomIndexPolicyUpdate {
-    customExtensions?: string[];
-    customIgnorePatterns?: string[];
-}
-
-export interface ObservedResolvedIndexPolicy extends ResolvedIndexPolicy {
-    controlSignature: string;
-}
-
 type IndexPolicyBinding = IndexPolicyRuntimeBinding;
 
 type EffectiveNavigationAuthority =
@@ -360,72 +383,11 @@ function publicationBindingsEqual(
         : right !== undefined && JSON.stringify(left) === JSON.stringify(right);
 }
 
-export interface ProvenVectorGenerationReceipt {
-    readonly collectionName: string;
-    readonly marker: IndexCompletionMarkerDocument;
-    readonly policy: ResolvedIndexPolicy;
-    readonly policyDocumentDigest: string;
-    readonly exactPayloadCount: number;
-    readonly observations: {
-        readonly profileFileToken: string | null;
-        readonly policyFileToken: string;
-    };
-}
-
-export interface ProvenGenerationReceipt extends Omit<ProvenVectorGenerationReceipt, 'observations'> {
-    readonly navigation: CurrentNavigationGeneration;
-    readonly observations: ProvenVectorGenerationReceipt['observations'] & {
-        readonly navigationToken: string;
-    };
-}
-
 export type ProvenSourceFreshnessCheckpointEvidence =
     | (Extract<SourceFreshnessCheckpointEvidence, { status: 'valid' }> & {
         readonly generationReceipt?: ProvenGenerationReceipt;
     })
     | Exclude<SourceFreshnessCheckpointEvidence, { status: 'valid' }>;
-
-export type NavigationGenerationProof =
-    | { status: 'valid'; generation: CurrentNavigationGeneration; observationToken: string }
-    | { status: 'not_bound' | 'missing' | 'incompatible' | 'corrupt' | 'requires_reindex' | 'unsupported' };
-
-export type IndexPolicyPublicationReceipt =
-    | {
-        status: 'committed';
-        operation: 'publish';
-        canonicalRoot: string;
-        documentDigest: string;
-        policyHash: string;
-        collectionName: string;
-        navigation: CanonicalPolicyNavigationBinding;
-        publication?: CanonicalPublicationBinding;
-    }
-    | {
-        status: 'committed';
-        operation: 'clear';
-        canonicalRoot: string;
-        previousDocumentDigest: string | null;
-    };
-
-export class IndexPolicyPublicationError extends Error {
-    readonly committed = true;
-
-    constructor(
-        message: string,
-        readonly receipt: IndexPolicyPublicationReceipt,
-        readonly publicationCause: unknown,
-    ) {
-        super(message);
-        this.name = 'IndexPolicyPublicationError';
-    }
-}
-
-export class AtomicIncrementalPublicationUnsupportedError extends Error {
-    constructor() {
-        super('The active vector backend cannot stage an atomic incremental publication; a full rebuild is required.');
-        this.name = 'AtomicIncrementalPublicationUnsupportedError';
-    }
-}
 
 export type CompletionMarkerValidationEvidence =
     | {
@@ -454,12 +416,6 @@ export type PreparedGenerationRevalidation = {
 export type IndexAuthorityObservations = {
     vector: string;
     navigation: string;
-};
-
-export type DurableIndexAuthoritySnapshot = {
-    canonicalRoot: string;
-    policyDocument: DurableIndexAuthorityArtifact | null;
-    navigationPointer: DurableIndexAuthorityArtifact | null;
 };
 
 type DurableIndexAuthorityRestoreResult =
@@ -556,25 +512,6 @@ function isUnsearchableStagedCollectionError(error: unknown): boolean {
         || /index not found\[collection=/i.test(joined)
         || /index does not exist/i.test(joined);
 }
-
-export type PreparedIndexCollectionBinding = Readonly<{
-    generation: number;
-    operationId: string;
-}>;
-
-export type PreparedIndexCollectionReceipt = Readonly<PreparedIndexCollectionBinding & {
-    canonicalRoot: string;
-    collectionName: string;
-}>;
-
-export type IndexCodebaseResult = {
-    indexedFiles: number;
-    totalChunks: number;
-    status: 'completed' | 'limit_reached';
-    /** Exact SHA-256 identities of source bytes consumed by this full index. */
-    indexedFileHashes: ReadonlyMap<string, string>;
-    navigationCandidate?: StagedNavigationSidecarGeneration;
-};
 
 type ReindexByChangeResult = {
     added: number;
@@ -950,8 +887,19 @@ export class Context {
             subtractVectorWriteMetrics: (after, before) => subtractVectorWriteMetrics(after, before),
             summarizeVectorWriteMetrics: (metrics, logicalRows) => summarizeVectorWriteMetrics(metrics, logicalRows),
             symbolRegistryStateRoot: this.symbolRegistryStateRoot,
-            synchronizerMutationTargets: this.synchronizerRegistry.mutationTargetMap,
-            synchronizers: this.synchronizerRegistry.synchronizerMap,
+            getSynchronizer: (synchronizerKey) => this.synchronizerRegistry.getSynchronizer(synchronizerKey),
+            registerSynchronizer: (synchronizerKey, synchronizer) => (
+                this.synchronizerRegistry.registerSynchronizer(synchronizerKey, synchronizer)
+            ),
+            getSynchronizerMutationTarget: (synchronizerKey) => (
+                this.synchronizerRegistry.getMutationTarget(synchronizerKey)
+            ),
+            setSynchronizerMutationTarget: (synchronizerKey, collectionName) => (
+                this.synchronizerRegistry.setMutationTarget(synchronizerKey, collectionName)
+            ),
+            clearSynchronizerMutationTarget: (synchronizerKey) => (
+                this.synchronizerRegistry.clearMutationTarget(synchronizerKey)
+            ),
             vectorDatabase: this.vectorDatabase,
             verifyCollectionPayloadMatchesCurrentSource: (collectionName, codeFiles, expectedChunks) => (
                 this.verifyCollectionPayloadMatchesCurrentSource(collectionName, codeFiles, expectedChunks)
@@ -1104,10 +1052,10 @@ export class Context {
 
     /**
      * Test-visible compatibility accessor for the synchronizer mutation-target
-     * map (Phase 4.6 registry extraction keeps the map inside SynchronizerRegistry).
+     * state (Phase 4.6 registry extraction keeps the map inside SynchronizerRegistry).
      */
-    get synchronizerMutationTargets(): Map<string, string> {
-        return this.synchronizerRegistry.mutationTargetMap;
+    getSynchronizerMutationTarget(synchronizerKey: string): string | undefined {
+        return this.synchronizerRegistry.getMutationTarget(synchronizerKey);
     }    /**
      * Set synchronizer for a collection
      */
@@ -1155,7 +1103,7 @@ export class Context {
      */
     getTrackedRelativePaths(codebasePath: string): string[] {
         const collectionName = this.resolveCollectionName(codebasePath);
-        const synchronizer = this.synchronizerRegistry.synchronizerMap.get(collectionName);
+        const synchronizer = this.synchronizerRegistry.getSynchronizer(collectionName);
         if (!synchronizer) {
             return [];
         }

@@ -8,11 +8,11 @@
  * caches and proof flights; this contract re-parents/composes that owner and
  * must never create a second proof cache or proof-flight registry.
  */
-import type { GenerationProofCoordinator } from '../core/context';
-import type { ProvenGenerationReceipt } from '../core/context';
-import type { NavigationGenerationProof } from '../core/context';
-import type { IndexPolicyPublicationReceipt } from '../core/context';
-import type { DurableIndexAuthoritySnapshot } from '../core/context';
+import type { GenerationProofCoordinator } from './index-authority-coordinator';
+import type { ProvenGenerationReceipt } from './contracts';
+import type { NavigationGenerationProof } from './contracts';
+import type { IndexPolicyPublicationReceipt } from './contracts';
+import type { DurableIndexAuthoritySnapshot } from './contracts';
 import type { ResolvedIndexPolicy } from '../policy/index-policy-runtime-service';
 import type { DurableAuthorityRestoreTransactionMechanics } from './restore-transaction';
 

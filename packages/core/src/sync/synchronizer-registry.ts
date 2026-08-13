@@ -8,7 +8,7 @@
  */
 import { FileSynchronizer } from './synchronizer';
 import type { IndexCompletionMarkerDocument } from '../vectordb/types';
-import type { ProvenGenerationReceipt } from '../core/context';
+import type { ProvenGenerationReceipt } from '../generation/contracts';
 
 /**
  * Narrow ports the synchronizer registry needs from Context. Every dependency is
@@ -35,19 +35,10 @@ export class SynchronizerRegistry {
     constructor(private readonly ports: SynchronizerRegistryPorts) {}
 
     /**
-     * Expose the live synchronizer map for workflow ports that consume it by
-     * reference (Phase 4.5 wiring).
+     * The registered synchronizer for a collection key, or undefined.
      */
-    get synchronizerMap(): Map<string, FileSynchronizer> {
-        return this.synchronizers;
-    }
-
-    /**
-     * Expose the live mutation-target map for workflow ports that consume it by
-     * reference (Phase 4.5 wiring).
-     */
-    get mutationTargetMap(): Map<string, string> {
-        return this.synchronizerMutationTargets;
+    getSynchronizer(collectionName: string): FileSynchronizer | undefined {
+        return this.synchronizers.get(collectionName);
     }
 
     /**
@@ -189,6 +180,13 @@ export class SynchronizerRegistry {
     clearSynchronizerForCollection(collectionName: string): void {
         this.synchronizers.delete(collectionName);
         this.synchronizerMutationTargets.delete(collectionName);
+    }
+
+    /**
+     * The pending mutation target for a synchronizer key, or undefined.
+     */
+    getMutationTarget(synchronizerKey: string): string | undefined {
+        return this.synchronizerMutationTargets.get(synchronizerKey);
     }
 
     /**

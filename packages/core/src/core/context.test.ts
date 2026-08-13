@@ -4633,13 +4633,13 @@ test('Context incremental sync clears its mutation target after a matching commi
 
         fs.writeFileSync(sourcePath, 'export const value = 2;\n', 'utf8');
         const result = await context.reindexByChange(codebasePath);
-        const privateContext = context as unknown as {
-            synchronizerMutationTargets: Map<string, string>;
-        };
 
         assert.equal(result.modified, 1);
         assert.equal(await context.getActiveIndexedCollectionName(codebasePath), context.resolveCollectionName(codebasePath));
-        assert.equal(privateContext.synchronizerMutationTargets.has(context.resolveCollectionName(codebasePath)), false);
+        assert.equal(
+            context.getSynchronizerMutationTarget(context.resolveCollectionName(codebasePath)),
+            undefined,
+        );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

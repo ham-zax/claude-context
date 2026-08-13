@@ -11,7 +11,7 @@ import {
     type GenerationAuthorityOwnedDomain,
     type GenerationAuthorityNonOwnedDomain,
 } from './index-authority-contract';
-import { createGenerationProofCoordinator, type GenerationProofCoordinator } from '../core/context';
+import { createGenerationProofCoordinator, type GenerationProofCoordinator } from './index-authority-coordinator';
 
 test('authority contract names exactly one writer', () => {
     assert.equal(generationAuthorityWriter, 'IndexAuthorityCoordinator');
