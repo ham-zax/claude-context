@@ -592,6 +592,16 @@ Do not place a short-lived lease callback inside readiness preparation.
 Depend on `SourceFreshnessPort` from the first batch; do not take a new direct
 dependency on `SyncManager` or `ToolHandlers` readiness internals.
 
+R3 resolution (sealed with the 5.1 repair): the search session's revalidation
+callable remains `finalBarrierChanged` (compatibility rule), and its
+source-freshness components are port-backed — full-comparison branches call
+`compareCurrentSourceToCheckpoint` / `compareAllCurrentSourceToCheckpoint` and
+the prepared-read cache flows through `SyncManager → SourceObservationState →
+port.currentObservationToken`. The port's registered-token
+`revalidateCurrentSourceObservation` is not substituted because it cannot
+reproduce the richer barrier semantics. Navigation sessions revalidate
+navigation/watcher identity and are out of source-freshness scope.
+
 Risk: M.
 
 Stopping condition: search, outline, call-graph, continuation, and failure paths prove

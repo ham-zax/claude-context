@@ -4356,6 +4356,18 @@ export class ToolHandlers {
                 // The execute performs the final barrier comparison; the session
                 // revalidates against that captured result so drift paths and
                 // stable paths both prove one final revalidation.
+                //
+                // Phase 5.2 R3 decision: finalBarrierChanged is retained as the
+                // revalidation callable (compatibility rule: do not replace
+                // finalBarrierChanged logic). Its source-freshness components are
+                // port-backed after the 5.1 repair: the full-comparison branch
+                // calls SourceFreshnessPort.compareCurrentSourceToCheckpoint /
+                // compareAllCurrentSourceToCheckpoint, and the prepared-read cache
+                // flows through SyncManager -> SourceObservationState ->
+                // port.currentObservationToken. The port's registered-token
+                // revalidateCurrentSourceObservation cannot substitute for these
+                // richer barrier semantics (deep comparison + authority
+                // observation + watcher cache) without weakening revalidation.
                 revalidateAuthority: async () => !finalBarrierChanged,
             });
             const outcome = await session.read(async (prepared, releaseLease): Promise<SearchToolTextResponse> => {
