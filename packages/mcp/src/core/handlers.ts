@@ -693,8 +693,25 @@ export class ToolHandlers {
         };
         this.navigationHandlers = new NavigationHandlers(navigationHandlersHost);
 
+        const getManageMaintenanceContext = () => this.context;
         const manageMaintenanceHandlersHost: ConstructorParameters<typeof ManageMaintenanceHandlers>[0] = {
             context: this.context,
+            get indexMutationPort() {
+                const context = getManageMaintenanceContext();
+                if (typeof context.getIndexMutationPort === "function") {
+                    return context.getIndexMutationPort();
+                }
+                // Compatibility fallback for hosts that do not expose the
+                // Phase 5.3 port yet: reproduce the exact previous direct
+                // Context clearIndex behavior.
+                return {
+                    clearIndex: (
+                        codebasePath: string,
+                        progressCallback?: Parameters<import("@zokizuan/satori-core").Context["clearIndex"]>[1],
+                        options?: Parameters<import("@zokizuan/satori-core").Context["clearIndex"]>[2],
+                    ) => context.clearIndex(codebasePath, progressCallback, options),
+                } as Pick<import("@zokizuan/satori-core").IndexMutationPort, "clearIndex">;
+            },
             snapshotManager: this.snapshotManager,
             syncManager: this.syncManager,
             trackedRootReadiness: this.trackedRootReadiness,
@@ -768,6 +785,9 @@ export class ToolHandlers {
                 // Phase 5.3 port yet: reproduce the exact previous direct
                 // Context mutation/publication behavior.
                 return createIndexMutationPort({
+                    clearIndex: (codebasePath, progressCallback, options) => (
+                        context.clearIndex(codebasePath, progressCallback, options)
+                    ),
                     checkCollectionLimit: () => context.getVectorStore().checkCollectionLimit(),
                     deleteCollectionWithVerification: (collectionName, options) => (
                         deleteCollectionWithVerification(context.getVectorStore(), collectionName, options)

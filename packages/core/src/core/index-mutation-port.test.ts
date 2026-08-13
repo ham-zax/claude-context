@@ -10,6 +10,7 @@ function stubDeps(overrides: Partial<IndexMutationPortDependencies> = {}): Index
         throw new Error('Unexpected index mutation port dependency invocation.');
     };
     return {
+        clearIndex: () => unimplemented(),
         checkCollectionLimit: () => unimplemented(),
         deleteCollectionWithVerification: () => unimplemented(),
         prepareIndexCollection: () => unimplemented(),
@@ -33,6 +34,20 @@ function stubDeps(overrides: Partial<IndexMutationPortDependencies> = {}): Index
         ...overrides,
     };
 }
+
+test('clearIndex delegates the teardown workflow through the operation port', async () => {
+    const progress = () => undefined;
+    const options = { assertMutationCurrent: () => undefined };
+    const seen: unknown[] = [];
+    const port = createIndexMutationPort(stubDeps({
+        clearIndex: async (...args: unknown[]) => {
+            seen.push(args);
+        },
+    }));
+
+    await port.clearIndex('/repo', progress, options);
+    assert.deepEqual(seen, [['/repo', progress, options]]);
+});
 
 test('checkCollectionLimit delegates to the vector store capability probe', async () => {
     let seen = 0;

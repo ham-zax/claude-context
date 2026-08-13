@@ -10,6 +10,7 @@ import {
     resolveLanguageCapabilityEvidence,
     unknownSymbolQualitySummary,
     type Context,
+    type IndexMutationPort,
     type LanguageCapabilityEvidenceSummary,
     type SymbolQualitySummary,
 } from "@zokizuan/satori-core";
@@ -61,6 +62,7 @@ type ToolTextResponse = {
 
 type ManageMaintenanceHandlersHost = {
     context: Pick<Context, "clearIndex"> & Partial<Pick<Context, "inspectSourceFreshnessCheckpoint" | "getSourceFreshnessPort">>;
+    indexMutationPort: Pick<IndexMutationPort, "clearIndex">;
     snapshotManager: Pick<SnapshotManager, "removeCodebaseCompletely" | "getLatestOperation" | "startOperation" | "transitionOperation" | "commitOperationPhase" | "saveCodebaseSnapshot">;
     syncManager: Pick<SyncManager, "ensureFreshness"> & Partial<Pick<
         SyncManager,
@@ -398,7 +400,7 @@ export class ManageMaintenanceHandlers {
                 if (mutationLease) {
                     this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
                 }
-                await this.host.context.clearIndex(absolutePath, undefined, {
+                await this.host.indexMutationPort.clearIndex(absolutePath, undefined, {
                     ...(mutationLease ? {
                         assertMutationCurrent: () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
                     } : {}),

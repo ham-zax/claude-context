@@ -165,6 +165,7 @@ import {
     type PublicationRetentionQueue,
 } from '../generation/index-authority-coordinator';
 import { IndexGenerationWorkflow } from '../generation/index-generation-workflow';
+import { IndexTeardownWorkflow } from '../generation/index-teardown-workflow';
 
 export {
     createGenerationProofCoordinator,
@@ -564,6 +565,7 @@ export class Context {
 
     private readonly indexAuthorityCoordinator: IndexAuthorityCoordinator;
     private indexGenerationWorkflow: IndexGenerationWorkflow;
+    private readonly indexTeardownWorkflow: IndexTeardownWorkflow;
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
     // Compatibility-only state for the frozen setter. New mutation callers pass
@@ -773,6 +775,43 @@ export class Context {
                 resolveProvenGeneration: (canonicalRoot) => this.resolveProvenGeneration(canonicalRoot),
             },
         );
+        this.indexTeardownWorkflow = new IndexTeardownWorkflow({
+            canonicalizeCodebasePath: (codebasePath) => this.canonicalizeCodebasePath(codebasePath),
+            indexPolicyMutationCoordinator: {
+                withLockAsync: (canonicalRoot, operation) => (
+                    this.indexPolicyMutationCoordinator.withLockAsync(canonicalRoot, operation)
+                ),
+            },
+            indexPolicyDocumentStore: {
+                recoverTombstonesWhileLocked: (canonicalRoot) => (
+                    this.indexPolicyDocumentStore.recoverTombstonesWhileLocked(canonicalRoot)
+                ),
+                deleteDocumentWhileLocked: (canonicalRoot) => (
+                    this.indexPolicyDocumentStore.deleteDocumentWhileLocked(canonicalRoot)
+                ),
+            },
+            listRelatedCollectionNames: (codebasePath) => this.listRelatedCollectionNames(codebasePath),
+            deleteCollectionWithVerification: (collectionName, options) => (
+                deleteCollectionWithVerification(this.vectorDatabase, collectionName, options).then(() => undefined)
+            ),
+            clearResolvedIndexPolicyRuntime: (canonicalRoot) => (
+                this.indexPolicyRuntimeService.clearResolvedIndexPolicyRuntime(canonicalRoot)
+            ),
+            setPolicyFileToken: (canonicalRoot, token) => this.indexPolicyRuntimeService.setPolicyFileToken(canonicalRoot, token),
+            clearSymbolRegistryForCodebase: (codebasePath, assertMutationCurrent, publishMutation) => (
+                this.clearSymbolRegistryForCodebase(codebasePath, assertMutationCurrent, publishMutation)
+            ),
+            deleteSnapshot: (codebasePath) => FileSynchronizer.deleteSnapshot(codebasePath),
+            resolveCollectionName: (codebasePath) => this.resolveCollectionName(codebasePath),
+            clearSynchronizerForCollection: (collectionName) => (
+                this.synchronizerRegistry.clearSynchronizerForCollection(collectionName)
+            ),
+            deleteIgnoreCodebaseState: (codebasePath) => this.ignoreRuleService.deleteCodebaseState(codebasePath),
+            deleteIndexProfile: (canonicalRoot) => this.indexPolicyRuntimeService.deleteIndexProfile(canonicalRoot),
+            clearLegacyWriteCollectionOverride: (canonicalRoot) => {
+                this.legacyWriteCollectionOverrides.delete(canonicalRoot);
+            },
+        });
         this.indexGenerationWorkflow = new IndexGenerationWorkflow({
             acceptPreparedSourceGenerationReceipt: (canonicalRoot, receipt) => (
                 this.acceptPreparedSourceGenerationReceipt(canonicalRoot, receipt)
@@ -1297,6 +1336,9 @@ export class Context {
     getIndexMutationPort(): IndexMutationPort {
         if (!this.indexMutationPort) {
             this.indexMutationPort = createIndexMutationPort({
+                clearIndex: (codebasePath, progressCallback, options) => (
+                    this.indexTeardownWorkflow.clearIndex(codebasePath, progressCallback, options)
+                ),
                 checkCollectionLimit: () => this.getVectorStore().checkCollectionLimit(),
                 deleteCollectionWithVerification: (collectionName, options) => (
                     deleteCollectionWithVerification(this.getVectorStore(), collectionName, options)
@@ -2907,46 +2949,7 @@ export class Context {
         progressCallback?: (progress: { phase: string; current: number; total: number; percentage: number }) => void,
         options: MutationGuardOptions = {},
     ): Promise<void> {
-        console.log(`[Context] 🧹 Cleaning index data for ${codebasePath}...`);
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-
-        progressCallback?.({ phase: 'Checking existing index...', current: 0, total: 100, percentage: 0 });
-
-        progressCallback?.({ phase: 'Removing index data...', current: 50, total: 100, percentage: 50 });
-        await this.indexPolicyMutationCoordinator.withLockAsync(canonicalRoot, async () => {
-            this.indexPolicyDocumentStore.recoverTombstonesWhileLocked(canonicalRoot);
-
-            for (const collectionName of await this.listRelatedCollectionNames(codebasePath)) {
-                await deleteCollectionWithVerification(this.vectorDatabase, collectionName, {
-                    beforeDropAttempt: options.assertMutationCurrent,
-                });
-            }
-
-            // Preserve the accepted policy while remote deletion is unproven. Once
-            // every related collection is confirmed absent, remove durable authority
-            // before reconciling the process-local policy state.
-            options.assertMutationCurrent?.();
-            this.indexPolicyDocumentStore.deleteDocumentWhileLocked(canonicalRoot);
-            this.clearResolvedIndexPolicyRuntime(canonicalRoot);
-            this.indexPolicyRuntimeService.setPolicyFileToken(canonicalRoot, null);
-
-            await this.clearSymbolRegistryForCodebase(
-                codebasePath,
-                options.assertMutationCurrent,
-                options.publishMutation,
-            );
-
-            options.assertMutationCurrent?.();
-            await FileSynchronizer.deleteSnapshot(codebasePath);
-            const familyCollectionName = this.resolveCollectionName(codebasePath);
-            this.synchronizerRegistry.clearSynchronizerForCollection(familyCollectionName);
-            this.ignoreRuleService.deleteCodebaseState(codebasePath);
-            this.legacyWriteCollectionOverrides.delete(canonicalRoot);
-            this.indexPolicyRuntimeService.deleteIndexProfile(canonicalRoot);
-        });
-
-        progressCallback?.({ phase: 'Index cleared', current: 100, total: 100, percentage: 100 });
-        console.log('[Context] ✅ Index data cleaned');
+        return this.indexTeardownWorkflow.clearIndex(codebasePath, progressCallback, options);
     }
 
     /**
@@ -3059,15 +3062,10 @@ export class Context {
         binding: IndexPolicyBinding,
         publishMutation?: (publish: () => void) => void,
     ): IndexPolicyPublicationReceipt {
-        const canonicalRoot = this.canonicalizeCodebasePath(policy.canonicalRoot);
-        if (canonicalRoot !== policy.canonicalRoot) {
-            throw new Error('Resolved index policy root is not canonical.');
-        }
-        return this.persistCustomIndexPolicy(
+        return this.indexAuthorityCoordinator.publishResolvedIndexPolicy(
             policy,
             binding,
             publishMutation,
-            () => this.indexPolicyRuntimeService.activateResolvedIndexPolicy(policy, binding),
         );
     }
 
@@ -3107,71 +3105,21 @@ export class Context {
         publishMutation: (publish: () => void) => void,
         expectedDocumentDigest: string,
     ): IndexPolicyPublicationReceipt {
-        if (!/^[a-f0-9]{64}$/.test(expectedDocumentDigest)) {
-            throw new Error('Expected index policy document digest must be a SHA-256 hex digest.');
-        }
-        return this.removePublishedIndexPolicy(codebasePath, publishMutation, expectedDocumentDigest);
+        return this.indexAuthorityCoordinator.clearPublishedIndexPolicy(
+            codebasePath,
+            publishMutation,
+            expectedDocumentDigest,
+        );
     }
 
     forceClearPublishedIndexPolicy(
         codebasePath: string,
         publishMutation: (publish: () => void) => void,
     ): IndexPolicyPublicationReceipt {
-        return this.removePublishedIndexPolicy(codebasePath, publishMutation);
-    }
-
-    private removePublishedIndexPolicy(
-        codebasePath: string,
-        publishMutation: (publish: () => void) => void,
-        expectedDocumentDigest?: string,
-    ): IndexPolicyPublicationReceipt {
-        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
-        const receipt: IndexPolicyPublicationReceipt = {
-            status: 'committed',
-            operation: 'clear',
-            canonicalRoot,
-            previousDocumentDigest: null,
-        };
-        let publicationCount = 0;
-        let committed = false;
-        const publish = () => {
-            publicationCount += 1;
-            if (publicationCount > 1) {
-                throw new Error('Index policy removal invoked more than once.');
-            }
-            this.indexPolicyDocumentStore.removeDocument(
-                canonicalRoot,
-                expectedDocumentDigest,
-                (removedDocumentDigest) => {
-                    committed = true;
-                    receipt.previousDocumentDigest = removedDocumentDigest;
-                    let reconciliationError: unknown;
-                    try {
-                        this.clearResolvedIndexPolicyRuntime(canonicalRoot);
-                    } catch (error) {
-                        reconciliationError = error;
-                    }
-                    this.indexPolicyRuntimeService.setPolicyFileToken(canonicalRoot, null);
-                    if (reconciliationError) throw reconciliationError;
-                },
-            );
-        };
-        try {
-            publishMutation(publish);
-            if (publicationCount !== 1) {
-                throw new Error('Index policy removal returned without publishing.');
-            }
-        } catch (error) {
-            if (committed) {
-                throw new IndexPolicyPublicationError(
-                    `Index policy removal committed before its publication receipt failed: ${error instanceof Error ? error.message : String(error)}`,
-                    receipt,
-                    error,
-                );
-            }
-            throw error;
-        }
-        return receipt;
+        return this.indexAuthorityCoordinator.forceClearPublishedIndexPolicy(
+            codebasePath,
+            publishMutation,
+        );
     }
     /**
      * Published-state activation hook invoked by the runtime policy service
@@ -4124,149 +4072,6 @@ export class Context {
 
     private clearResolvedIndexPolicyRuntime(canonicalRoot: string): void {
         this.indexPolicyRuntimeService.clearResolvedIndexPolicyRuntime(canonicalRoot);
-    }
-
-    private persistCustomIndexPolicy(
-        policy: ResolvedIndexPolicy,
-        binding: IndexPolicyBinding,
-        publishMutation?: (publish: () => void) => void,
-        activate?: () => void,
-    ): IndexPolicyPublicationReceipt {
-        const canonicalRoot = policy.canonicalRoot;
-        if (!binding.collectionName.trim()) {
-            throw new Error('Index policy collection binding must be nonempty.');
-        }
-        if (binding.navigation.status === 'sealed') {
-            if (!/^[a-zA-Z0-9_-]+$/.test(binding.navigation.generationId)) {
-                throw new Error('Index policy navigation generation binding is invalid.');
-            }
-            if (!/^[a-f0-9]{64}$/.test(binding.navigation.sealHash)) {
-                throw new Error('Index policy navigation seal binding is invalid.');
-            }
-        }
-        const expectedPolicyHash = computeIndexPolicyHash(
-            policy.profile,
-            policy.supportedExtensions,
-            policy.effectiveIgnorePatterns,
-        );
-        if (policy.policyHash !== expectedPolicyHash) {
-            throw new Error('Resolved index policy hash does not match its effective inputs.');
-        }
-        ignore().add(policy.effectiveIgnorePatterns);
-        const previousRuntimeState = {
-            ...this.indexPolicyRuntimeService.captureRuntimePolicyState(canonicalRoot),
-            binding: this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot),
-            resolvedPolicy: this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot),
-        };
-        const restoreRuntimeState = () => {
-            this.indexPolicyRuntimeService.restoreRuntimePolicyState(canonicalRoot, previousRuntimeState);
-            if (previousRuntimeState.binding) {
-                this.indexAuthorityCoordinator.setPublishedPolicyBinding(canonicalRoot, {
-                    ...previousRuntimeState.binding,
-                    navigation: { ...previousRuntimeState.binding.navigation },
-                    ...(previousRuntimeState.binding.publication
-                        ? { publication: structuredClone(previousRuntimeState.binding.publication) }
-                        : {}),
-                });
-            } else {
-                this.indexAuthorityCoordinator.deletePublishedPolicyBinding(canonicalRoot);
-            }
-            if (previousRuntimeState.resolvedPolicy) {
-                this.indexAuthorityCoordinator.setPublishedResolvedPolicy(canonicalRoot, {
-                    ...previousRuntimeState.resolvedPolicy,
-                    customExtensions: [...previousRuntimeState.resolvedPolicy.customExtensions],
-                    customIgnorePatterns: [...previousRuntimeState.resolvedPolicy.customIgnorePatterns],
-                    fileBasedIgnorePatterns: [...previousRuntimeState.resolvedPolicy.fileBasedIgnorePatterns],
-                    supportedExtensions: [...previousRuntimeState.resolvedPolicy.supportedExtensions],
-                    effectiveIgnorePatterns: [...previousRuntimeState.resolvedPolicy.effectiveIgnorePatterns],
-                });
-            } else {
-                this.indexAuthorityCoordinator.deletePublishedResolvedPolicy(canonicalRoot);
-            }
-        };
-        const policyBase = {
-            canonicalRoot,
-            customExtensions: policy.customExtensions,
-            customIgnorePatterns: policy.customIgnorePatterns,
-            fileBasedIgnorePatterns: policy.fileBasedIgnorePatterns,
-            profile: policy.profile,
-            supportedExtensions: policy.supportedExtensions,
-            effectiveIgnorePatterns: policy.effectiveIgnorePatterns,
-            policyHash: policy.policyHash,
-            collectionName: binding.collectionName,
-            navigation: binding.navigation,
-        };
-        const policyDocument = binding.publication && policy.controlSignature
-            ? buildCanonicalIndexPolicyDocument({
-                ...policyBase,
-                schemaVersion: 'satori_index_policy_v5',
-                publication: binding.publication,
-                controlSignature: policy.controlSignature,
-            })
-            : binding.publication
-                ? buildCanonicalIndexPolicyDocument({
-                    ...policyBase,
-                    schemaVersion: 'satori_index_policy_v4',
-                    publication: binding.publication,
-                })
-            : buildCanonicalIndexPolicyDocument({
-                ...policyBase,
-                schemaVersion: 'satori_index_policy_v3',
-            });
-        const documentDigest = policyDocument.documentDigest;
-        const receipt: IndexPolicyPublicationReceipt = {
-            status: 'committed',
-            operation: 'publish',
-            canonicalRoot,
-            documentDigest,
-            policyHash: policy.policyHash,
-            collectionName: binding.collectionName,
-            navigation: { ...binding.navigation },
-            ...(binding.publication ? { publication: structuredClone(binding.publication) } : {}),
-        };
-        let publicationCount = 0;
-        let activationVisible = false;
-        try {
-            const publish = () => {
-                publicationCount += 1;
-                if (publicationCount > 1) {
-                    throw new Error('Index policy publication invoked more than once.');
-                }
-                try {
-                    this.indexPolicyDocumentStore.persistDocument(canonicalRoot, policyDocument, () => {
-                        activationVisible = true;
-                        activate?.();
-                        this.indexPolicyRuntimeService.setPolicyFileToken(
-                            canonicalRoot,
-                            this.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot),
-                        );
-                        this.indexPolicyRuntimeService.setPolicyDocumentDigest(canonicalRoot, documentDigest);
-                    });
-                } catch (error) {
-                    if (!activationVisible) restoreRuntimeState();
-                    throw error;
-                }
-            };
-            if (publishMutation) {
-                publishMutation(publish);
-                if (publicationCount !== 1) throw new Error('Index policy publication returned without publishing.');
-            } else {
-                publish();
-            }
-        } catch (error) {
-            if (publicationCount > 0 && !activationVisible) {
-                restoreRuntimeState();
-            }
-            if (activationVisible) {
-                throw new IndexPolicyPublicationError(
-                    `Index policy publication committed before its receipt failed: ${error instanceof Error ? error.message : String(error)}`,
-                    receipt,
-                    error,
-                );
-            }
-            throw error;
-        }
-        return receipt;
     }
 
     /**

@@ -24,6 +24,10 @@ import type {
     RepairSnapshotEvidence,
 } from './repair-proof';
 import type { DurableAuthorityMutationOwner } from '../generation/restore-transaction';
+import type {
+    IndexTeardownProgressCallback,
+    IndexTeardownWorkflowOptions,
+} from '../generation/index-teardown-workflow';
 import type { IndexPolicyRuntimeBinding } from '../policy/index-policy-runtime-service';
 import type { StagedNavigationSidecarGeneration } from '../symbols';
 import type { FileSynchronizer } from '../sync/synchronizer';
@@ -70,6 +74,11 @@ export type EmbeddingProviderDescription = {
  * Narrow dependencies the port needs from its host (Context).
  */
 export interface IndexMutationPortDependencies {
+    clearIndex(
+        codebasePath: string,
+        progressCallback?: IndexTeardownProgressCallback,
+        options?: IndexTeardownWorkflowOptions,
+    ): Promise<void>;
     checkCollectionLimit(): Promise<boolean>;
     deleteCollectionWithVerification(
         collectionName: string,
@@ -148,6 +157,11 @@ export interface IndexMutationPortDependencies {
  * Operation-level mutation/publication port for the MCP indexing coordinator.
  */
 export interface IndexMutationPort {
+    clearIndex(
+        codebasePath: string,
+        progressCallback?: IndexTeardownProgressCallback,
+        options?: IndexTeardownWorkflowOptions,
+    ): Promise<void>;
     checkCollectionLimit(): Promise<boolean>;
     deleteCollectionWithVerification(
         collectionName: string,
@@ -226,6 +240,10 @@ export function createIndexMutationPort(
     deps: IndexMutationPortDependencies,
 ): IndexMutationPort {
     return {
+        async clearIndex(codebasePath, progressCallback, options) {
+            return deps.clearIndex(codebasePath, progressCallback, options);
+        },
+
         async checkCollectionLimit() {
             return deps.checkCollectionLimit();
         },
