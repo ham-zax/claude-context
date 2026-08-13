@@ -8,7 +8,12 @@ import {
     IndexAuthorityCoordinator,
     type IndexAuthorityDecisionPorts,
 } from './index-authority-coordinator';
-import type { ResolvedIndexPolicy } from '../policy/index-policy-runtime-service';
+import { IndexPolicyPublicationError } from './errors';
+import {
+    computeIndexPolicyHash,
+    type IndexPolicyRuntimeBinding,
+    type ResolvedIndexPolicy,
+} from '../policy/index-policy-runtime-service';
 import type {
     IndexCompletionFingerprint,
     IndexCompletionMarkerDocument,
@@ -231,4 +236,96 @@ test('authority owner preserves marker ABA and publication decision boundaries',
         relationshipOnlyUpgrade: false,
         useBoundGeneration: true,
     });
+});
+
+test('authority owner coordinates policy publication without constructing Context', () => {
+    const fingerprint = currentFingerprint();
+    const publishedPolicy: ResolvedIndexPolicy = {
+        ...policy(),
+        policyHash: computeIndexPolicyHash('default', ['.ts'], []),
+    };
+    const events: string[] = [];
+    let persistedDocument: { documentDigest: string } | undefined;
+    let authority!: IndexAuthorityCoordinator;
+    const runtimeState = {
+        customExtensions: null,
+        customIgnorePatterns: null,
+        profile: undefined,
+        ignoreState: null,
+        wasLoaded: false,
+        fileToken: undefined,
+        hadFileToken: false,
+        runtimeCompatible: undefined,
+        documentDigest: undefined,
+    };
+    const ports = {
+        canonicalizeCodebasePath: (value: string) => value,
+        buildIndexCompletionFingerprint: () => fingerprint,
+        indexPolicyDocumentStore: {
+            captureDocument: () => null,
+            resolvePolicyPath: () => '/policy.json',
+            persistDocument: (_root: string, document: { documentDigest: string }, onCommitted?: () => void) => {
+                events.push('persist-document');
+                persistedDocument = document;
+                onCommitted?.();
+            },
+            removeDocument: () => {
+                throw new Error('Unexpected policy removal.');
+            },
+        },
+        indexPolicyRuntimeService: {
+            getPolicyFileToken: () => 'policy-file-token',
+            getPolicyDocumentDigest: () => persistedDocument?.documentDigest,
+            getPolicyRuntimeCompatibility: () => true,
+            resolveCustomIndexPolicyFileToken: () => 'policy-file-token',
+            captureRuntimePolicyState: () => runtimeState,
+            restoreRuntimePolicyState: () => {
+                events.push('restore-runtime');
+            },
+            activateResolvedIndexPolicy: (nextPolicy: ResolvedIndexPolicy, binding: IndexPolicyRuntimeBinding) => {
+                events.push('activate-runtime');
+                authority.activatePublishedIndexPolicy(nextPolicy, binding);
+            },
+            clearResolvedIndexPolicyRuntime: () => {
+                authority.clearPublishedIndexPolicyRuntime(canonicalRoot);
+            },
+            setPolicyFileToken: (_root: string, token: string | null) => {
+                events.push(`policy-token:${token}`);
+            },
+            setPolicyDocumentDigest: (_root: string, digest: string) => {
+                events.push(`policy-digest:${digest}`);
+            },
+        },
+        resolveRepoConfigObservationToken: () => null,
+        resolveNavigationObservation: () => ({ status: 'not_bound' as const }),
+        resolveNavigationObservationToken: () => null,
+        resolveProvenGeneration: async () => null,
+        vectorDatabase: {
+            getPublicationObservation: () => 'publication-observation',
+        },
+    } as unknown as IndexAuthorityDecisionPorts;
+    authority = new IndexAuthorityCoordinator(
+        createGenerationProofCoordinator(),
+        ports,
+    );
+
+    assert.throws(
+        () => authority.publishResolvedIndexPolicy(
+            publishedPolicy,
+            { collectionName: 'chunks', navigation: { status: 'not_bound' } },
+            (publish) => {
+                publish();
+                throw new Error('receipt acknowledgement failed');
+            },
+        ),
+        (error: unknown) => {
+            assert.ok(error instanceof IndexPolicyPublicationError);
+            assert.equal(error.committed, true);
+            assert.equal(error.receipt.operation, 'publish');
+            assert.equal(error.receipt.documentDigest, persistedDocument?.documentDigest);
+            return true;
+        },
+    );
+    assert.deepEqual(events.slice(0, 2), ['persist-document', 'activate-runtime']);
+    assert.equal(authority.getPublishedResolvedPolicy(canonicalRoot)?.policyHash, publishedPolicy.policyHash);
 });

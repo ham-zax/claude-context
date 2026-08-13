@@ -106,9 +106,6 @@ import type {
     ProvenGenerationReceipt,
     ProvenVectorGenerationReceipt,
 } from '../generation/contracts';
-import {
-    IndexPolicyPublicationError,
-} from '../generation/errors';
 
 export type {
     CustomIndexPolicyUpdate,
@@ -133,7 +130,6 @@ import type {
     RepairSnapshotEvidence,
 } from './repair-proof';
 import {
-    buildCanonicalIndexPolicyDocument,
     inspectCompletionMarker,
     type CanonicalPolicyNavigationBinding,
     type CanonicalPublicationBinding,
@@ -713,6 +709,16 @@ export class Context {
                 indexPolicyDocumentStore: {
                     captureDocument: (canonicalRoot) => this.indexPolicyDocumentStore.captureDocument(canonicalRoot),
                     resolvePolicyPath: (canonicalRoot) => this.indexPolicyDocumentStore.resolvePolicyPath(canonicalRoot),
+                    persistDocument: (canonicalRoot, document, onCommitted) => (
+                        this.indexPolicyDocumentStore.persistDocument(canonicalRoot, document, onCommitted)
+                    ),
+                    removeDocument: (canonicalRoot, expectedDocumentDigest, onCommitted) => (
+                        this.indexPolicyDocumentStore.removeDocument(
+                            canonicalRoot,
+                            expectedDocumentDigest,
+                            onCommitted,
+                        )
+                    ),
                 },
                 indexPolicyMutationCoordinator: {
                     withLock: (canonicalRoot, operation) => this.indexPolicyMutationCoordinator.withLock(canonicalRoot, operation),
@@ -723,6 +729,20 @@ export class Context {
                     getPolicyDocumentDigest: (canonicalRoot) => this.indexPolicyRuntimeService.getPolicyDocumentDigest(canonicalRoot),
                     getPolicyRuntimeCompatibility: (canonicalRoot) => this.indexPolicyRuntimeService.getPolicyRuntimeCompatibility(canonicalRoot),
                     resolveCustomIndexPolicyFileToken: (canonicalRoot) => this.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot),
+                    captureRuntimePolicyState: (canonicalRoot) => this.indexPolicyRuntimeService.captureRuntimePolicyState(canonicalRoot),
+                    restoreRuntimePolicyState: (canonicalRoot, previousRuntimeState) => (
+                        this.indexPolicyRuntimeService.restoreRuntimePolicyState(canonicalRoot, previousRuntimeState)
+                    ),
+                    activateResolvedIndexPolicy: (policy, binding) => (
+                        this.indexPolicyRuntimeService.activateResolvedIndexPolicy(policy, binding)
+                    ),
+                    clearResolvedIndexPolicyRuntime: (canonicalRoot) => (
+                        this.indexPolicyRuntimeService.clearResolvedIndexPolicyRuntime(canonicalRoot)
+                    ),
+                    setPolicyFileToken: (canonicalRoot, token) => this.indexPolicyRuntimeService.setPolicyFileToken(canonicalRoot, token),
+                    setPolicyDocumentDigest: (canonicalRoot, digest) => (
+                        this.indexPolicyRuntimeService.setPolicyDocumentDigest(canonicalRoot, digest)
+                    ),
                 },
                 refreshRuntimePolicyAuthority: (canonicalRoot) => this.refreshRuntimePolicyAuthority(canonicalRoot),
                 restoreTransactionMechanics: this.restoreTransactionMechanics,
@@ -750,9 +770,6 @@ export class Context {
                     this.resolveNavigationObservationToken(canonicalRoot, generationId, strict)
                 ),
                 resolveRepoConfigObservationToken: (canonicalRoot) => this.resolveRepoConfigObservationToken(canonicalRoot),
-                publishResolvedIndexPolicy: (policy, binding, publishMutation) => (
-                    this.publishResolvedIndexPolicy(policy, binding, publishMutation)
-                ),
                 resolveProvenGeneration: (canonicalRoot) => this.resolveProvenGeneration(canonicalRoot),
             },
         );

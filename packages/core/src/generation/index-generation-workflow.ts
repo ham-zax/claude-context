@@ -584,7 +584,7 @@ export class IndexGenerationWorkflow {
                 if (!marker) {
                     throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
                 }
-                await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
+                await this.publishResolvedPolicyForMarker(indexPolicy, {
                     collectionName: writeCollectionName,
                     navigation: navigationCandidate ? {
                         status: 'sealed',
@@ -661,7 +661,7 @@ export class IndexGenerationWorkflow {
                 if (!marker) {
                     throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
                 }
-                await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
+                await this.publishResolvedPolicyForMarker(indexPolicy, {
                     collectionName: writeCollectionName,
                     navigation: navigationCandidate ? {
                         status: 'sealed',
@@ -686,7 +686,7 @@ export class IndexGenerationWorkflow {
                 if (!marker) {
                     throw new Error(`Partial index did not produce a completion marker for '${writeCollectionName}'.`);
                 }
-                await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(indexPolicy, {
+                await this.publishResolvedPolicyForMarker(indexPolicy, {
                     collectionName: writeCollectionName,
                     navigation: { status: 'not_bound' },
                 }, marker, options.publishMutation);
@@ -1720,10 +1720,28 @@ export class IndexGenerationWorkflow {
         ) {
             return;
         }
-        await this.ports.indexAuthorityCoordinator.publishResolvedIndexPolicyForMarker(policy, {
+        await this.publishResolvedPolicyForMarker(policy, {
             collectionName,
             navigation: navigationBinding,
         }, marker, publishMutation);
+    }
+
+    private async publishResolvedPolicyForMarker(
+        policy: ResolvedIndexPolicy,
+        binding: IndexPolicyBinding,
+        marker: IndexCompletionMarkerDocument,
+        publishMutation?: (publish: () => void) => void,
+    ): Promise<void> {
+        try {
+            this.ports.publishResolvedIndexPolicy(policy, binding, publishMutation);
+        } catch (error) {
+            await this.ports.indexAuthorityCoordinator.reconcileCommittedPolicyPublication(
+                policy,
+                binding,
+                marker,
+                error,
+            );
+        }
     }
 
     private async rebuildNavigationArtifactsForSyncDelta(
