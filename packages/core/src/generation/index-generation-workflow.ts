@@ -30,6 +30,7 @@ import type { IndexProfile } from '../config/defaults';
 import type { ResolvedIndexPolicy, IndexPolicyRuntimeService, IndexPolicyRuntimeBinding } from '../policy/index-policy-runtime-service';
 import type { Embedding, EmbeddingOperationMetricsSnapshot } from '../embedding';
 import { FileSynchronizer, type PreparedFileChangeSet, type SourceFreshnessCheckpointAuthority, type StagedSourceFreshnessCheckpoint } from '../sync/synchronizer';
+import { assertAuthenticPreparedFileChangeSet } from '../sync/prepared-change-set-authority';
 import type { IndexAuthorityCoordinator } from './index-authority-coordinator';
 import type { RepairProof, RepairSnapshotEvidence, RepairIndexResult, RepairActivatedGeneration } from '../core/repair-proof';
 import type { ExpectedIndexedChunk, ProcessedFileList } from '../core/indexing-pipeline';
@@ -558,6 +559,7 @@ export class IndexGenerationWorkflow {
         let localPreparedFileHashes: Map<string, string> | null = null;
 
         if (options.preparedChanges) {
+            assertAuthenticPreparedFileChangeSet(options.preparedChanges);
             if (!options.preparedChanges.sourceContract) {
                 throw new Error('[Context] Prepared change set is not authority-bound (missing sourceContract).');
             }
@@ -604,7 +606,15 @@ export class IndexGenerationWorkflow {
                     `[Context] Prepared change set file hashes do not match bound source contract merkle root (expected '${contract.merkleRoot}', got '${computedRoot}').`,
                 );
             }
-            preparedSourceContract = contract;
+            preparedSourceContract = Object.freeze({
+                canonicalRoot: contract.canonicalRoot,
+                supportedExtensions: Object.freeze([...contract.supportedExtensions]),
+                effectiveIgnorePatterns: Object.freeze([...contract.effectiveIgnorePatterns]),
+                fullHashRun: contract.fullHashRun,
+                partialScan: contract.partialScan,
+                unscannedDirPrefixes: Object.freeze([...contract.unscannedDirPrefixes]),
+                merkleRoot: contract.merkleRoot,
+            });
             localPreparedFileHashes = snapshottedHashes;
         }
 

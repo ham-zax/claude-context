@@ -714,10 +714,13 @@ function isRecognizableRetiredPolicyDocument(value: Record<string, unknown>, exp
     if (!isNonemptyString(value.collectionName)) {
         return false;
     }
-    if (!Array.isArray(value.supportedExtensions) || !Array.isArray(value.effectiveIgnorePatterns)) {
+    if (!isStringArray(value.supportedExtensions) || !isStringArray(value.effectiveIgnorePatterns)) {
         return false;
     }
     if (!isRecord(value.navigation) || typeof value.navigation.status !== 'string') {
+        return false;
+    }
+    if (value.navigation.status !== 'not_bound' && value.navigation.status !== 'sealed') {
         return false;
     }
     return true;

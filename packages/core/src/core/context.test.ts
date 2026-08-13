@@ -11968,50 +11968,8 @@ test('Context full index rejects PreparedFileChangeSet from a different canonica
     }
 });
 
-test('Context full index rejects wrong-root PreparedFileChangeSet even if assertCompatible is replaced with a no-op', async () => {
-    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-noop-root-a-'));
-    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-noop-root-b-'));
-    try {
-        fs.writeFileSync(path.join(rootA, 'source.ts'), 'export const a = 1;\n', 'utf8');
-        fs.writeFileSync(path.join(rootB, 'source.ts'), 'export const a = 1;\n', 'utf8');
-        const syncA = new FileSynchronizer(rootA, [], ['.ts']);
-        await syncA.initialize();
-        const preparedA = await syncA.prepareChanges({ forceFullHash: true });
-
-        const tamperedPrepared: typeof preparedA & { assertCompatible?: () => void } = {
-            ...preparedA,
-            assertCompatible: () => {},
-        };
-
-        const vectorDatabase = new InMemoryLanceVectorDatabase();
-        const context = new Context({
-            embedding: new TestEmbedding(),
-            vectorDatabase,
-            symbolRegistryStateRoot: path.join(rootB, 'state'),
-            indexPolicyStateRoot: path.join(rootB, 'policies'),
-        });
-
-        await assert.rejects(
-            async () => {
-                await context.indexCodebase(rootB, undefined, false, {
-                    preparedChanges: tamperedPrepared,
-                    deferFullIndexPublication: true,
-                });
-            },
-            (error: unknown) => {
-                assert.match(String(error), /Prepared change set was created for canonical root/);
-                return true;
-            },
-        );
-        assert.equal((await vectorDatabase.listCollections()).length, 0);
-    } finally {
-        fs.rmSync(rootA, { recursive: true, force: true });
-        fs.rmSync(rootB, { recursive: true, force: true });
-    }
-});
-
-test('Context full index rejects PreparedFileChangeSet missing sourceContract before payload mutation', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-missing-contract-'));
+test('Context full index rejects custom structural PreparedFileChangeSet as non-authentic capability', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-custom-structural-'));
     try {
         fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const a = 1;\n', 'utf8');
         const vectorDatabase = new InMemoryLanceVectorDatabase();
@@ -12022,27 +11980,74 @@ test('Context full index rejects PreparedFileChangeSet missing sourceContract be
             indexPolicyStateRoot: path.join(tempRoot, 'policies'),
         });
 
-        const sync = new FileSynchronizer(tempRoot, [], ['.ts']);
-        await sync.initialize();
-        const prepared = await sync.prepareChanges({ forceFullHash: true });
-
-        const unboundPrepared: typeof prepared = {
-            changes: prepared.changes,
-            fileHashes: prepared.fileHashes,
-            commit: prepared.commit,
-            stageCheckpoint: prepared.stageCheckpoint,
-            assertSourceObservationCurrent: prepared.assertSourceObservationCurrent,
+        const customPrepared: any = {
+            changes: { added: ['source.ts'], modified: [], deleted: [] },
+            fileHashes: new Map([['source.ts', '0'.repeat(64)]]),
+            commit: async () => ({}) as any,
+            stageCheckpoint: async () => ({}) as any,
+            assertSourceObservationCurrent: async () => {},
         };
 
         await assert.rejects(
             async () => {
                 await context.indexCodebase(tempRoot, undefined, false, {
-                    preparedChanges: unboundPrepared,
+                    preparedChanges: customPrepared,
                     deferFullIndexPublication: true,
                 });
             },
             (error: unknown) => {
-                assert.match(String(error), /missing sourceContract/i);
+                assert.match(String(error), /not an authentic synchronizer capability/i);
+                return true;
+            },
+        );
+        assert.equal((await vectorDatabase.listCollections()).length, 0);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context full index rejects cloned PreparedFileChangeSet with overridden checkpoint and revalidation as non-authentic capability', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-forged-capability-'));
+    try {
+        fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const a = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        const policy = await context.resolveIndexPolicyForCodebase(tempRoot);
+
+        const synchronizer = new FileSynchronizer(
+            tempRoot,
+            policy.effectiveIgnorePatterns,
+            policy.supportedExtensions,
+        );
+        await synchronizer.initialize();
+        const legitimatePrepared = await synchronizer.prepareChanges({ forceFullHash: true });
+
+        // Forge capability: same legitimate contract/Merkle, but fake stageCheckpoint and no-op assertSourceObservationCurrent
+        const forgedPrepared: typeof legitimatePrepared = {
+            ...legitimatePrepared,
+            stageCheckpoint: async (authority) => ({
+                checkpointIdentity: authority.collectionName,
+                snapshotPath: '/does/not/exist',
+                merkleRoot: legitimatePrepared.sourceContract!.merkleRoot,
+                documentDigest: 'f'.repeat(64),
+            }),
+            assertSourceObservationCurrent: async () => {},
+        };
+
+        await assert.rejects(
+            async () => {
+                await context.indexCodebase(tempRoot, undefined, false, {
+                    preparedChanges: forgedPrepared,
+                    deferFullIndexPublication: true,
+                });
+            },
+            (error: unknown) => {
+                assert.match(String(error), /not an authentic synchronizer capability/i);
                 return true;
             },
         );
@@ -12121,53 +12126,6 @@ test('Context full index rejects non-full-hash PreparedFileChangeSet before payl
             },
             (error: unknown) => {
                 assert.match(String(error), /full-hash scan/i);
-                return true;
-            },
-        );
-        assert.equal((await vectorDatabase.listCollections()).length, 0);
-    } finally {
-        fs.rmSync(tempRoot, { recursive: true, force: true });
-    }
-});
-
-test('Context full index rejects partial-scan PreparedFileChangeSet before payload mutation', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-partial-scan-'));
-    try {
-        fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const a = 1;\n', 'utf8');
-        const vectorDatabase = new InMemoryLanceVectorDatabase();
-        const context = new Context({
-            embedding: new TestEmbedding(),
-            vectorDatabase,
-            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
-            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
-        });
-        const policy = await context.resolveIndexPolicyForCodebase(tempRoot);
-
-        const synchronizer = new FileSynchronizer(
-            tempRoot,
-            policy.effectiveIgnorePatterns,
-            policy.supportedExtensions,
-        );
-        await synchronizer.initialize();
-        const prepared = await synchronizer.prepareChanges({ forceFullHash: true });
-
-        const partialPrepared: typeof prepared = {
-            ...prepared,
-            sourceContract: {
-                ...prepared.sourceContract!,
-                partialScan: true,
-            },
-        };
-
-        await assert.rejects(
-            async () => {
-                await context.indexCodebase(tempRoot, undefined, false, {
-                    preparedChanges: partialPrepared,
-                    deferFullIndexPublication: true,
-                });
-            },
-            (error: unknown) => {
-                assert.match(String(error), /partial scan/i);
                 return true;
             },
         );
@@ -12257,54 +12215,6 @@ test('Context full index rejects PreparedFileChangeSet when a file is injected i
             },
         );
         assert.equal((await vectorDatabase.listCollections()).length, 0);
-    } finally {
-        fs.rmSync(tempRoot, { recursive: true, force: true });
-    }
-});
-
-test('Context full index rejects publication if staged checkpoint merkle root diverges from prepared contract', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-divergent-checkpoint-'));
-    try {
-        fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const val = 1;\n', 'utf8');
-        const vectorDatabase = new InMemoryLanceVectorDatabase();
-        const context = new Context({
-            embedding: new TestEmbedding(),
-            vectorDatabase,
-            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
-            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
-        });
-        const policy = await context.resolveIndexPolicyForCodebase(tempRoot);
-
-        const synchronizer = new FileSynchronizer(
-            tempRoot,
-            policy.effectiveIgnorePatterns,
-            policy.supportedExtensions,
-        );
-        await synchronizer.initialize();
-        const prepared = await synchronizer.prepareChanges({ forceFullHash: true });
-
-        const corruptedStagingPrepared: typeof prepared = {
-            ...prepared,
-            stageCheckpoint: async (authority, assertMutation) => {
-                const realStaged = await prepared.stageCheckpoint(authority, assertMutation);
-                return {
-                    ...realStaged,
-                    merkleRoot: 'f'.repeat(64),
-                };
-            },
-        };
-
-        await assert.rejects(
-            async () => {
-                await context.indexCodebase(tempRoot, undefined, false, {
-                    preparedChanges: corruptedStagingPrepared,
-                });
-            },
-            (error: unknown) => {
-                assert.match(String(error), /merkle root.*does not match bound source contract/i);
-                return true;
-            },
-        );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import ignore from 'ignore';
 import { computeMerkleRoot } from './merkle';
+import { registerAuthenticPreparedFileChangeSet } from './prepared-change-set-authority';
 import {
     assertValidCurrentSnapshot,
     assertValidGenerationSnapshot,
@@ -1242,7 +1243,7 @@ export class FileSynchronizer {
             merkleRoot: nextMerkleRoot,
         });
 
-        return {
+        const prepared: PreparedFileChangeSet = Object.freeze({
             sourceContract,
             changes,
             fileHashes: new Map(nextState.fileHashes),
@@ -1317,7 +1318,10 @@ export class FileSynchronizer {
                 );
                 return commit;
             },
-        };
+        });
+
+        registerAuthenticPreparedFileChangeSet(prepared);
+        return prepared;
     }
 
     public async checkForChanges(): Promise<FileChangeResult> {
