@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `a58590e`
+Checkpoint HEAD: `eb42601`
 
 Completed ownership-bounded batches:
 
@@ -56,9 +56,10 @@ Completed ownership-bounded batches:
 - Phase 8 gate correction A / neutral `SourceFreshnessPort` + `IndexMutationPort` contracts (no `core/context` import from the port modules; `ProvenSourceFreshnessCheckpointEvidence` now owned by the freshness port module), plus D-adjacent P2 cleanup (SourceObservationState dead mutable-map getters removed; test-only Context accessor removed; `InstallPlan` options snapshot + frozen prepared array): `e109651`.
 - Phase 8 gate correction A/D follow-up / F6 fully closed: `InstallPlan` nested mutation records (`configMutation`, companion entries, `profileMutation`) now frozen copies, with a regression test proving strict-mode post-plan mutation throws: `fccc9e4`.
 - Phase 8 gate correction B / grouped narrow search collaborator seams: the 54-member `SearchRequestCoordinatorHost` callback bag is replaced by six named collaborators (`SearchReadinessCollaborator`, `SearchHintPayloadCollaborator`, `SearchPreparedReadCollaborator`, `SearchFreshnessCollaborator`, `SearchEnvironmentCollaborator`, `SearchContinuationStoreCollaborator`) composed in `SearchRequestCoordinatorCollaborators`. All 54 member signatures and all 54 `ToolHandlers` bindings preserved verbatim (machine-verified); MCP core suite 1257/1257 green: `a58590e`.
+- Phase 8 gate correction C / continuation owner identity: `SearchContinuationCoordinator` (and its pool) moved into the search module with the `SearchRequestCoordinator` as the registered owner token; store/lookup/advance/remove called directly (the `SearchContinuationStoreCollaborator` group left the collaborator set), routing hops coordinator-to-coordinator via `owner.continueOwned`, `ToolHandlers` keeps only constructor injection, the release delegate, and the `handleContinueSearch` entry point. Full MCP suite 1554 pass / 1 pre-existing skip: `eb42601`.
 
-Next open batch at this checkpoint: Phase 8 gate correction C (make
-`SearchRequestCoordinator` the continuation owner), then Phase 8.1.
+Next open batch at this checkpoint: Phase 8.1 (freeze the façade/API
+contract, remove genuinely dead private surface), then 8.2.
 Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
 planned only; it starts after Phase 8 is sealed, and its durable-format floor
 (9.3) requires separate authorization. Refresh this checkpoint only after an
