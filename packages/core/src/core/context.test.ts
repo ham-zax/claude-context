@@ -253,19 +253,6 @@ type ContextWithProcessChunkBatch = {
     ): Promise<void>;
 };
 
-const TEST_PUBLICATION = Object.freeze({
-    activationId: 'test-activation',
-    sourceCheckpoint: {
-        collectionName: 'test-collection',
-        markerRunId: 'test-marker',
-        indexPolicyHash: 'a'.repeat(64),
-        merkleRoot: 'b'.repeat(64),
-        documentDigest: 'c'.repeat(64),
-    },
-    graph: { kind: 'relationship_manifest_v2' as const, manifestHash: 'd'.repeat(64) },
-    receipt: { ownerId: 'test', generation: 1, operationId: 'test-op' },
-});
-
 function createTestPublication(
     collectionName: string,
     indexPolicyHash: string,

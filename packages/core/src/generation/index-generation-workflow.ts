@@ -871,19 +871,6 @@ export class IndexGenerationWorkflow {
                     publicationMs = Date.now() - publicationStartedAt;
                 }
             }
-            progressCallback?.({
-                phase: result.status === 'completed' ? 'Indexing complete!' : 'Indexing stopped at chunk limit',
-                current: result.processedFiles,
-                total: codeFiles.length,
-                percentage: 100,
-            });
-            return {
-                indexedFiles: result.processedFiles,
-                totalChunks: result.totalChunks,
-                status: result.status,
-                indexedFileHashes: result.indexedFileHashes,
-                ...(navigationCandidate ? { navigationCandidate } : {}),
-            };
         } catch (error) {
             if (
                 error instanceof IndexPolicyPublicationError
