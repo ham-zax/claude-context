@@ -532,6 +532,21 @@ function createFailedIndexingHarness(
             await vectorStore.dropCollection(collectionName);
             return { collectionName, attempts: 1, verifiedAbsent: true };
         },
+        prepareIndexCollection: async (
+            codebasePath: string,
+            binding: { generation: number; operationId: string; collectionName: string },
+            assertMutationCurrent?: () => void,
+        ) => {
+            assertMutationCurrent?.();
+            existingCollections.add(binding.collectionName);
+            return Object.freeze({
+                canonicalRoot: path.resolve(codebasePath),
+                collectionName: binding.collectionName,
+                generation: binding.generation,
+                operationId: binding.operationId,
+            });
+        },
+        discardPreparedIndexCollection: () => undefined,
         indexCompletionMarkersEqual: (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right),
         resolveIndexPolicyForCodebase: async (_root: string, update: { customExtensions?: string[]; customIgnorePatterns?: string[] } = {}) => {
             standardPolicyResolutionCalls += 1;
@@ -877,6 +892,28 @@ function createFailedIndexingHarness(
         getSnapshotIndexingProgress: () => 42,
         buildCollectionLimitMessage: async () => "collection limit",
         mutationLeaseCoordinator: options.mutationLeaseCoordinator,
+        manageResponse: (action: string, responsePath: string, status: string, message: string, responseOptions?: Record<string, unknown>) => ({
+            content: [{ type: "text", text: JSON.stringify({ action, path: responsePath, status, message, ...responseOptions }) }],
+        }),
+        buildRuntimeOwnerConflictResponseIfBlocked: async () => null,
+        assertIndexMutationCapabilities: () => undefined,
+        recoverStaleIndexingStateIfNeeded: async () => undefined,
+        getSnapshotIndexingCodebases: () => [],
+        getSnapshotIndexedCodebases: () => [],
+        buildManageActionBlockedMessage: () => "blocked",
+        buildCreateHint: () => ({}),
+        buildReindexHint: () => ({}),
+        buildStatusHint: () => ({}),
+        getManageRetryAfterMs: () => 2000,
+        buildIndexingMetadata: () => undefined,
+        buildReindexInstruction: () => "reindex",
+        buildManageRequiresReindexHints: () => ({}),
+        validateCompletionProof: async () => ({ outcome: "stale_local", reason: "missing_marker_doc" }),
+        recoverIndexedSnapshotFromCompletionProof: async () => false,
+        isZillizBackend: () => false,
+        dropZillizCollectionForCreate: async () => ({ status: "unmapped" }),
+        resolveStagedCollectionName: (codebasePath: string, generationId: string) => `${resolveCollectionName(codebasePath)}__gen_${generationId}`,
+        manageVectorBackendResponse: () => ({ content: [{ type: "text", text: "backend error" }] }),
     };
 
     return {
@@ -921,7 +958,7 @@ function createFailedIndexingHarness(
         get publishedCustomIgnorePatterns() {
             return publishedCustomIgnorePatterns;
         },
-        handler: new ManageIndexingHandlers(host as unknown as ConstructorParameters<typeof ManageIndexingHandlers>[0]) as unknown as StartBackgroundIndexing,
+        handler: new ManageIndexingHandlers(host as unknown as ConstructorParameters<typeof ManageIndexingHandlers>[0]) as unknown as ManageIndexingHandlers & StartBackgroundIndexing,
     };
 }
 
@@ -1330,6 +1367,219 @@ test("handleReindexCodebase canonicalizes once before ownership, preflight, and 
         assert.ok(harness.ownerCheckedRoots.length > 0);
         assert.ok(harness.ownerCheckedRoots.every((candidate) => candidate === repoPath));
         assert.deepEqual(harness.launchedRoots, [repoPath]);
+    });
+});
+
+test("handleIndexCodebase synchronous startBackgroundIndexing throw does not transfer lease ownership", async () => {
+    await withTempRepo(async (repoPath) => {
+        let releaseCalls = 0;
+        let startCalls = 0;
+        const harness = createIndexLaunchHarness(repoPath, {
+            startBackgroundIndexing: () => {
+                startCalls += 1;
+                throw new Error("synchronous startBackgroundIndexing throw");
+            },
+        });
+        const originalRelease = harness.coordinator.release.bind(harness.coordinator);
+        harness.coordinator.release = (lease) => {
+            releaseCalls += 1;
+            return originalRelease(lease);
+        };
+
+        const response = await harness.handler.handleIndexCodebase({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text);
+
+        assert.equal(payload.status, "error");
+        assert.match(payload.message, /synchronous startBackgroundIndexing throw/i);
+        assert.equal(startCalls, 1);
+        assert.equal(harness.lifecycle, "indexfailed");
+        assert.equal(harness.failedCalls, 1);
+        assert.equal(harness.preparedReceipt, null);
+        assert.equal(harness.coordinator.getActiveLease(repoPath), undefined);
+        assert.equal(releaseCalls, 1);
+    });
+});
+
+test("handleIndexCodebase asynchronous startBackgroundIndexing rejection transfers lease ownership to background handler", async () => {
+    await withTempRepo(async (repoPath) => {
+        let rejectWorker!: (error: Error) => void;
+        const worker = new Promise<void>((_resolve, reject) => { rejectWorker = reject; });
+        const harness = createIndexLaunchHarness(repoPath, {
+            startBackgroundIndexing: () => worker,
+        });
+        let releaseCalls = 0;
+        const originalRelease = harness.coordinator.release.bind(harness.coordinator);
+        harness.coordinator.release = (lease) => {
+            releaseCalls += 1;
+            return originalRelease(lease);
+        };
+
+        const response = await harness.handler.handleIndexCodebase({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, "ok");
+        assert.match(payload.message, /Started background indexing/i);
+        assert.equal(releaseCalls, 0);
+        assert.ok(harness.coordinator.getActiveLease(repoPath));
+
+        rejectWorker(new Error("asynchronous background failure"));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(harness.lifecycle, "indexfailed");
+        assert.equal(harness.failedCalls, 1);
+        assert.equal(harness.coordinator.getActiveLease(repoPath), undefined);
+        assert.equal(releaseCalls, 1);
+    });
+});
+
+test("background full-index sequence executes scanning, indexing, publication, and terminal lease release", async () => {
+    await withTempRepo(async (repoPath) => {
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(path.dirname(repoPath), "full-index-seq-leases"),
+            ownerId: "full-index-seq-owner",
+        });
+        let releaseCalls = 0;
+        const originalRelease = coordinator.release.bind(coordinator);
+        coordinator.release = (lease) => {
+            releaseCalls += 1;
+            return originalRelease(lease);
+        };
+
+        let workerFinishedResolve!: () => void;
+        const workerFinished = new Promise<void>((resolve) => {
+            workerFinishedResolve = resolve;
+        });
+
+        const harness = createFailedIndexingHarness(new Set(), {
+            mutationLeaseCoordinator: coordinator,
+            captureOperationPhases: true,
+            indexCodebase: async () => completedIndexResult(),
+            publishNavigationCandidate: async () => {
+                // called during publication
+            },
+        });
+
+        const originalStartBackgroundIndexing = harness.handler["startBackgroundIndexing"].bind(harness.handler);
+        harness.handler["startBackgroundIndexing"] = async (...args: Parameters<typeof originalStartBackgroundIndexing>) => {
+            try {
+                return await originalStartBackgroundIndexing(...args);
+            } finally {
+                workerFinishedResolve();
+            }
+        };
+
+        const response = await harness.handler.handleIndexCodebase({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, "ok");
+        assert.match(payload.message, /Started background indexing/i);
+
+        await workerFinished;
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(harness.lifecycle, "indexed");
+        assert.equal(harness.indexedSnapshots, 1);
+        assert.equal(harness.failedSnapshots.length, 0);
+        assert.equal(harness.latestOperation?.phase, "completed");
+        assert.equal(coordinator.getActiveLease(repoPath), undefined);
+        assert.equal(releaseCalls, 1);
+    });
+});
+
+test("background full-index aborts and fails closed when lease is preempted during indexing", async () => {
+    await withTempRepo(async (repoPath) => {
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(path.dirname(repoPath), "lease-preempt-leases"),
+            ownerId: "lease-preempt-owner",
+        });
+        let releaseCalls = 0;
+        const originalRelease = coordinator.release.bind(coordinator);
+        coordinator.release = (lease) => {
+            releaseCalls += 1;
+            return originalRelease(lease);
+        };
+
+        let workerFinishedResolve!: () => void;
+        const workerFinished = new Promise<void>((resolve) => {
+            workerFinishedResolve = resolve;
+        });
+
+        const harness = createFailedIndexingHarness(new Set(), {
+            mutationLeaseCoordinator: coordinator,
+            captureOperationPhases: true,
+            indexCodebase: async (_path, _progress, _force, mutationOptions) => {
+                const otherCoordinator = new MutationLeaseCoordinator({
+                    stateDir: path.join(path.dirname(repoPath), "lease-preempt-leases"),
+                    ownerId: "preempting-owner",
+                });
+                const preemptAcquired = otherCoordinator.acquire(repoPath, "repair", { stealStale: true });
+                assert.equal(preemptAcquired.acquired, true);
+
+                mutationOptions?.assertMutationCurrent?.();
+                return completedIndexResult();
+            },
+        });
+
+        const originalStartBackgroundIndexing = harness.handler["startBackgroundIndexing"].bind(harness.handler);
+        harness.handler["startBackgroundIndexing"] = async (...args: Parameters<typeof originalStartBackgroundIndexing>) => {
+            try {
+                return await originalStartBackgroundIndexing(...args);
+            } finally {
+                workerFinishedResolve();
+            }
+        };
+
+        const response = await harness.handler.handleIndexCodebase({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, "ok");
+
+        await workerFinished;
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(harness.indexedSnapshots, 0);
+        assert.notEqual(harness.latestOperation?.phase, "completed");
+        assert.equal(releaseCalls, 1);
+    });
+});
+
+test("background full-index detects source drift before commit and fails closed", async () => {
+    await withTempRepo(async (repoPath) => {
+        const coordinator = new MutationLeaseCoordinator({
+            stateDir: path.join(path.dirname(repoPath), "source-drift-leases"),
+            ownerId: "source-drift-owner",
+        });
+
+        let workerFinishedResolve!: () => void;
+        const workerFinished = new Promise<void>((resolve) => {
+            workerFinishedResolve = resolve;
+        });
+
+        const harness = createFailedIndexingHarness(new Set(), {
+            mutationLeaseCoordinator: coordinator,
+            captureOperationPhases: true,
+            indexCodebase: async () => {
+                fs.writeFileSync(path.join(repoPath, "index.ts"), "export const drifted = 2;\n");
+                return completedIndexResult();
+            },
+        });
+
+        const originalStartBackgroundIndexing = harness.handler["startBackgroundIndexing"].bind(harness.handler);
+        harness.handler["startBackgroundIndexing"] = async (...args: Parameters<typeof originalStartBackgroundIndexing>) => {
+            try {
+                return await originalStartBackgroundIndexing(...args);
+            } finally {
+                workerFinishedResolve();
+            }
+        };
+
+        const response = await harness.handler.handleIndexCodebase({ path: repoPath });
+        const payload = JSON.parse(response.content[0].text);
+        assert.equal(payload.status, "ok");
+
+        await workerFinished;
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.equal(harness.indexedSnapshots, 0);
+        assert.equal(harness.failedSnapshots.length, 1);
+        assert.equal(coordinator.getActiveLease(repoPath), undefined);
     });
 });
 
