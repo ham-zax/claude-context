@@ -68,7 +68,6 @@ import {
     SearchReadinessInvalidationReason,
     SearchRecommendedNextAction,
     SearchResponseEnvelope,
-    SearchResponseHints,
     SearchSpan,
 } from "./search-types.js";
 import {
@@ -115,9 +114,6 @@ import {
     normalizeSearchPath as normalizeSearchPathHelper,
     shouldIncludeCategoryInScope,
 } from "./search-ranking-policy.js";
-import {
-    resolveSearchRankingPolicyIdentity,
-} from "./search-order-policy.js";
 import { SearchQuerySupport } from "./search-query-support.js";
 import {
     TrackedRootReadiness,
@@ -165,21 +161,9 @@ import {
     type SearchResultSetCoordinatorLookup,
 } from "./search-result-set-cache.js";
 import {
-    projectGroupedDisclosure,
-    SEARCH_DISCLOSURE_POLICY_VERSION,
-} from "./search-disclosure.js";
-import {
-    verifySearchRankedSetBinding,
     type SearchRankedSetBinding,
-    type SearchRankedSetBindingInput,
-    type SearchRerankerBindingIdentity,
 } from "./search-result-set-identity.js";
-import { SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION } from "./search-rerank-document.js";
 import { READ_FILE_MAX_BYTES_DEFAULT } from "./published-source-reader.js";
-import {
-    resolveSearchRerankRequestIdentity,
-    type SearchRerankRequestIdentityV1,
-} from "./search-rerank-request-contract.js";
 import type {
 } from "./search-lexical-scoring.js";
 import {
@@ -239,90 +223,6 @@ type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
     FrozenSearchResultSet,
     ToolHandlers
 >;
-
-function resolveSearchRerankerBindingIdentity(
-    reranker: Reranker | null,
-    rerankerApplied: boolean,
-): SearchRerankerBindingIdentity {
-    if (!rerankerApplied) {
-        return { kind: "deterministic_baseline", policy: "B" };
-    }
-    if (!reranker) {
-        throw new Error("Applied search reranking requires a stable provider identity.");
-    }
-    const identity = reranker.getIdentity();
-    return {
-        kind: "provider",
-        provider: identity.provider,
-        model: identity.model,
-        profile: identity.profile,
-    };
-}
-
-function resolveSearchRerankerProjectionIdentity(
-    reranker: Reranker | null,
-    rerankerApplied: boolean,
-): string {
-    if (!rerankerApplied) return "not_applicable";
-    const projection = reranker?.getDocumentProjectionVersion?.()
-        ?? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
-    if (!projection.trim()) {
-        throw new Error("Applied search reranking requires a stable projection identity.");
-    }
-    return projection;
-}
-
-function resolveSearchRerankRequestIdOrNone(
-    reranker: Reranker | null,
-    rerankerApplied: boolean,
-): SearchRerankRequestIdentityV1 | null {
-    if (!rerankerApplied) return null;
-    if (!reranker) {
-        throw new Error("Applied search reranking requires a complete rerank request identity.");
-    }
-    const requestIdentity = resolveSearchRerankRequestIdentity(reranker);
-    const documentProjectionIdentity = reranker.getDocumentProjectionVersion?.()?.trim()
-        || SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
-    return {
-        ...requestIdentity,
-        documentProjectionIdentity,
-    };
-}
-
-function buildFrozenSearchRankedSetBindingInput(input: {
-    vectorReceipt: ProvenVectorGenerationReceipt;
-    generationReceipt?: ProvenGenerationReceipt;
-    preparedObservation: string;
-    sourceObservation: string | null;
-    queryPolicyDigest: string;
-    rerankerIdentity: SearchRerankerBindingIdentity;
-    rerankerProjectionIdentity: string;
-    rerankerRequestIdentity: SearchRerankRequestIdentityV1 | null;
-    rankingPolicyIdentity: string;
-    orderedResults: readonly SearchGroupedResultV2[];
-    recommendedActions: readonly (SearchRecommendedNextAction | null)[];
-}): SearchRankedSetBindingInput {
-    return {
-        queryPolicyDigest: input.queryPolicyDigest,
-        rankingPolicyIdentity: input.rankingPolicyIdentity,
-        disclosurePolicyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
-        publicationIdentity: {
-            collectionName: input.vectorReceipt.collectionName,
-            marker: input.vectorReceipt.marker,
-            policyDocumentDigest: input.vectorReceipt.policyDocumentDigest,
-            navigation: input.generationReceipt
-                ? { status: "sealed", receipt: input.generationReceipt.navigation }
-                : { status: "not_bound" },
-        },
-        preparedObservation: input.preparedObservation,
-        sourceObservation: input.sourceObservation,
-        rerankerIdentity: input.rerankerIdentity,
-        rerankerProjectionIdentity: input.rerankerProjectionIdentity,
-        rerankerRequestIdentity: input.rerankerRequestIdentity,
-        orderedResults: input.orderedResults,
-        recommendedActions: input.recommendedActions,
-    };
-}
 
 type CodebaseStatus = CodebaseInfo['status'];
 type TrackedCodebaseInfo = Record<string, unknown> & {
@@ -1253,6 +1153,35 @@ export class ToolHandlers {
             getEmbeddingProviderName: () => this.context.getEmbeddingEngine().getProvider(),
             semanticSearch: (request: import("@zokizuan/satori-core").SemanticSearchRequest) => this.context.semanticSearch(request),
             storeFrozenSearchResultSet: (input) => this.searchContinuationCoordinator.store(this, input),
+            lookupFrozenSearchResultSet: (handle, nowMs) => (
+                this.searchContinuationCoordinator.lookup(handle, nowMs)
+            ),
+            removeFrozenSearchResultSet: (handle) => (
+                this.searchContinuationCoordinator.remove(handle)
+            ),
+            advanceFrozenSearchResultSet: (input) => (
+                this.searchContinuationCoordinator.advance(input)
+            ),
+            isSearchContinuationOwner: (owner) => owner === this,
+            continueSearchRoutedToOwner: (args, lookup) => {
+                if (lookup.status !== "hit") {
+                    throw new Error("Routed search continuation lookup is not a hit.");
+                }
+                const owner = lookup.owner as unknown as ToolHandlers;
+                return owner.handleContinueSearchOwned(
+                    args,
+                    lookup as unknown as SearchContinuationLookup,
+                );
+            },
+            getPreparedGenerationRevalidator: () => {
+                const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
+                if (typeof revalidate !== "function") {
+                    return undefined;
+                }
+                return (codebasePath, receipt, options) => (
+                    revalidate.call(this.context, codebasePath, receipt, options)
+                );
+            },
         };
         this.searchRequestCoordinator = new SearchRequestCoordinator(
             searchRequestCoordinatorHost,
@@ -3797,296 +3726,11 @@ export class ToolHandlers {
         return this.handleContinueSearchOwned(args);
     }
 
-    private async handleContinueSearchOwned(
+    public async handleContinueSearchOwned(
         args: ToolArgs,
         routedLookup?: SearchContinuationLookup,
-    ): Promise<{
-        content: Array<{ type: "text"; text: string }>;
-        isError?: boolean;
-    }> {
-        const handle = typeof args.handle === "string" ? args.handle.trim() : "";
-        const expectedOffset = typeof args.expectedOffset === "number"
-            ? args.expectedOffset
-            : Number(args.expectedOffset);
-        const requestedLimit = typeof args.limit === "number" ? args.limit : Number(args.limit);
-        const fail = (code: string, message: string) => ({
-            content: [{
-                type: "text" as const,
-                text: this.stringifyToolJson({ status: "not_ready", code, message }),
-            }],
-            isError: true,
-        });
-        if (!/^[a-f0-9]{48}$/.test(handle)) {
-            return fail("SEARCH_RESULT_SET_HANDLE_INVALID", "Search continuation handle is invalid.");
-        }
-        if (
-            !Number.isSafeInteger(expectedOffset)
-            || expectedOffset < 0
-            || expectedOffset > this.capabilities.getMaxFrozenSearchResults()
-        ) {
-            return fail(
-                "SEARCH_RESULT_SET_OFFSET_INVALID",
-                `Search continuation expectedOffset must be an integer from 0 to ${this.capabilities.getMaxFrozenSearchResults()}.`,
-            );
-        }
-        if (
-            args.limit !== undefined
-            && (!Number.isSafeInteger(requestedLimit)
-                || requestedLimit <= 0
-                || requestedLimit > this.capabilities.getMaxSearchPageSize())
-        ) {
-            return fail(
-                "SEARCH_RESULT_SET_LIMIT_INVALID",
-                `Search continuation limit must be an integer from 1 to ${this.capabilities.getMaxSearchPageSize()}.`,
-            );
-        }
-
-        const nowMs = this.now();
-        const lookup = routedLookup ?? this.searchContinuationCoordinator.lookup(handle, nowMs);
-        if (lookup.status === "expired") {
-            return fail("SEARCH_RESULT_SET_EXPIRED", "Search continuation handle has expired. Run search_codebase again.");
-        }
-        if (lookup.status === "not_found") {
-            return fail("SEARCH_RESULT_SET_NOT_FOUND", "Search continuation handle is unavailable in this process. Run search_codebase again.");
-        }
-        if (lookup.status === "owner_unavailable") {
-            return fail("SEARCH_RESULT_SET_STALE", "Search continuation runtime is no longer available. Run search_codebase again.");
-        }
-        if (lookup.owner !== this) {
-            return lookup.owner.handleContinueSearchOwned(args, lookup);
-        }
-
-        const entry = lookup.entry;
-        let bindingValid = false;
-        try {
-            const rerankerIdentity = resolveSearchRerankerBindingIdentity(
-                this.reranker,
-                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
-            );
-            const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
-                this.reranker,
-                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
-            );
-            const rerankerRequestIdentity = resolveSearchRerankRequestIdOrNone(
-                this.reranker,
-                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
-            );
-            bindingValid = entry.baseEnvelope.rankedSetDigest
-                === entry.rankedSetBinding.rankedSetDigest
-                && verifySearchRankedSetBinding(
-                    entry.rankedSetBinding,
-                    buildFrozenSearchRankedSetBindingInput({
-                        vectorReceipt: entry.vectorReceipt,
-                        ...(entry.generationReceipt
-                            ? { generationReceipt: entry.generationReceipt }
-                            : {}),
-                        preparedObservation: entry.preparedObservation,
-                        sourceObservation: entry.sourceObservation,
-                        queryPolicyDigest: entry.queryPolicyDigest,
-                        rerankerIdentity,
-                        rerankerProjectionIdentity,
-                        rerankerRequestIdentity,
-                        rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
-                            orderAuthority: entry.rankedSetBinding.rerankerIdentity.kind === "provider"
-                                ? "reranker_order"
-                                : "retrieval_order",
-                        }),
-                        orderedResults: entry.orderedResults,
-                        recommendedActions: entry.recommendedActions,
-                    }),
-                );
-        } catch {
-            bindingValid = false;
-        }
-        if (!bindingValid) {
-            this.searchContinuationCoordinator.remove(handle);
-            return fail(
-                "SEARCH_RESULT_SET_STALE",
-                "Search result-set identity changed. Run search_codebase again.",
-            );
-        }
-        const observationBefore = this.getPreparedReadCacheObservation(entry.canonicalRoot);
-        const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
-        if (
-            !observationBefore.observation
-            || observationBefore.observation !== entry.preparedObservation
-            || observationBefore.sourceObservation !== entry.sourceObservation
-            || typeof revalidate !== "function"
-        ) {
-            this.searchContinuationCoordinator.remove(handle);
-            return fail("SEARCH_RESULT_SET_STALE", "Search publication or source observation changed. Run search_codebase again.");
-        }
-        const proof = await revalidate.call(this.context, entry.canonicalRoot, entry.vectorReceipt, {
-            ...(entry.generationReceipt ? { priorGenerationReceipt: entry.generationReceipt } : {}),
-        }).catch(() => null);
-        const observationAfter = this.getPreparedReadCacheObservation(entry.canonicalRoot);
-        if (
-            !proof
-            || proof.navigationProof.status === "requires_reindex"
-            || proof.navigationProof.status === "unsupported"
-            || observationAfter.observation !== observationBefore.observation
-            || observationAfter.sourceObservation !== observationBefore.sourceObservation
-        ) {
-            this.searchContinuationCoordinator.remove(handle);
-            return fail("SEARCH_RESULT_SET_STALE", "Search publication changed while continuation was being prepared. Run search_codebase again.");
-        }
-
-        const pageSize = Number.isFinite(requestedLimit)
-            ? requestedLimit
-            : entry.pageSize;
-        if (lookup.nextOffset !== expectedOffset) {
-            if (
-                lookup.lastPage?.expectedOffset === expectedOffset
-                && lookup.lastPage.pageSize === pageSize
-            ) {
-                return { content: [{ type: "text", text: lookup.lastPage.responseText }] };
-            }
-            return fail(
-                "SEARCH_RESULT_SET_CONFLICT",
-                "Search continuation offset or page size does not match the current cursor. Retry the exact prior request or use the latest continuation response.",
-            );
-        }
-        const remainingResults = entry.orderedResults.slice(lookup.nextOffset);
-        if (remainingResults.length === 0) {
-            return fail(
-                "SEARCH_RESULT_SET_CONSUMED",
-                "Search continuation is complete. Reuse the prior expectedOffset only to retry its page, or run search_codebase again.",
-            );
-        }
-
-        const projection = projectGroupedDisclosure({
-            orderedResults: remainingResults,
-            callerLimit: remainingResults.length,
-            disclosureLimit: pageSize,
-            maxResponseBytes: entry.responseByteLimit,
-            includeSummary: true,
-            buildEnvelope: (results, disclosure) => {
-                const resultCounts = entry.baseEnvelope.resultCounts
-                    ? {
-                        ...entry.baseEnvelope.resultCounts,
-                        returnedGroupCount: results.length,
-                        remainingGroupCount: Math.max(
-                            0,
-                            entry.baseEnvelope.resultCounts.effectiveFrozenTotal
-                                - lookup.nextOffset
-                                - results.length,
-                        ),
-                    }
-                    : undefined;
-                const recommendedNextAction = entry.recommendedActions[lookup.nextOffset] ?? null;
-                const noiseMitigationHint = this.searchQuerySupport.buildNoiseMitigationHint(
-                    entry.canonicalRoot,
-                    results.map((result) => result.target.file),
-                    entry.baseEnvelope.scope,
-                    this.searchQuerySupport.parseSearchOperators(entry.baseEnvelope.query),
-                );
-                const generatedArtifactsHint = this.buildGeneratedArtifactsVerificationHint(
-                    entry.canonicalRoot,
-                    results.map((result) => ({
-                        file: result.target.file,
-                        span: result.target.span,
-                    })),
-                );
-                const pageHints: SearchResponseHints = {
-                    ...(entry.baseEnvelope.hints ?? {}),
-                    ...(noiseMitigationHint ? { noiseMitigation: noiseMitigationHint } : {}),
-                    ...(generatedArtifactsHint
-                        ? {
-                            verification: {
-                                ...(entry.baseEnvelope.hints?.verification ?? {}),
-                                generatedArtifacts: generatedArtifactsHint,
-                            },
-                        }
-                        : {}),
-                };
-                const envelope: SearchGroupedResponseEnvelope = {
-                    ...entry.baseEnvelope,
-                    ...(resultCounts ? { resultCounts } : {}),
-                    ...(Object.keys(pageHints).length > 0 ? { hints: pageHints } : {}),
-                    ...(recommendedNextAction ? { recommendedNextAction } : {}),
-                    ...(disclosure ? { disclosure } : {}),
-                    results: [...results],
-                };
-                return (resultCounts?.remainingGroupCount ?? (remainingResults.length - results.length)) > 0
-                    ? {
-                        ...envelope,
-                        continuation: {
-                            handle,
-                            nextOffset: lookup.nextOffset + results.length,
-                            remainingGroupCount: resultCounts?.remainingGroupCount
-                                ?? (remainingResults.length - results.length),
-                        },
-                    }
-                    : envelope;
-            },
-        });
-        if (projection.status === "page_too_large") {
-            return fail("SEARCH_RESULT_SET_PAGE_TOO_LARGE", "The next search result cannot fit within the response byte budget. Use read_file on an earlier target or run a narrower search.");
-        }
-        const proofAfterProjection = await revalidate.call(
-            this.context,
-            entry.canonicalRoot,
-            entry.vectorReceipt,
-            {
-                ...(entry.generationReceipt
-                    ? { priorGenerationReceipt: entry.generationReceipt }
-                    : {}),
-            },
-        ).catch(() => null);
-        const observationAfterProjection = this.getPreparedReadCacheObservation(entry.canonicalRoot);
-        if (
-            !proofAfterProjection
-            || proofAfterProjection.navigationProof.status === "requires_reindex"
-            || proofAfterProjection.navigationProof.status === "unsupported"
-            || observationAfterProjection.observation !== observationAfter.observation
-            || observationAfterProjection.sourceObservation !== observationAfter.sourceObservation
-        ) {
-            this.searchContinuationCoordinator.remove(handle);
-            return fail(
-                "SEARCH_RESULT_SET_STALE",
-                "Search publication or source observation changed while the continuation page was being projected. Run search_codebase again.",
-            );
-        }
-        const nextOffset = lookup.nextOffset + projection.results.length;
-        const responseText = this.stringifyToolJson(projection.envelope);
-        const advanced = this.searchContinuationCoordinator.advance({
-            handle,
-            expectedOffset: lookup.nextOffset,
-            nextOffset,
-            nowMs: this.now(),
-            replay: {
-                expectedOffset,
-                pageSize,
-                responseText,
-            },
-        });
-        if (advanced !== "advanced") {
-            if (advanced === "conflict") {
-                const concurrent = this.searchContinuationCoordinator.lookup(handle, this.now());
-                if (
-                    concurrent.status === "hit"
-                    && concurrent.lastPage?.expectedOffset === expectedOffset
-                    && concurrent.lastPage.pageSize === pageSize
-                ) {
-                    return {
-                        content: [{ type: "text", text: concurrent.lastPage.responseText }],
-                    };
-                }
-            }
-            return fail(
-                advanced === "conflict"
-                    ? "SEARCH_RESULT_SET_CONFLICT"
-                    : advanced === "too_large"
-                        ? "SEARCH_RESULT_SET_PAGE_TOO_LARGE"
-                        : "SEARCH_RESULT_SET_STALE",
-                advanced === "too_large"
-                    ? "The continuation page plus its retry receipt exceeds the result-set cache byte budget. Run a narrower search."
-                    : "Search continuation was consumed or expired concurrently. Retry the exact prior request, use the latest continuation response, or run search_codebase again.",
-            );
-        }
-        return {
-            content: [{ type: "text", text: responseText }],
-        };
+    ) {
+        return this.searchRequestCoordinator.continueOwned(args, routedLookup);
     }
 
     public releaseSearchContinuationOwnership(): void {

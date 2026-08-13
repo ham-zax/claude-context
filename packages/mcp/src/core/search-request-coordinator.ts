@@ -119,13 +119,16 @@ import {
 } from "./search-result-finalization.js";
 import { attachCompactSearchResultIndex } from "./search-result-index.js";
 import {
+    type SearchResultSetCoordinatorLookup,
     type SearchResultSetStoreResult,
 } from "./search-result-set-cache.js";
 import {
     SEARCH_DISCLOSURE_POLICY_VERSION,
+    projectGroupedDisclosure,
 } from "./search-disclosure.js";
 import {
     buildSearchRankedSetBinding,
+    verifySearchRankedSetBinding,
     type SearchRankedSetBinding,
     type SearchRankedSetBindingInput,
     type SearchRerankerBindingIdentity,
@@ -648,7 +651,35 @@ export interface SearchRequestCoordinatorHost {
         reservedReplayBytes: number;
         nowMs: number;
     }): SearchResultSetStoreResult;
+    lookupFrozenSearchResultSet(handle: string, nowMs: number): SearchContinuationLookup;
+    removeFrozenSearchResultSet(handle: string): void;
+    advanceFrozenSearchResultSet(input: {
+        handle: string;
+        expectedOffset: number;
+        nextOffset: number;
+        nowMs: number;
+        replay: { expectedOffset: number; pageSize: number; responseText: string };
+    }): "advanced" | "conflict" | "expired" | "not_found" | "too_large";
+    isSearchContinuationOwner(owner: object): boolean;
+    continueSearchRoutedToOwner(
+        args: ToolArgs,
+        lookup: SearchContinuationLookup,
+    ): Promise<{
+        content: Array<{ type: "text"; text: string }>;
+        isError?: boolean;
+    }>;
+    getPreparedGenerationRevalidator():
+        | ((codebasePath: string, receipt: ProvenVectorGenerationReceipt, options?: {
+            priorGenerationReceipt?: ProvenGenerationReceipt;
+            navigationObservationChanged?: boolean;
+        }) => Promise<PreparedGenerationRevalidation | null>)
+        | undefined;
 }
+
+type SearchContinuationLookup = SearchResultSetCoordinatorLookup<
+    FrozenSearchResultSet,
+    object
+>;
 
 /**
  * Phase 6.1 — owns the dominant search attempt: argument validation,
@@ -2463,4 +2494,294 @@ export class SearchRequestCoordinator {
         }
     }
 
+    public async continueOwned(
+        args: ToolArgs,
+        routedLookup?: SearchContinuationLookup,
+    ): Promise<{
+        content: Array<{ type: "text"; text: string }>;
+        isError?: boolean;
+    }> {
+        const handle = typeof args.handle === "string" ? args.handle.trim() : "";
+        const expectedOffset = typeof args.expectedOffset === "number"
+            ? args.expectedOffset
+            : Number(args.expectedOffset);
+        const requestedLimit = typeof args.limit === "number" ? args.limit : Number(args.limit);
+        const fail = (code: string, message: string) => ({
+            content: [{
+                type: "text" as const,
+                text: this.host.stringifyToolJson({ status: "not_ready", code, message }),
+            }],
+            isError: true,
+        });
+        if (!/^[a-f0-9]{48}$/.test(handle)) {
+            return fail("SEARCH_RESULT_SET_HANDLE_INVALID", "Search continuation handle is invalid.");
+        }
+        if (
+            !Number.isSafeInteger(expectedOffset)
+            || expectedOffset < 0
+            || expectedOffset > this.host.getCapabilities().getMaxFrozenSearchResults()
+        ) {
+            return fail(
+                "SEARCH_RESULT_SET_OFFSET_INVALID",
+                `Search continuation expectedOffset must be an integer from 0 to ${this.host.getCapabilities().getMaxFrozenSearchResults()}.`,
+            );
+        }
+        if (
+            args.limit !== undefined
+            && (!Number.isSafeInteger(requestedLimit)
+                || requestedLimit <= 0
+                || requestedLimit > this.host.getCapabilities().getMaxSearchPageSize())
+        ) {
+            return fail(
+                "SEARCH_RESULT_SET_LIMIT_INVALID",
+                `Search continuation limit must be an integer from 1 to ${this.host.getCapabilities().getMaxSearchPageSize()}.`,
+            );
+        }
+
+        const nowMs = this.host.now();
+        const lookup = routedLookup ?? this.host.lookupFrozenSearchResultSet(handle, nowMs);
+        if (lookup.status === "expired") {
+            return fail("SEARCH_RESULT_SET_EXPIRED", "Search continuation handle has expired. Run search_codebase again.");
+        }
+        if (lookup.status === "not_found") {
+            return fail("SEARCH_RESULT_SET_NOT_FOUND", "Search continuation handle is unavailable in this process. Run search_codebase again.");
+        }
+        if (lookup.status === "owner_unavailable") {
+            return fail("SEARCH_RESULT_SET_STALE", "Search continuation runtime is no longer available. Run search_codebase again.");
+        }
+        if (!this.host.isSearchContinuationOwner(lookup.owner)) {
+            return this.host.continueSearchRoutedToOwner(args, lookup);
+        }
+
+        const entry = lookup.entry;
+        let bindingValid = false;
+        try {
+            const rerankerIdentity = resolveSearchRerankerBindingIdentity(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
+            const rerankerProjectionIdentity = resolveSearchRerankerProjectionIdentity(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
+            const rerankerRequestIdentity = resolveSearchRerankRequestIdOrNone(
+                this.reranker,
+                entry.rankedSetBinding.rerankerIdentity.kind === "provider",
+            );
+            bindingValid = entry.baseEnvelope.rankedSetDigest
+                === entry.rankedSetBinding.rankedSetDigest
+                && verifySearchRankedSetBinding(
+                    entry.rankedSetBinding,
+                    buildFrozenSearchRankedSetBindingInput({
+                        vectorReceipt: entry.vectorReceipt,
+                        ...(entry.generationReceipt
+                            ? { generationReceipt: entry.generationReceipt }
+                            : {}),
+                        preparedObservation: entry.preparedObservation,
+                        sourceObservation: entry.sourceObservation,
+                        queryPolicyDigest: entry.queryPolicyDigest,
+                        rerankerIdentity,
+                        rerankerProjectionIdentity,
+                        rerankerRequestIdentity,
+                        rankingPolicyIdentity: resolveSearchRankingPolicyIdentity({
+                            orderAuthority: entry.rankedSetBinding.rerankerIdentity.kind === "provider"
+                                ? "reranker_order"
+                                : "retrieval_order",
+                        }),
+                        orderedResults: entry.orderedResults,
+                        recommendedActions: entry.recommendedActions,
+                    }),
+                );
+        } catch {
+            bindingValid = false;
+        }
+        if (!bindingValid) {
+            this.host.removeFrozenSearchResultSet(handle);
+            return fail(
+                "SEARCH_RESULT_SET_STALE",
+                "Search result-set identity changed. Run search_codebase again.",
+            );
+        }
+        const observationBefore = this.host.getPreparedReadCacheObservation(entry.canonicalRoot);
+        const revalidate = this.host.getPreparedGenerationRevalidator();
+        if (
+            !observationBefore.observation
+            || observationBefore.observation !== entry.preparedObservation
+            || observationBefore.sourceObservation !== entry.sourceObservation
+            || typeof revalidate !== "function"
+        ) {
+            this.host.removeFrozenSearchResultSet(handle);
+            return fail("SEARCH_RESULT_SET_STALE", "Search publication or source observation changed. Run search_codebase again.");
+        }
+        const proof = await revalidate(entry.canonicalRoot, entry.vectorReceipt, {
+            ...(entry.generationReceipt ? { priorGenerationReceipt: entry.generationReceipt } : {}),
+        }).catch(() => null);
+        const observationAfter = this.host.getPreparedReadCacheObservation(entry.canonicalRoot);
+        if (
+            !proof
+            || proof.navigationProof.status === "requires_reindex"
+            || proof.navigationProof.status === "unsupported"
+            || observationAfter.observation !== observationBefore.observation
+            || observationAfter.sourceObservation !== observationBefore.sourceObservation
+        ) {
+            this.host.removeFrozenSearchResultSet(handle);
+            return fail("SEARCH_RESULT_SET_STALE", "Search publication changed while continuation was being prepared. Run search_codebase again.");
+        }
+
+        const pageSize = Number.isFinite(requestedLimit)
+            ? requestedLimit
+            : entry.pageSize;
+        if (lookup.nextOffset !== expectedOffset) {
+            if (
+                lookup.lastPage?.expectedOffset === expectedOffset
+                && lookup.lastPage.pageSize === pageSize
+            ) {
+                return { content: [{ type: "text", text: lookup.lastPage.responseText }] };
+            }
+            return fail(
+                "SEARCH_RESULT_SET_CONFLICT",
+                "Search continuation offset or page size does not match the current cursor. Retry the exact prior request or use the latest continuation response.",
+            );
+        }
+        const remainingResults = entry.orderedResults.slice(lookup.nextOffset);
+        if (remainingResults.length === 0) {
+            return fail(
+                "SEARCH_RESULT_SET_CONSUMED",
+                "Search continuation is complete. Reuse the prior expectedOffset only to retry its page, or run search_codebase again.",
+            );
+        }
+
+        const projection = projectGroupedDisclosure({
+            orderedResults: remainingResults,
+            callerLimit: remainingResults.length,
+            disclosureLimit: pageSize,
+            maxResponseBytes: entry.responseByteLimit,
+            includeSummary: true,
+            buildEnvelope: (results, disclosure) => {
+                const resultCounts = entry.baseEnvelope.resultCounts
+                    ? {
+                        ...entry.baseEnvelope.resultCounts,
+                        returnedGroupCount: results.length,
+                        remainingGroupCount: Math.max(
+                            0,
+                            entry.baseEnvelope.resultCounts.effectiveFrozenTotal
+                                - lookup.nextOffset
+                                - results.length,
+                        ),
+                    }
+                    : undefined;
+                const recommendedNextAction = entry.recommendedActions[lookup.nextOffset] ?? null;
+                const noiseMitigationHint = this.searchQuerySupport.buildNoiseMitigationHint(
+                    entry.canonicalRoot,
+                    results.map((result) => result.target.file),
+                    entry.baseEnvelope.scope,
+                    this.searchQuerySupport.parseSearchOperators(entry.baseEnvelope.query),
+                );
+                const generatedArtifactsHint = this.host.buildGeneratedArtifactsVerificationHint(
+                    entry.canonicalRoot,
+                    results.map((result) => ({
+                        file: result.target.file,
+                        span: result.target.span,
+                    })),
+                );
+                const pageHints: SearchResponseHints = {
+                    ...(entry.baseEnvelope.hints ?? {}),
+                    ...(noiseMitigationHint ? { noiseMitigation: noiseMitigationHint } : {}),
+                    ...(generatedArtifactsHint
+                        ? {
+                            verification: {
+                                ...(entry.baseEnvelope.hints?.verification ?? {}),
+                                generatedArtifacts: generatedArtifactsHint,
+                            },
+                        }
+                        : {}),
+                };
+                const envelope: SearchGroupedResponseEnvelope = {
+                    ...entry.baseEnvelope,
+                    ...(resultCounts ? { resultCounts } : {}),
+                    ...(Object.keys(pageHints).length > 0 ? { hints: pageHints } : {}),
+                    ...(recommendedNextAction ? { recommendedNextAction } : {}),
+                    ...(disclosure ? { disclosure } : {}),
+                    results: [...results],
+                };
+                return (resultCounts?.remainingGroupCount ?? (remainingResults.length - results.length)) > 0
+                    ? {
+                        ...envelope,
+                        continuation: {
+                            handle,
+                            nextOffset: lookup.nextOffset + results.length,
+                            remainingGroupCount: resultCounts?.remainingGroupCount
+                                ?? (remainingResults.length - results.length),
+                        },
+                    }
+                    : envelope;
+            },
+        });
+        if (projection.status === "page_too_large") {
+            return fail("SEARCH_RESULT_SET_PAGE_TOO_LARGE", "The next search result cannot fit within the response byte budget. Use read_file on an earlier target or run a narrower search.");
+        }
+        const proofAfterProjection = await revalidate(
+            entry.canonicalRoot,
+            entry.vectorReceipt,
+            {
+                ...(entry.generationReceipt
+                    ? { priorGenerationReceipt: entry.generationReceipt }
+                    : {}),
+            },
+        ).catch(() => null);
+        const observationAfterProjection = this.host.getPreparedReadCacheObservation(entry.canonicalRoot);
+        if (
+            !proofAfterProjection
+            || proofAfterProjection.navigationProof.status === "requires_reindex"
+            || proofAfterProjection.navigationProof.status === "unsupported"
+            || observationAfterProjection.observation !== observationAfter.observation
+            || observationAfterProjection.sourceObservation !== observationAfter.sourceObservation
+        ) {
+            this.host.removeFrozenSearchResultSet(handle);
+            return fail(
+                "SEARCH_RESULT_SET_STALE",
+                "Search publication or source observation changed while the continuation page was being projected. Run search_codebase again.",
+            );
+        }
+        const nextOffset = lookup.nextOffset + projection.results.length;
+        const responseText = this.host.stringifyToolJson(projection.envelope);
+        const advanced = this.host.advanceFrozenSearchResultSet({
+            handle,
+            expectedOffset: lookup.nextOffset,
+            nextOffset,
+            nowMs: this.host.now(),
+            replay: {
+                expectedOffset,
+                pageSize,
+                responseText,
+            },
+        });
+        if (advanced !== "advanced") {
+            if (advanced === "conflict") {
+                const concurrent = this.host.lookupFrozenSearchResultSet(handle, this.host.now());
+                if (
+                    concurrent.status === "hit"
+                    && concurrent.lastPage?.expectedOffset === expectedOffset
+                    && concurrent.lastPage.pageSize === pageSize
+                ) {
+                    return {
+                        content: [{ type: "text", text: concurrent.lastPage.responseText }],
+                    };
+                }
+            }
+            return fail(
+                advanced === "conflict"
+                    ? "SEARCH_RESULT_SET_CONFLICT"
+                    : advanced === "too_large"
+                        ? "SEARCH_RESULT_SET_PAGE_TOO_LARGE"
+                        : "SEARCH_RESULT_SET_STALE",
+                advanced === "too_large"
+                    ? "The continuation page plus its retry receipt exceeds the result-set cache byte budget. Run a narrower search."
+                    : "Search continuation was consumed or expired concurrently. Retry the exact prior request, use the latest continuation response, or run search_codebase again.",
+            );
+        }
+        return {
+            content: [{ type: "text", text: responseText }],
+        };
+    }
 }
