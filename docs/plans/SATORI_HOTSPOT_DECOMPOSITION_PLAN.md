@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `5032875`
+Checkpoint HEAD: `61d8163`
 
 Completed ownership-bounded batches:
 
@@ -37,9 +37,11 @@ Completed ownership-bounded batches:
 - Phase 4.4 / activation/rollback/retention/restore authority decisions: `9f96970`;
 - Phase 4.5 / IndexGenerationWorkflow repair and full-index orchestration: `60a142e`;
 - Phase 4.6 / SynchronizerRegistry synchronizer lifecycle ownership: `ca15dfe`;
-- Phase 5.1 / SourceFreshnessPort read-facing source readiness: `5032875`.
+- Phase 5.1 / SourceFreshnessPort read-facing source readiness: `5032875`;
+- Phase 5.1 repair / single MCP checkpoint observation/handoff state owner + SourceFreshnessPort read-path migration: `61d8163`;
+- Phase 5.2 / prepared publication-read session: `505358b`.
 
-Next open batch at this checkpoint: Phase 5.2. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 5.3. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
