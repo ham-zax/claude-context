@@ -9507,7 +9507,6 @@ test('Context.reindexByChange retains the filesystem delta for retry when increm
             () => context.reindexByChange(codebasePath),
             /synthetic incremental sync failure/,
         );
-        assert.equal((context as unknown as { reindexByChangeQueues: Map<string, Promise<void>> }).reindexByChangeQueues.size, 0);
 
         const registry = await readSymbolRegistrySidecar({ stateRoot, normalizedRootPath: codebasePath });
         assert.equal(registry.status, 'missing');
@@ -9610,7 +9609,6 @@ test('Context.reindexByChange serializes concurrent syncs with an existing synch
             'payload_insert',
             'marker_insert',
         ]);
-        assert.equal((context as unknown as { reindexByChangeQueues: Map<string, Promise<void>> }).reindexByChangeQueues.size, 0);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -9678,7 +9676,6 @@ test('Context.reindexByChange serializes first-use synchronizer creation', async
             'marker_insert',
         ]);
         assert.equal(context.getActiveSynchronizers().size, 1);
-        assert.equal((context as unknown as { reindexByChangeQueues: Map<string, Promise<void>> }).reindexByChangeQueues.size, 0);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

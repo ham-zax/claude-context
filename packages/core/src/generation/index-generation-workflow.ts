@@ -332,17 +332,36 @@ export interface IndexGenerationWorkflowPorts {
     indexPolicyRuntimeService: IndexPolicyRuntimeService;
     getNavigationDeltaState: () => CachedNavigationDeltaState | undefined;
     setNavigationDeltaState: (state: CachedNavigationDeltaState | undefined) => void;
-    preparedIndexCollectionReceipts: WeakSet<PreparedIndexCollectionReceipt>;
     getSynchronizer(synchronizerKey: string): FileSynchronizer | undefined;
     registerSynchronizer(synchronizerKey: string, synchronizer: FileSynchronizer): void;
     getSynchronizerMutationTarget(synchronizerKey: string): string | undefined;
     setSynchronizerMutationTarget(synchronizerKey: string, collectionName: string): void;
     clearSynchronizerMutationTarget(synchronizerKey: string): void;
-    reindexByChangeQueues: Map<string, Promise<void>>;
 }
 
 export class IndexGenerationWorkflow {
+    /**
+     * Phase 8.4A - the workflow owns the operation/capability warm state:
+     * the prepared-receipt capability set and the per-codebase reindex
+     * serialization queues, with their complete lifecycles.
+     */
+    private readonly preparedIndexCollectionReceipts =
+        new WeakSet<PreparedIndexCollectionReceipt>();
+    private readonly reindexByChangeQueues = new Map<string, Promise<void>>();
+
     constructor(private readonly ports: IndexGenerationWorkflowPorts) {}
+
+    public registerPreparedIndexCollectionReceipt(
+        receipt: PreparedIndexCollectionReceipt,
+    ): void {
+        this.preparedIndexCollectionReceipts.add(receipt);
+    }
+
+    public discardPreparedIndexCollectionReceipt(
+        receipt: PreparedIndexCollectionReceipt,
+    ): void {
+        this.preparedIndexCollectionReceipts.delete(receipt);
+    }
 
     refreshEmbedding(embedding: Embedding): void {
         this.ports.embedding = embedding;
@@ -390,7 +409,7 @@ export class IndexGenerationWorkflow {
         // WeakSet membership is the capability boundary. Matching strings are
         // insufficient because a caller could otherwise forge a receipt and
         // skip schema creation for a stale or unrelated collection.
-        if (!this.ports.preparedIndexCollectionReceipts.delete(receipt)) {
+        if (!this.preparedIndexCollectionReceipts.delete(receipt)) {
             throw new Error('Prepared index collection receipt is unknown or already consumed.');
         }
 
@@ -2890,20 +2909,20 @@ export class IndexGenerationWorkflow {
         canonicalRoot: string,
         operation: () => Promise<T>,
     ): Promise<T> {
-        const previous = this.ports.reindexByChangeQueues.get(canonicalRoot) || Promise.resolve();
+        const previous = this.reindexByChangeQueues.get(canonicalRoot) || Promise.resolve();
         let release!: () => void;
         const current = new Promise<void>((resolve) => {
             release = resolve;
         });
-        this.ports.reindexByChangeQueues.set(canonicalRoot, current);
+        this.reindexByChangeQueues.set(canonicalRoot, current);
 
         await previous;
         try {
             return await operation();
         } finally {
             release();
-            if (this.ports.reindexByChangeQueues.get(canonicalRoot) === current) {
-                this.ports.reindexByChangeQueues.delete(canonicalRoot);
+            if (this.reindexByChangeQueues.get(canonicalRoot) === current) {
+                this.reindexByChangeQueues.delete(canonicalRoot);
             }
         }
     }

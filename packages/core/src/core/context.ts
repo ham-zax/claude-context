@@ -584,7 +584,6 @@ export class Context {
 
     private sourceFreshnessPort: SourceFreshnessPort | null = null;
     private indexMutationPort: IndexMutationPort | null = null;
-    private reindexByChangeQueues = new Map<string, Promise<void>>();
     private get publicationRetentionQueues(): PublicationRetentionQueue {
         return this.indexAuthorityCoordinator.publicationRetentionQueues;
     }
@@ -597,7 +596,6 @@ export class Context {
     private readonly preparedNavigationDeltaStates =
         new WeakMap<StagedNavigationSidecarGeneration, CachedNavigationDeltaState>();
     private writeCollectionOverrides = new Map<string, string>();
-    private preparedIndexCollectionReceipts = new WeakSet<PreparedIndexCollectionReceipt>();
     private symbolRegistryStateRoot?: string;
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
     private readonly indexingPipeline: IndexingPipeline;
@@ -842,7 +840,6 @@ export class Context {
             ),
             policyNavigationBindingFromMarker: (navigation) => policyNavigationBindingFromMarker(navigation),
             policyNavigationBindingsEqual: (left, right) => policyNavigationBindingsEqual(left, right),
-            preparedIndexCollectionReceipts: this.preparedIndexCollectionReceipts,
             prepareCollection: (codebasePath, forceReindex, assertMutationCurrent) => (
                 this.prepareCollection(codebasePath, forceReindex, assertMutationCurrent)
             ),
@@ -866,7 +863,6 @@ export class Context {
                 this.rebuildNavigationArtifacts(codebasePath, assertMutationCurrent, publishMutation)
             ),
             refreshRuntimePolicyAuthority: (canonicalRoot) => this.refreshRuntimePolicyAuthority(canonicalRoot),
-            reindexByChangeQueues: this.reindexByChangeQueues,
             resolveCollectionName: (codebasePath) => this.resolveCollectionName(codebasePath),
             resolveCompletionMarkerForCollection: (codebasePath, collectionName) => (
                 this.resolveCompletionMarkerForCollection(codebasePath, collectionName)
@@ -2177,12 +2173,12 @@ export class Context {
             generation: binding.generation,
             operationId: binding.operationId.trim(),
         });
-        this.preparedIndexCollectionReceipts.add(receipt);
+        this.indexGenerationWorkflow.registerPreparedIndexCollectionReceipt(receipt);
         return receipt;
     }
 
     public discardPreparedIndexCollection(receipt: PreparedIndexCollectionReceipt): void {
-        this.preparedIndexCollectionReceipts.delete(receipt);
+        this.indexGenerationWorkflow.discardPreparedIndexCollectionReceipt(receipt);
     }
 
     public async getActiveIndexedCollectionName(codebasePath: string): Promise<string | null> {
