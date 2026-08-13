@@ -6,12 +6,21 @@ import path from "node:path";
 import crypto from "node:crypto";
 import {
     computeIndexPolicyControlSignature,
+    createIndexMutationPort,
+    createSourceFreshnessPort,
     FileSynchronizer,
     IndexPolicyPublicationError,
     observeIndexPolicyInputs,
     SynchronizerCheckpointPublicationError,
 } from "@zokizuan/satori-core";
-import type { CanonicalPublicationBinding, IndexPolicyPublicationReceipt } from "@zokizuan/satori-core";
+import type {
+    CanonicalPublicationBinding,
+    IndexMutationPort,
+    IndexMutationPortDependencies,
+    IndexPolicyPublicationReceipt,
+    SourceFreshnessPort,
+    SourceFreshnessPortDependencies,
+} from "@zokizuan/satori-core";
 import { ManageIndexingHandlers } from "./manage-indexing-handlers.js";
 import type {
     IndexFingerprint,
@@ -28,6 +37,46 @@ import type {
     FullIndexSourceHandoffInput,
     WatcherBootstrapCapture,
 } from "./sync.js";
+
+function unimplementedPortOp(): never {
+    throw new Error("Unexpected port operation invoked by the test host.");
+}
+
+function testIndexMutationPort(overrides: object = {}): IndexMutationPort {
+    return createIndexMutationPort({
+        checkCollectionLimit: () => unimplementedPortOp(),
+        deleteCollectionWithVerification: () => unimplementedPortOp(),
+        prepareIndexCollection: () => unimplementedPortOp(),
+        discardPreparedIndexCollection: () => unimplementedPortOp(),
+        proveVectorGeneration: () => unimplementedPortOp(),
+        proveIndexedGeneration: () => unimplementedPortOp(),
+        repairIndex: () => unimplementedPortOp(),
+        captureDurableIndexAuthority: () => unimplementedPortOp(),
+        restoreDurableIndexAuthority: () => unimplementedPortOp(),
+        publishCompletedIndexMarker: () => unimplementedPortOp(),
+        publishNavigationCandidate: () => unimplementedPortOp(),
+        discardNavigationCandidate: () => unimplementedPortOp(),
+        resolveIndexPolicyForReindex: () => unimplementedPortOp(),
+        resolveIndexPolicyForCodebase: () => unimplementedPortOp(),
+        describeEmbeddingProvider: () => unimplementedPortOp(),
+        indexCodebase: () => unimplementedPortOp(),
+        isObservedIndexPolicyControlSignatureCurrent: () => unimplementedPortOp(),
+        publishResolvedIndexPolicy: () => unimplementedPortOp(),
+        registerSynchronizer: () => unimplementedPortOp(),
+        indexCompletionMarkersEqual: () => unimplementedPortOp(),
+        ...overrides,
+    } as unknown as IndexMutationPortDependencies);
+}
+
+function testSourceFreshnessPort(overrides: object = {}): SourceFreshnessPort {
+    return createSourceFreshnessPort({
+        inspectSourceFreshnessCheckpoint: () => unimplementedPortOp(),
+        compareSourceObservationToFreshnessCheckpoint: () => unimplementedPortOp(),
+        compareAllSourceToFreshnessCheckpoint: () => unimplementedPortOp(),
+        getRegisteredSourceFreshnessCheckpointObservation: () => unimplementedPortOp(),
+        ...overrides,
+    } as unknown as SourceFreshnessPortDependencies);
+}
 
 const RUNTIME_FINGERPRINT: IndexFingerprint = {
     embeddingProvider: "VoyageAI",
@@ -222,7 +271,7 @@ function createRepairReceiptHarness(
         });
 
     const handler = new ManageIndexingHandlers({
-        context: {
+        indexMutationPort: testIndexMutationPort({
             repairIndex: async (_codebasePath: string, repairOptions?: RepairOptionsLike) => {
                 repairCalls += 1;
                 events.push("repair");
@@ -241,12 +290,14 @@ function createRepairReceiptHarness(
             },
             proveIndexedGeneration: options.proveIndexedGeneration
                 ?? (async () => provenRepairGeneration()),
+        }),
+        sourceFreshnessPort: testSourceFreshnessPort({
             inspectSourceFreshnessCheckpoint: options.inspectSourceFreshnessCheckpoint
                 ?? (async () => ({
                     status: "valid" as const,
                     documentDigest: "c".repeat(64),
                 })),
-        },
+        }),
         snapshotManager: {
             startOperation: (lease: RootMutationLease) => {
                 events.push("start:accepted");
@@ -469,10 +520,20 @@ function createFailedIndexingHarness(
         },
     };
 
-    const context = {
-        getVectorStore: () => vectorStore,
+    const indexMutationPort = createIndexMutationPort({
+        checkCollectionLimit: async () => true,
+        deleteCollectionWithVerification: async (
+            collectionName: string,
+            deleteOptions?: { beforeDropAttempt?: () => void },
+        ) => {
+            if (!await vectorStore.hasCollection(collectionName)) {
+                return { collectionName, attempts: 0, verifiedAbsent: true };
+            }
+            deleteOptions?.beforeDropAttempt?.();
+            await vectorStore.dropCollection(collectionName);
+            return { collectionName, attempts: 1, verifiedAbsent: true };
+        },
         indexCompletionMarkersEqual: (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right),
-        loadResolvedIgnorePatterns: async () => undefined,
         resolveIndexPolicyForCodebase: async (_root: string, update: { customExtensions?: string[]; customIgnorePatterns?: string[] } = {}) => {
             standardPolicyResolutionCalls += 1;
             const observed = await observeIndexPolicyInputs(path.resolve(_root));
@@ -569,18 +630,6 @@ function createFailedIndexingHarness(
             }
             return receipt;
         },
-        clearPublishedIndexPolicy: (
-            _canonicalRoot: string,
-            publishMutation: (publish: () => void) => void,
-            expectedDocumentDigest?: string,
-        ) => {
-            clearedExpectedDocumentDigests.push(expectedDocumentDigest);
-            publishMutation(() => {
-                publishedCustomExtensions = [];
-                publishedCustomIgnorePatterns = [];
-                publicationEvents.push('policy:clear');
-            });
-        },
         captureDurableIndexAuthority: () => {
             authorityEvents.push('capture');
             return {
@@ -598,16 +647,12 @@ function createFailedIndexingHarness(
             publishedCustomExtensions = [...(snapshot.testPolicy?.customExtensions ?? [])];
             publishedCustomIgnorePatterns = [...(snapshot.testPolicy?.customIgnorePatterns ?? [])];
         },
-        getCurrentNavigationGeneration: async () => null,
-        restoreNavigationGeneration: async () => {
-            publicationEvents.push('navigation:restore');
-        },
         registerSynchronizer: () => {
             registeredSynchronizers += 1;
         },
-        getEmbeddingEngine: () => ({
-            getProvider: () => "VoyageAI",
-            getDimension: () => 1024,
+        describeEmbeddingProvider: () => ({
+            provider: "VoyageAI",
+            dimension: 1024,
         }),
         indexCodebase: async (...args: Parameters<NonNullable<typeof options.indexCodebase>>) => {
             // The production Context full-rebuild owner creates the staged
@@ -664,46 +709,6 @@ function createFailedIndexingHarness(
         discardNavigationCandidate: async (candidate: { generationId: string }) => {
             publicationEvents.push(`navigation:discard:${candidate.generationId}`);
         },
-        getCompletionProofCollectionName: async () => (
-            typeof options.previousIndexedInfo?.collectionName === "string"
-                ? options.previousIndexedInfo.collectionName
-                : null
-        ),
-        getActiveIndexedCollectionName: async () => (
-            typeof options.previousIndexedInfo?.collectionName === "string"
-                ? options.previousIndexedInfo.collectionName
-                : null
-        ),
-        getIndexCompletionMarker: async () => options.previousIndexedInfo
-            ? buildMarker("repo", {
-                indexedFiles: Number(options.previousIndexedInfo.indexedFiles ?? 0),
-                totalChunks: Number(options.previousIndexedInfo.totalChunks ?? 0),
-                indexStatus: options.previousIndexedInfo.indexStatus === "limit_reached" ? "limit_reached" : "completed",
-            })
-            : null,
-        resolveProvenGeneration: async (root: string) => {
-            if (options.legacyRollback) return null;
-            if (!options.previousIndexedInfo || typeof options.previousIndexedInfo.collectionName !== 'string') return null;
-            return {
-                collectionName: options.previousIndexedInfo.collectionName,
-                marker: buildMarker('repo', {
-                    indexedFiles: Number(options.previousIndexedInfo.indexedFiles ?? 0),
-                    totalChunks: Number(options.previousIndexedInfo.totalChunks ?? 0),
-                    indexStatus: options.previousIndexedInfo.indexStatus === 'limit_reached' ? 'limit_reached' as const : 'completed' as const,
-                }),
-                navigation: null,
-                policy: {
-                    canonicalRoot: path.resolve(root),
-                    profile: 'default' as const,
-                    customExtensions: [...publishedCustomExtensions],
-                    customIgnorePatterns: [...publishedCustomIgnorePatterns],
-                    fileBasedIgnorePatterns: [],
-                    supportedExtensions: ['.ts', ...publishedCustomExtensions],
-                    effectiveIgnorePatterns: [...publishedCustomIgnorePatterns],
-                    policyHash: 'policy-hash',
-                },
-            };
-        },
         proveVectorGeneration: async (root: string) => {
             if (
                 publishedMarker
@@ -753,12 +758,12 @@ function createFailedIndexingHarness(
         },
         proveIndexedGeneration: async (root: string) => {
             if (!navigationPublished) return null;
-            return context.proveVectorGeneration(root);
+            return indexMutationPort.proveVectorGeneration(root);
         },
-    };
+    } as unknown as IndexMutationPortDependencies);
 
     const host = {
-        context,
+        indexMutationPort,
         snapshotManager: {
             setCodebaseIndexing: (_codebasePath: string, progress: number) => {
                 lifecycle = "indexing";
@@ -948,14 +953,19 @@ function createIndexLaunchHarness(
     const ownerCheckedRoots: string[] = [];
     const preflightRoots: string[] = [];
     const handler = new ManageIndexingHandlers({
-        context: {
-            getVectorStore: () => ({
-                checkCollectionLimit: async () => true,
-                hasCollection: async () => writeCollectionOverride !== null,
-                dropCollection: async () => {
-                    writeCollectionOverride = null;
-                },
-            }),
+        indexMutationPort: testIndexMutationPort({
+            checkCollectionLimit: async () => true,
+            deleteCollectionWithVerification: async (
+                collectionName: string,
+                deleteOptions?: { beforeDropAttempt?: () => void },
+            ) => {
+                if (writeCollectionOverride === null) {
+                    return { collectionName, attempts: 0, verifiedAbsent: true };
+                }
+                deleteOptions?.beforeDropAttempt?.();
+                writeCollectionOverride = null;
+                return { collectionName, attempts: 1, verifiedAbsent: true };
+            },
             prepareIndexCollection: async (
                 codebasePath: string,
                 binding: { generation: number; operationId: string },
@@ -978,15 +988,6 @@ function createIndexLaunchHarness(
                     preparedReceipt = null;
                 }
             },
-            resolveProvenGeneration: async () => options.initialIndexed ? {
-                collectionName: resolveCollectionName(repoPath),
-                marker: buildMarker(repoPath, {
-                    indexedFiles: 3,
-                    totalChunks: 9,
-                    indexStatus: 'completed',
-                }),
-                navigation: null,
-            } : null,
             proveVectorGeneration: async () => options.initialIndexed ? {
                 collectionName: resolveCollectionName(repoPath),
                 marker: buildMarker(repoPath, {
@@ -995,13 +996,7 @@ function createIndexLaunchHarness(
                     indexStatus: 'completed',
                 }),
             } : null,
-            getActiveIndexedCollectionName: async () => options.initialIndexed ? resolveCollectionName(repoPath) : null,
-            getIndexCompletionMarker: async () => options.initialIndexed ? buildMarker(repoPath, {
-                indexedFiles: 3,
-                totalChunks: 9,
-                indexStatus: 'completed',
-            }) : null,
-        },
+        }),
         snapshotManager: {
             setCodebaseIndexing: () => { lifecycle = "indexing"; },
             setCodebaseIndexFailed: (codebasePath: string) => {
@@ -2639,7 +2634,7 @@ test("handleRepairIndex saves the manifest paths verified by repair", async () =
         let manifestPaths: string[] | null = null;
         let repairOptions: Record<string, unknown> | undefined;
         const handler = new ManageIndexingHandlers({
-            context: {
+            indexMutationPort: testIndexMutationPort({
                 repairIndex: async (_codebasePath: string, options?: Record<string, unknown>) => {
                     repairOptions = options;
                     return {
@@ -2655,11 +2650,13 @@ test("handleRepairIndex saves the manifest paths verified by repair", async () =
                 proveIndexedGeneration: async () => provenRepairGeneration(
                     "snapshot-selected-collection",
                 ),
+            }),
+            sourceFreshnessPort: testSourceFreshnessPort({
                 inspectSourceFreshnessCheckpoint: async () => ({
                     status: "valid",
                     documentDigest: "c".repeat(64),
                 }),
-            },
+            }),
             snapshotManager: {
                 setCodebaseIndexed: () => undefined,
                 setCodebaseIndexManifest: (_codebasePath: string, paths: string[]) => {
@@ -2741,7 +2738,7 @@ test("handleRepairIndex recovers abandoned indexing before the indexing gate", a
         let indexingProbeCalls = 0;
         let stillIndexing = true;
         const handler = new ManageIndexingHandlers({
-            context: {
+            indexMutationPort: testIndexMutationPort({
                 repairIndex: async () => ({
                     status: "ok",
                     message: "repaired",
@@ -2763,11 +2760,13 @@ test("handleRepairIndex recovers abandoned indexing before the indexing gate", a
                 proveIndexedGeneration: async () => provenRepairGeneration(
                     "snapshot-selected-collection",
                 ),
+            }),
+            sourceFreshnessPort: testSourceFreshnessPort({
                 inspectSourceFreshnessCheckpoint: async () => ({
                     status: "valid",
                     documentDigest: "c".repeat(64),
                 }),
-            },
+            }),
             snapshotManager: {
                 setCodebaseIndexed: () => undefined,
                 setCodebaseIndexManifest: () => undefined,
@@ -2827,7 +2826,7 @@ test("handleRepairIndex does not publish success after lease loss during exact g
         let indexedCalls = 0;
         let saveCalls = 0;
         const handler = new ManageIndexingHandlers({
-            context: {
+            indexMutationPort: testIndexMutationPort({
                 repairIndex: async () => ({
                     status: "ok",
                     message: "repaired",
@@ -2843,7 +2842,7 @@ test("handleRepairIndex does not publish success after lease loss during exact g
                     coordinator.release(lease);
                     return provenRepairGeneration("snapshot-selected-collection");
                 },
-            },
+            }),
             snapshotManager: {
                 setCodebaseIndexed: () => { indexedCalls += 1; },
                 setCodebaseIndexManifest: () => undefined,

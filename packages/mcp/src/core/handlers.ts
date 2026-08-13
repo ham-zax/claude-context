@@ -3,6 +3,9 @@ import crypto from "node:crypto";
 import {
     Context,
     COLLECTION_LIMIT_MESSAGE,
+    createIndexMutationPort,
+    createSourceFreshnessPort,
+    deleteCollectionWithVerification,
     type IndexCompletionMarkerDocument,
     type ProvenGenerationReceipt,
     type ProvenVectorGenerationReceipt,
@@ -1145,8 +1148,132 @@ export class ToolHandlers {
             ) => Promise<void> | void;
         }).startBackgroundIndexing;
         const manageIndexingHandlersHost: ConstructorParameters<typeof ManageIndexingHandlers>[0] = {
-            get context() {
-                return getManageIndexingContext();
+            get indexMutationPort() {
+                const context = getManageIndexingContext();
+                if (typeof context.getIndexMutationPort === "function") {
+                    return context.getIndexMutationPort();
+                }
+                // Compatibility fallback for hosts that do not expose the
+                // Phase 5.3 port yet: reproduce the exact previous direct
+                // Context mutation/publication behavior.
+                return createIndexMutationPort({
+                    checkCollectionLimit: () => context.getVectorStore().checkCollectionLimit(),
+                    deleteCollectionWithVerification: (collectionName, options) => (
+                        deleteCollectionWithVerification(context.getVectorStore(), collectionName, options)
+                    ),
+                    prepareIndexCollection: (codebasePath, binding, assertMutationCurrent) => (
+                        context.prepareIndexCollection(codebasePath, binding, assertMutationCurrent)
+                    ),
+                    discardPreparedIndexCollection: (receipt) => (
+                        context.discardPreparedIndexCollection(receipt)
+                    ),
+                    proveVectorGeneration: (codebasePath) => context.proveVectorGeneration(codebasePath),
+                    proveIndexedGeneration: (codebasePath) => context.proveIndexedGeneration(codebasePath),
+                    repairIndex: (codebasePath, options) => context.repairIndex(codebasePath, options),
+                    captureDurableIndexAuthority: (codebasePath) => (
+                        context.captureDurableIndexAuthority(codebasePath)
+                    ),
+                    restoreDurableIndexAuthority: (snapshot, publishMutation, expectedCurrent, mutationOwner) => (
+                        context.restoreDurableIndexAuthority(
+                            snapshot,
+                            publishMutation,
+                            expectedCurrent,
+                            mutationOwner,
+                        )
+                    ),
+                    publishCompletedIndexMarker: (
+                        codebasePath,
+                        indexedFiles,
+                        totalChunks,
+                        collectionName,
+                        indexStatus,
+                        assertMutationCurrent,
+                        navigationCandidate,
+                        indexPolicyHash,
+                        runId,
+                    ) => context.publishCompletedIndexMarker(
+                        codebasePath,
+                        indexedFiles,
+                        totalChunks,
+                        collectionName,
+                        indexStatus,
+                        assertMutationCurrent,
+                        navigationCandidate,
+                        indexPolicyHash,
+                        runId,
+                    ),
+                    publishNavigationCandidate: (candidate, assertMutationCurrent, publishMutation) => (
+                        context.publishNavigationCandidate(candidate, assertMutationCurrent, publishMutation)
+                    ),
+                    discardNavigationCandidate: (candidate, assertMutationCurrent) => (
+                        context.discardNavigationCandidate(candidate, assertMutationCurrent)
+                    ),
+                    resolveIndexPolicyForReindex: (codebasePath, update) => (
+                        context.resolveIndexPolicyForReindex(codebasePath, update)
+                    ),
+                    resolveIndexPolicyForCodebase: (codebasePath, update) => (
+                        context.resolveIndexPolicyForCodebase(codebasePath, update)
+                    ),
+                    describeEmbeddingProvider: () => {
+                        const encoderEngine = context.getEmbeddingEngine();
+                        return {
+                            provider: encoderEngine.getProvider(),
+                            dimension: encoderEngine.getDimension(),
+                        };
+                    },
+                    indexCodebase: (codebasePath, progressCallback, forceReindex, options) => (
+                        context.indexCodebase(codebasePath, progressCallback, forceReindex, options)
+                    ),
+                    isObservedIndexPolicyControlSignatureCurrent: (policy) => (
+                        context.isObservedIndexPolicyControlSignatureCurrent(policy)
+                    ),
+                    publishResolvedIndexPolicy: (policy, binding, publishMutation) => (
+                        context.publishResolvedIndexPolicy(policy, binding, publishMutation)
+                    ),
+                    registerSynchronizer: (collectionName, synchronizer) => (
+                        context.registerSynchronizer(collectionName, synchronizer)
+                    ),
+                    indexCompletionMarkersEqual: (left, right) => (
+                        context.indexCompletionMarkersEqual(left, right)
+                    ),
+                });
+            },
+            get sourceFreshnessPort() {
+                const context = getManageIndexingContext();
+                if (typeof context.getSourceFreshnessPort === "function") {
+                    return context.getSourceFreshnessPort();
+                }
+                // Compatibility fallback for hosts that do not expose the
+                // Phase 5.1 port yet: reproduce the exact previous direct
+                // source-freshness inspection behavior.
+                return createSourceFreshnessPort({
+                    inspectSourceFreshnessCheckpoint: (
+                        codebasePath,
+                        checkpointIdentity,
+                        requestBoundReceipt,
+                    ) => context.inspectSourceFreshnessCheckpoint(
+                        codebasePath,
+                        checkpointIdentity,
+                        requestBoundReceipt,
+                    ),
+                    compareSourceObservationToFreshnessCheckpoint: (
+                        codebasePath,
+                        requestBoundReceipt,
+                    ) => context.compareSourceObservationToFreshnessCheckpoint(
+                        codebasePath,
+                        requestBoundReceipt,
+                    ),
+                    compareAllSourceToFreshnessCheckpoint: (
+                        codebasePath,
+                        requestBoundReceipt,
+                    ) => context.compareAllSourceToFreshnessCheckpoint(
+                        codebasePath,
+                        requestBoundReceipt,
+                    ),
+                    getRegisteredSourceFreshnessCheckpointObservation: (codebasePath) => (
+                        context.getRegisteredSourceFreshnessCheckpointObservation(codebasePath)
+                    ),
+                });
             },
             get snapshotManager() {
                 return getManageIndexingSnapshotManager();

@@ -2,8 +2,6 @@ import * as fs from "fs";
 import * as crypto from "node:crypto";
 import {
     COLLECTION_LIMIT_MESSAGE,
-    Context,
-    deleteCollectionWithVerification,
     IndexPolicyPublicationError,
     RemoteCollectionDeletePendingError,
     SynchronizerCheckpointPublicationError,
@@ -11,11 +9,15 @@ import {
 import type {
     CanonicalPublicationBinding,
     CustomIndexPolicyUpdate,
+    DurableIndexAuthoritySnapshot,
+    IndexMutationPort,
     PreparedIndexCollectionReceipt,
+    ProvenVectorGenerationReceipt,
     RepairProof,
     RepairSnapshotEvidence,
     ObservedResolvedIndexPolicy,
     SourceFreshnessCheckpointEvidence,
+    SourceFreshnessPort,
 } from "@zokizuan/satori-core";
 import type { SnapshotManager } from "./snapshot.js";
 import type { SyncManager, WatcherBootstrapCapture } from "./sync.js";
@@ -129,7 +131,8 @@ function classifyRepairSnapshotEvidence(info: Record<string, unknown> | undefine
 }
 
 type ManageIndexingHandlersHost = {
-    context: Context;
+    indexMutationPort: IndexMutationPort;
+    sourceFreshnessPort: SourceFreshnessPort;
     snapshotManager: SnapshotManager;
     syncManager: SyncManager;
     runtimeFingerprint: IndexFingerprint;
@@ -362,7 +365,7 @@ export class ManageIndexingHandlers {
             return;
         }
         try {
-            await deleteCollectionWithVerification(this.host.context.getVectorStore(), collectionName, {
+            await this.host.indexMutationPort.deleteCollectionWithVerification(collectionName, {
                 beforeDropAttempt: assertMutationCurrent,
             });
             console.log(`[BACKGROUND-INDEX] Cleaned failed staged collection '${collectionName}' for '${codebasePath}'.`);
@@ -744,7 +747,7 @@ export class ManageIndexingHandlers {
                     // a one-shot generation-bound receipt for the background
                     // owner to consume before it may skip preparation.
                     this.host.setWriteCollectionOverride(absolutePath, stagedCollectionName);
-                    preparedCollectionReceipt = await this.host.context.prepareIndexCollection(
+                    preparedCollectionReceipt = await this.host.indexMutationPort.prepareIndexCollection(
                         absolutePath,
                         {
                             generation: mutationLease.generation,
@@ -756,7 +759,7 @@ export class ManageIndexingHandlers {
                     // Compatibility path for hosts that do not provide mutation
                     // leases. They cannot safely transfer a generation-bound
                     // prepared receipt, so retain the existing immediate probe.
-                    const canCreateCollection = await this.host.context.getVectorStore().checkCollectionLimit();
+                    const canCreateCollection = await this.host.indexMutationPort.checkCollectionLimit();
                     if (!canCreateCollection) {
                         console.error(`[INDEX-VALIDATION] ❌ Collection limit validation failed: ${absolutePath}`);
                         const guidanceMessage = await this.host.buildCollectionLimitMessage(absolutePath);
@@ -768,7 +771,7 @@ export class ManageIndexingHandlers {
             } catch (validationError: unknown) {
                 console.error("[INDEX-VALIDATION] ❌ Collection creation validation failed:", validationError);
                 if (preparedCollectionReceipt) {
-                    this.host.context.discardPreparedIndexCollection(preparedCollectionReceipt);
+                    this.host.indexMutationPort.discardPreparedIndexCollection(preparedCollectionReceipt);
                     preparedCollectionReceipt = undefined;
                 }
                 if (mutationLease && this.host.mutationLeaseCoordinator?.isCurrent(mutationLease)) {
@@ -914,7 +917,7 @@ export class ManageIndexingHandlers {
             console.error("Error in handleIndexCodebase:", error);
             const failurePath = canonicalRoot ?? absolutePathOrRaw(codebasePath);
             if (preparedCollectionReceipt) {
-                this.host.context.discardPreparedIndexCollection(preparedCollectionReceipt);
+                this.host.indexMutationPort.discardPreparedIndexCollection(preparedCollectionReceipt);
                 preparedCollectionReceipt = undefined;
             }
             if (
@@ -950,7 +953,7 @@ export class ManageIndexingHandlers {
                 && Number(previousTotalChunks) >= 0
             ) {
                 try {
-                    const provenGeneration = await this.host.context.proveVectorGeneration(failurePath);
+                    const provenGeneration = await this.host.indexMutationPort.proveVectorGeneration(failurePath);
                     restorePreviousLifecycle = provenGeneration?.collectionName === previousCollectionName
                         && provenGeneration.marker.indexStatus !== "limit_reached"
                         && provenGeneration.marker.indexedFiles === Number(previousIndexedFiles)
@@ -1221,7 +1224,7 @@ export class ManageIndexingHandlers {
                 ? snapshotInfo.collectionName.trim()
                 : "";
             persistOperation("proving");
-            const result = await this.host.context.repairIndex(absolutePath, {
+            const result = await this.host.indexMutationPort.repairIndex(absolutePath, {
                 snapshotEvidence,
                 ...(preferredCollectionName ? { preferredCollectionName } : {}),
                 onProofUpdate: (proof) => {
@@ -1259,7 +1262,7 @@ export class ManageIndexingHandlers {
                         basis: "generation_proof_in_progress",
                     },
                 };
-                const proven = await this.host.context.proveIndexedGeneration(absolutePath);
+                const proven = await this.host.indexMutationPort.proveIndexedGeneration(absolutePath);
                 if (
                     !proven
                     || proven.collectionName !== result.collectionName
@@ -1269,25 +1272,14 @@ export class ManageIndexingHandlers {
                     throw new Error(`Repair completion for '${absolutePath}' did not match an exact proven generation.`);
                 }
                 assertMutationCurrent?.();
-                const checkpoint = await (async () => {
-                    if (typeof this.host.context.getSourceFreshnessPort === "function") {
-                        const prepared = await this.host.context
-                            .getSourceFreshnessPort()
-                            .prepareCurrentSourceObservation(
-                                absolutePath,
-                                {
-                                    checkpointIdentity: proven.collectionName,
-                                    requestBoundReceipt: proven,
-                                },
-                            );
-                        return prepared.evidence;
-                    }
-                    return this.host.context.inspectSourceFreshnessCheckpoint(
-                        absolutePath,
-                        proven.collectionName,
-                        proven,
-                    );
-                })();
+                const prepared = await this.host.sourceFreshnessPort.prepareCurrentSourceObservation(
+                    absolutePath,
+                    {
+                        checkpointIdentity: proven.collectionName,
+                        requestBoundReceipt: proven,
+                    },
+                );
+                const checkpoint = prepared.evidence;
                 if (checkpoint.status !== "valid") {
                     throw new Error(`Repair completion for '${absolutePath}' did not preserve a valid source checkpoint.`);
                 }
@@ -1480,8 +1472,8 @@ export class ManageIndexingHandlers {
         let navigationCandidate: import("@zokizuan/satori-core").StagedNavigationSidecarGeneration | undefined;
         let candidatePolicy: ObservedResolvedIndexPolicy | null = null;
         let candidatePolicyPublished = false;
-        let candidateAuthorityForRollback: ReturnType<Context['captureDurableIndexAuthority']> | null = null;
-        let expectedCandidateAuthority: Awaited<ReturnType<Context['proveVectorGeneration']>> = null;
+        let candidateAuthorityForRollback: DurableIndexAuthoritySnapshot | null = null;
+        let expectedCandidateAuthority: ProvenVectorGenerationReceipt | null = null;
         let candidateMarkerRunId: string | undefined;
         let candidateMarkerPublicationStarted = false;
         let writingReceiptPublished = false;
@@ -1553,7 +1545,7 @@ export class ManageIndexingHandlers {
             : "";
         const previousIndexedFiles = previousInfo?.indexedFiles;
         const previousTotalChunks = previousInfo?.totalChunks;
-        const previousAuthority = this.host.context.captureDurableIndexAuthority(absolutePath);
+        const previousAuthority = this.host.indexMutationPort.captureDurableIndexAuthority(absolutePath);
         let previousCompleteGeneration = previousInfo?.indexStatus === "completed"
             && previousInfo?.fingerprintSource === "verified"
             && previousFingerprint !== null
@@ -1578,7 +1570,7 @@ export class ManageIndexingHandlers {
 
         if (previousCompleteGeneration) {
             try {
-                const provenGeneration = await this.host.context.proveVectorGeneration(absolutePath);
+                const provenGeneration = await this.host.indexMutationPort.proveVectorGeneration(absolutePath);
                 if (
                     provenGeneration?.collectionName !== previousCompleteGeneration.collectionName
                     || provenGeneration.marker.indexStatus === "limit_reached"
@@ -1626,9 +1618,9 @@ export class ManageIndexingHandlers {
 
         try {
             for (const [capability, implementation] of [
-                ["publishCompletedIndexMarker", this.host.context.publishCompletedIndexMarker],
-                ["publishNavigationCandidate", this.host.context.publishNavigationCandidate],
-                ["discardNavigationCandidate", this.host.context.discardNavigationCandidate],
+                ["publishCompletedIndexMarker", this.host.indexMutationPort.publishCompletedIndexMarker],
+                ["publishNavigationCandidate", this.host.indexMutationPort.publishNavigationCandidate],
+                ["discardNavigationCandidate", this.host.indexMutationPort.discardNavigationCandidate],
             ] as const) {
                 if (typeof implementation !== "function") {
                     throw new Error(`Missing required staged-index capability: Context.${capability}.`);
@@ -1649,8 +1641,8 @@ export class ManageIndexingHandlers {
             }
 
             candidatePolicy = forceReindex
-                ? await this.host.context.resolveIndexPolicyForReindex(absolutePath, policyUpdate)
-                : await this.host.context.resolveIndexPolicyForCodebase(absolutePath, policyUpdate);
+                ? await this.host.indexMutationPort.resolveIndexPolicyForReindex(absolutePath, policyUpdate)
+                : await this.host.indexMutationPort.resolveIndexPolicyForCodebase(absolutePath, policyUpdate);
             console.log(`[BACKGROUND-INDEX] Using observed index profile '${candidatePolicy.profile}'.`);
             candidateMarkerRunId = crypto.randomUUID();
             this.host.syncManager.beginFullIndexSourceHandoff(
@@ -1695,8 +1687,8 @@ export class ManageIndexingHandlers {
 
             console.log(`[BACKGROUND-INDEX] Starting indexing for: ${absolutePath}`);
 
-            const encoderEngine = this.host.context.getEmbeddingEngine();
-            console.log(`[BACKGROUND-INDEX] 🧠 Using embedding provider: ${encoderEngine.getProvider()} with dimension: ${encoderEngine.getDimension()}`);
+            const encoderDescription = this.host.indexMutationPort.describeEmbeddingProvider();
+            console.log(`[BACKGROUND-INDEX] 🧠 Using embedding provider: ${encoderDescription.provider} with dimension: ${encoderDescription.dimension}`);
 
             console.log("[BACKGROUND-INDEX] 🚀 Beginning codebase indexing process...");
             // Context.indexCodebase owns the first and only staged-collection
@@ -1707,7 +1699,7 @@ export class ManageIndexingHandlers {
             if (preparedCollectionReceipt && !mutationLease) {
                 throw new Error('Prepared index collection receipt requires its mutation lease.');
             }
-            const stats = await this.host.context.indexCodebase(absolutePath, (progress) => {
+            const stats = await this.host.indexMutationPort.indexCodebase(absolutePath, (progress) => {
                 if (mutationLease) {
                     this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
                 }
@@ -1775,7 +1767,7 @@ export class ManageIndexingHandlers {
             }
             persistBackgroundPhase("proving");
 
-            if (!await this.host.context.isObservedIndexPolicyControlSignatureCurrent(candidatePolicy)) {
+            if (!await this.host.indexMutationPort.isObservedIndexPolicyControlSignatureCurrent(candidatePolicy)) {
                 throw new IndexPolicyControlDriftError(absolutePath);
             }
 
@@ -1826,7 +1818,7 @@ export class ManageIndexingHandlers {
 
             if (stats.status === "limit_reached") {
                 rejectCandidateSourceHandoff();
-                this.host.context.publishResolvedIndexPolicy(
+                this.host.indexMutationPort.publishResolvedIndexPolicy(
                     candidatePolicy,
                     {
                         collectionName: targetCollectionName,
@@ -1835,11 +1827,11 @@ export class ManageIndexingHandlers {
                     publishMutation,
                 );
                 candidatePolicyPublished = true;
-                candidateAuthorityForRollback = this.host.context.captureDurableIndexAuthority(absolutePath);
+                candidateAuthorityForRollback = this.host.indexMutationPort.captureDurableIndexAuthority(absolutePath);
                 // From this point a lost acknowledgement can leave a remote marker,
                 // so failure cleanup must attempt withdrawal even if publication throws.
                 candidateMarkerPublicationStarted = true;
-                await this.host.context.publishCompletedIndexMarker(
+                await this.host.indexMutationPort.publishCompletedIndexMarker(
                     absolutePath,
                     stats.indexedFiles,
                     stats.totalChunks,
@@ -1865,13 +1857,13 @@ export class ManageIndexingHandlers {
                 if (!stats.navigationCandidate) {
                     throw new Error(`Completed index candidate for '${absolutePath}' did not produce a navigation generation.`);
                 }
-                if (!await this.host.context.isObservedIndexPolicyControlSignatureCurrent(candidatePolicy)) {
+                if (!await this.host.indexMutationPort.isObservedIndexPolicyControlSignatureCurrent(candidatePolicy)) {
                     throw new IndexPolicyControlDriftError(absolutePath);
                 }
                 // Seal vector proof first. Active resolution also requires the matching
                 // navigation pointer, so the candidate remains unavailable until the
                 // pointer publication below succeeds.
-                await this.host.context.publishCompletedIndexMarker(
+                await this.host.indexMutationPort.publishCompletedIndexMarker(
                     absolutePath,
                     stats.indexedFiles,
                     stats.totalChunks,
@@ -1917,7 +1909,7 @@ export class ManageIndexingHandlers {
                         operationId: publicationAuthority.operationId,
                     },
                 };
-                this.host.context.publishResolvedIndexPolicy(
+                this.host.indexMutationPort.publishResolvedIndexPolicy(
                     candidatePolicy,
                     {
                         collectionName: targetCollectionName,
@@ -1931,8 +1923,8 @@ export class ManageIndexingHandlers {
                     publishMutation,
                 );
                 candidatePolicyPublished = true;
-                candidateAuthorityForRollback = this.host.context.captureDurableIndexAuthority(absolutePath);
-                expectedCandidateAuthority = await this.host.context.proveVectorGeneration(absolutePath);
+                candidateAuthorityForRollback = this.host.indexMutationPort.captureDurableIndexAuthority(absolutePath);
+                expectedCandidateAuthority = await this.host.indexMutationPort.proveVectorGeneration(absolutePath);
                 if (
                     expectedCandidateAuthority?.collectionName !== targetCollectionName
                     || expectedCandidateAuthority.marker.indexStatus !== "completed"
@@ -1943,19 +1935,19 @@ export class ManageIndexingHandlers {
                 ) {
                     throw new Error(`Candidate vector authority for '${absolutePath}' could not be proven before navigation publication.`);
                 }
-                await this.host.context.publishNavigationCandidate(
+                await this.host.indexMutationPort.publishNavigationCandidate(
                     stats.navigationCandidate,
                     assertMutationCurrent,
                     publishMutation,
                 );
-                candidateAuthorityForRollback = this.host.context.captureDurableIndexAuthority(absolutePath);
+                candidateAuthorityForRollback = this.host.indexMutationPort.captureDurableIndexAuthority(absolutePath);
                 candidateAuthorityCommitted = true;
             }
             if (stats.status === "completed") {
                 if (!fullIndexCheckpointCommitted) {
                     throw new Error(`Full index checkpoint was not committed for '${absolutePath}'.`);
                 }
-                this.host.context.registerSynchronizer(this.host.resolveCollectionName(absolutePath), synchronizer);
+                this.host.indexMutationPort.registerSynchronizer(this.host.resolveCollectionName(absolutePath), synchronizer);
                 if (
                     watcherBootstrapCapture
                     && fullIndexCheckpointEvidence
@@ -2035,7 +2027,7 @@ export class ManageIndexingHandlers {
                     `[BACKGROUND-INDEX] Policy publication for '${absolutePath}' committed before acknowledgement failed; restoring the captured durable authority.`,
                 );
                 candidatePolicyPublished = true;
-                candidateAuthorityForRollback = this.host.context.captureDurableIndexAuthority(absolutePath);
+                candidateAuthorityForRollback = this.host.indexMutationPort.captureDurableIndexAuthority(absolutePath);
             }
 
             if (error instanceof SynchronizerCheckpointPublicationError && error.committed) {
@@ -2056,10 +2048,10 @@ export class ManageIndexingHandlers {
                 && expectedCandidateAuthority
             ) {
                 try {
-                    const provenCandidate = await this.host.context.proveIndexedGeneration(absolutePath);
+                    const provenCandidate = await this.host.indexMutationPort.proveIndexedGeneration(absolutePath);
                     candidateAuthorityCommitted = provenCandidate?.collectionName === targetCollectionName
                         && provenCandidate.policyDocumentDigest === expectedCandidateAuthority.policyDocumentDigest
-                        && this.host.context.indexCompletionMarkersEqual(
+                        && this.host.indexMutationPort.indexCompletionMarkersEqual(
                             provenCandidate.marker,
                             expectedCandidateAuthority.marker,
                         );
@@ -2069,7 +2061,7 @@ export class ManageIndexingHandlers {
             }
             if (fullIndexCheckpointCommitted && candidateAuthorityCommitted && committedIndexStats) {
                 if (fullIndexSynchronizer) {
-                    this.host.context.registerSynchronizer(
+                    this.host.indexMutationPort.registerSynchronizer(
                         this.host.resolveCollectionName(absolutePath),
                         fullIndexSynchronizer,
                     );
@@ -2141,7 +2133,7 @@ export class ManageIndexingHandlers {
                 }
             }
             if (preparedCollectionReceipt) {
-                this.host.context.discardPreparedIndexCollection(preparedCollectionReceipt);
+                this.host.indexMutationPort.discardPreparedIndexCollection(preparedCollectionReceipt);
             }
             try {
                 await this.cleanupFailedStagedCollection(absolutePath, targetCollectionName, assertMutationCurrent);
@@ -2154,7 +2146,7 @@ export class ManageIndexingHandlers {
             }
             if (navigationCandidate) {
                 try {
-                    await this.host.context.discardNavigationCandidate(navigationCandidate, assertMutationCurrent);
+                    await this.host.indexMutationPort.discardNavigationCandidate(navigationCandidate, assertMutationCurrent);
                 } catch (navigationCleanupError) {
                     console.warn(`[BACKGROUND-INDEX] Failed to discard navigation candidate '${navigationCandidate.generationId}': ${formatUnknownError(navigationCleanupError)}`);
                 }
@@ -2167,7 +2159,7 @@ export class ManageIndexingHandlers {
                     if (!publishMutation) {
                         throw new Error('Cannot restore durable index authority without a current mutation fence.');
                     }
-                    await this.host.context.restoreDurableIndexAuthority(
+                    await this.host.indexMutationPort.restoreDurableIndexAuthority(
                         previousAuthority,
                         publishMutation,
                         candidateAuthorityForRollback,

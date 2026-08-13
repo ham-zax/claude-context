@@ -94,6 +94,7 @@ import {
 } from '../sync/synchronizer';
 import { SynchronizerRegistry } from '../sync/synchronizer-registry';
 import { createSourceFreshnessPort, type SourceFreshnessPort } from '../sync/source-freshness-port';
+import { createIndexMutationPort, type IndexMutationPort } from './index-mutation-port';
 import type {
     RepairIndexResult,
     RepairProof,
@@ -638,6 +639,7 @@ export class Context {
     });
 
     private sourceFreshnessPort: SourceFreshnessPort | null = null;
+    private indexMutationPort: IndexMutationPort | null = null;
     private reindexByChangeQueues = new Map<string, Promise<void>>();
     private get publicationRetentionQueues(): PublicationRetentionQueue {
         return this.indexAuthorityCoordinator.publicationRetentionQueues;
@@ -1373,6 +1375,95 @@ export class Context {
             });
         }
         return this.sourceFreshnessPort;
+    }
+
+    /**
+     * Phase 5.3 — narrow operation-level index mutation/publication port for
+     * the MCP indexing coordinator. Wires existing Context operations without
+     * exposing raw vector, embedding, or publication capabilities.
+     */
+    getIndexMutationPort(): IndexMutationPort {
+        if (!this.indexMutationPort) {
+            this.indexMutationPort = createIndexMutationPort({
+                checkCollectionLimit: () => this.getVectorStore().checkCollectionLimit(),
+                deleteCollectionWithVerification: (collectionName, options) => (
+                    deleteCollectionWithVerification(this.getVectorStore(), collectionName, options)
+                ),
+                prepareIndexCollection: (codebasePath, binding, assertMutationCurrent) => (
+                    this.prepareIndexCollection(codebasePath, binding, assertMutationCurrent)
+                ),
+                discardPreparedIndexCollection: (receipt) => (
+                    this.discardPreparedIndexCollection(receipt)
+                ),
+                proveVectorGeneration: (codebasePath) => this.proveVectorGeneration(codebasePath),
+                proveIndexedGeneration: (codebasePath) => this.proveIndexedGeneration(codebasePath),
+                repairIndex: (codebasePath, options) => this.repairIndex(codebasePath, options),
+                captureDurableIndexAuthority: (codebasePath) => (
+                    this.captureDurableIndexAuthority(codebasePath)
+                ),
+                restoreDurableIndexAuthority: (snapshot, publishMutation, expectedCurrent, mutationOwner) => (
+                    this.restoreDurableIndexAuthority(
+                        snapshot,
+                        publishMutation,
+                        expectedCurrent,
+                        mutationOwner,
+                    )
+                ),
+                publishCompletedIndexMarker: (
+                    codebasePath,
+                    indexedFiles,
+                    totalChunks,
+                    collectionName,
+                    indexStatus,
+                    assertMutationCurrent,
+                    navigationCandidate,
+                    indexPolicyHash,
+                    runId,
+                ) => this.publishCompletedIndexMarker(
+                    codebasePath,
+                    indexedFiles,
+                    totalChunks,
+                    collectionName,
+                    indexStatus,
+                    assertMutationCurrent,
+                    navigationCandidate,
+                    indexPolicyHash,
+                    runId,
+                ),
+                publishNavigationCandidate: (candidate, assertMutationCurrent, publishMutation) => (
+                    this.publishNavigationCandidate(candidate, assertMutationCurrent, publishMutation)
+                ),
+                discardNavigationCandidate: (candidate, assertMutationCurrent) => (
+                    this.discardNavigationCandidate(candidate, assertMutationCurrent)
+                ),
+                resolveIndexPolicyForReindex: (codebasePath, update) => (
+                    this.resolveIndexPolicyForReindex(codebasePath, update)
+                ),
+                resolveIndexPolicyForCodebase: (codebasePath, update) => (
+                    this.resolveIndexPolicyForCodebase(codebasePath, update)
+                ),
+                describeEmbeddingProvider: () => ({
+                    provider: this.getEmbeddingEngine().getProvider(),
+                    dimension: this.getEmbeddingEngine().getDimension(),
+                }),
+                indexCodebase: (codebasePath, progressCallback, forceReindex, options) => (
+                    this.indexCodebase(codebasePath, progressCallback, forceReindex, options)
+                ),
+                isObservedIndexPolicyControlSignatureCurrent: (policy) => (
+                    this.isObservedIndexPolicyControlSignatureCurrent(policy)
+                ),
+                publishResolvedIndexPolicy: (policy, binding, publishMutation) => (
+                    this.publishResolvedIndexPolicy(policy, binding, publishMutation)
+                ),
+                registerSynchronizer: (collectionName, synchronizer) => (
+                    this.registerSynchronizer(collectionName, synchronizer)
+                ),
+                indexCompletionMarkersEqual: (left, right) => (
+                    this.indexCompletionMarkersEqual(left, right)
+                ),
+            });
+        }
+        return this.indexMutationPort;
     }
 
     private async resolveCheckpointComparisonSynchronizer(
