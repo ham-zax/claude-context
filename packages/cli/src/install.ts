@@ -22,13 +22,10 @@ import {
 } from "./install-preflight.js";
 import {
     assertAutoClientTargets,
-    selectClientTargets,
 } from "./client-targets.js";
 import {
     packageNameFromSpecifier,
-    plannedManagedRuntimeCommand,
     resolveLauncherPath,
-    resolveManagedClientCommand,
     resolvePotionAssetsRoot,
     resolveRuntimeEntryPath,
     resolveRuntimePackageRoot,
@@ -59,7 +56,6 @@ export type {
 } from "./install-contracts.js";
 export { assertAutoClientTargets, detectClientTargets } from "./client-targets.js";
 export { resolveLauncherPath, resolveManagedClientCommand } from "./managed-runtime-paths.js";
-import { resolveManagedPackageSpecifier } from "./managed-package.js";
 import {
     buildLauncherScript,
     parseManagedLauncherDescriptor,
@@ -67,12 +63,9 @@ import {
 import {
     assertFileContentUnchanged,
     ensureDir,
-    prepareMutation,
-    prepareProjectProfileInstall,
     readTextIfExists,
     writeTextFileAtomic,
     type FileMutation,
-    type PreparedMutation,
 } from "./client-config-mutations.js";
 import {
     inspectManagedClientConfigurations,
@@ -87,6 +80,13 @@ import {
     resolveOfflineReranker,
     resolveVerifiedLateOnModel,
 } from "./runtime-selection.js";
+import {
+    createInstallPlan,
+    resolveDefaultPackageSpecifier,
+    type InstallPlan,
+} from "./install-planning.js";
+export { createInstallPlan } from "./install-planning.js";
+export type { InstallPlan } from "./install-planning.js";
 export {
     inspectManagedClientConfigurations,
     verifyManagedClientConfigurations,
@@ -113,17 +113,6 @@ import {
     resolveDefaultLateOnModelDirectory,
     type VerifiedLateOnModel,
 } from "./lateon-model-store.js";
-
-export interface InstallPlan {
-    readonly command: InstallCommandInput;
-    readonly homeDir: string;
-    readonly packageSpecifier: string;
-    readonly plannedRuntimeCommand: ManagedRuntimeCommand;
-    readonly clientCommand: ManagedRuntimeCommand;
-    readonly profileMutation: FileMutation & { filePath?: string };
-    readonly prepared: PreparedMutation[];
-    readonly options: InstallCommandOptions;
-}
 
 interface ManagedRuntimeCandidate {
     readonly command: ManagedRuntimeCommand;
@@ -178,15 +167,6 @@ function prepareLauncherInstall(
             writeTextFileAtomic(launcherPath, next, 0o755);
         },
     };
-}
-
-function resolveDefaultPackageSpecifier(): string {
-    try {
-        return resolveManagedPackageSpecifier();
-    } catch {
-        // Fall through to hard failure below.
-    }
-    throw new CliError("E_USAGE", "Unable to resolve the installed Satori package version for CLI install.", 2);
 }
 
 function npmOutput(error: unknown): string {
@@ -409,41 +389,6 @@ function exactRuntimeLanceDbProbe(runtimeCommand: ManagedRuntimeCommand): (datab
             loadLanceDb: () => import(pathToFileURL(resolved).href) as Promise<LanceDbModule>,
         });
     };
-}
-
-export function createInstallPlan(
-    command: InstallCommandInput,
-    options: InstallCommandOptions = {}
-): InstallPlan {
-    const homeDir = options.homeDir ?? os.homedir();
-    const repoDir = options.repoDir ?? process.cwd();
-    const packageSpecifier = options.packageSpecifier ?? resolveDefaultPackageSpecifier();
-    const plannedRuntimeCommand = options.runtimeCommand ?? plannedManagedRuntimeCommand(homeDir, packageSpecifier);
-    const clientCommand = resolveManagedClientCommand(homeDir);
-    const profileMutation: FileMutation & { filePath?: string } = command.kind === "install"
-        ? prepareProjectProfileInstall(repoDir, command.profile)
-        : { changed: false, apply: () => {} };
-
-    const prepared = selectClientTargets(homeDir, command.client, options.env ?? process.env).map((target) => (
-        prepareMutation(target, command, clientCommand)
-    ));
-
-    return Object.freeze({
-        command: Object.freeze({ ...command }),
-        homeDir,
-        packageSpecifier,
-        plannedRuntimeCommand: Object.freeze({
-            command: plannedRuntimeCommand.command,
-            args: Object.freeze([...plannedRuntimeCommand.args]) as unknown as string[],
-        }),
-        clientCommand: Object.freeze({
-            command: clientCommand.command,
-            args: Object.freeze([...clientCommand.args]) as unknown as string[],
-        }),
-        profileMutation,
-        prepared,
-        options,
-    });
 }
 
 export function applyInstallPlan(
