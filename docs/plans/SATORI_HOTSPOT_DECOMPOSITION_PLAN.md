@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `b1f3a84`
+Checkpoint HEAD: `01bff81`
 
 Completed ownership-bounded batches:
 
@@ -50,8 +50,9 @@ Completed ownership-bounded batches:
 - Phase 7.2 / client config inspection and runtime authority: `c718ce8`.
 - Phase 7.3 / runtime and reranker/vector-store selection: `4949568`.
 - Phase 7.4 / install planning as a pure mutation plan: `b1f3a84`.
+- Phase 7.5 / install application executor: `01bff81`.
 
-Next open batch at this checkpoint: Phase 7.5. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 7.6. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
