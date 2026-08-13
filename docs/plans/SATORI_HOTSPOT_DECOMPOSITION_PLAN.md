@@ -45,8 +45,9 @@ Completed ownership-bounded batches:
 - Phase 6.2 / search continuation in the bounded search owner: `7571fb5`.
 - Phase 6.3 / retrieval-pass ownership in the pass executor: `011f054`.
 - Phase 6.4 / call-graph request handling verified in NavigationHandlers: `011f054` (constraint check).
+- Phase 6.5 / cohesive owners left intact: `011f054` (constraint check).
 
-Next open batch at this checkpoint: Phase 6.5. Refresh this checkpoint only after an
+Next open batch at this checkpoint: Phase 7.1. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
@@ -698,6 +699,12 @@ current-source-symbols, and canonical-symbol-identity fixtures (115 tests).
 - Keep `symbol-context-composer.ts` until a new demonstrated owner appears.
 - Keep runtime-owner domain logic in `runtime-owner.ts`; move only MCP response
   adaptation if it materially shrinks handlers.
+
+Completed as a constraint check at `011f054`. None of the Phase 6 batches touched
+`SnapshotManager`, `symbol-context-composer.ts`, or `runtime-owner.ts`. The MCP
+runtime-owner response adaptation already lives as narrow host-builder delegation
+(`buildRuntimeOwnerConflictResponseIfBlocked`, `buildManageActionBlockedMessage`);
+moving it would not materially shrink handlers, so it stays.
 
 ## Phase 7 — CLI decomposition
 
