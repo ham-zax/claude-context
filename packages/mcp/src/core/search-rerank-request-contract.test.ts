@@ -212,18 +212,27 @@ test("contract parser rejects malformed and drifted manifests", () => {
     );
 });
 
-test("resolveSearchRerankRequestIdentity binds provider, projections, and contract digest", () => {
+test("resolveSearchRerankRequestIdentity binds current provider projections and the contract digest", () => {
     const identity = resolveSearchRerankRequestIdentity(fakeReranker({
-        getQueryProjectionVersion: () => "search_rerank_query_v1",
-        getDocumentProjectionVersion: () => "search_rerank_document_v3",
+        getQueryProjectionVersion: () => "search_rerank_query_v2",
+        getDocumentProjectionVersion: () => "search_rerank_document_v4",
     }));
     assert.deepEqual(
         { provider: identity.provider, model: identity.model, profile: identity.profile },
         { provider: "lateon", model: "LateOn-Code-edge", profile: "lateon_offline_quality_projection_v3_d32_v1" },
     );
-    assert.equal(identity.queryProjectionIdentity, "search_rerank_query_v1");
-    assert.equal(identity.documentProjectionIdentity, "search_rerank_document_v3");
+    assert.equal(identity.queryProjectionIdentity, "search_rerank_query_v2");
+    assert.equal(identity.documentProjectionIdentity, "search_rerank_document_v4");
     assert.equal(identity.requestContractSha256, loadSearchRerankRequestContract().contractSha256);
+});
+
+test("resolveSearchRerankRequestIdentity fails closed on retired document projection identities", () => {
+    assert.throws(
+        () => resolveSearchRerankRequestIdentity(fakeReranker({
+            getDocumentProjectionVersion: () => "search_rerank_document_v3",
+        })),
+        /search_rerank_document_projection_identity_unknown:search_rerank_document_v3/,
+    );
 });
 
 test("providers without advertised projections fall back to raw identities", () => {

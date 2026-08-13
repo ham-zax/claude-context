@@ -7,10 +7,6 @@
  * executable implementation. Historical V2/V3 builders are retired, and their
  * fixture material survives only as inert contract evidence in
  * `search-rerank-contract-evidence.ts`.
- *
- * `SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION` remains as the frozen fallback
- * wire identity for rerankers that declare no projection version; it is part
- * of the published request-contract identity, not an executable route.
  */
 import { compareContractStrings } from "@zokizuan/satori-core";
 import { serializeCanonicalJson } from "./canonical-json.js";
@@ -41,9 +37,6 @@ import {
     sourceLinesInSpan,
     type NormalizedProjectionInput,
 } from "./search-rerank-projection-primitives.js";
-
-export const SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION =
-    "search_rerank_document_v1" as const;
 
 export const SEARCH_RERANK_DOCUMENT_POLICY = Object.freeze({
     id: "search_rerank_document_v4",

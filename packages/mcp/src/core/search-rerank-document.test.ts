@@ -3,7 +3,6 @@ import test from "node:test";
 import {
     buildSearchRerankDocument,
     SEARCH_RERANK_DOCUMENT_POLICY,
-    SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION,
 } from "./search-rerank-document.js";
 import type { SearchRerankStructuralReference } from "./search-rerank-structural-context.js";
 
@@ -40,10 +39,9 @@ function ref(relation: SearchRerankStructuralReference["relation"], index: numbe
     };
 }
 
-test("canonical policy carries the frozen v4 contract identity and the v1 fallback wire identity", () => {
+test("canonical policy carries the frozen v4 contract identity", () => {
     assert.equal(SEARCH_RERANK_DOCUMENT_POLICY.id, "search_rerank_document_v4");
     assert.equal(SEARCH_RERANK_DOCUMENT_POLICY.previousVersion, "search_rerank_document_v3");
-    assert.equal(SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION, "search_rerank_document_v1");
 });
 
 test("canonical projection carries the answer-packet shape with bounded structural context", () => {

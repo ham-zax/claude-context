@@ -21,9 +21,10 @@ import {
     buildSearchRerankDocument,
 } from "./search-rerank-document.js";
 import {
+    SEARCH_RERANK_DOCUMENT_V3_CONTRACT_EVIDENCE,
     SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE,
-    buildSearchRerankDocumentV3ContractEvidence,
 } from "./search-rerank-contract-evidence.js";
+import { resolveSearchRerankDocumentProjectionIdentity } from "./search-rerank-document-routing.js";
 import { buildSearchRerankQuery } from "./search-rerank-query.js";
 import type { SearchAnswerFocus } from "./search-rerank-context.js";
 import { SEARCH_RERANK_QUERY_RAW_IDENTITY } from "./search-rerank-query-routing.js";
@@ -49,7 +50,7 @@ export const SEARCH_RERANK_REQUEST_CONTRACT_SCHEMA_VERSION =
     "satori_rerank_request_contract_v1" as const;
 export const SEARCH_RERANK_REQUEST_CONTRACT_ASSET_RELPATH =
     "assets/lateon/rerank-request-contract-v1.json";
-export const SEARCH_RERANK_DOCUMENT_RAW_IDENTITY = "semantic_document_raw_v1" as const;
+export { SEARCH_RERANK_DOCUMENT_RAW_IDENTITY } from "./search-rerank-document-routing.js";
 
 export const SEARCH_RERANK_PARTIAL_PROJECTION_SEMANTICS = Object.freeze({
     warnings: [
@@ -409,9 +410,7 @@ export function buildSearchRerankRequestContractFixtures(): SearchRerankRequestC
         queryProjectionV1,
         queryProjectionV2,
         candidateRoleClassification,
-        documentProjectionV3: buildSearchRerankDocumentV3ContractEvidence(
-            DOCUMENT_PROJECTION_FIXTURE,
-        ),
+        documentProjectionV3: SEARCH_RERANK_DOCUMENT_V3_CONTRACT_EVIDENCE,
         documentProjectionV4: buildSearchRerankDocument(DOCUMENT_PROJECTION_FIXTURE).text,
         documentProjectionV4Structural: buildSearchRerankDocument(
             DOCUMENT_PROJECTION_STRUCTURAL_FIXTURE,
@@ -690,7 +689,9 @@ export function resolveSearchRerankRequestIdentity(reranker: Reranker): SearchRe
         model: identity.model,
         profile: identity.profile,
         queryProjectionIdentity: queryProjectionIdentity || SEARCH_RERANK_QUERY_RAW_IDENTITY,
-        documentProjectionIdentity: documentProjectionIdentity || SEARCH_RERANK_DOCUMENT_RAW_IDENTITY,
+        documentProjectionIdentity: resolveSearchRerankDocumentProjectionIdentity(
+            documentProjectionIdentity,
+        ),
         requestContractSha256: loadSearchRerankRequestContract().contractSha256,
     };
 }

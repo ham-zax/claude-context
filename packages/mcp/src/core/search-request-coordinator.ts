@@ -135,8 +135,10 @@ import {
 } from "./search-result-set-identity.js";
 import {
     SEARCH_RERANK_DOCUMENT_POLICY,
-    SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION,
 } from "./search-rerank-document.js";
+import {
+    resolveSearchRerankDocumentProjectionIdentity,
+} from "./search-rerank-document-routing.js";
 import {
     projectPublicationBoundSearchRerankDocument,
     searchRerankCandidateId,
@@ -303,12 +305,9 @@ function resolveSearchRerankerProjectionIdentity(
     rerankerApplied: boolean,
 ): string {
     if (!rerankerApplied) return "not_applicable";
-    const projection = reranker?.getDocumentProjectionVersion?.()
-        ?? SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
-    if (!projection.trim()) {
-        throw new Error("Applied search reranking requires a stable projection identity.");
-    }
-    return projection;
+    return resolveSearchRerankDocumentProjectionIdentity(
+        reranker?.getDocumentProjectionVersion?.(),
+    );
 }
 
 function resolveSearchRerankRequestIdOrNone(
@@ -319,13 +318,7 @@ function resolveSearchRerankRequestIdOrNone(
     if (!reranker) {
         throw new Error("Applied search reranking requires a complete rerank request identity.");
     }
-    const requestIdentity = resolveSearchRerankRequestIdentity(reranker);
-    const documentProjectionIdentity = reranker.getDocumentProjectionVersion?.()?.trim()
-        || SEARCH_RERANK_DOCUMENT_PROJECTION_VERSION;
-    return {
-        ...requestIdentity,
-        documentProjectionIdentity,
-    };
+    return resolveSearchRerankRequestIdentity(reranker);
 }
 
 function buildFrozenSearchRankedSetBindingInput(input: {
@@ -2034,8 +2027,10 @@ export class SearchRequestCoordinator {
                     }),
                     projectionIdentity: this.reranker?.getQueryProjectionVersion?.(),
                 });
-                const rerankerDocumentProjectionVersion: string | undefined = this.reranker?.getDocumentProjectionVersion?.();
-                const wantsStructuralContext = rerankerDocumentProjectionVersion
+                const rerankerDocumentProjectionIdentity = resolveSearchRerankDocumentProjectionIdentity(
+                    this.reranker?.getDocumentProjectionVersion?.(),
+                );
+                const wantsStructuralContext = rerankerDocumentProjectionIdentity
                     === SEARCH_RERANK_DOCUMENT_POLICY.id;
                 const execution = await runSearchExecution({
                     effectiveRoot,
@@ -2085,7 +2080,7 @@ export class SearchRequestCoordinator {
                             : this.environment.semanticSearch(request);
                     },
                     reranker: this.reranker,
-                    ...(rerankerDocumentProjectionVersion === SEARCH_RERANK_DOCUMENT_POLICY.id
+                    ...(rerankerDocumentProjectionIdentity === SEARCH_RERANK_DOCUMENT_POLICY.id
                         ? {
                             buildRerankDocument: async (
                                 rerankQuery: string,
