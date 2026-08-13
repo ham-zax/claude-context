@@ -11,8 +11,11 @@ export type PublishedSurfaceSnapshot = {
 
 const SELECTED_EXPORT_DECLARATION_NAMES = [
     "IndexMutationOptions",
+    "IndexMutationPort",
+    "IndexMutationPortDependencies",
     "PreparedIndexCollectionBinding",
     "PreparedIndexCollectionReceipt",
+    "SourceFreshnessPort",
 ] as const;
 
 /**
