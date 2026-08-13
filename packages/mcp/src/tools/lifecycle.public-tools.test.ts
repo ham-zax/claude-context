@@ -34,6 +34,7 @@ import { CapabilityResolver } from "../core/capabilities.js";
 import { createSessionWorkspacePolicy } from "../core/session-workspace-policy.js";
 import type { IndexFingerprint } from "../config.js";
 import { ToolHandlers } from "../core/handlers.js";
+import { FullIndexOperation, type FullIndexOperationHost } from "../core/full-index-operation.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
 import type { ToolContext } from "./types.js";
@@ -589,23 +590,39 @@ test("public reindex replaces a coherent retired v2 tuple with restart-proven v5
                 CAPABILITIES,
             );
 
-            type BackgroundStart = (
-                root: string,
-                force: boolean,
-                stagedCollection?: string,
-                lease?: unknown,
-                previousInfo?: Record<string, unknown>,
-                policyUpdate?: Record<string, unknown>,
-            ) => Promise<void>;
-            const internalIndexing = (handlers as unknown as {
-                manageIndexingHandlers: { startBackgroundIndexing: BackgroundStart };
-            }).manageIndexingHandlers;
-            const actualStart = internalIndexing.startBackgroundIndexing.bind(internalIndexing);
             let background: Promise<void> | null = null;
-            (handlers as unknown as { startBackgroundIndexing?: BackgroundStart }).startBackgroundIndexing = (
-                ...args
+            (handlers as unknown as {
+                startBackgroundIndexing?: (
+                    root: string,
+                    force: boolean,
+                    stagedCollection?: string,
+                    lease?: unknown,
+                    previousInfo?: Record<string, unknown>,
+                    policyUpdate?: Record<string, unknown>,
+                    preparedReceipt?: unknown,
+                ) => Promise<void>;
+            }).startBackgroundIndexing = (
+                root,
+                force,
+                stagedCollection,
+                lease,
+                previousInfo,
+                policyUpdate,
+                preparedReceipt,
             ) => {
-                background = actualStart(...args);
+                const internalHost = (handlers as unknown as {
+                    manageIndexingHandlers: { host: FullIndexOperationHost };
+                }).manageIndexingHandlers.host;
+                const op = new FullIndexOperation(internalHost);
+                background = op.run({
+                    codebasePath: root,
+                    forceReindex: force,
+                    writeCollectionName: stagedCollection,
+                    mutationLease: lease as any,
+                    previousIndexedInfo: previousInfo,
+                    policyUpdate,
+                    preparedCollectionReceipt: preparedReceipt as any,
+                });
                 return background;
             };
 
