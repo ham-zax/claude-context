@@ -103,6 +103,32 @@ const LATEON_OPERATIONAL_REASONS = new Set<SearchRerankerOperationalReason>([
     "lateon_worker_failure",
 ]);
 
+function isSearchPassFaultInjectionEnabled(): boolean {
+    return process.env.NODE_ENV === 'test';
+}
+
+function getForcedFailedSearchPassId(): 'primary' | 'expanded' | 'both' | undefined {
+    if (!isSearchPassFaultInjectionEnabled()) {
+        return undefined;
+    }
+
+    const raw = typeof process.env.SATORI_TEST_FAIL_SEARCH_PASS === 'string'
+        ? process.env.SATORI_TEST_FAIL_SEARCH_PASS.trim().toLowerCase()
+        : '';
+    if (raw === 'primary' || raw === 'expanded' || raw === 'both') {
+        return raw;
+    }
+    return undefined;
+}
+
+function shouldForceSearchPassFailure(passId: 'primary' | 'expanded'): boolean {
+    const forced = getForcedFailedSearchPassId();
+    if (!forced) {
+        return false;
+    }
+    return forced === 'both' || forced === passId;
+}
+
 function resolveLateOnOperationalReason(error: unknown): SearchRerankerOperationalReason | undefined {
     if (!error || typeof error !== "object" || !("reason" in error)) return undefined;
     const reason = (error as { reason?: unknown }).reason;
@@ -454,7 +480,7 @@ export type SearchExecutionHost = {
         rerankQuery: string,
         result: SearchResultLike,
     ) => Promise<SearchRerankProjectionResult>;
-    shouldForceSearchPassFailure: (passId: SearchPassId) => boolean;
+    shouldForceSearchPassFailure?: (passId: SearchPassId) => boolean;
     classifyEmbeddingProviderError: (error: unknown) => EmbeddingProviderDiagnostic | null;
     classifyVectorBackendError: (error: unknown) => VectorBackendDiagnostic | null;
     measureSearchPhase: <T>(
@@ -993,7 +1019,7 @@ export async function runSearchExecution(
             return host.measureSearchPhase(
                 "semanticSearch",
                 () => Promise.allSettled(passDescriptors.map(async (pass) => {
-                if (host.shouldForceSearchPassFailure(pass.id)) {
+                if ((host.shouldForceSearchPassFailure ?? shouldForceSearchPassFailure)(pass.id)) {
                     throw new Error(`FORCED_TEST_SEARCH_PASS_FAILURE:${pass.id}`);
                 }
                 searchDiagnostics.semanticSearchAttempts += 1;

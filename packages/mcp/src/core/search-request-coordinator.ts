@@ -834,32 +834,6 @@ export class SearchRequestCoordinator {
         });
     }
 
-    private isSearchPassFaultInjectionEnabled(): boolean {
-        return process.env.NODE_ENV === 'test';
-    }
-
-    private getForcedFailedSearchPassId(): 'primary' | 'expanded' | 'both' | undefined {
-        if (!this.isSearchPassFaultInjectionEnabled()) {
-            return undefined;
-        }
-
-        const raw = typeof process.env.SATORI_TEST_FAIL_SEARCH_PASS === 'string'
-            ? process.env.SATORI_TEST_FAIL_SEARCH_PASS.trim().toLowerCase()
-            : '';
-        if (raw === 'primary' || raw === 'expanded' || raw === 'both') {
-            return raw;
-        }
-        return undefined;
-    }
-
-    private shouldForceSearchPassFailure(passId: 'primary' | 'expanded'): boolean {
-        const forced = this.getForcedFailedSearchPassId();
-        if (!forced) {
-            return false;
-        }
-        return forced === 'both' || forced === passId;
-    }
-
     public async attempt(
         args: ToolArgs,
         sourceDriftRetryCount: 0 | 1,
@@ -2201,7 +2175,6 @@ export class SearchRequestCoordinator {
                             },
                         }
                         : {}),
-                    shouldForceSearchPassFailure: (passId) => this.shouldForceSearchPassFailure(passId),
                     classifyEmbeddingProviderError,
                     classifyVectorBackendError,
                     measureSearchPhase: (phase, run) => this.measureSearchPhase(phaseTimings, phase, run),
