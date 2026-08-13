@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `fccc9e4`
+Checkpoint HEAD: `a58590e`
 
 Completed ownership-bounded batches:
 
@@ -55,9 +55,10 @@ Completed ownership-bounded batches:
 - Phase 4.7 / review-driven ownership seal: neutral `generation/contracts` + `generation/errors` (no `generation/*` or synchronizer-registry imports of `core/context`), `SynchronizerRegistry` raw-map getters replaced by a narrow mutation port, Context compatibility accessor narrowed: `8737e8e`.
 - Phase 8 gate correction A / neutral `SourceFreshnessPort` + `IndexMutationPort` contracts (no `core/context` import from the port modules; `ProvenSourceFreshnessCheckpointEvidence` now owned by the freshness port module), plus D-adjacent P2 cleanup (SourceObservationState dead mutable-map getters removed; test-only Context accessor removed; `InstallPlan` options snapshot + frozen prepared array): `e109651`.
 - Phase 8 gate correction A/D follow-up / F6 fully closed: `InstallPlan` nested mutation records (`configMutation`, companion entries, `profileMutation`) now frozen copies, with a regression test proving strict-mode post-plan mutation throws: `fccc9e4`.
+- Phase 8 gate correction B / grouped narrow search collaborator seams: the 54-member `SearchRequestCoordinatorHost` callback bag is replaced by six named collaborators (`SearchReadinessCollaborator`, `SearchHintPayloadCollaborator`, `SearchPreparedReadCollaborator`, `SearchFreshnessCollaborator`, `SearchEnvironmentCollaborator`, `SearchContinuationStoreCollaborator`) composed in `SearchRequestCoordinatorCollaborators`. All 54 member signatures and all 54 `ToolHandlers` bindings preserved verbatim (machine-verified); MCP core suite 1257/1257 green: `a58590e`.
 
-Next open batch at this checkpoint: Phase 8 gate correction B (narrow
-`SearchRequestCoordinatorHost`), then C (continuation owner identity).
+Next open batch at this checkpoint: Phase 8 gate correction C (make
+`SearchRequestCoordinator` the continuation owner), then Phase 8.1.
 Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
 planned only; it starts after Phase 8 is sealed, and its durable-format floor
 (9.3) requires separate authorization. Refresh this checkpoint only after an
