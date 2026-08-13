@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `eb42601`
+Checkpoint HEAD: `8c8ab51`
 
 Completed ownership-bounded batches:
 
@@ -57,9 +57,10 @@ Completed ownership-bounded batches:
 - Phase 8 gate correction A/D follow-up / F6 fully closed: `InstallPlan` nested mutation records (`configMutation`, companion entries, `profileMutation`) now frozen copies, with a regression test proving strict-mode post-plan mutation throws: `fccc9e4`.
 - Phase 8 gate correction B / grouped narrow search collaborator seams: the 54-member `SearchRequestCoordinatorHost` callback bag is replaced by six named collaborators (`SearchReadinessCollaborator`, `SearchHintPayloadCollaborator`, `SearchPreparedReadCollaborator`, `SearchFreshnessCollaborator`, `SearchEnvironmentCollaborator`, `SearchContinuationStoreCollaborator`) composed in `SearchRequestCoordinatorCollaborators`. All 54 member signatures and all 54 `ToolHandlers` bindings preserved verbatim (machine-verified); MCP core suite 1257/1257 green: `a58590e`.
 - Phase 8 gate correction C / continuation owner identity: `SearchContinuationCoordinator` (and its pool) moved into the search module with the `SearchRequestCoordinator` as the registered owner token; store/lookup/advance/remove called directly (the `SearchContinuationStoreCollaborator` group left the collaborator set), routing hops coordinator-to-coordinator via `owner.continueOwned`, `ToolHandlers` keeps only constructor injection, the release delegate, and the `handleContinueSearch` entry point. Full MCP suite 1554 pass / 1 pre-existing skip: `eb42601`.
+- Phase 8.1 / published-surface freeze + dead private façade removal: `contracts/published-surface.json` freezes the NAME set (481 barrel export names + 79 `Context` public member names) with a regenerating guard test (`src/core/published-surface.ts` computes via the TS API); five zero-caller private Context members deleted (two policy warm-state snapshot getters, `getIgnoreMatcherForCodebase`, both `withIndexPolicyMutationLock` wrappers) plus the two now-dead coordinator snapshot methods; oracles preserved (matcher-cache test moved to `ignore-rule-service.test.ts`, fenced-lock test now holds a synthetic lock file, warm-state asserts dropped where public `getActiveIgnorePatterns` oracles already prove the outcome). Dead-private scan now reports 0 candidates. Core suite 802 pass / 1 skip; MCP core suite 1257/1257: `8c8ab51`.
 
-Next open batch at this checkpoint: Phase 8.1 (freeze the façade/API
-contract, remove genuinely dead private surface), then 8.2.
+Next open batch at this checkpoint: Phase 8.2 (remove shallow
+ToolHandlers pass-through indirection), then 8.3.
 Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
 planned only; it starts after Phase 8 is sealed, and its durable-format floor
 (9.3) requires separate authorization. Refresh this checkpoint only after an
