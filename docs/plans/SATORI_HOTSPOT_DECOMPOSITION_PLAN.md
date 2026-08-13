@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `447b048`
+Checkpoint HEAD: `777551d`
 
 Completed ownership-bounded batches:
 
@@ -59,9 +59,10 @@ Completed ownership-bounded batches:
 - Phase 8 gate correction C / continuation owner identity: `SearchContinuationCoordinator` (and its pool) moved into the search module with the `SearchRequestCoordinator` as the registered owner token; store/lookup/advance/remove called directly (the `SearchContinuationStoreCollaborator` group left the collaborator set), routing hops coordinator-to-coordinator via `owner.continueOwned`, `ToolHandlers` keeps only constructor injection, the release delegate, and the `handleContinueSearch` entry point. Full MCP suite 1554 pass / 1 pre-existing skip: `eb42601`.
 - Phase 8.1 / published-surface freeze + dead private façade removal: `contracts/published-surface.json` freezes the NAME set (481 barrel export names + 79 `Context` public member names) with a regenerating guard test (`src/core/published-surface.ts` computes via the TS API); five zero-caller private Context members deleted (two policy warm-state snapshot getters, `getIgnoreMatcherForCodebase`, both `withIndexPolicyMutationLock` wrappers) plus the two now-dead coordinator snapshot methods; oracles preserved (matcher-cache test moved to `ignore-rule-service.test.ts`, fenced-lock test now holds a synthetic lock file, warm-state asserts dropped where public `getActiveIgnorePatterns` oracles already prove the outcome). Dead-private scan now reports 0 candidates. Core suite 802 pass / 1 skip; MCP core suite 1257/1257: `8c8ab51`.
 - Phase 8.2 / shallow ToolHandlers pass-through removal: `NavigationHandlersHost` now receives the `ToolResponseBuilders` capability directly instead of seven one-line payload-builder callbacks; the search hints collaborator's `buildRequiresReindexPayload` member removed in favor of the existing `getToolResponseBuilders()` accessor; eight private `ToolHandlers` wrapper methods deleted. The previously-masked runtime payload value `reason: "invalid_request"` is now declared in the `FileOutlineResponseEnvelope`/builder contracts. Outline/call-graph/requires-reindex payload fixtures identical; full MCP suite 1554 pass / 1 skip: `447b048`.
+- Phase 8.3 / single-source collection naming: `collection-naming.ts` (pure grammar: family prefixes, `__gen_` separator, active/alternate family names, staged names, generation-id normalization, family membership, family-name parsing) and `collection-family-listing.ts` (I/O: list + hasCollection probe fallback over a narrow port). Context delegates; grammar call sites consolidated in `lancedb-vectordb.ts` (local `collectionFamilyName` deleted), `index-generation-workflow.ts`, MCP `manage-indexing-handlers.ts`, and `vector-backend-maintenance.ts` (`SATORI_COLLECTION_FAMILY_PREFIXES` now imported). Barrel expanded (+11 names, fixture regenerated to 492). Core suite 802 pass / 1 skip; full MCP suite 1554 pass / 1 skip: `777551d`.
 
-Next open batch at this checkpoint: Phase 8.3 (single-source
-collection naming), then 8.4A.
+Next open batch at this checkpoint: Phase 8.4A (workflow queue +
+receipt capability ownership).
 Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
 planned only; it starts after Phase 8 is sealed, and its durable-format floor
 (9.3) requires separate authorization. Refresh this checkpoint only after an
