@@ -46,15 +46,11 @@ import {
     SEARCH_CHANGED_FILES_CACHE_TTL_MS,
     SEARCH_GITIGNORE_FORCE_RELOAD_EVERY_N,
     PathCategory,
-    SearchGroupBy,
-    SearchResultMode,
     SearchScope
 } from "./search-constants.js";
 import {
     CallGraphHint,
     CallGraphResponseEnvelope,
-    CallGraphResponseReason,
-    CallGraphResponseStatus,
     FingerprintCompatibilityDiagnostics,
     FileOutlineInput,
     FileOutlineResponseEnvelope,
@@ -715,12 +711,10 @@ export class ToolHandlers {
             ),
             loadPreparedNavigationSymbolsByFile: this.loadPreparedNavigationSymbolsByFile.bind(this),
             loadPreparedNavigationCompatibility: this.loadPreparedNavigationCompatibility.bind(this),
+            toolResponseBuilders: this.toolResponseBuilders,
             stringifyToolJson: this.stringifyToolJson.bind(this),
             normalizeRelativeFilePath: this.normalizeRelativeFilePath.bind(this),
-            buildInvalidFileOutlineRequestPayload: this.buildInvalidFileOutlineRequestPayload.bind(this),
             buildRequiresReindexFileOutlinePayload: buildRequiresReindexFileOutlinePayloadForNavigation,
-            buildNotIndexedFileOutlinePayload: this.buildNotIndexedFileOutlinePayload.bind(this),
-            buildNotReadyFileOutlinePayload: this.buildNotReadyFileOutlinePayload.bind(this),
             withProofDebugHint: this.withProofDebugHint.bind(this),
             isPartialIndexNavigationUnavailable: this.isPartialIndexNavigationUnavailable.bind(this),
             getRegistryFileFreshness: this.getRegistryFileFreshness.bind(this),
@@ -736,10 +730,6 @@ export class ToolHandlers {
             getWatcherObservation: this.getWatcherObservation.bind(this),
             buildSyncHint: this.buildSyncHint.bind(this),
             getOutlineStatusForLanguage: this.getOutlineStatusForLanguage.bind(this),
-            buildInvalidCallGraphRequestPayload: this.buildInvalidCallGraphRequestPayload.bind(this),
-            buildRequiresReindexCallGraphPayload: this.buildRequiresReindexCallGraphPayload.bind(this),
-            buildNotReadyCallGraphPayload: this.buildNotReadyCallGraphPayload.bind(this),
-            buildNotIndexedCallGraphPayload: this.buildNotIndexedCallGraphPayload.bind(this),
             isCallGraphLanguageSupported: this.isCallGraphLanguageSupported.bind(this),
             isSha256HexHash: this.isSha256HexHash.bind(this),
             buildStaleSymbolRefCallGraphPayload: this.buildStaleSymbolRefCallGraphPayload.bind(this),
@@ -1039,9 +1029,6 @@ export class ToolHandlers {
                 stringifyToolJson: (payload) => this.stringifyToolJson(payload),
                 getToolResponseBuilders: () => this.toolResponseBuilders,
                 getSearchNavigationHelpers: () => this.getSearchNavigationHelpers(),
-                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => (
-                    this.buildRequiresReindexPayload(codebasePath, detail, searchContext)
-                ),
                 buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => (
                     this.buildGeneratedArtifactsVerificationHint(codebaseRoot, results)
                 ),
@@ -2997,106 +2984,13 @@ export class ToolHandlers {
         return lines;
     }
 
-    private buildRequiresReindexPayload(
-        codebasePath: string,
-        detail?: string,
-        searchContext?: {
-            path: string;
-            query: string;
-            scope: SearchScope;
-            groupBy: SearchGroupBy;
-            resultMode: SearchResultMode;
-            limit: number;
-        }
-    ): Record<string, unknown> {
-        return this.toolResponseBuilders.buildRequiresReindexPayload(codebasePath, detail, searchContext);
-    }
 
-    private buildRequiresReindexCallGraphPayload(
-        codebasePath: string,
-        detail: string | undefined,
-        context: {
-            path: string;
-            symbolRef: CallGraphSymbolRef;
-            direction: CallGraphDirection;
-            depth: number;
-            limit: number;
-        },
-        reason: Extract<
-            NonOkReason,
-            | "requires_reindex"
-            | "partial_index_navigation_unavailable"
-            | "missing_symbol_registry"
-            | "missing_relationship_sidecar"
-            | "incompatible_symbol_registry"
-            | "incompatible_relationship_sidecar"
-        > = "requires_reindex"
-    ): CallGraphResponseEnvelope {
-        return this.toolResponseBuilders.buildRequiresReindexCallGraphPayload(codebasePath, detail, context, reason);
-    }
 
-    private buildNotReadyFileOutlinePayload(codebasePath: string, file: string, requestedPath: string): FileOutlineResponseEnvelope & Record<string, unknown> {
-        return this.toolResponseBuilders.buildNotReadyFileOutlinePayload(codebasePath, file, requestedPath);
-    }
 
-    private buildNotIndexedFileOutlinePayload(
-        file: string,
-        requestedPath: string,
-        staleLocal?: { codebaseRoot: string; reason: CompletionProofReason }
-    ): FileOutlineResponseEnvelope & Record<string, unknown> {
-        return this.toolResponseBuilders.buildNotIndexedFileOutlinePayload(file, requestedPath, staleLocal);
-    }
 
-    private buildInvalidFileOutlineRequestPayload(
-        requestedPath: string,
-        file: string,
-        message: string,
-        status: FileOutlineStatus = "not_ready",
-        reason?: NonOkReason
-    ): FileOutlineResponseEnvelope {
-        return this.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(requestedPath, file, message, status, reason);
-    }
 
-    private buildNotIndexedCallGraphPayload(
-        context: {
-            path: string;
-            symbolRef: CallGraphSymbolRef;
-            direction: CallGraphDirection;
-            depth: number;
-            limit: number;
-        },
-        staleLocal?: { codebaseRoot: string; reason: CompletionProofReason }
-    ): CallGraphResponseEnvelope {
-        return this.toolResponseBuilders.buildNotIndexedCallGraphPayload(context, staleLocal);
-    }
 
-    private buildNotReadyCallGraphPayload(
-        codebasePath: string,
-        context: {
-            path: string;
-            symbolRef: CallGraphSymbolRef;
-            direction: CallGraphDirection;
-            depth: number;
-            limit: number;
-        }
-    ): CallGraphResponseEnvelope {
-        return this.toolResponseBuilders.buildNotReadyCallGraphPayload(codebasePath, context);
-    }
 
-    private buildInvalidCallGraphRequestPayload(
-        context: {
-            path: string;
-            symbolRef: CallGraphSymbolRef;
-            direction: CallGraphDirection;
-            depth: number;
-            limit: number;
-        },
-        message: string,
-        status: CallGraphResponseStatus = "not_ready",
-        reason?: CallGraphResponseReason
-    ): CallGraphResponseEnvelope {
-        return this.toolResponseBuilders.buildInvalidCallGraphRequestPayload(context, message, status, reason);
-    }
 
     private getMatchingBlockedRoot(absolutePath: string): { path: string; message?: string } | null {
         const blocked = this.getSnapshotAllCodebases()

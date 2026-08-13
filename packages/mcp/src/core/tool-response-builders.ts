@@ -611,7 +611,7 @@ export class ToolResponseBuilders {
         file: string,
         message: string,
         status: FileOutlineStatus = "not_ready",
-        reason?: NonOkReason,
+        reason?: NonOkReason | "invalid_request",
     ): FileOutlineResponseEnvelope {
         return {
             status,

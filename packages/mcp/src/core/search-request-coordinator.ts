@@ -1,4 +1,3 @@
-import * as path from "path";
 import crypto from "node:crypto";
 import {
     COLLECTION_LIMIT_MESSAGE,
@@ -592,18 +591,6 @@ export interface SearchHintPayloadCollaborator {
         getOutlineStatusForLanguage: (relativeFilePath: string) => FileOutlineStatus;
     };
 
-    buildRequiresReindexPayload(
-        codebasePath: string,
-        detail?: string,
-        searchContext?: {
-            path: string;
-            query: string;
-            scope: SearchScope;
-            groupBy: SearchGroupBy;
-            resultMode: SearchResultMode;
-            limit: number;
-        },
-    ): Record<string, unknown>;
 
     buildGeneratedArtifactsVerificationHint(
         codebaseRoot: string,
@@ -1301,7 +1288,7 @@ export class SearchRequestCoordinator {
                     status,
                     reason
                 ),
-                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.hints.buildRequiresReindexPayload(
+                buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.hints.getToolResponseBuilders().buildRequiresReindexPayload(
                     codebasePath,
                     detail,
                     searchContext
@@ -2373,7 +2360,7 @@ export class SearchRequestCoordinator {
                         preparedRead: preparedReadState,
                         operations: readinessDebug.operations,
                     }),
-                    buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.hints.buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope,
+                    buildRequiresReindexPayload: (codebasePath, detail, searchContext) => this.hints.getToolResponseBuilders().buildRequiresReindexPayload(codebasePath, detail, searchContext) as unknown as SearchResponseEnvelope,
                     buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.hints.buildChangedCodeDebug(preparedReadState, changedFilesState),
                     buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.hints.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
                     getSearchNavigationHelpers: () => this.hints.getSearchNavigationHelpers(),

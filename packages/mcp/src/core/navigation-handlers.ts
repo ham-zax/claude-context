@@ -43,6 +43,7 @@ import type {
     CallGraphTestReference,
 } from "./call-graph.js";
 import { resolveCallGraphNavigationAuthority } from "./relationship-backed-call-graph.js";
+import { ToolResponseBuilders } from "./tool-response-builders.js";
 import type {
     CallGraphHint,
     CallGraphResponseEnvelope,
@@ -65,6 +66,9 @@ const OUTLINE_SUPPORTED_EXTENSIONS = getSupportedExtensionsForCapability("fileOu
 const PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_DETAIL = "Partial index/search data may exist, but navigation sidecars were not published because indexing stopped before completion.";
 
 type NavigationHandlersHost = {
+    toolResponseBuilders: ToolResponseBuilders;
+
+
     trackedRootReadiness: Pick<
         TrackedRootReadiness,
         | "prepareTrackedRootForRead"
@@ -73,46 +77,75 @@ type NavigationHandlersHost = {
         | "buildIndexFailedCallGraphPayload"
         | "buildMissingLocalCollectionCallGraphPayload"
     >;
+
+
     prepareNavigationRead(absolutePath: string): Promise<TrackedRootReadinessState>;
+
+
     acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
+
+
     getPreparedReadCacheObservation(codebasePath: string): {
         observation: string | null;
         sourceObservation: string | null;
         unavailableReason?: string;
     };
+
+
     isPreparedNavigationReadCurrent(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
     ): boolean;
+
+
     loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         file: string,
     ): ReturnType<NavigationStore["getSymbolsByFile"]>;
+
+
     loadPreparedNavigationCompatibility(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         expectedSymbolRegistryManifestHash: string,
     ): ReturnType<NavigationStore["getCompatibilityState"]>;
+
+
     isPreparedNavigationReadCurrent(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
     ): boolean;
+
+
     stringifyToolJson(value: unknown): string;
+
+
     normalizeRelativeFilePath(relativeFilePath: string): string;
-    buildInvalidFileOutlineRequestPayload(root: string, file: string, message: string, status?: string, reason?: string): unknown;
+
+
     buildRequiresReindexFileOutlinePayload(codebasePath: string, args: Record<string, unknown>, detail?: string, reason?: string): object;
-    buildNotIndexedFileOutlinePayload(file: string, requestedPath: string, staleLocal?: { codebaseRoot: string; reason: string }): FileOutlineResponseEnvelope;
-    buildNotReadyFileOutlinePayload(codebasePath: string, file: string, requestedPath: string): FileOutlineResponseEnvelope & Record<string, unknown>;
+
+
     withProofDebugHint<T extends object>(payload: T, proofDebugHint?: CompletionProbeDebugHint): T;
+
+
     isPartialIndexNavigationUnavailable(info: unknown): boolean;
+
+
     getRegistryFileFreshness(input: {
         symbols: SymbolRecord[];
         absoluteFile: string;
         sourceBytes: Buffer;
     }): { status: "fresh" | "stale" | "unknown" | "inconsistent"; registryHash?: string; currentHash?: string };
+
+
     /**
      * Whole-file byte ceiling for navigation source reads (config
      * READ_FILE_MAX_BYTES; the reader defaults to 8 MiB when absent).
      */
     readFileMaxBytes?: number;
+
+
     buildStaleSymbolRefFileOutlinePayload(codebasePath: string, args: Record<string, unknown>, detail?: string): FileOutlineResponseEnvelope;
+
+
     loadRegistryValidatedCallGraphSidecar(input: {
         codebaseRoot: string;
         registryManifestHash?: string;
@@ -124,51 +157,41 @@ type NavigationHandlersHost = {
         relationshipUnavailableReason?: CallGraphUnavailableReason;
         warning?: string;
     }>;
+
+
     buildRegistrySymbolCallGraphHint(symbol: SymbolRecord, file: string, navigationState: {
         relationshipReady: boolean;
         relationshipBuiltAt?: string;
         relationshipUnavailableReason?: CallGraphUnavailableReason;
     }): CallGraphHint;
+
+
     buildOutlineSpanWarningCodes(repair: PythonSourceBackedSpanRepair | undefined): string[];
+
+
     touchWatchedCodebase(codebasePath: string): Promise<void>;
+
+
     getWatcherObservation(codebasePath: string): {
         observedEventEpoch: number;
         comparedThroughEventEpoch: number;
         coverage: "starting" | "ready" | "disabled" | "failed" | "stopped";
         coverageGapSinceEpoch?: number;
     };
+
+
     buildSyncHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
+
+
     getOutlineStatusForLanguage(relativeFilePath: string): FileOutlineStatus;
-    buildInvalidCallGraphRequestPayload(context: {
-        path: string;
-        symbolRef: CallGraphSymbolRef;
-        direction: CallGraphDirection;
-        depth: number;
-        limit: number;
-    }, message: string, status?: string, reason?: string): unknown;
-    buildRequiresReindexCallGraphPayload(codebasePath: string, detail: string | undefined, context: {
-        path: string;
-        symbolRef: CallGraphSymbolRef;
-        direction: CallGraphDirection;
-        depth: number;
-        limit: number;
-    }, reason?: string): CallGraphResponseEnvelope;
-    buildNotReadyCallGraphPayload(codebasePath: string, context: {
-        path: string;
-        symbolRef: CallGraphSymbolRef;
-        direction: CallGraphDirection;
-        depth: number;
-        limit: number;
-    }): CallGraphResponseEnvelope;
-    buildNotIndexedCallGraphPayload(context: {
-        path: string;
-        symbolRef: CallGraphSymbolRef;
-        direction: CallGraphDirection;
-        depth: number;
-        limit: number;
-    }, staleLocal?: { codebaseRoot: string; reason: string }): CallGraphResponseEnvelope;
+
+
     isCallGraphLanguageSupported(language: string, file?: string): boolean;
+
+
     isSha256HexHash(input: string | undefined): boolean;
+
+
     buildStaleSymbolRefCallGraphPayload(input: {
         codebaseRoot: string;
         context: {
@@ -180,6 +203,8 @@ type NavigationHandlersHost = {
         };
         message: string;
     }): CallGraphResponseEnvelope;
+
+
     buildRelationshipBackedCallGraph(input: {
         codebaseRoot: string;
         generationId?: string;
@@ -504,7 +529,7 @@ export class NavigationHandlers {
         try {
             const absoluteRootResult = requireAbsoluteFilesystemPath(args.path, "path");
             if (!absoluteRootResult.ok) {
-                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(
                     absoluteRootResult.path,
                     typeof args.file === "string" ? args.file : "",
                     absoluteRootResult.message,
@@ -522,7 +547,7 @@ export class NavigationHandlers {
                 "file",
             );
             if (!relativeFileResult.ok) {
-                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(
                     absoluteRoot,
                     relativeFileResult.path,
                     relativeFileResult.message,
@@ -538,7 +563,7 @@ export class NavigationHandlers {
                 (detail === "analysis" || detail === "relationships")
                 && (resolveMode !== "exact" || !symbolIdExact)
             ) {
-                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(
                     absoluteRoot,
                     normalizedFile,
                     `detail="${detail}" requires resolveMode="exact" and symbolIdExact.`,
@@ -552,7 +577,7 @@ export class NavigationHandlers {
             }
 
             if (!fs.existsSync(absoluteRoot)) {
-                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(
                     absoluteRoot,
                     normalizedFile,
                     `Path '${absoluteRoot}' does not exist. file_outline requires an indexed codebase directory root.`,
@@ -567,7 +592,7 @@ export class NavigationHandlers {
 
             const rootStat = fs.statSync(absoluteRoot);
             if (!rootStat.isDirectory()) {
-                const payload = this.host.buildInvalidFileOutlineRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(
                     absoluteRoot,
                     normalizedFile,
                     `Path '${absoluteRoot}' is not a directory. file_outline requires an indexed codebase directory root.`,
@@ -625,21 +650,21 @@ export class NavigationHandlers {
             }
 
             if (trackedRootState.state === "not_indexed") {
-                const payload = this.host.buildNotIndexedFileOutlinePayload(normalizedFile, absoluteRoot);
+                const payload = this.host.toolResponseBuilders.buildNotIndexedFileOutlinePayload(normalizedFile, absoluteRoot);
                 return {
                     content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
                 };
             }
 
             if (trackedRootState.state === "indexing") {
-                const payload = this.host.buildNotReadyFileOutlinePayload(trackedRootState.codebasePath, normalizedFile, absoluteRoot);
+                const payload = this.host.toolResponseBuilders.buildNotReadyFileOutlinePayload(trackedRootState.codebasePath, normalizedFile, absoluteRoot);
                 return {
                     content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
                 };
             }
 
             if (trackedRootState.state === "stale_local") {
-                const payload = this.host.buildNotIndexedFileOutlinePayload(normalizedFile, absoluteRoot, {
+                const payload = this.host.toolResponseBuilders.buildNotIndexedFileOutlinePayload(normalizedFile, absoluteRoot, {
                     codebaseRoot: trackedRootState.codebasePath,
                     reason: trackedRootState.reason,
                 });
@@ -834,7 +859,7 @@ export class NavigationHandlers {
                 ? requireAbsoluteFilesystemPath(args.path)
                 : null;
             const pathForError = pathResult?.ok ? pathResult.absolutePath : (typeof args?.path === "string" ? args.path : "");
-            const payload = this.host.buildInvalidFileOutlineRequestPayload(
+            const payload = this.host.toolResponseBuilders.buildInvalidFileOutlineRequestPayload(
                 pathForError,
                 typeof args?.file === "string" ? this.host.normalizeRelativeFilePath(args.file) : "",
                 `Unexpected file_outline failure: ${formatUnknownError(error)}`,
@@ -881,7 +906,7 @@ export class NavigationHandlers {
         };
 
         if (!absolutePathResult.ok) {
-            const payload = this.host.buildInvalidCallGraphRequestPayload(
+            const payload = this.host.toolResponseBuilders.buildInvalidCallGraphRequestPayload(
                 invalidSymbolRefContext,
                 absolutePathResult.message,
                 "not_indexed",
@@ -894,7 +919,7 @@ export class NavigationHandlers {
         }
 
         if (!symbolFileResult.ok) {
-            const payload = this.host.buildInvalidCallGraphRequestPayload(
+            const payload = this.host.toolResponseBuilders.buildInvalidCallGraphRequestPayload(
                 invalidSymbolRefContext,
                 symbolFileResult.message,
                 "not_found",
@@ -907,7 +932,7 @@ export class NavigationHandlers {
         }
 
         if (!symbolRef || typeof symbolRef.file !== "string" || typeof symbolRef.symbolId !== "string") {
-            const payload = this.host.buildInvalidCallGraphRequestPayload(
+            const payload = this.host.toolResponseBuilders.buildInvalidCallGraphRequestPayload(
                 invalidSymbolRefContext,
                 "symbolRef with { file, symbolId } is required.",
                 "not_found",
@@ -925,7 +950,7 @@ export class NavigationHandlers {
         try {
             const absolutePath = absolutePathResult.absolutePath;
             if (!fs.existsSync(absolutePath)) {
-                const payload = this.host.buildInvalidCallGraphRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidCallGraphRequestPayload(
                     {
                         path: absolutePath,
                         symbolRef: normalizedSymbolRef,
@@ -945,7 +970,7 @@ export class NavigationHandlers {
 
             const stat = fs.statSync(absolutePath);
             if (!stat.isDirectory()) {
-                const payload = this.host.buildInvalidCallGraphRequestPayload(
+                const payload = this.host.toolResponseBuilders.buildInvalidCallGraphRequestPayload(
                     {
                         path: absolutePath,
                         symbolRef: normalizedSymbolRef,
@@ -986,7 +1011,7 @@ export class NavigationHandlers {
             });
             const outcome = await session.read(async (trackedRootState): Promise<ToolTextResponse> => {
             if (trackedRootState.state === "requires_reindex") {
-                const payload = this.host.buildRequiresReindexCallGraphPayload(
+                const payload = this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     trackedRootState.codebasePath,
                     trackedRootState.message,
                     {
@@ -1003,7 +1028,7 @@ export class NavigationHandlers {
             }
 
             if (trackedRootState.state === "indexing") {
-                const payload = this.host.buildNotReadyCallGraphPayload(trackedRootState.codebasePath, {
+                const payload = this.host.toolResponseBuilders.buildNotReadyCallGraphPayload(trackedRootState.codebasePath, {
                     path: absolutePath,
                     symbolRef,
                     direction,
@@ -1029,7 +1054,7 @@ export class NavigationHandlers {
             }
 
             if (trackedRootState.state === "not_indexed") {
-                const payload = this.host.buildNotIndexedCallGraphPayload({
+                const payload = this.host.toolResponseBuilders.buildNotIndexedCallGraphPayload({
                     path: absolutePath,
                     symbolRef,
                     direction,
@@ -1042,7 +1067,7 @@ export class NavigationHandlers {
             }
 
             if (trackedRootState.state === "stale_local") {
-                const payload = this.host.buildNotIndexedCallGraphPayload(
+                const payload = this.host.toolResponseBuilders.buildNotIndexedCallGraphPayload(
                     {
                         path: absolutePath,
                         symbolRef,
@@ -1085,7 +1110,7 @@ export class NavigationHandlers {
             const proofDebugHint = trackedRootState.proofDebugHint;
 
             if (this.host.isPartialIndexNavigationUnavailable(searchableRoot.info)) {
-                const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
+                const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     effectiveRoot,
                     PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_DETAIL,
                     {
@@ -1111,7 +1136,7 @@ export class NavigationHandlers {
                 const reason = registryState.status === "missing"
                     ? "missing_symbol_registry"
                     : "incompatible_symbol_registry";
-                const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
+                const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     effectiveRoot,
                     `Symbol registry is ${registryState.status}: ${registryState.reason}`,
                     {
@@ -1251,7 +1276,7 @@ export class NavigationHandlers {
                     sourceBytes: symbolSourceBytes,
                 });
                 if (fileFreshness.status === "inconsistent") {
-                    const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
+                    const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                         effectiveRoot,
                         `Symbol registry contains inconsistent file hashes for '${normalizedSymbolFile}'.`,
                         {
@@ -1313,7 +1338,7 @@ export class NavigationHandlers {
                 const reason = compatibility.relationships.status === "missing"
                     ? "missing_relationship_sidecar"
                     : "incompatible_relationship_sidecar";
-                const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
+                const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     effectiveRoot,
                     `Relationship sidecar is ${compatibility.relationships.status}: ${compatibility.relationships.reason}`,
                     {
@@ -1349,7 +1374,7 @@ export class NavigationHandlers {
                 readAuthorizedSourceLines,
             });
             if (!relationshipBackedGraph) {
-                const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexCallGraphPayload(
+                const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     effectiveRoot,
                     "Relationship-backed call graph traversal could not load a compatible navigation snapshot.",
                     {
@@ -1403,7 +1428,7 @@ export class NavigationHandlers {
             const pathResult = typeof args?.path === "string"
                 ? requireAbsoluteFilesystemPath(args.path)
                 : null;
-            const payload = this.host.buildInvalidCallGraphRequestPayload(
+            const payload = this.host.toolResponseBuilders.buildInvalidCallGraphRequestPayload(
                 {
                     path: pathResult?.ok ? pathResult.absolutePath : (typeof args?.path === "string" ? args.path : ""),
                     symbolRef: normalizedSymbolRef,

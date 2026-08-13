@@ -1000,7 +1000,7 @@ export interface FileOutlineSymbolResult extends CanonicalSymbolIdentity {
 
 export interface FileOutlineResponseEnvelope {
     status: FileOutlineStatus;
-    reason?: NonOkReason;
+    reason?: NonOkReason | "invalid_request";
     path: string;
     file: string;
     outline: { symbols: FileOutlineSymbolResult[] } | null;
