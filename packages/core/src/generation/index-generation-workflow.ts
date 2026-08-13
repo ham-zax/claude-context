@@ -330,8 +330,6 @@ export interface IndexGenerationWorkflowPorts {
     symbolRegistryStateRoot: string | undefined;
     indexAuthorityCoordinator: IndexAuthorityCoordinator;
     indexPolicyRuntimeService: IndexPolicyRuntimeService;
-    getNavigationDeltaState: () => CachedNavigationDeltaState | undefined;
-    setNavigationDeltaState: (state: CachedNavigationDeltaState | undefined) => void;
     getSynchronizer(synchronizerKey: string): FileSynchronizer | undefined;
     registerSynchronizer(synchronizerKey: string, synchronizer: FileSynchronizer): void;
     getSynchronizerMutationTarget(synchronizerKey: string): string | undefined;
@@ -348,8 +346,40 @@ export class IndexGenerationWorkflow {
     private readonly preparedIndexCollectionReceipts =
         new WeakSet<PreparedIndexCollectionReceipt>();
     private readonly reindexByChangeQueues = new Map<string, Promise<void>>();
+    /**
+     * Phase 8.4B - the workflow also owns the navigation warm state:
+     * the staged-delta WeakMap and the promoted delta, with the complete
+     * stage -> promote -> delete lifecycle.
+     */
+    private navigationDeltaState?: CachedNavigationDeltaState;
+    private readonly preparedNavigationDeltaStates =
+        new WeakMap<StagedNavigationSidecarGeneration, CachedNavigationDeltaState>();
 
     constructor(private readonly ports: IndexGenerationWorkflowPorts) {}
+
+    public stagePreparedNavigationDelta(
+        candidate: StagedNavigationSidecarGeneration,
+        state: CachedNavigationDeltaState,
+    ): void {
+        this.preparedNavigationDeltaStates.set(candidate, state);
+    }
+
+    public promotePreparedNavigationDelta(
+        candidate: StagedNavigationSidecarGeneration,
+        resolveNavigationObservationToken: () => string | null,
+    ): void {
+        const preparedDeltaState = this.preparedNavigationDeltaStates.get(candidate);
+        const navigationObservationToken = preparedDeltaState
+            ? resolveNavigationObservationToken()
+            : null;
+        if (preparedDeltaState && navigationObservationToken) {
+            this.navigationDeltaState = {
+                ...preparedDeltaState,
+                navigationObservationToken,
+            };
+        }
+        this.preparedNavigationDeltaStates.delete(candidate);
+    }
 
     public registerPreparedIndexCollectionReceipt(
         receipt: PreparedIndexCollectionReceipt,
@@ -1009,12 +1039,12 @@ export class IndexGenerationWorkflow {
                         preparedNavigation.generationId,
                         false,
                     );
-                    this.ports.setNavigationDeltaState(navigationObservationToken
+                    this.navigationDeltaState = navigationObservationToken
                         ? {
                             ...preparedNavigationState,
                             navigationObservationToken,
                         }
-                        : undefined);
+                        : undefined;
 
                     const generationReceipt = await this.ports.indexAuthorityCoordinator.recordActivatedGenerationProof({
                         canonicalRoot: input.canonicalRoot,
@@ -2877,7 +2907,7 @@ export class IndexGenerationWorkflow {
             sealHash?: string;
         },
     ): CachedNavigationDeltaState | undefined {
-        const cached = this.ports.getNavigationDeltaState();
+        const cached = this.navigationDeltaState;
         const expectedSealHash = sourceNavigation.navigationSealHash ?? sourceNavigation.sealHash;
         const currentObservation = cached
             && cached.canonicalRoot === canonicalRoot
@@ -2900,7 +2930,7 @@ export class IndexGenerationWorkflow {
             return cached;
         }
         if (cached?.canonicalRoot === canonicalRoot) {
-            this.ports.setNavigationDeltaState(undefined);
+            this.navigationDeltaState = undefined;
         }
         return undefined;
     }

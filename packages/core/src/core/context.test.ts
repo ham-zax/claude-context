@@ -2089,7 +2089,6 @@ test('Context invalidates warm navigation delta state when the bound seal observ
         assert.ok(current);
 
         const internals = context as unknown as {
-            navigationDeltaState?: unknown;
             resolveReusableNavigationDeltaState(
                 canonicalRoot: string,
                 navigation: NonNullable<typeof current>['navigation'],
@@ -2114,7 +2113,6 @@ test('Context invalidates warm navigation delta state when the bound seal observ
             internals.resolveReusableNavigationDeltaState(canonicalRoot, current.navigation),
             undefined,
         );
-        assert.equal(internals.navigationDeltaState, undefined);
         fs.writeFileSync(sourcePath, 'export const runtime = 3;\n', 'utf8');
         await assert.rejects(
             context.reindexByChange(codebasePath),

@@ -592,9 +592,6 @@ export class Context {
     private indexGenerationWorkflow: IndexGenerationWorkflow;
     // Derived warm-path state only. The durable generation remains authoritative,
     // and a restart or generation mismatch returns to exact sidecar validation.
-    private navigationDeltaState?: CachedNavigationDeltaState;
-    private readonly preparedNavigationDeltaStates =
-        new WeakMap<StagedNavigationSidecarGeneration, CachedNavigationDeltaState>();
     private writeCollectionOverrides = new Map<string, string>();
     private symbolRegistryStateRoot?: string;
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
@@ -825,10 +822,6 @@ export class Context {
             listRelatedCollectionNames: (codebasePath) => this.listRelatedCollectionNames(codebasePath),
             loadIgnorePatterns: (codebasePath) => this.loadIgnorePatterns(codebasePath),
             loadIndexProfileForCodebase: (codebasePath) => this.loadIndexProfileForCodebase(codebasePath),
-            getNavigationDeltaState: () => this.navigationDeltaState,
-            setNavigationDeltaState: (state) => {
-                this.navigationDeltaState = state;
-            },
             normalizeRelativePathForCodebase: (codebasePath, candidatePath) => (
                 this.normalizeRelativePathForCodebase(codebasePath, candidatePath)
             ),
@@ -4074,7 +4067,7 @@ export class Context {
             records: relationshipRecords,
             analysisByFile,
         });
-        this.preparedNavigationDeltaStates.set(result, {
+        this.indexGenerationWorkflow.stagePreparedNavigationDelta(result, {
             canonicalRoot,
             generationId: result.generationId,
             symbolRegistryManifestHash: result.manifestHash,
@@ -4159,21 +4152,14 @@ export class Context {
             beforePublish: assertMutationCurrent,
             publishMutation,
         });
-        const preparedDeltaState = this.preparedNavigationDeltaStates.get(candidate);
-        const navigationObservationToken = preparedDeltaState
-            ? this.resolveNavigationObservationToken(
+        this.indexGenerationWorkflow.promotePreparedNavigationDelta(
+            candidate,
+            () => this.resolveNavigationObservationToken(
                 canonicalRoot,
                 candidate.generationId,
                 false,
-            )
-            : null;
-        if (preparedDeltaState && navigationObservationToken) {
-            this.navigationDeltaState = {
-                ...preparedDeltaState,
-                navigationObservationToken,
-            };
-        }
-        this.preparedNavigationDeltaStates.delete(candidate);
+            ),
+        );
         console.log(`[Context] 🧭 Published navigation generation '${candidate.generationId}'.`);
         assertMutationCurrent?.();
         try {
