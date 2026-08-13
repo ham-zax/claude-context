@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `0963ca9`
+Checkpoint HEAD: `d24e4a9`
 
 Completed ownership-bounded batches:
 
@@ -71,14 +71,26 @@ Completed ownership-bounded batches:
 - Phase 8.9 / policy publication transaction ownership: `publishResolvedIndexPolicy` / `clearPublishedIndexPolicy` / `forceClearPublishedIndexPolicy` (validation, v3/v4/v5 document selection, rollback, and committed-before-receipt acknowledgement) moved into `IndexAuthorityCoordinator` over primitive document-store/runtime-service ports; Context keeps thin delegates; `IndexGenerationWorkflow` uses the port publication plus the coordinator's marker-bound reconciliation. Owner-level publication test constructs the coordinator without Context: `31e60db`.
 - Phase 8.10 / index teardown workflow: `IndexTeardownWorkflow` owns the cross-domain clear ordering under the shared policy-mutation lock (collections → durable policy → runtime policy → navigation sidecars → synchronizer checkpoint/registry → ignore state → compatibility state → index profile), wired through the new `IndexMutationPort.clearIndex` operation; `ManageMaintenanceHandlers` routes clears through the port; Context `clearIndex` is a thin delegate: `29db70d`.
 - Phase 8 surface-guard P2 / the published-surface freeze now also pins the deliberately public port interfaces (`IndexMutationPort`, `IndexMutationPortDependencies`, `SourceFreshnessPort`): `0963ca9`.
+- Phase 9.0 / version-support inventory (classification with writer/reader/selector evidence; recorded here, not guessed):
+  - Durable disk format — completion markers: `satori_index_completion_v3` is the current writer/reader (`Context.publishCompletedIndexMarker` / `proveVectorGenerationWithEvidence`); `v1`/`v2` have no writer and are recognized only by the classifier in `persisted-index-authority.ts:425-475` (invalid/requires_reindex).
+  - Durable disk format — policy documents: writer is `IndexAuthorityCoordinator.publishResolvedIndexPolicy` selecting `satori_index_policy_v5` (publication + controlSignature), `v4` (publication only), or `v3` (no publication); readers are `inspectIndexPolicyDocument`/`loadCustomIndexPolicy`. `satori_index_policy_v2` has no writer and is recognized only at `persisted-index-authority.ts:661` (requires_reindex). The v3/v4/v5 floor is the Phase 9.3 product decision.
+  - Durable disk format — fingerprints: `LEGACY_BASE/ANALYSIS/PROJECTION_INDEX_FINGERPRINT_FIELDS` are reader-only classification (`persisted-index-authority.ts:214-216,334-335`) feeding `legacy_unverified_fingerprint`; `dense_v3`/`hybrid_v3` are the current fingerprint schema versions (`config.ts:414-420`), `assumed_v2` is a historical source label (`config.ts:302`).
+  - Persisted operator/config state — MCP snapshot: `CodebaseSnapshotV3` is the only writer (`snapshot.ts:1278`); `V1`/`V2` are migration readers (`snapshot.ts:1051-1067`, `mapFromV1/V2Snapshot`) with no writer.
+  - Persisted operator/config state — LateOn runtime: six `SATORI_LATEON_PROFILE` IDs and three activation-policy IDs are validated in `config.ts:731-808`; all six profile assets (`satori_lateon_runtime_profile_v1..v4`) are still executable via `lateon-reranker.ts` (current: `lateon_offline_quality_projection_v4_d32_v1`); historical IDs are recognized at the CLI migration boundary (`runtime-selection.ts`, `lateon-model-store.ts`, `runtime-config.ts` doctor checks).
+  - Wire/provider identity (current, keep): `lexicographic_recursive_canonical_json_v1`, `relationship_manifest_v2`, `navigation_current_v2`, `search_disclosure_v1`, `provider_output_v1`, `embedding_projection_v1`, `lexical_projection_v1`, `VECTOR_CANDIDATE_RRF_K_V1`, `SHARED_RUNTIME_PROTOCOL_VERSION=2`, `satori_rerank_request_contract_v1` (frozen SHA `f4e8ec82…`).
+  - Rerank document projections: `search_rerank_document_v4` is current (selector: v4 profile `projectionVersion`, `search-request-coordinator.ts:2176-2180`); `v3` and `v2` are executable (`search-rerank-projection.ts`) and `v2` supplies 14-15 implementation-machinery symbols imported by v3/v4; `v1` (`search-rerank-document.ts`) is selected only by the legacy path in `search-query-support.ts`.
+  - Bounded source selection: `bounded_source_selection_v2` is current (`document-v4.ts:340`, `symbol-context-composer.ts:402,419`); `_v1` is selected only by `SEARCH_RERANK_DOCUMENT_V2_POLICY.selector.version` (`document-v2.ts:42`) and drives the CRLF legacy branch (`bounded-source-selector.ts:160-189`).
+  - Rerank query projections: `search_rerank_query_v2` is current (v4 profile); `v1` selected by the v3 profile (`query-routing.ts:28-33`); `semantic_query_raw_v1` is the raw fallback identity (`query-routing.ts:22-27`).
+  - Public API identities (current, keep): `SearchGroupedResultV2`, `SearchRerankRequestIdentityV1`, `SearchNavigationUnavailableReasonV2`, `CodebaseSnapshotV1-V3` union export.
+  - Deprecated compatibility seams (current): `Context.setWriteCollectionOverride` (legacy adapter), `navigation/runtime.ts:41` `servingStore` alias, `config.ts:55` `WATCHER_DEBOUNCE_MS` alias, `MCP_WATCH_DEBOUNCE_MS` (ignored).
+  - No other versioned production symbol families found beyond these and their test-only fixtures.
 
-Next open batch at this checkpoint: Phase 9.0 (version-support inventory).
-Phase 8 is sealed: implementation `bc53cb4 → 0963ca9`, seal review approved
-(`2386ad3`, `31e60db`, `29db70d`, `8d919dc`, `0963ca9` — no P0/P1; the only
-open item, surface-guard transitivity, closed by `0963ca9`). Phase 9 starts
-with the 9.0 inventory; its durable-format floor (9.3) requires separate
-authorization. Refresh this checkpoint only after an accepted batch is
-committed; preserve the original baseline above as historical lineage.
+Next open batch at this checkpoint: Phase 9.1 (retire old LateOn/runtime profiles).
+Phase 8 is sealed (`bc53cb4 → 0963ca9`, review-approved; seal commit above).
+Phase 9.0 is recorded; 9.1 starts from the inventory above. The durable-format
+floor (9.3) requires separate authorization. Refresh this checkpoint only after
+an accepted batch is committed; preserve the original baseline above as
+historical lineage.
 
 ## Goal
 
