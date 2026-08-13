@@ -89,12 +89,13 @@ Completed ownership-bounded batches:
 - Phase 9.2B / retire executable historical rerank document projections: production search uses one canonical document projector; the executable V2/V3 builders and their projection dispatch are removed; historical V3 fixture/policy material required only to preserve the frozen current request-contract identity becomes inert contract evidence, not executable implementation: `304c87a`.
 - Phase 9.2C / remove bounded-source selector v1: after no executable supported path selects it, the legacy CRLF newline branch is gone and `selectBoundedSource(...)` is one canonical algorithm; `bounded_source_selection_v2` remains the immutable current identity: `24a89d5`.
 - Phase 9.2D / retire query projection v1 (review-driven close): production routing accepts only raw (`semantic_query_raw_v1`) or current (`search_rerank_query_v2`) and rejects the retired v1 identity (`search_rerank_query_projection_identity_unknown`). The current projector is canonical (`buildSearchRerankQuery`, `SEARCH_RERANK_QUERY_PROJECTION_IDENTITY`, `search-rerank-query.ts`; immutable serialized identity stays `search_rerank_query_v2`). The retired v1 query bytes survive only as frozen inert literal contract evidence in `search-rerank-request-contract.ts`, decoupled from the current answer-focus model; `contractSha256` unchanged (contract test pins recomputation against the committed asset). A coordinator-level boundary test proves `handleSearchCode` fails closed with provider rerank call count 0 when a reranker advertises `search_rerank_query_v1`. Full MCP suite 1525 pass / 1 skip: `0564384`.
+- Phase 9.2 review repair / close projection retirement boundaries: document projection routing (`search-rerank-document-routing.ts`) is now symmetric with query routing — undefined/blank resolves to `semantic_document_raw_v1`, `search_rerank_document_v4` to the canonical publication-bound projector, and every other advertised identity (v1/v2/v3/unknown) throws `search_rerank_document_projection_identity_unknown` before any provider rerank call. The retired V3 document bytes and policy material survive only as frozen inert literal contract evidence (`SEARCH_RERANK_DOCUMENT_V3_CONTRACT_EVIDENCE`, `SEARCH_RERANK_DOCUMENT_V3_POLICY_EVIDENCE`); `buildSearchRerankDocumentV3ContractEvidence()` is deleted; no historical document builder executes during contract recomputation. Coordinator-level boundary tests cover retired V1/V2/V3 and one unknown document projection with provider rerank call count 0. `contractSha256` unchanged (`f4e8ec82`). Full MCP suite 302 pass / 1 skip: `8931e68`.
 
-Next open batch at this checkpoint: Phase 9.2 is complete pending the 9.2D
-review. The durable-format floor (9.3) requires separate authorization. Phase 8
-is sealed (`bc53cb4 → 0963ca9`, review-approved). Refresh this checkpoint only
-after an accepted batch is committed; preserve the original baseline above as
-historical lineage.
+Next open batch at this checkpoint: Phase 9.2 review repair is complete. The
+durable-format floor (9.3) requires separate authorization. Phase 8 is sealed
+(`bc53cb4 → 0963ca9`, review-approved). Refresh this checkpoint only after an
+accepted batch is committed; preserve the original baseline above as historical
+lineage.
 
 ## Goal
 
