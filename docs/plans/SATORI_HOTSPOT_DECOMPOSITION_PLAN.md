@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `d24e4a9`
+Checkpoint HEAD: `bcc2460`
 
 Completed ownership-bounded batches:
 
@@ -84,13 +84,14 @@ Completed ownership-bounded batches:
   - Public API identities (current, keep): `SearchGroupedResultV2`, `SearchRerankRequestIdentityV1`, `SearchNavigationUnavailableReasonV2`, `CodebaseSnapshotV1-V3` union export.
   - Deprecated compatibility seams (current): `Context.setWriteCollectionOverride` (legacy adapter), `navigation/runtime.ts:41` `servingStore` alias, `config.ts:55` `WATCHER_DEBOUNCE_MS` alias, `MCP_WATCH_DEBOUNCE_MS` (ignored).
   - No other versioned production symbol families found beyond these and their test-only fixtures.
+- Phase 9.1 / retired LateOn runtime profiles: only `lateon_offline_quality_projection_v4_d32_v1` can execute. `createMcpConfig` rejects every other known profile with a clear `Unsupported SATORI_LATEON_PROFILE` error carrying `satori upgrade` migration guidance, and the two historical activation policies are rejected the same way. `loadLateOnRuntimeProfile` rejects retired profile IDs and non-v4 schema assets; `PROFILE_PATHS` keeps only the v4 asset; the v1-v3 validation branches are deleted (`LATEON_RETIRED_RUNTIME_PROFILE_IDS` records the retired set). CLI upgrade/migration fixtures for historical managed profile IDs unchanged. Full MCP suite 1554 pass / 1 skip; CLI suite 364/364: `bcc2460`.
 
-Next open batch at this checkpoint: Phase 9.1 (retire old LateOn/runtime profiles).
-Phase 8 is sealed (`bc53cb4 → 0963ca9`, review-approved; seal commit above).
-Phase 9.0 is recorded; 9.1 starts from the inventory above. The durable-format
-floor (9.3) requires separate authorization. Refresh this checkpoint only after
-an accepted batch is committed; preserve the original baseline above as
-historical lineage.
+Next open batch at this checkpoint: Phase 9.2A (extract canonical rerank
+projection primitives). 9.2B may start only after this 9.1 retirement batch
+passes review. Phase 8 is sealed (`bc53cb4 → 0963ca9`, review-approved).
+The durable-format floor (9.3) requires separate authorization. Refresh this
+checkpoint only after an accepted batch is committed; preserve the original
+baseline above as historical lineage.
 
 ## Goal
 
