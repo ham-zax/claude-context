@@ -14,7 +14,7 @@ HEAD; this document must not be executed continuously as one change.
 
 ## Execution checkpoint
 
-Checkpoint HEAD: `95cc653`
+Checkpoint HEAD: `8737e8e`
 
 Completed ownership-bounded batches:
 
@@ -52,6 +52,7 @@ Completed ownership-bounded batches:
 - Phase 7.4 / install planning as a pure mutation plan: `b1f3a84`.
 - Phase 7.5 / install application executor: `01bff81`.
 - Phase 7.6 / runtime upgrade orchestration: `95cc653`.
+- Phase 4.7 / review-driven ownership seal: neutral `generation/contracts` + `generation/errors` (no `generation/*` or synchronizer-registry imports of `core/context`), `SynchronizerRegistry` raw-map getters replaced by a narrow mutation port, Context compatibility accessor narrowed: `8737e8e`.
 
 Next open batch at this checkpoint: Phase 8.1 (planned at `95cc653`; not started —
 awaiting review of Phases 5.3–7.6 and of this Phase 8 plan). Refresh this checkpoint only after an
