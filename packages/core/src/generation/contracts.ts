@@ -30,6 +30,7 @@ export interface ProvenVectorGenerationReceipt {
     readonly collectionName: string;
     readonly marker: IndexCompletionMarkerDocument;
     readonly policy: ResolvedIndexPolicy;
+    readonly publication?: CanonicalPublicationBinding;
     readonly policyDocumentDigest: string;
     readonly exactPayloadCount: number;
     readonly observations: {

@@ -17,6 +17,7 @@ import type {
     RepairProof,
     RepairSnapshotEvidence,
     ObservedResolvedIndexPolicy,
+    SourceFreshnessCheckpointAuthority,
     SourceFreshnessCheckpointEvidence,
     SourceFreshnessPort,
 } from "@zokizuan/satori-core";
@@ -1477,6 +1478,7 @@ export class ManageIndexingHandlers {
         let candidateMarkerPublicationStarted = false;
         let writingReceiptPublished = false;
         let fullIndexCheckpoint: import("@zokizuan/satori-core").PreparedFileChangeSet | undefined;
+        let stagedCheckpoint: import("@zokizuan/satori-core").StagedSourceFreshnessCheckpoint | undefined;
         let fullIndexSynchronizer: import("@zokizuan/satori-core").FileSynchronizer | undefined;
         let fullIndexCheckpointEvidence:
             | Extract<SourceFreshnessCheckpointEvidence, { status: "valid" }>
@@ -1663,17 +1665,18 @@ export class ManageIndexingHandlers {
             const ignorePatterns = candidatePolicy.effectiveIgnorePatterns;
             const supportedExtensions = candidatePolicy.supportedExtensions;
             console.log(`[BACKGROUND-INDEX] Using ${ignorePatterns.length} effective ignore patterns (policy=${candidatePolicy.policyHash.slice(0, 12)}).`);
+            const candidateAuthority: SourceFreshnessCheckpointAuthority = {
+                collectionName: targetCollectionName,
+                markerRunId: candidateMarkerRunId,
+                indexPolicyHash: candidatePolicy.policyHash,
+            };
             const synchronizer = new FileSynchronizer(
                 absolutePath,
                 ignorePatterns,
                 supportedExtensions,
                 {
                     checkpointIdentity: targetCollectionName,
-                    checkpointAuthority: {
-                        collectionName: targetCollectionName,
-                        markerRunId: candidateMarkerRunId,
-                        indexPolicyHash: candidatePolicy.policyHash,
-                    },
+                    checkpointAuthority: candidateAuthority,
                 },
             );
             fullIndexSynchronizer = synchronizer;
@@ -1682,6 +1685,7 @@ export class ManageIndexingHandlers {
                 publishMutation,
                 { deferSnapshotPublication: true },
             );
+            fullIndexCheckpoint = await synchronizer.prepareChanges({ forceFullHash: true });
 
             console.log(`[BACKGROUND-INDEX] Starting indexing for: ${absolutePath}`);
 
@@ -1723,6 +1727,7 @@ export class ManageIndexingHandlers {
                 deferFullIndexPublication: true,
                 indexPolicy: candidatePolicy,
                 writeCollectionName: targetCollectionName,
+                preparedChanges: fullIndexCheckpoint,
                 ...(preparedCollectionReceipt && mutationLease ? {
                     preparedCollectionReceipt,
                     preparedCollectionBinding: {
@@ -1745,18 +1750,12 @@ export class ManageIndexingHandlers {
                 );
                 // The checkpoint is authoritative only when it describes the exact
                 // source bytes consumed by this candidate generation.
-                fullIndexCheckpoint = await synchronizer.prepareChanges({ forceFullHash: true });
                 assertCheckpointMatchesIndexedSources(stats.indexedFiles, stats.indexedFileHashes, fullIndexCheckpoint);
-                // Publish the candidate-scoped checkpoint before any canonical
-                // authority selects its collection. A crash can now leave only
-                // an unreferenced checkpoint, never new authority with an old
-                // root-global freshness baseline.
-                await fullIndexCheckpoint.commit(assertMutationCurrent, publishMutation);
-                fullIndexCheckpointCommitted = true;
+                stagedCheckpoint = await fullIndexCheckpoint.stageCheckpoint(candidateAuthority, assertMutationCurrent);
                 const checkpointEvidence = await synchronizer.inspectOwnedSnapshot();
                 if (checkpointEvidence.status !== "valid") {
                     throw new Error(
-                        `Full index checkpoint for '${absolutePath}' could not be read after publication: ${checkpointEvidence.message}`,
+                        `Full index checkpoint for '${absolutePath}' could not be read after staging: ${checkpointEvidence.message}`,
                     );
                 }
                 fullIndexCheckpointEvidence = checkpointEvidence;
@@ -1879,11 +1878,16 @@ export class ManageIndexingHandlers {
                 this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
             }
             if (stats.status === "completed" && stats.navigationCandidate) {
-                if (!fullIndexCheckpointEvidence || !candidateMarkerRunId) {
+                if (!fullIndexCheckpointEvidence || !candidateMarkerRunId || !fullIndexCheckpoint) {
                     throw new Error(
                         `Completed index candidate for '${absolutePath}' has no exact source-checkpoint authority.`,
                     );
                 }
+                await fullIndexCheckpoint.assertSourceObservationCurrent();
+                if (mutationLease) {
+                    this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
+                }
+                assertMutationCurrent?.();
                 const activationId = crypto.randomUUID();
                 const publicationAuthority = mutationLease ?? {
                     ownerId: "core-internal",
@@ -1940,6 +1944,10 @@ export class ManageIndexingHandlers {
                     assertMutationCurrent,
                     publishMutation,
                 );
+                if (stagedCheckpoint) {
+                    fullIndexCheckpoint.promoteStagedCheckpoint?.(stagedCheckpoint, candidateAuthority);
+                    fullIndexCheckpointCommitted = true;
+                }
                 candidateAuthorityForRollback = this.host.indexMutationPort.captureDurableIndexAuthority(absolutePath);
                 candidateAuthorityCommitted = true;
             }
@@ -2118,6 +2126,21 @@ export class ManageIndexingHandlers {
                     candidateMarkerWithdrawn = true;
                 } catch (clearError) {
                     console.warn(`[BACKGROUND-INDEX] Failed to clear completion marker after indexing error for '${absolutePath}': ${formatUnknownError(clearError)}`);
+                }
+            }
+            if (stagedCheckpoint && !fullIndexCheckpointCommitted && targetCollectionName) {
+                try {
+                    const { FileSynchronizer } = await import("@zokizuan/satori-core");
+                    await FileSynchronizer.deleteSnapshotForGeneration(
+                        absolutePath,
+                        targetCollectionName,
+                        assertMutationCurrent,
+                        publishMutation,
+                    );
+                } catch (stagedCheckpointError) {
+                    console.warn(
+                        `[BACKGROUND-INDEX] Failed to remove staged candidate checkpoint for '${absolutePath}': ${formatUnknownError(stagedCheckpointError)}`,
+                    );
                 }
             }
             if (candidateMarkerWithdrawn && fullIndexCheckpointCommitted && fullIndexSynchronizer) {

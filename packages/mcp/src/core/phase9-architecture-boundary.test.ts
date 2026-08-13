@@ -14,11 +14,15 @@ const EXEMPT_RELATIVE_PATHS = new Set([
     "packages/core/src/core/persisted-index-authority.ts",
     "packages/mcp/src/server/lateon-reranker-protocol.ts",
     "packages/mcp/src/core/search-rerank-request-contract.ts",
+    "packages/cli/src/runtime-upgrade.ts",
+    "packages/cli/src/runtime-selection.ts",
+    "packages/cli/src/managed-runtime-closure.ts",
+    "packages/cli/src/lateon-model-store.ts",
 ]);
 
 export function isExemptBoundaryFile(filePath: string): boolean {
     const normalized = filePath.replace(/\\/g, "/");
-    if (normalized.endsWith(".test.ts") || normalized.includes("/cli/")) {
+    if (normalized.endsWith(".test.ts")) {
         return true;
     }
     return Array.from(EXEMPT_RELATIVE_PATHS).some((exempt) => normalized.endsWith(exempt));
@@ -44,7 +48,7 @@ export function scanSourceContentForBoundaryViolations(
         }
 
         const forbiddenImportMatch = line.match(
-            /from\s+["'].*?(search-rerank-contract-evidence|runtime-profile-v1|runtime-profile-v2|runtime-profile-v3|search-rerank-document-v[123]|search-rerank-query-v1).*?["']/,
+            /(?:from\s+|import\s*\(|require\s*\()\s*["'].*?(search-rerank-contract-evidence|runtime-profile-v1|runtime-profile-v2|runtime-profile-v3|search-rerank-document-v[123]|search-rerank-query-v1).*?["']/,
         );
         if (forbiddenImportMatch) {
             violations.push({
@@ -100,10 +104,12 @@ test("Phase 9 architecture boundary: production source tree has zero retired exe
     const repoRoot = path.resolve(import.meta.dirname, "../../../..");
     const coreSourceDir = path.join(repoRoot, "packages/core/src");
     const mcpSourceDir = path.join(repoRoot, "packages/mcp/src");
+    const cliSourceDir = path.join(repoRoot, "packages/cli/src");
 
     const allSourceFiles = [
         ...collectSourceFiles(coreSourceDir),
         ...collectSourceFiles(mcpSourceDir),
+        ...collectSourceFiles(cliSourceDir),
     ];
 
     const violations: BoundaryViolation[] = [];
@@ -118,15 +124,25 @@ test("Phase 9 architecture boundary: production source tree has zero retired exe
 });
 
 test("Phase 9 architecture boundary: synthetic retired module import fails scanner", () => {
-    const syntheticCode = `import { legacy } from "../core/search-rerank-contract-evidence.js";`;
-    const violations = scanSourceContentForBoundaryViolations(
+    const syntheticCode1 = `import { legacy } from "../core/search-rerank-contract-evidence.js";`;
+    const violations1 = scanSourceContentForBoundaryViolations(
         "packages/mcp/src/core/search-request-coordinator.ts",
-        syntheticCode,
+        syntheticCode1,
         false,
     );
 
-    assert.equal(violations.length, 1);
-    assert.equal(violations[0].rule, "forbidden_retired_module_import");
+    assert.equal(violations1.length, 1);
+    assert.equal(violations1[0].rule, "forbidden_retired_module_import");
+
+    const syntheticCode2 = `const retired = await import("./search-rerank-document-v3.js");`;
+    const violations2 = scanSourceContentForBoundaryViolations(
+        "packages/mcp/src/core/search-execution.ts",
+        syntheticCode2,
+        false,
+    );
+
+    assert.equal(violations2.length, 1);
+    assert.equal(violations2[0].rule, "forbidden_retired_module_import");
 });
 
 test("Phase 9 architecture boundary: synthetic retired policy branch fails scanner", () => {

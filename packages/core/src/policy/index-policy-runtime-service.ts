@@ -314,10 +314,6 @@ export class IndexPolicyRuntimeService {
         );
     }
 
-    invalidateCustomIndexPolicyFileToken(canonicalRoot: string): void {
-        this.policyFileTokensByCodebase.delete(canonicalRoot);
-    }
-
     /**
      * Load the custom policy document for a codebase into runtime state when
      * the document's observation token changed. Clears runtime state when the

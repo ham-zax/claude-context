@@ -75,6 +75,7 @@ export interface ReadSymbolRegistrySidecarInput {
 export type ReadSymbolRegistrySidecarResult =
     | {
         status: 'ok';
+        generationId?: string;
         rootPath: string;
         manifestHash: string;
         registry: SymbolRegistry;
@@ -332,6 +333,9 @@ export async function readNavigationGenerationSeal(
             ? await resolveNavigationGeneration(stateRoot, normalizedRootPath, generationId)
             : await resolveCurrentNavigationGeneration(stateRoot, normalizedRootPath);
     } catch (error) {
+        if (!generationId && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return { status: 'missing', rootPath, reason: 'navigation generation is missing' };
+        }
         return {
             status: error instanceof RetiredNavigationPointerError
                 || error instanceof UnsupportedNavigationPointerError
@@ -476,8 +480,15 @@ export async function readSymbolRegistrySidecar(input: ReadSymbolRegistrySidecar
             input.generationId,
         ));
     } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return {
+                status: 'missing',
+                rootPath,
+                reason: 'navigation generation is missing',
+            };
+        }
         return {
-            status: 'incompatible',
+            status: 'corrupt',
             rootPath,
             reason: error instanceof Error ? error.message : String(error),
         };
@@ -628,6 +639,7 @@ export async function readSymbolRegistrySidecar(input: ReadSymbolRegistrySidecar
         const registry = buildSymbolRegistry({ manifest, symbols });
         return {
             status: 'ok',
+            generationId: generation?.generationId,
             rootPath,
             manifestHash,
             registry,

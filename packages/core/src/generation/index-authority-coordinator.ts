@@ -301,7 +301,6 @@ export class IndexAuthorityCoordinator {
         const publication = binding.publication;
         if (publication && (
             publication.sourceCheckpoint.collectionName !== binding.collectionName
-            || publication.sourceCheckpoint.markerRunId !== marker.runId
             || publication.sourceCheckpoint.indexPolicyHash !== marker.indexPolicyHash
         )) return null;
 
@@ -405,6 +404,9 @@ export class IndexAuthorityCoordinator {
                     canonicalRoot,
                 ));
         } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                return { status: 'missing' };
+            }
             return {
                 status: error instanceof RetiredNavigationPointerError
                     ? 'requires_reindex'
@@ -514,7 +516,9 @@ export class IndexAuthorityCoordinator {
         if (!observations) return null;
         const collectionName = this.getPublishedPolicyBinding(canonicalRoot)?.collectionName;
         const observePublication = this.ports.vectorDatabase.getPublicationObservation;
-        if (!collectionName || typeof observePublication !== 'function') return null;
+        if (!collectionName || typeof observePublication !== 'function') {
+            return null;
+        }
         const publicationObservation = await observePublication.call(
             this.ports.vectorDatabase,
             collectionName,
@@ -552,6 +556,7 @@ export class IndexAuthorityCoordinator {
                 effectiveIgnorePatterns: [...receipt.policy.effectiveIgnorePatterns],
             },
             policyDocumentDigest: receipt.policyDocumentDigest,
+            ...(receipt.publication ? { publication: structuredClone(receipt.publication) } : {}),
             exactPayloadCount: receipt.exactPayloadCount,
             observations: { ...receipt.observations },
         };
@@ -1259,6 +1264,16 @@ export class IndexAuthorityCoordinator {
                 this.deletePublishedResolvedPolicy(canonicalRoot);
             }
         };
+        if (binding.navigation.status === 'not_bound' && binding.publication) {
+            throw new Error(`Invalid index policy binding for '${canonicalRoot}': publication must not be present when navigation status is 'not_bound'.`);
+        }
+        if (binding.navigation.status === 'sealed' && !binding.publication) {
+            throw new Error(`Invalid index policy binding for '${canonicalRoot}': publication is required when navigation status is 'sealed'.`);
+        }
+        if (!policy.controlSignature || typeof policy.controlSignature !== 'string') {
+            throw new Error(`Cannot publish index policy V5 for '${canonicalRoot}': policy.controlSignature is missing.`);
+        }
+        const controlSignature = policy.controlSignature;
         const policyBase = {
             canonicalRoot,
             customExtensions: policy.customExtensions,
@@ -1271,26 +1286,11 @@ export class IndexAuthorityCoordinator {
             collectionName: binding.collectionName,
             navigation: binding.navigation,
         };
-        if (!binding.publication) {
-            this.activatePublishedIndexPolicy(policy, binding);
-            return {
-                status: 'committed',
-                operation: 'publish',
-                canonicalRoot,
-                documentDigest: '',
-                policyHash: policy.policyHash,
-                collectionName: binding.collectionName,
-                navigation: { ...binding.navigation },
-            };
-        }
-        if (!policy.controlSignature) {
-            throw new Error('Index policy control signature is required for the current policy schema.');
-        }
         const policyDocument = buildCanonicalIndexPolicyDocument({
             ...policyBase,
             schemaVersion: 'satori_index_policy_v5',
-            publication: binding.publication,
-            controlSignature: policy.controlSignature,
+            ...(binding.navigation.status === 'sealed' ? { publication: binding.publication! } : {}),
+            controlSignature,
         });
         const documentDigest = policyDocument.documentDigest;
         const receipt: IndexPolicyPublicationReceipt = {
@@ -1320,6 +1320,11 @@ export class IndexAuthorityCoordinator {
                             this.ports.indexPolicyRuntimeService.resolveCustomIndexPolicyFileToken(canonicalRoot),
                         );
                         this.ports.indexPolicyRuntimeService.setPolicyDocumentDigest(canonicalRoot, documentDigest);
+                        this.setPublishedResolvedPolicy(canonicalRoot, policy);
+                        this.setPublishedPolicyBinding(canonicalRoot, {
+                            ...binding,
+                            policyHash: policy.policyHash,
+                        });
                     });
                 } catch (error) {
                     if (!activationVisible) restoreRuntimeState();

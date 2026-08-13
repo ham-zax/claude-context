@@ -27,9 +27,11 @@ import type { VectorDatabase } from '../vectordb/types';
 import type { IndexProfile } from '../config/defaults';
 import type { ResolvedIndexPolicy, IndexPolicyRuntimeService, IndexPolicyRuntimeBinding } from '../policy/index-policy-runtime-service';
 import type { Embedding, EmbeddingOperationMetricsSnapshot } from '../embedding';
+import { FileSynchronizer, type PreparedFileChangeSet, type SourceFreshnessCheckpointAuthority, type StagedSourceFreshnessCheckpoint } from '../sync/synchronizer';
 import type { IndexAuthorityCoordinator } from './index-authority-coordinator';
 import type { RepairProof, RepairSnapshotEvidence, RepairIndexResult, RepairActivatedGeneration } from '../core/repair-proof';
 import type { ExpectedIndexedChunk, ProcessedFileList } from '../core/indexing-pipeline';
+import { inspectCompletionMarker } from '../core/persisted-index-authority.js';
 import type { CanonicalPublicationBinding } from '../core/persisted-index-authority';
 import type { DurableAuthorityMutationOwner } from './restore-transaction';
 import type { SatoriRepoConfig } from '../config/repo-config';
@@ -56,7 +58,6 @@ import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
 } from '../symbols';
 import { assertDescriptorBoundIndexingSupported } from '../sync/root-bound-fs';
-import { FileSynchronizer } from '../sync/synchronizer';
 import {
     INDEX_COMPLETION_MARKER_DOC_ID,
 } from '../vectordb';
@@ -77,6 +78,8 @@ type NavigationDeltaBuildResult = {
 type RepairCompletionMarkerResolution =
     | { status: 'missing' }
     | { status: 'malformed' }
+    | { status: 'requires_reindex' }
+    | { status: 'fingerprint_mismatch' }
     | { status: 'matched'; marker: IndexCompletionMarkerDocument };
 type IndexPolicyBinding = IndexPolicyRuntimeBinding;
 
@@ -121,6 +124,7 @@ type MutationGuardOptions = {
     preparedCollectionReceipt?: PreparedIndexCollectionReceipt;
     preparedCollectionBinding?: PreparedIndexCollectionBinding;
     writeCollectionName?: string;
+    preparedChanges?: PreparedFileChangeSet;
 };
 type ReindexByChangeResult = {
     added: number;
@@ -145,6 +149,30 @@ type CachedNavigationDeltaState = {
     readonly records: readonly RelationshipRecord[];
     readonly analysisByFile: Map<string, RelationshipAnalysisEvidence>;
 };
+
+function assertExactIndexedFileHashesMatchPrepared(
+    indexedFileHashes: ReadonlyMap<string, string>,
+    preparedFileHashes: ReadonlyMap<string, string>,
+): void {
+    if (indexedFileHashes.size !== preparedFileHashes.size) {
+        throw new Error(
+            `Completed full index source mismatch: indexed ${indexedFileHashes.size} files but prepared observation contains ${preparedFileHashes.size} files.`,
+        );
+    }
+    for (const [filePath, expectedHash] of preparedFileHashes.entries()) {
+        const indexedHash = indexedFileHashes.get(filePath);
+        if (indexedHash === undefined) {
+            throw new Error(
+                `Completed full index source mismatch: file '${filePath}' was prepared but was not indexed.`,
+            );
+        }
+        if (indexedHash !== expectedHash) {
+            throw new Error(
+                `Completed full index source mismatch: hash for file '${filePath}' changed during indexing (prepared: ${expectedHash}, indexed: ${indexedHash}).`,
+            );
+        }
+    }
+}
 type CollectionPayloadVerification =
     | { ok: true; indexedFiles: number; totalChunks: number }
     | { ok: false; message: string };
@@ -252,6 +280,11 @@ export interface IndexGenerationWorkflowPorts {
             codebasePath: string,
             priorReceipt?: ProvenGenerationReceipt,
         ): Promise<ProvenGenerationReceipt | null>;
+    publishNavigationCandidate(
+        candidate: StagedNavigationSidecarGeneration,
+        assertMutationCurrent?: () => void,
+        publishMutation?: (publish: () => void) => void,
+    ): Promise<void>;
     publishResolvedIndexPolicy(
             policy: ResolvedIndexPolicy,
             binding: IndexPolicyBinding,
@@ -556,51 +589,136 @@ export class IndexGenerationWorkflow {
         }
         prepareCollectionMs = Date.now() - prepareStartedAt;
 
-        // 3. Recursively traverse codebase to get all supported files
+        // 3. Prepare exact source observation before indexing
         progressCallback?.({ phase: 'Scanning files...', current: 5, total: 100, percentage: 5 });
         const scanStartedAt = Date.now();
-        const codeFiles = await this.ports.getCodeFiles(codebasePath, indexPolicy);
+        await FileSynchronizer.deleteSnapshotForGeneration(codebasePath, writeCollectionName).catch(() => undefined);
+        const synchronizer = options.preparedChanges ? null : new FileSynchronizer(
+            codebasePath,
+            indexPolicy.effectiveIgnorePatterns,
+            indexPolicy.supportedExtensions,
+        );
+        const preparedChanges = options.preparedChanges
+            ?? await synchronizer!.prepareChanges({ forceFullHash: true });
+        const codeFiles = Array.from(preparedChanges.fileHashes.keys())
+            .sort()
+            .map((relativePath) => path.join(codebasePath, relativePath));
         scanFilesMs = Date.now() - scanStartedAt;
         console.log(`[Context] 📁 Found ${codeFiles.length} code files`);
 
         if (codeFiles.length === 0) {
-            await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
-            const navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
-                codebasePath,
-                [],
-                [],
-                options.assertMutationCurrent,
-                new Map(),
-                options.publishMutation,
-                options.deferFullIndexPublication === true,
-                indexPolicy,
-            );
-            if (!options.deferFullIndexPublication) {
-                await this.ports.writeCompletedIndexMarker(codebasePath, 0, 0, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
-                const marker = await this.ports.resolveCompletionMarkerForCollection(
+            let navigationCandidate: StagedNavigationSidecarGeneration | undefined;
+            let checkpointStaged = false;
+            let activated = false;
+            try {
+                await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
+                navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
                     codebasePath,
-                    writeCollectionName,
+                    [],
+                    [],
+                    options.assertMutationCurrent,
+                    new Map(),
+                    options.publishMutation,
+                    true,
+                    indexPolicy,
                 );
-                if (!marker) {
-                    throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
+                if (!options.deferFullIndexPublication) {
+                    const publicationStartedAt = Date.now();
+                    await this.ports.writeCompletedIndexMarker(codebasePath, 0, 0, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
+                    const marker = await this.ports.resolveCompletionMarkerForCollection(
+                        codebasePath,
+                        writeCollectionName,
+                    );
+                    if (!marker) {
+                        throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
+                    }
+                    const isSealed = navigationCandidate !== undefined && marker.navigation.status === 'sealed';
+                    let publication: CanonicalPublicationBinding | undefined = undefined;
+                    let checkpoint: StagedSourceFreshnessCheckpoint | undefined = undefined;
+                    let checkpointAuthority: SourceFreshnessCheckpointAuthority | undefined = undefined;
+                    if (isSealed) {
+                        checkpointAuthority = {
+                            collectionName: writeCollectionName,
+                            markerRunId: marker.runId,
+                            indexPolicyHash: indexPolicy.policyHash,
+                        };
+                        checkpoint = await preparedChanges.stageCheckpoint(checkpointAuthority);
+                        checkpointStaged = true;
+                        await preparedChanges.assertSourceObservationCurrent();
+                        options.assertMutationCurrent?.();
+                        publication = {
+                            activationId: marker.runId,
+                            sourceCheckpoint: {
+                                collectionName: writeCollectionName,
+                                markerRunId: marker.runId,
+                                indexPolicyHash: indexPolicy.policyHash,
+                                merkleRoot: checkpoint.merkleRoot,
+                                documentDigest: checkpoint.documentDigest,
+                            },
+                            graph: {
+                                kind: 'relationship_manifest_v2',
+                                manifestHash: marker.navigation.status === 'sealed' ? marker.navigation.relationshipManifestHash : '0'.repeat(64),
+                            },
+                            receipt: {
+                                ownerId: 'core-internal',
+                                generation: 1,
+                                operationId: marker.runId,
+                            },
+                        };
+                    }
+                    await this.publishResolvedPolicyForMarker(indexPolicy, {
+                        collectionName: writeCollectionName,
+                        navigation: (isSealed && navigationCandidate) ? {
+                            status: 'sealed',
+                            generationId: navigationCandidate.generationId,
+                            sealHash: navigationCandidate.navigationSealHash,
+                        } : { status: 'not_bound' },
+                        ...(publication ? { publication } : {}),
+                    }, marker, options.publishMutation);
+                    activated = true;
+                    if (isSealed && checkpoint && checkpointAuthority) {
+                        preparedChanges.promoteStagedCheckpoint?.(checkpoint, checkpointAuthority);
+                    }
+                    if (synchronizer) {
+                        this.ports.registerSynchronizer(writeCollectionName, synchronizer);
+                        this.ports.registerSynchronizer(this.ports.resolveCollectionName(codebasePath), synchronizer);
+                    }
+                    if (navigationCandidate) {
+                        await this.ports.publishNavigationCandidate(navigationCandidate).catch((err) => {
+                            console.warn('[Context] Failed to update auxiliary navigation pointer:', err);
+                        });
+                    }
+                    publicationMs = Date.now() - publicationStartedAt;
                 }
-                await this.publishResolvedPolicyForMarker(indexPolicy, {
-                    collectionName: writeCollectionName,
-                    navigation: navigationCandidate ? {
-                        status: 'sealed',
-                        generationId: navigationCandidate.generationId,
-                        sealHash: navigationCandidate.navigationSealHash,
-                    } : { status: 'not_bound' },
-                }, marker, options.publishMutation);
+                progressCallback?.({ phase: 'No files to index', current: 100, total: 100, percentage: 100 });
+                return {
+                    indexedFiles: 0,
+                    totalChunks: 0,
+                    status: 'completed',
+                    indexedFileHashes: new Map(),
+                    ...(navigationCandidate ? { navigationCandidate } : {}),
+                };
+            } catch (error) {
+                if (
+                    error instanceof IndexPolicyPublicationError
+                    && error.receipt.operation === 'publish'
+                    && error.receipt.collectionName === writeCollectionName
+                ) {
+                    activated = true;
+                }
+                if (!activated) {
+                    if (navigationCandidate) {
+                        await discardNavigationSidecarGeneration(navigationCandidate).catch(() => undefined);
+                    }
+                    if (checkpointStaged) {
+                        await FileSynchronizer.deleteSnapshotForGeneration(codebasePath, writeCollectionName).catch(() => undefined);
+                    }
+                    if (isStagedGenerationCollectionName(writeCollectionName)) {
+                        await this.ports.vectorDatabase.dropCollection(writeCollectionName).catch(() => undefined);
+                    }
+                }
+                throw error;
             }
-            progressCallback?.({ phase: 'No files to index', current: 100, total: 100, percentage: 100 });
-            return {
-                indexedFiles: 0,
-                totalChunks: 0,
-                status: 'completed',
-                indexedFileHashes: new Map(),
-                ...(navigationCandidate ? { navigationCandidate } : {}),
-            };
         }
 
         // 3. Process each file with streaming chunk processing
@@ -609,90 +727,183 @@ export class IndexGenerationWorkflow {
         const indexingEndPercentage = 100;
         const indexingRange = indexingEndPercentage - indexingStartPercentage;
 
-        const payloadStartedAt = Date.now();
-        const result = await this.ports.processFileList(
-            codeFiles,
-            codebasePath,
-            (filePath, fileIndex, totalFiles) => {
-                // Calculate progress percentage
-                const progressPercentage = indexingStartPercentage + (fileIndex / totalFiles) * indexingRange;
-
-                console.log(`[Context] 📊 Processed ${fileIndex}/${totalFiles} files`);
-                progressCallback?.({
-                    phase: `Processing files (${fileIndex}/${totalFiles})...`,
-                    current: fileIndex,
-                    total: totalFiles,
-                    percentage: Math.round(progressPercentage)
-                });
-            },
-            writeCollectionName,
-            options.assertMutationCurrent,
-            indexPolicy,
-        );
-        payloadPipelineMs = Date.now() - payloadStartedAt;
-
-        const finalizeStartedAt = Date.now();
-        await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
-        finalizeCollectionMs = Date.now() - finalizeStartedAt;
-
-        console.log(`[Context] ✅ Codebase indexing completed! Processed ${result.processedFiles} files in total, generated ${result.totalChunks} code chunks`);
-
         let navigationCandidate: StagedNavigationSidecarGeneration | undefined;
-        if (result.status === 'completed') {
-            const navigationStartedAt = Date.now();
-            navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
+        let checkpointStaged = false;
+        let activated = false;
+        let result: ProcessedFileList;
+        try {
+            const payloadStartedAt = Date.now();
+            result = await this.ports.processFileList(
+                codeFiles,
                 codebasePath,
-                result.symbolRecords,
-                result.symbolManifestFiles,
+                (filePath, fileIndex, totalFiles) => {
+                    // Calculate progress percentage
+                    const progressPercentage = indexingStartPercentage + (fileIndex / totalFiles) * indexingRange;
+
+                    console.log(`[Context] 📊 Processed ${fileIndex}/${totalFiles} files`);
+                    progressCallback?.({
+                        phase: `Processing files (${fileIndex}/${totalFiles})...`,
+                        current: fileIndex,
+                        total: totalFiles,
+                        percentage: Math.round(progressPercentage)
+                    });
+                },
+                writeCollectionName,
                 options.assertMutationCurrent,
-                result.analysisByFile,
-                options.publishMutation,
-                options.deferFullIndexPublication === true,
                 indexPolicy,
             );
-            navigationMs = Date.now() - navigationStartedAt;
-            if (!options.deferFullIndexPublication) {
-                const publicationStartedAt = Date.now();
-                await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
-                const marker = await this.ports.resolveCompletionMarkerForCollection(
-                    codebasePath,
-                    writeCollectionName,
-                );
-                if (!marker) {
-                    throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
-                }
-                await this.publishResolvedPolicyForMarker(indexPolicy, {
-                    collectionName: writeCollectionName,
-                    navigation: navigationCandidate ? {
-                        status: 'sealed',
-                        generationId: navigationCandidate.generationId,
-                        sealHash: navigationCandidate.navigationSealHash,
-                    } : { status: 'not_bound' },
-                }, marker, options.publishMutation);
-                publicationMs = Date.now() - publicationStartedAt;
+            payloadPipelineMs = Date.now() - payloadStartedAt;
+
+            if (result.status === 'completed') {
+                assertExactIndexedFileHashesMatchPrepared(result.indexedFileHashes, preparedChanges.fileHashes);
             }
-        } else {
-            // limit_reached: do not publish complete navigation sidecars, but seal partial vector
-            // proof so MCP readiness can allow warned partial search (not "missing marker" stale_local).
-            // indexStatus must stay on the marker so interrupted-index recovery does not promote as fully completed.
-            console.warn('[Context] ⚠️  Skipping symbol registry sidecar write because indexing stopped before processing the full file set.');
-            if (!options.deferFullIndexPublication) {
-                const publicationStartedAt = Date.now();
-                await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, writeCollectionName, 'limit_reached', options.assertMutationCurrent, undefined, indexPolicy.policyHash);
-                const marker = await this.ports.resolveCompletionMarkerForCollection(
+
+            const finalizeStartedAt = Date.now();
+            await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
+            finalizeCollectionMs = Date.now() - finalizeStartedAt;
+
+            console.log(`[Context] ✅ Codebase indexing completed! Processed ${result.processedFiles} files in total, generated ${result.totalChunks} code chunks`);
+
+            if (result.status === 'completed') {
+                const navigationStartedAt = Date.now();
+                navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
                     codebasePath,
-                    writeCollectionName,
+                    result.symbolRecords,
+                    result.symbolManifestFiles,
+                    options.assertMutationCurrent,
+                    result.analysisByFile,
+                    options.publishMutation,
+                    true,
+                    indexPolicy,
                 );
-                if (!marker) {
-                    throw new Error(`Partial index did not produce a completion marker for '${writeCollectionName}'.`);
+                navigationMs = Date.now() - navigationStartedAt;
+                if (!options.deferFullIndexPublication) {
+                    const publicationStartedAt = Date.now();
+                    await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
+                    const marker = await this.ports.resolveCompletionMarkerForCollection(
+                        codebasePath,
+                        writeCollectionName,
+                    );
+                    if (!marker) {
+                        throw new Error(`Completed index did not produce a completion marker for '${writeCollectionName}'.`);
+                    }
+                    const isSealed = navigationCandidate !== undefined && marker.navigation.status === 'sealed';
+                    let publication: CanonicalPublicationBinding | undefined = undefined;
+                    let checkpoint: StagedSourceFreshnessCheckpoint | undefined = undefined;
+                    let checkpointAuthority: SourceFreshnessCheckpointAuthority | undefined = undefined;
+                    if (isSealed) {
+                        checkpointAuthority = {
+                            collectionName: writeCollectionName,
+                            markerRunId: marker.runId,
+                            indexPolicyHash: indexPolicy.policyHash,
+                        };
+                        checkpoint = await preparedChanges.stageCheckpoint(checkpointAuthority);
+                        checkpointStaged = true;
+                        await preparedChanges.assertSourceObservationCurrent();
+                        options.assertMutationCurrent?.();
+                        publication = {
+                            activationId: marker.runId,
+                            sourceCheckpoint: {
+                                collectionName: writeCollectionName,
+                                markerRunId: marker.runId,
+                                indexPolicyHash: indexPolicy.policyHash,
+                                merkleRoot: checkpoint.merkleRoot,
+                                documentDigest: checkpoint.documentDigest,
+                            },
+                            graph: {
+                                kind: 'relationship_manifest_v2',
+                                manifestHash: (marker.navigation.status === 'sealed' && marker.navigation.relationshipManifestHash)
+                                    ? marker.navigation.relationshipManifestHash
+                                    : '0'.repeat(64),
+                            },
+                            receipt: {
+                                ownerId: 'core-internal',
+                                generation: 1,
+                                operationId: marker.runId,
+                            },
+                        };
+                    }
+                    await this.publishResolvedPolicyForMarker(indexPolicy, {
+                        collectionName: writeCollectionName,
+                        navigation: (isSealed && navigationCandidate) ? {
+                            status: 'sealed',
+                            generationId: navigationCandidate.generationId,
+                            sealHash: navigationCandidate.navigationSealHash,
+                        } : { status: 'not_bound' },
+                        ...(publication ? { publication } : {}),
+                    }, marker, options.publishMutation);
+                    activated = true;
+                    if (isSealed && checkpoint && checkpointAuthority) {
+                        preparedChanges.promoteStagedCheckpoint?.(checkpoint, checkpointAuthority);
+                    }
+                    if (synchronizer) {
+                        this.ports.registerSynchronizer(writeCollectionName, synchronizer);
+                        this.ports.registerSynchronizer(this.ports.resolveCollectionName(codebasePath), synchronizer);
+                    }
+                    if (navigationCandidate) {
+                        await this.ports.publishNavigationCandidate(navigationCandidate).catch((err) => {
+                            console.warn('[Context] Failed to update auxiliary navigation pointer:', err);
+                        });
+                    }
+                    publicationMs = Date.now() - publicationStartedAt;
                 }
-                await this.publishResolvedPolicyForMarker(indexPolicy, {
-                    collectionName: writeCollectionName,
-                    navigation: { status: 'not_bound' },
-                }, marker, options.publishMutation);
-                console.warn('[Context] ⚠️  Wrote completion marker for limit_reached partial index (navigation remains unpublished).');
-                publicationMs = Date.now() - publicationStartedAt;
+            } else {
+                // limit_reached: do not publish complete navigation sidecars, but seal partial vector
+                // proof so MCP readiness can allow warned partial search (not "missing marker" stale_local).
+                // indexStatus must stay on the marker so interrupted-index recovery does not promote as fully completed.
+                console.warn('[Context] ⚠️  Skipping symbol registry sidecar write because indexing stopped before processing the full file set.');
+                if (!options.deferFullIndexPublication) {
+                    const publicationStartedAt = Date.now();
+                    await this.ports.writeCompletedIndexMarker(codebasePath, result.processedFiles, result.totalChunks, writeCollectionName, 'limit_reached', options.assertMutationCurrent, undefined, indexPolicy.policyHash);
+                    const marker = await this.ports.resolveCompletionMarkerForCollection(
+                        codebasePath,
+                        writeCollectionName,
+                    );
+                    if (!marker) {
+                        throw new Error(`Partial index did not produce a completion marker for '${writeCollectionName}'.`);
+                    }
+                    await this.publishResolvedPolicyForMarker(indexPolicy, {
+                        collectionName: writeCollectionName,
+                        navigation: { status: 'not_bound' },
+                    }, marker, options.publishMutation);
+                    activated = true;
+                    console.warn('[Context] ⚠️  Wrote completion marker for limit_reached partial index (navigation remains unpublished).');
+                    publicationMs = Date.now() - publicationStartedAt;
+                }
             }
+            progressCallback?.({
+                phase: result.status === 'completed' ? 'Indexing complete!' : 'Indexing stopped at chunk limit',
+                current: result.processedFiles,
+                total: codeFiles.length,
+                percentage: 100,
+            });
+            return {
+                indexedFiles: result.processedFiles,
+                totalChunks: result.totalChunks,
+                status: result.status,
+                indexedFileHashes: result.indexedFileHashes,
+                ...(navigationCandidate ? { navigationCandidate } : {}),
+            };
+        } catch (error) {
+            if (
+                error instanceof IndexPolicyPublicationError
+                && error.receipt.operation === 'publish'
+                && error.receipt.collectionName === writeCollectionName
+            ) {
+                activated = true;
+            }
+            if (!activated) {
+                if (navigationCandidate) {
+                    await discardNavigationSidecarGeneration(navigationCandidate).catch(() => undefined);
+                }
+                if (checkpointStaged) {
+                    await FileSynchronizer.deleteSnapshotForGeneration(codebasePath, writeCollectionName).catch(() => undefined);
+                }
+                if (isStagedGenerationCollectionName(writeCollectionName)) {
+                    await this.ports.vectorDatabase.dropCollection(writeCollectionName).catch(() => undefined);
+                }
+            }
+            throw error;
         }
 
         progressCallback?.({
@@ -1043,20 +1254,49 @@ export class IndexGenerationWorkflow {
                     };
                     await input.preparedChanges.assertSourceObservationCurrent();
                     input.options.assertMutationCurrent?.();
-                    this.ports.publishResolvedIndexPolicy(
-                        input.sealedPolicy,
-                        {
-                            collectionName: candidateCollectionName,
-                            navigation: {
-                                status: 'sealed',
-                                generationId: preparedNavigation.generationId,
-                                sealHash: preparedNavigation.navigationSealHash,
+                    let publicationError: unknown = null;
+                    try {
+                        this.ports.publishResolvedIndexPolicy(
+                            input.sealedPolicy,
+                            {
+                                collectionName: candidateCollectionName,
+                                navigation: {
+                                    status: 'sealed',
+                                    generationId: preparedNavigation.generationId,
+                                    sealHash: preparedNavigation.navigationSealHash,
+                                },
+                                publication,
                             },
-                            publication,
-                        },
-                        input.options.publishMutation,
-                    );
-                    activated = true;
+                            input.options.publishMutation,
+                        );
+                        activated = true;
+                    } catch (error) {
+                        if (
+                            error instanceof IndexPolicyPublicationError
+                            && error.receipt.operation === 'publish'
+                            && error.receipt.collectionName === candidateCollectionName
+                            && error.receipt.publication?.activationId === activationId
+                        ) {
+                            activated = true;
+                            this.ports.refreshRuntimePolicyAuthority(input.canonicalRoot);
+                            publicationError = error;
+                        } else {
+                            throw error;
+                        }
+                    }
+                    if (activated) {
+                        input.preparedChanges.promoteStagedCheckpoint?.(checkpoint, checkpointAuthority);
+                        await this.ports.publishNavigationCandidate(
+                            preparedNavigation,
+                            input.options.assertMutationCurrent,
+                            input.options.publishMutation,
+                        ).catch((pointerError) => {
+                            console.warn('[Context] Committed delta generation could not update auxiliary navigation pointer:', pointerError);
+                        });
+                    }
+                    if (publicationError) {
+                        throw publicationError;
+                    }
                     const navigationObservationToken = this.ports.resolveNavigationObservationToken(
                         input.canonicalRoot,
                         preparedNavigation.generationId,
@@ -1288,22 +1528,41 @@ export class IndexGenerationWorkflow {
                 ? this.ports.cloneIndexCompletionMarker(sourceGenerationReceipt.marker)
                 : await this.ports.resolveCompletionMarkerForCollection(codebasePath, collectionName)
             : null;
-        const checkpointAuthority = previousMarker ? {
+        let checkpointAuthority = previousMarker ? {
             collectionName,
             markerRunId: previousMarker.runId,
             indexPolicyHash: previousMarker.indexPolicyHash,
         } : null;
+
+        if (!synchronizer) {
+            synchronizer = this.ports.getSynchronizer(synchronizerKey) ?? this.ports.getSynchronizer(collectionName);
+        }
+        if (!checkpointAuthority) {
+            checkpointAuthority = await FileSynchronizer.inspectSnapshotAuthority(canonicalRoot, collectionName);
+        }
+        if (!synchronizer && checkpointAuthority) {
+            const diskSynchronizer = new FileSynchronizer(
+                codebasePath,
+                sealedPolicy.effectiveIgnorePatterns,
+                sealedPolicy.supportedExtensions,
+                { checkpointIdentity: collectionName, checkpointAuthority },
+            );
+            const inspected = await diskSynchronizer.inspectOwnedSnapshot();
+            if (inspected.status === 'valid') {
+                await diskSynchronizer.initialize(options.assertMutationCurrent, options.publishMutation, {
+                    requireExistingCheckpoint: true,
+                });
+                synchronizer = diskSynchronizer;
+            }
+        }
         const reusingWithdrawnMutationTarget = previousMarker === null
             && this.ports.getSynchronizerMutationTarget(synchronizerKey) === collectionName
             && synchronizer?.ownsCheckpointIdentity(collectionName) === true;
         const restoringMissingMarkerFromOwnedCheckpoint = previousMarker === null
             && maintainCompletionMarker
-            && options.targetCollectionName?.trim() === collectionName
-            && synchronizer?.ownsCheckpointForCollectionPolicy(
-                collectionName,
-                sealedPolicy.policyHash,
-            ) === true;
-
+            && checkpointAuthority !== null
+            && (options.targetCollectionName === undefined || options.targetCollectionName.trim() === collectionName)
+            && synchronizer?.ownsCheckpointAuthority(checkpointAuthority) === true;
         if (
             synchronizer
             && !reusingWithdrawnMutationTarget
@@ -1343,7 +1602,9 @@ export class IndexGenerationWorkflow {
             this.ports.registerSynchronizer(synchronizerKey, newSynchronizer);
         }
 
-        const currentSynchronizer = this.ports.getSynchronizer(synchronizerKey)!;
+        const currentSynchronizer = (synchronizer ?? this.ports.getSynchronizer(synchronizerKey) ?? this.ports.getSynchronizer(collectionName))!;
+        this.ports.registerSynchronizer(synchronizerKey, currentSynchronizer);
+        this.ports.registerSynchronizer(collectionName, currentSynchronizer);
         const targetCollectionName = collectionName;
         this.ports.setSynchronizerMutationTarget(synchronizerKey, targetCollectionName);
         const markerWasMissing = maintainCompletionMarker && previousMarker === null;
@@ -1547,6 +1808,7 @@ export class IndexGenerationWorkflow {
                     options.assertMutationCurrent,
                     indexedDelta.analysisByFile,
                     options.publishMutation,
+                    navigationStateBeforeSync.generationId,
                 );
                 readinessArtifactsComplete = true;
             } else if (!canRebuildNavigationArtifacts && indexedDelta.status === 'completed') {
@@ -1717,15 +1979,58 @@ export class IndexGenerationWorkflow {
             currentBinding?.policyHash === marker.indexPolicyHash
             && currentBinding.collectionName === collectionName
             && this.ports.policyNavigationBindingsEqual(currentBinding.navigation, navigationBinding)
+            && (!currentBinding.publication || currentBinding.publication.sourceCheckpoint.markerRunId === marker.runId)
         ) {
             return;
+        }
+        const expectedAuthority: SourceFreshnessCheckpointAuthority = {
+            collectionName,
+            markerRunId: marker.runId,
+            indexPolicyHash: marker.indexPolicyHash,
+        };
+        const activeSynchronizer = this.ports.getSynchronizer(collectionName) ?? this.ports.getSynchronizer(this.ports.resolveCollectionName(canonicalRoot));
+        const synchronizerToInspect = (activeSynchronizer && activeSynchronizer.ownsCheckpointAuthority(expectedAuthority))
+            ? activeSynchronizer
+            : new FileSynchronizer(
+                canonicalRoot,
+                policy.effectiveIgnorePatterns,
+                policy.supportedExtensions,
+                {
+                    checkpointIdentity: collectionName,
+                    checkpointAuthority: expectedAuthority,
+                },
+            );
+        const checkpoint = await synchronizerToInspect.inspectOwnedSnapshot();
+        const isSealed = navigationBinding.status === 'sealed' && marker.navigation.status === 'sealed';
+        let publication: CanonicalPublicationBinding | undefined = undefined;
+        if (isSealed) {
+            if (checkpoint.status !== 'valid') {
+                throw new Error(`Cannot publish sealed policy binding for '${collectionName}': exact valid source checkpoint is required.`);
+            }
+            publication = {
+                activationId: marker.runId,
+                sourceCheckpoint: {
+                    collectionName,
+                    markerRunId: marker.runId,
+                    indexPolicyHash: marker.indexPolicyHash,
+                    merkleRoot: checkpoint.merkleRoot,
+                    documentDigest: checkpoint.documentDigest,
+                },
+                graph: {
+                    kind: 'relationship_manifest_v2',
+                    manifestHash: marker.navigation.status === 'sealed' ? marker.navigation.relationshipManifestHash : '0'.repeat(64),
+                },
+                receipt: {
+                    ownerId: 'core-internal',
+                    generation: 1,
+                    operationId: marker.runId,
+                },
+            };
         }
         await this.publishResolvedPolicyForMarker(policy, {
             collectionName,
             navigation: navigationBinding,
-            ...(currentBinding?.publication
-                ? { publication: structuredClone(currentBinding.publication) }
-                : {}),
+            ...(publication ? { publication } : {}),
         }, marker, publishMutation);
     }
 
@@ -1735,44 +2040,12 @@ export class IndexGenerationWorkflow {
         marker: IndexCompletionMarkerDocument,
         publishMutation?: (publish: () => void) => void,
     ): Promise<void> {
-        const controlSignature = (policy as { controlSignature?: string }).controlSignature
-            ?? 'v1:default';
-        const effectivePolicy: ResolvedIndexPolicy = policy.controlSignature ? policy : {
-            ...policy,
-            controlSignature,
-        };
-        const nav = marker.navigation;
-        const isSealed = nav.status === 'sealed' && binding.navigation.status === 'sealed';
-        const effectiveBinding: IndexPolicyBinding = binding.publication ? binding : {
-            ...binding,
-            ...(isSealed && nav.status === 'sealed' ? {
-                publication: {
-                    activationId: marker.runId,
-                    sourceCheckpoint: {
-                        collectionName: binding.collectionName,
-                        markerRunId: marker.runId,
-                        indexPolicyHash: marker.indexPolicyHash,
-                        merkleRoot: nav.sealHash,
-                        documentDigest: nav.sealHash,
-                    },
-                    graph: {
-                        kind: 'relationship_manifest_v2',
-                        manifestHash: nav.relationshipManifestHash,
-                    },
-                    receipt: {
-                        ownerId: 'core-internal',
-                        generation: 1,
-                        operationId: marker.runId,
-                    },
-                },
-            } : {}),
-        };
         try {
-            this.ports.publishResolvedIndexPolicy(effectivePolicy, effectiveBinding, publishMutation);
+            this.ports.publishResolvedIndexPolicy(policy, binding, publishMutation);
         } catch (error) {
             await this.ports.indexAuthorityCoordinator.reconcileCommittedPolicyPublication(
-                effectivePolicy,
-                effectiveBinding,
+                policy,
+                binding,
                 marker,
                 error,
             );
@@ -1859,10 +2132,7 @@ export class IndexGenerationWorkflow {
             ...rebuiltSymbolRecords,
         ];
 
-        if (deferPublication && existingGenerationId) {
-            if (existingRelationships.status !== 'ok') {
-                throw new Error('Atomic navigation delta requires compatible per-file relationship contributions.');
-            }
+        if (existingGenerationId && existingRelationships.status === 'ok') {
             const registry = buildSymbolRegistry({
                 manifest: {
                     schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
@@ -1909,6 +2179,13 @@ export class IndexGenerationWorkflow {
                 + `shared ${candidate.physical.sharedFiles} file(s) and wrote `
                 + `${candidate.physical.physicallyWrittenBytes} physical byte(s).`,
             );
+            if (!deferPublication) {
+                await this.ports.publishNavigationCandidate(
+                    candidate,
+                    assertMutationCurrent,
+                    publishMutation,
+                );
+            }
             return {
                 candidate,
                 state: {
@@ -2149,6 +2426,24 @@ export class IndexGenerationWorkflow {
         let trustedMarker: IndexCompletionMarkerDocument | null = null;
         let relationshipOnlyUpgrade = false;
         const markerResolution = await this.resolveRepairCompletionMarkerForCollection(canonicalPath, selectedCollection);
+        if (markerResolution.status === 'requires_reindex') {
+            proof.marker = { status: 'failed', basis: 'completion_marker_requires_reindex' };
+            proof.fingerprint = { status: 'failed', basis: 'completion_marker_requires_reindex' };
+            return withProof({
+                status: 'requires_reindex',
+                reason: 'requires_reindex',
+                message: 'The existing completion marker format requires reindexing.',
+            });
+        }
+        if (markerResolution.status === 'fingerprint_mismatch') {
+            proof.marker = { status: 'failed', basis: 'completion_marker_fingerprint_mismatch' };
+            proof.fingerprint = { status: 'failed', basis: 'completion_marker_fingerprint_mismatch' };
+            return withProof({
+                status: 'requires_reindex',
+                reason: 'requires_reindex',
+                message: 'The existing index is incompatible with the current runtime fingerprint.',
+            });
+        }
         if (markerResolution.status === 'malformed') {
             proof.marker = { status: 'failed', basis: 'malformed_completion_marker' };
             proof.fingerprint = snapshotFingerprintMatches
@@ -2881,6 +3176,7 @@ export class IndexGenerationWorkflow {
                     previousNavigationGenerationId,
                     ...(activeDataObservation ? { activeDataObservation } : {}),
                 });
+                await this.ports.waitForPublicationRetention(canonicalPath);
                 proof.navigation = {
                     status: 'matched',
                     basis: 'v4_navigation_activated_and_proven',
@@ -2965,6 +3261,15 @@ export class IndexGenerationWorkflow {
         const record = await this.ports.vectorDatabase.getControl(collectionName, INDEX_COMPLETION_MARKER_DOC_ID);
         if (!record) {
             return { status: 'missing' };
+        }
+        if (typeof record.metadata.kind === 'string' && record.kind === record.metadata.kind) {
+            const inspected = inspectCompletionMarker(record.metadata);
+            if (inspected.status === 'requires_reindex') {
+                if (inspected.reason === 'completion marker fingerprint requires reindex') {
+                    return { status: 'fingerprint_mismatch' };
+                }
+                return { status: 'requires_reindex' };
+            }
         }
         const marker = this.ports.parseCompletionControlRecord(codebasePath, record);
         if (marker) {

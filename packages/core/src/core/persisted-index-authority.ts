@@ -170,7 +170,7 @@ export interface CanonicalIndexPolicyV4Payload extends CanonicalIndexPolicyBase 
 
 export interface CanonicalIndexPolicyV5Payload extends CanonicalIndexPolicyBase {
     schemaVersion: 'satori_index_policy_v5';
-    publication: CanonicalPublicationBinding;
+    publication?: CanonicalPublicationBinding;
     controlSignature: string;
 }
 
@@ -547,29 +547,70 @@ function parsePublicationBinding(value: unknown): CanonicalPublicationBinding | 
     };
 }
 
+const LEGACY_V3_POLICY_KEYS = [
+    'schemaVersion',
+    'canonicalRoot',
+    'customExtensions',
+    'customIgnorePatterns',
+    'fileBasedIgnorePatterns',
+    'profile',
+    'supportedExtensions',
+    'effectiveIgnorePatterns',
+    'policyHash',
+    'collectionName',
+    'navigation',
+] as const;
+
+const LEGACY_V4_POLICY_KEYS = [
+    ...LEGACY_V3_POLICY_KEYS,
+    'publication',
+] as const;
+
+const V5_POLICY_NOT_BOUND_KEYS = [
+    ...LEGACY_V3_POLICY_KEYS,
+    'controlSignature',
+] as const;
+
+const V5_POLICY_SEALED_KEYS = [
+    ...LEGACY_V3_POLICY_KEYS,
+    'publication',
+    'controlSignature',
+] as const;
+
 function parsePolicyPayload(
     value: Record<string, unknown>,
     expectedRoot: string,
 ): CanonicalIndexPolicyPayload | null {
-    const basePayloadKeys = [
-        'schemaVersion',
-        'canonicalRoot',
-        'customExtensions',
-        'customIgnorePatterns',
-        'fileBasedIgnorePatterns',
-        'profile',
-        'supportedExtensions',
-        'effectiveIgnorePatterns',
-        'policyHash',
-        'collectionName',
-        'navigation',
-    ] as const;
-    const payloadKeys = [...basePayloadKeys, 'publication', 'controlSignature'];
+    const isV3 = value.schemaVersion === 'satori_index_policy_v3';
+    const isV4 = value.schemaVersion === 'satori_index_policy_v4';
+    const isV5 = value.schemaVersion === 'satori_index_policy_v5';
+
+    if (!isV3 && !isV4 && !isV5) return null;
+
+    const navigation = parsePolicyNavigation(value.navigation);
+    if (!navigation) return null;
+
+    let validKeys = false;
+    if (isV5) {
+        if (navigation.status === 'sealed') {
+            validKeys = hasExactKeys(value, V5_POLICY_SEALED_KEYS)
+                || hasExactKeys(value, [...V5_POLICY_SEALED_KEYS, 'documentDigest']);
+        } else if (navigation.status === 'not_bound') {
+            validKeys = hasExactKeys(value, V5_POLICY_NOT_BOUND_KEYS)
+                || hasExactKeys(value, [...V5_POLICY_NOT_BOUND_KEYS, 'documentDigest']);
+        }
+    } else if (isV4) {
+        validKeys = hasExactKeys(value, LEGACY_V4_POLICY_KEYS)
+            || hasExactKeys(value, [...LEGACY_V4_POLICY_KEYS, 'documentDigest']);
+    } else if (isV3) {
+        validKeys = hasExactKeys(value, LEGACY_V3_POLICY_KEYS)
+            || hasExactKeys(value, [...LEGACY_V3_POLICY_KEYS, 'documentDigest']);
+    }
+
+    if (!validKeys) return null;
+
     if (
-        (!hasExactKeys(value, payloadKeys)
-            && !hasExactKeys(value, [...payloadKeys, 'documentDigest']))
-        || value.schemaVersion !== 'satori_index_policy_v5'
-        || value.canonicalRoot !== expectedRoot
+        value.canonicalRoot !== expectedRoot
         || !isStringArray(value.customExtensions)
         || !isStringArray(value.customIgnorePatterns)
         || !isStringArray(value.fileBasedIgnorePatterns)
@@ -578,20 +619,61 @@ function parsePolicyPayload(
         || (value.profile !== 'default' && value.profile !== 'minimal' && value.profile !== 'all-text')
         || typeof value.policyHash !== 'string'
         || !SHA256.test(value.policyHash)
-        || typeof value.controlSignature !== 'string'
-        || !value.controlSignature.startsWith('v1:')
+        || (isV5 && (typeof value.controlSignature !== 'string' || !value.controlSignature.startsWith('v1:')))
         || !isNonemptyString(value.collectionName)
     ) return null;
-    const navigation = parsePolicyNavigation(value.navigation);
-    if (!navigation) return null;
-    const publication = parsePublicationBinding(value.publication);
-    if (!publication) return null;
-    if (
-        publication.sourceCheckpoint.collectionName !== value.collectionName
-        || publication.sourceCheckpoint.indexPolicyHash !== value.policyHash
-        || navigation.status !== 'sealed'
-        || publication.graph.manifestHash.length === 0
-    ) return null;
+
+    let publication: CanonicalPublicationBinding | undefined = undefined;
+    if (value.publication !== undefined && value.publication !== null) {
+        if (navigation.status !== 'sealed') return null;
+        const parsedPub = parsePublicationBinding(value.publication);
+        if (!parsedPub) return null;
+        if (
+            parsedPub.sourceCheckpoint.collectionName !== value.collectionName
+            || parsedPub.sourceCheckpoint.indexPolicyHash !== value.policyHash
+            || parsedPub.graph.manifestHash.length === 0
+        ) return null;
+        publication = parsedPub;
+    } else {
+        if (isV5 && navigation.status === 'sealed') return null;
+        if (isV4) return null;
+    }
+
+    if (isV5) {
+        return {
+            canonicalRoot: expectedRoot,
+            customExtensions: [...value.customExtensions],
+            customIgnorePatterns: [...value.customIgnorePatterns],
+            fileBasedIgnorePatterns: [...value.fileBasedIgnorePatterns],
+            profile: value.profile as CanonicalIndexPolicyBase['profile'],
+            supportedExtensions: [...value.supportedExtensions],
+            effectiveIgnorePatterns: [...value.effectiveIgnorePatterns],
+            policyHash: value.policyHash,
+            collectionName: value.collectionName,
+            navigation,
+            schemaVersion: 'satori_index_policy_v5',
+            ...(publication ? { publication } : {}),
+            controlSignature: value.controlSignature as string,
+        };
+    }
+
+    if (isV4) {
+        return {
+            canonicalRoot: expectedRoot,
+            customExtensions: [...value.customExtensions],
+            customIgnorePatterns: [...value.customIgnorePatterns],
+            fileBasedIgnorePatterns: [...value.fileBasedIgnorePatterns],
+            profile: value.profile as CanonicalIndexPolicyBase['profile'],
+            supportedExtensions: [...value.supportedExtensions],
+            effectiveIgnorePatterns: [...value.effectiveIgnorePatterns],
+            policyHash: value.policyHash,
+            collectionName: value.collectionName,
+            navigation,
+            schemaVersion: 'satori_index_policy_v4',
+            publication: publication!,
+        };
+    }
+
     return {
         canonicalRoot: expectedRoot,
         customExtensions: [...value.customExtensions],
@@ -603,9 +685,7 @@ function parsePolicyPayload(
         policyHash: value.policyHash,
         collectionName: value.collectionName,
         navigation,
-        schemaVersion: 'satori_index_policy_v5',
-        publication,
-        controlSignature: value.controlSignature as string,
+        schemaVersion: 'satori_index_policy_v3',
     };
 }
 

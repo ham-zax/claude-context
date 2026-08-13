@@ -14,6 +14,7 @@ import {
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
     type CanonicalIndexPolicyDocument,
+    type CanonicalPublicationBinding,
 } from './persisted-index-authority';
 import type { RepairProof } from './repair-proof';
 import {
@@ -57,7 +58,7 @@ import {
     INDEX_COMPLETION_MARKER_FILE_EXTENSION as COMPLETION_MARKER_EXTENSION,
 } from '../vectordb';
 import { LanceDbVectorDatabase } from '../vectordb/lancedb-vectordb';
-import { FileSynchronizer } from '../sync/synchronizer';
+import { FileSynchronizer, type SourceFreshnessCheckpointAuthority } from '../sync/synchronizer';
 import { computeIndexPolicyControlSignature } from './index-policy-input-observer';
 
 const previousSatoriStateRoot = process.env.SATORI_STATE_ROOT;
@@ -265,26 +266,47 @@ const TEST_PUBLICATION = Object.freeze({
     receipt: { ownerId: 'test', generation: 1, operationId: 'test-op' },
 });
 
+function createTestPublication(
+    collectionName: string,
+    indexPolicyHash: string,
+    markerRunId: string = 'test-marker',
+): CanonicalPublicationBinding {
+    return {
+        activationId: 'test-activation',
+        sourceCheckpoint: {
+            collectionName,
+            markerRunId,
+            indexPolicyHash,
+            merkleRoot: 'b'.repeat(64),
+            documentDigest: 'c'.repeat(64),
+        },
+        graph: { kind: 'relationship_manifest_v2' as const, manifestHash: 'd'.repeat(64) },
+        receipt: { ownerId: 'test', generation: 1, operationId: 'test-op' },
+    };
+}
+
 function unboundPolicyBinding(collectionName: string) {
     return {
         collectionName,
         navigation: { status: 'not_bound' as const },
-        publication: structuredClone(TEST_PUBLICATION),
     };
 }
 
 function sealedPolicyBinding(
     collectionName: string,
-    navigation: { generationId: string; navigationSealHash: string },
+    navigation: { generationId: string; sealHash?: string; navigationSealHash?: string },
+    policyHash?: string,
+    markerRunId?: string,
+    publication?: CanonicalPublicationBinding,
 ) {
     return {
         collectionName,
         navigation: {
             status: 'sealed' as const,
             generationId: navigation.generationId,
-            sealHash: navigation.navigationSealHash,
+            sealHash: (navigation.sealHash ?? navigation.navigationSealHash)!,
         },
-        publication: structuredClone(TEST_PUBLICATION),
+        publication: publication ?? createTestPublication(collectionName, policyHash ?? 'a'.repeat(64), markerRunId ?? 'test-marker'),
     };
 }
 
@@ -292,13 +314,22 @@ async function publishCurrentAuthorityCheckpoint(
     context: Context,
     codebasePath: string,
 ): Promise<void> {
-    let collectionName = await context.getActiveIndexedCollectionName(codebasePath);
-    if (!collectionName) {
-        collectionName = context.resolveCollectionName(codebasePath);
-    }
     const marker = await context.getIndexCompletionMarker(codebasePath);
+    const publishedBinding = (context as any).indexAuthorityCoordinator.getPublishedPolicyBinding((context as any).canonicalizeCodebasePath(codebasePath));
+    const collectionName = publishedBinding?.collectionName ?? context.resolveCollectionName(codebasePath);
     assert.ok(collectionName);
     assert.ok(marker);
+
+    const authority: SourceFreshnessCheckpointAuthority = {
+        collectionName,
+        markerRunId: marker.runId,
+        indexPolicyHash: marker.indexPolicyHash,
+    };
+
+    const existingSynchronizer = context.getActiveSynchronizers().get(collectionName);
+    if (existingSynchronizer && existingSynchronizer.ownsCheckpointAuthority(authority)) {
+        return;
+    }
 
     const synchronizer = new FileSynchronizer(
         codebasePath,
@@ -306,15 +337,22 @@ async function publishCurrentAuthorityCheckpoint(
         context.getIndexedExtensionsForCodebase(codebasePath),
         {
             checkpointIdentity: collectionName,
-            checkpointAuthority: {
-                collectionName,
-                markerRunId: marker.runId,
-                indexPolicyHash: marker.indexPolicyHash,
-            },
+            checkpointAuthority: authority,
         },
     );
+    const inspected = await synchronizer.inspectOwnedSnapshot().catch(() => ({ status: 'missing' as const }));
+    if (inspected.status === 'valid') {
+        await synchronizer.initialize(undefined, undefined, { requireExistingCheckpoint: true });
+        context.registerSynchronizer(collectionName, synchronizer);
+        return;
+    }
+
+    await FileSynchronizer.deleteSnapshotForGeneration(codebasePath, collectionName).catch(() => undefined);
     await synchronizer.initialize();
-    context.registerSynchronizer(context.resolveCollectionName(codebasePath), synchronizer);
+    const prepared = await synchronizer.prepareChanges();
+    const staged = await prepared.stageCheckpoint(authority);
+    prepared.promoteStagedCheckpoint?.(staged, authority);
+    context.registerSynchronizer(collectionName, synchronizer);
 }
 
 async function publishV4TestGeneration(
@@ -1207,7 +1245,7 @@ test('Context classifies a legacy projection fingerprint as requires_reindex and
         // marker as invalid (fingerprint-incompatible) rather than retired...
         assert.deepEqual(
             await context.getIndexCompletionMarkerForValidation(codebasePath),
-            { status: 'invalid_v3' },
+            { status: 'requires_reindex' },
         );
         // ...while repair classifies the legacy fingerprint as requires_reindex
         // on the fingerprint-mismatch basis, and the collection is never admitted.
@@ -1645,13 +1683,13 @@ test('Context.reindexByChange activates one immutable vector, navigation, graph,
         assert.equal(policy.schemaVersion, 'satori_index_policy_v5');
         assert.equal(policy.controlSignature, current.policy.controlSignature);
         assert.equal(policy.collectionName, current.collectionName);
-        assert.equal(policy.publication.receipt.ownerId, 'sync-owner');
-        assert.equal(policy.publication.receipt.generation, 7);
-        assert.equal(policy.publication.receipt.operationId, 'sync-operation');
-        assert.equal(policy.publication.graph.manifestHash, current.navigation.relationshipManifestHash);
+        assert.equal(policy.publication!.receipt.ownerId, 'sync-owner');
+        assert.equal(policy.publication!.receipt.generation, 7);
+        assert.equal(policy.publication!.receipt.operationId, 'sync-operation');
+        assert.equal(policy.publication!.graph.manifestHash, current.navigation.relationshipManifestHash);
         if (checkpoint.status === 'valid') {
-            assert.equal(policy.publication.sourceCheckpoint.merkleRoot, checkpoint.merkleRoot);
-            assert.equal(policy.publication.sourceCheckpoint.documentDigest, checkpoint.documentDigest);
+            assert.equal(policy.publication!.sourceCheckpoint.merkleRoot, checkpoint.merkleRoot);
+            assert.equal(policy.publication!.sourceCheckpoint.documentDigest, checkpoint.documentDigest);
         }
         const restarted = new Context({
             embedding: new TestEmbedding(),
@@ -4102,7 +4140,6 @@ test('Context stores default index-policy authority under SATORI_STATE_ROOT', as
         context.publishResolvedIndexPolicy(policy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const policyRoot = path.join(testSatoriStateRoot, 'index-policy');
@@ -4162,7 +4199,6 @@ test('restarted Context rejects a changed observed ignore policy before replacin
         publisher.publishResolvedIndexPolicy(accepted, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
@@ -4246,7 +4282,6 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(initialPolicy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const ignoreOnly = await context.resolveIndexPolicyForCodebase(rootA, {
@@ -4256,7 +4291,6 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(ignoreOnly, {
             collectionName: 'generation-b',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const extensionOnly = await context.resolveIndexPolicyForCodebase(rootA, {
@@ -4266,7 +4300,6 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(extensionOnly, {
             collectionName: 'generation-c',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const resetIgnores = await context.resolveIndexPolicyForCodebase(rootA, {
@@ -4277,7 +4310,6 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(resetIgnores, {
             collectionName: 'generation-d',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         assert.equal(context.getIndexedExtensionsForCodebase(rootA).includes('.foo'), true);
@@ -4318,7 +4350,6 @@ test('Context publishes and reloads the exact root ignore-file policy', async ()
         context.publishResolvedIndexPolicy(policy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
         assert.equal(context.getActiveIgnorePatterns(codebasePath).includes('generated/**'), true);
 
@@ -4360,7 +4391,6 @@ test('Context preserves ordered duplicate ignore rules around negation', async (
         context.publishResolvedIndexPolicy(policy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const restarted = new Context({
@@ -4400,7 +4430,6 @@ test('Context reloads policy published by another Context instance', async () =>
         first.publishResolvedIndexPolicy(initial, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
         assert.equal(second.getActiveIgnorePatterns(codebasePath).includes('private/**'), true);
 
@@ -4410,7 +4439,6 @@ test('Context reloads policy published by another Context instance', async () =>
         first.publishResolvedIndexPolicy(replacement, {
             collectionName: 'generation-b',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
 
         assert.equal(second.getActiveIgnorePatterns(codebasePath).includes('private/**'), false);
@@ -4446,11 +4474,11 @@ test('Context resolves a newly published profile policy on the first active-gene
         });
         const policy = await publisher.resolveIndexPolicyForCodebase(codebasePath);
         await publisher.indexCodebase(codebasePath, undefined, false, { indexPolicy: policy });
-        const navigation = await publisher.getCurrentNavigationGeneration(codebasePath);
-        assert.ok(navigation);
+        const publishedBinding = (publisher as any).indexAuthorityCoordinator.getPublishedPolicyBinding(codebasePath);
+        assert.ok(publishedBinding);
         publisher.publishResolvedIndexPolicy(
             policy,
-            sealedPolicyBinding(publisher.resolveCollectionName(codebasePath), navigation),
+            publishedBinding,
         );
 
         assert.equal(
@@ -4479,7 +4507,6 @@ test('Context keeps durable and runtime policy consistent when the publication w
         context.publishResolvedIndexPolicy(previous, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
-            publication: structuredClone(TEST_PUBLICATION),
         });
         const candidate = await context.resolveIndexPolicyForCodebase(codebasePath, {
             customIgnorePatterns: ['generated/**'],
@@ -5254,6 +5281,7 @@ test('Context completion validation rejects a missing policy-bound collection in
             sealedPolicyBinding(
                 context.resolveStagedCollectionName(codebasePath, 'missing'),
                 proven.navigation,
+                proven.policy.policyHash,
             ),
         );
 
@@ -5287,7 +5315,7 @@ test('Context completion validation rejects a markerless policy-bound collection
         await vectorDatabase.createHybridCollection(markerlessCollection);
         context.publishResolvedIndexPolicy(
             proven.policy,
-            sealedPolicyBinding(markerlessCollection, proven.navigation),
+            sealedPolicyBinding(markerlessCollection, proven.navigation, proven.policy.policyHash),
         );
 
         assert.deepEqual(
@@ -5343,7 +5371,7 @@ test('Context completion validation preserves vector authority when navigation i
             symbolRegistryStateRoot: navigationStateRoot,
         });
         await context.indexCodebase(codebasePath);
-        fs.rmSync(path.join(resolveNavigationSidecarRoot(navigationStateRoot, codebasePath), 'current.json'));
+        fs.rmSync(resolveNavigationSidecarRoot(navigationStateRoot, codebasePath), { recursive: true, force: true });
 
         const evidence = await context.getIndexCompletionMarkerForValidation(codebasePath);
         assert.equal(evidence.status, 'valid_v3');
@@ -5607,7 +5635,7 @@ test('Context invalidates and cannot republish an accepted generation after same
 
         context.publishResolvedIndexPolicy(
             accepted,
-            sealedPolicyBinding(collectionName, navigation),
+            sealedPolicyBinding(collectionName, navigation, accepted.policyHash),
         );
         assert.equal(await context.getActiveIndexedCollectionName(codebasePath), null);
 
@@ -5912,12 +5940,17 @@ test('Context active collection resolution requires the durable policy document 
             indexPolicyStateRoot: policyRoot,
         });
         await context.indexCodebase(codebasePath);
-        const acceptedPolicy = await context.resolveIndexPolicyForCodebase(codebasePath);
-        const navigation = await context.getCurrentNavigationGeneration(codebasePath);
-        assert.ok(navigation);
+        const initialGeneration = await context.resolveProvenGeneration(codebasePath);
+        assert.ok(initialGeneration);
         context.publishResolvedIndexPolicy(
-            acceptedPolicy,
-            sealedPolicyBinding(context.resolveCollectionName(codebasePath), navigation),
+            initialGeneration.policy,
+            sealedPolicyBinding(
+                context.resolveCollectionName(codebasePath),
+                initialGeneration.navigation,
+                initialGeneration.policy.policyHash,
+                initialGeneration.marker.runId,
+                initialGeneration.publication,
+            ),
         );
         assert.ok(await context.getActiveIndexedCollectionName(codebasePath));
 
@@ -5954,16 +5987,18 @@ test('Context proven generation returns the sealed policy after ignore-file chan
             indexPolicyStateRoot: path.join(stateRoot, 'policies'),
         });
         await context.indexCodebase(codebasePath);
-        const acceptedPolicy = await context.resolveIndexPolicyForCodebase(codebasePath);
-        const acceptedNavigation = await context.getCurrentNavigationGeneration(codebasePath);
-        assert.ok(acceptedNavigation);
-        context.publishResolvedIndexPolicy(
-            acceptedPolicy,
-            sealedPolicyBinding(context.resolveCollectionName(codebasePath), acceptedNavigation),
-        );
-
         const initial = await context.resolveProvenGeneration(codebasePath);
         assert.ok(initial);
+        context.publishResolvedIndexPolicy(
+            initial.policy,
+            sealedPolicyBinding(
+                context.resolveCollectionName(codebasePath),
+                initial.navigation,
+                initial.policy.policyHash,
+                initial.marker.runId,
+                initial.publication,
+            ),
+        );
         assert.deepEqual(initial?.policy.fileBasedIgnorePatterns, ['private/**']);
         const initialPolicyHash = initial?.policy.policyHash;
 
@@ -8392,11 +8427,21 @@ test('Context prior generation receipt fails closed on profile policy and naviga
 
         const restored = await context.proveIndexedGeneration(codebasePath);
         assert.ok(restored);
+        const replacementCollection = context.resolveStagedCollectionName(codebasePath, 'replacement');
         context.publishResolvedIndexPolicy(
             restored.policy,
             sealedPolicyBinding(
-                context.resolveStagedCollectionName(codebasePath, 'replacement'),
+                replacementCollection,
                 restored.navigation,
+                restored.policy.policyHash,
+                restored.marker.runId,
+                {
+                    ...restored.publication!,
+                    sourceCheckpoint: {
+                        ...restored.publication!.sourceCheckpoint,
+                        collectionName: replacementCollection,
+                    },
+                },
             ),
         );
         assert.notEqual(context.getIndexAuthorityObservation(codebasePath), initialAuthorityObservation);
@@ -8404,15 +8449,26 @@ test('Context prior generation receipt fails closed on profile policy and naviga
 
         context.publishResolvedIndexPolicy(
             restored.policy,
-            sealedPolicyBinding(restored.collectionName, restored.navigation),
+            sealedPolicyBinding(
+                restored.collectionName,
+                restored.navigation,
+                restored.policy.policyHash,
+                restored.marker.runId,
+                restored.publication,
+            ),
         );
         const rebound = await context.proveIndexedGeneration(codebasePath);
         assert.ok(rebound?.navigation);
-        const currentPath = path.join(resolveNavigationSidecarRoot(stateRoot, codebasePath), 'current.json');
-        const current = JSON.parse(fs.readFileSync(currentPath, 'utf8')) as Record<string, unknown>;
-        fs.writeFileSync(currentPath, JSON.stringify({
-            ...current,
-            symbolRegistryManifestHash: `${String(current.symbolRegistryManifestHash)}-changed`,
+        const sealPath = path.join(
+            resolveNavigationSidecarRoot(stateRoot, codebasePath),
+            'generations',
+            rebound.navigation.generationId,
+            'seal.json',
+        );
+        const seal = JSON.parse(fs.readFileSync(sealPath, 'utf8')) as Record<string, unknown>;
+        fs.writeFileSync(sealPath, JSON.stringify({
+            ...seal,
+            symbolRegistryManifestHash: `${String(seal.symbolRegistryManifestHash)}-changed`,
         }), 'utf8');
         assert.notEqual(context.getIndexAuthorityObservation(codebasePath), initialAuthorityObservation);
         assert.equal(await context.proveIndexedGeneration(codebasePath, rebound), null);
@@ -8455,7 +8511,7 @@ test('Context navigation authority observation changes when a bound manifest is 
     }
 });
 
-test('Context proven generation rejects a navigation pointer changed after active resolution', async () => {
+test('Context proven generation rejects a bound generation seal corrupted after active resolution', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-proven-race-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -8471,11 +8527,17 @@ test('Context proven generation rejects a navigation pointer changed after activ
         });
         await context.indexCodebase(codebasePath);
         const acceptedPolicy = await context.resolveIndexPolicyForCodebase(codebasePath);
-        const acceptedNavigation = await context.getCurrentNavigationGeneration(codebasePath);
-        assert.ok(acceptedNavigation);
+        const initialGeneration = await context.resolveProvenGeneration(codebasePath);
+        assert.ok(initialGeneration);
         context.publishResolvedIndexPolicy(
             acceptedPolicy,
-            sealedPolicyBinding(context.resolveCollectionName(codebasePath), acceptedNavigation),
+            sealedPolicyBinding(
+                context.resolveCollectionName(codebasePath),
+                initialGeneration.navigation,
+                acceptedPolicy.policyHash,
+                initialGeneration.marker.runId,
+                initialGeneration.publication,
+            ),
         );
         assert.ok(await context.resolveProvenGeneration(codebasePath));
 
@@ -8485,20 +8547,61 @@ test('Context proven generation rejects a navigation pointer changed after activ
             const observation = await observePublication(collectionName);
             if (!rebound) {
                 rebound = true;
-                const currentPath = path.join(
+                const sealPath = path.join(
                     resolveNavigationSidecarRoot(stateRoot, codebasePath),
-                    'current.json',
+                    'generations',
+                    initialGeneration.navigation.generationId,
+                    'seal.json',
                 );
-                const current = JSON.parse(fs.readFileSync(currentPath, 'utf8')) as Record<string, unknown>;
-                fs.writeFileSync(currentPath, JSON.stringify({
-                    ...current,
-                    generationId: `${String(current.generationId)}-rebound`,
+                const seal = JSON.parse(fs.readFileSync(sealPath, 'utf8')) as Record<string, unknown>;
+                fs.writeFileSync(sealPath, JSON.stringify({
+                    ...seal,
+                    generationId: `${String(seal.generationId)}-rebound`,
                 }), 'utf8');
             }
             return observation;
         };
 
         assert.equal(await context.resolveProvenGeneration(codebasePath), null);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context publication-bound generation remains provable when auxiliary current pointer is modified', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-bound-pointer-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const value = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+        });
+        await context.indexCodebase(codebasePath);
+        const provenBefore = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(provenBefore);
+        assert.ok(provenBefore.publication);
+
+        // Move mutable current.json to a different generationId
+        const currentPath = path.join(
+            resolveNavigationSidecarRoot(stateRoot, codebasePath),
+            'current.json',
+        );
+        const current = JSON.parse(fs.readFileSync(currentPath, 'utf8')) as Record<string, unknown>;
+        fs.writeFileSync(currentPath, JSON.stringify({
+            ...current,
+            generationId: `${String(current.generationId)}-diverged`,
+        }), 'utf8');
+
+        // Because publication-bound authority uses bound generation semantics, the generation remains fully provable
+        const provenAfter = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(provenAfter);
+        assert.equal(provenAfter.navigation.generationId, provenBefore.navigation.generationId);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -8524,7 +8627,11 @@ test('Context proven generation rejects a same-hash policy rebound to another co
         assert.ok(navigation);
         context.publishResolvedIndexPolicy(
             acceptedPolicy,
-            sealedPolicyBinding(context.resolveCollectionName(codebasePath), navigation),
+            sealedPolicyBinding(
+                context.resolveCollectionName(codebasePath),
+                navigation,
+                acceptedPolicy.policyHash,
+            ),
         );
 
         let rebound = false;
@@ -8536,6 +8643,7 @@ test('Context proven generation rejects a same-hash policy rebound to another co
                     sealedPolicyBinding(
                         `${context.resolveCollectionName(codebasePath)}__gen_rebound`,
                         navigation,
+                        acceptedPolicy.policyHash,
                     ),
                 );
             }
@@ -8697,6 +8805,28 @@ test('Context.reindexByChange writes changed chunks to the active staged collect
         assert.ok(stableDocs);
         vectorDatabase.collections.set(stagedCollection, new Map(stableDocs));
         await vectorDatabase.dropCollection(stableCollection);
+        const stagedSync = new FileSynchronizer(
+            codebasePath,
+            stableGeneration.policy.effectiveIgnorePatterns,
+            stableGeneration.policy.supportedExtensions,
+            {
+                checkpointIdentity: stagedCollection,
+                checkpointAuthority: {
+                    collectionName: stagedCollection,
+                    markerRunId: stableGeneration.marker.runId,
+                    indexPolicyHash: stableGeneration.policy.policyHash,
+                },
+            },
+        );
+        await stagedSync.initialize();
+        const stagedPrep = await stagedSync.prepareChanges();
+        const checkpoint = await stagedPrep.stageCheckpoint({
+            collectionName: stagedCollection,
+            markerRunId: stableGeneration.marker.runId,
+            indexPolicyHash: stableGeneration.policy.policyHash,
+        });
+        context.registerSynchronizer(stagedCollection, stagedSync);
+
         context.publishResolvedIndexPolicy(stableGeneration.policy, {
             collectionName: stagedCollection,
             navigation: stableGeneration.marker.navigation.status === 'sealed'
@@ -8706,9 +8836,17 @@ test('Context.reindexByChange writes changed chunks to the active staged collect
                     sealHash: stableGeneration.marker.navigation.sealHash,
                 }
                 : { status: 'not_bound' },
+            publication: {
+                ...stableGeneration.publication!,
+                sourceCheckpoint: {
+                    ...stableGeneration.publication!.sourceCheckpoint,
+                    collectionName: stagedCollection,
+                    merkleRoot: checkpoint.merkleRoot,
+                    documentDigest: checkpoint.documentDigest,
+                },
+            },
         });
         assert.equal(await context.getActiveIndexedCollectionName(codebasePath), stagedCollection);
-        await publishCurrentAuthorityCheckpoint(context, codebasePath);
 
         fs.writeFileSync(sourcePath, 'export const auth = false;\n', 'utf8');
         const result = await context.reindexByChange(codebasePath);
@@ -9828,7 +9966,7 @@ test('Context.reindexByChange replaces a root-global synchronizer before authori
         const replayedCheckpoint = await context.inspectSourceFreshnessCheckpoint(codebasePath);
         assert.equal(replayedCheckpoint.status, 'corrupt');
         if (replayedCheckpoint.status === 'corrupt') {
-            assert.match(replayedCheckpoint.message, /does not belong to the active completion marker/);
+            assert.match(replayedCheckpoint.message, /does not belong to the active completion marker|no matching authoritative completed generation/);
         }
     } finally {
         if (previousHome === undefined) delete process.env.HOME;
@@ -9859,6 +9997,12 @@ test('Context.recreateSynchronizerForCodebase rejects authority replacement whil
             },
         });
         await checkpoint.initialize();
+        const prep = await checkpoint.prepareChanges();
+        await prep.stageCheckpoint({
+            collectionName: firstCollection,
+            markerRunId: 'run_first',
+            indexPolicyHash: 'a'.repeat(64),
+        });
 
         const context = new Context({
             embedding: new TestEmbedding(),
@@ -10501,16 +10645,18 @@ test('Context.repairIndex proves large exact payload equality with same-state co
             language: 'typescript',
             chunkIndex: index,
         }));
+        const originalGetExpected = (context as any).getExpectedChunksAndSymbols.bind(context);
+        const originalExpected = await originalGetExpected([sourcePath], codebasePath);
         const proofContext = context as unknown as ContextWithExpectedChunks;
         proofContext.getExpectedChunksAndSymbols = async () => ({
             expectedChunks,
-            symbolRecords: [],
-            symbolManifestFiles: [],
-            analysisByFile: new Map(),
+            symbolRecords: originalExpected.symbolRecords,
+            symbolManifestFiles: originalExpected.symbolManifestFiles,
+            analysisByFile: originalExpected.analysisByFile,
         });
-        vectorDatabase.countDocuments = async () => expectedChunks.length;
         const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
         assert.ok(collectionName);
+        vectorDatabase.countDocuments = async () => expectedChunks.length;
         const markerDocument = vectorDatabase.collections
             .get(collectionName)
             ?.get(INDEX_COMPLETION_MARKER_DOC_ID);
@@ -10526,7 +10672,13 @@ test('Context.repairIndex proves large exact payload equality with same-state co
             return originalQuery(collectionName, request);
         };
 
-        const result = await context.repairIndex(codebasePath);
+        const result = await context.repairIndex(codebasePath, {
+            publicationAuthority: {
+                ownerId: 'large-payload-repair',
+                generation: 2,
+                operationId: 'large-payload-op',
+            },
+        });
 
         assert.equal(result.status, 'ok');
         assert.equal(result.proof.payload.status, 'matched');
@@ -10685,15 +10837,26 @@ test('Context.repairIndex legacy v3 + missing symbol registry requires reindex a
         fs.writeFileSync(sourcePath, 'export function auth() { return true; }\n', 'utf8');
 
         const vectorDatabase = new InMemoryVectorDatabase();
+        const policyRoot = path.join(stateRoot, 'policies');
         const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
             symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: policyRoot,
         });
 
         // 1. Initial complete index
         await context.recreateSynchronizerForCodebase(codebasePath);
         await context.indexCodebase(codebasePath);
+
+        const policyFile = fs.readdirSync(policyRoot).find((file) => file.endsWith('.json'));
+        assert.ok(policyFile);
+        const policyPath = path.join(policyRoot, policyFile);
+        const policyDoc = JSON.parse(fs.readFileSync(policyPath, 'utf8')) as Record<string, unknown>;
+        delete policyDoc.publication;
+        delete policyDoc.controlSignature;
+        policyDoc.schemaVersion = 'satori_index_policy_v3';
+        fs.writeFileSync(policyPath, JSON.stringify(policyDoc, null, 2), 'utf8');
 
         // Record vector document IDs before repair
         const collectionName = context.resolveCollectionName(codebasePath);
@@ -10707,9 +10870,15 @@ test('Context.repairIndex legacy v3 + missing symbol registry requires reindex a
         assert.equal(fs.existsSync(sqlitePath), false);
 
         // 3. Run repairIndex
-        const repairResult = await context.repairIndex(codebasePath);
+        const repairResult = await context.repairIndex(codebasePath, {
+            publicationAuthority: {
+                ownerId: 'repair-owner',
+                generation: 1,
+                operationId: 'repair-op',
+            },
+        });
         assert.equal(repairResult.status, 'requires_reindex');
-        assert.equal(repairResult.proof.navigation.basis, 'v4_repair_authority_missing');
+        assert.match(repairResult.message, /cannot promote a retired index policy authority format/i);
 
         // 4. Verify repair leaves the legacy authority and vector rows untouched.
         assert.equal(fs.existsSync(sqlitePath), false);
@@ -10818,7 +10987,7 @@ async function assertGenericV4RepairPreservesCheckpoint(removeNavigation: boolea
             markerRunIdBefore: before.marker.runId,
             markerRunIdAfter: after.marker.runId,
             publicationCheckpointMarkerRunId: policy.schemaVersion === 'satori_index_policy_v5'
-                ? policy.publication.sourceCheckpoint.markerRunId
+                ? policy.publication?.sourceCheckpoint.markerRunId
                 : null,
             checkpointAfter,
             zeroChangeSyncError,
@@ -11030,13 +11199,13 @@ test('Context.repairIndex atomically upgrades only relationship navigation under
         ) as CanonicalIndexPolicyDocument;
         assert.equal(policy.schemaVersion, 'satori_index_policy_v5');
         assert.equal(policy.collectionName, before.collectionName);
-        assert.equal(policy.publication.sourceCheckpoint.markerRunId, markerBefore.runId);
+        assert.equal(policy.publication!.sourceCheckpoint.markerRunId, markerBefore.runId);
         assert.equal(
-            policy.publication.sourceCheckpoint.documentDigest,
+            policy.publication!.sourceCheckpoint.documentDigest,
             result.activatedGeneration?.sourceCheckpointDocumentDigest,
         );
-        assert.equal(policy.publication.graph.manifestHash, after.navigation.relationshipManifestHash);
-        assert.deepEqual(policy.publication.receipt, {
+        assert.equal(policy.publication!.graph.manifestHash, after.navigation.relationshipManifestHash);
+        assert.deepEqual(policy.publication!.receipt, {
             ownerId: 'repair-owner',
             generation: 5,
             operationId: 'repair-operation',
@@ -11309,9 +11478,12 @@ test('Context.repairIndex does not infer relationship-only authority from a lega
         await publishCurrentAuthorityCheckpoint(original, codebasePath);
         const policyFile = fs.readdirSync(policyRoot).find((file) => file.endsWith('.json'));
         assert.ok(policyFile);
-        const policy = JSON.parse(
-            fs.readFileSync(path.join(policyRoot, policyFile), 'utf8'),
-        ) as CanonicalIndexPolicyDocument;
+        const policyPath = path.join(policyRoot, policyFile);
+        const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8')) as Record<string, unknown>;
+        delete policy.publication;
+        delete policy.controlSignature;
+        policy.schemaVersion = 'satori_index_policy_v3';
+        fs.writeFileSync(policyPath, JSON.stringify(policy, null, 2), 'utf8');
         assert.equal(policy.schemaVersion, 'satori_index_policy_v3');
 
         const upgraded = new Context({
@@ -11333,10 +11505,7 @@ test('Context.repairIndex does not infer relationship-only authority from a lega
         });
 
         assert.equal(result.status, 'requires_reindex');
-        assert.equal(
-            result.proof.navigation.basis,
-            'relationship_upgrade_v4_authority_missing',
-        );
+        assert.match(result.message, /cannot promote a retired index policy authority format/i);
         assert.deepEqual(vectorDatabase.mutationCalls, []);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -11398,6 +11567,8 @@ test('Context.repairIndex fingerprint mismatch returns requires_reindex, not rep
 
         // 2. Override completion marker with mismatched fingerprint
         const collectionName = context.resolveCollectionName(codebasePath);
+        const initialMarker = await context.getIndexCompletionMarker(codebasePath);
+        assert.ok(initialMarker);
         const mismatchedMarkerDoc: VectorDocument = {
             id: INDEX_COMPLETION_MARKER_DOC_ID,
             vector: Array(1024).fill(0),
@@ -11410,22 +11581,19 @@ test('Context.repairIndex fingerprint mismatch returns requires_reindex, not rep
                 kind: 'satori_index_completion_v3',
                 codebasePath,
                 fingerprint: {
+                    ...initialMarker.fingerprint,
                     embeddingProvider: 'MismatchedProvider',
                     embeddingModel: 'mismatched-model',
                     embeddingDimension: 9999,
                     vectorStoreProvider: 'Milvus',
-                    schemaVersion: 'dense_v3',
-                    parserVersion: LANGUAGE_PARSER_VERSION,
-                    extractorVersion: SYMBOL_EXTRACTOR_VERSION,
-                    relationshipVersion: RELATIONSHIP_BUILDER_VERSION,
                 },
                 indexedFiles: 1,
                 totalChunks: 1,
                 completedAt: new Date().toISOString(),
-                runId: 'mismatched-run-id',
-                indexPolicyHash: 'a'.repeat(64),
+                runId: initialMarker.runId,
+                indexPolicyHash: initialMarker.indexPolicyHash,
                 indexStatus: 'completed',
-                navigation: { status: 'not_bound' },
+                navigation: initialMarker.navigation,
             }
         };
         await vectorDatabase.writeDocuments(collectionName, [mismatchedMarkerDoc]);
@@ -11648,6 +11816,128 @@ test('Context rejects lexicalMatchMode combined with dense retrieval', async () 
             }),
             /lexicalMatchMode is invalid for dense retrieval/,
         );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context full index fails closed when indexed file bytes mismatch the prepared observation', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-full-index-mismatch-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        const filePath = path.join(codebasePath, 'source.ts');
+        fs.writeFileSync(filePath, 'export const initial = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+
+        // Intercept file indexing to simulate transient drift during scan
+        const originalProcessFileList = (context as unknown as { indexingPipeline: { processFileList: (...args: unknown[]) => Promise<unknown> } }).indexingPipeline.processFileList;
+        (context as unknown as { indexingPipeline: { processFileList: (...args: unknown[]) => Promise<unknown> } }).indexingPipeline.processFileList = async (...args: unknown[]) => {
+            const res = await originalProcessFileList.apply((context as unknown as { indexingPipeline: unknown }).indexingPipeline, args) as { indexedFileHashes: Map<string, string> };
+            // Mutate the returned indexed file hash to simulate transient drift
+            res.indexedFileHashes.set('source.ts', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+            return res;
+        };
+
+        await assert.rejects(
+            () => context.indexCodebase(codebasePath),
+            /Completed full index source mismatch: hash for file 'source.ts' changed during indexing/i,
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context full index fails closed when source bytes drift during pipeline execution', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-source-drift-race-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        const filePath = path.join(codebasePath, 'source.ts');
+        fs.writeFileSync(filePath, 'export const initial = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+
+        // Simulate real source change during pipeline chunking then restoration before finish
+        const originalProcessFileList = (context as unknown as { indexingPipeline: { processFileList: (...args: unknown[]) => Promise<unknown> } }).indexingPipeline.processFileList;
+        (context as unknown as { indexingPipeline: { processFileList: (...args: unknown[]) => Promise<unknown> } }).indexingPipeline.processFileList = async (...args: unknown[]) => {
+            fs.writeFileSync(filePath, 'export const modifiedDuringIndex = 2;\n', 'utf8');
+            const res = await originalProcessFileList.apply((context as unknown as { indexingPipeline: unknown }).indexingPipeline, args);
+            // Restore file back to original A so disk looks current, but indexer read drifted bytes B
+            fs.writeFileSync(filePath, 'export const initial = 1;\n', 'utf8');
+            return res;
+        };
+
+        await assert.rejects(
+            () => context.indexCodebase(codebasePath),
+            /Completed full index source mismatch: hash for file 'source.ts' changed during indexing/i,
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context deferred full index accepts prepared source observation capability across deferral', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-deferred-source-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'source.ts'), 'export const val = 123;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+
+        const synchronizer = new FileSynchronizer(
+            codebasePath,
+            [],
+            ['.ts'],
+            {
+                checkpointIdentity: 'test_collection',
+                checkpointAuthority: {
+                    collectionName: 'test_collection',
+                    markerRunId: 'test_run',
+                    indexPolicyHash: '0'.repeat(64),
+                },
+            },
+        );
+        await synchronizer.initialize(undefined, undefined, { deferSnapshotPublication: true });
+        const preparedChanges = await synchronizer.prepareChanges({ forceFullHash: true });
+
+        const result = await context.indexCodebase(codebasePath, undefined, false, {
+            deferFullIndexPublication: true,
+            preparedChanges,
+            writeCollectionName: 'test_collection',
+        });
+
+        assert.equal(result.status, 'completed');
+        assert.equal(result.indexedFiles, 1);
+        assert.equal(
+            preparedChanges.fileHashes.get('source.ts'),
+            result.indexedFileHashes.get('source.ts'),
+        );
+        const staged = await preparedChanges.stageCheckpoint({
+            collectionName: 'test_collection',
+            markerRunId: 'test_run',
+            indexPolicyHash: '0'.repeat(64),
+        });
+        const evidence = await synchronizer.inspectOwnedSnapshot();
+        assert.equal(evidence.status, 'valid');
+        assert.equal(evidence.merkleRoot, staged.merkleRoot);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }

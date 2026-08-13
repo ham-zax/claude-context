@@ -129,6 +129,10 @@ export interface PreparedFileChangeSet {
         checkpointAuthority: SourceFreshnessCheckpointAuthority,
         assertMutationCurrent?: () => void,
     ): Promise<StagedSourceFreshnessCheckpoint>;
+    promoteStagedCheckpoint?(
+        checkpoint: StagedSourceFreshnessCheckpoint,
+        checkpointAuthority: SourceFreshnessCheckpointAuthority,
+    ): void;
     assertSourceObservationCurrent(): Promise<void>;
 }
 
@@ -245,6 +249,7 @@ export class FileSynchronizer {
         this.snapshotRequiresPersistence = false;
         this.snapshotDocumentDigest = null;
     }
+
 
     private static normalizeCheckpointAuthority(
         authority: SourceFreshnessCheckpointAuthority,
@@ -397,7 +402,7 @@ export class FileSynchronizer {
         assertMutationCurrent?.();
         await fsp.mkdir(merkleDir, { recursive: true });
         if (fsSync.existsSync(snapshotPath)) {
-            throw new Error(`[Synchronizer] Candidate checkpoint already exists at ${snapshotPath}.`);
+            throw new Error(`cannot stage checkpoint because ${snapshotPath} already exists`);
         }
         try {
             const temporaryFile = await fsp.open(tempSnapshotPath, 'wx', 0o600);
@@ -547,7 +552,10 @@ export class FileSynchronizer {
         afterPublish?: () => void,
         checkpointAuthority: SourceFreshnessCheckpointAuthority | null = this.checkpointAuthority,
     ): Promise<void> {
-        const merkleDir = path.dirname(this.snapshotPath);
+        const targetSnapshotPath = checkpointAuthority
+            ? FileSynchronizer.getSnapshotPathForGeneration(this.rootDir, checkpointAuthority.collectionName)
+            : this.snapshotPath;
+        const merkleDir = path.dirname(targetSnapshotPath);
         assertMutationCurrent?.();
         if (assertMutationCurrent && !publishMutation) {
             throw new Error('[Synchronizer] A mutation-fenced snapshot write requires an atomic publication callback.');
@@ -562,10 +570,11 @@ export class FileSynchronizer {
             merkleRoot: this.merkleRoot,
             fullHashCounter: this.fullHashCounter,
         };
+        const checkpointIdentity = checkpointAuthority?.collectionName ?? this.checkpointIdentity;
         const payload = buildSnapshotPayload(
             checkpoint,
             this.rootDir,
-            this.checkpointIdentity,
+            checkpointIdentity,
             checkpointAuthority,
         );
 
@@ -574,12 +583,14 @@ export class FileSynchronizer {
             && typeof payload.documentDigest === 'string'
             ? payload.documentDigest
             : null;
-        const tempSnapshotPath = `${this.snapshotPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const tempSnapshotPath = `${targetSnapshotPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
         let targetReplaced = false;
         let checkpointApplied = false;
         const applyPublishedCheckpoint = () => {
             if (!checkpointApplied) {
+                this.checkpointIdentity = checkpointIdentity;
                 this.checkpointAuthority = checkpointAuthority;
+                this.snapshotPath = targetSnapshotPath;
                 this.snapshotDocumentDigest = publishedDocumentDigest;
                 afterPublish?.();
                 checkpointApplied = true;
@@ -594,7 +605,7 @@ export class FileSynchronizer {
                 await temporaryFile.close();
             }
             const publishSnapshot = () => {
-                fsSync.renameSync(tempSnapshotPath, this.snapshotPath);
+                fsSync.renameSync(tempSnapshotPath, targetSnapshotPath);
                 targetReplaced = true;
                 const directory = fsSync.openSync(merkleDir, 'r');
                 try {
@@ -623,8 +634,8 @@ export class FileSynchronizer {
             if (
                 targetReplaced
                 && !checkpointApplied
-                && fsSync.existsSync(this.snapshotPath)
-                && fsSync.readFileSync(this.snapshotPath, 'utf8') === serializedPayload
+                && fsSync.existsSync(targetSnapshotPath)
+                && fsSync.readFileSync(targetSnapshotPath, 'utf8') === serializedPayload
             ) {
                 applyPublishedCheckpoint();
             }
@@ -632,7 +643,7 @@ export class FileSynchronizer {
         } finally {
             await fsp.unlink(tempSnapshotPath).catch(() => undefined);
         }
-        console.log(`Saved snapshot to ${this.snapshotPath}`);
+        console.log(`Saved snapshot to ${targetSnapshotPath}`);
     }
 
     private async loadSnapshot(): Promise<{ migrated: boolean; missing: boolean }> {
@@ -959,6 +970,32 @@ export class FileSynchronizer {
         return this.checkpointIdentity;
     }
 
+    public static async inspectSnapshotAuthority(
+        rootDir: string,
+        collectionName: string,
+    ): Promise<SourceFreshnessCheckpointAuthority | null> {
+        const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(rootDir, collectionName);
+        try {
+            const data = await fsp.readFile(snapshotPath, 'utf8');
+            const snapshot = parseSnapshotDocument(data);
+            if (
+                snapshot.snapshotVersion === GENERATION_SNAPSHOT_VERSION
+                && snapshot.checkpointIdentity === collectionName.trim()
+                && snapshot.markerRunId
+                && snapshot.indexPolicyHash
+            ) {
+                return {
+                    collectionName: snapshot.checkpointIdentity,
+                    markerRunId: snapshot.markerRunId,
+                    indexPolicyHash: snapshot.indexPolicyHash,
+                };
+            }
+        } catch {
+            return null;
+        }
+        return null;
+    }
+
     private buildScanContext(
         forceFullHash: boolean,
         previousHashes: ReadonlyMap<string, string>,
@@ -1097,7 +1134,7 @@ export class FileSynchronizer {
             );
         }
 
-        if (migrated) {
+        if (migrated && !this.checkpointIdentity) {
             const previousHashes = new Map(this.fileHashes);
             const previousStats = new Map(this.fileStats);
             const { effective } = await this.scanCurrentState(previousHashes, previousStats, true);
@@ -1112,6 +1149,15 @@ export class FileSynchronizer {
                 await this.saveSnapshot(undefined, assertMutationCurrent, publishMutation);
                 this.snapshotRequiresPersistence = false;
             }
+        } else if (missing && this.checkpointIdentity) {
+            const previousHashes = new Map(this.fileHashes);
+            const previousStats = new Map(this.fileStats);
+            const { effective } = await this.scanCurrentState(previousHashes, previousStats, true);
+            this.fileHashes = effective.fileHashes;
+            this.fileStats = effective.fileStats;
+            this.partialScan = effective.partialScan;
+            this.unscannedDirPrefixes = effective.unscannedDirPrefixes;
+            this.merkleRoot = computeMerkleRoot(this.fileHashes);
         } else if (!this.merkleRoot) {
             this.merkleRoot = computeMerkleRoot(this.fileHashes);
         }
@@ -1171,6 +1217,9 @@ export class FileSynchronizer {
             || metadataChanged
             || counterAdvanced;
         let commit: Promise<PreparedFileChangeCommitReceipt> | undefined;
+        let stagedReceipt: StagedSourceFreshnessCheckpoint | null = null;
+        let stagedAuthority: SourceFreshnessCheckpointAuthority | null = null;
+        let promoted = false;
 
         return {
             changes,
@@ -1190,10 +1239,47 @@ export class FileSynchronizer {
                     throw new Error('[Synchronizer] Source observation changed while the candidate publication was being prepared.');
                 }
             },
-            stageCheckpoint: (
+            stageCheckpoint: async (
                 checkpointAuthority: SourceFreshnessCheckpointAuthority,
                 assertMutationCurrent?: () => void,
-            ) => this.stageCheckpointState(nextState, checkpointAuthority, assertMutationCurrent),
+            ) => {
+                const staged = await this.stageCheckpointState(nextState, checkpointAuthority, assertMutationCurrent);
+                stagedReceipt = staged;
+                stagedAuthority = FileSynchronizer.normalizeCheckpointAuthority(checkpointAuthority);
+                return staged;
+            },
+            promoteStagedCheckpoint: (
+                staged: StagedSourceFreshnessCheckpoint,
+                checkpointAuthority: SourceFreshnessCheckpointAuthority,
+            ) => {
+                if (promoted) {
+                    throw new Error('[Synchronizer] Staged checkpoint has already been promoted.');
+                }
+                if (!stagedReceipt || stagedReceipt !== staged || staged.documentDigest !== stagedReceipt.documentDigest) {
+                    throw new Error('[Synchronizer] Cannot promote checkpoint: staged receipt did not originate from this prepared change set.');
+                }
+                const authority = FileSynchronizer.normalizeCheckpointAuthority(checkpointAuthority);
+                if (
+                    !stagedAuthority
+                    || stagedAuthority.collectionName !== authority.collectionName
+                    || stagedAuthority.markerRunId !== authority.markerRunId
+                    || stagedAuthority.indexPolicyHash !== authority.indexPolicyHash
+                ) {
+                    throw new Error('[Synchronizer] Checkpoint authority does not match staged checkpoint authority.');
+                }
+                promoted = true;
+                this.fileHashes = new Map(nextState.fileHashes);
+                this.fileStats = new Map(nextState.fileStats);
+                this.merkleRoot = nextState.merkleRoot;
+                this.partialScan = nextState.partialScan;
+                this.unscannedDirPrefixes = [...nextState.unscannedDirPrefixes];
+                this.fullHashCounter = nextState.fullHashCounter;
+                this.checkpointIdentity = authority.collectionName;
+                this.checkpointAuthority = authority;
+                this.snapshotPath = staged.snapshotPath;
+                this.snapshotDocumentDigest = staged.documentDigest;
+                this.checkpointVersion += 1;
+            },
             commit: (
                 assertMutationCurrent?: () => void,
                 publishMutation?: (publish: () => void) => void,

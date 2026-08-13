@@ -406,6 +406,54 @@ test('policy inspector binds the observed control signature in canonical v5 auth
     });
 });
 
+test('policy inspector enforces strict navigation and publication invariants for v5 authority', () => {
+    const unboundDocument = buildCanonicalIndexPolicyDocument({
+        ...policyPayload({ status: 'not_bound' }),
+        schemaVersion: 'satori_index_policy_v5',
+        controlSignature: 'v1:default',
+    });
+    assert.equal(inspectIndexPolicyDocument(unboundDocument, '/repo').status, 'current');
+
+    // Sealed V5 without publication MUST be rejected
+    const sealedNoPub = {
+        ...policyPayload({ status: 'sealed', generationId: 'generation-1', sealHash: SHA_C }),
+        schemaVersion: 'satori_index_policy_v5',
+        controlSignature: 'v1:default',
+    };
+    assert.deepEqual(inspectIndexPolicyDocument(sealedNoPub, '/repo'), {
+        status: 'corrupt',
+        reason: 'canonical index policy payload is invalid',
+    });
+
+    // Unbound V5 WITH publication MUST be rejected
+    const unboundWithPub = {
+        ...unboundDocument,
+        publication: {
+            activationId: 'activation-1',
+            sourceCheckpoint: {
+                collectionName: 'collection-1',
+                markerRunId: 'marker-1',
+                indexPolicyHash: SHA_A,
+                merkleRoot: SHA_B,
+                documentDigest: SHA_C,
+            },
+            graph: { kind: 'relationship_manifest_v2', manifestHash: SHA_B },
+            receipt: { ownerId: 'sync', generation: 4, operationId: 'operation-1' },
+        },
+    };
+    assert.deepEqual(inspectIndexPolicyDocument(unboundWithPub, '/repo'), {
+        status: 'corrupt',
+        reason: 'canonical index policy payload is invalid',
+    });
+
+    // Extra unrecognized key MUST be rejected by exact-key validation
+    const extraKey = { ...unboundDocument, extra_unbound_field: 'unauthorized' };
+    assert.deepEqual(inspectIndexPolicyDocument(extraKey, '/repo'), {
+        status: 'corrupt',
+        reason: 'canonical index policy payload is invalid',
+    });
+});
+
 test('policy inspector requires reindex for every retired policy schema', () => {
     const payloadBase = {
         schemaVersion: 'satori_index_policy_v2',

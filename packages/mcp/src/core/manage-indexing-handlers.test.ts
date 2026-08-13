@@ -1635,6 +1635,19 @@ test("background reindex does not publish authority when checkpoint acknowledgem
                         new Error("checkpoint acknowledgement failed"),
                     );
                 },
+                stageCheckpoint: async (...args) => {
+                    const staged = await prepared.stageCheckpoint(...args);
+                    const receipt: import("@zokizuan/satori-core").PreparedFileChangeCommitReceipt = {
+                        status: 'committed',
+                        checkpointVersion: 1,
+                        merkleRoot: staged.merkleRoot,
+                    };
+                    throw new SynchronizerCheckpointPublicationError(
+                        "checkpoint acknowledgement failed",
+                        receipt,
+                        new Error("checkpoint acknowledgement failed"),
+                    );
+                },
             };
         };
 

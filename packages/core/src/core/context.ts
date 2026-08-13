@@ -43,6 +43,8 @@ import {
 } from '../navigation';
 import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
+    RetiredNavigationPointerError,
+    UnsupportedNavigationPointerError,
     buildSymbolRegistry,
     clearSymbolRegistrySidecar,
     computeNavigationGenerationSealHash,
@@ -84,6 +86,7 @@ import * as os from 'os';
 import ignore from 'ignore';
 import {
     FileSynchronizer,
+    type PreparedFileChangeSet,
     type SourceFreshnessPathComparison,
 } from '../sync/synchronizer';
 import { SynchronizerRegistry } from '../sync/synchronizer-registry';
@@ -448,6 +451,7 @@ type MutationGuardOptions = {
     preparedCollectionReceipt?: PreparedIndexCollectionReceipt;
     preparedCollectionBinding?: PreparedIndexCollectionBinding;
     writeCollectionName?: string;
+    preparedChanges?: PreparedFileChangeSet;
 };
 
 type StagedCollectionPruneOptions = {
@@ -883,6 +887,9 @@ export class Context {
             ),
             proveIndexedGeneration: (codebasePath, priorReceipt) => (
                 this.proveIndexedGeneration(codebasePath, priorReceipt)
+            ),
+            publishNavigationCandidate: (candidate, assertMutationCurrent, publishMutation) => (
+                this.publishNavigationCandidate(candidate, assertMutationCurrent, publishMutation)
             ),
             publishResolvedIndexPolicy: (codebasePath, policy, publishMutation) => (
                 this.publishResolvedIndexPolicy(codebasePath, policy, publishMutation)
@@ -2051,14 +2058,14 @@ export class Context {
         if (policyBinding.publication) {
             const checkpoint = await new FileSynchronizer(
                 canonicalRoot,
-                [],
-                [],
+                publishedPolicy.effectiveIgnorePatterns,
+                publishedPolicy.supportedExtensions,
                 {
                     checkpointIdentity: policyBinding.collectionName,
                     checkpointAuthority: {
                         collectionName: policyBinding.collectionName,
-                        markerRunId: initialMarker.runId,
-                        indexPolicyHash: initialMarker.indexPolicyHash,
+                        markerRunId: policyBinding.publication.sourceCheckpoint.markerRunId,
+                        indexPolicyHash: policyBinding.publication.sourceCheckpoint.indexPolicyHash,
                     },
                 },
             ).inspectOwnedSnapshot();
@@ -2179,12 +2186,16 @@ export class Context {
             ? {
                 ...vectorReceipt,
                 navigation: { ...navigation! },
+                publication: finalBinding.publication ? structuredClone(finalBinding.publication) : undefined,
                 observations: {
                     ...vectorReceipt.observations,
                     navigationToken: finalNavigationToken!,
                 },
             }
-            : vectorReceipt;
+            : {
+                ...vectorReceipt,
+                publication: finalBinding.publication ? structuredClone(finalBinding.publication) : undefined,
+            };
     }
 
     private invalidateGenerationProofForCollection(collectionName: string): void {
@@ -2388,6 +2399,14 @@ export class Context {
             && cached.generationReceipt
             && (!validateArtifacts || cached.navigationArtifactsValidated)
         ) {
+            const currentNavToken = this.resolveNavigationObservationToken(
+                canonicalRoot,
+                cached.generationReceipt.navigation.generationId,
+                cached.generationReceipt.observations.navigationToken.includes('pointerToken'),
+            );
+            if (!currentNavToken || currentNavToken !== cached.generationReceipt.observations.navigationToken) {
+                return { status: 'incompatible' };
+            }
             if (await this.indexAuthorityCoordinator.resolveGenerationProofIdentity(canonicalRoot) !== identity) {
                 return { status: 'incompatible' };
             }
@@ -2825,6 +2844,16 @@ export class Context {
             if (error instanceof IndexPolicyAuthorityError) policyAuthorityInvalid = true;
         }
         if (policyAuthorityInvalid) return { status: 'policy_authority_invalid' };
+        try {
+            await resolveCurrentNavigationGeneration(this.symbolRegistryStateRoot, canonicalRoot);
+        } catch (error) {
+            if (error instanceof RetiredNavigationPointerError) {
+                return { status: 'requires_reindex' };
+            }
+            if (error instanceof UnsupportedNavigationPointerError) {
+                return { status: 'unsupported_authority' };
+            }
+        }
         const boundCollection = this.indexAuthorityCoordinator.getPublishedPolicyBinding(canonicalRoot)?.collectionName;
         const publishedPolicy = this.indexAuthorityCoordinator.getPublishedResolvedPolicy(canonicalRoot);
         if (
@@ -3988,9 +4017,7 @@ export class Context {
         const pointerPath = path.join(navigationRoot, 'current.json');
         const generationRoot = path.join(navigationRoot, 'generations', generationId);
         const sealPath = path.join(generationRoot, 'seal.json');
-        const pointerToken = requireCurrentPointer
-            ? this.resolveFilesystemObservationToken(pointerPath)
-            : null;
+        const pointerToken = this.resolveFilesystemObservationToken(pointerPath);
         const sealToken = this.resolveFilesystemObservationToken(sealPath);
         if ((requireCurrentPointer && !pointerToken) || !sealToken) return { status: 'missing' };
 
@@ -4042,7 +4069,7 @@ export class Context {
             || !relationshipShardDirectoryToken
         ) return { status: 'missing' };
         return { status: 'valid', token: JSON.stringify({
-            ...(pointerToken ? { pointerToken } : {}),
+            ...(requireCurrentPointer && pointerToken ? { pointerToken } : {}),
             sealToken,
             symbolRegistryManifestToken,
             symbolIndexToken,

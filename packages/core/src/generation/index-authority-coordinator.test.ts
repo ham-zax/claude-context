@@ -53,6 +53,7 @@ function policy(): ResolvedIndexPolicy {
         supportedExtensions: ['.ts'],
         effectiveIgnorePatterns: [],
         policyHash,
+        controlSignature: 'v1:control-signature',
     };
 }
 

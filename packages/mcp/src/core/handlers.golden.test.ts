@@ -372,6 +372,7 @@ function createGenerationReceipt(
             supportedExtensions: [],
             effectiveIgnorePatterns: [],
             policyHash: 'policy-hash-golden',
+            controlSignature: 'v1:.satoriignore:missing|.gitignore:missing|satori.toml:missing',
         },
         policyDocumentDigest: '1'.repeat(64),
         exactPayloadCount: 1,

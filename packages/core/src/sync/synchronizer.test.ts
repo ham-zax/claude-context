@@ -8,6 +8,7 @@ import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     FileSynchronizer,
     SynchronizerCheckpointPublicationError,
+    type SourceFreshnessCheckpointAuthority,
 } from './synchronizer';
 
 function checkpointOptions(checkpointIdentity: string) {
@@ -1296,6 +1297,56 @@ test('FileSynchronizer rejects a prepared publication after its source observati
         await assert.rejects(
             () => prepared.assertSourceObservationCurrent(),
             /source observation changed while the candidate publication was being prepared/i,
+        );
+    } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+        fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+});
+
+test('FileSynchronizer staged checkpoint promotion is capability-bound and one-shot', async () => {
+    const previousHome = process.env.HOME;
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-promote-home-'));
+    const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-sync-stage-promote-repo-'));
+    try {
+        process.env.HOME = tempHome;
+        const sourcePath = path.join(tempRepo, 'index.ts');
+        fs.writeFileSync(sourcePath, 'export const val = 1;\n', 'utf8');
+        const authorityA: SourceFreshnessCheckpointAuthority = {
+            collectionName: 'col_a',
+            markerRunId: 'run_1',
+            indexPolicyHash: 'a'.repeat(64),
+        };
+        const synchronizer = new FileSynchronizer(tempRepo, [], ['.ts'], {
+            checkpointIdentity: 'col_a',
+            checkpointAuthority: authorityA,
+        });
+        await synchronizer.initialize(undefined, undefined, { deferSnapshotPublication: true });
+        const prepared = await synchronizer.prepareChanges();
+        const staged = await prepared.stageCheckpoint(authorityA);
+
+        // Foreign staged receipt cannot be promoted
+        assert.throws(
+            () => prepared.promoteStagedCheckpoint?.({ ...staged, documentDigest: 'tampered' }, authorityA),
+            /staged receipt did not originate/i,
+        );
+
+        // Mismatched authority cannot be promoted
+        assert.throws(
+            () => prepared.promoteStagedCheckpoint?.(staged, { ...authorityA, markerRunId: 'wrong_run' }),
+            /Checkpoint authority does not match/i,
+        );
+
+        // First valid promotion succeeds
+        prepared.promoteStagedCheckpoint?.(staged, authorityA);
+        assert.ok(synchronizer.ownsCheckpointAuthority(authorityA));
+
+        // Second promotion fails (one-shot)
+        assert.throws(
+            () => prepared.promoteStagedCheckpoint?.(staged, authorityA),
+            /already been promoted/i,
         );
     } finally {
         if (previousHome === undefined) delete process.env.HOME;

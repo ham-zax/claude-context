@@ -25,6 +25,8 @@ function currentCompletionMarker(codebasePath: string) {
             parserVersion: "parser-v1",
             extractorVersion: "extractor-v1",
             relationshipVersion: "relationships-v1",
+            embeddingArtifactDigest: "0".repeat(64),
+            embeddingNormalizationPolicy: "none",
             embeddingProjectionVersion: "embedding_projection_v1",
             lexicalProjectionVersion: "lexical_projection_v1",
         },

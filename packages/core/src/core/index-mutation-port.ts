@@ -30,7 +30,7 @@ import type {
 } from '../generation/index-teardown-workflow';
 import type { IndexPolicyRuntimeBinding } from '../policy/index-policy-runtime-service';
 import type { StagedNavigationSidecarGeneration } from '../symbols';
-import type { FileSynchronizer } from '../sync/synchronizer';
+import type { FileSynchronizer, PreparedFileChangeSet } from '../sync/synchronizer';
 import type { IndexCompletionMarkerDocument } from '../vectordb';
 import type {
     VerifiedCollectionDeleteOptions,
@@ -49,6 +49,7 @@ export type IndexMutationOptions = {
     preparedCollectionReceipt?: PreparedIndexCollectionReceipt;
     preparedCollectionBinding?: PreparedIndexCollectionBinding;
     writeCollectionName?: string;
+    preparedChanges?: PreparedFileChangeSet;
 };
 
 export type IndexMutationRepairOptions = {
