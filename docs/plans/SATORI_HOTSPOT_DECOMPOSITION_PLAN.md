@@ -58,7 +58,9 @@ Completed ownership-bounded batches:
 
 Next open batch at this checkpoint: Phase 8 gate correction B (narrow
 `SearchRequestCoordinatorHost`), then C (continuation owner identity).
-Phase 8 is planned and authorized; L/XL batches stop for review. Refresh this checkpoint only after an
+Phase 8 is planned and authorized; L/XL batches stop for review. Phase 9 is
+planned only; it starts after Phase 8 is sealed, and its durable-format floor
+(9.3) requires separate authorization. Refresh this checkpoint only after an
 accepted batch is committed; preserve the original baseline above as historical
 lineage.
 
@@ -1145,6 +1147,148 @@ teardown
   ToolHandlers. Fold that glue into 8.7/8.10 if touched, otherwise leave.
 - Path predicates: no duplication — the ToolHandlers predicates are aliases of
   `search-ranking-policy.ts` exports; the owner is correct.
+
+
+## Phase 9 — Canonicalization and compatibility retirement
+
+Status: planned, not implemented. Goal: every domain has ONE canonical current
+implementation; legacy versions shrink to a tiny compatibility boundary (recognize
+→ classify → requires_reindex / unsupported) or are rejected outright.
+Version-aware code must stop at the boundary — workflows, coordinators, and search
+must never branch on `schemaVersion` or import `SomethingV2`.
+
+Depends on Phase 8 being sealed (the durable-floor decision lives in the authority
+owner that 8.8/8.9 establish). Starts only after Phase 8 is sealed and reviewed.
+
+### Phase 9 global rules
+
+- Not every `v1`/`v2` string is dead code. Some are the CURRENT contract identity
+  (`canonical_json_v1`, `relationship_manifest_v2`, `search_rerank_document_v4`).
+  A `v1` suffix says nothing about obsolescence.
+- Deletion criterion: is there a supported input/output/runtime path that still
+  requires this implementation?
+  - No → delete.
+  - Only to recognize obsolete persisted state → shrink to a decoder/rejection
+    boundary.
+  - Current stable identity → keep the identity; the implementation may become
+    unversioned.
+- Public npm APIs keep semver compatibility until an explicitly authorized
+  breaking Core release. Internal renames must preserve published names (keep
+  export aliases or confine renames to unpublished internals).
+- Persisted-format policy changes (retiring a durable format) require separate
+  authorization; they are product decisions, not refactors.
+
+### 9.0 Version-support inventory (S)
+
+Search `_v1/_v2/_v3/_v4/_v5`, `schemaVersion`, `previousVersion`, profile IDs,
+policy IDs. Classify every hit: `wire/provider identity` | `durable disk format`
+| `public API` | `process-local/internal` | `test-only`. Record current writer,
+current reader, and whether anything actually selects it. This inventory is the
+batch-sheet source for every later 9.x batch; the plan does not predetermine
+deletions beyond the named targets below.
+
+Stopping condition: every versioned symbol classified with writer/reader/
+selector evidence; the inventory is recorded in the batch sheet, not guessed.
+
+### 9.1 Retire old LateOn/runtime profiles (L)
+
+Today `loadLateOnRuntimeProfile()` parses and accepts all four profile
+generations (v1–v4), including old projection and query-projection identities.
+Support the current profile only; old explicit profiles fail with a clear
+`unsupported_profile`-equivalent error instead of invoking old behavior.
+LateOn profile files are derived runtime state (refreshable), so this is
+retirement, not durable-format migration.
+
+Stopping condition: current-profile runtime fixtures unchanged; each retired
+profile receives the intended unsupported error (rejection tests); no v1–v3
+runtime path remains.
+
+### 9.2 Canonicalize the rerank implementation (L)
+
+V4 currently imports implementation machinery out of the V2 module, and V3 is
+built on V2 helpers. Do NOT delete V2/V3 files first. Order:
+
+```text
+9.2A  extract neutral projection primitives out of V2/V3
+      (search-rerank-document.ts / search-rerank-projection-validation.ts /
+      search-rerank-source-selection.ts) — pure moves, zero behavior change
+      → V4 imports the primitives
+      → V2/V3 production builders and projection dispatch removed
+
+9.2B  remove selector V1
+```
+
+9.2B is gated on 9.2A: `LEGACY_BOUNDED_SOURCE_SELECTION_POLICY_VERSION` is
+selected by V2/V3 rerank documents, so the legacy newline algorithm (CRLF
+special-case) can only disappear after those documents are retired.
+
+Terminology: production names become `SearchRerankDocumentInput`,
+`SearchRerankDocumentResult`, `buildSearchRerankDocument()`; the immutable
+contract constant stays `SEARCH_RERANK_DOCUMENT_CONTRACT_ID =
+"search_rerank_document_v4"`. Internal renames only where names are unpublished.
+
+Stopping condition: current V4 projection bytes/order identical (policy-id and
+projection fixtures); V2/V3 paths gone; selector has one canonical algorithm
+with V2 fixtures unchanged.
+
+### 9.3 Durable compatibility floor — separately authorized (XL)
+
+Current policy authority accepts `satori_index_policy_v3/v4/v5` as readable
+documents; `persisted-index-authority.ts` parses legacy fingerprint shapes
+(`LEGACY_*_INDEX_FINGERPRINT_FIELDS`). Completion markers already model the
+target pattern (V3 canonical; V1/V2 minimally recognized → `requires_reindex`).
+
+Proposed policy (requires explicit product authorization — it forces a one-time
+reindex on upgrade):
+
+```text
+current durable generation  → supported
+recognized old generation   → requires_reindex (never "corrupt")
+unknown malformed           → corrupt
+```
+
+Target: writer V5 only, reader V5 only for policy documents; current completion
+marker V3; current full fingerprint only. This supersedes the v3/v4/v5 document
+fixtures pinned by Phase 8.9 — the batch sheet must explicitly replace those
+oracles with rejection tests.
+
+Do not proceed without authorization. Risk XL (persisted-format policy change).
+
+### 9.4 Delete resulting dead assets (S)
+
+Old runtime-profile fixtures, historical active branches, old builder tests,
+and compatibility utilities go. Keep a small set of rejection tests proving an
+old profile/index receives the intended unsupported/requires_reindex result.
+
+Stopping condition: no dead production path references retired versions; all
+retired versions have rejection coverage.
+
+### 9.5 Architecture guard (M)
+
+Version-specific schema code may live only in codec/profile-loader/compatibility
+boundary modules. A workflow/coordinator importing `SomethingV2` or branching on
+`schemaVersion` must fail an enforceable check (eslint rule or architectural
+test added with the first boundary that exists).
+
+Stopping condition: the guard exists and fails on a planted violation; current
+suite green.
+
+### Recommended aggressiveness for Satori
+
+```text
+runtime/provider compatibility → latest only
+rerank projection              → latest only
+query projection               → latest only
+bounded selector               → latest only
+process-local caches           → latest only
+durable disk state             → current generation supported;
+                                 recognized old → requires_reindex
+                                 (separately authorized)
+public npm API                 → semver until an authorized breaking release
+```
+
+The reranker cleanup (9.1/9.2) is first: clearest payoff, least durable-state
+risk.
 
 
 ## Test migration policy
