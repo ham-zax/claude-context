@@ -117,7 +117,17 @@ class SynchronizerCheckpointCleanupFailure extends Error {
     }
 }
 
+export interface PreparedSourceContract {
+    readonly canonicalRoot: string;
+    readonly supportedExtensions: readonly string[];
+    readonly effectiveIgnorePatterns: readonly string[];
+    readonly fullHashRun: boolean;
+    readonly partialScan: boolean;
+    readonly unscannedDirPrefixes: readonly string[];
+}
+
 export interface PreparedFileChangeSet {
+    readonly sourceContract?: PreparedSourceContract;
     readonly changes: FileChangeResult;
     readonly fileHashes: ReadonlyMap<string, string>;
     commit(
@@ -134,6 +144,11 @@ export interface PreparedFileChangeSet {
         checkpointAuthority: SourceFreshnessCheckpointAuthority,
     ): void;
     assertSourceObservationCurrent(): Promise<void>;
+    assertCompatible?(sourceContract: {
+        canonicalRoot: string;
+        effectiveIgnorePatterns: readonly string[];
+        supportedExtensions: readonly string[];
+    }): void;
 }
 
 export interface FileSynchronizerInitializeOptions {
@@ -1221,9 +1236,65 @@ export class FileSynchronizer {
         let stagedAuthority: SourceFreshnessCheckpointAuthority | null = null;
         let promoted = false;
 
+        const sourceContract: PreparedSourceContract = Object.freeze({
+            canonicalRoot: this.rootDir,
+            supportedExtensions: Object.freeze(Array.from(this.supportedExtensions).sort()),
+            effectiveIgnorePatterns: Object.freeze([...this.ignorePatterns]),
+            fullHashRun,
+            partialScan: effective.partialScan,
+            unscannedDirPrefixes: Object.freeze([...effective.unscannedDirPrefixes]),
+        });
+
+        const assertCompatible = (targetContract: {
+            canonicalRoot: string;
+            effectiveIgnorePatterns: readonly string[];
+            supportedExtensions: readonly string[];
+        }) => {
+            const canonicalTarget = FileSynchronizer.canonicalizeSnapshotIdentityPath(targetContract.canonicalRoot);
+            if (sourceContract.canonicalRoot !== canonicalTarget) {
+                throw new Error(
+                    `[Synchronizer] Prepared change set was created for canonical root '${sourceContract.canonicalRoot}', not '${canonicalTarget}'.`,
+                );
+            }
+            const normalizedTargetExtensions = normalizeSupportedExtensions(
+                targetContract.supportedExtensions.length > 0 ? targetContract.supportedExtensions : DEFAULT_SUPPORTED_EXTENSIONS,
+            );
+            const sourceExts = new Set(sourceContract.supportedExtensions);
+            const targetExts = new Set(normalizedTargetExtensions);
+            if (
+                sourceExts.size !== targetExts.size
+                || !Array.from(sourceExts).every((ext) => targetExts.has(ext))
+            ) {
+                throw new Error(
+                    `[Synchronizer] Prepared change set was created with supported extensions [${sourceContract.supportedExtensions.join(', ')}], which does not match the active policy [${normalizedTargetExtensions.join(', ')}].`,
+                );
+            }
+            if (
+                sourceContract.effectiveIgnorePatterns.length !== targetContract.effectiveIgnorePatterns.length
+                || !sourceContract.effectiveIgnorePatterns.every((pattern, i) => pattern === targetContract.effectiveIgnorePatterns[i])
+            ) {
+                throw new Error(
+                    `[Synchronizer] Prepared change set was created with ignore patterns [${sourceContract.effectiveIgnorePatterns.join(', ')}], which does not match the active policy [${targetContract.effectiveIgnorePatterns.join(', ')}].`,
+                );
+            }
+            if (!sourceContract.fullHashRun) {
+                throw new Error('[Synchronizer] Prepared change set is not a full-hash scan.');
+            }
+            if (sourceContract.partialScan) {
+                throw new Error('[Synchronizer] Prepared change set is a partial scan.');
+            }
+            if (sourceContract.unscannedDirPrefixes.length > 0) {
+                throw new Error(
+                    `[Synchronizer] Prepared change set has unscanned directory prefixes: ${sourceContract.unscannedDirPrefixes.join(', ')}.`,
+                );
+            }
+        };
+
         return {
+            sourceContract,
             changes,
             fileHashes: new Map(nextState.fileHashes),
+            assertCompatible,
             assertSourceObservationCurrent: async () => {
                 const { effective } = await this.scanCurrentState(
                     new Map(nextState.fileHashes),

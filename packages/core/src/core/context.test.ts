@@ -11889,10 +11889,11 @@ test('Context deferred full index accepts prepared source observation capability
             indexPolicyStateRoot: path.join(tempRoot, 'policies'),
         });
 
+        const policy = await context.resolveIndexPolicyForCodebase(codebasePath);
         const synchronizer = new FileSynchronizer(
             codebasePath,
-            [],
-            ['.ts'],
+            policy.effectiveIgnorePatterns,
+            policy.supportedExtensions,
             {
                 checkpointIdentity: 'test_collection',
                 checkpointAuthority: {
@@ -11929,3 +11930,156 @@ test('Context deferred full index accepts prepared source observation capability
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
+
+test('Context full index rejects PreparedFileChangeSet from a different canonical root before payload mutation', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-root-a-'));
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-root-b-'));
+    try {
+        fs.writeFileSync(path.join(rootA, 'source.ts'), 'export const a = 1;\n', 'utf8');
+        fs.writeFileSync(path.join(rootB, 'source.ts'), 'export const a = 1;\n', 'utf8');
+        const syncA = new FileSynchronizer(rootA, [], ['.ts']);
+        await syncA.initialize();
+        const preparedA = await syncA.prepareChanges({ forceFullHash: true });
+
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryLanceVectorDatabase(),
+            symbolRegistryStateRoot: path.join(rootB, 'state'),
+            indexPolicyStateRoot: path.join(rootB, 'policies'),
+        });
+
+        await assert.rejects(
+            async () => {
+                await context.indexCodebase(rootB, undefined, false, {
+                    preparedChanges: preparedA,
+                    deferFullIndexPublication: true,
+                });
+            },
+            (error: unknown) => {
+                assert.match(String(error), /Prepared change set was created for canonical root/);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(rootA, { recursive: true, force: true });
+        fs.rmSync(rootB, { recursive: true, force: true });
+    }
+});
+
+test('Context full index rejects PreparedFileChangeSet with mismatched source-selection policy before payload mutation', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-mismatch-'));
+    try {
+        fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const a = 1;\n', 'utf8');
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryLanceVectorDatabase(),
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        const policy = await context.resolveIndexPolicyForCodebase(tempRoot);
+
+        const syncMismatched = new FileSynchronizer(
+            tempRoot,
+            ['mismatched_ignore/**', ...policy.effectiveIgnorePatterns],
+            policy.supportedExtensions,
+        );
+        await syncMismatched.initialize();
+        const prepared = await syncMismatched.prepareChanges({ forceFullHash: true });
+
+        await assert.rejects(
+            async () => {
+                await context.indexCodebase(tempRoot, undefined, false, {
+                    preparedChanges: prepared,
+                    deferFullIndexPublication: true,
+                });
+            },
+            (error: unknown) => {
+                assert.match(String(error), /ignore patterns.*which does not match/is);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context full index rejects non-full-hash PreparedFileChangeSet before payload mutation', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-non-full-hash-'));
+    try {
+        fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const a = 1;\n', 'utf8');
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryLanceVectorDatabase(),
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+        const policy = await context.resolveIndexPolicyForCodebase(tempRoot);
+
+        const synchronizer = new FileSynchronizer(
+            tempRoot,
+            policy.effectiveIgnorePatterns,
+            policy.supportedExtensions,
+        );
+        await synchronizer.initialize();
+        const nonFullHashPrepared = await synchronizer.prepareChanges();
+
+        await assert.rejects(
+            async () => {
+                await context.indexCodebase(tempRoot, undefined, false, {
+                    preparedChanges: nonFullHashPrepared,
+                    deferFullIndexPublication: true,
+                });
+            },
+            (error: unknown) => {
+                assert.match(String(error), /full-hash scan/i);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context full index rejects partial-scan PreparedFileChangeSet before payload mutation', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-partial-scan-'));
+    try {
+        fs.writeFileSync(path.join(tempRoot, 'source.ts'), 'export const a = 1;\n', 'utf8');
+        const synchronizer = new FileSynchronizer(tempRoot, [], ['.ts']);
+        await synchronizer.initialize();
+        const prepared = await synchronizer.prepareChanges({ forceFullHash: true });
+
+        const partialPrepared: typeof prepared = {
+            ...prepared,
+            sourceContract: {
+                ...prepared.sourceContract!,
+                partialScan: true,
+            },
+            assertCompatible: () => {
+                throw new Error('[Synchronizer] Prepared change set is a partial scan.');
+            },
+        };
+
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase: new InMemoryLanceVectorDatabase(),
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+
+        await assert.rejects(
+            async () => {
+                await context.indexCodebase(tempRoot, undefined, false, {
+                    preparedChanges: partialPrepared,
+                    deferFullIndexPublication: true,
+                });
+            },
+            (error: unknown) => {
+                assert.match(String(error), /partial scan/i);
+                return true;
+            },
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+

@@ -181,6 +181,7 @@
     "PreparedGenerationRevalidation",
     "PreparedIndexCollectionBinding",
     "PreparedIndexCollectionReceipt",
+    "PreparedSourceContract",
     "PreparedSourceObservation",
     "Project",
     "ProvenGenerationReceipt",

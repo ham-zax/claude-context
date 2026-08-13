@@ -7,8 +7,9 @@
  * acquires authority state by reachability through Context.
  */
 import * as crypto from 'crypto';
-import { isStagedGenerationCollectionName } from '../core/collection-naming.js';
 import * as path from 'path';
+import { isStagedGenerationCollectionName } from '../core/collection-naming.js';
+import { normalizeSupportedExtensions } from '../config/index-policy';
 import type { ProvenGenerationReceipt } from './contracts';
 import type { IndexPolicyPublicationReceipt } from './contracts';
 import type { PreparedIndexCollectionReceipt } from './contracts';
@@ -543,6 +544,62 @@ export class IndexGenerationWorkflow {
         }
         const indexPolicy = options.indexPolicy
             ?? await this.resolveIndexPolicyForCodebase(codebasePath);
+
+        if (options.preparedChanges) {
+            if (options.preparedChanges.assertCompatible) {
+                options.preparedChanges.assertCompatible({
+                    canonicalRoot: indexPolicy.canonicalRoot,
+                    effectiveIgnorePatterns: indexPolicy.effectiveIgnorePatterns,
+                    supportedExtensions: indexPolicy.supportedExtensions,
+                });
+            } else if (options.preparedChanges.sourceContract) {
+                const contract = options.preparedChanges.sourceContract;
+                const canonicalTarget = FileSynchronizer.canonicalizeSnapshotIdentityPath(codebasePath);
+                if (contract.canonicalRoot !== canonicalTarget) {
+                    throw new Error(
+                        `[Context] Prepared change set was created for canonical root '${contract.canonicalRoot}', not '${canonicalTarget}'.`,
+                    );
+                }
+                const normalizedTargetExtensions = normalizeSupportedExtensions(indexPolicy.supportedExtensions);
+                const sourceExts = new Set(contract.supportedExtensions);
+                const targetExts = new Set(normalizedTargetExtensions);
+                if (
+                    sourceExts.size !== targetExts.size
+                    || !Array.from(sourceExts).every((ext) => targetExts.has(ext))
+                ) {
+                    throw new Error(
+                        '[Context] Prepared change set supported extensions do not match the active index policy.',
+                    );
+                }
+                if (
+                    contract.effectiveIgnorePatterns.length !== indexPolicy.effectiveIgnorePatterns.length
+                    || !contract.effectiveIgnorePatterns.every((p, i) => p === indexPolicy.effectiveIgnorePatterns[i])
+                ) {
+                    throw new Error(
+                        '[Context] Prepared change set ignore patterns do not match the active index policy.',
+                    );
+                }
+                if (!contract.fullHashRun) {
+                    throw new Error('[Context] Prepared change set must be a full-hash scan.');
+                }
+                if (contract.partialScan) {
+                    throw new Error('[Context] Prepared change set must not be a partial scan.');
+                }
+                if (contract.unscannedDirPrefixes.length > 0) {
+                    throw new Error('[Context] Prepared change set has unscanned directory prefixes.');
+                }
+            } else if (options.preparedChanges.changes) {
+                if (options.preparedChanges.changes.fullHashRun !== true) {
+                    throw new Error('[Context] Prepared change set must be a full-hash scan.');
+                }
+                if (options.preparedChanges.changes.partialScan === true) {
+                    throw new Error('[Context] Prepared change set must not be a partial scan.');
+                }
+                if ((options.preparedChanges.changes.unscannedDirPrefixes?.length ?? 0) > 0) {
+                    throw new Error('[Context] Prepared change set has unscanned directory prefixes.');
+                }
+            }
+        }
 
         // 2. Check and prepare vector collection
         progressCallback?.({ phase: 'Preparing collection...', current: 0, total: 100, percentage: 0 });

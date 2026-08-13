@@ -21,7 +21,7 @@ export function normalizeSupportedExtension(extension: string): string {
     return value.startsWith('.') ? value.toLowerCase() : `.${value.toLowerCase()}`;
 }
 
-export function normalizeSupportedExtensions(extensions: string[]): string[] {
+export function normalizeSupportedExtensions(extensions: readonly string[]): string[] {
     return [...new Set(
         extensions
             .map(normalizeSupportedExtension)

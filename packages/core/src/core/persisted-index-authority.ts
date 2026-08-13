@@ -709,13 +709,16 @@ export function inspectIndexPolicyDocument(
         return { status: 'corrupt', reason: 'index policy document is not an object' };
     }
     if (value.schemaVersion === 'satori_index_policy_v2') {
+        if (isNonemptyString(value.canonicalRoot) && value.canonicalRoot !== expectedRoot) {
+            return { status: 'corrupt', reason: 'canonical index policy payload is invalid' };
+        }
         return { status: 'requires_reindex', reason: 'index policy v2 requires reindex' };
     }
-    if (value.schemaVersion === 'satori_index_policy_v3') {
-        return { status: 'requires_reindex', reason: 'index policy v3 requires reindex' };
-    }
-    if (value.schemaVersion === 'satori_index_policy_v4') {
-        return { status: 'requires_reindex', reason: 'index policy v4 requires reindex' };
+    if (value.schemaVersion === 'satori_index_policy_v3' || value.schemaVersion === 'satori_index_policy_v4') {
+        if (isNonemptyString(value.canonicalRoot) && value.canonicalRoot !== expectedRoot) {
+            return { status: 'corrupt', reason: 'canonical index policy payload is invalid' };
+        }
+        return { status: 'requires_reindex', reason: `index policy ${value.schemaVersion === 'satori_index_policy_v3' ? 'v3' : 'v4'} requires reindex` };
     }
     if (value.schemaVersion !== 'satori_index_policy_v5') {
         const futureVersion = typeof value.schemaVersion === 'string'

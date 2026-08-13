@@ -519,10 +519,14 @@ test('authority inspectors classify arbitrary and nonexistent older schemas as c
         { schemaVersion: 'garbage' },
         { schemaVersion: 'satori_index_policy_beta' },
         { schemaVersion: 'satori_index_policy_v1' },
+        { schemaVersion: 'satori_index_policy_v3', canonicalRoot: '/different-root' },
+        { schemaVersion: 'satori_index_policy_v4', canonicalRoot: '/different-root' },
     ]) {
         assert.deepEqual(inspectIndexPolicyDocument(value, '/repo'), {
             status: 'corrupt',
-            reason: 'index policy schema is invalid',
+            reason: (value as { canonicalRoot?: string }).canonicalRoot
+                ? 'canonical index policy payload is invalid'
+                : 'index policy schema is invalid',
         });
     }
 });
