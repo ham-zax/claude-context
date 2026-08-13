@@ -327,31 +327,14 @@ export function indexFingerprintsEqual(left: unknown, right: IndexFingerprint): 
     return compareIndexCompatibility(left, right).status === 'compatible';
 }
 
+function isLegacyFingerprintShape(value: Record<string, unknown>): boolean {
+    return hasExactKeys(value, LEGACY_BASE_INDEX_FINGERPRINT_FIELDS)
+        || hasExactKeys(value, LEGACY_ANALYSIS_INDEX_FINGERPRINT_FIELDS)
+        || hasExactKeys(value, LEGACY_PROJECTION_INDEX_FINGERPRINT_FIELDS);
+}
+
 function parseFingerprint(value: unknown): CanonicalCompletionFingerprint | null {
-    if (!isRecord(value)) return null;
-    const parsed = parseIndexFingerprint(value);
-    if (
-        (!hasExactKeys(value, LEGACY_ANALYSIS_INDEX_FINGERPRINT_FIELDS)
-            && !hasExactKeys(value, LEGACY_PROJECTION_INDEX_FINGERPRINT_FIELDS)
-            && !hasExactKeys(value, INDEX_FINGERPRINT_FIELDS))
-        || !parsed
-        || !parsed.parserVersion
-        || !parsed.extractorVersion
-        || !parsed.relationshipVersion
-    ) return null;
-    return {
-        ...parsed,
-        embeddingArtifactDigest: parsed.embeddingArtifactDigest ?? null,
-        embeddingNormalizationPolicy: parsed.embeddingNormalizationPolicy
-            ?? 'legacy_unspecified',
-        parserVersion: parsed.parserVersion,
-        extractorVersion: parsed.extractorVersion,
-        relationshipVersion: parsed.relationshipVersion,
-        embeddingProjectionVersion: parsed.embeddingProjectionVersion
-            ?? 'legacy_unspecified',
-        lexicalProjectionVersion: parsed.lexicalProjectionVersion
-            ?? 'legacy_unspecified',
-    };
+    return parseCurrentRuntimeFingerprint(value);
 }
 
 function parseCanonicalNavigationBinding(value: unknown): CanonicalNavigationBinding | null {
@@ -444,6 +427,9 @@ export function inspectCompletionMarker(value: unknown): CompletionMarkerInspect
     if (value.kind === 'satori_index_completion_v3') {
         if (!hasValidMarkerEnvelope(value)) {
             return { status: 'corrupt', reason: 'canonical completion marker envelope is invalid' };
+        }
+        if (isRecord(value.fingerprint) && isLegacyFingerprintShape(value.fingerprint)) {
+            return { status: 'requires_reindex', reason: 'completion marker fingerprint requires reindex' };
         }
         const fingerprint = parseFingerprint(value.fingerprint);
         if (!fingerprint) {
@@ -578,17 +564,11 @@ function parsePolicyPayload(
         'collectionName',
         'navigation',
     ] as const;
-    const isV4 = value.schemaVersion === 'satori_index_policy_v4';
-    const isV5 = value.schemaVersion === 'satori_index_policy_v5';
-    const payloadKeys = isV5
-        ? [...basePayloadKeys, 'publication', 'controlSignature']
-        : isV4
-            ? [...basePayloadKeys, 'publication']
-            : basePayloadKeys;
+    const payloadKeys = [...basePayloadKeys, 'publication', 'controlSignature'];
     if (
         (!hasExactKeys(value, payloadKeys)
             && !hasExactKeys(value, [...payloadKeys, 'documentDigest']))
-        || (value.schemaVersion !== 'satori_index_policy_v3' && !isV4 && !isV5)
+        || value.schemaVersion !== 'satori_index_policy_v5'
         || value.canonicalRoot !== expectedRoot
         || !isStringArray(value.customExtensions)
         || !isStringArray(value.customIgnorePatterns)
@@ -598,23 +578,21 @@ function parsePolicyPayload(
         || (value.profile !== 'default' && value.profile !== 'minimal' && value.profile !== 'all-text')
         || typeof value.policyHash !== 'string'
         || !SHA256.test(value.policyHash)
-        || (isV5 && (typeof value.controlSignature !== 'string' || !value.controlSignature.startsWith('v1:')))
+        || typeof value.controlSignature !== 'string'
+        || !value.controlSignature.startsWith('v1:')
         || !isNonemptyString(value.collectionName)
     ) return null;
     const navigation = parsePolicyNavigation(value.navigation);
     if (!navigation) return null;
-    const publication = isV4 || isV5 ? parsePublicationBinding(value.publication) : null;
-    if ((isV4 || isV5) && !publication) return null;
+    const publication = parsePublicationBinding(value.publication);
+    if (!publication) return null;
     if (
-        publication
-        && (
-            publication.sourceCheckpoint.collectionName !== value.collectionName
-            || publication.sourceCheckpoint.indexPolicyHash !== value.policyHash
-            || navigation.status !== 'sealed'
-            || publication.graph.manifestHash.length === 0
-        )
+        publication.sourceCheckpoint.collectionName !== value.collectionName
+        || publication.sourceCheckpoint.indexPolicyHash !== value.policyHash
+        || navigation.status !== 'sealed'
+        || publication.graph.manifestHash.length === 0
     ) return null;
-    const base = {
+    return {
         canonicalRoot: expectedRoot,
         customExtensions: [...value.customExtensions],
         customIgnorePatterns: [...value.customIgnorePatterns],
@@ -625,18 +603,10 @@ function parsePolicyPayload(
         policyHash: value.policyHash,
         collectionName: value.collectionName,
         navigation,
+        schemaVersion: 'satori_index_policy_v5',
+        publication,
+        controlSignature: value.controlSignature as string,
     };
-    if (isV5 && publication) {
-        return {
-            ...base,
-            schemaVersion: 'satori_index_policy_v5',
-            publication,
-            controlSignature: value.controlSignature as string,
-        };
-    }
-    return publication
-        ? { ...base, schemaVersion: 'satori_index_policy_v4', publication }
-        : { ...base, schemaVersion: 'satori_index_policy_v3' };
 }
 
 function digestPolicyPayload(payload: CanonicalIndexPolicyPayload): string {
@@ -661,11 +631,13 @@ export function inspectIndexPolicyDocument(
     if (value.schemaVersion === 'satori_index_policy_v2') {
         return { status: 'requires_reindex', reason: 'index policy v2 requires reindex' };
     }
-    if (
-        value.schemaVersion !== 'satori_index_policy_v3'
-        && value.schemaVersion !== 'satori_index_policy_v4'
-        && value.schemaVersion !== 'satori_index_policy_v5'
-    ) {
+    if (value.schemaVersion === 'satori_index_policy_v3') {
+        return { status: 'requires_reindex', reason: 'index policy v3 requires reindex' };
+    }
+    if (value.schemaVersion === 'satori_index_policy_v4') {
+        return { status: 'requires_reindex', reason: 'index policy v4 requires reindex' };
+    }
+    if (value.schemaVersion !== 'satori_index_policy_v5') {
         const futureVersion = typeof value.schemaVersion === 'string'
             ? /^satori_index_policy_v([1-9]\d*)$/.exec(value.schemaVersion)
             : null;

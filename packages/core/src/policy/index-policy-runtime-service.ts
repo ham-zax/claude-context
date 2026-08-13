@@ -346,6 +346,9 @@ export class IndexPolicyRuntimeService {
                 throw new Error(inspected.reason);
             }
             const payload = inspected.value;
+            if (payload.schemaVersion !== 'satori_index_policy_v5') {
+                throw new Error(`Custom index policy schema '${payload.schemaVersion}' is not the current schema.`);
+            }
             const expectedPolicyHash = computeIndexPolicyHash(
                 payload.profile,
                 payload.supportedExtensions,
@@ -363,15 +366,11 @@ export class IndexPolicyRuntimeService {
                 supportedExtensions: payload.supportedExtensions,
                 effectiveIgnorePatterns: payload.effectiveIgnorePatterns,
                 policyHash: payload.policyHash,
-                ...(payload.schemaVersion === 'satori_index_policy_v5'
-                    ? { controlSignature: payload.controlSignature }
-                    : {}),
+                controlSignature: payload.controlSignature,
             }, {
                 collectionName: payload.collectionName,
                 navigation: { ...payload.navigation },
-                ...(payload.schemaVersion === 'satori_index_policy_v4' || payload.schemaVersion === 'satori_index_policy_v5'
-                    ? { publication: structuredClone(payload.publication) }
-                    : {}),
+                publication: structuredClone(payload.publication),
             });
             this.loadedCustomPolicyRoots.add(canonicalRoot);
             this.policyFileTokensByCodebase.set(canonicalRoot, currentToken);

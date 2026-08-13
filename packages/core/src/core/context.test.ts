@@ -10,7 +10,6 @@ import {
     Context,
     createGenerationProofCoordinator,
     IndexPolicyPublicationError,
-    type ResolvedIndexPolicy,
 } from './context';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
@@ -253,10 +252,24 @@ type ContextWithProcessChunkBatch = {
     ): Promise<void>;
 };
 
+const TEST_PUBLICATION = Object.freeze({
+    activationId: 'test-activation',
+    sourceCheckpoint: {
+        collectionName: 'test-collection',
+        markerRunId: 'test-marker',
+        indexPolicyHash: 'a'.repeat(64),
+        merkleRoot: 'b'.repeat(64),
+        documentDigest: 'c'.repeat(64),
+    },
+    graph: { kind: 'relationship_manifest_v2' as const, manifestHash: 'd'.repeat(64) },
+    receipt: { ownerId: 'test', generation: 1, operationId: 'test-op' },
+});
+
 function unboundPolicyBinding(collectionName: string) {
     return {
         collectionName,
         navigation: { status: 'not_bound' as const },
+        publication: structuredClone(TEST_PUBLICATION),
     };
 }
 
@@ -271,6 +284,7 @@ function sealedPolicyBinding(
             generationId: navigation.generationId,
             sealHash: navigation.navigationSealHash,
         },
+        publication: structuredClone(TEST_PUBLICATION),
     };
 }
 
@@ -4085,6 +4099,7 @@ test('Context stores default index-policy authority under SATORI_STATE_ROOT', as
         context.publishResolvedIndexPolicy(policy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const policyRoot = path.join(testSatoriStateRoot, 'index-policy');
@@ -4144,6 +4159,7 @@ test('restarted Context rejects a changed observed ignore policy before replacin
         publisher.publishResolvedIndexPolicy(accepted, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         fs.writeFileSync(ignorePath, '# pattern removed\n', 'utf8');
@@ -4165,63 +4181,41 @@ test('restarted Context rejects a changed observed ignore policy before replacin
     }
 });
 
-test('incremental reconciliation upgrades matching v4 policy authority with its observed control signature', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-v4-upgrade-'));
+test('loading a v4 policy document from disk requires reindex', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-policy-v4-reindex-'));
     const stateRoot = path.join(tempRoot, 'policy-state');
     const codebasePath = path.join(tempRoot, 'repo');
 
     try {
         fs.mkdirSync(codebasePath, { recursive: true });
-        fs.writeFileSync(path.join(codebasePath, '.satoriignore'), '/data/\n', 'utf8');
-        const publisher = new Context({
+        const context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase: new InMemoryVectorDatabase(),
             indexPolicyStateRoot: stateRoot,
         });
-        const observed = await publisher.resolveIndexPolicyForCodebase(codebasePath);
-        const legacyPolicy: ResolvedIndexPolicy = { ...observed };
-        delete legacyPolicy.controlSignature;
-        publisher.publishResolvedIndexPolicy(legacyPolicy, {
-            collectionName: 'generation-a',
-            navigation: {
-                status: 'sealed',
-                generationId: 'navigation-a',
-                sealHash: 'a'.repeat(64),
-            },
-            publication: {
-                activationId: 'activation-a',
-                sourceCheckpoint: {
-                    collectionName: 'generation-a',
-                    markerRunId: 'marker-a',
-                    indexPolicyHash: legacyPolicy.policyHash,
-                    merkleRoot: 'b'.repeat(64),
-                    documentDigest: 'c'.repeat(64),
-                },
-                graph: {
-                    kind: 'relationship_manifest_v2',
-                    manifestHash: 'd'.repeat(64),
-                },
-                receipt: {
-                    ownerId: 'owner-a',
-                    generation: 1,
-                    operationId: 'operation-a',
-                },
-            },
-        });
+        const observed = await context.resolveIndexPolicyForCodebase(codebasePath);
+        context.publishResolvedIndexPolicy(observed, unboundPolicyBinding('generation-a'));
 
+        // Downgrade the on-disk document to V4 by rewriting it
+        const policyFile = fs.readdirSync(stateRoot).find((file) => file.endsWith('.json'));
+        assert.ok(policyFile);
+        const doc = JSON.parse(fs.readFileSync(path.join(stateRoot, policyFile), 'utf8')) as Record<string, unknown>;
+        doc.schemaVersion = 'satori_index_policy_v4';
+        delete doc.controlSignature;
+        delete doc.documentDigest;
+        doc.documentDigest = crypto.createHash('sha256').update(JSON.stringify(doc)).digest('hex');
+        fs.writeFileSync(path.join(stateRoot, policyFile), JSON.stringify(doc), 'utf8');
+
+        // Loading the downgraded document should throw IndexFormatRequiresReindexError
         const restarted = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase: new InMemoryVectorDatabase(),
             indexPolicyStateRoot: stateRoot,
         });
-        const candidate = await restarted.observeIndexPolicyForIncrementalReconciliation(codebasePath);
-
-        assert.equal(restarted.activateObservedIndexPolicyForIncrementalReconciliation(candidate), true);
-        const policyFile = fs.readdirSync(stateRoot).find((file) => file.endsWith('.json'));
-        assert.ok(policyFile);
-        const upgraded = JSON.parse(fs.readFileSync(path.join(stateRoot, policyFile), 'utf8')) as Record<string, unknown>;
-        assert.equal(upgraded.schemaVersion, 'satori_index_policy_v5');
-        assert.equal(upgraded.controlSignature, candidate.controlSignature);
+        await assert.rejects(
+            () => restarted.observeIndexPolicyForIncrementalReconciliation(codebasePath),
+            (error: unknown) => error instanceof Error && error.message.includes('index policy v4 requires reindex'),
+        );
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -4249,6 +4243,7 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(initialPolicy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const ignoreOnly = await context.resolveIndexPolicyForCodebase(rootA, {
@@ -4258,6 +4253,7 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(ignoreOnly, {
             collectionName: 'generation-b',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const extensionOnly = await context.resolveIndexPolicyForCodebase(rootA, {
@@ -4267,6 +4263,7 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(extensionOnly, {
             collectionName: 'generation-c',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const resetIgnores = await context.resolveIndexPolicyForCodebase(rootA, {
@@ -4277,6 +4274,7 @@ test('Context custom index policy preserves omitted fields, supports explicit re
         context.publishResolvedIndexPolicy(resetIgnores, {
             collectionName: 'generation-d',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         assert.equal(context.getIndexedExtensionsForCodebase(rootA).includes('.foo'), true);
@@ -4317,6 +4315,7 @@ test('Context publishes and reloads the exact root ignore-file policy', async ()
         context.publishResolvedIndexPolicy(policy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
         assert.equal(context.getActiveIgnorePatterns(codebasePath).includes('generated/**'), true);
 
@@ -4358,6 +4357,7 @@ test('Context preserves ordered duplicate ignore rules around negation', async (
         context.publishResolvedIndexPolicy(policy, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         const restarted = new Context({
@@ -4397,6 +4397,7 @@ test('Context reloads policy published by another Context instance', async () =>
         first.publishResolvedIndexPolicy(initial, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
         assert.equal(second.getActiveIgnorePatterns(codebasePath).includes('private/**'), true);
 
@@ -4406,6 +4407,7 @@ test('Context reloads policy published by another Context instance', async () =>
         first.publishResolvedIndexPolicy(replacement, {
             collectionName: 'generation-b',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
 
         assert.equal(second.getActiveIgnorePatterns(codebasePath).includes('private/**'), false);
@@ -4474,6 +4476,7 @@ test('Context keeps durable and runtime policy consistent when the publication w
         context.publishResolvedIndexPolicy(previous, {
             collectionName: 'generation-a',
             navigation: { status: 'not_bound' },
+            publication: structuredClone(TEST_PUBLICATION),
         });
         const candidate = await context.resolveIndexPolicyForCodebase(codebasePath, {
             customIgnorePatterns: ['generated/**'],

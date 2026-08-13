@@ -1271,23 +1271,27 @@ export class IndexAuthorityCoordinator {
             collectionName: binding.collectionName,
             navigation: binding.navigation,
         };
-        const policyDocument = binding.publication && policy.controlSignature
-            ? buildCanonicalIndexPolicyDocument({
-                ...policyBase,
-                schemaVersion: 'satori_index_policy_v5',
-                publication: binding.publication,
-                controlSignature: policy.controlSignature,
-            })
-            : binding.publication
-                ? buildCanonicalIndexPolicyDocument({
-                    ...policyBase,
-                    schemaVersion: 'satori_index_policy_v4',
-                    publication: binding.publication,
-                })
-                : buildCanonicalIndexPolicyDocument({
-                    ...policyBase,
-                    schemaVersion: 'satori_index_policy_v3',
-                });
+        if (!binding.publication) {
+            this.activatePublishedIndexPolicy(policy, binding);
+            return {
+                status: 'committed',
+                operation: 'publish',
+                canonicalRoot,
+                documentDigest: '',
+                policyHash: policy.policyHash,
+                collectionName: binding.collectionName,
+                navigation: { ...binding.navigation },
+            };
+        }
+        if (!policy.controlSignature) {
+            throw new Error('Index policy control signature is required for the current policy schema.');
+        }
+        const policyDocument = buildCanonicalIndexPolicyDocument({
+            ...policyBase,
+            schemaVersion: 'satori_index_policy_v5',
+            publication: binding.publication,
+            controlSignature: policy.controlSignature,
+        });
         const documentDigest = policyDocument.documentDigest;
         const receipt: IndexPolicyPublicationReceipt = {
             status: 'committed',

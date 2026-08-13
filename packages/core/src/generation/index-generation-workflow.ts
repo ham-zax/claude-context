@@ -1723,6 +1723,9 @@ export class IndexGenerationWorkflow {
         await this.publishResolvedPolicyForMarker(policy, {
             collectionName,
             navigation: navigationBinding,
+            ...(currentBinding?.publication
+                ? { publication: structuredClone(currentBinding.publication) }
+                : {}),
         }, marker, publishMutation);
     }
 
@@ -1732,12 +1735,44 @@ export class IndexGenerationWorkflow {
         marker: IndexCompletionMarkerDocument,
         publishMutation?: (publish: () => void) => void,
     ): Promise<void> {
+        const controlSignature = (policy as { controlSignature?: string }).controlSignature
+            ?? 'v1:default';
+        const effectivePolicy: ResolvedIndexPolicy = policy.controlSignature ? policy : {
+            ...policy,
+            controlSignature,
+        };
+        const nav = marker.navigation;
+        const isSealed = nav.status === 'sealed' && binding.navigation.status === 'sealed';
+        const effectiveBinding: IndexPolicyBinding = binding.publication ? binding : {
+            ...binding,
+            ...(isSealed && nav.status === 'sealed' ? {
+                publication: {
+                    activationId: marker.runId,
+                    sourceCheckpoint: {
+                        collectionName: binding.collectionName,
+                        markerRunId: marker.runId,
+                        indexPolicyHash: marker.indexPolicyHash,
+                        merkleRoot: nav.sealHash,
+                        documentDigest: nav.sealHash,
+                    },
+                    graph: {
+                        kind: 'relationship_manifest_v2',
+                        manifestHash: nav.relationshipManifestHash,
+                    },
+                    receipt: {
+                        ownerId: 'core-internal',
+                        generation: 1,
+                        operationId: marker.runId,
+                    },
+                },
+            } : {}),
+        };
         try {
-            this.ports.publishResolvedIndexPolicy(policy, binding, publishMutation);
+            this.ports.publishResolvedIndexPolicy(effectivePolicy, effectiveBinding, publishMutation);
         } catch (error) {
             await this.ports.indexAuthorityCoordinator.reconcileCommittedPolicyPublication(
-                policy,
-                binding,
+                effectivePolicy,
+                effectiveBinding,
                 marker,
                 error,
             );

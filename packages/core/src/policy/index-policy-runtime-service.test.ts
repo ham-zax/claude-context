@@ -113,7 +113,7 @@ function buildPolicyDocument(
         ?? computeIndexPolicyHash(profile, supportedExtensions, effectiveIgnorePatterns);
     return buildCanonicalIndexPolicyDocument({
         canonicalRoot,
-        schemaVersion: 'satori_index_policy_v3',
+        schemaVersion: 'satori_index_policy_v5',
         customExtensions,
         customIgnorePatterns,
         fileBasedIgnorePatterns,
@@ -122,7 +122,24 @@ function buildPolicyDocument(
         effectiveIgnorePatterns,
         policyHash,
         collectionName: options.collectionName ?? 'fixture-collection',
-        navigation: { status: 'not_bound' },
+        navigation: {
+            status: 'sealed',
+            generationId: 'gen-1',
+            sealHash: 'a'.repeat(64),
+        },
+        publication: {
+            activationId: 'activation-1',
+            sourceCheckpoint: {
+                collectionName: options.collectionName ?? 'fixture-collection',
+                markerRunId: 'marker-1',
+                indexPolicyHash: policyHash,
+                merkleRoot: 'b'.repeat(64),
+                documentDigest: 'c'.repeat(64),
+            },
+            graph: { kind: 'relationship_manifest_v2', manifestHash: 'd'.repeat(64) },
+            receipt: { ownerId: 'test', generation: 1, operationId: 'op-1' },
+        },
+        controlSignature: 'v1:default',
     });
 }
 
@@ -192,8 +209,12 @@ test('loadCustomIndexPolicy activates runtime composition and caches by file tok
             computeIndexPolicyHash(policy.profile, policy.supportedExtensions, policy.effectiveIgnorePatterns),
         );
         assert.equal(binding.collectionName, 'fixture-collection');
-        assert.deepEqual(binding.navigation, { status: 'not_bound' });
-        assert.equal(binding.publication, undefined);
+        assert.deepEqual(binding.navigation, {
+            status: 'sealed',
+            generationId: 'gen-1',
+            sealHash: 'a'.repeat(64),
+        });
+        assert.notEqual(binding.publication, undefined);
 
         assert.deepEqual(ignoreRuleService.getRuntimeCustomPatterns(root), ['custom/**']);
         assert.deepEqual(ignoreRuleService.getActivePatterns(root), [

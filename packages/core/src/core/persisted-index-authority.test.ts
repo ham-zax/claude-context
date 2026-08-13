@@ -68,7 +68,7 @@ test('completion marker inspector admits only complete canonical v3 shapes', () 
     delete legacyProjectionFingerprint.fingerprint.embeddingNormalizationPolicy;
     delete legacyProjectionFingerprint.fingerprint.embeddingProjectionVersion;
     delete legacyProjectionFingerprint.fingerprint.lexicalProjectionVersion;
-    assert.equal(inspectCompletionMarker(legacyProjectionFingerprint as never).status, 'current');
+    assert.equal(inspectCompletionMarker(legacyProjectionFingerprint as never).status, 'requires_reindex');
 
     const partialProjectionFingerprint = structuredClone(canonicalMarker()) as unknown as {
         fingerprint: Record<string, unknown>;
@@ -336,32 +336,26 @@ function policyPayload(
     };
 }
 
-test('policy inspector uses one fixed canonical v3 digest payload', () => {
-    const document = buildCanonicalIndexPolicyDocument(policyPayload({
+test('policy inspector requires reindex for canonical v3 documents', () => {
+    const rawPayload = policyPayload({
         status: 'sealed',
         generationId: 'generation-1',
         sealHash: SHA_C,
-    }));
-    const inspected = inspectIndexPolicyDocument(document, '/repo');
-    assert.equal(inspected.status, 'current');
-
-    const tampered = { ...document, collectionName: 'collection-2' };
-    assert.deepEqual(inspectIndexPolicyDocument(tampered, '/repo'), {
-        status: 'corrupt',
-        reason: 'canonical index policy document digest is invalid',
     });
-
-    const mixed = { ...document, navigationGenerationId: 'generation-1' };
-    assert.deepEqual(inspectIndexPolicyDocument(mixed, '/repo'), {
-        status: 'corrupt',
-        reason: 'canonical index policy payload is invalid',
+    const document = {
+        ...rawPayload,
+        documentDigest: crypto.createHash('sha256').update(JSON.stringify(rawPayload), 'utf8').digest('hex'),
+    };
+    assert.deepEqual(inspectIndexPolicyDocument(document, '/repo'), {
+        status: 'requires_reindex',
+        reason: 'index policy v3 requires reindex',
     });
 });
 
-test('policy inspector binds one canonical v4 publication tuple', () => {
-    const document = buildCanonicalIndexPolicyDocument({
+test('policy inspector requires reindex for canonical v4 documents', () => {
+    const rawPayload = {
         ...policyPayload({ status: 'sealed', generationId: 'generation-1', sealHash: SHA_C }),
-        schemaVersion: 'satori_index_policy_v4',
+        schemaVersion: 'satori_index_policy_v4' as const,
         publication: {
             activationId: 'activation-1',
             sourceCheckpoint: {
@@ -371,19 +365,17 @@ test('policy inspector binds one canonical v4 publication tuple', () => {
                 merkleRoot: SHA_B,
                 documentDigest: SHA_C,
             },
-            graph: { kind: 'relationship_manifest_v2', manifestHash: SHA_B },
+            graph: { kind: 'relationship_manifest_v2' as const, manifestHash: SHA_B },
             receipt: { ownerId: 'sync', generation: 4, operationId: 'operation-1' },
         },
-    });
-    assert.equal(inspectIndexPolicyDocument(document, '/repo').status, 'current');
-
-    const tampered = structuredClone(document) as CanonicalIndexPolicyPayload & {
-        publication: { sourceCheckpoint: { merkleRoot: string } };
     };
-    tampered.publication.sourceCheckpoint.merkleRoot = SHA_C;
-    assert.deepEqual(inspectIndexPolicyDocument(tampered, '/repo'), {
-        status: 'corrupt',
-        reason: 'canonical index policy document digest is invalid',
+    const document = {
+        ...rawPayload,
+        documentDigest: crypto.createHash('sha256').update(JSON.stringify(rawPayload), 'utf8').digest('hex'),
+    };
+    assert.deepEqual(inspectIndexPolicyDocument(document, '/repo'), {
+        status: 'requires_reindex',
+        reason: 'index policy v4 requires reindex',
     });
 });
 

@@ -241,8 +241,15 @@ test('authority owner preserves marker ABA and publication decision boundaries',
 test('authority owner coordinates policy publication without constructing Context', () => {
     const fingerprint = currentFingerprint();
     const publishedPolicy: ResolvedIndexPolicy = {
-        ...policy(),
+        canonicalRoot,
+        profile: 'default',
+        customExtensions: [],
+        customIgnorePatterns: [],
+        fileBasedIgnorePatterns: [],
+        supportedExtensions: ['.ts'],
+        effectiveIgnorePatterns: [],
         policyHash: computeIndexPolicyHash('default', ['.ts'], []),
+        controlSignature: 'v1:default',
     };
     const events: string[] = [];
     let persistedDocument: { documentDigest: string } | undefined;
@@ -312,7 +319,26 @@ test('authority owner coordinates policy publication without constructing Contex
     assert.throws(
         () => authority.publishResolvedIndexPolicy(
             publishedPolicy,
-            { collectionName: 'chunks', navigation: { status: 'not_bound' } },
+            {
+                collectionName: 'chunks',
+                navigation: {
+                    status: 'sealed',
+                    generationId: 'gen-1',
+                    sealHash: 'a'.repeat(64),
+                },
+                publication: {
+                    activationId: 'act-1',
+                    sourceCheckpoint: {
+                        collectionName: 'chunks',
+                        markerRunId: 'marker-1',
+                        indexPolicyHash: publishedPolicy.policyHash,
+                        merkleRoot: 'b'.repeat(64),
+                        documentDigest: 'c'.repeat(64),
+                    },
+                    graph: { kind: 'relationship_manifest_v2', manifestHash: 'd'.repeat(64) },
+                    receipt: { ownerId: 'test', generation: 1, operationId: 'op-1' },
+                },
+            },
             (publish) => {
                 publish();
                 throw new Error('receipt acknowledgement failed');
