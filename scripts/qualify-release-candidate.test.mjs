@@ -5,7 +5,9 @@ import {
   qualifyReleaseCandidate,
 } from './qualify-release-candidate.mjs';
 
-test('qualification runs the complete gate before packed graph verification', async () => {
+const quietProgress = { interactive: false, write: () => {} };
+
+test('qualification runs the complete gate before packed graph verification with sync runner', async () => {
   const order = [];
   let statusCalls = 0;
   const report = { valid: true };
@@ -13,6 +15,7 @@ test('qualification runs the complete gate before packed graph verification', as
     cwd: '/repo',
     tempRoot: '/tmp/release',
     keepTempDirectory: true,
+    progressOptions: quietProgress,
     gitStatusImpl: () => {
       statusCalls += 1;
       return '';
@@ -35,10 +38,53 @@ test('qualification runs the complete gate before packed graph verification', as
   ]);
 });
 
+test('qualification runs with async runner', async () => {
+  const executed = [];
+  const report = { valid: true };
+  const result = await qualifyReleaseCandidate({
+    cwd: '/repo',
+    progressOptions: quietProgress,
+    gitStatusImpl: () => '',
+    runCommandImpl: async (entry) => {
+      await new Promise((resolve) => setImmediate(resolve));
+      executed.push(entry.label);
+    },
+    checkGraphImpl: async () => report,
+  });
+
+  assert.equal(result, report);
+  assert.equal(executed.length, RELEASE_QUALIFICATION_COMMANDS.length);
+});
+
+test('qualification stops subsequent phases when a command fails', async () => {
+  const executed = [];
+  await assert.rejects(
+    qualifyReleaseCandidate({
+      cwd: '/repo',
+      progressOptions: quietProgress,
+      gitStatusImpl: () => '',
+      runCommandImpl: (entry) => {
+        executed.push(entry.label);
+        if (entry.label === 'clean release build') {
+          throw new Error('Build failed');
+        }
+      },
+      checkGraphImpl: async () => ({ valid: true }),
+    }),
+    /Build failed/,
+  );
+
+  assert.deepEqual(executed, [
+    'repository lint and version checks',
+    'clean release build',
+  ]);
+});
+
 test('qualification refuses a dirty initial worktree before running commands', async () => {
   let commandCalls = 0;
   await assert.rejects(
     qualifyReleaseCandidate({
+      progressOptions: quietProgress,
       gitStatusImpl: () => ' M package.json',
       runCommandImpl: () => { commandCalls += 1; },
     }),
@@ -52,6 +98,7 @@ test('qualification refuses generated drift before graph verification', async ()
   let graphCalls = 0;
   await assert.rejects(
     qualifyReleaseCandidate({
+      progressOptions: quietProgress,
       gitStatusImpl: () => {
         statusCalls += 1;
         return statusCalls === 1 ? '' : ' M server.json';
@@ -69,6 +116,7 @@ test('qualification refuses packed-graph drift after verification', async () => 
   let graphCalls = 0;
   await assert.rejects(
     qualifyReleaseCandidate({
+      progressOptions: quietProgress,
       gitStatusImpl: () => {
         statusCalls += 1;
         return statusCalls < 3 ? '' : ' M packages/mcp/package.json';
