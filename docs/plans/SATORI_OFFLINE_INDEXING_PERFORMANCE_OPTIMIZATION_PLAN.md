@@ -58,7 +58,6 @@ Define a generic, backend-neutral write aggregation contract in `packages/core/s
 ```ts
 export interface VectorWriteAggregationPolicy {
     readonly preferredMaxRows: number;
-    readonly preferredMaxBytes?: number;
 }
 ```
 
@@ -69,6 +68,7 @@ export interface VectorDatabase {
     getWriteAggregationPolicy?(): VectorWriteAggregationPolicy;
 }
 ```
+Absence of `getWriteAggregationPolicy()` means no Core-side write aggregation is performed (unbuffered write dispatch).
 
 #### 2. Pinned Toolchain Requirement
 Native helper compilation must use the pinned Rust toolchain recorded in `inference-contract.canonical.json` (`rustc 1.97.1 (8bab26f4f 2026-07-14)`, `x86_64-unknown-linux-gnu`). Shipping binaries must not be generated from arbitrary local compiler versions.
@@ -82,7 +82,7 @@ Decouple `EmbeddingBatchPolicy` ($\le 32$ items for Potion) from vector persiste
 
 * `LanceDbVectorDatabase` reports `getWriteAggregationPolicy(): { preferredMaxRows: 256 }`.
 * `MilvusVectorDatabase` retains its unbuffered / 117-row + 4 MiB policy.
-* [`IndexingPipeline`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts) consumes the resolved policy and buffers embedded [`IndexedVectorDocument`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts)s before dispatching `writeDocuments()`. Adapters without write aggregation preference operate unbuffered (`preferredMaxRows = 1`).
+* [`IndexingPipeline`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts) consumes the resolved policy and buffers embedded [`IndexedVectorDocument`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts)s before dispatching `writeDocuments()`. Adapters without write aggregation preference operate unbuffered.
 
 #### 2. Implementation Specifications
 * **Files:**
@@ -92,10 +92,27 @@ Decouple `EmbeddingBatchPolicy` ($\le 32$ items for Potion) from vector persiste
     * Separate chunk embedding from buffer flushing:
       ```ts
       private async embedChunkBatch(batch: ChunkBatch): Promise<IndexedVectorDocument[]>;
-      private async flushVectorWriteBuffer(collectionName: string, buffer: IndexedVectorDocument[]): Promise<void>;
+      private async flushVectorWriteBuffer(collectionName: string, buffer: IndexedVectorDocument[], options: ProcessOptions): Promise<void>;
       ```
-    * Maintain write buffer as local operation state: `let pendingVectorWrites: IndexedVectorDocument[] = [];` inside `processFileList()`, avoiding instance field reentrancy hazards.
-    * Flush `pendingVectorWrites` when `pendingVectorWrites.length >= writeAggregationPolicy.preferredMaxRows` or upon EOF.
+    * Maintain write buffer as local operation state: `const pendingVectorWrites: IndexedVectorDocument[] = [];` inside `processFileList()`, avoiding instance field reentrancy hazards.
+    * Exact-size flush loop:
+      ```ts
+      if (writeAggregationPolicy) {
+          while (pendingVectorWrites.length >= writeAggregationPolicy.preferredMaxRows) {
+              const batch = pendingVectorWrites.splice(0, writeAggregationPolicy.preferredMaxRows);
+              await this.flushVectorWriteBuffer(collectionName, batch, options);
+          }
+      } else {
+          const batch = pendingVectorWrites.splice(0, pendingVectorWrites.length);
+          await this.flushVectorWriteBuffer(collectionName, batch, options);
+      }
+
+      // EOF flush:
+      if (pendingVectorWrites.length > 0) {
+          const batch = pendingVectorWrites.splice(0, pendingVectorWrites.length);
+          await this.flushVectorWriteBuffer(collectionName, batch, options);
+      }
+      ```
 * **Safety Fences & Failure Semantics:**
   * Re-assert `assertMutationCurrent()` and embedding identity immediately prior to each `flushVectorWriteBuffer()` call.
   * On parsing or embedding failure: drop only the unpersisted local `pendingVectorWrites` buffer and propagate the error. Discard of the candidate staged generation remains authoritative in `IndexGenerationWorkflow`.
@@ -144,8 +161,6 @@ Replace 32 sequential single-text JSON lines over stdin/stdout with a single bat
       items: Option<Vec<WorkerBatchItem>>,
       #[serde(skip_serializing_if = "Option::is_none")]
       error_code: Option<String>,
-      #[serde(skip_serializing_if = "Option::is_none")]
-      error_index: Option<usize>,
   }
   ```
 * **TypeScript Client:** [`packages/core/src/embedding/potion-embedding.ts`](file:///home/hamza/repo/satori/packages/core/src/embedding/potion-embedding.ts)
@@ -234,7 +249,7 @@ Record full telemetry metrics (Analysis, Embedding, VectorWrites, Navigation, Pu
 > [!IMPORTANT]
 > Every change must strictly satisfy the following invariants:
 
-1. **Semantic Content Equivalence:** Completed indexing runs must produce identical indexed file sets, content hashes, extracted symbol definitions, and relationship graphs across runs for unchanged inputs.
+1. **Semantic Content Equivalence:** For unchanged source and policy inputs, completed runs must preserve the same indexed source-file identities/hashes, chunk identities and searchable projections, extracted symbol definitions, and relationship graph. Runtime-generated metadata such as `indexedAt`, generation IDs, and timestamps is excluded from byte-level equivalence.
 2. **Canonical Contract Validity:** Authoritative completion markers must strictly conform to `CanonicalCompletionMarker` schema, contain valid fingerprints, and bind to sealed navigation generations (accounting for dynamic `runId`, `completedAt` timestamps, and updated artifact digests).
 3. **Atomic Staged Publication:** Incomplete or interrupted indexing runs must never leak orphan vector chunks, unsealed sidecars, or corrupt LanceDB tables into live search paths.
 4. **No Abstraction Leakage:** `VectorDatabase` interface remains backend-agnostic. Backend-specific write batching policies are declared by adapters and consumed through generic capabilities.
