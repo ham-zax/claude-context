@@ -77,7 +77,7 @@ import {
     type RelationshipAnalysisEvidence,
 } from '../relationships';
 
-import { ThreadedWasmSemanticProjectAnalyzer, type SemanticSourceFile } from '../semantic';
+import { ThreadedWasmSemanticProjectAnalyzer, type SemanticProjectAnalyzer, type SemanticSourceFile } from '../semantic';
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -335,6 +335,7 @@ export interface ContextConfig {
     /** Required when hybrid reads can overlap externally coordinated mutations. */
     mutationGenerationObserver?: MutationGenerationObserver;
     generationProofCoordinator?: GenerationProofCoordinator;
+    semanticAnalyzer?: SemanticProjectAnalyzer;
 }
 
 type IndexPolicyBinding = IndexPolicyRuntimeBinding;
@@ -579,6 +580,7 @@ export class Context {
     private readonly semanticSearchService: SemanticSearchService<ProvenVectorGenerationReceipt>;
     private readonly indexingPipeline: IndexingPipeline;
     private readonly ignoreRuleService: IgnoreRuleService;
+    private readonly semanticAnalyzer?: SemanticProjectAnalyzer;
     private vectorStoreProvider: VectorStoreProviderIdentity;
 
     constructor(config: ContextConfig = {}) {
@@ -817,7 +819,8 @@ export class Context {
             },
         });
 
-        const semanticAnalyzer = new ThreadedWasmSemanticProjectAnalyzer();
+        const semanticAnalyzer = config.semanticAnalyzer ?? new ThreadedWasmSemanticProjectAnalyzer();
+        this.semanticAnalyzer = semanticAnalyzer;
 
         this.indexGenerationWorkflow = new IndexGenerationWorkflow({
             acceptPreparedSourceGenerationReceipt: (canonicalRoot, receipt) => (
@@ -4056,5 +4059,12 @@ export class Context {
      */
     getLanguageAnalysisStrategy(language: string): ReturnType<LanguageAnalysisPort['getStrategyForLanguage']> {
         return this.languageAnalyzer.getStrategyForLanguage(language);
+    }
+
+    /**
+     * Dispose managed background runtime workers and resources.
+     */
+    public async dispose(): Promise<void> {
+        await this.semanticAnalyzer?.dispose?.();
     }
 }
