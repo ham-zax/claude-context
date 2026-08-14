@@ -186,7 +186,7 @@ satori/
 
 ### Phase B: Generalized CBM Language Platform & Go Acceptance Qualification
 
-#### Task B1: Real WASM Engine Compilation & Dynamic Memory Session Runtime (IMPLEMENTED — FINAL QUALIFICATION REVIEW PENDING)
+#### Task B1: Real WASM Engine Compilation & Dynamic Memory Session Runtime (QUALIFIED & APPROVED)
 - [x] Implement Emscripten C entrypoints in `third_party/cbm-semantic/satori_semantic.c` with multi-stream query exports:
   - Freeze definitions stream (`satori_semantic_definition_count`, `satori_semantic_definitions`).
   - Freeze & populate relationship stream with Go CALLS (`satori_semantic_relationship_count`, `satori_semantic_relationships`).
@@ -197,18 +197,27 @@ satori/
 - [x] Centralize ownership and cleanup of Tree-sitter trees, parsers, and temporary resolution structures across success and error paths; verify repeated lifecycle stability.
 - [x] Enforce C ABI language validation (reject unsupported languages at create time).
 - [x] Verify `wasm-smoke.test.ts`, `wasm-engine.test.ts`, `wasm-stress.test.ts`, `packed-core-smoke.test.ts`, `utf8-span-parity.test.ts`, and `go-call-characterization.test.ts` pass executing real WASM.
-- [ ] **STOP AND REPORT FOR USER REVIEW BEFORE TASK B2.**
+- [x] Verify logical recipe reproducibility digest and SHA256 integrity via `pnpm semantic:verify`.
+- [x] **USER REVIEW APPROVED FOR TASK B1.**
 
-#### Task B2: Declarative Language Registry & Generic CBM Contribution Engine
-- [ ] Create `packages/core/src/semantic/languages/semantic-languages.json` and TypeScript descriptor schema in `packages/core/src/semantic/descriptor.ts`.
-- [ ] Implement generic `CbmSemanticContributionEngine` in `packages/core/src/relationships/contributions/cbm.ts` supporting any CBM-backed language.
-- [ ] Implement exact definition byte-span target resolution (`targetProvenance.span -> SymbolRecord.span.startByte/endByte`).
-- [ ] Refactor `builder.ts` to dispatch entirely through generic contribution engines with zero language-specific branches.
+#### Task B2: Declarative Language Registry & Generic CBM Contribution Engine (IMPLEMENTED & HARDENED)
+- [x] Create authoritative `packages/core/assets/semantic-engine/semantic-languages.json` with draft-07 JSON schema `semantic-languages.schema.json` and fail-closed loader in `descriptor.ts`.
+- [x] Implement declarative strategy resolution in `DefaultLanguageResolutionStrategyRegistry` dynamically selecting `cbm_semantic` from language descriptors without hardcoded language branches.
+- [x] Implement generic `CbmSemanticContributionEngine` in `packages/core/src/relationships/contributions/cbm.ts` supporting any CBM-backed language.
+- [x] Implement exact byte-span target resolution (`targetProvenance.span -> SymbolRecord.span.startByte/endByte`) with decoy rejection test.
+- [x] Implement fail-closed caller binding in `CbmSemanticContributionEngine` with strict byte containment.
+- [x] Enforce Central Satori Admission via neutral `packages/core/src/relationships/admission.ts` (`admitAuthoritativeProofBackedCalls`) breaking circular dependencies.
+- [x] Unify single registry instance threading from analyzer → pipeline/workflow → strategy registry → CBM contribution.
+- [x] Enforce descriptor-manifest alignment and fail-closed manifest checking in `WasmSemanticProjectAnalyzer` and `verifySemanticEngine()`.
+- [x] Add TypeScript Layer Acceptance test proving second CBM language integration with zero builder/dispatch code modifications.
 
-#### Task B3: Workflow Generic Auxiliary Inputs & Capability Decoupling
-- [ ] Update `IndexGenerationWorkflow` to query `semanticLanguageRegistry.getAuxiliaryFilePatterns()` to gather auxiliary inputs without filename branching.
-- [ ] Decouple `cbm.supportsLanguage()` from public Satori publication eligibility (`callGraphBuild` capability). Remove `|| strategy === 'cbm_semantic'` from production eligibility checks.
-- [ ] Revert cross-language alterations to `test-path.ts`.
+#### Task B3: Incremental Semantic Rebuild & Descriptor-Driven Auxiliary Observation
+- [ ] **Incremental CBM Rebuild**: In `rebuildNavigationArtifactsForSyncDelta()` and `buildRelationshipDelta()`, when any source or semantic auxiliary for a CBM language changes in a sync delta:
+  - Reread current complete source snapshot for that language.
+  - Rerun semantic analysis to produce fresh `semanticEvidenceByLanguage`.
+  - Re-resolve and replace affected language claims and relationships during delta publication.
+- [ ] **Descriptor-Driven Auxiliary Observation**: Separate semantic auxiliary observation from vector search indexing (auxiliary input ≠ searchable/vector-indexed document) using root-bound/freshness-safe observation.
+- [ ] **Capability Decoupling & Qualification**: Maintain strict separation between descriptor existence, compiled native engine availability, and Satori publication capability (`callGraphBuild`).
 
 #### Task B4: Architectural & Upstream Documentation Deliverables
 - [ ] Author `docs/architecture/LANGUAGE_INTELLIGENCE.md` covering the full platform architecture, extension invariants, and future language migration steps (including strategic second-language selection: Rust / TypeScript).
