@@ -2452,6 +2452,158 @@ export { value as aliasValue };
     assert.deepEqual(target.parentQualifiedNamePath, []);
 });
 
+test('buildRelationshipDelta incrementally rebuilds CBM language relationships when fresh semantic evidence is provided', () => {
+    const symbols1: SymbolRecord[] = [
+        {
+            symbolKey: 'main.go#main',
+            symbolInstanceId: 'inst-main',
+            name: 'main',
+            label: 'main',
+            qualifiedName: 'main',
+            kind: 'function',
+            file: 'main.go',
+            language: 'go',
+            span: { startByte: 0, endByte: 100, startLine: 1, endLine: 10, startColumn: 0, endColumn: 1 },
+            parentQualifiedNamePath: [],
+            fileHash: 'fh-main-1',
+            extractorVersion: 'v1',
+        },
+        {
+            symbolKey: 'service.go#Run',
+            symbolInstanceId: 'inst-service-1',
+            name: 'Run',
+            label: 'Run',
+            qualifiedName: 'Run',
+            kind: 'function',
+            file: 'service.go',
+            language: 'go',
+            span: { startByte: 0, endByte: 80, startLine: 1, endLine: 8, startColumn: 0, endColumn: 1 },
+            parentQualifiedNamePath: [],
+            fileHash: 'fh-srv-1',
+            extractorVersion: 'v1',
+        },
+    ];
+
+    const prevRegistry = buildSymbolRegistry({
+        manifest: {
+            ...manifest(),
+            files: [
+                { path: 'main.go', language: 'go', hash: 'fh-main-1', symbolCount: 1, definitionStatus: 'definitions_present' },
+                { path: 'service.go', language: 'go', hash: 'fh-srv-1', symbolCount: 1, definitionStatus: 'definitions_present' },
+            ],
+        },
+        symbols: symbols1,
+    });
+
+    const initialEvidence: import('../semantic').SemanticProjectEvidence = {
+        language: 'go',
+        occurrencesByFile: new Map([
+            [
+                'main.go',
+                [
+                    {
+                        sourceFile: 'main.go',
+                        callSpan: { startByte: 20, endByte: 35, startLine: 3, endLine: 3, startColumn: 2, endColumn: 17 },
+                        targetProvenance: {
+                            file: 'service.go',
+                            span: { startByte: 0, endByte: 80, startLine: 1, endLine: 8, startColumn: 0, endColumn: 1 },
+                            name: 'Run',
+                            kind: 'function',
+                        },
+                        proof: { strategy: 'direct_call' },
+                        decision: 'resolved',
+                        confidence: 1.0,
+                    },
+                ],
+            ],
+        ]),
+    };
+
+    const analysisByFile = new Map<string, RelationshipAnalysisEvidence>();
+    analysisByFile.set('main.go', { moduleBindings: [], callSites: [] });
+    analysisByFile.set('service.go', { moduleBindings: [], callSites: [] });
+
+    const existingRecords = buildRelationshipsForRegistry({
+        registry: prevRegistry,
+        analysisByFile,
+        mode: { kind: 'qualification', enabledUnpromotedCallLanguages: new Set(['go']) },
+        semanticEvidenceByLanguage: new Map([['go', initialEvidence]]),
+    });
+
+    assert.equal(existingRecords.length, 1);
+    assert.equal(existingRecords[0].targetInstanceId, 'inst-service-1');
+
+    // Next state: service.go is updated with a new symbol instance ID and byte span (90..170)
+    const symbols2: SymbolRecord[] = [
+        symbols1[0],
+        {
+            symbolKey: 'service.go#Run',
+            symbolInstanceId: 'inst-service-2',
+            name: 'Run',
+            label: 'Run',
+            qualifiedName: 'Run',
+            kind: 'function',
+            file: 'service.go',
+            language: 'go',
+            span: { startByte: 90, endByte: 170, startLine: 10, endLine: 18, startColumn: 0, endColumn: 1 },
+            parentQualifiedNamePath: [],
+            fileHash: 'fh-srv-2',
+            extractorVersion: 'v1',
+        },
+    ];
+
+    const nextRegistry = buildSymbolRegistry({
+        manifest: {
+            ...manifest(),
+            files: [
+                { path: 'main.go', language: 'go', hash: 'fh-main-1', symbolCount: 1, definitionStatus: 'definitions_present' },
+                { path: 'service.go', language: 'go', hash: 'fh-srv-2', symbolCount: 1, definitionStatus: 'definitions_present' },
+            ],
+        },
+        symbols: symbols2,
+    });
+
+    const freshEvidence: import('../semantic').SemanticProjectEvidence = {
+        language: 'go',
+        occurrencesByFile: new Map([
+            [
+                'main.go',
+                [
+                    {
+                        sourceFile: 'main.go',
+                        callSpan: { startByte: 20, endByte: 35, startLine: 3, endLine: 3, startColumn: 2, endColumn: 17 },
+                        targetProvenance: {
+                            file: 'service.go',
+                            span: { startByte: 90, endByte: 170, startLine: 10, endLine: 18, startColumn: 0, endColumn: 1 },
+                            name: 'Run',
+                            kind: 'function',
+                        },
+                        proof: { strategy: 'direct_call' },
+                        decision: 'resolved',
+                        confidence: 1.0,
+                    },
+                ],
+            ],
+        ]),
+    };
+
+    const delta = buildRelationshipDelta({
+        previousRegistry: prevRegistry,
+        registry: nextRegistry,
+        existingRecords,
+        analysisByFile,
+        changedFiles: new Set(['service.go']),
+        mode: { kind: 'qualification', enabledUnpromotedCallLanguages: new Set(['go']) },
+        semanticEvidenceByLanguage: new Map([['go', freshEvidence]]),
+    });
+
+    // Verify that the relationship was rebuilt and retargeted to the new instance ID
+    assert.equal(delta.records.length, 1);
+    assert.equal(delta.records[0].targetInstanceId, 'inst-service-2');
+    assert.ok(delta.affectedFiles.includes('main.go'));
+    assert.ok(delta.affectedFiles.includes('service.go'));
+});
+
 
 
 

@@ -7,6 +7,7 @@
  * acquires authority state by reachability through Context.
  */
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as path from 'path';
 import { isStagedGenerationCollectionName } from '../core/collection-naming.js';
 import { normalizeSupportedExtensions } from '../config/index-policy';
@@ -2273,6 +2274,57 @@ export class IndexGenerationWorkflow {
         }
     }
 
+    private collectSemanticAuxiliariesForLanguage(
+        codebasePath: string,
+        language: string,
+        registry: SemanticLanguageRegistry,
+    ): SemanticAuxiliaryFile[] {
+        const desc = registry.getDescriptor(language);
+        if (!desc || desc.auxiliaryFiles.length === 0) return [];
+
+        const results: SemanticAuxiliaryFile[] = [];
+        const visited = new Set<string>();
+
+        const walk = (currentDir: string, relDir: string) => {
+            let entries: fs.Dirent[];
+            try {
+                entries = fs.readdirSync(currentDir, { withFileTypes: true });
+            } catch {
+                return;
+            }
+            for (const entry of entries) {
+                if (entry.isDirectory()) {
+                    if (['.git', 'node_modules', 'dist', 'build', '.satori'].includes(entry.name)) {
+                        continue;
+                    }
+                    walk(path.join(currentDir, entry.name), relDir ? `${relDir}/${entry.name}` : entry.name);
+                } else if (entry.isFile()) {
+                    const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+                    const matches = registry.matchAuxiliaries(relPath).filter((m) => m.language === language);
+                    for (const match of matches) {
+                        if (visited.has(relPath)) continue;
+                        visited.add(relPath);
+                        try {
+                            const content = fs.readFileSync(path.join(currentDir, entry.name), 'utf8');
+                            const sourceHash = crypto.createHash('sha256').update(content).digest('hex');
+                            results.push({
+                                path: relPath,
+                                role: match.role,
+                                source: content,
+                                sourceHash,
+                            });
+                        } catch {
+                            // ignore unreadable auxiliary
+                        }
+                    }
+                }
+            }
+        };
+
+        walk(codebasePath, '');
+        return results.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    }
+
     private async rebuildNavigationArtifactsForSyncDelta(
         codebasePath: string,
         existingRegistry: SymbolRegistry,
@@ -2368,6 +2420,49 @@ export class IndexGenerationWorkflow {
                 },
                 symbols: mergedSymbolRecords,
             });
+
+            const semanticRegistry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
+            const semanticEvidenceByLanguage = new Map<string, SemanticProjectEvidence>();
+
+            if (this.ports.semanticAnalyzer) {
+                const affectedSemanticLanguages = new Set<string>();
+                for (const filePath of replacedPaths) {
+                    const auxMatches = semanticRegistry.matchAuxiliaries(filePath);
+                    for (const match of auxMatches) {
+                        if (this.ports.semanticAnalyzer.supportsLanguage(match.language)) {
+                            affectedSemanticLanguages.add(match.language);
+                        }
+                    }
+                    const fileEntry = mergedManifestFiles.find((f) => f.path === filePath)
+                        ?? existingRegistry.manifest.files.find((f) => f.path === filePath);
+                    if (fileEntry && this.ports.semanticAnalyzer.supportsLanguage(fileEntry.language)) {
+                        affectedSemanticLanguages.add(fileEntry.language);
+                    }
+                }
+
+                for (const lang of affectedSemanticLanguages) {
+                    const sourceFiles: SemanticSourceFile[] = [];
+                    const langFiles = mergedManifestFiles.filter((f) => f.language === lang);
+                    for (const f of langFiles) {
+                        try {
+                            const fullPath = path.resolve(codebasePath, f.path);
+                            const source = fs.readFileSync(fullPath, 'utf8');
+                            const sourceHash = crypto.createHash('sha256').update(source).digest('hex');
+                            sourceFiles.push({ path: f.path, source, sourceHash });
+                        } catch {
+                            // ignore unreadable file
+                        }
+                    }
+                    const auxiliaryFiles = this.collectSemanticAuxiliariesForLanguage(codebasePath, lang, semanticRegistry);
+                    const evidence = await this.ports.semanticAnalyzer.analyze({
+                        language: lang,
+                        sourceFiles,
+                        auxiliaryFiles,
+                    });
+                    semanticEvidenceByLanguage.set(lang, evidence);
+                }
+            }
+
             const relationshipDelta = await measurePhase(
                 'publication_relationship_delta',
                 () => buildRelationshipDelta({
@@ -2377,6 +2472,8 @@ export class IndexGenerationWorkflow {
                     analysisByFile: retainedAnalysisByFile,
                     changedFiles: replacedPaths,
                     previousAnalysisByFile,
+                    semanticRegistry,
+                    semanticEvidenceByLanguage,
                 }),
             );
             assertMutationCurrent?.();

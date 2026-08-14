@@ -409,6 +409,19 @@ export function buildRelationshipDelta(input: BuildRelationshipDeltaInput): Buil
         if (resolutionChanged) affectedFiles.add(file.path);
     }
 
+    if (input.semanticEvidenceByLanguage) {
+        const entries = input.semanticEvidenceByLanguage instanceof Map
+            ? [...input.semanticEvidenceByLanguage.entries()]
+            : Object.entries(input.semanticEvidenceByLanguage);
+        for (const [lang] of entries) {
+            for (const file of input.registry.manifest.files) {
+                if (file.language === lang) {
+                    affectedFiles.add(file.path);
+                }
+            }
+        }
+    }
+
     const retained = input.existingRecords.filter((record) => !affectedFiles.has(record.file));
     const rebuilt = buildRelationshipsForRegistry({
         registry: input.registry,
@@ -416,6 +429,8 @@ export function buildRelationshipDelta(input: BuildRelationshipDeltaInput): Buil
         sourceFiles: affectedFiles,
         mode: input.mode,
         strategyRegistry: input.strategyRegistry,
+        semanticRegistry: input.semanticRegistry,
+        semanticEvidenceByLanguage: input.semanticEvidenceByLanguage,
     });
 
     const recordsByKey = new Map<string, RelationshipRecord>();
