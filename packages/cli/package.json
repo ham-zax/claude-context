@@ -10,17 +10,18 @@
     "satori-cli": "dist/index.js"
   },
   "scripts": {
-    "build": "pnpm clean && tsc --build --force && pnpm fix:bin-perms && node -e \"require('fs').copyFileSync('src/managed-launcher-script.mjs','dist/managed-launcher-script.mjs')\"",
+    "build": "pnpm clean && tsc --build && pnpm fix:bin-perms && node -e \"require('fs').copyFileSync('src/managed-launcher-script.mjs','dist/managed-launcher-script.mjs')\"",
     "dev": "tsx --watch src/index.ts",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist tsconfig.tsbuildinfo .tsbuildinfo",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build",
     "start": "tsx src/index.ts",
     "release:smoke": "tsx scripts/release-smoke.ts",
     "fix:bin-perms": "node -e \"const fs=require('fs');try{fs.chmodSync('dist/index.js',0o755);}catch(e){console.error(e);process.exit(1);}\"",
-    "prepublishOnly": "pnpm build && pnpm release:smoke",
-    "test": "pnpm --filter @zokizuan/satori-mcp build:runtime && node --import tsx --test --test-concurrency=1 src/**/*.test.ts"
+    "prepublishOnly": "pnpm build",
+    "test": "pnpm --filter @zokizuan/satori-mcp build:runtime && pnpm run test:raw",
+    "test:raw": "node --import tsx --test --test-reporter=../../scripts/satori-test-reporter.mjs --test-concurrency=8 src/**/*.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

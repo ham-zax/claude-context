@@ -38,15 +38,15 @@ test('public release commands delegate to their authoritative owners', () => {
 test('release qualification owns the complete production gate', () => {
   const commands = RELEASE_QUALIFICATION_COMMANDS.map((entry) => `${entry.command} ${entry.args.join(' ')}`);
   for (const expected of [
-    'pnpm run check',
-    'pnpm -C packages/core test',
-    'pnpm -C packages/mcp test',
-    'pnpm -C packages/cli test',
+    'pnpm run check:fast',
+    'pnpm run build',
+    'pnpm -C packages/core run test:raw',
+    'pnpm -C packages/mcp run test:raw',
+    'pnpm -C packages/cli run test:raw',
     'pnpm run test:scripts',
     'pnpm -C packages/mcp contract:check',
     'pnpm -C packages/mcp docs:check',
     'pnpm -C packages/mcp manifest:check',
-    'pnpm run build',
     'pnpm run release:smoke:mcp',
     'pnpm run release:smoke:cli',
   ]) {

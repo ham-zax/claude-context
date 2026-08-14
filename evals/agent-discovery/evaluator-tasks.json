@@ -30,8 +30,8 @@
         "requiredRelations": [
           {
             "relation": "caller",
-            "symbol": "handleSearchCodeAttempt",
-            "file": "packages/mcp/src/core/handlers.ts"
+            "symbol": "attempt",
+            "file": "packages/mcp/src/core/search-request-coordinator.ts"
           },
           {
             "relation": "callee",
@@ -74,8 +74,8 @@
         "requiredRelations": [
           {
             "relation": "caller",
-            "symbol": "handleSearchCodeAttempt",
-            "file": "packages/mcp/src/core/handlers.ts"
+            "symbol": "attempt",
+            "file": "packages/mcp/src/core/search-request-coordinator.ts"
           },
           {
             "relation": "helper",

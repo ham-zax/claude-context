@@ -213,8 +213,25 @@ type ContextWithGetCodeFiles = {
     getCodeFiles: (codebasePath: string) => Promise<string[]>;
 };
 
+import type { IndexPolicyRuntimeBinding } from '../policy/index-policy-runtime-service';
+
+type ContextWithIndexAuthority = {
+    indexAuthorityCoordinator: {
+        getPublishedPolicyBinding: (codebasePath: string) => (IndexPolicyRuntimeBinding & { policyHash: string }) | undefined;
+    };
+    canonicalizeCodebasePath: (codebasePath: string) => string;
+};
+
 type ContextWithExpectedChunks = {
-    getExpectedChunksAndSymbols: (...args: unknown[]) => Promise<unknown>;
+    getExpectedChunksAndSymbols: (
+        sourcePaths: string[],
+        codebasePath: string,
+    ) => Promise<{
+        expectedChunks: unknown[];
+        symbolRecords: SymbolRecord[];
+        symbolManifestFiles: SymbolRegistryManifestFile[];
+        analysisByFile?: unknown;
+    }>;
 };
 
 type ContextWithNavigationArtifactBuilder = {
@@ -302,7 +319,8 @@ async function publishCurrentAuthorityCheckpoint(
     codebasePath: string,
 ): Promise<void> {
     const marker = await context.getIndexCompletionMarker(codebasePath);
-    const publishedBinding = (context as any).indexAuthorityCoordinator.getPublishedPolicyBinding((context as any).canonicalizeCodebasePath(codebasePath));
+    const contextInternal = context as unknown as ContextWithIndexAuthority;
+    const publishedBinding = contextInternal.indexAuthorityCoordinator.getPublishedPolicyBinding(contextInternal.canonicalizeCodebasePath(codebasePath));
     const collectionName = publishedBinding?.collectionName ?? context.resolveCollectionName(codebasePath);
     assert.ok(collectionName);
     assert.ok(marker);
@@ -4461,7 +4479,8 @@ test('Context resolves a newly published profile policy on the first active-gene
         });
         const policy = await publisher.resolveIndexPolicyForCodebase(codebasePath);
         await publisher.indexCodebase(codebasePath, undefined, false, { indexPolicy: policy });
-        const publishedBinding = (publisher as any).indexAuthorityCoordinator.getPublishedPolicyBinding(codebasePath);
+        const publisherInternal = publisher as unknown as ContextWithIndexAuthority;
+        const publishedBinding = publisherInternal.indexAuthorityCoordinator.getPublishedPolicyBinding(codebasePath);
         assert.ok(publishedBinding);
         publisher.publishResolvedIndexPolicy(
             policy,
@@ -10632,9 +10651,9 @@ test('Context.repairIndex proves large exact payload equality with same-state co
             language: 'typescript',
             chunkIndex: index,
         }));
-        const originalGetExpected = (context as any).getExpectedChunksAndSymbols.bind(context);
-        const originalExpected = await originalGetExpected([sourcePath], codebasePath);
         const proofContext = context as unknown as ContextWithExpectedChunks;
+        const originalGetExpected = proofContext.getExpectedChunksAndSymbols.bind(context);
+        const originalExpected = await originalGetExpected([sourcePath], codebasePath);
         proofContext.getExpectedChunksAndSymbols = async () => ({
             expectedChunks,
             symbolRecords: originalExpected.symbolRecords,
@@ -11980,18 +11999,18 @@ test('Context full index rejects custom structural PreparedFileChangeSet as non-
             indexPolicyStateRoot: path.join(tempRoot, 'policies'),
         });
 
-        const customPrepared: any = {
+        const customPrepared = {
             changes: { added: ['source.ts'], modified: [], deleted: [] },
             fileHashes: new Map([['source.ts', '0'.repeat(64)]]),
-            commit: async () => ({}) as any,
-            stageCheckpoint: async () => ({}) as any,
+            commit: async () => ({} as unknown as never),
+            stageCheckpoint: async () => ({} as unknown as never),
             assertSourceObservationCurrent: async () => {},
         };
 
         await assert.rejects(
             async () => {
                 await context.indexCodebase(tempRoot, undefined, false, {
-                    preparedChanges: customPrepared,
+                    preparedChanges: customPrepared as unknown as never,
                     deferFullIndexPublication: true,
                 });
             },

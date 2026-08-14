@@ -4,6 +4,22 @@ import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+const PNPM_ONLY_NPM_ENV_KEYS = new Set([
+    "NPM_CONFIG__JSR_REGISTRY",
+    "NPM_CONFIG_ALLOW_SCRIPTS",
+    "NPM_CONFIG_AUTO_INSTALL_PEERS",
+    "NPM_CONFIG_CACHE_DIR",
+    "NPM_CONFIG_CHILD_CONCURRENCY",
+    "NPM_CONFIG_DEDUPE_PEER_DEPENDENTS",
+    "NPM_CONFIG_DIR",
+    "NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK",
+    "NPM_CONFIG_NPM_GLOBALCONFIG",
+    "NPM_CONFIG_PREFER_FROZEN_LOCKFILE",
+    "NPM_CONFIG_SHELL_EMULATOR",
+    "NPM_CONFIG_STORE_DIR",
+    "NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN",
+]);
+
 function npmOutput(error: unknown): string {
     if (!(error instanceof Error)) {
         return String(error);
@@ -176,7 +192,11 @@ export function installPackedRuntimeClosure(
         cwd: smokeExecDir,
         encoding: "utf8",
         env: {
-            ...process.env,
+            ...Object.fromEntries(
+                Object.entries(process.env).filter(
+                    ([key]) => !PNPM_ONLY_NPM_ENV_KEYS.has(key.toUpperCase()),
+                ),
+            ),
             npm_config_package_lock: "false",
         },
         stdio: ["ignore", "pipe", "pipe"],

@@ -2,10 +2,11 @@ import path from "node:path";
 
 /**
  * pnpm injects a set of npm_config_* variables into script processes that
- * npm 11.13 rejects as unknown; drop them when spawning npm children.
+ * modern npm rejects or fails on (such as EALLOWSCRIPTS); drop them when spawning npm children.
  */
 const PNPM_ONLY_NPM_ENV_KEYS = new Set([
     "NPM_CONFIG__JSR_REGISTRY",
+    "NPM_CONFIG_ALLOW_SCRIPTS",
     "NPM_CONFIG_AUTO_INSTALL_PEERS",
     "NPM_CONFIG_CACHE_DIR",
     "NPM_CONFIG_CHILD_CONCURRENCY",

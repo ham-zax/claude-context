@@ -9,13 +9,13 @@
     "satori": "dist/index.js"
   },
   "scripts": {
-    "build": "pnpm clean && tsc --build --force && pnpm fix:bin-perms && pnpm docs:generate && pnpm manifest:generate",
-    "build:runtime": "pnpm clean && tsc --build --force && pnpm fix:bin-perms",
+    "build": "pnpm clean && tsc --build && pnpm fix:bin-perms && pnpm docs:generate && pnpm manifest:generate",
+    "build:runtime": "pnpm clean && tsc --build && pnpm fix:bin-perms",
     "dev": "tsx --watch src/index.ts",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist tsconfig.tsbuildinfo .tsbuildinfo",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build",
     "start": "tsx src/index.ts",
     "start:with-env": "OPENAI_API_KEY=${OPENAI_API_KEY:-your-api-key-here} MILVUS_ADDRESS=${MILVUS_ADDRESS:-localhost:19530} tsx src/index.ts",
     "docs:generate": "tsx scripts/generate-docs.ts",
@@ -27,8 +27,9 @@
     "release:smoke": "tsx scripts/release-smoke.ts",
     "test:release-smoke": "node --import tsx --test scripts/release-smoke.test.ts",
     "fix:bin-perms": "node -e \"const fs=require('fs');try{fs.chmodSync('dist/index.js',0o755);}catch(e){console.error(e);process.exit(1);}\"",
-    "prepublishOnly": "pnpm build && pnpm docs:check && pnpm manifest:check && pnpm release:smoke",
-    "test": "pnpm --filter @zokizuan/satori-core build && node --import tsx --import ./src/test-state-root.ts --test --test-concurrency=1 src/core/**/*.test.ts src/server/**/*.test.ts src/tools/**/*.test.ts src/cli/**/*.test.ts"
+    "prepublishOnly": "pnpm build && pnpm docs:check && pnpm manifest:check",
+    "test": "pnpm --filter @zokizuan/satori-core build && pnpm run test:raw",
+    "test:raw": "node --import tsx --import ./src/test-state-root.ts --test --test-reporter=../../scripts/satori-test-reporter.mjs --test-concurrency=8 src/core/**/*.test.ts src/server/**/*.test.ts src/tools/**/*.test.ts src/cli/**/*.test.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "3.0.2",
