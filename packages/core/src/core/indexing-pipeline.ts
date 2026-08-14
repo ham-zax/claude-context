@@ -446,6 +446,8 @@ export class IndexingPipeline {
             + `${targetEstimatedTokens ? `, target_estimated_tokens=${targetEstimatedTokens}` : ''}`,
         );
 
+        const writeAggregationPolicy = this.getVectorDatabase().getWriteAggregationPolicy?.();
+        let pendingVectorWrites: IndexedVectorDocument[] = [];
         let chunkBuffer: PendingIndexedChunk[] = [];
         let chunkBufferEstimatedTokens = 0;
         let processedFiles = 0;
@@ -470,18 +472,38 @@ export class IndexingPipeline {
             if (chunkBuffer.length === 0) return;
             const searchType = isHybrid ? 'hybrid' : 'regular';
             try {
-                await this.processChunkBuffer(
+                const documents = await this.processChunkBuffer(
                     chunkBuffer,
                     input.collectionName,
-                    input.assertMutationCurrent,
                     performance,
                 );
+                pendingVectorWrites.push(...documents);
+                if (writeAggregationPolicy) {
+                    while (pendingVectorWrites.length >= writeAggregationPolicy.preferredMaxRows) {
+                        const batch = pendingVectorWrites.splice(0, writeAggregationPolicy.preferredMaxRows);
+                        await this.flushVectorWriteBuffer(
+                            input.collectionName,
+                            batch,
+                            input.assertMutationCurrent,
+                            performance,
+                        );
+                    }
+                } else {
+                    const batch = pendingVectorWrites.splice(0, pendingVectorWrites.length);
+                    await this.flushVectorWriteBuffer(
+                        input.collectionName,
+                        batch,
+                        input.assertMutationCurrent,
+                        performance,
+                    );
+                }
             } catch (error) {
                 console.error(
                     `[Context] ❌ Failed to process ${failureContext} for ${searchType}:`,
                     error,
                 );
                 if (error instanceof Error) console.error('[Context] Stack trace:', error.stack);
+                pendingVectorWrites = [];
                 throw new Error(
                     `Failed to persist ${failureContext} for ${searchType}: ${describeError(error)}`,
                 );
@@ -597,6 +619,15 @@ export class IndexingPipeline {
             );
             await flushChunkBuffer('final chunk batch');
         }
+        if (pendingVectorWrites.length > 0) {
+            const batch = pendingVectorWrites.splice(0, pendingVectorWrites.length);
+            await this.flushVectorWriteBuffer(
+                input.collectionName,
+                batch,
+                input.assertMutationCurrent,
+                performance,
+            );
+        }
         if (!limitReached && indexedFileHashes.size !== processedFiles) {
             throw new Error(
                 `Completed full index source coverage is inconsistent: ${processedFiles} processed files but ${indexedFileHashes.size} source identities.`,
@@ -665,13 +696,12 @@ export class IndexingPipeline {
         };
     }
 
-    async processChunkBatch(
+    async embedChunkBatch(
         chunkEntries: ProjectedChunkEntry[],
         codebasePath: string,
         collectionName: string,
-        assertMutationCurrent?: () => void,
         performance?: IndexingPipelineMetrics,
-    ): Promise<void> {
+    ): Promise<IndexedVectorDocument[]> {
         const indexedAt = new Date().toISOString();
         const chunks = chunkEntries.map(({ chunk }) => chunk);
         const projections = chunkEntries.map((entry) => entry.projections);
@@ -771,7 +801,7 @@ export class IndexingPipeline {
                 `Duplicate chunk identities generated for collection '${collectionName}'.`,
             );
         }
-        const documents: IndexedVectorDocument[] = chunks.map((chunk, index) => {
+        return chunks.map((chunk, index) => {
             const relativePath = chunkEntries[index].relativePath;
             const fileExtension = path.extname(relativePath);
             const {
@@ -803,7 +833,17 @@ export class IndexingPipeline {
                 projections: projections[index],
             };
         });
+    }
+
+    async flushVectorWriteBuffer(
+        collectionName: string,
+        documents: IndexedVectorDocument[],
+        assertMutationCurrent?: () => void,
+        performance?: IndexingPipelineMetrics,
+    ): Promise<void> {
+        if (documents.length === 0) return;
         assertMutationCurrent?.();
+        this.assertEmbeddingIdentityCurrent();
         if (performance) performance.logicalVectorWriteRequests += 1;
         const writeStartedAt = Date.now();
         try {
@@ -815,13 +855,33 @@ export class IndexingPipeline {
         }
     }
 
-    private async processChunkBuffer(
-        chunkBuffer: PendingIndexedChunk[],
+    async processChunkBatch(
+        chunkEntries: ProjectedChunkEntry[],
+        codebasePath: string,
         collectionName: string,
         assertMutationCurrent?: () => void,
         performance?: IndexingPipelineMetrics,
     ): Promise<void> {
-        if (chunkBuffer.length === 0) return;
+        const documents = await this.embedChunkBatch(
+            chunkEntries,
+            codebasePath,
+            collectionName,
+            performance,
+        );
+        await this.flushVectorWriteBuffer(
+            collectionName,
+            documents,
+            assertMutationCurrent,
+            performance,
+        );
+    }
+
+    private async processChunkBuffer(
+        chunkBuffer: PendingIndexedChunk[],
+        collectionName: string,
+        performance?: IndexingPipelineMetrics,
+    ): Promise<IndexedVectorDocument[]> {
+        if (chunkBuffer.length === 0) return [];
         const chunks = chunkBuffer.map((item) => item.chunk);
         const codebasePath = chunkBuffer[0].codebasePath;
         const estimatedTokens = chunkBuffer.reduce(
@@ -834,11 +894,10 @@ export class IndexingPipeline {
         console.log(
             `[Context] 🔄 Processing batch of ${chunks.length} chunks (~${estimatedTokens} tokens) for ${searchType}`,
         );
-        await this.processChunkBatch(
+        return this.embedChunkBatch(
             chunkBuffer,
             codebasePath,
             collectionName,
-            assertMutationCurrent,
             performance,
         );
     }

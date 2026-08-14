@@ -198,6 +198,10 @@ export type VectorWriteAttemptSample = {
     flushReason: VectorWriteFlushReason;
 };
 
+export interface VectorWriteAggregationPolicy {
+    readonly preferredMaxRows: number;
+}
+
 export type VectorWriteMetricsSnapshot = {
     providerRequestCount: number;
     retryCount: number;
@@ -212,6 +216,9 @@ export type VectorWriteMetricsSnapshot = {
 export interface VectorDatabase {
     /** Release adapter-owned resources when the runtime shuts down. */
     close?(): Promise<void> | void;
+
+    /** Optional write aggregation preference declared by the backend adapter. */
+    getWriteAggregationPolicy?(): VectorWriteAggregationPolicy;
 
     /**
      * Create collection
