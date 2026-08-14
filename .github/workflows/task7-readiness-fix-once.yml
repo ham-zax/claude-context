@@ -1,0 +1,196 @@
+name: Task7 Readiness Fix Once
+
+on:
+  push:
+    branches:
+      - integrate/language-spine-cbm-go
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.event.head_commit.message == 'chore(task7): apply readiness wrapper patch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch head
+        uses: actions/checkout@v4
+        with:
+          ref: integrate/language-spine-cbm-go
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply exact stale-sync readiness fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          target = Path('packages/mcp/src/core/handlers.ts')
+          text = target.read_text(encoding='utf-8')
+
+          old_wrapper = '''    private async prepareTrackedRootReadWithObservation(
+              absolutePath: string,
+              onPhase: (phase: ReadinessPhase, durationMs: number) => void,
+              accessMode: 'semantic' | 'navigation' = 'semantic',
+          ): Promise<TrackedRootReadinessState> {
+              const state = await this.trackedRootReadiness.prepareTrackedRootForRead(
+                  absolutePath,
+                  accessMode,
+                  onPhase,
+                  { observePreparedRead: (root) => this.getPreparedAuthorityObservation(root) },
+              );
+              if (
+                  state.state === 'ready'
+                  && this.mutationLeaseCoordinator?.getActiveLease(state.root.path)
+              ) {
+                  this.evictPreparedRead(state.root.path);
+                  const operation = this.getIndexingOperationForReadiness(state.root.path);
+                  return {
+                      state: 'indexing',
+                      codebasePath: state.root.path,
+                      ...(operation ? { operation } : {}),
+                      searchableGenerationAvailable: true,
+                  };
+              }
+              return state;
+          }
+          '''
+
+          new_wrapper = '''    private async prepareTrackedRootReadWithObservation(
+              absolutePath: string,
+              onPhase: (phase: ReadinessPhase, durationMs: number) => void,
+              accessMode: 'semantic' | 'navigation' = 'semantic',
+          ): Promise<TrackedRootReadinessState> {
+              const state = await this.trackedRootReadiness.prepareTrackedRootForRead(
+                  absolutePath,
+                  accessMode,
+                  onPhase,
+                  { observePreparedRead: (root) => this.getPreparedAuthorityObservation(root) },
+              );
+              if (state.state !== 'ready') {
+                  return state;
+              }
+
+              const activeLease = this.mutationLeaseCoordinator?.getActiveLease(state.root.path);
+              if (!activeLease) {
+                  return state;
+              }
+
+              this.evictPreparedRead(state.root.path);
+              const durableOperation = this.readLatestOperationReceipt(state.root.path);
+              const operation = this.getIndexingOperationForReadiness(state.root.path);
+              const matchingActiveSync = Boolean(
+                  state.vectorReceipt
+                  && activeLease.action === 'sync'
+                  && operation?.action === 'sync'
+                  && operation.generation === activeLease.generation
+                  && durableOperation?.id === activeLease.operationId
+              );
+
+              if (process.env.SATORI_TASK7_DEBUG === '1') {
+                  console.error(`[TASK7-DEBUG][readiness-wrapper] ${JSON.stringify({
+                      root: state.root.path,
+                      accessMode,
+                      vectorReceipt: state.vectorReceipt
+                          ? {
+                              collectionName: state.vectorReceipt.collectionName,
+                              markerRunId: state.vectorReceipt.marker?.runId ?? null,
+                          }
+                          : null,
+                      activeLease: {
+                          action: activeLease.action,
+                          generation: activeLease.generation,
+                          operationId: activeLease.operationId,
+                      },
+                      durableOperation: durableOperation
+                          ? {
+                              id: durableOperation.id ?? null,
+                              action: durableOperation.action,
+                              generation: durableOperation.generation,
+                              phase: durableOperation.phase,
+                          }
+                          : null,
+                      matchingActiveSync,
+                      decision: matchingActiveSync
+                          ? 'preserve_searchable_read'
+                          : 'strip_searchable_read',
+                  })}`);
+              }
+
+              return {
+                  state: 'indexing',
+                  codebasePath: state.root.path,
+                  ...(operation ? { operation } : {}),
+                  searchableGenerationAvailable: true,
+                  ...(matchingActiveSync ? { searchableRead: state } : {}),
+              };
+          }
+          '''
+
+          old_receipt = '''    private readLatestOperationReceipt(codebasePath: string):
+              | { action: string; phase: string; generation: number }
+              | undefined {
+              const reader = this.snapshotManager as unknown as {
+                  getLatestOperation?: (path: string) => { action: string; phase: string; generation: number } | undefined;
+              };
+              try {
+                  return reader.getLatestOperation?.(codebasePath);
+              } catch {
+                  return undefined;
+              }
+          }
+          '''
+
+          new_receipt = '''    private readLatestOperationReceipt(codebasePath: string):
+              | { id?: string; action: string; phase: string; generation: number }
+              | undefined {
+              const reader = this.snapshotManager as unknown as {
+                  getLatestOperation?: (path: string) => {
+                      id?: string;
+                      action: string;
+                      phase: string;
+                      generation: number;
+                  } | undefined;
+              };
+              try {
+                  return reader.getLatestOperation?.(codebasePath);
+              } catch {
+                  return undefined;
+              }
+          }
+          '''
+
+          if text.count(old_wrapper) != 1:
+              raise SystemExit(f'Expected exactly one readiness wrapper block, found {text.count(old_wrapper)}')
+          if text.count(old_receipt) != 1:
+              raise SystemExit(f'Expected exactly one operation receipt block, found {text.count(old_receipt)}')
+
+          text = text.replace(old_wrapper, new_wrapper)
+          text = text.replace(old_receipt, new_receipt)
+          target.write_text(text, encoding='utf-8')
+
+      - name: Build Core
+        run: pnpm --filter @zokizuan/satori-core build
+
+      - name: Verify stale-sync wrapper regression
+        run: pnpm --filter @zokizuan/satori-mcp test:raw src/core/handlers.stale-sync-readiness.test.ts
+
+      - name: Commit production fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/mcp/src/core/handlers.ts
+          git diff --cached --check
+          git commit -m 'fix(mcp): preserve proven reads during active sync'
+          git push origin HEAD:integrate/language-spine-cbm-go
