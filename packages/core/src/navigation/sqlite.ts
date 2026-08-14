@@ -484,11 +484,6 @@ function createSecondaryIndexes(database: DatabaseSync): void {
     `);
 }
 
-function createSchema(database: DatabaseSync): void {
-    createTables(database);
-    createSecondaryIndexes(database);
-}
-
 function readExistingRegistryState(input: NavigationStoreInput, rootPath: string): NavigationRegistryState {
     const sqlitePath = resolveNavigationSqlitePath(input.stateRoot, input.normalizedRootPath);
     if (!fs.existsSync(sqlitePath)) {

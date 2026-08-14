@@ -447,6 +447,16 @@ export class IndexingPipeline {
         );
 
         const writeAggregationPolicy = this.getVectorDatabase().getWriteAggregationPolicy?.();
+        if (writeAggregationPolicy) {
+            if (
+                !Number.isSafeInteger(writeAggregationPolicy.preferredMaxRows)
+                || writeAggregationPolicy.preferredMaxRows <= 0
+            ) {
+                throw new Error(
+                    `Invalid VectorWriteAggregationPolicy preferredMaxRows: ${writeAggregationPolicy.preferredMaxRows}. Must be a positive safe integer.`,
+                );
+            }
+        }
         let pendingVectorWrites: IndexedVectorDocument[] = [];
         let chunkBuffer: PendingIndexedChunk[] = [];
         let chunkBufferEstimatedTokens = 0;

@@ -477,3 +477,61 @@ test('validateNavigationStoreParity reports a missing SQLite symbol row as a det
         assert.ok(parity.mismatches.includes('registry_status:ok:incompatible'));
     });
 });
+
+test('importNavigationToSqlite creates all five secondary indexes in the final SQLite database', async () => {
+    await withTempDir(async (stateRoot) => {
+        const fileOwner = createSynthesizedFileSymbol({
+            relativePath: 'src/auth.ts',
+            language: 'typescript',
+            content: 'export function login() { return true; }\n',
+            fileHash: 'hash-auth',
+            extractorVersion: 'extractor-v1',
+        });
+        const login = createFunctionSymbol({
+            file: 'src/auth.ts',
+            name: 'login',
+            startLine: 1,
+            endLine: 1,
+            fileHash: 'hash-auth',
+        });
+        const registry = buildSymbolRegistry({
+            manifest: manifest([
+                { path: 'src/auth.ts', hash: 'hash-auth', language: 'typescript', symbolCount: 2 },
+            ]),
+            symbols: [fileOwner, login],
+        });
+        const registryResult = await writeSymbolRegistrySidecar({ stateRoot, registry });
+        await writeRelationshipSidecar({
+            stateRoot,
+            normalizedRootPath: '/repo',
+            symbolRegistryManifestHash: registryResult.manifestHash,
+            relationshipVersion: 'relationship-v1',
+            builtAt: '2026-06-17T00:00:00.000Z',
+            files: registry.manifest.files,
+            records: [],
+        });
+        await importNavigationToSqlite({
+            stateRoot,
+            normalizedRootPath: '/repo',
+        });
+
+        const sqlitePath = resolveNavigationSqlitePath(stateRoot, '/repo');
+        const database = new DatabaseSync(sqlitePath);
+        try {
+            const indexRows = database.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name ASC",
+            ).all() as Array<{ name: string }>;
+            const indexNames = indexRows.map((r) => r.name);
+            const expectedIndexes = [
+                'idx_relationship_file',
+                'idx_relationship_source',
+                'idx_relationship_target',
+                'idx_symbols_file_span',
+                'idx_symbols_key',
+            ];
+            assert.deepEqual(indexNames, expectedIndexes);
+        } finally {
+            database.close();
+        }
+    });
+});
