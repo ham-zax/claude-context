@@ -77,7 +77,7 @@ import {
     type RelationshipAnalysisEvidence,
 } from '../relationships';
 
-import { WasmSemanticProjectAnalyzer, type SemanticSourceFile } from '../semantic';
+import { ThreadedWasmSemanticProjectAnalyzer, type SemanticSourceFile } from '../semantic';
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -817,7 +817,7 @@ export class Context {
             },
         });
 
-        const semanticAnalyzer = new WasmSemanticProjectAnalyzer();
+        const semanticAnalyzer = new ThreadedWasmSemanticProjectAnalyzer();
 
         this.indexGenerationWorkflow = new IndexGenerationWorkflow({
             acceptPreparedSourceGenerationReceipt: (canonicalRoot, receipt) => (
