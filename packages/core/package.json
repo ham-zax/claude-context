@@ -10,6 +10,11 @@
       "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./semantic": {
+      "types": "./dist/semantic/index.d.ts",
+      "require": "./dist/semantic/index.js",
+      "default": "./dist/semantic/index.js"
+    },
     "./lancedb": {
       "types": "./dist/lancedb.d.ts",
       "require": "./dist/lancedb.js",

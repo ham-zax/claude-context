@@ -250,16 +250,15 @@ export async function installLocalMcpRuntime(options = {}) {
   assertActivationOwner(activationOwner);
 
   if (typeof activationOwner.terminateSatoriServers === 'function') {
-    try {
-      const termResult = await activationOwner.terminateSatoriServers({
-        homeDir,
-        env: inheritedEnvironment,
-      });
-      if (termResult?.terminated?.length) {
-        logger.log(`Terminated ${termResult.terminated.length} active background Satori server(s) before activation.`);
-      }
-    } catch {
-      // Non-fatal if no running servers or state root
+    const termResult = await activationOwner.terminateSatoriServers({
+      homeDir,
+      env: inheritedEnvironment,
+    });
+    if (termResult?.status === 'partial') {
+      throw new Error('Cannot safely activate local runtime: Satori server state is only partially verified.');
+    }
+    if (termResult?.terminated?.length) {
+      logger.log(`Terminated ${termResult.terminated.length} active background Satori server(s) before activation.`);
     }
   }
   const runtimeCommand = { command: nodePath, args: [runtimeEntry] };

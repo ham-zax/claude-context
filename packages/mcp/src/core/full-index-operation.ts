@@ -3,9 +3,11 @@ import {
     COLLECTION_LIMIT_MESSAGE,
     IndexPolicyPublicationError,
     SynchronizerCheckpointPublicationError,
-    defaultSemanticLanguageRegistry,
     isStagedGenerationCollectionName,
 } from "@zokizuan/satori-core";
+import {
+    defaultSemanticLanguageRegistry,
+} from "@zokizuan/satori-core/semantic";
 import type {
     CanonicalPublicationBinding,
     CustomIndexPolicyUpdate,

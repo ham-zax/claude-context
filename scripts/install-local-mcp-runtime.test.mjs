@@ -327,7 +327,7 @@ test('installLocalMcpRuntime terminates active background servers before activat
   let terminatedOptions = null;
   const activationOwner = createActivationOwner({ SATORI_RUNTIME_PROFILE: 'offline' }, async (options) => {
     terminatedOptions = options;
-    return { terminated: [{ pid: 4242, sources: ['shared-runtime-host'] }] };
+    return { status: 'terminated', terminated: [{ pid: 4242, sources: ['shared-runtime-host'] }] };
   });
 
   try {
@@ -343,6 +343,56 @@ test('installLocalMcpRuntime terminates active background servers before activat
     assert.equal(terminatedOptions?.homeDir, homeDir);
     assert.equal(terminatedOptions?.env?.CUSTOM_VAR, '1');
     assert.equal(messages.some((msg) => msg.includes('Terminated 1 active background Satori server(s)')), true);
+    assert.equal(activationOwner.calls.some((call) => call.kind === 'execute'), true);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('installLocalMcpRuntime fails closed and avoids activation if terminateSatoriServers throws', async () => {
+  const { repoRoot, homeDir } = createLocalRuntimeFixture();
+  const activationOwner = createActivationOwner({ SATORI_RUNTIME_PROFILE: 'offline' }, async () => {
+    throw new Error('E_TERMINATION_FAILED: Failed to terminate Satori server pid=4242');
+  });
+
+  try {
+    await assert.rejects(
+      installLocalMcpRuntime({
+        repoRoot,
+        homeDir,
+        noBuild: true,
+        activationOwner,
+        logger: { log: () => {} },
+      }),
+      /E_TERMINATION_FAILED: Failed to terminate Satori server pid=4242/,
+    );
+    assert.equal(activationOwner.calls.some((call) => call.kind === 'execute'), false);
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('installLocalMcpRuntime fails closed and avoids activation if terminateSatoriServers returns partial status', async () => {
+  const { repoRoot, homeDir } = createLocalRuntimeFixture();
+  const activationOwner = createActivationOwner({ SATORI_RUNTIME_PROFILE: 'offline' }, async () => ({
+    status: 'partial',
+    terminated: [],
+  }));
+
+  try {
+    await assert.rejects(
+      installLocalMcpRuntime({
+        repoRoot,
+        homeDir,
+        noBuild: true,
+        activationOwner,
+        logger: { log: () => {} },
+      }),
+      /Cannot safely activate local runtime: Satori server state is only partially verified\./,
+    );
+    assert.equal(activationOwner.calls.some((call) => call.kind === 'execute'), false);
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
