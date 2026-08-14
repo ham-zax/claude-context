@@ -132,11 +132,11 @@ Decouple `EmbeddingBatchPolicy` ($\le 32$ items for Potion) from vector persiste
   * [`packages/core/src/vectordb/types.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts): Declare `VectorWriteAggregationPolicy` interface and `getWriteAggregationPolicy?()`.
   * [`packages/core/src/vectordb/lancedb-vectordb.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/lancedb-vectordb.ts): Implement `getWriteAggregationPolicy(): VectorWriteAggregationPolicy { return { preferredMaxRows: 256 }; }`.
   * [`packages/core/src/core/indexing-pipeline.ts`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts):
-    * **Policy Validation:** Validate `Number.isSafeInteger(policy.preferredMaxRows) && policy.preferredMaxRows > 0`. The invalid policy fails fast (`EMBEDDING_PROVIDER_ERROR` on the vector write path); it never falls back to silent unbuffered dispatch.
+    * **Policy Validation:** Validate `Number.isSafeInteger(policy.preferredMaxRows) && policy.preferredMaxRows > 0` upfront. An invalid policy fails fast with a configuration/programming error (`Error`) before indexing begins; there is no fallback.
     * Maintain write buffer as local operation state: `const pendingVectorWrites: IndexedVectorDocument[] = [];` inside `processFileList()`.
     * Exact-size flush loop with final tail flush at EOF:
       ```ts
-      if (writeAggregationPolicy && Number.isSafeInteger(writeAggregationPolicy.preferredMaxRows) && writeAggregationPolicy.preferredMaxRows > 0) {
+      if (writeAggregationPolicy) {
           while (pendingVectorWrites.length >= writeAggregationPolicy.preferredMaxRows) {
               const batch = pendingVectorWrites.splice(0, writeAggregationPolicy.preferredMaxRows);
               await this.flushVectorWriteBuffer(collectionName, batch, options);

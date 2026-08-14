@@ -184,31 +184,14 @@ export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<vo
 
     // Capability verification: structural presence is insufficient; prove the
     // worker starts, loads the model, completes a smoke embedding, and exits cleanly.
+    // PotionEmbedding.create() validates runtime execution and normalization.
     const embedding = await PotionEmbedding.create({
         helperPath,
         modelPath,
         requestTimeoutMs: 5000,
         startupTimeoutMs: 5000,
     });
-    try {
-        const [smoke] = await embedding.embedDocuments(["satori install capability smoke"]);
-        if (!smoke || !Array.isArray(smoke.vector) || smoke.vector.length !== POTION_DIMENSION) {
-            throw new Error("Bundled Potion runtime failed to produce a valid embedding vector.");
-        }
-        let normSq = 0;
-        for (const val of smoke.vector) {
-            if (!Number.isFinite(val)) {
-                throw new Error("Bundled Potion runtime produced non-finite embedding vector elements.");
-            }
-            normSq += val * val;
-        }
-        const norm = Math.sqrt(normSq);
-        if (Math.abs(norm - 1.0) > 1e-4) {
-            throw new Error(`Bundled Potion runtime vector norm ${norm} is not normalized.`);
-        }
-    } finally {
-        await embedding.close();
-    }
+    await embedding.close();
 }
 
 export function assertSupportedPotionPlatform(input: Pick<InstallPreflightInput, "platform" | "architecture">): void {

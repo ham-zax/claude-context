@@ -270,6 +270,42 @@ test('concurrent foreground query is accepted while a full 32-item background ba
     }
 });
 
+test('concurrent foreground query is accepted while two full 32-item background batches are pending', async (t) => {
+    const embedding = await createFakeEmbedding(t, { maxBatchItems: 32 });
+
+    // Hold two full 32-item document batches in flight (64 items total, consuming full background pending capacity)
+    const batch1Texts = ['__delay_150ms__item0', ...Array.from({ length: 31 }, (_, i) => `b1_item${i + 1}`)];
+    const batch2Texts = Array.from({ length: 32 }, (_, i) => `b2_item${i}`);
+    const batch1Promise = embedding.embedDocuments(batch1Texts);
+    const batch2Promise = embedding.embedDocuments(batch2Texts);
+
+    // Both batches are dispatched synchronously, so 64 items are pending.
+    // A 3rd document request must be rejected as queue full:
+    await assert.rejects(
+        embedding.embedDocuments(['b3_item0']),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_INVALID_REQUEST'
+            && error.message.includes('queue is full'),
+    );
+
+    // But a foreground query must be accepted using the reserved foreground capacity:
+    const queryPromise = embedding.embedQuery('foreground query');
+
+    const [batch1Docs, batch2Docs, queryDoc] = await Promise.all([
+        batch1Promise,
+        batch2Promise,
+        queryPromise,
+    ]);
+    assert.equal(batch1Docs.length, 32);
+    assert.equal(batch2Docs.length, 32);
+    assert.equal(queryDoc.vector.length, POTION_DIMENSION);
+    assert.ok(queryDoc.vector.every(Number.isFinite));
+    for (const doc of [...batch1Docs, ...batch2Docs]) {
+        assert.equal(doc.vector.length, POTION_DIMENSION);
+        assert.ok(doc.vector.every(Number.isFinite));
+    }
+});
+
 test('Potion provider classifies native invalid input without exposing source text', async (t) => {
     const embedding = await createFakeEmbedding(t);
     for (const input of ['', '__all_unknown__', '__oversized__']) {

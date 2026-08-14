@@ -17,11 +17,11 @@ export const POTION_DIMENSION = 256;
 export const POTION_RETAINED_TOKEN_LIMIT = 4096;
 export const POTION_MAX_TIMEOUT_MS = 300_000;
 /**
- * @deprecated The inference-contract digest is no longer a runtime or index
- * compatibility authority. Installation integrity is owned by the pinned
- * Potion manifest (see packages/cli/src/install-preflight.ts), and index
- * compatibility is owned by POTION_SEMANTIC_VERSION. Retained only for
- * published-surface compatibility; scheduled for removal.
+ * @deprecated Legacy pre-semantic-identity digest; do not compare against
+ * the current inference fixture. Installation integrity is owned by the
+ * pinned Potion manifest (see packages/cli/src/install-preflight.ts), and
+ * index compatibility is owned by POTION_SEMANTIC_VERSION. Retained only
+ * for published-surface compatibility; scheduled for removal.
  */
 export const POTION_INFERENCE_CONTRACT_DIGEST =
     'e716e695cc5895150602501601832a1e7467a09bf9dae1c347b1ff80accf0364';
@@ -32,6 +32,7 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_BATCH_ITEMS = 32;
 const MAX_BATCH_ITEMS = 64;
 const MAX_PENDING_ITEMS = 256;
+const FOREGROUND_QUERY_RESERVE_ITEMS = 1;
 const NORMALIZATION_TOLERANCE = 1e-5;
 const POTION_STARTUP_SMOKE_TEXT = 'satori potion runtime conformance smoke';
 
@@ -41,7 +42,10 @@ export interface PotionEmbeddingConfig {
     requestTimeoutMs?: number;
     startupTimeoutMs?: number;
     maxBatchItems?: number;
-    /** Total outstanding worker item capacity (defaults to 2x maxBatchItems). */
+    /**
+     * Normal/background outstanding item capacity (defaults to 2x maxBatchItems).
+     * One additional foreground query slot is reserved separately.
+     */
     maxPendingItems?: number;
 }
 
@@ -594,7 +598,10 @@ export class PotionEmbedding extends Embedding {
             }));
         }
         const itemCount = 1;
-        if (this.pendingItemsCount + itemCount > this.maxPendingItems) {
+        const capacityLimit = role === 'query'
+            ? this.maxPendingItems + FOREGROUND_QUERY_RESERVE_ITEMS
+            : this.maxPendingItems;
+        if (this.pendingItemsCount + itemCount > capacityLimit) {
             return Promise.reject(providerError({
                 code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
                 retryable: false,
