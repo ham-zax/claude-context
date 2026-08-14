@@ -6,23 +6,31 @@ Based on empirical benchmarks across two distinct workloads—**`satori`** (Type
 
 ```mermaid
 graph TD
-    subgraph Phase 1: Adapter-Governed Write Aggregation
-        A[IndexingPipeline Chunk Buffer] -->|Buffer size resolved from VectorDatabase policy| B[LanceDbVectorDatabase writeDocuments]
+    subgraph Phase 0: Contracts & Prerequisites
+        P0[Define VectorWriteAggregationPolicy & Pinned Toolchain]
+    end
+    subgraph Phase 1: Backend-Neutral Write Aggregation
+        P0 --> A[IndexingPipeline Local Write Buffer]
+        A -->|Policy: LanceDB preferredMaxRows = 256| B[LanceDbVectorDatabase writeDocuments]
         B --> C[Checkpoint 1: Benchmark Sweep]
     end
-    subgraph Phase 2: Native Batch IPC
-        C --> D[Potion Batch IPC Protocol: encode_batch]
-        D -->|Dual Bound: <=32 items AND <1 MiB| E[Rust StrictPotionModel::encode_batch]
-        E --> F[Checkpoint 2: Combined Rebaseline]
+    subgraph Phase 2: Native Batch IPC & Artifact Closure
+        C --> D[Potion Batch Protocol: encode_batch]
+        D -->|Dual Bound: <=32 native subbatch AND <1 MiB| E[StrictPotionModel::encode_batch]
+        E --> F[Helper Build + SHA Update + Canonical Contract Digest Closure]
+        F --> G[Checkpoint 2: Parity & Conformance]
     end
-    subgraph Phase 3: Derived Cache
-        F --> G[SQLite Navigation Deferred Secondary Indexing]
-        G --> H[Checkpoint 3: SQLite Import Parity]
+    subgraph Phase 3: Combined Rebaseline
+        G --> H[3-Run Telemetry Rebaseline on TS & Python]
     end
-    subgraph Phase 4: Conditional Overlap
-        H --> I{Is residual overlap warranted?}
-        I -->|Yes| J[Bounded Depth-2 Producer/Consumer Pipeline]
-        I -->|No| K[Final Telemetry & Verification]
+    subgraph Phase 4: Derived Cache
+        H --> I[SQLite Navigation Deferred Secondary Indexing]
+        I --> J[Checkpoint 3: SQLite Import Parity]
+    end
+    subgraph Phase 5: Conditional Overlap
+        J --> K{Is residual overlap warranted?}
+        K -->|Yes| L[Bounded Resource Overlap: 1 in-flight embed, 1 in-flight write, max 256 queue]
+        K -->|No| M[Final Verification & Release Check]
     end
 ```
 
@@ -32,96 +40,151 @@ graph TD
 
 | Workload Class | Original Baseline | Target (Horizon 1) | Key Bottleneck Addressed |
 | :--- | :--- | :--- | :--- |
-| **Class A: `satori`** (TS-heavy, 577 files, 13.5k chunks) | **52.7s** | **18–22s** (Sub-25s SLA) | LanceDB 425 write calls $\to$ ~27–54 calls; Potion IPC batching |
-| **Class B: `tradingview_ratio`** (Python, 1,422 files, 19.6k chunks) | **146.1s** | **45–55s** (>2.6× Speedup) | LanceDB 612 write calls $\to$ ~39–77 calls; Python navigation cache |
+| **Class A: `satori`** (TS-heavy, 577 files, 13.5k chunks) | **52.7s** | **18–22s** (Target) | LanceDB 425 write calls $\to$ ~54 calls; Potion IPC batching |
+| **Class B: `tradingview_ratio`** (Python, 1,422 files, 19.6k chunks) | **146.1s** | **45–55s** (Target) | LanceDB 612 write calls $\to$ ~77 calls; Python navigation cache |
+
+> [!NOTE]
+> 256 rows is the selected **bounded-memory tradeoff** (512 remains the measured maximum-throughput point: 27 calls on `satori` / 39 calls on `tradingview_ratio`). Wall-clock numbers represent engineering targets; release acceptance is governed by empirical call-count reductions, frozen inference parity, and absence of correctness regressions.
 
 ---
 
 ## Step-by-Step Implementation Sequence
 
-### Phase 1: Adapter-Governed Vector Write Aggregation
+### Phase 0: Contract Definitions & Prerequisites
+
+#### 1. Backend-Neutral Write Policy Contract
+Define a generic, backend-neutral write aggregation contract in `packages/core/src/vectordb/types.ts`:
+
+```ts
+export interface VectorWriteAggregationPolicy {
+    readonly preferredMaxRows: number;
+    readonly preferredMaxBytes?: number;
+}
+```
+
+Add optional capability to `VectorDatabase`:
+```ts
+export interface VectorDatabase {
+    // ...
+    getWriteAggregationPolicy?(): VectorWriteAggregationPolicy;
+}
+```
+
+#### 2. Pinned Toolchain Requirement
+Native helper compilation must use the pinned Rust toolchain recorded in `inference-contract.canonical.json` (`rustc 1.97.1 (8bab26f4f 2026-07-14)`, `x86_64-unknown-linux-gnu`). Shipping binaries must not be generated from arbitrary local compiler versions.
+
+---
+
+### Phase 1: Backend-Neutral Vector Write Aggregation
 
 #### 1. Architectural Intent
 Decouple `EmbeddingBatchPolicy` ($\le 32$ items for Potion) from vector persistence flushing without leaking backend-specific constants into generic pipeline orchestration.
 
-* The vector database adapter (e.g. `LanceDbVectorDatabase`) declares its preferred write aggregation policy (target: **256 rows**) via its backend capabilities (`getBackendInfo()` or `writeBatchPolicy`).
-* [`IndexingPipeline`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts) consumes this resolved policy and buffers embedded [`IndexedVectorDocument`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts)s before dispatching `writeDocuments()`. Adapters without write aggregation preference operate unbuffered (`batchSize = 1` or immediate flush).
-
-```text
-[Chunk Generator] ──(32 chunks)──> [Potion Embedding] ──(32 vectors)──┐
-                                                                       ▼
-                                                       [Pipeline Write Buffer]
-                                                       (Flushes at backend policy size or EOF)
-                                                                       │
-                                                                       ▼
-                                                       [VectorDatabase writeDocuments()]
-```
+* `LanceDbVectorDatabase` reports `getWriteAggregationPolicy(): { preferredMaxRows: 256 }`.
+* `MilvusVectorDatabase` retains its unbuffered / 117-row + 4 MiB policy.
+* [`IndexingPipeline`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts) consumes the resolved policy and buffers embedded [`IndexedVectorDocument`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts)s before dispatching `writeDocuments()`. Adapters without write aggregation preference operate unbuffered (`preferredMaxRows = 1`).
 
 #### 2. Implementation Specifications
 * **Files:**
-  * [`packages/core/src/vectordb/types.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts): Expose optional `writeBatchSize` in `VectorStoreBackendInfo` / `VectorDatabase`.
-  * [`packages/core/src/vectordb/lancedb-vectordb.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/lancedb-vectordb.ts): Declare `writeBatchSize = 256` in `getBackendInfo()`.
-  * [`packages/core/src/core/indexing-pipeline.ts`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts): Accumulate completed vector records in `this.pendingWriteBuffer` up to the resolved write batch limit or EOF.
-* **Safety Fences:**
-  * Re-assert `assertMutationCurrent()` immediately prior to each aggregated `writeDocuments()` call.
-  * Re-verify embedding identity validity prior to write dispatch.
-  * In case of any error during parsing or embedding, immediately clear the write buffer and fail fast without publishing staged state.
+  * [`packages/core/src/vectordb/types.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts): Declare `VectorWriteAggregationPolicy` interface and `getWriteAggregationPolicy?()`.
+  * [`packages/core/src/vectordb/lancedb-vectordb.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/lancedb-vectordb.ts): Implement `getWriteAggregationPolicy(): VectorWriteAggregationPolicy { return { preferredMaxRows: 256 }; }`.
+  * [`packages/core/src/core/indexing-pipeline.ts`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts):
+    * Separate chunk embedding from buffer flushing:
+      ```ts
+      private async embedChunkBatch(batch: ChunkBatch): Promise<IndexedVectorDocument[]>;
+      private async flushVectorWriteBuffer(collectionName: string, buffer: IndexedVectorDocument[]): Promise<void>;
+      ```
+    * Maintain write buffer as local operation state: `let pendingVectorWrites: IndexedVectorDocument[] = [];` inside `processFileList()`, avoiding instance field reentrancy hazards.
+    * Flush `pendingVectorWrites` when `pendingVectorWrites.length >= writeAggregationPolicy.preferredMaxRows` or upon EOF.
+* **Safety Fences & Failure Semantics:**
+  * Re-assert `assertMutationCurrent()` and embedding identity immediately prior to each `flushVectorWriteBuffer()` call.
+  * On parsing or embedding failure: drop only the unpersisted local `pendingVectorWrites` buffer and propagate the error. Discard of the candidate staged generation remains authoritative in `IndexGenerationWorkflow`.
 
 #### 3. Verification & Checkpoint 1
-* Run unit tests: `pnpm --filter @zokizuan/satori-core test src/core/indexing-pipeline.test.ts`.
-* Run benchmark harness on `satori` and `tradingview_ratio`. Confirm LanceDB write call counts drop from **425 $\to$ ~54** (`satori`) and **612 $\to$ ~77** (`tradingview_ratio`), with write duration dropping to $<3.5\text{s}$.
+* Unit tests: `pnpm --filter @zokizuan/satori-core test src/core/indexing-pipeline.test.ts`.
+* LanceDB adapter tests: `pnpm --filter @zokizuan/satori-core test src/vectordb/lancedb-vectordb.test.ts`.
+* 3-run benchmark sweep on `satori` and `tradingview_ratio`: Confirm write calls drop to $\approx 54$ and $\approx 77$, with write duration $<3.5\text{s}$.
 
 ---
 
-### Phase 2: Potion Native Batch IPC Protocol (`encode_batch`)
+### Phase 2: Potion Native Batch IPC Protocol & Artifact Closure
 
 #### 1. Architectural Intent
 Replace 32 sequential single-text JSON lines over stdin/stdout with a single batched IPC frame executing `StrictPotionModel::encode_batch(&texts)`.
 
-#### 2. Implementation Specifications
+#### 2. Protocol Specifications
 * **Rust Worker Protocol:** [`experiments/potion-l0-l1/src/main.rs`](file:///home/hamza/repo/satori/experiments/potion-l0-l1/src/main.rs)
-  * Add `WorkerRequest::EncodeBatch { id: String, role: Role, texts: Vec<String> }`.
-  * Add `WorkerResponse::Batch { id: String, ok: bool, vectors: Option<Vec<Vec<f32>>>, retained_token_counts: Option<Vec<usize>>, error_code: Option<String> }`.
-  * Invoke `model.encode_batch(&texts)` within panic containment hooks.
-* **TypeScript Client:** [`packages/core/src/embedding/potion-embedding.ts`](file:///home/hamza/repo/satori/packages/core/src/embedding/potion-embedding.ts)
-  * Update `embedDocuments(texts)`:
-    * Accumulate texts up to `maxBatchItems` (32) **AND** total frame bytes $< 1\text{ MiB}$ (`MAX_WORKER_FRAME_BYTES`).
-    * Transmit single frame: `{ op: "encode_batch", id, role: "document", texts }`.
-    * Fall back to frame splitting if a single batch exceeds the 1 MiB boundary.
-    * Parse response and validate dimensions (256), finite floats, and 1:1 order alignment.
+  ```rust
+  #[derive(Debug, Deserialize)]
+  #[serde(tag = "op", rename_all = "snake_case")]
+  enum WorkerRequest {
+      Encode { id: String, role: Role, text: String },
+      EncodeBatch { id: String, role: Role, texts: Vec<String> },
+      InjectPanic { id: String },
+      Shutdown { id: String },
+  }
 
-#### 3. Verification & Checkpoint 2
-* Run Potion unit tests: `pnpm --filter @zokizuan/satori-core test src/embedding/potion-embedding.test.ts`.
-* Verify vector parity: Ensure cosine similarity between single-frame embeddings and batched embeddings is $1.00000 \pm 10^{-6}$.
-* Measure real throughput: Confirm `chunksPerSec` increases significantly over the 856 chunks/sec baseline.
+  #[derive(Debug, Serialize)]
+  #[serde(rename_all = "camelCase")]
+  struct WorkerBatchItem {
+      retained_token_count: usize,
+      vector: Vec<f32>,
+  }
+
+  #[derive(Debug, Serialize)]
+  #[serde(rename_all = "camelCase")]
+  struct WorkerResponse {
+      id: String,
+      ok: bool,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      retained_token_count: Option<usize>,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      vector: Option<Vec<f32>>,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      items: Option<Vec<WorkerBatchItem>>,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      error_code: Option<String>,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      error_index: Option<usize>,
+  }
+  ```
+* **TypeScript Client:** [`packages/core/src/embedding/potion-embedding.ts`](file:///home/hamza/repo/satori/packages/core/src/embedding/potion-embedding.ts)
+  * Distinguish public `maxBatchItems` (up to 64) from native worker sub-batches ($\le 32$ items AND serialized request frame $< 1\text{ MiB}$).
+  * Reject single texts exceeding `MAX_WORKER_FRAME_BYTES` (do not split individual strings).
+  * Validate worker response frame byte bounds ($< 1\text{ MiB}$), 1:1 structural alignment, dimension (256), finite floats, and normalization.
+
+#### 3. Artifact & Version Authority Closure
+1. Compile `satori-potion` with pinned toolchain (`rustc 1.97.1`).
+2. Replace `packages/mcp/assets/potion/linux-x64/satori-potion`.
+3. Compute SHA-256 of new binary and update `POTION_HELPER_SHA256` in `potion-embedding.ts`.
+4. Update `experiments/potion-l0-l1/fixtures/inference-contract.canonical.json` with new `helperSha256`.
+5. Compute canonical contract SHA-256 and update `POTION_INFERENCE_CONTRACT_DIGEST` in `potion-embedding.ts`.
+6. Add compatibility test proving that existing index fingerprints created with the prior artifact digest correctly trigger the expected `requires_reindex` status.
+
+#### 4. Verification & Checkpoint 2
+* Potion TypeScript tests: `pnpm --filter @zokizuan/satori-core test src/embedding/potion-embedding.test.ts`.
+* Native conformance & frozen parity verification:
+  * Maximum absolute difference $\le 10^{-6}$
+  * Minimum cosine similarity $\ge 0.999999$
+  * Retained token counts exactly equal
+  * Output ordering exactly equal
+* Real batch IPC benchmark on 344 representative chunks: Confirm throughput materially exceeds 856 chunks/sec baseline.
 
 ---
 
 ### Phase 3: Combined Pipeline Rebaseline
 
 #### 1. Execution
-Run full end-to-end indexing on both repositories with **LanceDB 256 Aggregation + Potion Batch IPC** active:
+Run 3 controlled benchmark runs on both repositories with **LanceDB 256 Aggregation + Potion Native Batch IPC**:
 * `satori` (TypeScript-heavy)
 * `tradingview_ratio` (Python-heavy)
 
-#### 2. Telemetry Comparison Table
-Capture and record the full telemetry breakdown:
-```text
-┌─────────────────────────────────┬──────────────────┬──────────────────┐
-│ Phase / Telemetry Metric        │ satori           │ tradingview      │
-├─────────────────────────────────┼──────────────────┼──────────────────┤
-│ totalMs (Wall Clock)            │ [To measure]     │ [To measure]     │
-│ payloadPipeline.analysis        │ [To measure]     │ [To measure]     │
-│ payloadPipeline.embedding       │ [To measure]     │ [To measure]     │
-│ payloadPipeline.vectorWrites    │ [To measure]     │ [To measure]     │
-│ navigation                      │ [To measure]     │ [To measure]     │
-│ publication                     │ [To measure]     │ [To measure]     │
-└─────────────────────────────────┴──────────────────┴──────────────────┘
-```
+#### 2. Full Telemetry Object Comparison
+Record full telemetry metrics (Analysis, Embedding, VectorWrites, Navigation, Publication, Total).
 
-#### 3. Decision Point for Phase 5 (Pipelining)
-Analyze the new critical path:
-* If AST analysis dominates (e.g., 16s vs. 6s embedding and 2s writes), evaluate whether a bounded depth-2 overlap pipeline provides sufficient wall-clock reduction to justify its coordination logic.
+#### 3. Critical Path Audit & Phase 5 Evaluation
+* Compare residual analysis vs. embedding vs. write durations.
+* Authorize Phase 5 **only if** the combined telemetry establishes sufficient serial overlap headroom to justify queue coordination complexity.
 
 ---
 
@@ -129,28 +192,40 @@ Analyze the new critical path:
 
 #### 1. Implementation Specifications
 * **File:** [`packages/core/src/navigation/sqlite.ts`](file:///home/hamza/repo/satori/packages/core/src/navigation/sqlite.ts)
-* In `createSchema(database)`: Create only the tables and primary keys (`navigation_manifest`, `files`, `symbols`, `relationships`).
+* Refactor `createSchema` into `createTables` and `createSecondaryIndexes`.
 * In `importNavigationToSqlite()`:
   1. Open temporary database.
-  2. Create tables (`createSchema`).
-  3. `BEGIN` transaction $\to$ bulk insert all files, symbols, and relationships.
-  4. Issue `CREATE INDEX` for secondary indexes (`idx_symbols_key`, `idx_symbols_file_span`, `idx_relationship_source`, `idx_relationship_target`, `idx_relationship_file`).
-  5. `COMMIT` transaction $\to$ close $\to$ atomic rename into final destination.
+  2. `createTables(database)`.
+  3. `BEGIN` transaction $\to$ bulk insert files, symbols, relationships.
+  4. `createSecondaryIndexes(database)`.
+  5. `COMMIT` transaction $\to$ close $\to$ atomic rename into final path.
+* No PRAGMA modifications (preserve existing durability invariants).
 
 #### 2. Verification & Checkpoint 4
-* Run navigation test suite: `pnpm --filter @zokizuan/satori-core test src/navigation/sqlite.test.ts`.
-* Verify query performance and data integrity: Execute sample symbol lookups and relationship traversals on `tradingview_ratio`'s imported navigation cache.
+* Navigation tests: `pnpm --filter @zokizuan/satori-core test src/navigation/sqlite.test.ts`.
+* Parity test: Verify navigation query responses (`findSymbols`, `findCallers`, `findImplementations`) match baseline output.
 
 ---
 
 ### Phase 5: Conditional Bounded Pipeline Overlap
 
-*(Executed only if Phase 3 rebaseline establishes significant residual headroom)*
+*(Executed only if Phase 3 rebaseline authorizes it)*
 
-#### 1. Specifications
-* Overlap embedding of batch $N$ with vector write dispatch of batch $N-1$ and AST analysis of batch $N+1$.
-* Enforce maximum queue depth of 2 batches with strict backpressure.
-* Maintain deterministic error handling: any failure immediately aborts in-flight promises and cleans up staged collections.
+#### 1. Resource & Queue Bounds
+* Maximum 1 embedding microbatch in flight.
+* Maximum 1 vector write aggregation batch in flight.
+* Maximum 256 completed-but-unpersisted vectors in write queue.
+* Maximum 1 next embedding microbatch staged.
+* Zero unbounded source or chunk queues.
+* Deterministic output order preserved.
+
+#### 2. Safe Failure & Cancellation Contract
+* On first error:
+  1. Immediately stop scheduling new analysis, embedding, or write tasks.
+  2. Stop accepting additional entries into the queue.
+  3. Drain/settle any active in-flight LanceDB write mutation to avoid racing cleanup.
+  4. Propagate the original failure to `IndexGenerationWorkflow`.
+  5. `IndexGenerationWorkflow` authoritative handler discards the candidate vector generation and unsealed sidecars.
 
 ---
 
@@ -159,8 +234,12 @@ Analyze the new critical path:
 > [!IMPORTANT]
 > Every change must strictly satisfy the following invariants:
 
-1. **Semantic Content Equivalence:** Completed indexing runs must produce identical indexed file sets, content hashes, extracted symbol definitions, and relationship graphs across runs.
-2. **Canonical Contract Validity:** Authoritative completion markers must strictly conform to `CanonicalCompletionMarker` schema, contain valid fingerprints, and bind to sealed navigation generations.
+1. **Semantic Content Equivalence:** Completed indexing runs must produce identical indexed file sets, content hashes, extracted symbol definitions, and relationship graphs across runs for unchanged inputs.
+2. **Canonical Contract Validity:** Authoritative completion markers must strictly conform to `CanonicalCompletionMarker` schema, contain valid fingerprints, and bind to sealed navigation generations (accounting for dynamic `runId`, `completedAt` timestamps, and updated artifact digests).
 3. **Atomic Staged Publication:** Incomplete or interrupted indexing runs must never leak orphan vector chunks, unsealed sidecars, or corrupt LanceDB tables into live search paths.
-4. **No Abstraction Leakage:** `VectorDatabase` interface remains backend-agnostic. Backend-specific write batching policies are declared by adapters and consumed through generic options/capabilities.
-5. **Zero Test Regressions:** All unit, integration, and e2e test suites in `packages/core` and `packages/mcp` must pass cleanly.
+4. **No Abstraction Leakage:** `VectorDatabase` interface remains backend-agnostic. Backend-specific write batching policies are declared by adapters and consumed through generic capabilities.
+5. **Comprehensive Test Suite & Release Checks:**
+   * Unit & integration tests in `packages/core` and `packages/mcp`.
+   * Potion inference contract & artifact verification tests.
+   * `pnpm run check`
+   * `pnpm run release:check`
