@@ -16,6 +16,7 @@ import {
     INDEX_COMPLETION_MARKER_DOC_ID,
     resetSharedRuntimeNavigationStoreForTests,
     resolveNavigationSidecarRoot,
+    type PreparedCollectionReceipt,
 } from "@zokizuan/satori-core";
 import type {
     CollectionDetails,
@@ -35,6 +36,7 @@ import { createSessionWorkspacePolicy } from "../core/session-workspace-policy.j
 import type { IndexFingerprint } from "../config.js";
 import { ToolHandlers } from "../core/handlers.js";
 import { FullIndexOperation, type FullIndexOperationHost } from "../core/full-index-operation.js";
+import type { RootMutationLease } from "../core/mutation-lease-coordinator.js";
 import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
 import type { ToolContext } from "./types.js";
@@ -618,10 +620,10 @@ test("public reindex replaces a coherent retired v2 tuple with restart-proven v5
                     codebasePath: root,
                     forceReindex: force,
                     writeCollectionName: stagedCollection,
-                    mutationLease: lease as any,
+                    mutationLease: lease as unknown as RootMutationLease,
                     previousIndexedInfo: previousInfo,
                     policyUpdate,
-                    preparedCollectionReceipt: preparedReceipt as any,
+                    preparedCollectionReceipt: preparedReceipt as unknown as PreparedCollectionReceipt,
                 });
                 return background;
             };
