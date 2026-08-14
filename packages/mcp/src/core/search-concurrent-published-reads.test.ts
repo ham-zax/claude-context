@@ -416,7 +416,7 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
     }
 });
 
-test('Product characterization: 5 parallel searches execute against publication N during sync writing without throwaway, then activate N+1', async () => {
+test('coordinator characterization: five parallel stale reads stay pinned across simulated activation', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-product-char-'));
     let coordinator: SearchRequestCoordinator | undefined;
     try {

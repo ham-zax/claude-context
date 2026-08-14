@@ -11,14 +11,20 @@ test('Packed @zokizuan/satori-core contains semantic engine assets and executes 
     try {
         const corePkgDir = path.resolve(__dirname, '../../..');
 
+        // Ensure core is built so packed tarball contains compiled dist
+        if (!fs.existsSync(path.join(corePkgDir, 'dist', 'index.js')) || !fs.existsSync(path.join(corePkgDir, 'dist', 'semantic', 'wasm', 'wasm-analyzer.js'))) {
+            execFileSync('pnpm', ['run', 'build'], {
+                cwd: corePkgDir,
+                encoding: 'utf8',
+                env: process.env,
+            });
+        }
+
         // Pack @zokizuan/satori-core to temp dir
         const packOutput = execFileSync('pnpm', ['pack', '--pack-destination', tempDir], {
             cwd: corePkgDir,
             encoding: 'utf8',
-            env: {
-                ...process.env,
-                PATH: `/home/hamza/.nvm/versions/node/v24.19.0/bin:${process.env.PATH}`,
-            },
+            env: process.env,
         });
 
         const tarballName = packOutput.trim().split('\n').pop()?.trim();

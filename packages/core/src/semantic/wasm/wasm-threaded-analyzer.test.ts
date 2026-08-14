@@ -121,3 +121,65 @@ test('ThreadedWasmSemanticProjectAnalyzer rejects in-flight pending requests whe
     );
     await disposePromise;
 });
+
+test('ThreadedWasmSemanticProjectAnalyzer rejects analyze calls made after disposal', async () => {
+    const analyzer = new ThreadedWasmSemanticProjectAnalyzer();
+    await analyzer.dispose();
+
+    await assert.rejects(
+        () => analyzer.analyze({
+            language: 'go',
+            auxiliaryFiles: [],
+            sourceFiles: [],
+        }),
+        /Semantic analyzer has been disposed/,
+    );
+});
+
+test('ThreadedWasmSemanticProjectAnalyzer handles multiple dispose calls idempotently without error', async () => {
+    const analyzer = new ThreadedWasmSemanticProjectAnalyzer();
+    await Promise.all([
+        analyzer.dispose(),
+        analyzer.dispose(),
+        analyzer.dispose(),
+    ]);
+});
+
+test('Context memoizes dispose and calls underlying analyzer dispose exactly once across concurrent callers', async () => {
+    let disposeCount = 0;
+    const mockAnalyzer = {
+        supportsLanguage: () => true,
+        analyze: async () => ({ language: 'go', occurrencesByFile: new Map() }),
+        dispose: async () => {
+            disposeCount += 1;
+        },
+    };
+    const { Context } = await import('../../core/context.js');
+    const context = new Context({
+        semanticAnalyzer: mockAnalyzer,
+        embedding: {
+            getProvider: () => 'mock',
+            getDimension: () => 10,
+            getIdentity: () => ({
+                provider: 'mock',
+                model: 'mock-model',
+                dimension: 10,
+                artifactDigest: null,
+                normalizationPolicy: 'provider_output_v1',
+            }),
+            embed: async () => [],
+            close: async () => {},
+        } as any,
+        vectorDatabase: {
+            search: async () => [],
+        } as any,
+    });
+
+    await Promise.all([
+        context.dispose(),
+        context.dispose(),
+        context.dispose(),
+    ]);
+
+    assert.equal(disposeCount, 1);
+});

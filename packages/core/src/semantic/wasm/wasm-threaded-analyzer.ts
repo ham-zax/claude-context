@@ -43,6 +43,7 @@ function filterWorkerExecArgv(): string[] {
 
 export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnalyzer {
     private worker: Worker | null = null;
+    private disposed = false;
     private nextRequestId = 1;
     private readonly pendingRequests = new Map<number, {
         resolve: (val: SemanticProjectEvidence) => void;
@@ -61,13 +62,17 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
     }
 
     private getOrCreateWorker(): Worker {
+        if (this.disposed) {
+            throw new Error('Semantic analyzer has been disposed');
+        }
         if (!this.worker) {
             const scriptPath = resolveWorkerScriptPath();
-            this.worker = new Worker(scriptPath, {
+            const worker = new Worker(scriptPath, {
                 execArgv: filterWorkerExecArgv(),
             });
+            this.worker = worker;
 
-            this.worker.on('message', (response: WasmWorkerResponse) => {
+            worker.on('message', (response: WasmWorkerResponse) => {
                 const pending = this.pendingRequests.get(response.id);
                 if (!pending) return;
                 this.pendingRequests.delete(response.id);
@@ -84,14 +89,14 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
                 }
             });
 
-            this.worker.on('error', (err) => {
+            worker.on('error', (err) => {
                 for (const [, req] of this.pendingRequests) {
                     req.reject(err);
                 }
                 this.pendingRequests.clear();
             });
 
-            this.worker.on('exit', (code) => {
+            worker.on('exit', (code) => {
                 if (code !== 0) {
                     const exitError = new Error(`CBM Semantic Worker stopped unexpectedly with exit code ${code}`);
                     for (const [, req] of this.pendingRequests) {
@@ -99,13 +104,18 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
                     }
                     this.pendingRequests.clear();
                 }
-                this.worker = null;
+                if (this.worker === worker) {
+                    this.worker = null;
+                }
             });
         }
         return this.worker;
     }
 
     async analyze(input: SemanticProjectInput): Promise<SemanticProjectEvidence> {
+        if (this.disposed) {
+            throw new Error('Semantic analyzer has been disposed');
+        }
         if (!this.supportsLanguage(input.language)) {
             return {
                 language: input.language,
@@ -124,14 +134,19 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
     }
 
     async dispose(): Promise<void> {
-        if (this.worker) {
-            const workerToTerminate = this.worker;
-            this.worker = null;
-            for (const [, req] of this.pendingRequests) {
-                req.reject(new Error('Semantic analyzer disposed while request was pending'));
-            }
-            this.pendingRequests.clear();
-            await workerToTerminate.terminate();
+        if (this.disposed) return;
+        this.disposed = true;
+
+        const worker = this.worker;
+        this.worker = null;
+
+        for (const [, req] of this.pendingRequests) {
+            req.reject(new Error('Semantic analyzer disposed while request was pending'));
+        }
+        this.pendingRequests.clear();
+
+        if (worker) {
+            await worker.terminate();
         }
     }
 }

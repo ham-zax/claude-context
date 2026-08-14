@@ -581,6 +581,7 @@ export class Context {
     private readonly indexingPipeline: IndexingPipeline;
     private readonly ignoreRuleService: IgnoreRuleService;
     private readonly semanticAnalyzer?: SemanticProjectAnalyzer;
+    private disposePromise: Promise<void> | null = null;
     private vectorStoreProvider: VectorStoreProviderIdentity;
 
     constructor(config: ContextConfig = {}) {
@@ -4064,7 +4065,10 @@ export class Context {
     /**
      * Dispose managed background runtime workers and resources.
      */
-    public async dispose(): Promise<void> {
-        await this.semanticAnalyzer?.dispose?.();
+    public dispose(): Promise<void> {
+        if (!this.disposePromise) {
+            this.disposePromise = Promise.resolve(this.semanticAnalyzer?.dispose?.());
+        }
+        return this.disposePromise;
     }
 }

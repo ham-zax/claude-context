@@ -357,7 +357,7 @@ test('authority owner coordinates policy publication without constructing Contex
     assert.equal(authority.getPublishedResolvedPolicy(canonicalRoot)?.policyHash, publishedPolicy.policyHash);
 });
 
-test('active publication read lease physically blocks publication retention until released', async () => {
+test('active publication read lease blocks the publication retention gate until released', async () => {
     const proofCoordinator = createGenerationProofCoordinator();
     const authority = new IndexAuthorityCoordinator(proofCoordinator);
     const root = '/repo/mvcc-test';
