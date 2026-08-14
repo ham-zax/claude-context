@@ -243,3 +243,42 @@ test("install postflight reports incomplete static config as a warning without p
         fs.rmSync(homeDir, { recursive: true, force: true });
     }
 });
+
+test("install postflight identifies owner when launcher is direct node process (pid equals launcherPid)", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-postflight-direct-pid-"));
+    try {
+        const installResult = await installFixture(homeDir);
+        const result = await runInstallPostflight({
+            installResult,
+            homeDir,
+            env: { EMBEDDING_PROVIDER: "Ollama", MILVUS_ADDRESS: "localhost:19530" },
+            startupTimeoutMs: 1_000,
+            callTimeoutMs: 1_000,
+            writeStderr: () => {},
+            connectSession: async () => {
+                writeOwnerRegistry(homeDir, [{
+                    ownerId: "direct-node-owner",
+                    pid: 101,
+                    ppid: 50,
+                    satoriVersion: "4.11.17",
+                }]);
+                return {
+                    launcherPid: 101,
+                    serverVersion: { name: "satori", version: "4.11.17" },
+                    listTools: async () => ({ tools: TOOL_NAMES.map((name) => ({ name })) }) as never,
+                    close: async () => writeOwnerRegistry(homeDir, []),
+                };
+            },
+            isProcessLive: () => false,
+            wait: async () => {},
+        });
+
+        assert.equal(result.status, "ok");
+        const runtimeOwnerCheck = result.checks.find((check) => check.name === "runtime_owner");
+        assert.equal(runtimeOwnerCheck?.status, "ok");
+        const terminationCheck = result.checks.find((check) => check.name === "termination");
+        assert.equal(terminationCheck?.status, "ok");
+    } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+});

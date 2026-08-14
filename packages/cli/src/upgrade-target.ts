@@ -61,6 +61,10 @@ export function compareStableVersions(left: string, right: string): number {
     return 0;
 }
 
+function normalizeNpmViewValue(value: unknown): unknown {
+    return Array.isArray(value) && value.length === 1 ? value[0] : value;
+}
+
 function readManifest(raw: string): PublishedPackageManifest {
     let parsed: unknown;
     try {
@@ -69,6 +73,7 @@ function readManifest(raw: string): PublishedPackageManifest {
         const message = error instanceof Error ? error.message : String(error);
         throw new CliError("E_UPGRADE", `npm returned malformed Satori package metadata: ${message}`, 1);
     }
+    parsed = normalizeNpmViewValue(parsed);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         throw new CliError("E_UPGRADE", "npm returned an invalid Satori CLI package manifest.", 1);
     }

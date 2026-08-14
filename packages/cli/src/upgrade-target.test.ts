@@ -36,6 +36,20 @@ test("resolveSatoriUpgradeTarget pins the latest CLI runtime closure exactly", (
     assert.deepEqual(calls, ["npm view @zokizuan/satori-cli@latest --json"]);
 });
 
+test("resolveSatoriUpgradeTarget handles array response from modern npm view", () => {
+    const target = resolveSatoriUpgradeTarget({
+        execFileSyncImpl: (() => JSON.stringify([JSON.parse(manifest())])) as never,
+    });
+
+    assert.deepEqual(target, {
+        cliPackageSpecifier: "@zokizuan/satori-cli@1.4.0",
+        cliVersion: "1.4.0",
+        mcpPackageSpecifier: "@zokizuan/satori-mcp@6.3.0",
+        mcpVersion: "6.3.0",
+        coreVersion: "3.2.0",
+    });
+});
+
 test("resolveSatoriUpgradeTarget rejects incomplete or non-exact release metadata", () => {
     for (const invalidManifest of [
         manifest({ name: "@example/not-satori" }),

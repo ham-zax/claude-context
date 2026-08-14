@@ -268,7 +268,7 @@ export async function runInstallPostflight(options: InstallPostflightOptions): P
         const initializedOwners = readOwners(registryPath);
         postflightOwner = initializedOwners.find((owner) => (
             !baselineOwnerIds.has(owner.ownerId)
-            && (launcherPid == null || owner.ppid === launcherPid)
+            && (launcherPid == null || owner.pid === launcherPid || owner.ppid === launcherPid)
         )) || null;
 
         const listedNames = toolNames(await session.listTools());
@@ -312,7 +312,7 @@ export async function runInstallPostflight(options: InstallPostflightOptions): P
             const remainingOwners = readOwners(registryPath);
             postflightOwner = remainingOwners.find((owner) => (
                 !baselineOwnerIds.has(owner.ownerId)
-                && (launcherPid == null || owner.ppid === launcherPid)
+                && (launcherPid == null || owner.pid === launcherPid || owner.ppid === launcherPid)
             )) || null;
         } catch {
             // Runtime-owner registry errors are reported by the check above.
