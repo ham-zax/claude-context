@@ -58,10 +58,10 @@ export class SyntacticResolutionContributionEngine implements CallResolutionEngi
                     const testRecord: RelationshipRecord = {
                         ...record,
                         type: 'TESTS',
-                        confidence: 'high',
                     };
                     recordsByKey.set(relationshipKey(testRecord), testRecord);
                 }
+
             }
         }
 

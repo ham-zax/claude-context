@@ -22,8 +22,11 @@ import type { StagedNavigationSidecarGeneration } from '../symbols/sidecar-lifec
 import type { SymbolRecord, SymbolRegistryManifestFile } from '../symbols/contracts';
 import type { SymbolRegistry } from '../symbols/registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
-import { buildRelationshipDelta } from '../relationships';
+import { buildRelationshipDelta, buildRelationshipsForRegistry } from '../relationships';
+import type { SemanticProjectAnalyzer, SemanticSourceFile } from '../semantic';
+import type { LanguageAnalysisPort } from '../language-analysis';
 import type { RelationshipRecord } from '../symbols/contracts';
+
 import type { IndexCompletionMarkerDocument, IndexCompletionFingerprint, VectorFilter, VectorControlRecord, VectorWriteMetricsSnapshot } from '../vectordb';
 import type { VectorDatabase } from '../vectordb/types';
 import type { IndexProfile } from '../config/defaults';
@@ -361,7 +364,16 @@ export interface IndexGenerationWorkflowPorts {
             publishMutation?: (publish: () => void) => void,
             deferPublication?: boolean,
             indexPolicy?: ResolvedIndexPolicy,
+            semanticSources?: readonly SemanticSourceFile[],
         ): Promise<StagedNavigationSidecarGeneration | undefined>;
+    buildIndexPolicyHash(codebasePath: string): string;
+    readIndexableFileInsideRoot(
+            absoluteFile: string,
+            canonicalRoot: string,
+            indexPolicy?: ResolvedIndexPolicy,
+        ): Promise<string | null>;
+    languageAnalyzer: LanguageAnalysisPort;
+    semanticAnalyzer?: SemanticProjectAnalyzer;
     embedding: Embedding;
     vectorDatabase: VectorDatabase;
     symbolRegistryStateRoot: string | undefined;
@@ -373,6 +385,7 @@ export interface IndexGenerationWorkflowPorts {
     setSynchronizerMutationTarget(synchronizerKey: string, collectionName: string): void;
     clearSynchronizerMutationTarget(synchronizerKey: string): void;
 }
+
 
 export class IndexGenerationWorkflow {
     /**
@@ -429,6 +442,118 @@ export class IndexGenerationWorkflow {
     ): void {
         this.preparedIndexCollectionReceipts.delete(receipt);
     }
+
+    public async stageSymbolRegistryForCompletedIndex(
+        codebasePath: string,
+        symbolRecords: SymbolRecord[],
+        symbolManifestFiles: SymbolRegistryManifestFile[],
+        assertMutationCurrent?: () => void,
+        suppliedAnalysisByFile?: Map<string, RelationshipAnalysisEvidence>,
+        publishMutation?: (publish: () => void) => void,
+        deferPublication: boolean = false,
+        indexPolicy?: ResolvedIndexPolicy,
+        semanticSources?: readonly SemanticSourceFile[],
+    ): Promise<StagedNavigationSidecarGeneration | undefined> {
+        if (indexPolicy) {
+            this.ports.assertResolvedIndexPolicyRoot(codebasePath, indexPolicy);
+        }
+        const canonicalRoot = this.ports.canonicalizeCodebasePath(codebasePath);
+        const manifestFiles = [...symbolManifestFiles].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+        const registry = buildSymbolRegistry({
+            manifest: {
+                schemaVersion: SYMBOL_REGISTRY_SCHEMA_VERSION,
+                normalizedRootPath: canonicalRoot,
+                rootFingerprint: this.ports.buildRootFingerprint(canonicalRoot),
+                indexPolicyHash: indexPolicy?.policyHash ?? this.ports.buildIndexPolicyHash(codebasePath),
+                languageRouterVersion: this.ports.getLanguageRouterVersion(),
+                extractorVersion: this.ports.getSymbolExtractorVersion(),
+                relationshipVersion: this.ports.getRelationshipVersion(),
+                builtAt: new Date().toISOString(),
+                files: manifestFiles,
+            },
+            symbols: symbolRecords,
+        });
+
+        const analysisByFile = new Map(suppliedAnalysisByFile ?? []);
+        for (const file of manifestFiles) {
+            if (analysisByFile.has(file.path)) {
+                continue;
+            }
+            const absoluteFile = path.resolve(canonicalRoot, file.path);
+            const relativeFromRoot = path.relative(canonicalRoot, absoluteFile);
+            if (!relativeFromRoot || relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
+                throw new Error(`Navigation manifest path '${file.path}' escapes the codebase root.`);
+            }
+            const content = await this.ports.readIndexableFileInsideRoot(absoluteFile, canonicalRoot, indexPolicy);
+            if (content === null) {
+                throw new Error(`Navigation source no longer satisfies the active policy for '${file.path}'.`);
+            }
+            const observedHash = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+            if (observedHash !== file.hash) {
+                throw new Error(`Source changed before navigation publication for '${file.path}'.`);
+            }
+            const analysis = await this.ports.languageAnalyzer.analyze({
+                content,
+                language: file.language,
+                relativePath: file.path,
+            });
+            analysisByFile.set(file.path, {
+                moduleBindings: analysis.moduleBindings,
+                callSites: analysis.callSites,
+                receiverTypeBindings: analysis.receiverTypeBindings,
+                pythonFlowFacts: analysis.pythonFlowFacts ?? [],
+            });
+        }
+
+        if (this.ports.semanticAnalyzer && semanticSources && semanticSources.length > 0) {
+            const sourcesByLanguage = new Map<string, SemanticSourceFile[]>();
+            for (const src of semanticSources) {
+                const fileEntry = manifestFiles.find((f) => f.path === src.path);
+                const lang = fileEntry?.language ?? '';
+                if (this.ports.semanticAnalyzer.supportsLanguage(lang)) {
+                    const list = sourcesByLanguage.get(lang) ?? [];
+                    list.push(src);
+                    sourcesByLanguage.set(lang, list);
+                }
+            }
+            for (const [language, sourceFiles] of sourcesByLanguage) {
+                await this.ports.semanticAnalyzer.analyze({
+                    language,
+                    sourceFiles,
+                    auxiliaryFiles: [],
+                });
+            }
+        }
+
+        const relationshipRecords = buildRelationshipsForRegistry({ registry, analysisByFile });
+        assertMutationCurrent?.();
+        const result = await stageNavigationSidecarGeneration({
+            stateRoot: this.ports.symbolRegistryStateRoot,
+            registry,
+            records: relationshipRecords,
+            analysisByFile,
+        });
+        this.stagePreparedNavigationDelta(result, {
+            canonicalRoot,
+            generationId: result.generationId,
+            symbolRegistryManifestHash: result.manifestHash,
+            relationshipManifestHash: result.relationshipManifestHash,
+            navigationSealHash: result.navigationSealHash,
+            registry,
+            records: relationshipRecords,
+            analysisByFile,
+        });
+        console.log(`[Context] 🧭 Staged navigation generation '${result.generationId}' with ${result.symbolCount} symbols across ${result.fileShardCount} symbol shards and ${result.relationshipCount} relationships across ${result.relationshipFileShardCount} relationship shards`);
+        if (!deferPublication) {
+            await this.ports.publishNavigationCandidate(
+                result,
+                assertMutationCurrent,
+                publishMutation,
+            );
+        }
+        return result;
+    }
+
 
     refreshEmbedding(embedding: Embedding): void {
         this.ports.embedding = embedding;
@@ -692,7 +817,7 @@ export class IndexGenerationWorkflow {
             let activated = false;
             try {
                 await this.finalizePreparedCollection(writeCollectionName, options.assertMutationCurrent);
-                navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
+                navigationCandidate = await this.stageSymbolRegistryForCompletedIndex(
                     codebasePath,
                     [],
                     [],
@@ -702,6 +827,7 @@ export class IndexGenerationWorkflow {
                     true,
                     indexPolicy,
                 );
+
                 if (!options.deferFullIndexPublication) {
                     const publicationStartedAt = Date.now();
                     await this.ports.writeCompletedIndexMarker(codebasePath, 0, 0, writeCollectionName, 'completed', options.assertMutationCurrent, navigationCandidate, indexPolicy.policyHash);
@@ -851,7 +977,7 @@ export class IndexGenerationWorkflow {
 
             if (result.status === 'completed') {
                 const navigationStartedAt = Date.now();
-                navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
+                navigationCandidate = await this.stageSymbolRegistryForCompletedIndex(
                     codebasePath,
                     result.symbolRecords,
                     result.symbolManifestFiles,
@@ -860,7 +986,9 @@ export class IndexGenerationWorkflow {
                     options.publishMutation,
                     true,
                     indexPolicy,
+                    result.semanticSources,
                 );
+
                 navigationMs = Date.now() - navigationStartedAt;
                 if (!options.deferFullIndexPublication) {
                     const publicationStartedAt = Date.now();
@@ -2279,7 +2407,7 @@ export class IndexGenerationWorkflow {
         }
 
         return {
-            candidate: await this.ports.writeSymbolRegistryForCompletedIndex(
+            candidate: await this.stageSymbolRegistryForCompletedIndex(
                 codebasePath,
                 mergedSymbolRecords,
                 mergedManifestFiles,
@@ -2289,6 +2417,7 @@ export class IndexGenerationWorkflow {
                 deferPublication,
             ),
         };
+
     }
 
     private async refreshCompletionMarkerFromCurrentSource(
@@ -3143,7 +3272,7 @@ export class IndexGenerationWorkflow {
             let navigationCandidate: StagedNavigationSidecarGeneration | undefined;
             let activated = false;
             try {
-                navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
+                navigationCandidate = await this.stageSymbolRegistryForCompletedIndex(
                     canonicalPath,
                     symbolRecords,
                     symbolManifestFiles,
@@ -3153,6 +3282,7 @@ export class IndexGenerationWorkflow {
                     true,
                     repairPolicy,
                 );
+
                 if (!navigationCandidate) {
                     throw new Error('V4 navigation repair did not stage a navigation generation.');
                 }
@@ -3277,7 +3407,7 @@ export class IndexGenerationWorkflow {
         }
 
         // 6. Rebuild symbol registry/relationship sidecars
-        const navigationCandidate = await this.ports.writeSymbolRegistryForCompletedIndex(
+        const navigationCandidate = await this.stageSymbolRegistryForCompletedIndex(
             canonicalPath,
             symbolRecords,
             symbolManifestFiles,
@@ -3287,6 +3417,7 @@ export class IndexGenerationWorkflow {
             false,
             repairPolicy,
         );
+
 
         // 7. Write new completion marker
         await this.ports.writeCompletedIndexMarker(

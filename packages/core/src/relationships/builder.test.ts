@@ -2391,6 +2391,9 @@ test('Characterization: JS/TS syntactic resolution produces direct CALLS and der
     assert.equal(testCalls.length, 1);
     assert.equal(testTests.length, 1);
     assert.equal(testCalls[0].targetInstanceId, testTests[0].targetInstanceId);
+    assert.equal(testCalls[0].confidence, 'low');
+    assert.equal(testTests[0].confidence, 'low');
 });
+
 
 

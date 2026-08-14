@@ -600,12 +600,11 @@ export class IndexingPipeline {
                 if (limitReached) break;
             } catch (error) {
                 console.error(
-                    `[Context] ⚠️  Failed to process file ${filePath}:`,
-                    error,
+                    `[Context] ❌ Failed to index file ${filePath}: ${describeError(error)}`,
                 );
-                if (error instanceof Error) console.error('[Context] Stack trace:', error.stack);
                 throw error;
             }
+
         }
 
         if (chunkBuffer.length > 0) {
