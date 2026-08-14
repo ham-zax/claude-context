@@ -85,6 +85,39 @@ export interface FreshnessDecision {
     };
 }
 
+export type FreshnessTriggerReason =
+    | 'watcher_pending'
+    | 'exact_compare_differs'
+    | 'exact_compare_unavailable'
+    | 'full_compare_differs'
+    | 'full_compare_unavailable'
+    | 'ignore_control_changed'
+    | 'checkpoint_changed'
+    | 'threshold_expired'
+    | 'manual_zero_threshold';
+
+export interface FreshnessTriggerInput {
+    watcherPending?: boolean;
+    exactComparison?: { status: string; changedPaths?: readonly string[] };
+    fullComparison?: { status: string };
+    ignoreControlChanged?: boolean;
+    checkpointChanged?: boolean;
+    thresholdMs?: number;
+    timeSinceLastSyncMs?: number;
+}
+
+export function determineFreshnessTriggerReason(input: FreshnessTriggerInput): FreshnessTriggerReason {
+    if (input.ignoreControlChanged) return 'ignore_control_changed';
+    if (input.checkpointChanged) return 'checkpoint_changed';
+    if (input.watcherPending) return 'watcher_pending';
+    if (input.exactComparison?.status === 'differs') return 'exact_compare_differs';
+    if (input.exactComparison?.status === 'unavailable') return 'exact_compare_unavailable';
+    if (input.fullComparison?.status === 'differs') return 'full_compare_differs';
+    if (input.fullComparison?.status === 'unavailable') return 'full_compare_unavailable';
+    if (input.thresholdMs === 0) return 'manual_zero_threshold';
+    return 'threshold_expired';
+}
+
 export type WatcherLifecycleState = 'starting' | 'ready' | 'failed' | 'stopped';
 export type WatcherObservationCoverage = WatcherLifecycleState | 'disabled';
 export type WatcherEventReason =
@@ -1097,7 +1130,13 @@ export class SyncManager {
         }
 
         // 3. Execution Gate
-        // console.log(`[SYNC] 🔄 Triggering Sync for '${codebasePath}' (Threshold: ${thresholdMs}ms)`);
+        const triggerReason = determineFreshnessTriggerReason({
+            watcherPending: watcherObservationPending,
+            ignoreControlChanged: false,
+            thresholdMs,
+            timeSinceLastSyncMs: timeSince,
+        });
+        console.log(`[SYNC] 🔄 Triggering Sync for '${codebasePath}'. Trigger: ${triggerReason} (Threshold: ${thresholdMs}ms)`);
 
         this.bumpFreshnessEpoch(codebasePath);
         const syncPromise = (async () => {
