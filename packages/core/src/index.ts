@@ -29,3 +29,4 @@ export * from './relationships';
 export * from './config/defaults';
 export * from './config/execution-profile';
 export * from './config/repo-config';
+export * from './semantic';
