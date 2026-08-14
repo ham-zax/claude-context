@@ -45,10 +45,10 @@ graph TD
 
 ### Empirical Results (Measured Progress)
 
-| Workload Class | Original Baseline | Phase 1 (LanceDB 256 Aggregation) | Phase 2 (Potion Batch IPC) | Key Measured Win |
-| :--- | :--- | :--- | :--- | :--- |
-| **`satori`** (TS, 19.8k chunks) | ~75–120s (618 writes / 55s) | **68.81s** (78 writes / 4.29s) | *Verified Parity: $\le 10^{-6}$ max diff* | **-87.4% write calls (-92.2% write duration)** |
-| **`tradingview_ratio`** (Python, 19.6k chunks) | 146.10s (612 writes / 55s) | **77.30s** (warm: **67.6s–68.6s**, 77 writes / 3.72s) | *Verified Parity: $\le 10^{-6}$ max diff* | **~78s wall-clock speedup (2x faster)** |
+| Workload Class | Original Baseline | Phase 1 (LanceDB 256 Aggregation) | Phase 2 (Potion Batch IPC) | Phase 3 (Combined Rebaseline) | Cumulative Measured Gain |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`satori`** (TS, 19.5k chunks) | ~75–120s (Writes: ~55s, Embed: ~41.5s) | **68.81s** (78 writes / 4.29s) | *Verified Parity: $\le 10^{-6}$ max diff* | **46.79s** (Embed: **21.91s**, Writes: **3.18s**) | **~30–75s faster wall-clock (2x pure embedding speedup, 17x write speedup)** |
+| **`tradingview_ratio`** (Python, 19.6k chunks) | 146.10s (Writes: ~55s, Embed: ~45s) | **77.30s** (warm: **67.6s–68.6s**) | *Verified Parity: $\le 10^{-6}$ max diff* | **72.34s** (warm: **64.52s–69.42s**, Embed: **22.42s**, Writes: **3.43s**) | **~79.1s faster wall-clock (2.2x speedup)** |
 
 > [!NOTE]
 > 256 rows is the selected **bounded-memory tradeoff** (512 remains the measured maximum-throughput point: 27 calls on `satori` / 39 calls on `tradingview_ratio`). Wall-clock numbers represent engineering targets; release acceptance is governed by empirical call-count reductions, frozen inference parity, and absence of correctness regressions.
