@@ -9,7 +9,7 @@ import type { Embedding } from '../embedding';
 
 function createMockVectorDb(): VectorDatabase {
     return {
-        writeDocuments: async () => ({ rowsWritten: 0 }),
+        writeDocuments: async () => {},
         insertVector: async () => {},
         insertVectors: async () => {},
         searchVectors: async () => [],
@@ -26,13 +26,15 @@ function createMockVectorDb(): VectorDatabase {
 function createMockEmbedding(): Embedding {
     return {
         getDimension: () => 768,
+        getProvider: () => 'test',
+        detectDimension: async () => 768,
         embedQuery: async () => ({ vector: new Array(768).fill(0), dimension: 768 }),
         embedDocuments: async (texts: string[]) => texts.map(() => ({ vector: new Array(768).fill(0), dimension: 768 })),
         getIdentity: () => ({
             provider: 'test',
             model: 'test',
             dimension: 768,
-            artifactDigest: 'digest',
+            artifactDigest: null,
             normalizationPolicy: 'none',
         }),
     } as unknown as Embedding;
@@ -52,7 +54,7 @@ test('IndexingPipeline does not retain semanticSources when semantic analyzer su
             provider: 'test',
             model: 'test',
             dimension: 768,
-            artifactDigest: 'digest',
+            artifactDigest: null,
             normalizationPolicy: 'none',
         }),
         isHybridEnabled: () => false,
@@ -107,9 +109,10 @@ test('IndexingPipeline retains exact source and sourceHash when semantic analyze
                 provider: 'test',
                 model: 'test',
                 dimension: 768,
-                artifactDigest: 'digest',
+                artifactDigest: null,
                 normalizationPolicy: 'none',
             }),
+
             isHybridEnabled: () => false,
             canonicalizeCodebasePath: (p) => p,
             normalizeRelativePathForCodebase: (_cb, p) => path.relative(tempDir, p) as unknown as RepositoryRelativePath,

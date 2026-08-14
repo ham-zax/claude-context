@@ -2396,10 +2396,16 @@ test('Characterization: JS/TS syntactic resolution produces direct CALLS and der
 });
 
 test('resolveUniqueLocalSymbol resolves top-level local export when nested member shares same name', async () => {
-    const source = `export const value = 1;
-export class Thing {
-    value() { return 2; }
+    const source = `function value() {
+    return 1;
 }
+
+class Thing {
+    value() {
+        return 2;
+    }
+}
+
 export { value as aliasValue };
 `;
     const analysisByFile = await analyzeFiles(new Map([['src/mod.ts', source]]));
@@ -2436,13 +2442,16 @@ export { value as aliasValue };
 
     const records = buildRelationshipsForRegistry({ registry, analysisByFile });
     const exportRecords = records.filter((r) => r.type === 'EXPORTS');
-    assert.ok(exportRecords.length >= 1);
-    for (const exp of exportRecords) {
-        const target = registry.symbols.find((s) => s.symbolInstanceId === exp.targetInstanceId);
-        assert.ok(target);
-        assert.equal(target.parentQualifiedNamePath.length, 0);
-    }
+    assert.equal(exportRecords.length, 1);
+    const target = registry.symbols.find(
+        (symbol) => symbol.symbolInstanceId === exportRecords[0].targetInstanceId,
+    );
+    assert.ok(target);
+    assert.equal(target.name, 'value');
+    assert.equal(target.kind, 'function');
+    assert.deepEqual(target.parentQualifiedNamePath, []);
 });
+
 
 
 
