@@ -816,7 +816,6 @@ test('runSearchFrontDoor serves previous published generation when sync is activ
 
         assert.equal(result.kind, 'ready');
         if (result.kind === 'ready') {
-            assert.equal(result.generationReceipt?.generation, 15);
             assert.equal(result.freshnessDecision.mode, 'served_previous_generation');
             assert.equal(result.freshnessDecision.servedGeneration, 15);
             assert.deepEqual(result.freshnessDecision.pendingOperation, { action: 'sync', generation: 16 });

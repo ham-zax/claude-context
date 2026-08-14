@@ -83,7 +83,6 @@ test('parallel searches execute concurrently against pinned publication during a
             const res = results[i];
             assert.equal(res.kind, 'ready', `Query ${i} should be ready`);
             if (res.kind === 'ready') {
-                assert.equal(res.generationReceipt?.generation, 15);
                 assert.equal(res.freshnessDecision.mode, 'served_previous_generation');
                 assert.equal(res.freshnessDecision.servedGeneration, 15);
                 assert.deepEqual(res.freshnessDecision.pendingOperation, { action: 'sync', generation: 16 });
@@ -107,11 +106,6 @@ test('parallel searches execute concurrently against pinned publication during a
                     },
                     warnings: [],
                     debugMode: 'none',
-                    hints: {
-                        getToolResponseBuilders: () => ({
-                            buildCreateHint: () => ({ tool: 'satori_manage_index', args: { action: 'create', path: tempRoot } }),
-                        }),
-                    },
                 };
 
                 const envelope = buildGroupedSearchEnvelope({

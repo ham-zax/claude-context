@@ -26,7 +26,7 @@ import {
     roundSearchScore,
 } from "./search-response-helpers.js";
 
-type SearchResponseCommonInput = {
+export type SearchResponseCommonInput = {
     codebaseRoot: string;
     absolutePath: string;
     query: string;

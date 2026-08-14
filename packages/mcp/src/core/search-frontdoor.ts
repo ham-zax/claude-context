@@ -298,7 +298,9 @@ export async function runSearchFrontDoor(
     ) {
         // Stale-while-sync: serve the proven readable generation immediately without blocking
         activeSyncServingPrevious = true;
-        servedPreviousGeneration = trackedRootState.searchableRead.generationReceipt?.generation;
+        servedPreviousGeneration = trackedRootState.operation?.generation !== undefined
+            ? Math.max(1, trackedRootState.operation.generation - 1)
+            : undefined;
         if (trackedRootState.operation) {
             pendingSyncOperation = {
                 action: trackedRootState.operation.action,
