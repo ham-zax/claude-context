@@ -830,6 +830,14 @@ interface SearchBaseResponseEnvelope {
     limit: number;
     freshnessDecision?: FreshnessDecision | { mode: "skipped_requires_reindex" | "skipped_indexing" } | null;
     freshnessSummary?: SearchFreshnessSummary;
+    freshness?: {
+        state: "sync_in_progress";
+        servedGeneration: number;
+        pendingOperation?: {
+            action: string;
+            generation: number;
+        };
+    };
     warnings?: SearchWarningDetail[];
     recommendedNextAction?: SearchRecommendedNextAction;
     message?: string;

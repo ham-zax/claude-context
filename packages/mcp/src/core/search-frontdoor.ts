@@ -286,7 +286,27 @@ export async function runSearchFrontDoor(
     trackCodebasePath(absolutePath);
 
     let trackedRootState = await host.prepareInitialTrackedRootRead(absolutePath);
+    let activeSyncServingPrevious = false;
+    let servedPreviousGeneration: number | undefined;
+    let pendingSyncOperation: { action: string; generation: number } | undefined;
+
     if (
+        trackedRootState.state === "indexing"
+        && trackedRootState.operation?.action === "sync"
+        && trackedRootState.searchableGenerationAvailable
+        && trackedRootState.searchableRead
+    ) {
+        // Stale-while-sync: serve the proven readable generation immediately without blocking
+        activeSyncServingPrevious = true;
+        servedPreviousGeneration = trackedRootState.searchableRead.generationReceipt?.generation;
+        if (trackedRootState.operation) {
+            pendingSyncOperation = {
+                action: trackedRootState.operation.action,
+                generation: trackedRootState.operation.generation,
+            };
+        }
+        trackedRootState = trackedRootState.searchableRead;
+    } else if (
         trackedRootState.state === "indexing"
         && trackedRootState.operation?.action === "sync"
         && trackedRootState.searchableGenerationAvailable
@@ -328,19 +348,28 @@ export async function runSearchFrontDoor(
     for (let freshnessAttempt = 0; freshnessAttempt < 2; freshnessAttempt += 1) {
         const freshnessRoot = effectiveRoot;
         const observationBeforeFreshness = host.getPreparedReadObservation?.(freshnessRoot) ?? null;
-        const freshnessDecision = await host.ensureSearchFreshness(
-            freshnessRoot,
-            trackedRootState.state === 'ready' ? trackedRootState : undefined,
-        );
+        const freshnessDecision: FreshnessDecision = activeSyncServingPrevious
+            ? {
+                mode: 'served_previous_generation',
+                checkedAt: new Date().toISOString(),
+                thresholdMs: 0,
+                servedGeneration: servedPreviousGeneration ?? 0,
+                pendingOperation: pendingSyncOperation,
+            }
+            : await host.ensureSearchFreshness(
+                freshnessRoot,
+                trackedRootState.state === 'ready' ? trackedRootState : undefined,
+            );
         host.noteFreshnessMode(freshnessDecision.mode);
 
         const observationAfterFreshness = host.getPreparedReadObservation?.(freshnessRoot) ?? null;
-        const canReuseInitialReadiness = freshnessAttempt === 0
+        const canReuseInitialReadiness = (freshnessAttempt === 0
             && trackedRootState.state === "ready"
             && freshnessDecisionPreservesAuthority(freshnessDecision)
             && observationBeforeFreshness !== null
             && trackedRootState.preparedObservation === observationBeforeFreshness
-            && observationBeforeFreshness === observationAfterFreshness;
+            && observationBeforeFreshness === observationAfterFreshness)
+            || (activeSyncServingPrevious && trackedRootState.state === "ready");
         const postFreshnessRootState = canReuseInitialReadiness
             ? trackedRootState
             : await host.preparePostFreshnessTrackedRootRead(

@@ -216,6 +216,13 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
         groupBy: input.groupBy,
         limit: input.limit,
         resultMode: "grouped",
+        ...(input.freshnessDecision?.mode === "served_previous_generation" ? {
+            freshness: {
+                state: "sync_in_progress" as const,
+                servedGeneration: input.freshnessDecision.servedGeneration ?? 0,
+                ...(input.freshnessDecision.pendingOperation ? { pendingOperation: input.freshnessDecision.pendingOperation } : {}),
+            },
+        } : {}),
         ...(exposeFreshnessEvidence ? {
             freshnessDecision: input.freshnessDecision,
             freshnessSummary: input.freshnessSummary,
@@ -245,6 +252,13 @@ export function buildRawSearchEnvelope(input: SearchResponseCommonInput & {
         groupBy: input.groupBy,
         limit: input.limit,
         resultMode: "raw",
+        ...(input.freshnessDecision?.mode === "served_previous_generation" ? {
+            freshness: {
+                state: "sync_in_progress" as const,
+                servedGeneration: input.freshnessDecision.servedGeneration ?? 0,
+                ...(input.freshnessDecision.pendingOperation ? { pendingOperation: input.freshnessDecision.pendingOperation } : {}),
+            },
+        } : {}),
         ...(exposeFreshnessEvidence ? {
             freshnessDecision: input.freshnessDecision,
             freshnessSummary: input.freshnessSummary,

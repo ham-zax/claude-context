@@ -763,3 +763,66 @@ test('search front door reproves readiness when a mutation completed after cache
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
+
+test('runSearchFrontDoor serves previous published generation when sync is actively indexing', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-stale-sync-'));
+    const preparedRead = {
+        state: 'ready' as const,
+        codebasePath: tempRoot,
+        collectionName: 'col_gen_15',
+        manifestHash: 'man-15',
+        root: { path: tempRoot, info: { status: 'indexed' as const } },
+        proofDebugHint: undefined,
+        vectorReceipt: { generation: 15, collectionName: 'col_gen_15', dimension: 256 },
+        generationReceipt: { generation: 15, manifestHash: 'man-15' },
+        navigationStatus: 'valid' as const,
+        preparedObservation: 'obs-15',
+        navigationAuthorityMode: 'canonical_v4' as const,
+    };
+
+    const host = {
+        prepareInitialTrackedRootRead: async () => ({
+            state: 'indexing' as const,
+            codebasePath: tempRoot,
+            operation: { action: 'sync' as const, generation: 16, phase: 'writing', id: 'op-16' },
+            searchableGenerationAvailable: true,
+            searchableRead: preparedRead,
+        }),
+        getPreparedReadObservation: () => 'obs-15',
+        ensureSearchFreshness: async () => {
+            throw new Error('ensureSearchFreshness should not be called when serving previous generation during sync');
+        },
+        noteFreshnessMode: () => undefined,
+        buildFreshnessBlockedSearchPayload: () => null,
+        isPartialIndexNavigationUnavailable: () => false,
+        partialIndexWarnings: [],
+        canSyncStaleLocal: () => false,
+        buildBlockedReadinessPayload: () => null,
+        trackedRootReadiness: {
+            buildMissingLocalCollectionSearchPayload: () => ({}),
+            buildIndexFailedSearchPayload: () => ({}),
+        },
+    } as unknown as SearchFrontDoorHost;
+
+    try {
+        const result = await runSearchFrontDoor({
+            path: tempRoot,
+            query: 'test query',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+        }, host);
+
+        assert.equal(result.kind, 'ready');
+        if (result.kind === 'ready') {
+            assert.equal(result.generationReceipt?.generation, 15);
+            assert.equal(result.freshnessDecision.mode, 'served_previous_generation');
+            assert.equal(result.freshnessDecision.servedGeneration, 15);
+            assert.deepEqual(result.freshnessDecision.pendingOperation, { action: 'sync', generation: 16 });
+        }
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+

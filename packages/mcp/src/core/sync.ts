@@ -55,7 +55,8 @@ export type FreshnessDecisionMode =
     | 'skipped_mutation_in_progress'
     | 'skipped_missing_path'
     | 'reconciled_ignore_change'
-    | 'ignore_reload_failed';
+    | 'ignore_reload_failed'
+    | 'served_previous_generation';
 
 export interface FreshnessDecision {
     mode: FreshnessDecisionMode;
@@ -77,6 +78,11 @@ export interface FreshnessDecision {
     activeMutation?: RootMutationLease;
     operation?: IndexOperationReceipt;
     checkpointStatus?: 'missing' | 'corrupt';
+    servedGeneration?: number;
+    pendingOperation?: {
+        action: string;
+        generation: number;
+    };
 }
 
 export type WatcherLifecycleState = 'starting' | 'ready' | 'failed' | 'stopped';
