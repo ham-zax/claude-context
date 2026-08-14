@@ -219,7 +219,10 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
         ...(input.freshnessDecision?.mode === "served_previous_generation" ? {
             freshness: {
                 state: "sync_in_progress" as const,
-                servedGeneration: input.freshnessDecision.servedGeneration ?? 0,
+                ...(input.freshnessDecision.servedCollection ? { servedCollection: input.freshnessDecision.servedCollection } : {}),
+                ...(input.freshnessDecision.servedRunId ? { servedRunId: input.freshnessDecision.servedRunId } : {}),
+                ...(input.freshnessDecision.servedGenerationId ? { servedGenerationId: input.freshnessDecision.servedGenerationId } : {}),
+                ...(input.freshnessDecision.servedGeneration ? { servedGeneration: input.freshnessDecision.servedGeneration } : {}),
                 ...(input.freshnessDecision.pendingOperation ? { pendingOperation: input.freshnessDecision.pendingOperation } : {}),
             },
         } : {}),
@@ -255,7 +258,10 @@ export function buildRawSearchEnvelope(input: SearchResponseCommonInput & {
         ...(input.freshnessDecision?.mode === "served_previous_generation" ? {
             freshness: {
                 state: "sync_in_progress" as const,
-                servedGeneration: input.freshnessDecision.servedGeneration ?? 0,
+                ...(input.freshnessDecision.servedCollection ? { servedCollection: input.freshnessDecision.servedCollection } : {}),
+                ...(input.freshnessDecision.servedRunId ? { servedRunId: input.freshnessDecision.servedRunId } : {}),
+                ...(input.freshnessDecision.servedGenerationId ? { servedGenerationId: input.freshnessDecision.servedGenerationId } : {}),
+                ...(input.freshnessDecision.servedGeneration ? { servedGeneration: input.freshnessDecision.servedGeneration } : {}),
                 ...(input.freshnessDecision.pendingOperation ? { pendingOperation: input.freshnessDecision.pendingOperation } : {}),
             },
         } : {}),

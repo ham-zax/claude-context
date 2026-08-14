@@ -773,8 +773,8 @@ test('runSearchFrontDoor serves previous published generation when sync is activ
         manifestHash: 'man-15',
         root: { path: tempRoot, info: { status: 'indexed' as const } },
         proofDebugHint: undefined,
-        vectorReceipt: { generation: 15, collectionName: 'col_gen_15', dimension: 256 },
-        generationReceipt: { generation: 15, manifestHash: 'man-15' },
+        vectorReceipt: { collectionName: 'col_gen_15', marker: { runId: 'run-15' } },
+        generationReceipt: { marker: { runId: 'run-15' } },
         navigationStatus: 'valid' as const,
         preparedObservation: 'obs-15',
         navigationAuthorityMode: 'canonical_v4' as const,
@@ -817,7 +817,8 @@ test('runSearchFrontDoor serves previous published generation when sync is activ
         assert.equal(result.kind, 'ready');
         if (result.kind === 'ready') {
             assert.equal(result.freshnessDecision.mode, 'served_previous_generation');
-            assert.equal(result.freshnessDecision.servedGeneration, 15);
+            assert.equal(result.freshnessDecision.servedCollection, 'col_gen_15');
+            assert.equal(result.freshnessDecision.servedRunId, 'run-15');
             assert.deepEqual(result.freshnessDecision.pendingOperation, { action: 'sync', generation: 16 });
         }
     } finally {

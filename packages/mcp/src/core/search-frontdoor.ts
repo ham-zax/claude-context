@@ -287,7 +287,9 @@ export async function runSearchFrontDoor(
 
     let trackedRootState = await host.prepareInitialTrackedRootRead(absolutePath);
     let activeSyncServingPrevious = false;
-    let servedPreviousGeneration: number | undefined;
+    let servedCollection: string | undefined;
+    let servedRunId: string | undefined;
+    let servedGenerationId: string | undefined;
     let pendingSyncOperation: { action: string; generation: number } | undefined;
 
     if (
@@ -298,9 +300,13 @@ export async function runSearchFrontDoor(
     ) {
         // Stale-while-sync: serve the proven readable generation immediately without blocking
         activeSyncServingPrevious = true;
-        servedPreviousGeneration = trackedRootState.operation?.generation !== undefined
-            ? Math.max(1, trackedRootState.operation.generation - 1)
-            : undefined;
+        const readable = trackedRootState.searchableRead;
+        servedCollection = readable.vectorReceipt?.collectionName;
+        servedRunId = readable.vectorReceipt?.marker?.runId ?? readable.generationReceipt?.marker?.runId;
+        servedGenerationId = readable.sourceBackedNavigationBinding?.generationId
+            ?? (readable.generationReceipt?.navigation && typeof readable.generationReceipt.navigation === 'object' && 'generationId' in readable.generationReceipt.navigation
+                ? (readable.generationReceipt.navigation as { generationId?: string }).generationId
+                : undefined);
         if (trackedRootState.operation) {
             pendingSyncOperation = {
                 action: trackedRootState.operation.action,
@@ -352,11 +358,13 @@ export async function runSearchFrontDoor(
         const observationBeforeFreshness = host.getPreparedReadObservation?.(freshnessRoot) ?? null;
         const freshnessDecision: FreshnessDecision = activeSyncServingPrevious
             ? {
-                mode: 'served_previous_generation',
+                mode: "served_previous_generation",
                 checkedAt: new Date().toISOString(),
                 thresholdMs: 0,
-                servedGeneration: servedPreviousGeneration ?? 0,
-                pendingOperation: pendingSyncOperation,
+                ...(servedCollection ? { servedCollection } : {}),
+                ...(servedRunId ? { servedRunId } : {}),
+                ...(servedGenerationId ? { servedGenerationId } : {}),
+                ...(pendingSyncOperation ? { pendingOperation: pendingSyncOperation } : {}),
             }
             : await host.ensureSearchFreshness(
                 freshnessRoot,

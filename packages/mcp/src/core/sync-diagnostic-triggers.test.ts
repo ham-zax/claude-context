@@ -39,7 +39,36 @@ test('determineFreshnessTriggerReason categorizes full_compare_differs', () => {
     assert.equal(reason, 'full_compare_differs');
 });
 
+test('determineFreshnessTriggerReason categorizes full_compare_unavailable', () => {
+    const reason = determineFreshnessTriggerReason({
+        fullComparison: { status: 'unavailable' },
+    });
+    assert.equal(reason, 'full_compare_unavailable');
+});
+
 test('determineFreshnessTriggerReason categorizes threshold_expired and manual_zero_threshold', () => {
     assert.equal(determineFreshnessTriggerReason({ thresholdMs: 0 }), 'manual_zero_threshold');
     assert.equal(determineFreshnessTriggerReason({ thresholdMs: 60000, timeSinceLastSyncMs: 70000 }), 'threshold_expired');
+});
+
+test('determineFreshnessTriggerReason preserves precedence across multiple active indicators', () => {
+    // ignore control change takes precedence over watcher pending
+    assert.equal(determineFreshnessTriggerReason({
+        ignoreControlChanged: true,
+        watcherPending: true,
+        fullComparison: { status: 'differs' },
+    }), 'ignore_control_changed');
+
+    // watcher pending takes precedence over exact comparison
+    assert.equal(determineFreshnessTriggerReason({
+        watcherPending: true,
+        exactComparison: { status: 'differs' },
+    }), 'watcher_pending');
+
+    // exact comparison differs takes precedence over threshold expiry
+    assert.equal(determineFreshnessTriggerReason({
+        exactComparison: { status: 'differs' },
+        thresholdMs: 60000,
+        timeSinceLastSyncMs: 80000,
+    }), 'exact_compare_differs');
 });

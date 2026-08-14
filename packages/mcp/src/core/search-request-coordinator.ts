@@ -387,6 +387,10 @@ type RequestSourceBarrier =
     | Readonly<{
         mode: 'full_comparison';
         authorityObservation: string;
+    }>
+    | Readonly<{
+        mode: 'publication_consistent_stale_read';
+        collectionName: string;
     }>;
 
 type CompletedFreshnessRequestProof = Readonly<{
@@ -1336,7 +1340,19 @@ export class SearchRequestCoordinator {
                     freshnessDecision = freshnessDecisionFromFrontDoor;
                 const finalSourceObservation = this.preparedRead.getPreparedReadCacheObservation(effectiveRoot);
                 let requestSourceBarrier: RequestSourceBarrier | undefined;
-                if (
+                if (freshnessDecision.mode === 'served_previous_generation') {
+                    requestSourceBarrier = {
+                        mode: 'publication_consistent_stale_read',
+                        collectionName: vectorReceipt?.collectionName ?? '',
+                    };
+                    readinessDebug.requestProof = {
+                        freshnessComparisonMode: 'stale_while_sync',
+                        exactPathCount: 0,
+                        checkpointBindings: 1,
+                        preRetrievalFullComparisons: 0,
+                        finalFullComparisons: 0,
+                    };
+                } else if (
                     finalSourceObservation.observation !== null
                     && finalSourceObservation.sourceObservation !== null
                     && finalSourceObservation.unavailableReason === undefined
@@ -1443,6 +1459,9 @@ export class SearchRequestCoordinator {
                     };
                 }
                 sourceBarrierChanged = async (): Promise<boolean> => {
+                    if (requestSourceBarrier.mode === 'publication_consistent_stale_read') {
+                        return false;
+                    }
                     if (requestSourceBarrier.mode === 'watcher') {
                         const currentBarrier = this.preparedRead.getPreparedReadCacheObservation(effectiveRoot);
                         return currentBarrier.observation !== requestSourceBarrier.observation
@@ -1488,7 +1507,8 @@ export class SearchRequestCoordinator {
                 }
                 const sourceFreshnessWasEstablished = freshnessDecision.mode === 'synced'
                     || freshnessDecision.mode === 'reconciled_ignore_change'
-                    || freshnessDecision.mode === 'skipped_source_unchanged';
+                    || freshnessDecision.mode === 'skipped_source_unchanged'
+                    || freshnessDecision.mode === 'served_previous_generation';
                 const checkpointWarningAlreadyPresent = frontDoorWarnings.includes(
                     WARNING_CODES.SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE,
                 );

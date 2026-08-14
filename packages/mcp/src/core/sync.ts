@@ -78,6 +78,9 @@ export interface FreshnessDecision {
     activeMutation?: RootMutationLease;
     operation?: IndexOperationReceipt;
     checkpointStatus?: 'missing' | 'corrupt';
+    servedCollection?: string;
+    servedRunId?: string;
+    servedGenerationId?: string;
     servedGeneration?: number;
     pendingOperation?: {
         action: string;
@@ -1067,6 +1070,7 @@ export class SyncManager {
             }
         }
 
+        let exactComparisonResult: { status: string; changedPaths?: readonly string[] } | undefined;
         const exactSourceComparisonPaths = options.exactSourceComparisonPaths;
         if (!watcherObservationPending && exactSourceComparisonPaths && exactSourceComparisonPaths.length > 0) {
             const compareSourcePaths = this.context.compareSourcePathsToFreshnessCheckpoint;
@@ -1078,6 +1082,7 @@ export class SyncManager {
                     exactSourceComparisonPaths,
                     options.preparedVectorReceipt,
                 );
+                exactComparisonResult = comparison;
                 options.onPhaseTiming?.(
                     'exact_path_comparison',
                     Math.max(0, Date.now() - exactComparisonStartedAt),
@@ -1092,6 +1097,7 @@ export class SyncManager {
             }
         }
 
+        let fullComparisonResult: { status: string } | undefined;
         if (options.fullSourceComparison === true) {
             const compareAllSource = this.context.compareAllSourceToFreshnessCheckpoint;
             if (typeof compareAllSource === 'function') {
@@ -1101,6 +1107,7 @@ export class SyncManager {
                     codebasePath,
                     options.preparedVectorReceipt,
                 );
+                fullComparisonResult = comparison;
                 options.onPhaseTiming?.(
                     'exact_path_comparison',
                     Math.max(0, Date.now() - fullComparisonStartedAt),
@@ -1132,6 +1139,8 @@ export class SyncManager {
         // 3. Execution Gate
         const triggerReason = determineFreshnessTriggerReason({
             watcherPending: watcherObservationPending,
+            exactComparison: exactComparisonResult,
+            fullComparison: fullComparisonResult,
             ignoreControlChanged: false,
             thresholdMs,
             timeSinceLastSyncMs: timeSince,
