@@ -39,7 +39,7 @@
 - Reranking that depends on current-source projection must not run in this first repair. Preserve retrieval order and expose normal stale-sync freshness metadata. A publication-native rerank projection can be added later.
 - Working-tree divergence remains observable in freshness/debug metadata; do not erase the fact that source is newer than the served publication.
 
-- [ ] **Step 1: Write the failing stale-publication isolation test**
+- [x] **Step 1: Write the failing stale-publication isolation test**
 
 Create `packages/mcp/src/core/search-execution.stale-publication.test.ts` using the same `runSearchExecution` test style as `search-execution.native-order.test.ts`. Configure a non-empty changed-file set, an exact `path:` operator, and an enabled fake reranker. Each filesystem-backed search method and the reranker increments a counter.
 
@@ -61,7 +61,7 @@ assert.equal(outcome.freshnessSummary.syncMode, "served_previous_generation");
 
 The production change that makes this test pass is the explicit publication-only gate. The test must fail on the current branch because current execution invokes filesystem-backed lexical evidence and reranking.
 
-- [ ] **Step 2: Run the focused test and observe RED**
+- [x] **Step 2: Run the focused test and observe RED**
 
 Run:
 
@@ -71,7 +71,7 @@ pnpm --filter @zokizuan/satori-mcp test:raw src/core/search-execution.stale-publ
 
 Expected: FAIL because at least one current-source lane or reranker was invoked.
 
-- [ ] **Step 3: Implement the minimal execution gate**
+- [x] **Step 3: Implement the minimal execution gate**
 
 In `search-execution.ts`, separate source divergence from live-evidence permission:
 
@@ -90,11 +90,11 @@ Use `allowLiveWorkingTreeEvidence` for dirty-source suppression and `buildDirtyF
 
 Do **not** redefine divergence to false: freshness/debug output may still truthfully report that working tree source is ahead of the served publication.
 
-- [ ] **Step 4: Re-run focused test and observe GREEN**
+- [x] **Step 4: Re-run focused test and observe GREEN**
 
 Run the focused test above; expected PASS.
 
-- [ ] **Step 5: Run neighboring search-execution tests**
+- [x] **Step 5: Run neighboring search-execution tests**
 
 ```bash
 pnpm --filter @zokizuan/satori-mcp test:raw \
@@ -104,7 +104,7 @@ pnpm --filter @zokizuan/satori-mcp test:raw \
 
 Expected: PASS; normal settled-search behavior remains unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/mcp/src/core/search-execution.ts \
@@ -126,7 +126,7 @@ git commit -m "fix(mcp): isolate stale publication search evidence"
 
 **Behavior contract:** exact registry and sealed relationship graph are publication-owned and may remain usable. Current-source span repair and preview extraction are not publication-owned and must be disabled in `served_previous_generation`.
 
-- [ ] **Step 1: Write a failing test**
+- [x] **Step 1: Write a failing test**
 
 Inject a current-source reader/validation seam using the existing test-host pattern. In stale mode, a valid exact registry hit must not call current-source validation or preview reading; result preview may be empty if publication-native source bytes are unavailable.
 
@@ -138,7 +138,7 @@ assert.equal(currentSourceValidationCalls, 0);
 assert.equal(outcome.kind, "handled");
 ```
 
-- [ ] **Step 2: Run focused test and observe RED**
+- [x] **Step 2: Run focused test and observe RED**
 
 ```bash
 pnpm --filter @zokizuan/satori-mcp test:raw src/core/search-exact-fast-path.stale-publication.test.ts
@@ -146,7 +146,7 @@ pnpm --filter @zokizuan/satori-mcp test:raw src/core/search-exact-fast-path.stal
 
 Expected: FAIL because the current fast path calls `readCurrentSourceEvidence()` for previews.
 
-- [ ] **Step 3: Implement stale exact-path behavior**
+- [x] **Step 3: Implement stale exact-path behavior**
 
 Add:
 
@@ -163,11 +163,11 @@ When true:
 
 Normal non-stale exact search remains unchanged.
 
-- [ ] **Step 4: Re-run focused and existing exact-registry tests**
+- [x] **Step 4: Re-run focused and existing exact-registry tests**
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/mcp/src/core/search-exact-fast-path.ts \
@@ -195,23 +195,23 @@ git commit -m "fix(mcp): keep stale exact search publication bound"
 - Do not require a navigation generation receipt merely to perform safe vector search. If navigation is advertised but cannot be proven, navigation must degrade independently rather than making vector retrieval unpinned.
 - A stale request must never reach the fallback `semanticSearch(request)` path.
 
-- [ ] **Step 1: Add failing front-door test for missing vector receipt**
+- [x] **Step 1: Add failing front-door test for missing vector receipt**
 
 Host returns active sync + `searchableRead` but no vector receipt. Assert the result does **not** enter `served_previous_generation`.
 
-- [ ] **Step 2: Add failing coordinator test for unpinned fallback**
+- [x] **Step 2: Add failing coordinator test for unpinned fallback**
 
 For a stale-mode request, configure the host so `semanticSearchInProvenGeneration` records calls and plain `semanticSearch` throws. Assert the stale request invokes only the proven-generation path.
 
-- [ ] **Step 3: Run focused tests and observe RED**
+- [x] **Step 3: Run focused tests and observe RED**
 
-- [ ] **Step 4: Implement strict vector receipt admission**
+- [x] **Step 4: Implement strict vector receipt admission**
 
 Add `trackedRootState.searchableRead.vectorReceipt` to the stale-admission gate. If a valid receipt is missing, retain the existing blocked/wait path instead of manufacturing stale readiness.
 
-- [ ] **Step 5: Re-run tests and observe GREEN**
+- [x] **Step 5: Re-run tests and observe GREEN**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/mcp/src/core/search-frontdoor.ts \
@@ -235,7 +235,7 @@ git commit -m "fix(mcp): require proven publication for stale reads"
 
 **Known current risk:** after the lease is acquired, `SearchRequestCoordinator` still compares `preparedObservation` with the current authority observation. Activation can legitimately change that pointer while the pinned old generation remains retained, so stale-mode N readers must not be invalidated solely by N+1 activation.
 
-- [ ] **Step 1: Replace simulation-only test with real coordinator behavior**
+- [x] **Step 1: Replace simulation-only test with real coordinator behavior**
 
 The test must instantiate/exercise the actual `SearchRequestCoordinator`/`PreparedPublicationReadSession` path. Do not manually construct a fake `frontDoorResult` and call that “coordinator execution.”
 
@@ -255,21 +255,21 @@ assert.deepEqual(boundCollectionsForB, ["col_gen_n1"]);
 assert.equal(unpinnedSemanticSearchCalls, 0);
 ```
 
-- [ ] **Step 2: Add/retain Core retention-gate proof**
+- [x] **Step 2: Add/retain Core retention-gate proof**
 
 Using real `IndexAuthorityCoordinator.acquirePublicationReadLease()`, prove retention cleanup waits while A's lease is held and can proceed after release. Keep this separate from MCP retrieval assertions so each ownership boundary is testable.
 
-- [ ] **Step 3: Run tests and observe RED if activation invalidates A**
+- [x] **Step 3: Run tests and observe RED if activation invalidates A**
 
-- [ ] **Step 4: Implement minimal stale-session authority revalidation rule**
+- [x] **Step 4: Implement minimal stale-session authority revalidation rule**
 
 For `served_previous_generation`, current-authority pointer movement after lease acquisition is not itself a stale condition. Revalidation must preserve the pinned receipt identity and lease, not require the global current pointer to remain N.
 
 Non-stale/current-source reads retain existing authority/source-drift checks.
 
-- [ ] **Step 5: Re-run focused tests and observe GREEN**
+- [x] **Step 5: Re-run focused tests and observe GREEN**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/mcp/src/core/search-request-coordinator.ts \
@@ -297,11 +297,11 @@ git commit -m "fix(mcp): preserve pinned readers across publication activation"
 
 **Behavior contract:** Context owns the semantic analyzer it passes to `IndexGenerationWorkflow`; runtime shutdown owns Context disposal. Shutdown is idempotent and happens only after active sync lifecycle work is drained.
 
-- [ ] **Step 1: Add failing analyzer-port type/lifecycle test**
+- [x] **Step 1: Add failing analyzer-port type/lifecycle test**
 
 Use a fake analyzer with a dispose counter. The test must prove Context, not test code, owns disposal.
 
-- [ ] **Step 2: Add the lifecycle contract in the correct interface file**
+- [x] **Step 2: Add the lifecycle contract in the correct interface file**
 
 In `packages/core/src/semantic/analyzer-port.ts`:
 
@@ -361,7 +361,7 @@ git commit -m "fix(runtime): own semantic worker lifecycle through Context"
 
 **Behavior contract:** preserve `ignore_control_changed` and `checkpoint_changed`; actual completed `differs` evidence is more causal than generic watcher pending; watcher pending remains more informative than an unavailable comparison.
 
-- [ ] **Step 1: Write failing precedence tests**
+- [x] **Step 1: Write failing precedence tests**
 
 ```ts
 assert.equal(determineFreshnessTriggerReason({
@@ -380,9 +380,9 @@ assert.equal(determineFreshnessTriggerReason({
 }), "watcher_pending");
 ```
 
-- [ ] **Step 2: Run tests and observe RED**
+- [x] **Step 2: Run tests and observe RED**
 
-- [ ] **Step 3: Implement precedence**
+- [x] **Step 3: Implement precedence**
 
 ```ts
 if (input.ignoreControlChanged) return "ignore_control_changed";
@@ -396,9 +396,9 @@ if (input.thresholdMs === 0) return "manual_zero_threshold";
 return "threshold_expired";
 ```
 
-- [ ] **Step 4: Re-run tests and observe GREEN**
+- [x] **Step 4: Re-run tests and observe GREEN**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/mcp/src/core/sync.ts packages/mcp/src/core/sync-diagnostic-triggers.test.ts
@@ -411,43 +411,43 @@ git commit -m "fix(mcp): report causal freshness sync triggers"
 
 **Files:** none unless qualification exposes a defect.
 
-- [ ] Run semantic artifact verification:
+- [x] Run semantic artifact verification:
 
 ```bash
 pnpm semantic:verify
 ```
 
-- [ ] Run workspace checks:
+- [x] Run workspace checks:
 
 ```bash
 pnpm run check
 ```
 
-- [ ] Run Core tests:
+- [x] Run Core tests:
 
 ```bash
 pnpm --filter @zokizuan/satori-core test
 ```
 
-- [ ] Run MCP tests:
+- [x] Run MCP tests:
 
 ```bash
 pnpm --filter @zokizuan/satori-mcp test
 ```
 
-- [ ] Run installer tests because runtime lifecycle ownership changed:
+- [x] Run installer tests because runtime lifecycle ownership changed:
 
 ```bash
 node --test scripts/install-local-mcp-runtime.test.mjs
 ```
 
-- [ ] Run packed/release verification:
+- [x] Run packed/release verification:
 
 ```bash
 pnpm run release:check
 ```
 
-- [ ] Product characterization on the exact qualified head:
+- [x] Product characterization on the exact qualified head:
   1. Hold a real sync in `writing`.
   2. Fire five parallel searches without a settle/throwaway ritual.
   3. Require 5/5 tool responses with no `-32001` and no `not_ready` solely because sync is active.
