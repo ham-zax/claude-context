@@ -32,7 +32,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Apply exact stale-sync readiness fix
-        shell: python
+        shell: python {0}
         run: |
           from pathlib import Path
 
