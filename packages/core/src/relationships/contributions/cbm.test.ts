@@ -262,14 +262,26 @@ test('CbmSemanticContributionEngine abstains when enclosing symbol is non-callab
     ];
 
     const registry: SymbolRegistry = {
+        manifest: {
+            schemaVersion: 'symbol_registry_v3',
+            normalizedRootPath: '/repo',
+            rootFingerprint: 'rfp',
+            indexPolicyHash: 'iph',
+            languageRouterVersion: 'lr-v2',
+            extractorVersion: 'v1',
+            relationshipVersion: 'v1',
+            builtAt: '2026-08-14T00:00:00.000Z',
+            files: [
+                { path: 'main.go', hash: 'h1', language: 'go', symbolCount: 2, definitionStatus: 'definitions_present' },
+            ],
+        },
         symbols,
         symbolsByFile: new Map([['main.go', symbols]]),
-        symbolsByKey: new Map(symbols.map((s) => [s.symbolKey, s])),
         symbolsByInstanceId: new Map(symbols.map((s) => [s.symbolInstanceId, s])),
-        qualifiedNameRegistry: { byQn: new Map(), byKey: new Map() },
-        generationId: 'gen-test',
-        schemaVersion: 'v1',
-        createdAt: new Date().toISOString(),
+        symbolsByKey: new Map(symbols.map((s) => [s.symbolKey, [s]])),
+        symbolsByLabel: new Map(symbols.map((s) => [s.label, [s]])),
+        symbolsByQualifiedName: new Map(symbols.map((s) => [s.qualifiedName, [s]])),
+        warnings: [],
     };
 
     const engine = new CbmSemanticContributionEngine('go');
