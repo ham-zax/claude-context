@@ -40,8 +40,15 @@ graph TD
 
 | Workload Class | Original Baseline | Target (Horizon 1) | Key Bottleneck Addressed |
 | :--- | :--- | :--- | :--- |
-| **Class A: `satori`** (TS-heavy, 577 files, 13.5k chunks) | **52.7s** | **18–22s** (Target) | LanceDB 425 write calls $\to$ ~54 calls; Potion IPC batching |
-| **Class B: `tradingview_ratio`** (Python, 1,422 files, 19.6k chunks) | **146.1s** | **45–55s** (Target) | LanceDB 612 write calls $\to$ ~77 calls; Python navigation cache |
+| **Class A: `satori`** (TS-heavy, 964 files, 19.8k chunks) | **~75–120s** (Write: ~55s) | **18–22s** (Target) | LanceDB 618 write calls $\to$ 78 calls; Potion IPC batching |
+| **Class B: `tradingview_ratio`** (Python, 1,422 files, 19.6k chunks) | **146.1s** (Write: ~55s) | **45–55s** (Target) | LanceDB 612 write calls $\to$ 77 calls; Python navigation cache |
+
+### Empirical Results (Measured Progress)
+
+| Workload Class | Original Baseline | Phase 1 (LanceDB 256 Aggregation) | Phase 2 (Potion Batch IPC) | Key Measured Win |
+| :--- | :--- | :--- | :--- | :--- |
+| **`satori`** (TS, 19.8k chunks) | ~75–120s (618 writes / 55s) | **68.81s** (78 writes / 4.29s) | *Verified Parity: $\le 10^{-6}$ max diff* | **-87.4% write calls (-92.2% write duration)** |
+| **`tradingview_ratio`** (Python, 19.6k chunks) | 146.10s (612 writes / 55s) | **77.30s** (warm: **67.6s–68.6s**, 77 writes / 3.72s) | *Verified Parity: $\le 10^{-6}$ max diff* | **~78s wall-clock speedup (2x faster)** |
 
 > [!NOTE]
 > 256 rows is the selected **bounded-memory tradeoff** (512 remains the measured maximum-throughput point: 27 calls on `satori` / 39 calls on `tradingview_ratio`). Wall-clock numbers represent engineering targets; release acceptance is governed by empirical call-count reductions, frozen inference parity, and absence of correctness regressions.
