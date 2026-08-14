@@ -2074,6 +2074,7 @@ export class SearchRequestCoordinator {
                     retrievalPolicy,
                     entrypointOwnerEvidence,
                     requestedSubdirectory,
+                    dirtyFilesNotFreshened: initialDirtyFilesNotFreshened,
                 }, {
                     searchQuerySupport: this.searchQuerySupport,
                     semanticSearch: (request) => {

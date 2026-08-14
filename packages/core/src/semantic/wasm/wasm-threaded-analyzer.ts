@@ -66,6 +66,7 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
             this.worker = new Worker(scriptPath, {
                 execArgv: filterWorkerExecArgv(),
             });
+            this.worker.unref();
 
             this.worker.on('message', (response: WasmWorkerResponse) => {
                 const pending = this.pendingRequests.get(response.id);

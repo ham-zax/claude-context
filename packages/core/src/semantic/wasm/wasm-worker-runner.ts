@@ -25,6 +25,7 @@ export type WasmWorkerResponse =
     };
 
 if (parentPort) {
+    parentPort.unref();
     parentPort.on('message', async (message: WasmWorkerRequest) => {
         try {
             const evidence = await analyzer.analyze(message.input);
