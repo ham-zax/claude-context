@@ -2313,3 +2313,84 @@ test('buildRelationshipDelta full-rebuild oracle keeps records, claims, proof st
         assert.deepEqual(claimsFor(deltaAnalysis2, file), claimsFor(deltaAnalysis, file));
     }
 });
+
+test('Characterization: Python resolution preserves exact CALLS, claims, and flow proof steps', async () => {
+    const sources = new Map([
+        ['pkg/__init__.py', ''],
+        ['pkg/db.py', 'class Database:\n    def query(self, q: str) -> str:\n        return q\n'],
+        ['pkg/service.py', 'from pkg.db import Database\n\ndef run():\n    db = Database()\n    return db.query("SELECT 1")\n'],
+    ]);
+    const { registry, analysisByFile } = await buildAnalyzedPythonRegistry(sources);
+    const records = buildRelationshipsForRegistry({ registry, analysisByFile });
+    
+    // Check CALLS records
+    const calls = records.filter((r) => r.type === 'CALLS');
+    assert.ok(calls.length >= 2, 'Must have at least constructor call and query call');
+    
+    // Check attached claims
+    const serviceEvidence = analysisByFile.get('pkg/service.py');
+    assert.ok(serviceEvidence?.resolutionClaims);
+    assert.ok(serviceEvidence.resolutionClaims.length >= 2);
+    
+    const queryClaim = serviceEvidence.resolutionClaims.find((c) => c.targetSymbol?.includes('query'));
+    assert.ok(queryClaim, 'Query method call must be resolved in claims');
+    assert.equal(queryClaim.decision, 'resolved');
+    assert.equal(queryClaim.resolutionAuthority, 'origin_flow');
+});
+
+test('Characterization: JS/TS syntactic resolution produces direct CALLS and derived TESTS edges', async () => {
+    const sources = new Map([
+        ['src/math.ts', 'export function add(a: number, b: number): number { return a + b; }\n'],
+        ['src/app.ts', 'import { add } from "./math";\nexport function main() { return add(1, 2); }\n'],
+        ['tests/app.test.ts', 'import { add } from "../src/math";\nexport function testAdd() { return add(2, 3); }\n'],
+    ]);
+    const analysisByFile = await analyzeFiles(sources);
+    const symbols: SymbolRecord[] = [];
+    const files: SymbolRegistryManifest['files'] = [];
+
+    for (const [relativePath, content] of sources.entries()) {
+        const analysis = analysisByFile.get(relativePath);
+        assert.ok(analysis);
+        const fileSymbols = buildSymbolRecordsForFile({
+            relativePath,
+            language: 'typescript',
+            content,
+            fileHash: `hash-${relativePath}`,
+            extractorVersion: 'test-extractor-v1',
+            chunks: [],
+            extractedSymbols: analysis.symbols,
+        });
+        symbols.push(...fileSymbols);
+        files.push({
+            path: relativePath,
+            language: 'typescript',
+            hash: `hash-${relativePath}`,
+            symbolCount: fileSymbols.length,
+            definitionStatus: 'definitions_present',
+        });
+    }
+
+    const registry = buildSymbolRegistry({
+        manifest: {
+            ...manifest(),
+            files,
+        },
+        symbols,
+    });
+
+
+    const records = buildRelationshipsForRegistry({ registry, analysisByFile });
+    
+    // Production call from src/app.ts -> src/math.ts
+    const appCalls = records.filter((r) => r.file === 'src/app.ts' && r.type === 'CALLS');
+    assert.equal(appCalls.length, 1);
+    
+    // Test call from tests/app.test.ts -> src/math.ts has both CALLS and derived TESTS
+    const testCalls = records.filter((r) => r.file === 'tests/app.test.ts' && r.type === 'CALLS');
+    const testTests = records.filter((r) => r.file === 'tests/app.test.ts' && r.type === 'TESTS');
+    assert.equal(testCalls.length, 1);
+    assert.equal(testTests.length, 1);
+    assert.equal(testCalls[0].targetInstanceId, testTests[0].targetInstanceId);
+});
+
+

@@ -79,6 +79,8 @@ import {
     buildRelationshipsForRegistry,
     type RelationshipAnalysisEvidence,
 } from '../relationships';
+import { noopSemanticProjectAnalyzer } from '../semantic';
+
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -965,6 +967,7 @@ export class Context {
         this.indexingPipeline = new IndexingPipeline({
             getVectorDatabase: () => this.vectorDatabase,
             languageAnalyzer: this.languageAnalyzer,
+            semanticAnalyzer: noopSemanticProjectAnalyzer,
             getEmbedding: () => this.embedding,
             assertEmbeddingIdentityCurrent: () => this.assertEmbeddingIdentityCurrent(),
             isHybridEnabled: () => this.getIsHybrid(),
@@ -982,6 +985,7 @@ export class Context {
             ),
             getSymbolExtractorVersion: () => this.getSymbolExtractorVersion(),
         });
+
         this.semanticSearchService = new SemanticSearchService({
             getVectorDatabase: () => this.vectorDatabase,
             embeddingAccess: {

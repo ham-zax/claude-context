@@ -85,6 +85,10 @@ export type ExpectedIndexedChunk = Readonly<{
     chunkIndex: number;
 }>;
 
+import type { SemanticProjectAnalyzer, SemanticSourceFile } from '../semantic';
+
+type IgnoreMatcher = ReturnType<typeof ignore>;
+
 export type ProcessedFileList = Readonly<{
     processedFiles: number;
     totalChunks: number;
@@ -92,6 +96,7 @@ export type ProcessedFileList = Readonly<{
     symbolRecords: SymbolRecord[];
     symbolManifestFiles: SymbolRegistryManifestFile[];
     analysisByFile: Map<string, RelationshipAnalysisEvidence>;
+    semanticSources?: readonly SemanticSourceFile[];
     indexedFileHashes: ReadonlyMap<string, string>;
     performance: IndexingPipelineMetrics;
 }>;
@@ -119,11 +124,10 @@ interface PendingIndexedChunk extends ProjectedChunkEntry {
     readonly codebasePath: string;
 }
 
-type IgnoreMatcher = ReturnType<typeof ignore>;
-
 type IndexingPipelineConfig = Readonly<{
     getVectorDatabase: () => VectorDatabase;
     languageAnalyzer: LanguageAnalysisPort;
+    semanticAnalyzer?: SemanticProjectAnalyzer;
     getEmbedding: () => Embedding;
     assertEmbeddingIdentityCurrent: () => Readonly<EmbeddingIdentity>;
     isHybridEnabled: () => boolean;
@@ -141,6 +145,7 @@ type IndexingPipelineConfig = Readonly<{
     ) => boolean;
     getSymbolExtractorVersion: () => string;
 }>;
+
 
 function resolveEmbeddingBatchSize(
     rawValue: string | undefined,
@@ -193,6 +198,7 @@ function chunksWithResolvedOwners(
 export class IndexingPipeline {
     private readonly getVectorDatabase: () => VectorDatabase;
     private readonly languageAnalyzer: LanguageAnalysisPort;
+    private readonly semanticAnalyzer?: SemanticProjectAnalyzer;
     private readonly getEmbedding: () => Embedding;
     private readonly assertEmbeddingIdentityCurrent: () => Readonly<EmbeddingIdentity>;
     private readonly isHybridEnabled: () => boolean;
@@ -209,6 +215,7 @@ export class IndexingPipeline {
     constructor(config: IndexingPipelineConfig) {
         this.getVectorDatabase = config.getVectorDatabase;
         this.languageAnalyzer = config.languageAnalyzer;
+        this.semanticAnalyzer = config.semanticAnalyzer;
         this.getEmbedding = config.getEmbedding;
         this.assertEmbeddingIdentityCurrent = config.assertEmbeddingIdentityCurrent;
         this.isHybridEnabled = config.isHybridEnabled;
@@ -218,6 +225,7 @@ export class IndexingPipeline {
         this.matchesIgnorePattern = config.matchesIgnorePattern;
         this.getSymbolExtractorVersion = config.getSymbolExtractorVersion;
     }
+
 
     async getCodeFiles(
         codebasePath: string,
@@ -454,6 +462,7 @@ export class IndexingPipeline {
         const symbolRecords: SymbolRecord[] = [];
         const symbolManifestFiles: SymbolRegistryManifestFile[] = [];
         const analysisByFile = new Map<string, RelationshipAnalysisEvidence>();
+        const semanticSources: SemanticSourceFile[] = [];
         const indexedFileHashes = new Map<string, string>();
         const performance: IndexingPipelineMetrics = {
             analysisMs: 0,
@@ -509,6 +518,13 @@ export class IndexingPipeline {
                 const { relativePath } = analyzed;
                 analysisByFile.set(relativePath, symbolFacts.relationshipEvidence);
                 indexedFileHashes.set(relativePath, analyzed.sourceHash);
+                if (this.semanticAnalyzer?.supportsLanguage(analyzed.language)) {
+                    semanticSources.push({
+                        path: analyzed.relativePath,
+                        source: analyzed.source,
+                        sourceHash: analyzed.sourceHash,
+                    });
+                }
                 symbolRecords.push(...symbolFacts.symbolRecords);
                 symbolManifestFiles.push(symbolFacts.manifestFile);
                 performance.analysisMs += Date.now() - analysisStartedAt;
@@ -584,8 +600,10 @@ export class IndexingPipeline {
                 if (limitReached) break;
             } catch (error) {
                 console.error(
-                    `[Context] ❌ Failed to index file ${filePath}: ${describeError(error)}`,
+                    `[Context] ⚠️  Failed to process file ${filePath}:`,
+                    error,
                 );
+                if (error instanceof Error) console.error('[Context] Stack trace:', error.stack);
                 throw error;
             }
         }
@@ -609,6 +627,7 @@ export class IndexingPipeline {
             symbolRecords,
             symbolManifestFiles,
             analysisByFile,
+            ...(semanticSources.length > 0 ? { semanticSources } : {}),
             indexedFileHashes,
             performance,
         };

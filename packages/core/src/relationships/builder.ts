@@ -1,23 +1,21 @@
-import { isLanguageCapabilitySupportedForLanguage } from '../language';
 import type { LanguageAnalysisResult } from '../language-analysis';
 import type { RelationshipRecord, SymbolRecord, SymbolRegistry } from '../symbols';
-import { isTestOrFixturePath } from './test-path';
 import {
-    buildTargetIndex,
     compareRelationshipRecords,
     compareStrings,
     getEvidence,
     getEvidenceEntries,
-    isEligibleCallTarget,
-    ownerForCall,
     relationshipKey,
     relationshipSpan,
     resolvePythonModulePath,
     resolveRelativeModulePath,
-    resolvePythonRelationships,
-    resolveUnambiguousTarget,
 } from './python-resolution';
 import type { ResolutionClaim } from './resolution';
+import { pythonResolutionContributionEngine } from './contributions/python';
+import { syntacticResolutionContributionEngine } from './contributions/syntactic';
+import type { RelationshipBuildMode } from './contributions/contracts';
+import type { LanguageResolutionStrategyRegistry } from './resolution-strategy-registry';
+
 
 export type RelationshipAnalysisEvidence =
     Pick<LanguageAnalysisResult, 'moduleBindings' | 'callSites'>
@@ -34,6 +32,8 @@ export interface BuildCallRelationshipsForRegistryInput {
      * analysis map as semantic context for cross-file resolution.
      */
     sourceFiles?: ReadonlySet<string>;
+    mode?: RelationshipBuildMode;
+    strategyRegistry?: LanguageResolutionStrategyRegistry;
 }
 
 export type BuildRelationshipsForRegistryInput = BuildCallRelationshipsForRegistryInput;
@@ -97,66 +97,89 @@ function attachResolutionClaims(
     }
 }
 
-export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsForRegistryInput): RelationshipRecord[] {
-    const targetIndex = buildTargetIndex(input.registry.symbols);
-    const symbolsByFile = input.registry.symbolsByFile;
-    const recordsByKey = new Map<string, RelationshipRecord>();
+/**
+ * Centrally admits resolved call claims proposed by language providers,
+ * verifying that the decision is resolved, authority is approved, and both
+ * source and target symbol instances exist in the current registry.
+ */
+export function admitResolvedCallClaims(input: {
+    registry: SymbolRegistry;
+    claims: readonly ResolutionClaim[];
+}): RelationshipRecord[] {
+    const symbolsByInstanceId = new Map(
+        input.registry.symbols.map((symbol) => [symbol.symbolInstanceId, symbol]),
+    );
+    const admitted: RelationshipRecord[] = [];
 
-    // Python-specific module/direct/member/flow resolution and claim
-    // construction are delegated to the side-effect-free engine. Claim
-    // attachment to analysis evidence happens here during emit.
-    const pythonResult = resolvePythonRelationships({
+    for (const claim of input.claims) {
+        if (claim.decision !== 'resolved') continue;
+        if (claim.relationshipType !== 'CALLS') continue;
+        if (!claim.sourceInstanceId || !claim.targetInstanceId) continue;
+        if (claim.resolutionAuthority !== 'direct_binding' && claim.resolutionAuthority !== 'origin_flow') continue;
+
+        const source = symbolsByInstanceId.get(claim.sourceInstanceId);
+        const target = symbolsByInstanceId.get(claim.targetInstanceId);
+        if (!source || !target) continue;
+
+        const record: RelationshipRecord = {
+            sourceKey: source.symbolKey,
+            sourceInstanceId: source.symbolInstanceId,
+            targetKey: target.symbolKey,
+            targetInstanceId: target.symbolInstanceId,
+            type: 'CALLS',
+            file: source.file,
+            span: claim.callSpan,
+            confidence: target.file === source.file ? 'high' : 'low',
+        };
+        admitted.push(record);
+    }
+
+    return admitted;
+}
+
+
+export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsForRegistryInput): RelationshipRecord[] {
+    const recordsByKey = new Map<string, RelationshipRecord>();
+    const allClaimsByFile = new Map<string, ResolutionClaim[]>();
+
+    // Python-specific module/direct/member/flow resolution and claim construction
+    const pythonResult = pythonResolutionContributionEngine.resolveCalls({
         registry: input.registry,
         analysisByFile: input.analysisByFile,
-        settings: { sourceFiles: input.sourceFiles },
+        sourceFiles: input.sourceFiles,
+        mode: input.mode,
     });
     for (const record of pythonResult.records) {
         recordsByKey.set(relationshipKey(record), record);
     }
-
-    for (const file of input.registry.manifest.files) {
-        if (input.sourceFiles && !input.sourceFiles.has(file.path)) continue;
-        if (file.language === 'python') continue;
-        if (!isLanguageCapabilitySupportedForLanguage(file.language, 'callGraphBuild')) continue;
-        const evidence = getEvidence(input.analysisByFile, file.path);
-        if (!evidence) continue;
-        for (const call of evidence.callSites) {
-            const source = ownerForCall(symbolsByFile.get(file.path) ?? [], call);
-            if (!source) continue;
-            const candidates = targetIndex.get(call.calleeName);
-            const target = !candidates || candidates.length === 0
-                ? undefined
-                : call.kind === 'member'
-                    ? undefined
-                    : resolveUnambiguousTarget(
-                        source,
-                        candidates.filter((candidate) => isEligibleCallTarget(call, candidate)),
-                    );
-            if (!target) continue;
-            const record: RelationshipRecord = {
-                sourceKey: source.symbolKey,
-                sourceInstanceId: source.symbolInstanceId,
-                targetKey: target.symbolKey,
-                targetInstanceId: target.symbolInstanceId,
-                type: 'CALLS',
-                file: source.file,
-                span: relationshipSpan(call),
-                confidence: target.file === source.file ? 'high' : 'low',
-            };
-            recordsByKey.set(relationshipKey(record), record);
-            if (isTestOrFixturePath(source.file) && !isTestOrFixturePath(target.file)) {
-                const testRecord: RelationshipRecord = {
-                    ...record,
-                    type: 'TESTS',
-                };
-                recordsByKey.set(relationshipKey(testRecord), testRecord);
-            }
+    if (pythonResult.claimsByFile) {
+        for (const [file, claims] of pythonResult.claimsByFile) {
+            allClaimsByFile.set(file, [...claims]);
         }
     }
 
-    attachResolutionClaims(input.analysisByFile, pythonResult.claimsByFile);
+    // Syntactic non-Python direct call matching and derived TESTS edges
+    const syntacticResult = syntacticResolutionContributionEngine.resolveCalls({
+        registry: input.registry,
+        analysisByFile: input.analysisByFile,
+        sourceFiles: input.sourceFiles,
+        mode: input.mode,
+    });
+    for (const record of syntacticResult.records) {
+        recordsByKey.set(relationshipKey(record), record);
+    }
+    if (syntacticResult.claimsByFile) {
+        for (const [file, claims] of syntacticResult.claimsByFile) {
+            const existing = allClaimsByFile.get(file) ?? [];
+            existing.push(...claims);
+            allClaimsByFile.set(file, existing);
+        }
+    }
+
+    attachResolutionClaims(input.analysisByFile, allClaimsByFile);
     return [...recordsByKey.values()].sort(compareRelationshipRecords);
 }
+
 
 function buildImportExportRelationshipsForRegistry(input: BuildRelationshipsForRegistryInput): RelationshipRecord[] {
     const fileOwners = getFileOwners(input.registry.symbols);
