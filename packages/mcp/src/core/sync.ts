@@ -112,10 +112,10 @@ export interface FreshnessTriggerInput {
 export function determineFreshnessTriggerReason(input: FreshnessTriggerInput): FreshnessTriggerReason {
     if (input.ignoreControlChanged) return 'ignore_control_changed';
     if (input.checkpointChanged) return 'checkpoint_changed';
-    if (input.watcherPending) return 'watcher_pending';
     if (input.exactComparison?.status === 'differs') return 'exact_compare_differs';
-    if (input.exactComparison?.status === 'unavailable') return 'exact_compare_unavailable';
     if (input.fullComparison?.status === 'differs') return 'full_compare_differs';
+    if (input.watcherPending) return 'watcher_pending';
+    if (input.exactComparison?.status === 'unavailable') return 'exact_compare_unavailable';
     if (input.fullComparison?.status === 'unavailable') return 'full_compare_unavailable';
     if (input.thresholdMs === 0) return 'manual_zero_threshold';
     return 'threshold_expired';

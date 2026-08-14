@@ -59,10 +59,22 @@ test('determineFreshnessTriggerReason preserves precedence across multiple activ
         fullComparison: { status: 'differs' },
     }), 'ignore_control_changed');
 
-    // watcher pending takes precedence over exact comparison
+    // exact comparison differs takes precedence over watcher pending
     assert.equal(determineFreshnessTriggerReason({
         watcherPending: true,
         exactComparison: { status: 'differs' },
+    }), 'exact_compare_differs');
+
+    // full comparison differs takes precedence over watcher pending
+    assert.equal(determineFreshnessTriggerReason({
+        watcherPending: true,
+        fullComparison: { status: 'differs' },
+    }), 'full_compare_differs');
+
+    // watcher pending takes precedence over exact comparison unavailable
+    assert.equal(determineFreshnessTriggerReason({
+        watcherPending: true,
+        exactComparison: { status: 'unavailable' },
     }), 'watcher_pending');
 
     // exact comparison differs takes precedence over threshold expiry
