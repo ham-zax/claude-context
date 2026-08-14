@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,103 +7,240 @@ import { connectCliMcpSession, type CliMcpSession } from '../packages/cli/src/cl
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const MCP_ROOT = path.resolve(__dirname, '..', 'packages', 'mcp');
+const SATORI_ROOT = path.resolve(__dirname, '..');
+const MCP_ROOT = path.join(SATORI_ROOT, 'packages', 'mcp');
 const RUNTIME_ENTRY = path.join(MCP_ROOT, 'dist', 'index.js');
-const TRUFFLEHOG_PATH = '/home/hamza/repo/trufflehog';
-
+const TARGET_REPO = process.env.SATORI_TASK7_REPO || '/home/hamza/repo/trufflehog';
 const POTION_ASSETS = path.join(MCP_ROOT, 'assets', 'potion', 'linux-x64');
+const POLL_INTERVAL_MS = 100;
+const OPERATION_TIMEOUT_MS = 10 * 60_000;
 
-function parseFirstText(result: Awaited<ReturnType<CliMcpSession['callTool']>>): Record<string, unknown> {
+type JsonRecord = Record<string, unknown>;
+
+type OperationIdentity = {
+    id: string;
+    action: string;
+    generation: number;
+    phase: string;
+};
+
+type PublicationIdentity = {
+    collectionName: string;
+    markerRunId: string;
+};
+
+function asRecord(value: unknown): JsonRecord | undefined {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as JsonRecord
+        : undefined;
+}
+
+function parseFirstText(result: Awaited<ReturnType<CliMcpSession['callTool']>>): JsonRecord {
     const content = result.content as Array<{ type?: string; text?: string }>;
     const text = content.find((part) => part.type === 'text')?.text;
     if (!text) throw new Error('Satori tool response did not contain text.');
     if (result.isError === true) throw new Error(`Satori tool failed: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return JSON.parse(text) as JsonRecord;
 }
 
-async function connect(env: Record<string, string>): Promise<CliMcpSession> {
+function readOperation(response: JsonRecord): OperationIdentity | undefined {
+    const operation = asRecord(response.operation);
+    if (!operation) return undefined;
+    if (
+        typeof operation.id !== 'string'
+        || typeof operation.action !== 'string'
+        || typeof operation.generation !== 'number'
+        || typeof operation.phase !== 'string'
+    ) return undefined;
+    return {
+        id: operation.id,
+        action: operation.action,
+        generation: operation.generation,
+        phase: operation.phase,
+    };
+}
+
+function requirePublication(response: JsonRecord, label: string): PublicationIdentity {
+    const publication = asRecord(response.publication);
+    if (
+        !publication
+        || typeof publication.collectionName !== 'string'
+        || publication.collectionName.length === 0
+        || typeof publication.markerRunId !== 'string'
+        || publication.markerRunId.length === 0
+    ) {
+        throw new Error(`${label} did not expose a proven publication identity.`);
+    }
+    return {
+        collectionName: publication.collectionName,
+        markerRunId: publication.markerRunId,
+    };
+}
+
+function git(args: string[], cwd = SATORI_ROOT): string {
+    return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+}
+
+function assertCleanWorktree(repoPath: string, label: string): void {
+    const dirty = git(['status', '--porcelain', '--untracked-files=all'], repoPath);
+    if (dirty.length > 0) {
+        throw new Error(`${label} must be clean before Task 7 qualification. Dirty paths:\n${dirty}`);
+    }
+}
+
+function buildExactHead(): string {
+    assertCleanWorktree(SATORI_ROOT, 'Satori worktree');
+    const head = git(['rev-parse', 'HEAD']);
+    execFileSync('pnpm', ['run', 'build'], {
+        cwd: SATORI_ROOT,
+        stdio: 'inherit',
+        env: process.env,
+    });
+    assertCleanWorktree(SATORI_ROOT, 'Satori worktree after build');
+    if (!fs.existsSync(RUNTIME_ENTRY)) {
+        throw new Error(`Built MCP runtime is missing: ${RUNTIME_ENTRY}`);
+    }
+    const headAfterBuild = git(['rev-parse', 'HEAD']);
+    if (headAfterBuild !== head) {
+        throw new Error(`Satori HEAD moved during build (${head} -> ${headAfterBuild}).`);
+    }
+    return head;
+}
+
+function chooseTrackedGoFile(repoPath: string): string {
+    const output = execFileSync('git', ['-C', repoPath, 'ls-files', '-z', '--', '*.go']);
+    const files = output.toString('utf8').split('\0').filter(Boolean);
+    const candidate = files.find((relativePath) => {
+        const base = path.basename(relativePath);
+        return !base.endsWith('_test.go') && !relativePath.includes('/vendor/');
+    }) ?? files[0];
+    if (!candidate) throw new Error('Target repository has no tracked Go file to mutate for Task 7.');
+    return path.join(repoPath, candidate);
+}
+
+async function connect(stateRoot: string): Promise<CliMcpSession> {
     const helperPath = path.join(POTION_ASSETS, 'satori-potion');
     const modelPath = path.join(POTION_ASSETS, 'model');
+    const childEnv = { ...process.env };
+    delete childEnv.SATORI_LATEON_PROFILE;
+    delete childEnv.SATORI_LATEON_ACTIVATION_POLICY;
+    delete childEnv.SATORI_LATEON_MODEL_PATH;
 
     return connectCliMcpSession({
         command: process.execPath,
         args: [RUNTIME_ENTRY],
         env: {
-            ...process.env,
+            ...childEnv,
             EMBEDDING_PROVIDER: 'Potion',
+            VECTOR_STORE_PROVIDER: 'LanceDB',
+            LANCEDB_PATH: path.join(stateRoot, 'lancedb'),
+            SATORI_STATE_ROOT: stateRoot,
             SATORI_RUNTIME_PROFILE: 'offline',
+            SATORI_RERANKER_PROVIDER: 'none',
             POTION_HELPER_PATH: helperPath,
             POTION_MODEL_PATH: modelPath,
             POTION_REQUEST_TIMEOUT_MS: '15000',
-            SATORI_SESSION_ROOTS_JSON: JSON.stringify([TRUFFLEHOG_PATH]),
-            ...env,
+            SATORI_SESSION_ROOTS_JSON: JSON.stringify([TARGET_REPO]),
         },
         startupTimeoutMs: 30_000,
-        callTimeoutMs: 120_000,
-        writeStderr: (chunk) => {
-            process.stderr.write(chunk);
-        },
+        callTimeoutMs: OPERATION_TIMEOUT_MS,
+        writeStderr: (chunk) => process.stderr.write(chunk),
     });
 }
 
-async function waitForIndexCompletion(session: CliMcpSession, repoPath: string): Promise<Record<string, unknown>> {
-    const deadline = Date.now() + 180_000;
-    while (Date.now() < deadline) {
-        const status = parseFirstText(await session.callTool('manage_index', {
-            action: 'status',
-            path: repoPath,
-        }));
-        const phase = (status.operation as Record<string, unknown> | undefined)?.phase;
-        if (phase === 'completed') return status;
-        if (phase === 'failed' || phase === 'blocked') {
-            throw new Error(`Index operation failed: ${JSON.stringify(status)}`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    throw new Error('Index operation did not complete within 180 seconds.');
+async function readStatus(session: CliMcpSession): Promise<JsonRecord> {
+    return parseFirstText(await session.callTool('manage_index', {
+        action: 'status',
+        path: TARGET_REPO,
+    }));
 }
 
-async function main() {
-    console.log('='.repeat(80));
-    console.log('🚀 REAL TASK 7 PRODUCT CHARACTERIZATION ON TRUFFLEHOG');
-    console.log(`Repository: ${TRUFFLEHOG_PATH}`);
-    console.log(`Runtime: ${RUNTIME_ENTRY}`);
-    console.log('='.repeat(80));
+async function waitForOperationPhase(
+    session: CliMcpSession,
+    predicate: (operation: OperationIdentity) => boolean,
+    description: string,
+): Promise<{ status: JsonRecord; operation: OperationIdentity }> {
+    const deadline = Date.now() + OPERATION_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+        const status = await readStatus(session);
+        const operation = readOperation(status);
+        if (operation) {
+            if (operation.phase === 'failed' || operation.phase === 'blocked') {
+                throw new Error(`Index operation ${operation.id} ${operation.phase}: ${JSON.stringify(status)}`);
+            }
+            if (predicate(operation)) return { status, operation };
+        }
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+    throw new Error(`Timed out waiting for ${description}.`);
+}
 
-    if (!fs.existsSync(TRUFFLEHOG_PATH)) {
-        throw new Error(`Target repo ${TRUFFLEHOG_PATH} does not exist.`);
+async function establishPublicationN(session: CliMcpSession): Promise<PublicationIdentity> {
+    const initial = await readStatus(session);
+    const initialStatus = initial.status;
+    if (initialStatus !== 'not_indexed' && initialStatus !== 'requires_reindex') {
+        throw new Error(`Isolated Task 7 state unexpectedly returned status=${String(initialStatus)}.`);
     }
 
-    const session = await connect({});
+    const action = initialStatus === 'requires_reindex' ? 'reindex' : 'create';
+    const start = parseFirstText(await session.callTool('manage_index', {
+        action,
+        path: TARGET_REPO,
+    }));
+    const startedOperation = readOperation(start);
+
+    const completed = await waitForOperationPhase(
+        session,
+        (operation) => (
+            operation.phase === 'completed'
+            && (!startedOperation || operation.id === startedOperation.id)
+        ),
+        `${action} completion`,
+    );
+    return requirePublication(completed.status, 'Publication N');
+}
+
+async function main(): Promise<void> {
+    console.log('='.repeat(80));
+    console.log('TASK 7: REAL STALE-WHILE-SYNC PRODUCT CHARACTERIZATION');
+    console.log(`Target repository: ${TARGET_REPO}`);
+    console.log('='.repeat(80));
+
+    if (!fs.existsSync(TARGET_REPO)) throw new Error(`Target repository does not exist: ${TARGET_REPO}`);
+    assertCleanWorktree(TARGET_REPO, 'Target repository');
+    const qualifiedHead = buildExactHead();
+    console.log(`Exact Satori HEAD: ${qualifiedHead}`);
+
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-task7-mvcc-'));
+    const mutationPath = chooseTrackedGoFile(TARGET_REPO);
+    const originalBytes = fs.readFileSync(mutationPath);
+    let session: CliMcpSession | undefined;
 
     try {
-        console.log('\n[Phase 1] Checking existing index on TruffleHog (establishing Publication N)...');
-        let status = parseFirstText(await session.callTool('manage_index', {
-            action: 'status',
-            path: TRUFFLEHOG_PATH,
-        }));
-        console.log(`Initial status: phase=${(status.operation as any)?.phase}, status=${status.status}, generation=${(status.operation as any)?.generation}`);
+        session = await connect(stateRoot);
 
-        if (status.status === 'requires_reindex' || status.status === 'not_indexed' || (status.operation as any)?.phase !== 'completed') {
-            console.log('Initial index needed or requires reindex. Running manage_index create/reindex...');
-            await session.callTool('manage_index', {
-                action: status.status === 'requires_reindex' ? 'reindex' : 'create',
-                path: TRUFFLEHOG_PATH,
-            });
-            status = await waitForIndexCompletion(session, TRUFFLEHOG_PATH);
-        }
+        console.log('\n[1/5] Establishing immutable publication N in isolated Satori state...');
+        const publicationN = await establishPublicationN(session);
+        console.log(`Publication N: ${publicationN.collectionName} / ${publicationN.markerRunId}`);
 
-        const pubN = (status.operation as any)?.generation;
-        console.log(`Publication N established: generation=${pubN}`);
+        console.log('\n[2/5] Creating one real tracked Go-source delta...');
+        const marker = `\n// satori-task7-mvcc-${qualifiedHead.slice(0, 12)}-${Date.now()}\n`;
+        fs.writeFileSync(mutationPath, Buffer.concat([originalBytes, Buffer.from(marker, 'utf8')]));
 
-        console.log('\n[Phase 2] Triggering real sync into writing and immediately firing 5 parallel searches (no settle ritual)...');
-        // Trigger a sync operation
-        const syncStartPromise = session.callTool('manage_index', {
+        console.log('[3/5] Starting real sync and requiring observation of its writing phase...');
+        const syncRequest = session.callTool('manage_index', {
             action: 'sync',
-            path: TRUFFLEHOG_PATH,
+            path: TARGET_REPO,
         });
 
-        // Immediately fire 5 parallel searches against TruffleHog while sync is active
+        const writing = await waitForOperationPhase(
+            session,
+            (operation) => operation.action === 'sync' && operation.phase === 'writing',
+            'the real sync to enter writing',
+        );
+        const syncOperation = writing.operation;
+        console.log(`Observed sync writing: id=${syncOperation.id}, generation=${syncOperation.generation}`);
+
         const searchQueries = [
             'where is detector verification handled',
             'git log scanner credentials',
@@ -111,77 +249,116 @@ async function main() {
             'trufflehog output formatter',
         ];
 
-        const searchStarts = performance.now();
-        const searchPromises = searchQueries.map(async (query, idx) => {
-            const start = performance.now();
-            const rawResult = await session.callTool('search_codebase', {
-                path: TRUFFLEHOG_PATH,
+        console.log('[4/5] Firing five parallel searches while that exact sync is writing...');
+        const searchResults = await Promise.all(searchQueries.map(async (query, index) => {
+            const startedAt = performance.now();
+            const response = parseFirstText(await session!.callTool('search_codebase', {
+                path: TARGET_REPO,
                 query,
                 limit: 5,
-            });
-            const elapsed = performance.now() - start;
-            const parsed = parseFirstText(rawResult);
-            return {
-                idx,
-                query,
-                elapsed,
-                rawResult,
-                parsed,
-            };
-        });
+            }));
+            return { index, query, response, elapsedMs: performance.now() - startedAt };
+        }));
 
-        const searchResults = await Promise.all(searchPromises);
-        const totalSearchElapsed = performance.now() - searchStarts;
-        console.log(`All 5 parallel searches completed in ${totalSearchElapsed.toFixed(1)}ms.`);
-
-        // Verify all 5 results
-        let allOk = true;
-        for (const res of searchResults) {
-            const resultStatus = res.parsed.status ?? 'ok';
-            const freshness = res.parsed.freshness as Record<string, unknown> | undefined;
-            const resultsCount = Array.isArray(res.parsed.results) ? res.parsed.results.length : 0;
-            console.log(` Search #${res.idx + 1} ("${res.query}"): status=${resultStatus}, duration=${res.elapsed.toFixed(1)}ms, results=${resultsCount}, freshnessState=${freshness?.state ?? 'unknown'}`);
-
-            if (res.rawResult.isError || resultStatus === 'not_ready') {
-                allOk = false;
-                console.error(`  FAIL: Search #${res.idx + 1} failed or returned not_ready!`);
+        for (const result of searchResults) {
+            if (result.response.status !== 'ok') {
+                throw new Error(`Search #${result.index + 1} returned status=${String(result.response.status)}.`);
             }
+            const freshness = asRecord(result.response.freshness);
+            const pendingOperation = asRecord(freshness?.pendingOperation);
+            if (freshness?.state !== 'sync_in_progress') {
+                throw new Error(`Search #${result.index + 1} did not report sync_in_progress freshness.`);
+            }
+            if (
+                freshness.servedCollection !== publicationN.collectionName
+                || freshness.servedRunId !== publicationN.markerRunId
+            ) {
+                throw new Error(
+                    `Search #${result.index + 1} was not pinned to publication N: ${JSON.stringify(freshness)}`,
+                );
+            }
+            if (
+                pendingOperation?.action !== 'sync'
+                || pendingOperation.generation !== syncOperation.generation
+            ) {
+                throw new Error(
+                    `Search #${result.index + 1} did not identify the active sync generation: ${JSON.stringify(freshness)}`,
+                );
+            }
+            const resultCount = Array.isArray(result.response.results) ? result.response.results.length : 0;
+            console.log(
+                `  Search #${result.index + 1}: ok, ${result.elapsedMs.toFixed(1)}ms, `
+                + `${resultCount} results, served N`,
+            );
         }
 
-        if (!allOk) {
-            throw new Error('One or more parallel searches failed or returned not_ready during sync.');
+        const syncStartResponse = parseFirstText(await syncRequest);
+        const syncStartOperation = readOperation(syncStartResponse);
+        if (
+            syncStartOperation
+            && (
+                syncStartOperation.id !== syncOperation.id
+                || syncStartOperation.generation !== syncOperation.generation
+            )
+        ) {
+            throw new Error(
+                `Sync tool response identity disagreed with observed writing operation: `
+                + `${JSON.stringify(syncStartOperation)} vs ${JSON.stringify(syncOperation)}`,
+            );
         }
 
-        console.log('\n[Phase 3] Awaiting completion and activation of the sync operation (Publication N+1)...');
-        await syncStartPromise;
-        const finalSyncStatus = await waitForIndexCompletion(session, TRUFFLEHOG_PATH);
-        const pubNPlus1 = (finalSyncStatus.operation as any)?.generation;
-        console.log(`Sync completed and activated: generation=${pubNPlus1}`);
+        const completed = await waitForOperationPhase(
+            session,
+            (operation) => (
+                operation.id === syncOperation.id
+                && operation.generation === syncOperation.generation
+                && operation.phase === 'completed'
+            ),
+            `sync ${syncOperation.id} completion`,
+        );
+        const publicationN1 = requirePublication(completed.status, 'Publication N+1');
+        if (publicationN1.markerRunId === publicationN.markerRunId) {
+            throw new Error('Sync completed without activating a distinct publication markerRunId.');
+        }
+        console.log(`Publication N+1: ${publicationN1.collectionName} / ${publicationN1.markerRunId}`);
 
-        console.log('\n[Phase 4] Verifying new search request uses updated Publication N+1...');
-        const postSyncSearch = parseFirstText(await session.callTool('search_codebase', {
-            path: TRUFFLEHOG_PATH,
+        console.log('[5/5] Verifying a post-activation search succeeds while N+1 remains authoritative...');
+        const postSearch = parseFirstText(await session.callTool('search_codebase', {
+            path: TARGET_REPO,
             query: 'detector verification',
             limit: 5,
         }));
-        const postFreshness = postSyncSearch.freshness as Record<string, unknown> | undefined;
-        console.log(`Post-sync search: status=${postSyncSearch.status ?? 'ok'}, results=${(postSyncSearch.results as any[])?.length}, freshnessState=${postFreshness?.state ?? 'synced'}`);
+        if (postSearch.status !== 'ok') {
+            throw new Error(`Post-activation search returned status=${String(postSearch.status)}.`);
+        }
+        const postStatus = await readStatus(session);
+        const postPublication = requirePublication(postStatus, 'Post-activation publication');
+        if (
+            postPublication.collectionName !== publicationN1.collectionName
+            || postPublication.markerRunId !== publicationN1.markerRunId
+        ) {
+            throw new Error('Active publication changed unexpectedly during the post-activation search.');
+        }
 
         console.log('\n' + '='.repeat(80));
-        console.log('✅ REAL TASK 7 PRODUCT CHARACTERIZATION PASSED ON TRUFFLEHOG:');
-        console.log(' - 5/5 parallel searches returned status ok during active sync writing');
-        console.log(' - 0 transport timeouts (-32001)');
-        console.log(' - 0 sync-only not_ready errors');
-        console.log(` - Stale reads pinned to publication N (${pubN})`);
-        console.log(` - Real sync cleanly activated to publication N+1 (${pubNPlus1})`);
-        console.log(' - Post-activation search successfully served from updated publication');
+        console.log('TASK 7 PRODUCT CHARACTERIZATION PASSED');
+        console.log(`Exact head: ${qualifiedHead}`);
+        console.log(' - real tracked source delta forced a non-noop sync');
+        console.log(` - exact sync generation ${syncOperation.generation} was observed in writing`);
+        console.log(' - 5/5 parallel searches returned status=ok during writing');
+        console.log(' - every search identified the same immutable publication N and pending sync');
+        console.log(' - the exact sync completed and activated a distinct publication N+1');
+        console.log(' - a post-activation search succeeded with N+1 still authoritative');
         console.log('='.repeat(80));
     } finally {
-        await session.close();
+        if (session) await session.close();
+        fs.writeFileSync(mutationPath, originalBytes);
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+        assertCleanWorktree(TARGET_REPO, 'Target repository after restoration');
     }
 }
 
-main().catch((err) => {
-    console.error('Task 7 Product Characterization Failed:', err);
+main().catch((error: unknown) => {
+    console.error('Task 7 product characterization failed:', error);
     process.exit(1);
 });
