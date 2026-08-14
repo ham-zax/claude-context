@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CbmSemanticContributionEngine } from './cbm';
 import type { SymbolRecord, SymbolRegistry } from '../../symbols';
 import type { SemanticProjectEvidence } from '../../semantic/contracts';
-import { DefaultSemanticLanguageRegistry, type SemanticLanguageDescriptor } from '../../semantic/descriptor';
+import { DefaultSemanticLanguageRegistry } from '../../semantic/descriptor';
 
 function createMockRegistryWithDecoy(): SymbolRegistry {
     const callerSpan = { startByte: 50, endByte: 150, startLine: 5, endLine: 10, startColumn: 0, endColumn: 1 };

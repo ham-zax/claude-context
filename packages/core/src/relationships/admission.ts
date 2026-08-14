@@ -1,4 +1,4 @@
-import type { RelationshipRecord, SymbolRecord, SymbolRegistry } from '../symbols';
+import type { RelationshipRecord, SymbolRegistry } from '../symbols';
 import type { ResolutionClaim } from './resolution';
 
 /**
