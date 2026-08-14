@@ -410,8 +410,28 @@ async function assertPackedPotionExecutionCapability(installRoot: string, packed
                 close(): Promise<void>;
             }>;
         };
+        restoreVerifiedOwnerExecutableBit(input: {
+            filePath: string;
+            expectedSha256: string;
+            label: string;
+        }): Promise<void>;
     };
 
+    // Packaging strips the owner execute bit; the install-side repair is the
+    // single integrity owner, performed here against the packed closure before
+    // runtime validation executes the helper.
+    const packedManifest = JSON.parse(fs.readFileSync(path.join(assetsRoot, "manifest.json"), "utf8")) as {
+        files?: Array<{ path?: string; sha256?: string }>;
+    };
+    const packedHelper = packedManifest.files?.find((artifact) => artifact.path === "satori-potion");
+    if (!packedHelper?.sha256) {
+        throw new Error("Packed Potion manifest does not declare the helper artifact.");
+    }
+    await core.restoreVerifiedOwnerExecutableBit({
+        filePath: helperPath,
+        expectedSha256: packedHelper.sha256,
+        label: "helper",
+    });
     const embedding = await core.PotionEmbedding.create({ helperPath, modelPath });
     try {
         const [result] = await embedding.embedDocuments([
