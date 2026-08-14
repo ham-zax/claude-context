@@ -12,9 +12,11 @@ export interface LanguageResolutionStrategyRegistry {
 
 const STRATEGY_BY_CANONICAL_LANGUAGE: Readonly<Record<string, LanguageResolutionStrategy>> = {
     python: 'python_native',
+    go: 'cbm_semantic',
     javascript: 'syntactic',
     typescript: 'syntactic',
 };
+
 
 export class DefaultLanguageResolutionStrategyRegistry implements LanguageResolutionStrategyRegistry {
     private readonly customStrategies: Map<string, LanguageResolutionStrategy>;

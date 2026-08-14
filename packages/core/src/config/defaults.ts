@@ -34,6 +34,13 @@ export const INDEXABLE_EXTENSIONLESS_FILENAMES = [
     '.dockerignore',
 ] as const;
 
+export const INDEXABLE_EXACT_FILENAMES = [
+    ...INDEXABLE_EXTENSIONLESS_FILENAMES,
+    'go.mod',
+    'go.work',
+] as const;
+
+
 export const MINIMAL_SUPPORTED_EXTENSIONS = [
     ...SOURCE_SUPPORTED_EXTENSIONS,
     ...DOC_SUPPORTED_EXTENSIONS,

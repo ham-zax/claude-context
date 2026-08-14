@@ -1,25 +1,26 @@
 import { isLanguageCapabilitySupportedForLanguage } from '../language';
 import type { LanguageAnalysisResult } from '../language-analysis';
 import type { RelationshipRecord, SymbolRecord, SymbolRegistry } from '../symbols';
+
 import {
     compareRelationshipRecords,
     compareStrings,
-    getEvidence,
-    getEvidenceEntries,
     relationshipKey,
     relationshipSpan,
     resolvePythonModulePath,
     resolveRelativeModulePath,
 } from './python-resolution';
+
 import type { ResolutionClaim } from './resolution';
 import { pythonResolutionContributionEngine } from './contributions/python';
 import { syntacticResolutionContributionEngine } from './contributions/syntactic';
+import { goResolutionContributionEngine } from './contributions/go';
 import type { RelationshipBuildMode } from './contributions/contracts';
 import {
     type LanguageResolutionStrategyRegistry,
     defaultResolutionStrategyRegistry,
 } from './resolution-strategy-registry';
-
+import type { SemanticProjectEvidence } from '../semantic';
 
 export type RelationshipAnalysisEvidence =
     Pick<LanguageAnalysisResult, 'moduleBindings' | 'callSites'>
@@ -39,7 +40,9 @@ export interface BuildCallRelationshipsForRegistryInput {
     sourceFiles?: ReadonlySet<string>;
     mode?: RelationshipBuildMode;
     strategyRegistry?: LanguageResolutionStrategyRegistry;
+    semanticEvidenceByLanguage?: ReadonlyMap<string, SemanticProjectEvidence> | Record<string, SemanticProjectEvidence>;
 }
+
 
 export type BuildRelationshipsForRegistryInput = BuildCallRelationshipsForRegistryInput;
 
@@ -68,11 +71,12 @@ function getFileOwners(symbols: readonly SymbolRecord[]): Map<string, SymbolReco
 function resolveUniqueLocalSymbol(
     file: string,
     name: string,
-    symbols: readonly SymbolRecord[],
+    symbolsByFile: Map<string, SymbolRecord[]>,
 ): SymbolRecord | undefined {
-    const matches = symbols.filter((symbol) => (
-        symbol.file === file
-        && symbol.kind !== 'file'
+    const fileSymbols = symbolsByFile.get(file);
+    if (!fileSymbols) return undefined;
+    const matches = fileSymbols.filter((symbol) => (
+        symbol.kind !== 'file'
         && symbol.name === name
         && symbol.parentQualifiedNamePath.length === 0
     ));
@@ -91,19 +95,42 @@ function resolveModulePathForDelta(
         : resolveRelativeModulePath(sourceFile, specifier, registry, language, availableFiles);
 }
 
+function getEvidence(
+    analysisByFile: Map<string, RelationshipAnalysisEvidence> | Record<string, RelationshipAnalysisEvidence> | undefined,
+    file: string,
+): RelationshipAnalysisEvidence | undefined {
+    if (!analysisByFile) return undefined;
+    if (analysisByFile instanceof Map) {
+        return analysisByFile.get(file);
+    }
+    return analysisByFile[file];
+}
+
+function getEvidenceEntries(
+    analysisByFile: Map<string, RelationshipAnalysisEvidence> | Record<string, RelationshipAnalysisEvidence> | undefined,
+): Array<[string, RelationshipAnalysisEvidence]> {
+    if (!analysisByFile) return [];
+    if (analysisByFile instanceof Map) {
+        return [...analysisByFile.entries()];
+    }
+    return Object.entries(analysisByFile);
+}
+
 function attachResolutionClaims(
     analysisByFile: Map<string, RelationshipAnalysisEvidence> | Record<string, RelationshipAnalysisEvidence>,
-    claimsByFile: ReadonlyMap<string, readonly ResolutionClaim[]>,
+    claimsByFile: Map<string, ResolutionClaim[]>,
 ): void {
-    for (const [file, claims] of claimsByFile.entries()) {
+    for (const [file, claims] of claimsByFile) {
         const evidence = getEvidence(analysisByFile, file);
-        if (!evidence) continue;
-        (evidence as { resolutionClaims?: readonly ResolutionClaim[] }).resolutionClaims =
-            [...claims].sort((left, right) =>
-                left.callSpan.startByte - right.callSpan.startByte
-            );
+        if (evidence) {
+            (evidence as { resolutionClaims?: readonly ResolutionClaim[] }).resolutionClaims =
+                [...claims].sort((left, right) =>
+                    left.callSpan.startByte - right.callSpan.startByte
+                );
+        }
     }
 }
+
 
 
 /**
@@ -112,7 +139,7 @@ function attachResolutionClaims(
  * source and target symbol instances exist in the current registry, and
  * provenance boundaries (source file match, line boundary containment) hold.
  */
-export function admitResolvedCallClaims(input: {
+export function admitAuthoritativeProofBackedCalls(input: {
     registry: SymbolRegistry;
     claims: readonly ResolutionClaim[];
 }): RelationshipRecord[] {
@@ -158,6 +185,9 @@ export function admitResolvedCallClaims(input: {
     return admitted;
 }
 
+export const admitResolvedCallClaims = admitAuthoritativeProofBackedCalls;
+
+
 
 export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsForRegistryInput): RelationshipRecord[] {
     const strategyRegistry = input.strategyRegistry ?? defaultResolutionStrategyRegistry;
@@ -167,19 +197,23 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
     // 1. Partition files by strategy, evaluating capability eligibility per language
     const pythonFiles = new Set<string>();
     const syntacticFiles = new Set<string>();
+    const goFiles = new Set<string>();
 
     for (const file of input.registry.manifest.files) {
         if (input.sourceFiles && !input.sourceFiles.has(file.path)) continue;
 
+        const strategy = strategyRegistry.strategyForLanguage(file.language);
         const isEligible = isLanguageCapabilitySupportedForLanguage(file.language, 'callGraphBuild')
-            || (input.mode?.kind === 'qualification' && input.mode.enabledUnpromotedCallLanguages.has(file.language));
+            || (input.mode?.kind === 'qualification' && input.mode.enabledUnpromotedCallLanguages.has(file.language))
+            || strategy === 'cbm_semantic';
         if (!isEligible) continue;
 
-        const strategy = strategyRegistry.strategyForLanguage(file.language);
         if (strategy === 'python_native') {
             pythonFiles.add(file.path);
         } else if (strategy === 'syntactic') {
             syntacticFiles.add(file.path);
+        } else if (strategy === 'cbm_semantic') {
+            goFiles.add(file.path);
         }
     }
 
@@ -216,6 +250,34 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
         }
         if (syntacticResult.claimsByFile) {
             for (const [file, claims] of syntacticResult.claimsByFile) {
+                const existing = allClaimsByFile.get(file) ?? [];
+                existing.push(...claims);
+                allClaimsByFile.set(file, existing);
+            }
+        }
+    }
+
+    // 4. Dispatch Go CBM semantic engine for cbm_semantic files
+    if (goFiles.size > 0) {
+        let semanticEvidence: SemanticProjectEvidence | undefined;
+        if (input.semanticEvidenceByLanguage) {
+            semanticEvidence = input.semanticEvidenceByLanguage instanceof Map
+                ? input.semanticEvidenceByLanguage.get('go')
+                : (input.semanticEvidenceByLanguage as Record<string, SemanticProjectEvidence>)['go'];
+        }
+        const goResult = goResolutionContributionEngine.resolveCalls({
+            registry: input.registry,
+            analysisByFile: input.analysisByFile,
+            sourceFiles: goFiles,
+            mode: input.mode,
+            strategyRegistry,
+            semanticEvidence,
+        });
+        for (const record of goResult.records) {
+            recordsByKey.set(relationshipKey(record), record);
+        }
+        if (goResult.claimsByFile) {
+            for (const [file, claims] of goResult.claimsByFile) {
                 const existing = allClaimsByFile.get(file) ?? [];
                 existing.push(...claims);
                 allClaimsByFile.set(file, existing);
@@ -271,8 +333,9 @@ function buildImportExportRelationshipsForRegistry(input: BuildRelationshipsForR
 
             const localName = binding.localName ?? binding.exportedName;
             const target = localName
-                ? resolveUniqueLocalSymbol(source.file, localName, symbolsByFile.get(source.file) ?? [])
+                ? resolveUniqueLocalSymbol(source.file, localName, symbolsByFile)
                 : undefined;
+
             if (!target) continue;
             const record: RelationshipRecord = {
                 sourceKey: source.symbolKey,

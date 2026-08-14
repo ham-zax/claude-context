@@ -77,7 +77,7 @@ import {
     type RelationshipAnalysisEvidence,
 } from '../relationships';
 
-import { noopSemanticProjectAnalyzer, type SemanticSourceFile } from '../semantic';
+import { WasmSemanticProjectAnalyzer, type SemanticSourceFile } from '../semantic';
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -816,8 +816,12 @@ export class Context {
                 this.legacyWriteCollectionOverrides.delete(canonicalRoot);
             },
         });
+
+        const semanticAnalyzer = new WasmSemanticProjectAnalyzer();
+
         this.indexGenerationWorkflow = new IndexGenerationWorkflow({
             acceptPreparedSourceGenerationReceipt: (canonicalRoot, receipt) => (
+
                 this.acceptPreparedSourceGenerationReceipt(canonicalRoot, receipt)
             ),
             assertResolvedIndexPolicyRoot: (codebasePath, policy) => (
@@ -940,19 +944,17 @@ export class Context {
                 this.readIndexableFileInsideRoot(absoluteFile, canonicalRoot, indexPolicy)
             ),
             languageAnalyzer: this.languageAnalyzer,
-            semanticAnalyzer: noopSemanticProjectAnalyzer,
+            semanticAnalyzer,
             waitForPublicationRetention: (canonicalRoot) => this.waitForPublicationRetention(canonicalRoot),
             writeCompletedIndexMarker: (codebasePath, indexedFiles, totalChunks, collectionName, indexStatus, assertMutationCurrent, navigationCandidate, indexPolicyHash, runId) => (
                 this.writeCompletedIndexMarker(codebasePath, indexedFiles, totalChunks, collectionName, indexStatus, assertMutationCurrent, navigationCandidate, indexPolicyHash, runId)
             ),
         });
 
-
-
         this.indexingPipeline = new IndexingPipeline({
             getVectorDatabase: () => this.vectorDatabase,
             languageAnalyzer: this.languageAnalyzer,
-            semanticAnalyzer: noopSemanticProjectAnalyzer,
+            semanticAnalyzer,
             getEmbedding: () => this.embedding,
             assertEmbeddingIdentityCurrent: () => this.assertEmbeddingIdentityCurrent(),
             isHybridEnabled: () => this.getIsHybrid(),
@@ -3558,8 +3560,9 @@ export class Context {
     }
 
     private getLanguageRouterVersion(): string {
-        return 'language-router-v1';
+        return 'language-router-v2';
     }
+
 
     private getRelationshipVersion(): string {
         return RELATIONSHIP_BUILDER_VERSION;

@@ -50,6 +50,7 @@
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "assets/tree-sitter/**",
+    "assets/semantic-engine/**",
     "README.md"
   ],
   "repository": {

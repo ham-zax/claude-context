@@ -3,8 +3,9 @@ import * as path from 'path';
 import { TextDecoder } from 'util';
 import {
     ALL_TEXT_INDEX_MARKER,
-    INDEXABLE_EXTENSIONLESS_FILENAMES,
+    INDEXABLE_EXACT_FILENAMES,
 } from './defaults';
+
 
 const DEFAULT_ALL_TEXT_MAX_BYTES = 1_048_576;
 const TEXT_PROBE_BYTES = 8192;
@@ -41,9 +42,9 @@ function getAllTextMaxBytes(): number {
     return parsePositiveInteger(process.env.SATORI_ALL_TEXT_MAX_BYTES, DEFAULT_ALL_TEXT_MAX_BYTES);
 }
 
-function isAllowedExtensionlessFilename(relativePath: string): boolean {
+function isAllowedExactFilename(relativePath: string): boolean {
     const basename = path.basename(relativePath).toLowerCase();
-    return INDEXABLE_EXTENSIONLESS_FILENAMES.some((filename) => filename.toLowerCase() === basename);
+    return INDEXABLE_EXACT_FILENAMES.some((filename) => filename.toLowerCase() === basename);
 }
 
 async function isUtf8TextObservationUnderLimit(
@@ -82,12 +83,13 @@ export async function isIndexableFileObservationByPolicy(
     if (extension && extensionSet.has(extension)) {
         return true;
     }
-    if (!extension && isAllowedExtensionlessFilename(relativePath)) {
+    if (isAllowedExactFilename(relativePath)) {
         return true;
     }
     if (!extensionSet.has(ALL_TEXT_INDEX_MARKER)) {
         return false;
     }
+
     return isUtf8TextObservationUnderLimit(size, readProbe);
 }
 

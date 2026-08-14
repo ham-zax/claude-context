@@ -48,9 +48,9 @@ export interface SemanticTargetProvenance {
 }
 
 export interface SemanticPackageBindingProof {
-    readonly localName: string;
     readonly importPath: string;
-    readonly packageIdentity: string;
+    readonly localName?: string;
+    readonly packageIdentity?: string;
     readonly span?: SourceSpan;
 }
 

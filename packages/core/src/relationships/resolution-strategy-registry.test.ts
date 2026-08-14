@@ -14,13 +14,14 @@ test('defaultResolutionStrategyRegistry maps canonical languages to their correc
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('ts'), 'syntactic');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('tsx'), 'syntactic');
     
-    // In Phase A, Go, Rust, Java, C++, etc. map to 'none'
-    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('go'), 'none');
+    // In Phase B, Go maps to 'cbm_semantic'
+    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('go'), 'cbm_semantic');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('rust'), 'none');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('rs'), 'none');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('java'), 'none');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('unknown-lang'), 'none');
 });
+
 
 test('DefaultLanguageResolutionStrategyRegistry accepts custom strategy overrides', () => {
     const custom = new DefaultLanguageResolutionStrategyRegistry({
