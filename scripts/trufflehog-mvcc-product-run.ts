@@ -14,6 +14,8 @@ const TARGET_REPO = process.env.SATORI_TASK7_REPO || '/home/hamza/repo/truffleho
 const POTION_ASSETS = path.join(MCP_ROOT, 'assets', 'potion', 'linux-x64');
 const POLL_INTERVAL_MS = 100;
 const OPERATION_TIMEOUT_MS = 10 * 60_000;
+const TASK7_DEBUG = process.env.SATORI_TASK7_DEBUG !== '0';
+const KEEP_FAILED_STATE = process.env.SATORI_TASK7_KEEP_STATE_ON_FAILURE === '1';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -29,10 +31,31 @@ type PublicationIdentity = {
     markerRunId: string;
 };
 
+type StatusTraceEntry = {
+    observedAt: string;
+    status: unknown;
+    reason: unknown;
+    operation?: OperationIdentity;
+    publication?: PublicationIdentity;
+};
+
 function asRecord(value: unknown): JsonRecord | undefined {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
         ? value as JsonRecord
         : undefined;
+}
+
+function formatError(error: unknown): string {
+    return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function debug(label: string, value?: unknown): void {
+    if (!TASK7_DEBUG) return;
+    if (value === undefined) {
+        console.error(`[TASK7-DEBUG] ${label}`);
+        return;
+    }
+    console.error(`[TASK7-DEBUG] ${label}:\n${JSON.stringify(value, null, 2)}`);
 }
 
 function parseFirstText(result: Awaited<ReturnType<CliMcpSession['callTool']>>): JsonRecord {
@@ -60,7 +83,7 @@ function readOperation(response: JsonRecord): OperationIdentity | undefined {
     };
 }
 
-function requirePublication(response: JsonRecord, label: string): PublicationIdentity {
+function readPublication(response: JsonRecord): PublicationIdentity | undefined {
     const publication = asRecord(response.publication);
     if (
         !publication
@@ -68,13 +91,20 @@ function requirePublication(response: JsonRecord, label: string): PublicationIde
         || publication.collectionName.length === 0
         || typeof publication.markerRunId !== 'string'
         || publication.markerRunId.length === 0
-    ) {
-        throw new Error(`${label} did not expose a proven publication identity.`);
-    }
+    ) return undefined;
     return {
         collectionName: publication.collectionName,
         markerRunId: publication.markerRunId,
     };
+}
+
+function requirePublication(response: JsonRecord, label: string): PublicationIdentity {
+    const publication = readPublication(response);
+    if (!publication) {
+        debug(`${label} response missing publication`, response);
+        throw new Error(`${label} did not expose a proven publication identity.`);
+    }
+    return publication;
 }
 
 function git(args: string[], cwd = SATORI_ROOT): string {
@@ -137,6 +167,7 @@ async function connect(stateRoot: string): Promise<CliMcpSession> {
             SATORI_STATE_ROOT: stateRoot,
             SATORI_RUNTIME_PROFILE: 'offline',
             SATORI_RERANKER_PROVIDER: 'none',
+            SATORI_TASK7_DEBUG: TASK7_DEBUG ? '1' : '0',
             POTION_HELPER_PATH: helperPath,
             POTION_MODEL_PATH: modelPath,
             POTION_REQUEST_TIMEOUT_MS: '15000',
@@ -155,28 +186,62 @@ async function readStatus(session: CliMcpSession): Promise<JsonRecord> {
     }));
 }
 
+function statusTraceEntry(status: JsonRecord): StatusTraceEntry {
+    return {
+        observedAt: new Date().toISOString(),
+        status: status.status,
+        reason: status.reason,
+        ...(readOperation(status) ? { operation: readOperation(status) } : {}),
+        ...(readPublication(status) ? { publication: readPublication(status) } : {}),
+    };
+}
+
 async function waitForOperationPhase(
     session: CliMcpSession,
     predicate: (operation: OperationIdentity) => boolean,
     description: string,
 ): Promise<{ status: JsonRecord; operation: OperationIdentity }> {
     const deadline = Date.now() + OPERATION_TIMEOUT_MS;
+    const history: StatusTraceEntry[] = [];
+    let lastSignature = '';
+
     while (Date.now() < deadline) {
         const status = await readStatus(session);
-        const operation = readOperation(status);
+        const trace = statusTraceEntry(status);
+        const signature = JSON.stringify({
+            status: trace.status,
+            reason: trace.reason,
+            operation: trace.operation,
+            publication: trace.publication,
+        });
+        if (signature !== lastSignature) {
+            history.push(trace);
+            if (history.length > 20) history.shift();
+            if (TASK7_DEBUG) {
+                console.error(`[TASK7-TRACE] ${description}: ${signature}`);
+            }
+            lastSignature = signature;
+        }
+
+        const operation = trace.operation;
         if (operation) {
             if (operation.phase === 'failed' || operation.phase === 'blocked') {
+                debug(`${description} terminal failure status`, status);
                 throw new Error(`Index operation ${operation.id} ${operation.phase}: ${JSON.stringify(status)}`);
             }
             if (predicate(operation)) return { status, operation };
         }
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
-    throw new Error(`Timed out waiting for ${description}.`);
+
+    throw new Error(
+        `Timed out waiting for ${description}. Recent status transitions:\n${JSON.stringify(history, null, 2)}`,
+    );
 }
 
 async function establishPublicationN(session: CliMcpSession): Promise<PublicationIdentity> {
     const initial = await readStatus(session);
+    debug('Initial isolated-state status', initial);
     const initialStatus = initial.status;
     if (initialStatus !== 'not_indexed' && initialStatus !== 'requires_reindex') {
         throw new Error(`Isolated Task 7 state unexpectedly returned status=${String(initialStatus)}.`);
@@ -187,6 +252,7 @@ async function establishPublicationN(session: CliMcpSession): Promise<Publicatio
         action,
         path: TARGET_REPO,
     }));
+    debug(`${action} start response`, start);
     const startedOperation = readOperation(start);
 
     const completed = await waitForOperationPhase(
@@ -197,6 +263,7 @@ async function establishPublicationN(session: CliMcpSession): Promise<Publicatio
         ),
         `${action} completion`,
     );
+    debug('Publication N completed status', completed.status);
     return requirePublication(completed.status, 'Publication N');
 }
 
@@ -204,6 +271,7 @@ async function main(): Promise<void> {
     console.log('='.repeat(80));
     console.log('TASK 7: REAL STALE-WHILE-SYNC PRODUCT CHARACTERIZATION');
     console.log(`Target repository: ${TARGET_REPO}`);
+    console.log(`Task-7 diagnostics: ${TASK7_DEBUG ? 'enabled' : 'disabled'}`);
     console.log('='.repeat(80));
 
     if (!fs.existsSync(TARGET_REPO)) throw new Error(`Target repository does not exist: ${TARGET_REPO}`);
@@ -215,6 +283,7 @@ async function main(): Promise<void> {
     const mutationPath = chooseTrackedGoFile(TARGET_REPO);
     const originalBytes = fs.readFileSync(mutationPath);
     let session: CliMcpSession | undefined;
+    let failure: unknown;
 
     try {
         session = await connect(stateRoot);
@@ -226,6 +295,7 @@ async function main(): Promise<void> {
         console.log('\n[2/5] Creating one real tracked Go-source delta...');
         const marker = `\n// satori-task7-mvcc-${qualifiedHead.slice(0, 12)}-${Date.now()}\n`;
         fs.writeFileSync(mutationPath, Buffer.concat([originalBytes, Buffer.from(marker, 'utf8')]));
+        console.log(`Mutated tracked source: ${path.relative(TARGET_REPO, mutationPath)}`);
 
         console.log('[3/5] Starting real sync and requiring observation of its writing phase...');
         const syncRequest = session.callTool('manage_index', {
@@ -240,6 +310,7 @@ async function main(): Promise<void> {
         );
         const syncOperation = writing.operation;
         console.log(`Observed sync writing: id=${syncOperation.id}, generation=${syncOperation.generation}`);
+        debug('Status at observed writing phase', writing.status);
 
         const searchQueries = [
             'where is detector verification handled',
@@ -252,21 +323,33 @@ async function main(): Promise<void> {
         console.log('[4/5] Firing five parallel searches while that exact sync is writing...');
         const searchResults = await Promise.all(searchQueries.map(async (query, index) => {
             const startedAt = performance.now();
-            const response = parseFirstText(await session!.callTool('search_codebase', {
-                path: TARGET_REPO,
-                query,
-                limit: 5,
-            }));
-            return { index, query, response, elapsedMs: performance.now() - startedAt };
+            try {
+                const response = parseFirstText(await session!.callTool('search_codebase', {
+                    path: TARGET_REPO,
+                    query,
+                    limit: 5,
+                }));
+                const elapsedMs = performance.now() - startedAt;
+                debug(`Search #${index + 1} response (${elapsedMs.toFixed(1)}ms)`, response);
+                return { index, query, response, elapsedMs };
+            } catch (error) {
+                console.error(
+                    `[TASK7-FAIL] Search #${index + 1} transport/tool failure for ${JSON.stringify(query)} `
+                    + `after ${(performance.now() - startedAt).toFixed(1)}ms: ${formatError(error)}`,
+                );
+                throw error;
+            }
         }));
 
         for (const result of searchResults) {
             if (result.response.status !== 'ok') {
+                debug(`Search #${result.index + 1} non-ok envelope`, result.response);
                 throw new Error(`Search #${result.index + 1} returned status=${String(result.response.status)}.`);
             }
             const freshness = asRecord(result.response.freshness);
             const pendingOperation = asRecord(freshness?.pendingOperation);
             if (freshness?.state !== 'sync_in_progress') {
+                debug(`Search #${result.index + 1} unexpected freshness`, freshness);
                 throw new Error(`Search #${result.index + 1} did not report sync_in_progress freshness.`);
             }
             if (
@@ -293,6 +376,7 @@ async function main(): Promise<void> {
         }
 
         const syncStartResponse = parseFirstText(await syncRequest);
+        debug('Sync tool response', syncStartResponse);
         const syncStartOperation = readOperation(syncStartResponse);
         if (
             syncStartOperation
@@ -316,6 +400,7 @@ async function main(): Promise<void> {
             ),
             `sync ${syncOperation.id} completion`,
         );
+        debug('Completed sync status', completed.status);
         const publicationN1 = requirePublication(completed.status, 'Publication N+1');
         if (publicationN1.markerRunId === publicationN.markerRunId) {
             throw new Error('Sync completed without activating a distinct publication markerRunId.');
@@ -328,10 +413,12 @@ async function main(): Promise<void> {
             query: 'detector verification',
             limit: 5,
         }));
+        debug('Post-activation search response', postSearch);
         if (postSearch.status !== 'ok') {
             throw new Error(`Post-activation search returned status=${String(postSearch.status)}.`);
         }
         const postStatus = await readStatus(session);
+        debug('Post-activation manage_index status', postStatus);
         const postPublication = requirePublication(postStatus, 'Post-activation publication');
         if (
             postPublication.collectionName !== publicationN1.collectionName
@@ -350,15 +437,30 @@ async function main(): Promise<void> {
         console.log(' - the exact sync completed and activated a distinct publication N+1');
         console.log(' - a post-activation search succeeded with N+1 still authoritative');
         console.log('='.repeat(80));
+    } catch (error) {
+        failure = error;
+        console.error(`[TASK7-FAIL] ${formatError(error)}`);
+        if (session) {
+            try {
+                debug('Final manage_index status after failure', await readStatus(session));
+            } catch (statusError) {
+                console.error(`[TASK7-FAIL] Could not read final status: ${formatError(statusError)}`);
+            }
+        }
+        throw error;
     } finally {
         if (session) await session.close();
         fs.writeFileSync(mutationPath, originalBytes);
-        fs.rmSync(stateRoot, { recursive: true, force: true });
         assertCleanWorktree(TARGET_REPO, 'Target repository after restoration');
+        if (failure && KEEP_FAILED_STATE) {
+            console.error(`[TASK7-DEBUG] Preserving failed isolated state root: ${stateRoot}`);
+        } else {
+            fs.rmSync(stateRoot, { recursive: true, force: true });
+        }
     }
 }
 
-main().catch((error: unknown) => {
-    console.error('Task 7 product characterization failed:', error);
+main().catch((error) => {
+    console.error('Task 7 Product Characterization Failed:', error);
     process.exit(1);
 });
