@@ -3880,52 +3880,54 @@ test('Context.indexCodebase attaches Go extractor owner metadata in production i
     const codebasePath = path.join(tempRoot, 'repo');
     const sourcePath = path.join(codebasePath, 'svc.go');
 
-    try {
-        fs.mkdirSync(codebasePath, { recursive: true });
-        fs.writeFileSync(sourcePath, [
-            'package svc',
-            '',
-            'func add(a, b int) int {',
-            '  return a + b',
-            '}',
-            '',
-        ].join('\n'), 'utf8');
+        let context: Context | undefined;
+        try {
+            fs.mkdirSync(codebasePath, { recursive: true });
+            fs.writeFileSync(sourcePath, [
+                'package svc',
+                '',
+                'func add(a, b int) int {',
+                '  return a + b',
+                '}',
+                '',
+            ].join('\n'), 'utf8');
 
-        const vectorDatabase = new InMemoryVectorDatabase();
-        const context = new Context({
-            embedding: new TestEmbedding(),
-            vectorDatabase,
-            symbolRegistryStateRoot: stateRoot,
-        });
+            const vectorDatabase = new InMemoryVectorDatabase();
+            context = new Context({
+                embedding: new TestEmbedding(),
+                vectorDatabase,
+                symbolRegistryStateRoot: stateRoot,
+            });
 
-        const result = await context.indexCodebase(codebasePath);
-        const sidecar = await readSymbolRegistrySidecar({ stateRoot, normalizedRootPath: codebasePath });
+            const result = await context.indexCodebase(codebasePath);
+            const sidecar = await readSymbolRegistrySidecar({ stateRoot, normalizedRootPath: codebasePath });
 
-        assert.equal(result.status, 'completed');
-        assert.equal(sidecar.status, 'ok');
-        if (sidecar.status !== 'ok') {
-            return;
+            assert.equal(result.status, 'completed');
+            assert.equal(sidecar.status, 'ok');
+            if (sidecar.status !== 'ok') {
+                return;
+            }
+
+            const add = sidecar.registry.symbolsByFile
+                .get('svc.go')
+                ?.find((symbol) => symbol.kind === 'function' && symbol.name === 'add');
+            assert.ok(add);
+            assert.equal(add?.language, 'go');
+            assert.equal(add?.label, 'function add');
+
+            const documents = Array.from(vectorDatabase.collections.values())
+                .flatMap((collection) => Array.from(collection.values()))
+                .filter((document) => document.fileExtension !== COMPLETION_MARKER_EXTENSION)
+                .filter((document) => document.relativePath === 'svc.go');
+            assert.ok(documents.length > 0);
+            assert.ok(documents.some((document) => document.metadata.ownerSymbolInstanceId === add?.symbolInstanceId));
+            assert.ok(documents.every((document) => typeof document.metadata.ownerSymbolKey === 'string'));
+            assert.ok(documents.every((document) => typeof document.metadata.ownerSymbolInstanceId === 'string'));
+        } finally {
+            await context?.dispose();
+            fs.rmSync(tempRoot, { recursive: true, force: true });
         }
-
-        const add = sidecar.registry.symbolsByFile
-            .get('svc.go')
-            ?.find((symbol) => symbol.kind === 'function' && symbol.name === 'add');
-        assert.ok(add);
-        assert.equal(add?.language, 'go');
-        assert.equal(add?.label, 'function add');
-
-        const documents = Array.from(vectorDatabase.collections.values())
-            .flatMap((collection) => Array.from(collection.values()))
-            .filter((document) => document.fileExtension !== COMPLETION_MARKER_EXTENSION)
-            .filter((document) => document.relativePath === 'svc.go');
-        assert.ok(documents.length > 0);
-        assert.ok(documents.some((document) => document.metadata.ownerSymbolInstanceId === add?.symbolInstanceId));
-        assert.ok(documents.every((document) => typeof document.metadata.ownerSymbolKey === 'string'));
-        assert.ok(documents.every((document) => typeof document.metadata.ownerSymbolInstanceId === 'string'));
-    } finally {
-        fs.rmSync(tempRoot, { recursive: true, force: true });
-    }
-});
+    });
 
 test('Context.indexCodebase attaches Rust extractor owner metadata in production indexing', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-rust-symbols-'));
@@ -4066,12 +4068,13 @@ test('Context.indexCodebase degrades malformed Go source to synthesized file-own
     const codebasePath = path.join(tempRoot, 'repo');
     const sourcePath = path.join(codebasePath, 'broken.go');
 
+    let context: Context | undefined;
     try {
         fs.mkdirSync(codebasePath, { recursive: true });
         fs.writeFileSync(sourcePath, 'package svc\nfunc broken( {\n', 'utf8');
 
         const vectorDatabase = new InMemoryVectorDatabase();
-        const context = new Context({
+        context = new Context({
             embedding: new TestEmbedding(),
             vectorDatabase,
             symbolRegistryStateRoot: stateRoot,
@@ -4099,6 +4102,7 @@ test('Context.indexCodebase degrades malformed Go source to synthesized file-own
         assert.ok(documents.every((document) => document.metadata.ownerSymbolInstanceId === fileOwner?.symbolInstanceId));
         assert.ok(documents.every((document) => document.metadata.symbolKind === 'file'));
     } finally {
+        await context?.dispose();
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });

@@ -87,3 +87,37 @@ test('Context wires dispose() to semanticAnalyzer', async () => {
     await context.dispose();
     assert.equal(disposed, true);
 });
+
+test('ThreadedWasmSemanticProjectAnalyzer rejects in-flight pending requests when disposed', async () => {
+    const analyzer = new ThreadedWasmSemanticProjectAnalyzer();
+    const sourceFiles = [];
+    for (let i = 0; i < 50; i++) {
+        sourceFiles.push({
+            path: `pkg/file${i}.go`,
+            source: `package pkg\n\nfunc HeavyFunc${i}() {}\nfunc Call${i}() { HeavyFunc${i}() }\n`,
+            sourceHash: `hash-${i}`,
+        });
+    }
+
+    const pendingPromise = analyzer.analyze({
+        language: 'go',
+        auxiliaryFiles: [
+            {
+                role: 'go.mod',
+                path: 'go.mod',
+                source: 'module example.com/test\n\ngo 1.21\n',
+                sourceHash: 'aux-hash',
+            },
+        ],
+        sourceFiles,
+    });
+
+    // Dispose immediately while analysis request is in-flight
+    const disposePromise = analyzer.dispose();
+
+    await assert.rejects(
+        pendingPromise,
+        /Semantic analyzer disposed while request was pending|CBM Semantic Worker stopped unexpectedly/,
+    );
+    await disposePromise;
+});

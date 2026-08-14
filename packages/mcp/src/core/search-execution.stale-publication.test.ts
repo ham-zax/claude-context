@@ -65,6 +65,7 @@ function buildInput(): SearchExecutionInput {
             available: true,
             files: new Set(["src/dirty.ts"]),
         },
+        dirtyFilesNotFreshened: true,
         retrievalPolicy: resolveSearchPolicy({ resultLimit: 3, hasMustOperators: false }),
     };
 }

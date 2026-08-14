@@ -357,7 +357,8 @@ export async function runExactRegistryFastPath(
             const symbol = registryState.registry.symbolsByInstanceId.get(node.symbolId);
             return symbol && filterSymbol(symbol) ? [symbol] : [];
         });
-        const relationshipTouchesDirtySource = input.dirtyFilesNotFreshened
+        const relationshipTouchesDirtySource = !publicationOnlyStaleRead
+            && input.dirtyFilesNotFreshened
             && peerSymbols.some((symbol) => input.observedChangedFilesState.files.has(
                 symbol.file.replace(/\\/g, "/").replace(/^\/+/, ""),
             ));

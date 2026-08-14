@@ -66,7 +66,6 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
             this.worker = new Worker(scriptPath, {
                 execArgv: filterWorkerExecArgv(),
             });
-            this.worker.unref();
 
             this.worker.on('message', (response: WasmWorkerResponse) => {
                 const pending = this.pendingRequests.get(response.id);
@@ -128,6 +127,10 @@ export class ThreadedWasmSemanticProjectAnalyzer implements SemanticProjectAnaly
         if (this.worker) {
             const workerToTerminate = this.worker;
             this.worker = null;
+            for (const [, req] of this.pendingRequests) {
+                req.reject(new Error('Semantic analyzer disposed while request was pending'));
+            }
+            this.pendingRequests.clear();
             await workerToTerminate.terminate();
         }
     }

@@ -508,7 +508,7 @@ export type SearchExecutionInput = {
     exactRegistryFallbackForTrackedLexical: boolean;
     freshnessMode: FreshnessDecision["mode"];
     observedChangedFilesState: ChangedFilesState;
-    dirtyFilesNotFreshened?: boolean;
+    dirtyFilesNotFreshened: boolean;
     retrievalPolicy: ResolvedSearchPolicy;
     entrypointOwnerEvidence?: EntrypointOwnerEvidenceResolution;
     requestedSubdirectory?: RequestedSearchSubdirectory | null;
@@ -1001,7 +1001,7 @@ export async function runSearchExecution(
     };
     const publicationOnlyStaleRead = input.freshnessMode === "served_previous_generation";
     const allowLiveWorkingTreeEvidence = !publicationOnlyStaleRead;
-    const dirtyFilesNotFreshened = allowLiveWorkingTreeEvidence && (input.dirtyFilesNotFreshened ?? false);
+    const dirtyFilesNotFreshened = allowLiveWorkingTreeEvidence && input.dirtyFilesNotFreshened;
     const canSupplementLivePathEvidence = allowLiveWorkingTreeEvidence
         && input.parsedOperators.path.length > 0;
 

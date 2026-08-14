@@ -174,3 +174,135 @@ test("runExactRegistryFastPath uses publication-only symbols without reading cur
         }
     }
 });
+
+test("runExactRegistryFastPath preserves dirty relationship peers without reading disk during served_previous_generation", async () => {
+    const peerSymbol: SymbolRecord = {
+        symbolKey: "src/caller.ts:5:15:function:CallerFunction",
+        symbolInstanceId: "sym-peer-1",
+        name: "CallerFunction",
+        qualifiedName: "CallerFunction",
+        parentQualifiedNamePath: [],
+        kind: "function",
+        file: "src/caller.ts",
+        label: "function CallerFunction()",
+        span: { startLine: 5, endLine: 15 },
+        language: "typescript",
+        fileHash: "hash-peer-1",
+        extractorVersion: "1.0.0",
+    };
+
+    const mockRegistry: SymbolRegistry = {
+        manifest: { builtAt: "2026-08-15T00:00:00Z" } as any,
+        symbols: [testSymbol, peerSymbol],
+        symbolsByInstanceId: new Map([
+            ["sym-1", testSymbol],
+            ["sym-peer-1", peerSymbol],
+        ]),
+        symbolsByKey: new Map([
+            ["src/target.ts:10:20:function:TargetFunction", [testSymbol]],
+            ["src/caller.ts:5:15:function:CallerFunction", [peerSymbol]],
+        ]),
+        symbolsByFile: new Map([
+            ["src/target.ts", [testSymbol]],
+            ["src/caller.ts", [peerSymbol]],
+        ]),
+        symbolsByLabel: new Map([
+            ["function TargetFunction()", [testSymbol]],
+            ["function CallerFunction()", [peerSymbol]],
+        ]),
+        symbolsByQualifiedName: new Map([
+            ["TargetFunction", [testSymbol]],
+            ["CallerFunction", [peerSymbol]],
+        ]),
+        warnings: [],
+    };
+
+    const parsedOperators = parseSearchOperators("who calls TargetFunction");
+    const queryPlan = buildSearchQueryPlan("who calls TargetFunction", true, parsedOperators);
+    const input: SearchExactFastPathInput = {
+        ...buildInput(),
+        query: "who calls TargetFunction",
+        semanticQuery: "who calls TargetFunction",
+        parsedOperators,
+        queryPlan,
+        // The peer file src/caller.ts is modified in the working tree
+        changedFilesState: { available: true, files: new Set(["src/caller.ts"]) },
+        observedChangedFilesState: { available: true, files: new Set(["src/caller.ts"]) },
+        dirtyFilesNotFreshened: true,
+    };
+
+    const support = new SearchQuerySupport({
+        normalizeSearchPath: (value) => value,
+        hasPathSegment: () => false,
+        isGeneratedPath: () => false,
+        isTestPath: () => false,
+        isFixturePath: () => false,
+        isDocPath: () => false,
+        getContextActiveIgnorePatterns: () => [],
+        getContextTrackedRelativePaths: () => [],
+        classifyPathCategory: () => "core",
+        shouldIncludeCategoryInScope: () => true,
+        getSyncWatchDebounceMs: () => 0,
+        capabilities: {
+            hasReranker: () => false,
+            getDefaultRerankEnabled: () => false,
+        } as unknown as CapabilityResolver,
+        runtimeFingerprint: {} as never,
+        reranker: null,
+        gitignoreForceReloadEveryN: 1000,
+    });
+
+    const host: SearchExactFastPathHost = {
+        searchQuerySupport: support,
+        measureSearchPhase: async (_phase, run) => run(),
+        loadRegistryManifest: async () => ({
+            status: "ok",
+            registry: mockRegistry,
+            manifestHash: "man-1",
+        }),
+        loadRegistryValidatedCallGraphSidecar: async () => ({ relationshipReady: true }),
+        buildRelationshipBackedCallGraph: async () => ({
+            supported: true,
+            direction: "callers",
+            depth: 1,
+            limit: 5,
+            source: "relationship_sidecar",
+            nodes: [
+                { symbolId: "sym-1", label: "TargetFunction", file: "src/target.ts" },
+                { symbolId: "sym-peer-1", label: "CallerFunction", file: "src/caller.ts" },
+            ],
+            edges: [
+                { srcSymbolId: "sym-peer-1", dstSymbolId: "sym-1", kind: "CALLS" as const },
+            ],
+            metrics: { edgeCount: 1, nodeCount: 2, truncated: false },
+        } as any),
+        buildChangedCodeDebug: async () => undefined,
+        buildGeneratedArtifactsVerificationHint: () => undefined,
+        getSearchNavigationHelpers: () => ({
+            now: () => Date.now(),
+            sanitizeIndexedRelativeFilePath: (f: string) => f,
+            isCallGraphLanguageSupported: () => false,
+            getOutlineStatusForLanguage: () => "valid" as any,
+            buildSearchCandidateHierarchy: () => undefined,
+            buildSearchCandidateRelationships: () => undefined,
+            buildSearchCandidateTestCoverage: () => undefined,
+        } as any),
+        now: () => Date.now(),
+    };
+
+    const outcome = await runExactRegistryFastPath(input, host);
+
+    assert.equal(outcome.kind, "handled");
+    if (outcome.kind === "handled") {
+        assert.equal(outcome.finalized.kind, "ok");
+        if (outcome.finalized.kind === "ok") {
+            const envelope = outcome.finalized.envelope;
+            // Both peer and target returned, despite peer belonging to dirty file
+            assert.equal(envelope.results.length, 2);
+            const peerResult = envelope.results[0] as import("./search-types.js").SearchGroupedResultV2;
+            assert.equal(peerResult.target.file, "src/caller.ts");
+            assert.equal(peerResult.target.symbolId, "sym-peer-1");
+            assert.equal(peerResult.preview, "");
+        }
+    }
+});
