@@ -2095,6 +2095,12 @@ export class SearchRequestCoordinator {
                                     : {},
                             );
                         }
+                        if (freshnessDecision.mode === "served_previous_generation") {
+                            if (!vectorReceipt) {
+                                throw new Error("Stale-while-sync requires a proven vector generation receipt.");
+                            }
+                            return this.environment.semanticSearchInProvenGeneration!(vectorReceipt, request);
+                        }
                         return vectorReceipt
                             ? this.environment.semanticSearchInProvenGeneration!(vectorReceipt, request)
                             : this.environment.semanticSearch(request);

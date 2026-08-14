@@ -826,3 +826,76 @@ test('runSearchFrontDoor serves previous published generation when sync is activ
     }
 });
 
+test('runSearchFrontDoor does not enter served_previous_generation if searchableRead lacks vectorReceipt', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-stale-no-vector-'));
+    const preparedReadWithoutVector = {
+        state: 'ready' as const,
+        codebasePath: tempRoot,
+        collectionName: 'col_gen_15',
+        manifestHash: 'man-15',
+        root: { path: tempRoot, info: { status: 'indexed' as const } },
+        proofDebugHint: undefined,
+        vectorReceipt: undefined,
+        generationReceipt: { marker: { runId: 'run-15' } },
+        navigationStatus: 'valid' as const,
+        preparedObservation: 'obs-15',
+        navigationAuthorityMode: 'canonical_v4' as const,
+    };
+
+    const host = {
+        prepareInitialTrackedRootRead: async () => ({
+            state: 'indexing' as const,
+            codebasePath: tempRoot,
+            operation: { action: 'sync' as const, generation: 16, phase: 'writing', id: 'op-16' },
+            searchableGenerationAvailable: true,
+            searchableRead: preparedReadWithoutVector,
+        }),
+        getPreparedReadObservation: () => 'obs-15',
+        ensureSearchFreshness: async () => {
+            throw new Error('ensureSearchFreshness unexpected call');
+        },
+        noteFreshnessMode: () => undefined,
+        buildFreshnessBlockedSearchPayload: () => null,
+        isPartialIndexNavigationUnavailable: () => false,
+        partialIndexWarnings: [],
+        canSyncStaleLocal: () => false,
+        buildBlockedReadinessPayload: () => ({
+            status: 'not_ready',
+            code: 'INDEXING_IN_PROGRESS',
+            message: 'Indexing in progress',
+        }),
+        buildNotReadySearchPayload: (codebasePath: string) => ({
+            formatVersion: 'test',
+            status: 'not_ready',
+            reason: 'indexing',
+            codebasePath,
+            path: tempRoot,
+            query: 'test query',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+            results: [],
+        }),
+        trackedRootReadiness: {
+            buildMissingLocalCollectionSearchPayload: () => ({}),
+            buildIndexFailedSearchPayload: () => ({}),
+        },
+    } as unknown as SearchFrontDoorHost;
+
+    try {
+        const result = await runSearchFrontDoor({
+            path: tempRoot,
+            query: 'test query',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+        }, host);
+
+        assert.equal(result.kind, 'blocked');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+

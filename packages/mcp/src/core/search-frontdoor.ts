@@ -297,6 +297,7 @@ export async function runSearchFrontDoor(
         && trackedRootState.operation?.action === "sync"
         && trackedRootState.searchableGenerationAvailable
         && trackedRootState.searchableRead
+        && trackedRootState.searchableRead.vectorReceipt !== undefined
     ) {
         // Stale-while-sync: serve the proven readable generation immediately without blocking
         activeSyncServingPrevious = true;
