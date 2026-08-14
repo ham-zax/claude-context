@@ -27,17 +27,14 @@ function loadEngineManifestLanguages(): Set<string> {
     ];
     for (const p of candidatePaths) {
         if (fs.existsSync(p)) {
-            try {
-                const manifest = JSON.parse(fs.readFileSync(p, 'utf8'));
-                if (manifest && manifest.languages && typeof manifest.languages === 'object') {
-                    return new Set(Object.keys(manifest.languages).map((l) => l.toLowerCase()));
-                }
-            } catch {
-                // ignore
+            const manifest = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (manifest && manifest.languages && typeof manifest.languages === 'object') {
+                return new Set(Object.keys(manifest.languages).map((l) => l.toLowerCase()));
             }
+            throw new Error(`Invalid semantic engine manifest at ${p}: missing or malformed 'languages' map`);
         }
     }
-    return new Set(['go']);
+    throw new Error(`Semantic engine manifest missing. Searched: ${candidatePaths.join(', ')}`);
 }
 
 export class WasmSemanticProjectAnalyzer implements SemanticProjectAnalyzer {

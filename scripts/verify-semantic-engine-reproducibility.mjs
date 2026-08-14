@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import {
     ASSETS_DIR,
     MANIFEST_PATH,
+    DESCRIPTOR_PATH,
+    SCHEMA_PATH,
     JS_PATH,
     WASM_PATH,
     PINNED_UPSTREAM_COMMIT,
@@ -20,6 +22,12 @@ export function verifySemanticEngine() {
     if (!fs.existsSync(MANIFEST_PATH)) {
         throw new Error(`Semantic engine manifest missing: ${MANIFEST_PATH}`);
     }
+    if (!fs.existsSync(DESCRIPTOR_PATH)) {
+        throw new Error(`Semantic language descriptor missing: ${DESCRIPTOR_PATH}`);
+    }
+    if (!fs.existsSync(SCHEMA_PATH)) {
+        throw new Error(`Semantic language descriptor schema missing: ${SCHEMA_PATH}`);
+    }
     if (!fs.existsSync(JS_PATH)) {
         throw new Error(`Semantic engine JS artifact missing: ${JS_PATH}`);
     }
@@ -28,8 +36,15 @@ export function verifySemanticEngine() {
     }
 
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+    const descriptorJson = JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8'));
     const sourceDigest = computeSourceDigest();
     const recipeDigest = computeLogicalRecipeDigest();
+
+    if (!descriptorJson || !Array.isArray(descriptorJson.languages)) {
+        throw new Error(`Invalid descriptor JSON at ${DESCRIPTOR_PATH}: missing 'languages' array`);
+    }
+
+    const descriptorByLang = new Map(descriptorJson.languages.map((l) => [l.language.toLowerCase(), l]));
 
     if (manifest.abiVersion !== 1) {
         throw new Error(`Manifest abiVersion mismatch: expected 1, saw ${manifest.abiVersion}`);
@@ -47,6 +62,24 @@ export function verifySemanticEngine() {
         throw new Error(`Manifest build recipe digest mismatch:\n  manifest: ${manifest.buildRecipeDigest}\n  computed: ${recipeDigest}`);
     }
 
+    if (!manifest.languages || typeof manifest.languages !== 'object') {
+        throw new Error(`Manifest missing 'languages' specification`);
+    }
+
+    // Verify descriptor<->manifest agreement for all compiled native languages
+    for (const [lang, compiledSpec] of Object.entries(manifest.languages)) {
+        const desc = descriptorByLang.get(lang.toLowerCase());
+        if (!desc) {
+            throw new Error(`Compiled language '${lang}' in manifest has no matching descriptor in ${DESCRIPTOR_PATH}`);
+        }
+        if (desc.semanticRevision !== compiledSpec.semanticRevision) {
+            throw new Error(`Language '${lang}' revision mismatch:\n  descriptor: ${desc.semanticRevision}\n  manifest:   ${compiledSpec.semanticRevision}`);
+        }
+        if (desc.grammar !== compiledSpec.grammar) {
+            throw new Error(`Language '${lang}' grammar mismatch:\n  descriptor: ${desc.grammar}\n  manifest:   ${compiledSpec.grammar}`);
+        }
+    }
+
     const jsBytes = fs.readFileSync(JS_PATH);
     const jsHash = crypto.createHash('sha256').update(jsBytes).digest('hex');
     if (manifest.jsSha256 !== jsHash) {
@@ -59,14 +92,19 @@ export function verifySemanticEngine() {
         throw new Error(`WASM artifact hash mismatch:\n  manifest: ${manifest.wasmSha256}\n  actual:   ${wasmHash}`);
     }
 
+    const descriptorBytes = fs.readFileSync(DESCRIPTOR_PATH);
+    const descriptorHash = crypto.createHash('sha256').update(descriptorBytes).digest('hex');
+
     return {
         abiVersion: manifest.abiVersion,
         upstreamCommit: manifest.upstreamCommit,
         emscriptenVersion: manifest.emscriptenVersion,
         semanticSourceDigest: sourceDigest,
         buildRecipeDigest: recipeDigest,
+        descriptorSha256: descriptorHash,
         jsSha256: jsHash,
         wasmSha256: wasmHash,
+        verifiedLanguages: Object.keys(manifest.languages),
     };
 }
 
@@ -79,8 +117,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         console.log(`  Emscripten Version: ${result.emscriptenVersion}`);
         console.log(`  Source Digest:      ${result.semanticSourceDigest}`);
         console.log(`  Recipe Digest:      ${result.buildRecipeDigest}`);
+        console.log(`  Descriptor Digest:  ${result.descriptorSha256}`);
         console.log(`  JS Digest:          ${result.jsSha256}`);
         console.log(`  WASM Digest:        ${result.wasmSha256}`);
+        console.log(`  Verified Languages: ${result.verifiedLanguages.join(', ')}`);
     } catch (err) {
         console.error(`✖ Semantic engine verification failed: ${err.message}`);
         process.exit(1);

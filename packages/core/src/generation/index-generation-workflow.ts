@@ -538,6 +538,7 @@ export class IndexGenerationWorkflow {
         const relationshipRecords = buildRelationshipsForRegistry({
             registry,
             analysisByFile,
+            semanticRegistry: this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry,
             semanticEvidenceByLanguage,
         });
 

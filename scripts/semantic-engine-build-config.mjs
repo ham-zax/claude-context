@@ -10,6 +10,8 @@ export const REPO_ROOT = path.resolve(__dirname, '..');
 export const CBM_SRC_DIR = path.join(REPO_ROOT, 'third_party', 'cbm-semantic');
 export const ASSETS_DIR = path.join(REPO_ROOT, 'packages', 'core', 'assets', 'semantic-engine');
 export const MANIFEST_PATH = path.join(ASSETS_DIR, 'semantic-engine.manifest.json');
+export const DESCRIPTOR_PATH = path.join(ASSETS_DIR, 'semantic-languages.json');
+export const SCHEMA_PATH = path.join(ASSETS_DIR, 'semantic-languages.schema.json');
 export const JS_PATH = path.join(ASSETS_DIR, 'satori-semantic-engine.js');
 export const WASM_PATH = path.join(ASSETS_DIR, 'satori-semantic-engine.wasm');
 

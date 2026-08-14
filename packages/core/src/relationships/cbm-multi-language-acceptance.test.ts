@@ -6,7 +6,7 @@ import { buildRelationshipsForRegistry } from './builder';
 import type { SymbolRecord, SymbolRegistry } from '../symbols';
 import type { SemanticProjectEvidence } from '../semantic/contracts';
 
-test('Architecture Acceptance: Adding a second CBM language requires zero modifications to builder.ts or dispatch logic', () => {
+test('TypeScript Layer Acceptance: Adding a second CBM language requires zero modifications to builder.ts or dispatch logic', () => {
     // 1. Declarative descriptor for a new language ("rust")
     const rustDescriptor: SemanticLanguageDescriptor = {
         language: 'rust',
@@ -182,4 +182,122 @@ test('Architecture Acceptance: Adding a second CBM language requires zero modifi
     assert.equal(claims[0].providerId, 'satori-cbm-semantic-rust');
     assert.equal(claims[0].targetInstanceId, 'inst-rust-target-real');
     assert.equal(claims[0].decision, 'resolved');
+});
+
+test('TypeScript Layer Acceptance: Caller binding fails closed and abstains when call span is outside any callable symbol', () => {
+    const rustDescriptor: SemanticLanguageDescriptor = {
+        language: 'rust',
+        canonicalLanguage: 'rust',
+        extensions: ['.rs'],
+        strategy: 'cbm_semantic',
+        semanticRevision: 'rust-v1',
+        grammar: 'tree-sitter-rust',
+        auxiliaryFiles: [],
+        providerId: 'satori-cbm-semantic-rust',
+        providerVersion: 'cbm-rust-v1',
+        environmentConfigId: 'cbm-rust-config-v1',
+    };
+    const semanticRegistry = new DefaultSemanticLanguageRegistry([rustDescriptor]);
+
+    const symbols: SymbolRecord[] = [
+        {
+            symbolKey: 'src/lib.rs#run_pipeline',
+            symbolInstanceId: 'inst-rust-caller',
+            name: 'run_pipeline',
+            label: 'run_pipeline',
+            qualifiedName: 'run_pipeline',
+            kind: 'function',
+            file: 'src/lib.rs',
+            language: 'rust',
+            span: { startByte: 0, endByte: 100, startLine: 1, endLine: 10, startColumn: 0, endColumn: 1 },
+            parentQualifiedNamePath: [],
+            fileHash: 'fh-rust-lib',
+            extractorVersion: 'v1',
+        },
+        {
+            symbolKey: 'src/engine.rs#execute',
+            symbolInstanceId: 'inst-rust-target',
+            name: 'execute',
+            label: 'execute',
+            qualifiedName: 'Engine.execute',
+            kind: 'method',
+            file: 'src/engine.rs',
+            language: 'rust',
+            span: { startByte: 110, endByte: 180, startLine: 12, endLine: 20, startColumn: 0, endColumn: 1 },
+            parentQualifiedNamePath: ['Engine'],
+            fileHash: 'fh-rust-eng',
+            extractorVersion: 'v1',
+        },
+    ];
+
+    const symbolsByFile = new Map<string, SymbolRecord[]>();
+    symbolsByFile.set('src/lib.rs', [symbols[0]]);
+    symbolsByFile.set('src/engine.rs', [symbols[1]]);
+
+    const registry: SymbolRegistry = {
+        manifest: {
+            schemaVersion: 'symbol_registry_v3',
+            normalizedRootPath: '/repo',
+            rootFingerprint: 'rfp',
+            indexPolicyHash: 'iph',
+            languageRouterVersion: 'lr-v2',
+            extractorVersion: 'v1',
+            relationshipVersion: 'v1',
+            builtAt: '2026-08-14T00:00:00.000Z',
+            files: [
+                { path: 'src/lib.rs', hash: 'h1', language: 'rust', symbolCount: 1, definitionStatus: 'definitions_present' },
+                { path: 'src/engine.rs', hash: 'h2', language: 'rust', symbolCount: 1, definitionStatus: 'definitions_present' },
+            ],
+        },
+        symbols,
+        symbolsByFile,
+        symbolsByInstanceId: new Map(symbols.map((s) => [s.symbolInstanceId, s])),
+        symbolsByKey: new Map(symbols.map((s) => [s.symbolKey, [s]])),
+        symbolsByLabel: new Map(symbols.map((s) => [s.label, [s]])),
+        symbolsByQualifiedName: new Map(symbols.map((s) => [s.qualifiedName, [s]])),
+        warnings: [],
+    };
+
+    // Call span is at 500..550, which is outside the caller symbol span (0..100)
+    const outOfBoundsEvidence: SemanticProjectEvidence = {
+        language: 'rust',
+        occurrencesByFile: new Map([
+            [
+                'src/lib.rs',
+                [
+                    {
+                        sourceFile: 'src/lib.rs',
+                        callSpan: { startByte: 500, endByte: 550, startLine: 50, endLine: 55, startColumn: 4, endColumn: 19 },
+                        targetProvenance: {
+                            file: 'src/engine.rs',
+                            span: { startByte: 110, endByte: 180, startLine: 12, endLine: 20, startColumn: 0, endColumn: 1 },
+                            name: 'execute',
+                            kind: 'method',
+                        },
+                        proof: { strategy: 'direct_call' },
+                        decision: 'resolved',
+                        confidence: 1.0,
+                    },
+                ],
+            ],
+        ]),
+    };
+
+    const analysisByFile = new Map();
+    analysisByFile.set('src/lib.rs', { moduleBindings: [], callSites: [] });
+    analysisByFile.set('src/engine.rs', { moduleBindings: [], callSites: [] });
+
+    const records = buildRelationshipsForRegistry({
+        registry,
+        analysisByFile,
+        mode: {
+            kind: 'qualification',
+            enabledUnpromotedCallLanguages: new Set(['rust']),
+        },
+        semanticRegistry,
+        semanticEvidenceByLanguage: new Map([['rust', outOfBoundsEvidence]]),
+    });
+
+    // Zero records admitted because caller binding failed closed (did not fall back to an arbitrary symbol)
+    assert.equal(records.length, 0);
 });

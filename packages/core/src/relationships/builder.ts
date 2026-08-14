@@ -19,9 +19,10 @@ import type { RelationshipBuildMode } from './contributions/contracts';
 import {
     type LanguageResolutionStrategyRegistry,
     defaultResolutionStrategyRegistry,
+    DefaultLanguageResolutionStrategyRegistry,
 } from './resolution-strategy-registry';
 import type { SemanticProjectEvidence } from '../semantic';
-import type { SemanticLanguageRegistry } from '../semantic/descriptor';
+import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '../semantic/descriptor';
 
 export type RelationshipAnalysisEvidence =
     Pick<LanguageAnalysisResult, 'moduleBindings' | 'callSites'>
@@ -135,78 +136,14 @@ function attachResolutionClaims(
 
 
 
-/**
- * Centrally admits resolved call claims proposed by language providers,
- * verifying that the decision is resolved, authority is approved, both
- * source and target symbol instances exist in the current registry, and
- * provenance boundaries (source file match, line boundary containment) hold.
- */
-export function admitAuthoritativeProofBackedCalls(input: {
-    registry: SymbolRegistry;
-    claims: readonly ResolutionClaim[];
-}): RelationshipRecord[] {
-    const symbolsByInstanceId = new Map(
-        input.registry.symbols.map((symbol) => [symbol.symbolInstanceId, symbol]),
-    );
-    const admitted: RelationshipRecord[] = [];
-
-    for (const claim of input.claims) {
-        if (claim.decision !== 'resolved') continue;
-        if (claim.relationshipType !== 'CALLS') continue;
-        if (claim.resolutionAuthority !== 'direct_binding' && claim.resolutionAuthority !== 'origin_flow') {
-            continue;
-        }
-
-        if (!claim.sourceInstanceId || !claim.targetInstanceId) {
-            continue;
-        }
-
-        const source = symbolsByInstanceId.get(claim.sourceInstanceId);
-        const target = symbolsByInstanceId.get(claim.targetInstanceId);
-        if (!source || !target) continue;
-
-        // Invariant: claim sourceFile must match source symbol file
-        if (claim.sourceFile !== source.file) continue;
-
-        // Invariant: call span must fall within source symbol line boundaries if span is defined
-        if (source.span) {
-            const withinLine =
-                claim.callSpan.startLine >= source.span.startLine &&
-                claim.callSpan.endLine <= source.span.endLine;
-            const withinByte =
-                source.span.startByte === undefined ||
-                source.span.endByte === undefined ||
-                claim.callSpan.startByte === undefined ||
-                claim.callSpan.endByte === undefined ||
-                (claim.callSpan.startByte >= source.span.startByte &&
-                    claim.callSpan.endByte <= source.span.endByte);
-
-            if (!withinLine || !withinByte) {
-                continue;
-            }
-        }
-
-        const record: RelationshipRecord = {
-            sourceKey: source.symbolKey,
-            sourceInstanceId: source.symbolInstanceId,
-            targetKey: target.symbolKey,
-            targetInstanceId: target.symbolInstanceId,
-            type: 'CALLS',
-            file: source.file,
-            span: claim.callSpan,
-            confidence: target.file === source.file ? 'high' : 'low',
-            resolutionAuthority: claim.resolutionAuthority,
-        };
-        admitted.push(record);
-    }
-
-    return admitted;
-}
-
-export const admitResolvedCallClaims = admitAuthoritativeProofBackedCalls;
+export {
+    admitAuthoritativeProofBackedCalls,
+    admitResolvedCallClaims,
+} from './admission';
 
 export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsForRegistryInput): RelationshipRecord[] {
-    const strategyRegistry = input.strategyRegistry ?? defaultResolutionStrategyRegistry;
+    const semanticRegistry = input.semanticRegistry ?? defaultSemanticLanguageRegistry;
+    const strategyRegistry = input.strategyRegistry ?? (input.semanticRegistry ? new DefaultLanguageResolutionStrategyRegistry(undefined, semanticRegistry) : defaultResolutionStrategyRegistry);
     const recordsByKey = new Map<string, RelationshipRecord>();
     const allClaimsByFile = new Map<string, ResolutionClaim[]>();
 

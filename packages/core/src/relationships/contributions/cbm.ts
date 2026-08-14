@@ -12,7 +12,7 @@ import {
 } from '../resolution';
 import type { SemanticProjectEvidence } from '../../semantic/contracts';
 import { defaultSemanticLanguageRegistry, type SemanticLanguageDescriptor, type SemanticLanguageRegistry } from '../../semantic/descriptor';
-import { admitAuthoritativeProofBackedCalls } from '../builder';
+import { admitAuthoritativeProofBackedCalls } from '../admission';
 
 function findEnclosingCaller(
     fileSymbols: readonly SymbolRecord[] | undefined,
@@ -23,24 +23,25 @@ function findEnclosingCaller(
     let bestCandidate: SymbolRecord | undefined;
     let smallestSpan = Infinity;
 
+    const hasByteCoords = callSpan.startByte !== undefined && callSpan.endByte !== undefined;
+
     for (const sym of fileSymbols) {
         if (!sym.span) continue;
         if (sym.kind === 'file') continue;
 
-        const contains = (
-            callSpan.startByte !== undefined &&
-            callSpan.endByte !== undefined &&
-            sym.span.startByte !== undefined &&
-            sym.span.endByte !== undefined &&
-            callSpan.startByte >= sym.span.startByte &&
-            callSpan.endByte <= sym.span.endByte
-        ) || (
-            callSpan.startLine >= sym.span.startLine &&
-            callSpan.endLine <= sym.span.endLine
-        );
+        let contains = false;
+        if (hasByteCoords) {
+            if (sym.span.startByte !== undefined && sym.span.endByte !== undefined) {
+                contains = callSpan.startByte! >= sym.span.startByte && callSpan.endByte! <= sym.span.endByte;
+            }
+        } else {
+            contains = callSpan.startLine >= sym.span.startLine && callSpan.endLine <= sym.span.endLine;
+        }
 
         if (contains) {
-            const symSpan = (sym.span.endByte ?? 0) - (sym.span.startByte ?? 0);
+            const symSpan = (sym.span.endByte !== undefined && sym.span.startByte !== undefined)
+                ? sym.span.endByte - sym.span.startByte
+                : (sym.span.endLine - sym.span.startLine);
             if (symSpan < smallestSpan) {
                 smallestSpan = symSpan;
                 bestCandidate = sym;
@@ -48,8 +49,9 @@ function findEnclosingCaller(
         }
     }
 
-    if (bestCandidate) return bestCandidate;
-    return fileSymbols.find((s) => s.kind === 'file') ?? fileSymbols[0];
+    // Fail closed: if no containing callable symbol matched the span, abstain (return undefined).
+    // NEVER fall back to arbitrary file symbols.
+    return bestCandidate;
 }
 
 function findExactSpanTarget(
