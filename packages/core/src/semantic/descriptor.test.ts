@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     defaultSemanticLanguageRegistry,
     DefaultSemanticLanguageRegistry,
+    validateSemanticLanguagesConfig,
     type SemanticLanguageDescriptor,
 } from './descriptor';
 
@@ -91,4 +92,59 @@ test('SemanticLanguageRegistry supports multi-language auxiliary routing without
 
     assert.equal(registry.isAuxiliaryPath('Cargo.lock'), true);
     assert.equal(registry.isAuxiliaryPath('package.json'), false);
+});
+
+test('validateSemanticLanguagesConfig rejects invalid strategy, missing fields, unknown keys, and duplicate languages', () => {
+    const validDescriptor: SemanticLanguageDescriptor = {
+        language: 'go',
+        canonicalLanguage: 'go',
+        extensions: ['.go'],
+        strategy: 'cbm_semantic',
+        semanticRevision: 'go-v1',
+        grammar: 'tree-sitter-go',
+        auxiliaryFiles: [{ pattern: '**/go.mod', role: 'manifest' }],
+        providerId: 'satori-cbm-semantic-go',
+        providerVersion: 'cbm-go-v1',
+        environmentConfigId: 'cbm-go-config-v1',
+    };
+
+    // 1. Valid configuration passes
+    const result = validateSemanticLanguagesConfig({ languages: [validDescriptor] });
+    assert.equal(result.languages.length, 1);
+    assert.equal(result.languages[0].language, 'go');
+
+    // 2. Reject invalid strategy 'banana'
+    assert.throws(
+        () => validateSemanticLanguagesConfig({ languages: [{ ...validDescriptor, strategy: 'banana' }] }),
+        /strategy' must be one of \[cbm_semantic\], saw 'banana'/,
+    );
+
+    // 3. Reject unknown property
+    assert.throws(
+        () => validateSemanticLanguagesConfig({ languages: [{ ...validDescriptor, extraField: 'unexpected' }] }),
+        /unknown property 'extraField'/,
+    );
+
+    // 4. Reject duplicate canonical languages
+    assert.throws(
+        () => validateSemanticLanguagesConfig({
+            languages: [
+                validDescriptor,
+                { ...validDescriptor, language: 'GoAlternative', canonicalLanguage: 'go' },
+            ],
+        }),
+        /Duplicate descriptor for canonical language 'go'/,
+    );
+
+    // 5. Reject invalid extension format
+    assert.throws(
+        () => validateSemanticLanguagesConfig({ languages: [{ ...validDescriptor, extensions: ['go'] }] }),
+        /extension at index 0 must be a valid extension/,
+    );
+
+    // 6. Reject empty languages array
+    assert.throws(
+        () => validateSemanticLanguagesConfig({ languages: [] }),
+        /'languages' must be a non-empty array/,
+    );
 });

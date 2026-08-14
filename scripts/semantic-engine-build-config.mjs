@@ -133,3 +133,99 @@ export function computeSourceDigest(rootDir = CBM_SRC_DIR) {
 
     return hash.digest('hex');
 }
+
+const ALLOWED_STRATEGIES = new Set(['cbm_semantic']);
+const ALLOWED_DESCRIPTOR_KEYS = new Set([
+    'language',
+    'canonicalLanguage',
+    'extensions',
+    'strategy',
+    'semanticRevision',
+    'grammar',
+    'auxiliaryFiles',
+    'providerId',
+    'providerVersion',
+    'environmentConfigId',
+]);
+const ALLOWED_AUXILIARY_KEYS = new Set(['pattern', 'role']);
+
+export function validateSemanticLanguagesConfig(raw) {
+    if (!raw || typeof raw !== 'object') {
+        throw new Error('Invalid semantic language configuration: root must be a JSON object');
+    }
+    if (!Array.isArray(raw.languages) || raw.languages.length === 0) {
+        throw new Error("Invalid semantic language configuration: 'languages' must be a non-empty array");
+    }
+
+    const seenCanonical = new Set();
+    for (let i = 0; i < raw.languages.length; i++) {
+        const entry = raw.languages[i];
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new Error(`Invalid descriptor at index ${i}: must be an object`);
+        }
+        for (const key of Object.keys(entry)) {
+            if (!ALLOWED_DESCRIPTOR_KEYS.has(key)) {
+                throw new Error(`Invalid descriptor at index ${i}: unknown property '${key}'`);
+            }
+        }
+        if (typeof entry.language !== 'string' || !entry.language.trim()) {
+            throw new Error(`Invalid descriptor at index ${i}: 'language' must be a non-empty string`);
+        }
+        if (typeof entry.canonicalLanguage !== 'string' || !entry.canonicalLanguage.trim()) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'canonicalLanguage' must be a non-empty string`);
+        }
+        const canonical = entry.canonicalLanguage.toLowerCase();
+        if (seenCanonical.has(canonical)) {
+            throw new Error(`Duplicate descriptor for canonical language '${canonical}'`);
+        }
+        seenCanonical.add(canonical);
+
+        if (typeof entry.strategy !== 'string' || !ALLOWED_STRATEGIES.has(entry.strategy)) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'strategy' must be one of [${[...ALLOWED_STRATEGIES].join(', ')}], saw '${entry.strategy}'`);
+        }
+        if (typeof entry.semanticRevision !== 'string' || !entry.semanticRevision.trim()) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'semanticRevision' must be non-empty`);
+        }
+        if (typeof entry.grammar !== 'string' || !entry.grammar.trim()) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'grammar' must be non-empty`);
+        }
+        if (!Array.isArray(entry.extensions) || entry.extensions.length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'extensions' must be non-empty array`);
+        }
+        for (const ext of entry.extensions) {
+            if (typeof ext !== 'string' || !ext.startsWith('.') || ext.length < 2) {
+                throw new Error(`Invalid extension '${ext}' in '${entry.language}'`);
+            }
+        }
+        if (!Array.isArray(entry.auxiliaryFiles)) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'auxiliaryFiles' must be an array`);
+        }
+        for (let aIdx = 0; aIdx < entry.auxiliaryFiles.length; aIdx++) {
+            const aux = entry.auxiliaryFiles[aIdx];
+            if (!aux || typeof aux !== 'object' || Array.isArray(aux)) {
+                throw new Error(`Invalid auxiliary entry at ${aIdx} in '${entry.language}'`);
+            }
+            for (const key of Object.keys(aux)) {
+                if (!ALLOWED_AUXILIARY_KEYS.has(key)) {
+                    throw new Error(`Invalid auxiliary property '${key}' at index ${aIdx} in '${entry.language}'`);
+                }
+            }
+            if (typeof aux.pattern !== 'string' || !aux.pattern.trim()) {
+                throw new Error(`Invalid auxiliary pattern at index ${aIdx} in '${entry.language}'`);
+            }
+            if (typeof aux.role !== 'string' || !aux.role.trim()) {
+                throw new Error(`Invalid auxiliary role at index ${aIdx} in '${entry.language}'`);
+            }
+        }
+        if (typeof entry.providerId !== 'string' || !entry.providerId.trim()) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'providerId' must be non-empty`);
+        }
+        if (typeof entry.providerVersion !== 'string' || !entry.providerVersion.trim()) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'providerVersion' must be non-empty`);
+        }
+        if (typeof entry.environmentConfigId !== 'string' || !entry.environmentConfigId.trim()) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'environmentConfigId' must be non-empty`);
+        }
+    }
+    return raw;
+}

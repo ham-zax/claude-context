@@ -27,26 +27,34 @@
         ],
         "properties": {
           "language": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "canonicalLanguage": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "extensions": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^\\.[a-zA-Z0-9_-]+$"
             },
             "minItems": 1
           },
           "strategy": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "cbm_semantic"
+            ]
           },
           "semanticRevision": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "grammar": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "auxiliaryFiles": {
             "type": "array",
@@ -58,23 +66,28 @@
               ],
               "properties": {
                 "pattern": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 },
                 "role": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "additionalProperties": false
             }
           },
           "providerId": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "providerVersion": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "environmentConfigId": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "additionalProperties": false

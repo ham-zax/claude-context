@@ -11,7 +11,7 @@ export interface SemanticLanguageDescriptor {
     readonly language: string;
     readonly canonicalLanguage: string;
     readonly extensions: readonly string[];
-    readonly strategy?: string;
+    readonly strategy: 'cbm_semantic' | string;
     readonly semanticRevision: string;
     readonly grammar: string;
     readonly auxiliaryFiles: readonly SemanticAuxiliaryPattern[];
@@ -33,6 +33,125 @@ export interface SemanticLanguageRegistry {
     getAllAuxiliaryPatterns(): readonly { pattern: string; role: string; language: string }[];
     matchAuxiliaries(filePath: string): readonly SemanticAuxiliaryMatch[];
     isAuxiliaryPath(filePath: string): boolean;
+}
+
+const ALLOWED_STRATEGIES: ReadonlySet<string> = new Set(['cbm_semantic']);
+
+const ALLOWED_DESCRIPTOR_KEYS: ReadonlySet<string> = new Set([
+    'language',
+    'canonicalLanguage',
+    'extensions',
+    'strategy',
+    'semanticRevision',
+    'grammar',
+    'auxiliaryFiles',
+    'providerId',
+    'providerVersion',
+    'environmentConfigId',
+]);
+
+const ALLOWED_AUXILIARY_KEYS: ReadonlySet<string> = new Set(['pattern', 'role']);
+
+export function validateSemanticLanguagesConfig(raw: unknown): { languages: SemanticLanguageDescriptor[] } {
+    if (!raw || typeof raw !== 'object') {
+        throw new Error(`Invalid semantic language configuration: root must be a JSON object`);
+    }
+
+    const config = raw as Record<string, unknown>;
+    if (!Array.isArray(config.languages) || config.languages.length === 0) {
+        throw new Error(`Invalid semantic language configuration: 'languages' must be a non-empty array`);
+    }
+
+    const seenCanonicalLanguages = new Set<string>();
+    const validatedDescriptors: SemanticLanguageDescriptor[] = [];
+
+    for (let i = 0; i < config.languages.length; i++) {
+        const item = config.languages[i];
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            throw new Error(`Invalid descriptor at index ${i}: must be a JSON object`);
+        }
+
+        const entry = item as Record<string, unknown>;
+
+        // Reject unknown properties
+        for (const key of Object.keys(entry)) {
+            if (!ALLOWED_DESCRIPTOR_KEYS.has(key)) {
+                throw new Error(`Invalid descriptor at index ${i} ('${entry.language ?? i}'): unknown property '${key}'`);
+            }
+        }
+
+        if (typeof entry.language !== 'string' || entry.language.trim().length === 0) {
+            throw new Error(`Invalid descriptor at index ${i}: 'language' must be a non-empty string`);
+        }
+        if (typeof entry.canonicalLanguage !== 'string' || entry.canonicalLanguage.trim().length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'canonicalLanguage' must be a non-empty string`);
+        }
+
+        const canonical = normalizeLanguageId(entry.canonicalLanguage);
+        if (seenCanonicalLanguages.has(canonical)) {
+            throw new Error(`Duplicate descriptor for canonical language '${canonical}' at index ${i}`);
+        }
+        seenCanonicalLanguages.add(canonical);
+
+        if (typeof entry.strategy !== 'string' || !ALLOWED_STRATEGIES.has(entry.strategy)) {
+            throw new Error(
+                `Invalid descriptor '${entry.language}': 'strategy' must be one of [${[...ALLOWED_STRATEGIES].join(', ')}], saw '${entry.strategy}'`,
+            );
+        }
+
+        if (typeof entry.semanticRevision !== 'string' || entry.semanticRevision.trim().length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'semanticRevision' must be a non-empty string`);
+        }
+        if (typeof entry.grammar !== 'string' || entry.grammar.trim().length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'grammar' must be a non-empty string`);
+        }
+
+        if (!Array.isArray(entry.extensions) || entry.extensions.length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'extensions' must be a non-empty array of file extensions`);
+        }
+        for (let extIdx = 0; extIdx < entry.extensions.length; extIdx++) {
+            const ext = entry.extensions[extIdx];
+            if (typeof ext !== 'string' || !ext.startsWith('.') || ext.length < 2) {
+                throw new Error(`Invalid descriptor '${entry.language}': extension at index ${extIdx} must be a valid extension (e.g. '.go')`);
+            }
+        }
+
+        if (!Array.isArray(entry.auxiliaryFiles)) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'auxiliaryFiles' must be an array`);
+        }
+        for (let auxIdx = 0; auxIdx < entry.auxiliaryFiles.length; auxIdx++) {
+            const aux = entry.auxiliaryFiles[auxIdx];
+            if (!aux || typeof aux !== 'object' || Array.isArray(aux)) {
+                throw new Error(`Invalid auxiliary file at index ${auxIdx} in '${entry.language}': must be an object`);
+            }
+            const auxEntry = aux as Record<string, unknown>;
+            for (const key of Object.keys(auxEntry)) {
+                if (!ALLOWED_AUXILIARY_KEYS.has(key)) {
+                    throw new Error(`Invalid auxiliary file at index ${auxIdx} in '${entry.language}': unknown property '${key}'`);
+                }
+            }
+            if (typeof auxEntry.pattern !== 'string' || auxEntry.pattern.trim().length === 0) {
+                throw new Error(`Invalid auxiliary file at index ${auxIdx} in '${entry.language}': 'pattern' must be a non-empty string`);
+            }
+            if (typeof auxEntry.role !== 'string' || auxEntry.role.trim().length === 0) {
+                throw new Error(`Invalid auxiliary file at index ${auxIdx} in '${entry.language}': 'role' must be a non-empty string`);
+            }
+        }
+
+        if (typeof entry.providerId !== 'string' || entry.providerId.trim().length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'providerId' must be a non-empty string`);
+        }
+        if (typeof entry.providerVersion !== 'string' || entry.providerVersion.trim().length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'providerVersion' must be a non-empty string`);
+        }
+        if (typeof entry.environmentConfigId !== 'string' || entry.environmentConfigId.trim().length === 0) {
+            throw new Error(`Invalid descriptor '${entry.language}': 'environmentConfigId' must be a non-empty string`);
+        }
+
+        validatedDescriptors.push(entry as unknown as SemanticLanguageDescriptor);
+    }
+
+    return { languages: validatedDescriptors };
 }
 
 function matchPattern(filePath: string, pattern: string): boolean {
@@ -63,11 +182,13 @@ function resolveDescriptorPath(): string {
 function loadDefaultLanguagesConfig(): { languages: SemanticLanguageDescriptor[] } {
     const jsonPath = resolveDescriptorPath();
     const content = fs.readFileSync(jsonPath, 'utf8');
-    const parsed = JSON.parse(content);
-    if (!parsed || !Array.isArray(parsed.languages)) {
-        throw new Error(`Invalid semantic language configuration in ${jsonPath}: missing 'languages' array`);
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(content);
+    } catch (e) {
+        throw new Error(`Malformed JSON in semantic language descriptor configuration at ${jsonPath}: ${(e as Error).message}`);
     }
-    return parsed;
+    return validateSemanticLanguagesConfig(parsed);
 }
 
 export class DefaultSemanticLanguageRegistry implements SemanticLanguageRegistry {
@@ -78,7 +199,10 @@ export class DefaultSemanticLanguageRegistry implements SemanticLanguageRegistry
         this.descriptorsByLanguage = new Map();
         this.descriptorsByExtension = new Map();
 
-        const list = descriptors ?? loadDefaultLanguagesConfig().languages;
+        const list = descriptors
+            ? (descriptors.length > 0 ? validateSemanticLanguagesConfig({ languages: descriptors }).languages : [])
+            : loadDefaultLanguagesConfig().languages;
+
         for (const desc of list) {
             const canonical = normalizeLanguageId(desc.canonicalLanguage || desc.language);
             this.descriptorsByLanguage.set(canonical, desc);

@@ -14,6 +14,7 @@ import {
     PINNED_EMSCRIPTEN_VERSION,
     computeLogicalRecipeDigest,
     computeSourceDigest,
+    validateSemanticLanguagesConfig,
 } from './semantic-engine-build-config.mjs';
 
 export { computeSourceDigest, computeLogicalRecipeDigest };
@@ -36,13 +37,10 @@ export function verifySemanticEngine() {
     }
 
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-    const descriptorJson = JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8'));
+    const descriptorRaw = JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8'));
+    const descriptorJson = validateSemanticLanguagesConfig(descriptorRaw);
     const sourceDigest = computeSourceDigest();
     const recipeDigest = computeLogicalRecipeDigest();
-
-    if (!descriptorJson || !Array.isArray(descriptorJson.languages)) {
-        throw new Error(`Invalid descriptor JSON at ${DESCRIPTOR_PATH}: missing 'languages' array`);
-    }
 
     const descriptorByLang = new Map(descriptorJson.languages.map((l) => [l.language.toLowerCase(), l]));
 
