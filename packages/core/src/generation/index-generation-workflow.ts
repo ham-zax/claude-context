@@ -165,13 +165,18 @@ type CachedNavigationDeltaState = {
 function assertExactIndexedFileHashesMatchPrepared(
     indexedFileHashes: ReadonlyMap<string, string>,
     preparedFileHashes: ReadonlyMap<string, string>,
+    isAuxiliaryPath?: (filePath: string) => boolean,
 ): void {
-    if (indexedFileHashes.size !== preparedFileHashes.size) {
+    const searchablePreparedFileHashes = isAuxiliaryPath
+        ? new Map([...preparedFileHashes.entries()].filter(([f]) => !isAuxiliaryPath(f)))
+        : preparedFileHashes;
+
+    if (indexedFileHashes.size !== searchablePreparedFileHashes.size) {
         throw new Error(
-            `Completed full index source mismatch: indexed ${indexedFileHashes.size} files but prepared observation contains ${preparedFileHashes.size} files.`,
+            `Completed full index source mismatch: indexed ${indexedFileHashes.size} files but prepared observation contains ${searchablePreparedFileHashes.size} searchable files (${preparedFileHashes.size} total observed).`,
         );
     }
-    for (const [filePath, expectedHash] of preparedFileHashes.entries()) {
+    for (const [filePath, expectedHash] of searchablePreparedFileHashes.entries()) {
         const indexedHash = indexedFileHashes.get(filePath);
         if (indexedHash === undefined) {
             throw new Error(
@@ -975,7 +980,12 @@ export class IndexGenerationWorkflow {
             payloadPipelineMs = Date.now() - payloadStartedAt;
 
             if (result.status === 'completed') {
-                assertExactIndexedFileHashesMatchPrepared(result.indexedFileHashes, localPreparedFileHashes);
+                const semanticRegistry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
+                assertExactIndexedFileHashesMatchPrepared(
+                    result.indexedFileHashes,
+                    localPreparedFileHashes,
+                    (f) => semanticRegistry.isAuxiliaryPath(f),
+                );
             }
 
             const finalizeStartedAt = Date.now();
