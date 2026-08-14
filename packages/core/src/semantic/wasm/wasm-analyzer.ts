@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type {
     SemanticProjectAnalyzer,
 } from '../analyzer-port';
@@ -16,14 +18,45 @@ import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '
 import { WasmSemanticEngine } from './wasm-engine';
 import { ReceiverBindingKind, SemanticDecision as WasmSemanticDecision, SemanticStrategy as WasmSemanticStrategy } from './wasm-types';
 
+function loadEngineManifestLanguages(): Set<string> {
+    const candidatePaths = [
+        path.resolve(__dirname, '../../../assets/semantic-engine/semantic-engine.manifest.json'),
+        path.resolve(__dirname, '../../assets/semantic-engine/semantic-engine.manifest.json'),
+        path.resolve(__dirname, '../assets/semantic-engine/semantic-engine.manifest.json'),
+        path.resolve(__dirname, './assets/semantic-engine/semantic-engine.manifest.json'),
+    ];
+    for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+            try {
+                const manifest = JSON.parse(fs.readFileSync(p, 'utf8'));
+                if (manifest && manifest.languages && typeof manifest.languages === 'object') {
+                    return new Set(Object.keys(manifest.languages).map((l) => l.toLowerCase()));
+                }
+            } catch {
+                // ignore
+            }
+        }
+    }
+    return new Set(['go']);
+}
+
 export class WasmSemanticProjectAnalyzer implements SemanticProjectAnalyzer {
+    private readonly compiledNativeLanguages: Set<string>;
+
     constructor(
         private readonly engineProvider: () => Promise<WasmSemanticEngine> = () => WasmSemanticEngine.create(),
         private readonly languageRegistry: SemanticLanguageRegistry = defaultSemanticLanguageRegistry,
-    ) {}
+        compiledNativeLanguages?: readonly string[],
+    ) {
+        this.compiledNativeLanguages = new Set(
+            compiledNativeLanguages ? compiledNativeLanguages.map((l) => l.toLowerCase()) : loadEngineManifestLanguages(),
+        );
+    }
 
     supportsLanguage(language: string): boolean {
-        return this.languageRegistry.supportsLanguage(language);
+        const canonical = language.toLowerCase();
+        // Intersection of: (1) descriptor registered in registry AND (2) language compiled into native WASM engine
+        return this.languageRegistry.supportsLanguage(canonical) && this.compiledNativeLanguages.has(canonical);
     }
 
     async analyze(input: SemanticProjectInput): Promise<SemanticProjectEvidence> {

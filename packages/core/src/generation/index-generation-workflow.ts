@@ -24,7 +24,7 @@ import type { SymbolRegistry } from '../symbols/registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
 import { buildRelationshipDelta, buildRelationshipsForRegistry } from '../relationships';
 import type { SemanticAuxiliaryFile, SemanticProjectAnalyzer, SemanticProjectEvidence, SemanticSourceFile } from '../semantic';
-import { defaultSemanticLanguageRegistry } from '../semantic/descriptor';
+import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '../semantic/descriptor';
 import type { LanguageAnalysisPort } from '../language-analysis';
 import type { RelationshipRecord } from '../symbols/contracts';
 
@@ -365,6 +365,7 @@ export interface IndexGenerationWorkflowPorts {
         ): Promise<string | null>;
     languageAnalyzer: LanguageAnalysisPort;
     semanticAnalyzer?: SemanticProjectAnalyzer;
+    semanticLanguageRegistry?: SemanticLanguageRegistry;
     embedding: Embedding;
     vectorDatabase: VectorDatabase;
     symbolRegistryStateRoot: string | undefined;
@@ -500,17 +501,20 @@ export class IndexGenerationWorkflow {
         const semanticEvidenceByLanguage = new Map<string, SemanticProjectEvidence>();
         if (this.ports.semanticAnalyzer && semanticSources && semanticSources.length > 0) {
             const sourcesByLanguage = new Map<string, SemanticSourceFile[]>();
-            const auxiliaryFiles: SemanticAuxiliaryFile[] = [];
+            const auxiliaryFilesByLanguage = new Map<string, SemanticAuxiliaryFile[]>();
+            const registry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
 
             for (const src of semanticSources) {
-                const auxMatch = defaultSemanticLanguageRegistry.matchAuxiliaryRole(src.path);
-                if (auxMatch) {
-                    auxiliaryFiles.push({
+                const auxMatches = registry.matchAuxiliaries(src.path);
+                for (const match of auxMatches) {
+                    const list = auxiliaryFilesByLanguage.get(match.language) ?? [];
+                    list.push({
                         path: src.path,
-                        role: auxMatch.role,
+                        role: match.role,
                         source: src.source,
                         sourceHash: src.sourceHash,
                     });
+                    auxiliaryFilesByLanguage.set(match.language, list);
                 }
 
                 const fileEntry = manifestFiles.find((f) => f.path === src.path);
@@ -525,7 +529,7 @@ export class IndexGenerationWorkflow {
                 const evidence = await this.ports.semanticAnalyzer.analyze({
                     language,
                     sourceFiles,
-                    auxiliaryFiles,
+                    auxiliaryFiles: auxiliaryFilesByLanguage.get(language) ?? [],
                 });
                 semanticEvidenceByLanguage.set(language, evidence);
             }

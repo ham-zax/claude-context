@@ -29,6 +29,7 @@ import type {
 } from '../symbols';
 import type { RepositoryRelativePath } from '../paths/repository-path';
 import type { RelationshipAnalysisEvidence } from '../relationships';
+import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '../semantic/descriptor';
 import {
     openRegularFileInsideRoot,
     readFileHandleExactly,
@@ -128,6 +129,7 @@ type IndexingPipelineConfig = Readonly<{
     getVectorDatabase: () => VectorDatabase;
     languageAnalyzer: LanguageAnalysisPort;
     semanticAnalyzer?: SemanticProjectAnalyzer;
+    semanticLanguageRegistry?: SemanticLanguageRegistry;
     getEmbedding: () => Embedding;
     assertEmbeddingIdentityCurrent: () => Readonly<EmbeddingIdentity>;
     isHybridEnabled: () => boolean;
@@ -199,6 +201,7 @@ export class IndexingPipeline {
     private readonly getVectorDatabase: () => VectorDatabase;
     private readonly languageAnalyzer: LanguageAnalysisPort;
     private readonly semanticAnalyzer?: SemanticProjectAnalyzer;
+    private readonly semanticLanguageRegistry: SemanticLanguageRegistry;
     private readonly getEmbedding: () => Embedding;
     private readonly assertEmbeddingIdentityCurrent: () => Readonly<EmbeddingIdentity>;
     private readonly isHybridEnabled: () => boolean;
@@ -216,6 +219,7 @@ export class IndexingPipeline {
         this.getVectorDatabase = config.getVectorDatabase;
         this.languageAnalyzer = config.languageAnalyzer;
         this.semanticAnalyzer = config.semanticAnalyzer;
+        this.semanticLanguageRegistry = config.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
         this.getEmbedding = config.getEmbedding;
         this.assertEmbeddingIdentityCurrent = config.assertEmbeddingIdentityCurrent;
         this.isHybridEnabled = config.isHybridEnabled;
@@ -518,7 +522,10 @@ export class IndexingPipeline {
                 const { relativePath } = analyzed;
                 analysisByFile.set(relativePath, symbolFacts.relationshipEvidence);
                 indexedFileHashes.set(relativePath, analyzed.sourceHash);
-                if (this.semanticAnalyzer?.supportsLanguage(analyzed.language)) {
+                if (
+                    this.semanticAnalyzer?.supportsLanguage(analyzed.language) ||
+                    this.semanticLanguageRegistry.isAuxiliaryPath(analyzed.relativePath)
+                ) {
                     semanticSources.push({
                         path: analyzed.relativePath,
                         source: analyzed.source,

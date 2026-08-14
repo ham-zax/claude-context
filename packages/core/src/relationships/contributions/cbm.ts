@@ -1,4 +1,4 @@
-import type { RelationshipRecord, SymbolRecord, SymbolRegistry } from '../../symbols';
+import type { SymbolRecord, SymbolRegistry } from '../../symbols';
 import type {
     CallResolutionContribution,
     CallResolutionEngine,
@@ -11,7 +11,8 @@ import {
     type ResolutionProofStep,
 } from '../resolution';
 import type { SemanticProjectEvidence } from '../../semantic/contracts';
-import { defaultSemanticLanguageRegistry, type SemanticLanguageDescriptor } from '../../semantic/descriptor';
+import { defaultSemanticLanguageRegistry, type SemanticLanguageDescriptor, type SemanticLanguageRegistry } from '../../semantic/descriptor';
+import { admitAuthoritativeProofBackedCalls } from '../builder';
 
 function findEnclosingCaller(
     fileSymbols: readonly SymbolRecord[] | undefined,
@@ -51,27 +52,42 @@ function findEnclosingCaller(
     return fileSymbols.find((s) => s.kind === 'file') ?? fileSymbols[0];
 }
 
-function findMatchingTarget(
+function findExactSpanTarget(
     registry: SymbolRegistry,
     targetFile: string,
     targetName: string,
+    targetSpan?: { startByte?: number; endByte?: number },
     ownerName?: string,
 ): SymbolRecord[] {
     const fileSymbols = registry.symbolsByFile.get(targetFile);
-    if (!fileSymbols) return [];
+    if (!fileSymbols || fileSymbols.length === 0) return [];
+
+    // Exact target binding requires exact byte span coordinates from native provenance
+    if (targetSpan?.startByte === undefined || targetSpan?.endByte === undefined) {
+        return [];
+    }
 
     return fileSymbols.filter((sym: SymbolRecord) => {
         if (sym.kind === 'file') return false;
-        if (sym.name === targetName || sym.qualifiedName.endsWith(`.${targetName}`)) {
-            if (ownerName) {
-                return (
-                    sym.parentQualifiedNamePath.includes(ownerName) ||
-                    sym.qualifiedName.includes(ownerName)
-                );
-            }
-            return true;
+
+        // 1. Exact byte span match is the primary binding authority
+        if (sym.span?.startByte !== targetSpan.startByte || sym.span?.endByte !== targetSpan.endByte) {
+            return false;
         }
-        return false;
+
+        // 2. Name validation as sanity check
+        if (sym.name !== targetName && !sym.qualifiedName.endsWith(`.${targetName}`)) {
+            return false;
+        }
+
+        // 3. Owner validation if provided
+        if (ownerName) {
+            return (
+                sym.parentQualifiedNamePath.includes(ownerName) ||
+                sym.qualifiedName.includes(ownerName)
+            );
+        }
+        return true;
     });
 }
 
@@ -81,18 +97,23 @@ export interface CbmResolutionInput extends CallResolutionEngineInput {
 }
 
 export class CbmSemanticContributionEngine implements CallResolutionEngine {
-    private readonly descriptor?: SemanticLanguageDescriptor;
+    private readonly descriptor: SemanticLanguageDescriptor;
 
     constructor(
         readonly language: string,
         descriptor?: SemanticLanguageDescriptor,
+        registry: SemanticLanguageRegistry = defaultSemanticLanguageRegistry,
     ) {
-        this.descriptor = descriptor ?? defaultSemanticLanguageRegistry.getDescriptor(language);
+        const desc = descriptor ?? registry.getDescriptor(language);
+        if (!desc) {
+            throw new Error(`Unregistered semantic language: '${language}'. A valid SemanticLanguageDescriptor must be registered in the registry.`);
+        }
+        this.descriptor = desc;
     }
 
     resolveCalls(input: CbmResolutionInput): CallResolutionContribution {
-        const records: RelationshipRecord[] = [];
         const claimsByFile = new Map<string, ResolutionClaim[]>();
+        const allClaims: ResolutionClaim[] = [];
 
         let semanticEvidence = input.semanticEvidence;
         if (!semanticEvidence && input.semanticEvidenceByLanguage) {
@@ -105,9 +126,9 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
             return { records: [], claimsByFile: new Map() };
         }
 
-        const providerId = this.descriptor?.providerId ?? `satori-cbm-semantic-${this.language}`;
-        const providerVersion = this.descriptor?.providerVersion ?? `cbm-${this.language}-v1`;
-        const environmentConfigId = this.descriptor?.environmentConfigId ?? `cbm-${this.language}-config-v1`;
+        const providerId = this.descriptor.providerId;
+        const providerVersion = this.descriptor.providerVersion;
+        const environmentConfigId = this.descriptor.environmentConfigId;
 
         const sourceFilter = input.sourceFiles;
 
@@ -174,10 +195,11 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
                 let decision = occ.decision;
 
                 if (occ.targetProvenance && decision === 'resolved') {
-                    const matches = findMatchingTarget(
+                    const matches = findExactSpanTarget(
                         input.registry,
                         occ.targetProvenance.file,
                         occ.targetProvenance.name,
+                        occ.targetProvenance.span,
                         occ.targetProvenance.ownerName,
                     );
 
@@ -188,14 +210,14 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
                         proofSteps.push({
                             kind: 'ambiguity',
                             subject: occ.targetProvenance.name,
-                            detail: `Found ${matches.length} matching symbols in ${occ.targetProvenance.file}`,
+                            detail: `Found ${matches.length} matching symbols at target span in ${occ.targetProvenance.file}`,
                         });
                     } else {
                         decision = 'unresolved';
                         proofSteps.push({
                             kind: 'unresolved_dependency',
                             subject: occ.targetProvenance.name,
-                            detail: `Symbol not found in target file ${occ.targetProvenance.file}`,
+                            detail: `No matching symbol record found at exact span in target file ${occ.targetProvenance.file}`,
                         });
                     }
                 }
@@ -231,25 +253,17 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
                 };
 
                 fileClaims.push(claim);
-
-                if (decision === 'resolved' && targetSymbol) {
-                    const record: RelationshipRecord = {
-                        sourceKey: caller.symbolKey,
-                        sourceInstanceId: caller.symbolInstanceId,
-                        targetKey: targetSymbol.symbolKey,
-                        targetInstanceId: targetSymbol.symbolInstanceId,
-                        type: 'CALLS',
-                        file: filePath,
-                        span: occ.callSpan,
-                        confidence: targetSymbol.file === filePath ? 'high' : 'medium',
-                        resolutionAuthority: 'direct_binding',
-                    };
-                    records.push(record);
-                }
+                allClaims.push(claim);
             }
 
             claimsByFile.set(filePath, fileClaims);
         }
+
+        // Central Satori admission: CBM proposes claims, Satori centrally admits them
+        const records = admitAuthoritativeProofBackedCalls({
+            registry: input.registry,
+            claims: allClaims,
+        });
 
         return {
             records,

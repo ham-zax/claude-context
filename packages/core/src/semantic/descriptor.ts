@@ -11,6 +11,7 @@ export interface SemanticLanguageDescriptor {
     readonly language: string;
     readonly canonicalLanguage: string;
     readonly extensions: readonly string[];
+    readonly strategy?: string;
     readonly semanticRevision: string;
     readonly grammar: string;
     readonly auxiliaryFiles: readonly SemanticAuxiliaryPattern[];
@@ -19,11 +20,19 @@ export interface SemanticLanguageDescriptor {
     readonly environmentConfigId: string;
 }
 
+export interface SemanticAuxiliaryMatch {
+    readonly role: string;
+    readonly language: string;
+}
+
 export interface SemanticLanguageRegistry {
     supportsLanguage(language: string): boolean;
     getDescriptor(language: string): SemanticLanguageDescriptor | undefined;
     getAllSupportedLanguages(): readonly string[];
-    matchAuxiliaryRole(filePath: string): { role: string; language: string } | undefined;
+    getStrategyForLanguage(language: string): string | undefined;
+    getAllAuxiliaryPatterns(): readonly { pattern: string; role: string; language: string }[];
+    matchAuxiliaries(filePath: string): readonly SemanticAuxiliaryMatch[];
+    isAuxiliaryPath(filePath: string): boolean;
 }
 
 function matchPattern(filePath: string, pattern: string): boolean {
@@ -36,34 +45,29 @@ function matchPattern(filePath: string, pattern: string): boolean {
     return base.toLowerCase() === pattern.toLowerCase() || normalized.toLowerCase().endsWith(pattern.toLowerCase());
 }
 
-function loadDefaultLanguagesConfig(): { languages: SemanticLanguageDescriptor[] } {
-    try {
-        const jsonPath = path.join(__dirname, 'languages', 'semantic-languages.json');
-        if (fs.existsSync(jsonPath)) {
-            return JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+function resolveDescriptorPath(): string {
+    const candidatePaths = [
+        path.resolve(__dirname, '../../../assets/semantic-engine/semantic-languages.json'),
+        path.resolve(__dirname, '../../assets/semantic-engine/semantic-languages.json'),
+        path.resolve(__dirname, '../assets/semantic-engine/semantic-languages.json'),
+        path.resolve(__dirname, './assets/semantic-engine/semantic-languages.json'),
+    ];
+    for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+            return p;
         }
-    } catch {
-        // Fallback to embedded default
     }
-    return {
-        languages: [
-            {
-                language: 'go',
-                canonicalLanguage: 'go',
-                extensions: ['.go'],
-                semanticRevision: 'go-v1',
-                grammar: 'tree-sitter-go',
-                auxiliaryFiles: [
-                    { pattern: '**/go.mod', role: 'manifest' },
-                    { pattern: '**/go.sum', role: 'lockfile' },
-                    { pattern: '**/go.work', role: 'workspace' },
-                ],
-                providerId: 'satori-cbm-semantic-go',
-                providerVersion: 'cbm-d150ebe4+satori-go-semantic-v1',
-                environmentConfigId: 'cbm-go-semantic-v1',
-            },
-        ],
-    };
+    throw new Error(`Semantic language descriptor configuration file missing. Searched: ${candidatePaths.join(', ')}`);
+}
+
+function loadDefaultLanguagesConfig(): { languages: SemanticLanguageDescriptor[] } {
+    const jsonPath = resolveDescriptorPath();
+    const content = fs.readFileSync(jsonPath, 'utf8');
+    const parsed = JSON.parse(content);
+    if (!parsed || !Array.isArray(parsed.languages)) {
+        throw new Error(`Invalid semantic language configuration in ${jsonPath}: missing 'languages' array`);
+    }
+    return parsed;
 }
 
 export class DefaultSemanticLanguageRegistry implements SemanticLanguageRegistry {
@@ -98,15 +102,39 @@ export class DefaultSemanticLanguageRegistry implements SemanticLanguageRegistry
         return Array.from(this.descriptorsByLanguage.keys());
     }
 
-    matchAuxiliaryRole(filePath: string): { role: string; language: string } | undefined {
+    getStrategyForLanguage(language: string): string | undefined {
+        const desc = this.getDescriptor(language);
+        return desc?.strategy ?? (desc ? 'cbm_semantic' : undefined);
+    }
+
+    getAllAuxiliaryPatterns(): readonly { pattern: string; role: string; language: string }[] {
+        const results: { pattern: string; role: string; language: string }[] = [];
+        for (const [lang, desc] of this.descriptorsByLanguage) {
+            for (const aux of desc.auxiliaryFiles) {
+                results.push({
+                    pattern: aux.pattern,
+                    role: aux.role,
+                    language: lang,
+                });
+            }
+        }
+        return results;
+    }
+
+    matchAuxiliaries(filePath: string): readonly SemanticAuxiliaryMatch[] {
+        const matches: SemanticAuxiliaryMatch[] = [];
         for (const [lang, desc] of this.descriptorsByLanguage) {
             for (const aux of desc.auxiliaryFiles) {
                 if (matchPattern(filePath, aux.pattern)) {
-                    return { role: aux.role, language: lang };
+                    matches.push({ role: aux.role, language: lang });
                 }
             }
         }
-        return undefined;
+        return matches;
+    }
+
+    isAuxiliaryPath(filePath: string): boolean {
+        return this.matchAuxiliaries(filePath).length > 0;
     }
 }
 

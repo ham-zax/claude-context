@@ -21,6 +21,7 @@ import {
     defaultResolutionStrategyRegistry,
 } from './resolution-strategy-registry';
 import type { SemanticProjectEvidence } from '../semantic';
+import type { SemanticLanguageRegistry } from '../semantic/descriptor';
 
 export type RelationshipAnalysisEvidence =
     Pick<LanguageAnalysisResult, 'moduleBindings' | 'callSites'>
@@ -40,6 +41,7 @@ export interface BuildCallRelationshipsForRegistryInput {
     sourceFiles?: ReadonlySet<string>;
     mode?: RelationshipBuildMode;
     strategyRegistry?: LanguageResolutionStrategyRegistry;
+    semanticRegistry?: SemanticLanguageRegistry;
     semanticEvidenceByLanguage?: ReadonlyMap<string, SemanticProjectEvidence> | Record<string, SemanticProjectEvidence>;
 }
 
@@ -193,6 +195,7 @@ export function admitAuthoritativeProofBackedCalls(input: {
             file: source.file,
             span: claim.callSpan,
             confidence: target.file === source.file ? 'high' : 'low',
+            resolutionAuthority: claim.resolutionAuthority,
         };
         admitted.push(record);
     }
@@ -296,7 +299,7 @@ export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsF
                     ? input.semanticEvidenceByLanguage.get(language)
                     : (input.semanticEvidenceByLanguage as Record<string, SemanticProjectEvidence>)[language];
             }
-            const cbmEngine = new CbmSemanticContributionEngine(language);
+            const cbmEngine = new CbmSemanticContributionEngine(language, undefined, input.semanticRegistry);
             const cbmResult = cbmEngine.resolveCalls({
                 registry: input.registry,
                 analysisByFile: input.analysisByFile,

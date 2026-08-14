@@ -192,7 +192,7 @@ test('GoResolutionContributionEngine resolves method receiver calls across files
     assert.equal(rec.sourceKey, 'main.go#main');
     assert.equal(rec.targetKey, 'user.go#Greet');
     assert.equal(rec.type, 'CALLS');
-    assert.equal(rec.confidence, 'medium');
+    assert.equal(rec.confidence, 'low');
 
     const claims = result.claimsByFile?.get('main.go');
     assert.ok(claims);
@@ -213,7 +213,7 @@ test('GoResolutionContributionEngine abstains on ambiguous targets and produces 
         kind: 'method',
         file: 'user.go',
         language: 'go',
-        span: { startByte: 100, endByte: 140, startLine: 8, endLine: 12, startColumn: 0, endColumn: 1 },
+        span: { startByte: 20, endByte: 60, startLine: 2, endLine: 5, startColumn: 0, endColumn: 1 },
         parentQualifiedNamePath: ['User'],
         fileHash: 'fh-user',
         extractorVersion: 'v1',
