@@ -16,10 +16,10 @@ export const POTION_DIMENSION = 256;
 export const POTION_RETAINED_TOKEN_LIMIT = 4096;
 export const POTION_MAX_TIMEOUT_MS = 300_000;
 export const POTION_INFERENCE_CONTRACT_DIGEST =
-    'bfda80d97aeb585e20650b1c54e9063a65068ce284317f0e0a812e20964dcee7';
+    'e716e695cc5895150602501601832a1e7467a09bf9dae1c347b1ff80accf0364';
 
 const POTION_HELPER_SHA256 =
-    '2e42f3165b96927bb365f74a11b0495661ac3c44e1a194c55a8f0613b5bb2e12';
+    '0ecc35fe604e10074a7219f2ed82aa0e4fdb023fc4c99e62c6657938a55681a2';
 const POTION_MODEL_SHA256 =
     '75cf7a6c2171b230ad19b1e7d8e0b1aee86da5a02af8e7cacedd9921d227623c';
 const POTION_TOKENIZER_SHA256 =
@@ -46,6 +46,7 @@ interface WorkerResponse {
     ok?: unknown;
     retainedTokenCount?: unknown;
     vector?: unknown;
+    items?: unknown;
     errorCode?: unknown;
     ready?: unknown;
     modelLoadedOnce?: unknown;
@@ -513,6 +514,96 @@ export class PotionEmbedding extends Embedding {
         return response;
     }
 
+    private requestBatch(role: 'query' | 'document', texts: string[]): Promise<WorkerResponse> {
+        if (this.state !== 'ready' || !this.child) {
+            return Promise.reject(providerError({
+                code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+                retryable: false,
+                message: 'Potion worker is not available.',
+            }));
+        }
+        if (this.pending.size >= this.maxBatchItems) {
+            return Promise.reject(providerError({
+                code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
+                retryable: false,
+                message: 'Potion worker queue is full.',
+            }));
+        }
+        const id = `potion-${++this.requestSequence}`;
+        const frame = `${JSON.stringify({ op: 'encode_batch', id, role, texts })}\n`;
+        if (Buffer.byteLength(frame) > MAX_WORKER_FRAME_BYTES) {
+            return Promise.reject(providerError({
+                code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
+                retryable: false,
+                message: 'Potion embedding input exceeds the bounded worker frame.',
+            }));
+        }
+        const response = new Promise<WorkerResponse>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                const timeoutError = providerError({
+                    code: 'EMBEDDING_PROVIDER_TIMEOUT',
+                    retryable: true,
+                    message: 'Potion embedding request timed out.',
+                });
+                this.failWorker(timeoutError);
+            }, this.requestTimeoutMs);
+            this.pending.set(id, { resolve, reject, timeout });
+        });
+        this.child.stdin.write(frame, (error) => {
+            if (error) {
+                this.failWorker(providerError({
+                    code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+                    retryable: true,
+                    message: 'Potion worker request could not be delivered.',
+                }));
+            }
+        });
+        return response;
+    }
+
+    private validateItem(item: unknown): EmbeddingVector {
+        if (!item || typeof item !== 'object') {
+            throw providerError({
+                code: 'EMBEDDING_PROVIDER_ERROR',
+                retryable: false,
+                message: 'Potion worker returned an invalid embedding item.',
+            });
+        }
+        const record = item as { retainedTokenCount?: unknown; vector?: unknown };
+        if (
+            !Number.isSafeInteger(record.retainedTokenCount)
+            || (record.retainedTokenCount as number) <= 0
+            || (record.retainedTokenCount as number) > POTION_RETAINED_TOKEN_LIMIT
+            || !Array.isArray(record.vector)
+            || record.vector.length !== POTION_DIMENSION
+            || record.vector.some((value) => typeof value !== 'number' || !Number.isFinite(value))
+        ) {
+            throw providerError({
+                code: 'EMBEDDING_PROVIDER_ERROR',
+                retryable: false,
+                message: 'Potion worker returned an invalid embedding.',
+            });
+        }
+        const vector = record.vector as number[];
+        const squaredNorm = vector.reduce((sum, value) => sum + value * value, 0);
+        const norm = Math.sqrt(squaredNorm);
+        if (!Number.isFinite(norm) || norm <= Number.EPSILON) {
+            throw providerError({
+                code: 'EMBEDDING_PROVIDER_ERROR',
+                retryable: false,
+                message: 'Potion worker returned a zero-norm or non-finite embedding.',
+            });
+        }
+        if (Math.abs(norm - 1) > NORMALIZATION_TOLERANCE) {
+            throw providerError({
+                code: 'EMBEDDING_PROVIDER_ERROR',
+                retryable: false,
+                message: 'Potion worker returned an unnormalized embedding.',
+            });
+        }
+        return { vector, dimension: POTION_DIMENSION };
+    }
+
     private validateResponse(response: WorkerResponse): EmbeddingVector {
         if (response.ok !== true) {
             const nativeCode = typeof response.errorCode === 'string'
@@ -533,38 +624,37 @@ export class PotionEmbedding extends Embedding {
                 message: `Potion embedding request was rejected (${nativeCode}).`,
             });
         }
-        if (
-            !Number.isSafeInteger(response.retainedTokenCount)
-            || (response.retainedTokenCount as number) <= 0
-            || (response.retainedTokenCount as number) > POTION_RETAINED_TOKEN_LIMIT
-            || !Array.isArray(response.vector)
-            || response.vector.length !== POTION_DIMENSION
-            || response.vector.some((value) => typeof value !== 'number' || !Number.isFinite(value))
-        ) {
+        return this.validateItem(response);
+    }
+
+    private validateBatchResponse(response: WorkerResponse, expectedCount: number): EmbeddingVector[] {
+        if (response.ok !== true) {
+            const nativeCode = typeof response.errorCode === 'string'
+                ? response.errorCode
+                : 'UNCLASSIFIED_NATIVE_ERROR';
+            const invalidInput = new Set([
+                'EMPTY_INPUT',
+                'ALL_UNKNOWN_INPUT',
+                'OVERSIZED_INPUT',
+                'FRAME_TOO_LARGE',
+                'INVALID_FRAME',
+            ]).has(nativeCode);
+            throw providerError({
+                code: invalidInput
+                    ? 'EMBEDDING_PROVIDER_INVALID_REQUEST'
+                    : 'EMBEDDING_PROVIDER_ERROR',
+                retryable: false,
+                message: `Potion embedding request was rejected (${nativeCode}).`,
+            });
+        }
+        if (!Array.isArray(response.items) || response.items.length !== expectedCount) {
             throw providerError({
                 code: 'EMBEDDING_PROVIDER_ERROR',
                 retryable: false,
-                message: 'Potion worker returned an invalid embedding.',
+                message: 'Potion worker returned an invalid batch result array.',
             });
         }
-        const vector = response.vector as number[];
-        const squaredNorm = vector.reduce((sum, value) => sum + value * value, 0);
-        const norm = Math.sqrt(squaredNorm);
-        if (!Number.isFinite(norm) || norm <= Number.EPSILON) {
-            throw providerError({
-                code: 'EMBEDDING_PROVIDER_ERROR',
-                retryable: false,
-                message: 'Potion worker returned a zero-norm or non-finite embedding.',
-            });
-        }
-        if (Math.abs(norm - 1) > NORMALIZATION_TOLERANCE) {
-            throw providerError({
-                code: 'EMBEDDING_PROVIDER_ERROR',
-                retryable: false,
-                message: 'Potion worker returned an unnormalized embedding.',
-            });
-        }
-        return { vector, dimension: POTION_DIMENSION };
+        return response.items.map((item) => this.validateItem(item));
     }
 
     async detectDimension(): Promise<number> {
@@ -584,8 +674,42 @@ export class PotionEmbedding extends Embedding {
                 message: `Potion embedding batch exceeds ${this.maxBatchItems} items.`,
             });
         }
-        const responses = await Promise.all(texts.map((text) => this.request('document', text)));
-        return responses.map((response) => this.validateResponse(response));
+
+        const NATIVE_SUBBATCH_LIMIT = 32;
+        const subbatches: string[][] = [];
+        let currentSubbatch: string[] = [];
+        let currentSubbatchBytes = 0;
+
+        for (const text of texts) {
+            const textBytes = Buffer.byteLength(text, 'utf8');
+            if (textBytes > MAX_WORKER_FRAME_BYTES - 1024) {
+                throw providerError({
+                    code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
+                    retryable: false,
+                    message: 'Potion embedding input exceeds the bounded worker frame.',
+                });
+            }
+            if (
+                currentSubbatch.length > 0
+                && (currentSubbatch.length >= NATIVE_SUBBATCH_LIMIT || currentSubbatchBytes + textBytes > MAX_WORKER_FRAME_BYTES - 2048)
+            ) {
+                subbatches.push(currentSubbatch);
+                currentSubbatch = [];
+                currentSubbatchBytes = 0;
+            }
+            currentSubbatch.push(text);
+            currentSubbatchBytes += textBytes;
+        }
+        if (currentSubbatch.length > 0) {
+            subbatches.push(currentSubbatch);
+        }
+
+        const results: EmbeddingVector[] = [];
+        for (const subbatch of subbatches) {
+            const response = await this.requestBatch('document', subbatch);
+            results.push(...this.validateBatchResponse(response, subbatch.length));
+        }
+        return results;
     }
 
     getDimension(): number {

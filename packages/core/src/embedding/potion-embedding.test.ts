@@ -46,6 +46,36 @@ process.stdout.write(JSON.stringify({
   networkBlocked: true,
 }) + '\n');
 
+function encodeSingle(text) {
+  if (text === '__timeout__') return { timeout: true };
+  if (text === '__crash__') process.exit(17);
+  if (text.trim() === '') {
+    return { ok: false, errorCode: 'EMPTY_INPUT' };
+  }
+  if (text === '__all_unknown__' || text === '__oversized__') {
+    const errorCode = text === '__all_unknown__' ? 'ALL_UNKNOWN_INPUT' : 'OVERSIZED_INPUT';
+    return { ok: false, errorCode };
+  }
+  let vector;
+  if (text === '__wrong_dimensions__') {
+    vector = [1];
+  } else if (text === '__zero__') {
+    vector = Array(256).fill(0);
+  } else if (text === '__non_finite__') {
+    vector = [null, ...Array(255).fill(0)];
+  } else if (text === '__unnormalized__') {
+    vector = [2, ...Array(255).fill(0)];
+  } else {
+    const angle = (Buffer.byteLength(text, 'utf8') % 100) / 100;
+    vector = [Math.cos(angle), Math.sin(angle), ...Array(254).fill(0)];
+  }
+  return {
+    ok: true,
+    retainedTokenCount: 1,
+    vector,
+  };
+}
+
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 lines.on('line', (line) => {
   const request = JSON.parse(line);
@@ -53,35 +83,35 @@ lines.on('line', (line) => {
     process.stdout.write(JSON.stringify({ id: request.id, ok: true }) + '\n', () => process.exit(0));
     return;
   }
-  if (request.text === '__timeout__') return;
-  if (request.text === '__crash__') process.exit(17);
-  if (request.text.trim() === '') {
-    process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode: 'EMPTY_INPUT' }) + '\n');
+  if (request.op === 'encode_batch') {
+    const items = [];
+    for (const text of request.texts) {
+      const res = encodeSingle(text);
+      if (res.timeout) return;
+      if (!res.ok) {
+        process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode: res.errorCode }) + '\n');
+        return;
+      }
+      items.push({ retainedTokenCount: res.retainedTokenCount, vector: res.vector });
+    }
+    process.stdout.write(JSON.stringify({
+      id: request.id,
+      ok: true,
+      items,
+    }) + '\n');
     return;
   }
-  if (request.text === '__all_unknown__' || request.text === '__oversized__') {
-    const errorCode = request.text === '__all_unknown__' ? 'ALL_UNKNOWN_INPUT' : 'OVERSIZED_INPUT';
-    process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode }) + '\n');
+  const res = encodeSingle(request.text);
+  if (res.timeout) return;
+  if (!res.ok) {
+    process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode: res.errorCode }) + '\n');
     return;
-  }
-  let vector;
-  if (request.text === '__wrong_dimensions__') {
-    vector = [1];
-  } else if (request.text === '__zero__') {
-    vector = Array(256).fill(0);
-  } else if (request.text === '__non_finite__') {
-    vector = [null, ...Array(255).fill(0)];
-  } else if (request.text === '__unnormalized__') {
-    vector = [2, ...Array(255).fill(0)];
-  } else {
-    const angle = (Buffer.byteLength(request.text, 'utf8') % 100) / 100;
-    vector = [Math.cos(angle), Math.sin(angle), ...Array(254).fill(0)];
   }
   process.stdout.write(JSON.stringify({
     id: request.id,
     ok: true,
-    retainedTokenCount: 1,
-    vector,
+    retainedTokenCount: res.retainedTokenCount,
+    vector: res.vector,
   }) + '\n');
 });
 `;
@@ -351,4 +381,48 @@ test('pinned L1 helper satisfies the Core provider contract', {
     assert.equal(document.vector.length, POTION_DIMENSION);
     assert.ok(query.vector.every(Number.isFinite));
     assert.ok(document.vector.every(Number.isFinite));
+});
+
+test('pinned L1 helper satisfies batch parity against sequential embeddings', {
+    skip: !realHelperPath || !realModelPath,
+}, async (t) => {
+    const embedding = await PotionEmbedding.create({
+        helperPath: realHelperPath as string,
+        modelPath: realModelPath as string,
+    });
+    t.after(() => embedding.close());
+
+    const testTexts = [
+        'function parseChunk(content: string): Chunk[] { return []; }',
+        'export const MAX_WRITE_BATCH_SIZE = 256;',
+        'class LanceDbVectorDatabase implements VectorDatabase { }',
+        'import * as path from "node:path";',
+    ];
+
+    const sequentialDocs = await Promise.all(testTexts.map((text) => embedding.embedQuery(text)));
+    const batchDocs = await embedding.embedDocuments(testTexts);
+
+    assert.equal(batchDocs.length, testTexts.length);
+    for (let i = 0; i < testTexts.length; i++) {
+        const seq = sequentialDocs[i].vector;
+        const bat = batchDocs[i].vector;
+        assert.equal(seq.length, bat.length);
+
+        let maxDiff = 0;
+        let dotProduct = 0;
+        let normSeqSq = 0;
+        let normBatSq = 0;
+
+        for (let j = 0; j < seq.length; j++) {
+            const diff = Math.abs(seq[j] - bat[j]);
+            if (diff > maxDiff) maxDiff = diff;
+            dotProduct += seq[j] * bat[j];
+            normSeqSq += seq[j] * seq[j];
+            normBatSq += bat[j] * bat[j];
+        }
+        const cosineSim = dotProduct / (Math.sqrt(normSeqSq) * Math.sqrt(normBatSq));
+
+        assert.ok(maxDiff <= 1e-6, `Max diff ${maxDiff} must be <= 1e-6 for text ${i}`);
+        assert.ok(cosineSim >= 0.999999, `Cosine similarity ${cosineSim} must be >= 0.999999 for text ${i}`);
+    }
 });

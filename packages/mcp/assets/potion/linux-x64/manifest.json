@@ -24,12 +24,12 @@
       "libgcc_s"
     ]
   },
-  "embeddingInferenceContractDigest": "bfda80d97aeb585e20650b1c54e9063a65068ce284317f0e0a812e20964dcee7",
+  "embeddingInferenceContractDigest": "e716e695cc5895150602501601832a1e7467a09bf9dae1c347b1ff80accf0364",
   "files": [
     {
       "path": "satori-potion",
-      "bytes": 4224392,
-      "sha256": "2e42f3165b96927bb365f74a11b0495661ac3c44e1a194c55a8f0613b5bb2e12",
+      "bytes": 4227880,
+      "sha256": "0ecc35fe604e10074a7219f2ed82aa0e4fdb023fc4c99e62c6657938a55681a2",
       "executable": true
     },
     {

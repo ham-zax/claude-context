@@ -12249,7 +12249,7 @@ test('Context full index respects VectorWriteAggregationPolicy during indexing',
         class AggregatingMockDb extends InMemoryLanceVectorDatabase {
             public recordedWriteBatchSizes: number[] = [];
 
-            override getWriteAggregationPolicy() {
+            getWriteAggregationPolicy() {
                 return { preferredMaxRows: 4 };
             }
 

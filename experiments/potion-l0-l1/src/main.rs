@@ -86,6 +86,11 @@ enum WorkerRequest {
         role: Role,
         text: String,
     },
+    EncodeBatch {
+        id: String,
+        role: Role,
+        texts: Vec<String>,
+    },
     InjectPanic {
         id: String,
     },
@@ -97,9 +102,19 @@ enum WorkerRequest {
 impl WorkerRequest {
     fn id(&self) -> &str {
         match self {
-            Self::Encode { id, .. } | Self::InjectPanic { id } | Self::Shutdown { id } => id,
+            Self::Encode { id, .. }
+            | Self::EncodeBatch { id, .. }
+            | Self::InjectPanic { id }
+            | Self::Shutdown { id } => id,
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerBatchItem {
+    retained_token_count: usize,
+    vector: Vec<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +126,8 @@ struct WorkerResponse {
     retained_token_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vector: Option<Vec<f32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    items: Option<Vec<WorkerBatchItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<String>,
 }
@@ -149,6 +166,7 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                 ok: false,
                 retained_token_count: None,
                 vector: None,
+                items: None,
                 error_code: Some("FRAME_TOO_LARGE".to_owned()),
             })?;
             continue;
@@ -161,6 +179,7 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                     ok: false,
                     retained_token_count: None,
                     vector: None,
+                    items: None,
                     error_code: Some("INVALID_FRAME".to_owned()),
                 })?;
                 continue;
@@ -180,6 +199,7 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                         ok: true,
                         retained_token_count: Some(encoded.retained_token_count),
                         vector: Some(encoded.vector),
+                        items: None,
                         error_code: None,
                     },
                     Err(error) => WorkerResponse {
@@ -187,6 +207,37 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                         ok: false,
                         retained_token_count: None,
                         vector: None,
+                        items: None,
+                        error_code: Some(error.code().to_owned()),
+                    },
+                }
+            }
+            WorkerRequest::EncodeBatch { role, texts, .. } => {
+                let _ = role;
+                match model.encode_batch(&texts) {
+                    Ok(encodings) => {
+                        let items = encodings
+                            .into_iter()
+                            .map(|enc| WorkerBatchItem {
+                                retained_token_count: enc.retained_token_count,
+                                vector: enc.vector,
+                            })
+                            .collect();
+                        WorkerResponse {
+                            id,
+                            ok: true,
+                            retained_token_count: None,
+                            vector: None,
+                            items: Some(items),
+                            error_code: None,
+                        }
+                    }
+                    Err(error) => WorkerResponse {
+                        id,
+                        ok: false,
+                        retained_token_count: None,
+                        vector: None,
+                        items: None,
                         error_code: Some(error.code().to_owned()),
                     },
                 }
@@ -197,6 +248,7 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                 ok: true,
                 retained_token_count: None,
                 vector: None,
+                items: None,
                 error_code: None,
             },
         }));
@@ -207,6 +259,7 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                 ok: false,
                 retained_token_count: None,
                 vector: None,
+                items: None,
                 error_code: Some("NATIVE_PANIC_CONTAINED".to_owned()),
             })?,
         }
