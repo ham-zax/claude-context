@@ -7,8 +7,8 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import {
     POTION_DIMENSION,
-    POTION_INFERENCE_CONTRACT_DIGEST,
     POTION_MODEL_ID,
+    POTION_SEMANTIC_VERSION,
 } from "@zokizuan/satori-core";
 import {
     buildRuntimeIndexFingerprint,
@@ -45,9 +45,8 @@ function config(root: string): ContextMcpConfig {
         vectorStoreProvider: "LanceDB",
         lanceDbPath: path.join(root, "lancedb"),
         encoderProvider: "Potion",
-        encoderModel: POTION_MODEL_ID,
+        encoderModel: `${POTION_MODEL_ID}+${POTION_SEMANTIC_VERSION}`,
         encoderOutputDimension: POTION_DIMENSION,
-        embeddingArtifactDigest: POTION_INFERENCE_CONTRACT_DIGEST,
         potionHelperPath: path.join(root, "helper"),
         potionModelPath: path.join(root, "model"),
         potionRequestTimeoutMs: 5000,
