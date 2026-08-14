@@ -698,7 +698,7 @@ test("offline install preflight records resolved local model identity", async ()
     }
 });
 
-test("offline install defaults to the checksum-verified bundled Potion runtime", async () => {
+test("offline install defaults to the integrity- and capability-verified bundled Potion runtime", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "satori-potion-preflight-"));
     try {
         const result = await runInstallPreflight({
@@ -773,6 +773,24 @@ test("bundled Potion verification rejects a modified provenance manifest", async
         await assert.rejects(
             verifyBundledPotionRuntime(assetsRoot),
             /missing, invalid, or untrusted/,
+        );
+    } finally {
+        fs.rmSync(assetsRoot, { recursive: true, force: true });
+    }
+});
+
+test("bundled Potion verification rejects missing artifact when manifest is valid", async () => {
+    const assetsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-potion-valid-manifest-"));
+    try {
+        // Copy the exact valid manifest file
+        fs.copyFileSync(
+            path.join(POTION_ASSETS_ROOT, "manifest.json"),
+            path.join(assetsRoot, "manifest.json"),
+        );
+        // Do not create the files or create a truncated artifact
+        await assert.rejects(
+            verifyBundledPotionRuntime(assetsRoot),
+            /missing|regular file|failed checksum/i,
         );
     } finally {
         fs.rmSync(assetsRoot, { recursive: true, force: true });

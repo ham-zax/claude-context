@@ -43,10 +43,12 @@ import {
     type VectorPublicationCapabilities,
     type VectorRecord,
     type VectorStoreBackendInfo,
+    type VectorWriteAggregationPolicy,
 } from './types';
 
 const CONTROL_TABLE_PREFIX = '__satori_control_';
 const DEFAULT_MAX_WRITE_BATCH_SIZE = 512;
+const DEFAULT_WRITE_AGGREGATION_BATCH_SIZE = 256;
 const STABLE_TIE_INITIAL_MULTIPLIER = 2;
 const STABLE_TIE_MINIMUM_FETCH = 32;
 const COLLECTION_IO_CONCURRENCY = 64;
@@ -734,6 +736,10 @@ export class LanceDbVectorDatabase implements VectorDatabase {
 
     getPublicationCapabilities(): VectorPublicationCapabilities {
         return { atomicCandidatePublication: 'collection_fork' };
+    }
+
+    getWriteAggregationPolicy(): VectorWriteAggregationPolicy {
+        return { preferredMaxRows: DEFAULT_WRITE_AGGREGATION_BATCH_SIZE };
     }
 
     private async vectorDimension(table: Table): Promise<number> {

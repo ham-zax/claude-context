@@ -246,6 +246,14 @@ test('LanceDB adapter preserves exact retrieval, projections, controls, and idem
     assert.equal(await database.getControl(collectionName, marker.id), null);
 });
 
+test('LanceDB declares preferred write aggregation policy', async (t) => {
+    const databasePath = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-lancedb-aggregation-'));
+    t.after(() => fs.rmSync(databasePath, { recursive: true, force: true }));
+    const database = new LanceDbVectorDatabase({ databasePath });
+    t.after(() => database.close());
+    assert.deepEqual(database.getWriteAggregationPolicy?.(), { preferredMaxRows: 256 });
+});
+
 test('LanceDB publication observation changes for payload marker and collection mutations', async (t) => {
     const databasePath = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-lancedb-observation-'));
     t.after(() => fs.rmSync(databasePath, { recursive: true, force: true }));

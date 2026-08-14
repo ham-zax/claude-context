@@ -12239,3 +12239,45 @@ test('Context full index rejects PreparedFileChangeSet when a file is injected i
     }
 });
 
+test('Context full index respects VectorWriteAggregationPolicy during indexing', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-aggregation-'));
+    try {
+        for (let i = 0; i < 5; i++) {
+            fs.writeFileSync(path.join(tempRoot, `file_${i}.ts`), `export const v${i} = ${i};\nexport const fn${i} = () => ${i};\n`, 'utf8');
+        }
+
+        class AggregatingMockDb extends InMemoryLanceVectorDatabase {
+            public recordedWriteBatchSizes: number[] = [];
+
+            getWriteAggregationPolicy() {
+                return { preferredMaxRows: 4 };
+            }
+
+            override async writeDocuments(collectionName: string, documents: any[]): Promise<void> {
+                this.recordedWriteBatchSizes.push(documents.length);
+                await super.writeDocuments(collectionName, documents);
+            }
+        }
+
+        const vectorDatabase = new AggregatingMockDb();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+        });
+
+        await context.indexCodebase(tempRoot, undefined, false, {
+            deferFullIndexPublication: true,
+        });
+
+        // 5 files generate 25 total chunks. With preferredMaxRows: 4, batches should be [4, 4, 4, 4, 4, 4, 1]
+        const totalRowsWritten = vectorDatabase.recordedWriteBatchSizes.reduce((s, c) => s + c, 0);
+        assert.equal(totalRowsWritten, 25);
+        assert.deepEqual(vectorDatabase.recordedWriteBatchSizes, [4, 4, 4, 4, 4, 4, 1]);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+

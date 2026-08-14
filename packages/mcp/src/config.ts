@@ -15,9 +15,9 @@ import {
     SYMBOL_EXTRACTOR_VERSION,
     parseIndexFingerprint as parseCoreIndexFingerprint,
     POTION_DIMENSION,
-    POTION_INFERENCE_CONTRACT_DIGEST,
     POTION_MAX_TIMEOUT_MS,
     POTION_MODEL_ID,
+    POTION_SEMANTIC_VERSION,
     resolveExecutionPolicy,
     resolveOllamaModelIdentity,
     type ExecutionProfile,
@@ -490,20 +490,11 @@ export async function resolveMcpRuntimeBootstrap(
         ) {
             throw new Error(`Potion requires EMBEDDING_OUTPUT_DIMENSION=${POTION_DIMENSION}.`);
         }
-        if (
-            config.embeddingArtifactDigest !== undefined
-            && config.embeddingArtifactDigest !== POTION_INFERENCE_CONTRACT_DIGEST
-        ) {
-            throw new Error('Potion inference-contract digest does not match the pinned L1 authority.');
-        }
         const resolvedConfig = Object.freeze({
             ...config,
-            encoderModel: POTION_MODEL_ID,
+            encoderModel: `${POTION_MODEL_ID}+${POTION_SEMANTIC_VERSION}`,
             encoderOutputDimension: POTION_DIMENSION,
-            // Reuse the existing persisted artifact-digest authority field for
-            // Potion's complete inference contract rather than adding a second
-            // fingerprint shape that would invalidate existing providers.
-            embeddingArtifactDigest: POTION_INFERENCE_CONTRACT_DIGEST,
+            embeddingArtifactDigest: undefined,
         });
         return Object.freeze({
             config: resolvedConfig,
@@ -888,7 +879,7 @@ export function createMcpConfig(): ContextMcpConfig {
         ollamaEncoderModel: envManager.get('OLLAMA_MODEL'),
         ollamaModelDigest: envManager.get('OLLAMA_MODEL_DIGEST'),
         ollamaEndpoint: envManager.get('OLLAMA_HOST'),
-        // The installer pins these paths to its checksum-verified runtime bundle.
+        // The installer pins these paths to its integrity- and capability-verified runtime bundle.
         potionHelperPath: envManager.get('POTION_HELPER_PATH'),
         potionModelPath: envManager.get('POTION_MODEL_PATH'),
         potionRequestTimeoutMs,

@@ -8,6 +8,7 @@ import {
     POTION_DIMENSION,
     POTION_INFERENCE_CONTRACT_DIGEST,
     POTION_MODEL_ID,
+    PotionEmbedding,
     resolveOllamaModelIdentity,
     verifyPinnedPotionArtifacts,
     type ResolvedOllamaModelIdentity,
@@ -28,7 +29,7 @@ import type {
 const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
 const DEFAULT_POTION_REQUEST_TIMEOUT_MS = "5000";
 const PREFLIGHT_COLLECTION = "satori_install_preflight";
-const POTION_MANIFEST_SHA256 = "2a4da35d7a339c94c100457296fc221e1aff64fbc33594215bb369c19f3b8211";
+const POTION_MANIFEST_SHA256 = "1a352372df87443420ff564384024c113c66c12e15588a6f5021a487ab9ed81b";
 
 export interface InstallPreflightInput {
     runtime: InstallRuntime;
@@ -112,6 +113,9 @@ function sha256File(filePath: string): string {
 }
 
 export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<void> {
+    if (!path.isAbsolute(assetsRoot)) {
+        throw new Error("Potion asset root must be absolute.");
+    }
     const manifestPath = path.join(assetsRoot, "manifest.json");
     let manifest: PotionArtifactManifest;
     try {
@@ -154,24 +158,49 @@ export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<vo
             throw new Error("Bundled Potion manifest contains an invalid artifact entry.");
         }
         const artifactPath = path.join(assetsRoot, artifact.path);
-        const stat = fs.lstatSync(artifactPath);
+        let stat: fs.Stats;
+        try {
+            stat = fs.lstatSync(artifactPath);
+        } catch {
+            throw new Error(`Bundled Potion artifact '${artifact.path}' is missing at '${artifactPath}'.`);
+        }
         if (!stat.isFile() || stat.isSymbolicLink()) {
             throw new Error(`Bundled Potion artifact '${artifact.path}' must be a regular file.`);
         }
         if (stat.size !== artifact.bytes || sha256File(artifactPath) !== artifact.sha256) {
             throw new Error(`Bundled Potion artifact '${artifact.path}' failed checksum verification.`);
         }
-        if (artifact.executable) {
-            // npm normalizes non-bin package files to 0644. Restore only the
-            // owning user's execute bit after the immutable bytes are proven.
-            if ((stat.mode & fs.constants.S_IXUSR) === 0) {
-                fs.chmodSync(artifactPath, stat.mode | fs.constants.S_IXUSR);
-            }
-            fs.accessSync(artifactPath, fs.constants.X_OK);
-        }
     }
     const { helperPath, modelPath } = potionRuntimePaths(assetsRoot);
     await verifyPinnedPotionArtifacts({ helperPath, modelPath });
+
+    // Capability verification: structural presence is insufficient; prove the
+    // worker starts, loads the model, completes a smoke embedding, and exits cleanly.
+    const embedding = await PotionEmbedding.create({
+        helperPath,
+        modelPath,
+        requestTimeoutMs: 5000,
+        startupTimeoutMs: 5000,
+    });
+    try {
+        const [smoke] = await embedding.embedDocuments(["satori install capability smoke"]);
+        if (!smoke || !Array.isArray(smoke.vector) || smoke.vector.length !== POTION_DIMENSION) {
+            throw new Error("Bundled Potion runtime failed to produce a valid embedding vector.");
+        }
+        let normSq = 0;
+        for (const val of smoke.vector) {
+            if (!Number.isFinite(val)) {
+                throw new Error("Bundled Potion runtime produced non-finite embedding vector elements.");
+            }
+            normSq += val * val;
+        }
+        const norm = Math.sqrt(normSq);
+        if (Math.abs(norm - 1.0) > 1e-4) {
+            throw new Error(`Bundled Potion runtime vector norm ${norm} is not normalized.`);
+        }
+    } finally {
+        await embedding.close();
+    }
 }
 
 export function assertSupportedPotionPlatform(input: Pick<InstallPreflightInput, "platform" | "architecture">): void {

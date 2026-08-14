@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
     POTION_DIMENSION,
-    POTION_INFERENCE_CONTRACT_DIGEST,
+    POTION_SEMANTIC_VERSION,
     POTION_MODEL_ID,
 } from '@zokizuan/satori-core';
 import {
@@ -14,7 +14,6 @@ import {
     parseIndexFingerprint,
     resolveMcpRuntimeBootstrap,
     type ContextMcpConfig,
-    type IndexFingerprint,
 } from '../config.js';
 
 const DIGEST = 'a'.repeat(64);
@@ -30,26 +29,90 @@ test('offline static config preserves the installer-resolved Ollama dimension', 
         'OLLAMA_HOST',
         'EMBEDDING_OUTPUT_DIMENSION',
     ] as const;
-    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const backup = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
     try {
-        Object.assign(process.env, {
-            SATORI_RUNTIME_PROFILE: 'offline',
-            VECTOR_STORE_PROVIDER: 'LanceDB',
-            LANCEDB_PATH: '/tmp/satori-lancedb',
-            EMBEDDING_PROVIDER: 'Ollama',
-            OLLAMA_MODEL: 'nomic-embed-text:latest',
-            OLLAMA_MODEL_DIGEST: DIGEST,
-            OLLAMA_HOST: 'http://127.0.0.1:11434',
-            EMBEDDING_OUTPUT_DIMENSION: '768',
-        });
-        assert.equal(createMcpConfig().encoderOutputDimension, 768);
+        for (const key of keys) delete process.env[key];
+        process.env.SATORI_RUNTIME_PROFILE = 'offline';
+        process.env.VECTOR_STORE_PROVIDER = 'LanceDB';
+        process.env.LANCEDB_PATH = '/opt/satori/lancedb';
+        process.env.EMBEDDING_PROVIDER = 'Ollama';
+        process.env.OLLAMA_MODEL = 'nomic-embed-text';
+        process.env.OLLAMA_MODEL_DIGEST = 'a'.repeat(64);
+        process.env.OLLAMA_HOST = 'http://127.0.0.1:11434';
+        process.env.EMBEDDING_OUTPUT_DIMENSION = '768';
+
+        const parsed = createMcpConfig();
+        assert.equal(parsed.encoderProvider, 'Ollama');
+        assert.equal(parsed.encoderOutputDimension, 768);
     } finally {
         for (const key of keys) {
-            const value = previous[key];
-            if (value === undefined) delete process.env[key];
-            else process.env[key] = value;
+            if (backup[key] === undefined) delete process.env[key];
+            else process.env[key] = backup[key];
         }
     }
+});
+
+test('Potion static config defaults EMBEDDING_OUTPUT_DIMENSION to 256', () => {
+    const keys = [
+        'SATORI_RUNTIME_PROFILE',
+        'VECTOR_STORE_PROVIDER',
+        'LANCEDB_PATH',
+        'EMBEDDING_PROVIDER',
+        'POTION_HELPER_PATH',
+        'POTION_MODEL_PATH',
+        'EMBEDDING_OUTPUT_DIMENSION',
+    ] as const;
+    const backup = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+        for (const key of keys) delete process.env[key];
+        process.env.SATORI_RUNTIME_PROFILE = 'offline';
+        process.env.VECTOR_STORE_PROVIDER = 'LanceDB';
+        process.env.LANCEDB_PATH = '/opt/satori/lancedb';
+        process.env.EMBEDDING_PROVIDER = 'Potion';
+        process.env.POTION_HELPER_PATH = '/opt/satori/potion-helper';
+        process.env.POTION_MODEL_PATH = '/opt/satori/potion-model';
+
+        const parsed = createMcpConfig();
+        assert.equal(parsed.encoderProvider, 'Potion');
+        assert.equal(parsed.encoderModel, POTION_MODEL_ID);
+        assert.equal(parsed.encoderOutputDimension, POTION_DIMENSION);
+    } finally {
+        for (const key of keys) {
+            if (backup[key] === undefined) delete process.env[key];
+            else process.env[key] = backup[key];
+        }
+    }
+});
+
+test('offline bootstrap preserves recorded Ollama dimension', async () => {
+    const recorded = config({
+        executionProfile: 'offline',
+        networkPolicy: { kind: 'local-only' },
+        encoderProvider: 'Ollama',
+        encoderModel: 'nomic-embed-text',
+        ollamaEncoderModel: 'nomic-embed-text',
+        ollamaModelDigest: DIGEST,
+        ollamaEndpoint: 'http://127.0.0.1:11434',
+        encoderOutputDimension: 768,
+    });
+
+    const resolved = await resolveMcpRuntimeBootstrap(recorded, {
+        resolveOllamaIdentity: async () => Object.freeze({
+            configuredModel: 'nomic-embed-text',
+            resolvedModel: 'nomic-embed-text:latest',
+            artifactDigest: DIGEST,
+            artifactSize: 42,
+            dimension: 768,
+        }),
+    });
+
+    assert.equal(resolved.runtimeFingerprint.embeddingDimension, 768);
+    assert.equal(resolved.runtimeFingerprint.embeddingModel, 'nomic-embed-text:latest');
+    assert.equal(resolved.runtimeFingerprint.embeddingArtifactDigest, DIGEST);
+    assert.equal(
+        resolved.runtimeFingerprint.embeddingNormalizationPolicy,
+        EMBEDDING_NORMALIZATION_POLICY_VERSION,
+    );
 });
 
 test('retired reranker application mode fails clearly before MCP configuration is built', () => {
@@ -129,14 +192,14 @@ test('Potion bootstrap seals the frozen L1 inference identity', async () => {
         potionModelPath: '/opt/satori/potion-model',
     }));
 
-    assert.equal(resolved.config.embeddingArtifactDigest, POTION_INFERENCE_CONTRACT_DIGEST);
+    assert.equal(resolved.config.embeddingArtifactDigest, undefined);
     assert.equal(resolved.runtimeFingerprint.embeddingProvider, 'Potion');
-    assert.equal(resolved.runtimeFingerprint.embeddingModel, POTION_MODEL_ID);
-    assert.equal(resolved.runtimeFingerprint.embeddingDimension, POTION_DIMENSION);
     assert.equal(
-        resolved.runtimeFingerprint.embeddingArtifactDigest,
-        POTION_INFERENCE_CONTRACT_DIGEST,
+        resolved.runtimeFingerprint.embeddingModel,
+        `${POTION_MODEL_ID}+${POTION_SEMANTIC_VERSION}`,
     );
+    assert.equal(resolved.runtimeFingerprint.embeddingDimension, POTION_DIMENSION);
+    assert.equal(resolved.runtimeFingerprint.embeddingArtifactDigest, null);
     assert.deepEqual(
         parseIndexFingerprint(resolved.runtimeFingerprint),
         resolved.runtimeFingerprint,
@@ -145,14 +208,6 @@ test('Potion bootstrap seals the frozen L1 inference identity', async () => {
         ...resolved.runtimeFingerprint,
         embeddingArtifactDigest: 'b'.repeat(64),
     }, resolved.runtimeFingerprint), false);
-    const missingContractDigest = Object.fromEntries(
-        Object.entries(resolved.runtimeFingerprint)
-            .filter(([field]) => field !== 'embeddingArtifactDigest'),
-    ) as unknown as IndexFingerprint;
-    assert.equal(
-        indexFingerprintsEqual(missingContractDigest, resolved.runtimeFingerprint),
-        false,
-    );
 });
 
 test('Potion is selected only through explicit offline configuration', () => {
@@ -386,17 +441,26 @@ test('LateOn config fails closed for a missing or relative shared model path', (
     }
 });
 
-test('Potion bootstrap rejects changed inference identity', async () => {
+test('Potion bootstrap rejects invalid model identity or dimension', async () => {
+    await assert.rejects(
+        resolveMcpRuntimeBootstrap(config({
+            executionProfile: 'offline',
+            networkPolicy: { kind: 'local-only' },
+            encoderProvider: 'Potion',
+            encoderModel: 'untrusted-potion-model',
+            encoderOutputDimension: POTION_DIMENSION,
+        })),
+        /pinned model identity/,
+    );
     await assert.rejects(
         resolveMcpRuntimeBootstrap(config({
             executionProfile: 'offline',
             networkPolicy: { kind: 'local-only' },
             encoderProvider: 'Potion',
             encoderModel: POTION_MODEL_ID,
-            encoderOutputDimension: POTION_DIMENSION,
-            embeddingArtifactDigest: 'b'.repeat(64),
+            encoderOutputDimension: 512,
         })),
-        /inference-contract digest does not match/,
+        /EMBEDDING_OUTPUT_DIMENSION=256/,
     );
 });
 

@@ -7,8 +7,8 @@ import test from "node:test";
 import {
     POTION_DIMENSION,
     PotionEmbedding,
-    RerankerRequestError,
     restoreVerifiedOwnerExecutableBit,
+    RerankerRequestError,
     type Reranker,
     type RerankResult,
 } from "@zokizuan/satori-core";
@@ -638,7 +638,7 @@ lines.on('line', (line) => {
 });
 `;
 
-test("Scenario H: a 0644 packed helper is repaired only after checksum validation, then embeds", async () => {
+test("Scenario H: a 0644 helper fails closed before execution and succeeds after install chmod", async () => {
     const installRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-e2e-packed-"));
     try {
         const helperPath = path.join(installRoot, "satori-potion");

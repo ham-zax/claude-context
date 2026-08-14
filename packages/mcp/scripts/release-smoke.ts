@@ -266,8 +266,6 @@ export async function runPackedPotionSmoke(runtimeRoot: string): Promise<void> {
             }>;
         };
     };
-    // create() verifies the pinned artifact closure and repairs the owner
-    // execute bit on the trusted helper before any native code runs.
     const embedding = await core.PotionEmbedding.create({ helperPath, modelPath });
     try {
         const result = await embedding.embedQuery("release smoke");

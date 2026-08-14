@@ -1,5 +1,6 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,8 +8,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
     POTION_DIMENSION,
-    POTION_INFERENCE_CONTRACT_DIGEST,
     POTION_MODEL_ID,
+    POTION_RETAINED_TOKEN_LIMIT,
+    POTION_SEMANTIC_VERSION,
     PotionEmbedding,
     restoreVerifiedOwnerExecutableBit,
 } from './potion-embedding.js';
@@ -24,18 +26,6 @@ type TestPotionEmbeddingConstructor = new (config: {
 
 const TestPotionEmbedding = PotionEmbedding as unknown as TestPotionEmbeddingConstructor;
 
-test('committed L1 inference manifest matches the provider identity digest', () => {
-    // tsx executes these tests as ESM; the CJS build typing does not apply.
-    // @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
-    const moduleUrl = import.meta.url;
-    const manifestPath = path.resolve(
-        path.dirname(fileURLToPath(moduleUrl)),
-        '../../../../experiments/potion-l0-l1/fixtures/inference-contract.canonical.json',
-    );
-    const digest = crypto.createHash('sha256').update(fs.readFileSync(manifestPath)).digest('hex');
-    assert.equal(digest, POTION_INFERENCE_CONTRACT_DIGEST);
-});
-
 const FAKE_WORKER = String.raw`#!/usr/bin/env node
 const readline = require('node:readline');
 
@@ -46,6 +36,36 @@ process.stdout.write(JSON.stringify({
   networkBlocked: true,
 }) + '\n');
 
+function encodeSingle(text) {
+  if (text === '__timeout__') return { timeout: true };
+  if (text === '__crash__') process.exit(17);
+  if (text.trim() === '') {
+    return { ok: false, errorCode: 'EMPTY_INPUT' };
+  }
+  if (text === '__all_unknown__' || text === '__oversized__') {
+    const errorCode = text === '__all_unknown__' ? 'ALL_UNKNOWN_INPUT' : 'OVERSIZED_INPUT';
+    return { ok: false, errorCode };
+  }
+  let vector;
+  if (text === '__wrong_dimensions__') {
+    vector = [1];
+  } else if (text === '__zero__') {
+    vector = Array(256).fill(0);
+  } else if (text === '__non_finite__') {
+    vector = [null, ...Array(255).fill(0)];
+  } else if (text === '__unnormalized__') {
+    vector = [2, ...Array(255).fill(0)];
+  } else {
+    const angle = (Buffer.byteLength(text, 'utf8') % 100) / 100;
+    vector = [Math.cos(angle), Math.sin(angle), ...Array(254).fill(0)];
+  }
+  return {
+    ok: true,
+    retainedTokenCount: 1,
+    vector,
+  };
+}
+
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 lines.on('line', (line) => {
   const request = JSON.parse(line);
@@ -53,36 +73,54 @@ lines.on('line', (line) => {
     process.stdout.write(JSON.stringify({ id: request.id, ok: true }) + '\n', () => process.exit(0));
     return;
   }
-  if (request.text === '__timeout__') return;
-  if (request.text === '__crash__') process.exit(17);
-  if (request.text.trim() === '') {
-    process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode: 'EMPTY_INPUT' }) + '\n');
+  if (request.op === 'encode_batch') {
+    const delayMatch = request.texts.find((t) => typeof t === 'string' && t.startsWith('__delay_'));
+    const delayMs = delayMatch ? parseInt(delayMatch.match(/__delay_(\d+)ms__/)[1], 10) : 0;
+    const sendBatch = () => {
+      const items = [];
+      for (const text of request.texts) {
+        const res = encodeSingle(text);
+        if (res.timeout) return;
+        if (!res.ok) {
+          process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode: res.errorCode }) + '\n');
+          return;
+        }
+        items.push({ retainedTokenCount: res.retainedTokenCount, vector: res.vector });
+      }
+      process.stdout.write(JSON.stringify({
+        id: request.id,
+        ok: true,
+        items,
+      }) + '\n');
+    };
+    if (delayMs > 0) {
+      setTimeout(sendBatch, delayMs);
+    } else {
+      sendBatch();
+    }
     return;
   }
-  if (request.text === '__all_unknown__' || request.text === '__oversized__') {
-    const errorCode = request.text === '__all_unknown__' ? 'ALL_UNKNOWN_INPUT' : 'OVERSIZED_INPUT';
-    process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode }) + '\n');
-    return;
-  }
-  let vector;
-  if (request.text === '__wrong_dimensions__') {
-    vector = [1];
-  } else if (request.text === '__zero__') {
-    vector = Array(256).fill(0);
-  } else if (request.text === '__non_finite__') {
-    vector = [null, ...Array(255).fill(0)];
-  } else if (request.text === '__unnormalized__') {
-    vector = [2, ...Array(255).fill(0)];
+  const delayMatch = typeof request.text === 'string' && request.text.startsWith('__delay_') ? request.text : null;
+  const delayMs = delayMatch ? parseInt(delayMatch.match(/__delay_(\d+)ms__/)[1], 10) : 0;
+  const sendSingle = () => {
+    const res = encodeSingle(request.text);
+    if (res.timeout) return;
+    if (!res.ok) {
+      process.stdout.write(JSON.stringify({ id: request.id, ok: false, errorCode: res.errorCode }) + '\n');
+      return;
+    }
+    process.stdout.write(JSON.stringify({
+      id: request.id,
+      ok: true,
+      retainedTokenCount: res.retainedTokenCount,
+      vector: res.vector,
+    }) + '\n');
+  };
+  if (delayMs > 0) {
+    setTimeout(sendSingle, delayMs);
   } else {
-    const angle = (Buffer.byteLength(request.text, 'utf8') % 100) / 100;
-    vector = [Math.cos(angle), Math.sin(angle), ...Array(254).fill(0)];
+    sendSingle();
   }
-  process.stdout.write(JSON.stringify({
-    id: request.id,
-    ok: true,
-    retainedTokenCount: 1,
-    vector,
-  }) + '\n');
 });
 `;
 
@@ -127,7 +165,7 @@ test('Potion worker limits remain bounded', () => {
     }), /no greater than 64/);
 });
 
-test('Potion provider preserves the frozen identity and exact symmetric input', async (t) => {
+test('Potion provider preserves the frozen semantic identity and exact symmetric input', async (t) => {
     const embedding = await createFakeEmbedding(t);
     const query = await embedding.embedQuery('symmetric witness');
     const [document] = await embedding.embedDocuments(['symmetric witness']);
@@ -139,9 +177,9 @@ test('Potion provider preserves the frozen identity and exact symmetric input', 
     assert.ok(Math.abs(Math.hypot(...query.vector) - 1) <= 1e-5);
     assert.deepEqual(embedding.getIdentity(), {
         provider: 'Potion',
-        model: POTION_MODEL_ID,
+        model: `${POTION_MODEL_ID}+${POTION_SEMANTIC_VERSION}`,
         dimension: POTION_DIMENSION,
-        artifactDigest: POTION_INFERENCE_CONTRACT_DIGEST,
+        artifactDigest: null,
         normalizationPolicy: 'provider_output_v1',
     });
 });
@@ -160,6 +198,29 @@ test('Potion provider batches on one bounded worker and preserves input order', 
     );
 });
 
+test('Potion pending queue capacity enforces maxBatchItems and recovers on request completion', async (t) => {
+    const embedding = await createFakeEmbedding(t, { maxBatchItems: 4 });
+
+    // Send a 4-item batch with delay to keep the queue occupied
+    const delayedPromise = embedding.embedDocuments(['__delay_100ms__', 'doc2', 'doc3', 'doc4']);
+
+    // 5th item while 4 are pending must immediately reject with queue full
+    await assert.rejects(
+        embedding.embedDocuments(['doc5']),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_INVALID_REQUEST'
+            && error.message.includes('queue is full'),
+    );
+
+    // Wait for the in-flight batch to finish
+    const delayedDocs = await delayedPromise;
+    assert.equal(delayedDocs.length, 4);
+
+    // Queue capacity is now available again
+    const subsequentDocs = await embedding.embedDocuments(['doc5']);
+    assert.equal(subsequentDocs.length, 1);
+});
+
 test('Potion provider classifies native invalid input without exposing source text', async (t) => {
     const embedding = await createFakeEmbedding(t);
     for (const input of ['', '__all_unknown__', '__oversized__']) {
@@ -167,59 +228,40 @@ test('Potion provider classifies native invalid input without exposing source te
             embedding.embedQuery(input),
             (error: unknown) => error instanceof EmbeddingProviderError
                 && error.code === 'EMBEDDING_PROVIDER_INVALID_REQUEST'
-                && !error.message.includes(input || 'source text'),
+                && (input.length === 0 || !error.message.includes(input)),
         );
     }
 });
 
-test('Potion provider rejects malformed, zero, non-finite, and unnormalized output', async (t) => {
-    const embedding = await createFakeEmbedding(t);
-    for (const input of ['__wrong_dimensions__', '__zero__', '__non_finite__', '__unnormalized__']) {
-        await assert.rejects(
-            embedding.embedQuery(input),
-            (error: unknown) => error instanceof EmbeddingProviderError
-                && error.code === 'EMBEDDING_PROVIDER_ERROR',
-        );
-    }
-});
-
-test('Potion timeout terminates the worker and rejects later work', async (t) => {
-    const embedding = await createFakeEmbedding(t, { requestTimeoutMs: 30 });
+test('Potion provider classifies worker timeout with retryable flag', async (t) => {
+    const embedding = await createFakeEmbedding(t, { requestTimeoutMs: 50 });
     await assert.rejects(
         embedding.embedQuery('__timeout__'),
         (error: unknown) => error instanceof EmbeddingProviderError
-            && error.code === 'EMBEDDING_PROVIDER_TIMEOUT',
+            && error.code === 'EMBEDDING_PROVIDER_TIMEOUT'
+            && error.retryable === true,
+    );
+});
+
+test('Potion provider fails all pending requests when the worker crashes', async (t) => {
+    const embedding = await createFakeEmbedding(t, { requestTimeoutMs: 1_000 });
+    const pendingWork = embedding.embedQuery('__delay_200ms__');
+    const crashTrigger = embedding.embedQuery('__crash__');
+
+    await assert.rejects(
+        crashTrigger,
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+    );
+    await assert.rejects(
+        pendingWork,
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
     );
     await assert.rejects(
         embedding.embedQuery('later work'),
         (error: unknown) => error instanceof EmbeddingProviderError
             && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
-    );
-});
-
-test('Potion worker isolation contains a native process failure', async (t) => {
-    const embedding = await createFakeEmbedding(t);
-    await assert.rejects(
-        embedding.embedQuery('__crash__'),
-        (error: unknown) => error instanceof EmbeddingProviderError
-            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
-    );
-    await assert.rejects(
-        embedding.embedQuery('later work'),
-        (error: unknown) => error instanceof EmbeddingProviderError
-            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
-    );
-});
-
-test('Potion artifact verification fails closed before worker startup', async () => {
-    await assert.rejects(
-        PotionEmbedding.create({
-            helperPath: path.join(os.tmpdir(), 'missing-potion-helper'),
-            modelPath: path.join(os.tmpdir(), 'missing-potion-model'),
-        }),
-        (error: unknown) => error instanceof EmbeddingProviderError
-            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE'
-            && !error.message.includes(os.tmpdir()),
     );
 });
 
@@ -331,8 +373,152 @@ test('an already executable helper keeps its exact mode', async () => {
     }
 });
 
-const realHelperPath = process.env.SATORI_POTION_TEST_HELPER;
-const realModelPath = process.env.SATORI_POTION_TEST_MODEL;
+test('Potion provider rejects malformed, zero, non-finite, and unnormalized output', async (t) => {
+    const embedding = await createFakeEmbedding(t);
+    for (const input of ['__wrong_dimensions__', '__zero__', '__non_finite__', '__unnormalized__']) {
+        await assert.rejects(
+            embedding.embedQuery(input),
+            (error: unknown) => error instanceof EmbeddingProviderError
+                && error.code === 'EMBEDDING_PROVIDER_ERROR',
+        );
+    }
+});
+
+test('Potion timeout terminates the worker and rejects later work', async (t) => {
+    const embedding = await createFakeEmbedding(t, { requestTimeoutMs: 30 });
+    await assert.rejects(
+        embedding.embedQuery('__timeout__'),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_TIMEOUT',
+    );
+    await assert.rejects(
+        embedding.embedQuery('later work'),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+    );
+});
+
+test('Potion worker isolation contains a native process failure', async (t) => {
+    const embedding = await createFakeEmbedding(t);
+    await assert.rejects(
+        embedding.embedQuery('__crash__'),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+    );
+    await assert.rejects(
+        embedding.embedQuery('later work'),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE',
+    );
+});
+
+test('Potion runtime file validation fails closed when assets are missing', {
+    skip: process.platform !== 'linux' || process.arch !== 'x64',
+}, async () => {
+    await assert.rejects(
+        PotionEmbedding.create({
+            helperPath: path.join(os.tmpdir(), 'missing-potion-helper'),
+            modelPath: path.join(os.tmpdir(), 'missing-potion-model'),
+        }),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE'
+            && !error.message.includes(os.tmpdir()),
+    );
+});
+
+test('Potion runtime file validation rejects symlink assets', {
+    skip: process.platform !== 'linux' || process.arch !== 'x64',
+}, async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potion-validation-'));
+    try {
+        const realHelper = path.join(root, 'real-helper');
+        const helperSymlink = path.join(root, 'satori-potion');
+        const modelDir = path.join(root, 'model');
+        fs.mkdirSync(modelDir);
+        fs.writeFileSync(realHelper, 'helper', { mode: 0o755 });
+        fs.symlinkSync(realHelper, helperSymlink);
+        fs.writeFileSync(path.join(modelDir, 'model.safetensors'), 'model');
+        fs.writeFileSync(path.join(modelDir, 'tokenizer.json'), 'tokenizer');
+        fs.writeFileSync(path.join(modelDir, 'config.json'), 'config');
+
+        await assert.rejects(
+            PotionEmbedding.create({
+                helperPath: helperSymlink,
+                modelPath: modelDir,
+            }),
+            (error: unknown) => error instanceof EmbeddingProviderError
+                && error.code === 'EMBEDDING_PROVIDER_UNAVAILABLE'
+                && error.message.includes('must be a regular file'),
+        );
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('Potion batch packing correctly handles pathological escaping and near-limit inputs', async (t) => {
+    const embedding = await createFakeEmbedding(t, { maxBatchItems: 32 });
+    const pathological = [
+        'normal text',
+        'text with "quotes" and \\backslashes\\ and \n newlines \r\n and \t tabs',
+        'unicode \u0000 \u001f \ufffd symbols',
+        JSON.stringify({ complex: 'json', nested: { array: [1, 2, 3] } }),
+    ];
+    const docs = await embedding.embedDocuments(pathological);
+    assert.equal(docs.length, pathological.length);
+
+    // Single item exceeding 1 MiB is rejected
+    const hugeItem = 'a'.repeat(1_048_576);
+    await assert.rejects(
+        embedding.embedDocuments([hugeItem]),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_INVALID_REQUEST',
+    );
+});
+
+test('Potion batch subbatches and concurrent queries reserve unique request IDs without collision', async (t) => {
+    const embedding = await createFakeEmbedding(t, { maxBatchItems: 64 });
+    // 33 items splits into 2 native subbatches (limit 32): batch 1 has 32 items, batch 2 has 1 item.
+    // batch 1 has a delayed first item so it stays in-flight while we issue a concurrent query.
+    const batchTexts = ['__delay_50ms__item0', ...Array.from({ length: 32 }, (_, i) => `item${i + 1}`)];
+
+    const batchPromise = embedding.embedDocuments(batchTexts);
+    // Allow batchPromise to execute synchronous subbatch ID planning and dispatch batch 1:
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    // Concurrent embedQuery executes while batch 1 is in-flight:
+    const queryPromise = embedding.embedQuery('concurrent query');
+
+    const [batchDocs, queryDoc] = await Promise.all([batchPromise, queryPromise]);
+    assert.equal(batchDocs.length, 33);
+    assert.equal(queryDoc.vector.length, POTION_DIMENSION);
+    assert.ok(queryDoc.vector.every(Number.isFinite));
+    for (const doc of batchDocs) {
+        assert.equal(doc.vector.length, POTION_DIMENSION);
+        assert.ok(doc.vector.every(Number.isFinite));
+    }
+});
+
+// @ts-expect-error TS1470: import.meta is available at test runtime under tsx.
+const testModuleDirectory = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+
+const defaultRealHelperPath = path.resolve(
+    testModuleDirectory,
+    '../../../mcp/assets/potion/linux-x64/satori-potion',
+);
+const defaultRealModelPath = path.resolve(
+    testModuleDirectory,
+    '../../../mcp/assets/potion/linux-x64/model',
+);
+const realHelperPath = process.env.SATORI_POTION_TEST_HELPER || (
+    process.platform === 'linux' && process.arch === 'x64' && fs.existsSync(defaultRealHelperPath)
+        ? defaultRealHelperPath
+        : undefined
+);
+const realModelPath = process.env.SATORI_POTION_TEST_MODEL || (
+    process.platform === 'linux' && process.arch === 'x64' && fs.existsSync(defaultRealModelPath)
+        ? defaultRealModelPath
+        : undefined
+);
 
 test('pinned L1 helper satisfies the Core provider contract', {
     skip: !realHelperPath || !realModelPath,
@@ -351,4 +537,272 @@ test('pinned L1 helper satisfies the Core provider contract', {
     assert.equal(document.vector.length, POTION_DIMENSION);
     assert.ok(query.vector.every(Number.isFinite));
     assert.ok(document.vector.every(Number.isFinite));
+});
+
+interface RawWorkerClient {
+    send(payload: Record<string, unknown>): Promise<{
+        id: string;
+        ok: boolean;
+        items?: Array<{ retainedTokenCount: number; vector: number[] }>;
+        retainedTokenCount?: number;
+        vector?: number[];
+        errorCode?: string;
+    }>;
+    close(): Promise<void>;
+}
+
+async function createRawWorkerClient(helperPath: string, modelPath: string): Promise<RawWorkerClient> {
+    const child = spawn(helperPath, ['worker', modelPath, '--block-network'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stderr.on('data', () => undefined);
+    child.stdin.on('error', () => undefined);
+
+    let readyResolve: () => void;
+    const readyPromise = new Promise<void>((resolve) => {
+        readyResolve = resolve;
+    });
+
+    const pending = new Map<string, {
+        resolve: (res: {
+            id: string;
+            ok: boolean;
+            items?: Array<{ retainedTokenCount: number; vector: number[] }>;
+            retainedTokenCount?: number;
+            vector?: number[];
+            errorCode?: string;
+        }) => void;
+        reject: (err: Error) => void;
+    }>();
+    let stdoutBuffer = Buffer.alloc(0);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+        stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
+        while (true) {
+            let leading = 0;
+            while (leading < stdoutBuffer.length && stdoutBuffer[leading] <= 0x20) {
+                leading += 1;
+            }
+            if (leading > 0) {
+                stdoutBuffer = stdoutBuffer.subarray(leading);
+            }
+            if (stdoutBuffer.length === 0) break;
+            if (stdoutBuffer[0] !== 0x7b) break;
+
+            let depth = 0;
+            let inString = false;
+            let escaped = false;
+            let frameEnd = -1;
+            for (let i = 0; i < stdoutBuffer.length; i += 1) {
+                const byte = stdoutBuffer[i];
+                if (inString) {
+                    if (escaped) {
+                        escaped = false;
+                    } else if (byte === 0x5c) {
+                        escaped = true;
+                    } else if (byte === 0x22) {
+                        inString = false;
+                    }
+                    continue;
+                }
+                if (byte === 0x22) {
+                    inString = true;
+                } else if (byte === 0x7b || byte === 0x5b) {
+                    depth += 1;
+                } else if (byte === 0x7d || byte === 0x5d) {
+                    depth -= 1;
+                    if (depth === 0) {
+                        frameEnd = i + 1;
+                        break;
+                    }
+                    if (depth < 0) break;
+                }
+            }
+            if (frameEnd < 0) break;
+            const frame = stdoutBuffer.subarray(0, frameEnd);
+            stdoutBuffer = stdoutBuffer.subarray(frameEnd);
+            try {
+                const parsed = JSON.parse(frame.toString('utf8'));
+                if (parsed.ready === true) {
+                    readyResolve();
+                    continue;
+                }
+                if (typeof parsed.id === 'string' && pending.has(parsed.id)) {
+                    const handler = pending.get(parsed.id)!;
+                    pending.delete(parsed.id);
+                    handler.resolve(parsed);
+                }
+            } catch {
+                // Ignore parse errors
+            }
+        }
+    });
+
+    await readyPromise;
+
+    let seq = 0;
+    return {
+        send(payload: Record<string, unknown>) {
+            return new Promise((resolve, reject) => {
+                const id = (payload.id as string) || `raw-${++seq}`;
+                pending.set(id, { resolve, reject });
+                child.stdin.write(JSON.stringify({ ...payload, id }) + '\n');
+            });
+        },
+        async close() {
+            child.kill('SIGKILL');
+        },
+    };
+}
+
+test('pinned L1 helper satisfies legacy single-encode vs native batch-encode parity and failure classification via raw worker protocol', {
+    skip: !realHelperPath || !realModelPath,
+}, async (t) => {
+    const rawWorker = await createRawWorkerClient(realHelperPath as string, realModelPath as string);
+    t.after(() => rawWorker.close());
+
+    const testTexts = [
+        'function parseChunk(content: string): Chunk[] { return []; }',
+        'export const MAX_WRITE_BATCH_SIZE = 256;',
+        'class LanceDbVectorDatabase implements VectorDatabase { }',
+        'import * as path from "node:path";',
+        'const escaped = "quotes: \\"hello\\" \\n newlines";',
+        'let sum = 0; for (let i = 0; i < 100; i++) { sum += i; }',
+        'SELECT symbol_key, file_path FROM symbols WHERE start_line >= 10;',
+    ];
+
+    // 1. Single op: "encode" vs single-item batch op: "encode_batch"
+    for (let i = 0; i < testTexts.length; i++) {
+        const text = testTexts[i];
+        const singleRes = await rawWorker.send({ op: 'encode', role: 'document', text });
+        const batchRes = await rawWorker.send({ op: 'encode_batch', role: 'document', texts: [text] });
+
+        assert.equal(singleRes.ok, true, `singleRes must be ok for text ${i}`);
+        assert.equal(batchRes.ok, true, `batchRes must be ok for text ${i}`);
+        assert.equal(Array.isArray(batchRes.items), true);
+        assert.equal(batchRes.items?.length, 1);
+
+        const singleVec = singleRes.vector!;
+        const batchVec = batchRes.items![0].vector;
+        assert.equal(singleRes.retainedTokenCount, batchRes.items![0].retainedTokenCount);
+        assert.equal(singleVec.length, POTION_DIMENSION);
+        assert.equal(batchVec.length, POTION_DIMENSION);
+
+        let maxDiff = 0;
+        let dotProduct = 0;
+        let normSingleSq = 0;
+        let normBatchSq = 0;
+        for (let j = 0; j < POTION_DIMENSION; j++) {
+            const diff = Math.abs(singleVec[j] - batchVec[j]);
+            if (diff > maxDiff) maxDiff = diff;
+            dotProduct += singleVec[j] * batchVec[j];
+            normSingleSq += singleVec[j] * singleVec[j];
+            normBatchSq += batchVec[j] * batchVec[j];
+        }
+        const cosineSim = dotProduct / (Math.sqrt(normSingleSq) * Math.sqrt(normBatchSq));
+
+        assert.ok(maxDiff <= 1e-6, `Max diff ${maxDiff} must be <= 1e-6 for item ${i}`);
+        assert.ok(cosineSim >= 0.999999, `Cosine similarity ${cosineSim} must be >= 0.999999 for item ${i}`);
+    }
+
+    // 2. Multi-item batch against sequential singles
+    const multiBatchRes = await rawWorker.send({ op: 'encode_batch', role: 'document', texts: testTexts });
+    assert.equal(multiBatchRes.ok, true);
+    assert.equal(multiBatchRes.items?.length, testTexts.length);
+
+    for (let i = 0; i < testTexts.length; i++) {
+        const singleRes = await rawWorker.send({ op: 'encode', role: 'document', text: testTexts[i] });
+        const batchItem: { retainedTokenCount: number; vector: number[] } = multiBatchRes.items![i];
+        assert.equal(singleRes.retainedTokenCount, batchItem.retainedTokenCount);
+        assert.equal(singleRes.vector!.length, POTION_DIMENSION);
+        assert.equal(batchItem.vector.length, POTION_DIMENSION);
+        for (let j = 0; j < POTION_DIMENSION; j++) {
+            assert.ok(
+                Math.abs(singleRes.vector![j] - batchItem.vector[j]) <= 1e-6,
+                `Multi-batch item ${i} dim ${j} difference exceeds 1e-6`,
+            );
+        }
+    }
+
+    // 3. Exact native error code parity on invalid input
+    const singleEmpty = await rawWorker.send({ op: 'encode', role: 'document', text: '' });
+    assert.equal(singleEmpty.ok, false);
+    assert.equal(singleEmpty.errorCode, 'EMPTY_INPUT');
+
+    const batchEmpty = await rawWorker.send({ op: 'encode_batch', role: 'document', texts: ['valid text', ''] });
+    assert.equal(batchEmpty.ok, false);
+    assert.equal(batchEmpty.errorCode, 'EMPTY_INPUT');
+
+    // 4. Public TS adapter error classification on real helper
+    const embedding = await PotionEmbedding.create({
+        helperPath: realHelperPath as string,
+        modelPath: realModelPath as string,
+    });
+    t.after(() => embedding.close());
+    await assert.rejects(
+        embedding.embedDocuments(['valid text', '']),
+        (error: unknown) => error instanceof EmbeddingProviderError
+            && error.code === 'EMBEDDING_PROVIDER_INVALID_REQUEST'
+            && error.message.includes('EMPTY_INPUT'),
+    );
+});
+
+test('pinned L1 helper satisfies frozen reference fixtures contract for potion_semantics_v1', {
+    skip: !realHelperPath || !realModelPath,
+}, async (t) => {
+    const fixturesPath = path.resolve(
+        testModuleDirectory,
+        '../../../../experiments/potion-l0-l1/fixtures/reference-fixtures.json',
+    );
+    assert.ok(fs.existsSync(fixturesPath), 'Reference fixtures file must exist.');
+    const fixturesContent = JSON.parse(fs.readFileSync(fixturesPath, 'utf8'));
+
+    // Assert fixture metadata matches frozen authority
+    assert.equal(fixturesContent.schemaVersion, 1);
+    assert.equal(fixturesContent.retainedTokenLimit, POTION_RETAINED_TOKEN_LIMIT);
+    assert.equal(fixturesContent.normalization, true);
+    assert.equal(fixturesContent.modelRevision, 'e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b');
+
+    const embedding = await PotionEmbedding.create({
+        helperPath: realHelperPath as string,
+        modelPath: realModelPath as string,
+    });
+    t.after(() => embedding.close());
+
+    for (const testCase of fixturesContent.cases) {
+        let actualVector: number[];
+        if (testCase.role === 'query') {
+            const res = await embedding.embedQuery(testCase.text);
+            actualVector = res.vector;
+        } else {
+            const [res] = await embedding.embedDocuments([testCase.text]);
+            actualVector = res.vector;
+        }
+
+        assert.equal(actualVector.length, POTION_DIMENSION);
+        assert.equal(testCase.vector.length, POTION_DIMENSION);
+
+        let maxDiff = 0;
+        let dotProduct = 0;
+        let normActualSq = 0;
+        let normExpectedSq = 0;
+
+        for (let j = 0; j < POTION_DIMENSION; j++) {
+            const diff = Math.abs(actualVector[j] - testCase.vector[j]);
+            if (diff > maxDiff) maxDiff = diff;
+            dotProduct += actualVector[j] * testCase.vector[j];
+            normActualSq += actualVector[j] * actualVector[j];
+            normExpectedSq += testCase.vector[j] * testCase.vector[j];
+        }
+        const cosineSim = dotProduct / (Math.sqrt(normActualSq) * Math.sqrt(normExpectedSq));
+
+        assert.ok(
+            maxDiff <= fixturesContent.tolerance.maxAbsoluteDifference,
+            `Case ${testCase.id}: max absolute difference ${maxDiff} exceeds tolerance ${fixturesContent.tolerance.maxAbsoluteDifference}`,
+        );
+        assert.ok(
+            cosineSim >= fixturesContent.tolerance.minimumCosineSimilarity,
+            `Case ${testCase.id}: cosine similarity ${cosineSim} below minimum ${fixturesContent.tolerance.minimumCosineSimilarity}`,
+        );
+    }
 });

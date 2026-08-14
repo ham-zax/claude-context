@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
     resolveLanceDbNativePackage,
     resolveOxcParserNativePackage,
@@ -362,19 +362,19 @@ function packedPotionSmokeEnv(
     smokeHomeDir: string,
 ): NodeJS.ProcessEnv {
     const assetsRoot = path.join(packedMcpRoot, "assets", "potion", "linux-x64");
-    const manifestPath = path.join(assetsRoot, "manifest.json");
     const helperPath = path.join(assetsRoot, "satori-potion");
     const modelPath = path.join(assetsRoot, "model");
-    for (const requiredPath of [manifestPath, helperPath, path.join(modelPath, "model.safetensors")]) {
+    for (const requiredPath of [
+        helperPath,
+        path.join(modelPath, "model.safetensors"),
+        path.join(modelPath, "config.json"),
+        path.join(modelPath, "tokenizer.json"),
+        path.join(assetsRoot, "MODEL_CARD.md"),
+        path.join(assetsRoot, "MODEL2VEC_RS_LICENSE"),
+    ]) {
         if (!fs.existsSync(requiredPath)) {
             throw new Error(`Packed Potion artifact is missing: ${requiredPath}.`);
         }
-    }
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
-        model?: { identity?: unknown };
-    };
-    if (typeof manifest.model?.identity !== "string" || manifest.model.identity.length === 0) {
-        throw new Error("Packed Potion manifest has no model identity.");
     }
     return {
         ...baseEnv,
@@ -382,7 +382,7 @@ function packedPotionSmokeEnv(
         VECTOR_STORE_PROVIDER: "LanceDB",
         LANCEDB_PATH: path.join(smokeHomeDir, ".satori", "vector", "lancedb"),
         EMBEDDING_PROVIDER: "Potion",
-        EMBEDDING_MODEL: manifest.model.identity,
+        EMBEDDING_MODEL: "minishlab/potion-code-16M-v2@e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b",
         EMBEDDING_OUTPUT_DIMENSION: "256",
         POTION_HELPER_PATH: helperPath,
         POTION_MODEL_PATH: modelPath,
@@ -390,7 +390,52 @@ function packedPotionSmokeEnv(
     };
 }
 
-function main(): void {
+async function assertPackedPotionExecutionCapability(installRoot: string, packedMcpRoot: string): Promise<void> {
+    if (process.platform !== "linux" || process.arch !== "x64") {
+        return;
+    }
+    const assetsRoot = path.join(packedMcpRoot, "assets", "potion", "linux-x64");
+    const helperPath = path.join(assetsRoot, "satori-potion");
+    const modelPath = path.join(assetsRoot, "model");
+
+    const coreEntry = path.join(installRoot, "node_modules", "@zokizuan", "satori-core", "dist", "index.js");
+    if (!fs.existsSync(coreEntry)) {
+        throw new Error(`Packed Core entry is missing under ${installRoot}.`);
+    }
+
+    const core = await import(pathToFileURL(coreEntry).href) as {
+        PotionEmbedding: {
+            create(config: Readonly<{ helperPath: string; modelPath: string }>): Promise<{
+                embedDocuments(texts: string[]): Promise<Array<{ vector: number[]; dimension: number }>>;
+                close(): Promise<void>;
+            }>;
+        };
+    };
+
+    const embedding = await core.PotionEmbedding.create({ helperPath, modelPath });
+    try {
+        const [result] = await embedding.embedDocuments([
+            "satori packed release capability smoke test document",
+        ]);
+        if (
+            !result
+            || result.dimension !== 256
+            || !Array.isArray(result.vector)
+            || result.vector.length !== 256
+            || !result.vector.every((value) => Number.isFinite(value))
+        ) {
+            throw new Error("Packed Potion smoke did not return a finite 256-dimensional embedding.");
+        }
+        const norm = Math.sqrt(result.vector.reduce((sum: number, v: number) => sum + v * v, 0));
+        if (Math.abs(norm - 1.0) > 1e-4) {
+            throw new Error(`Packed Potion smoke vector norm ${norm} is not normalized.`);
+        }
+    } finally {
+        await embedding.close();
+    }
+}
+
+async function main(): Promise<void> {
     const currentFile = fileURLToPath(import.meta.url);
     const packageRoot = path.resolve(path.dirname(currentFile), "..");
     const corePackageRoot = path.resolve(packageRoot, "..", "core");
@@ -422,6 +467,7 @@ function main(): void {
         assertPackedLateOnAcquisitionAuthority(packed.packedMcpRoot, packed.packedCliRoot);
         assertPackedCliLateOnAcquisition(packed.packedCliRoot);
         assertPackedCliHelp(runCliSmoke(["--format", "json", "--help"], packed.cliEntry, smokeExecDir, baseEnv));
+        await assertPackedPotionExecutionCapability(smokeExecDir, packed.packedMcpRoot);
         const doctorEnv = packedPotionSmokeEnv(baseEnv, packed.packedMcpRoot, smokeHomeDir);
         runCliSmoke(["doctor"], packed.cliEntry, smokeExecDir, doctorEnv);
         console.log("[release:smoke] Packed CLI->MCP->Core closure, offline Potion runtime, and LateOn D32 acquisition authority passed.");
@@ -438,5 +484,8 @@ function main(): void {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    main();
+    main().catch((error) => {
+        console.error(`[release:smoke] ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+    });
 }
