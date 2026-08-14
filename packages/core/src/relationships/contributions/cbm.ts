@@ -196,7 +196,14 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
                 let targetSymbol: SymbolRecord | undefined;
                 let decision = occ.decision;
 
-                if (occ.targetProvenance && decision === 'resolved') {
+                if (decision === 'resolved' && !occ.targetProvenance) {
+                    decision = 'unresolved';
+                    proofSteps.push({
+                        kind: 'unresolved_dependency',
+                        subject: 'unknown',
+                        detail: 'Resolved occurrence lacks target provenance',
+                    });
+                } else if (occ.targetProvenance && decision === 'resolved') {
                     const matches = findExactSpanTarget(
                         input.registry,
                         occ.targetProvenance.file,
@@ -222,6 +229,10 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
                             detail: `No matching symbol record found at exact span in target file ${occ.targetProvenance.file}`,
                         });
                     }
+                }
+
+                if (decision === 'resolved' && !targetSymbol) {
+                    decision = 'unresolved';
                 }
 
                 const depKey = dependencyKeyForCall({

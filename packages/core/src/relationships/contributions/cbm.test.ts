@@ -187,3 +187,123 @@ test('CbmSemanticContributionEngine fails closed on unregistered language descri
         /Unregistered semantic language: 'unregistered_lang'/,
     );
 });
+
+test('CbmSemanticContributionEngine downgrades resolved occurrence to unresolved when targetProvenance is missing', () => {
+    const registry = createMockRegistryWithDecoy();
+    const engine = new CbmSemanticContributionEngine('go');
+
+    const semanticEvidence: SemanticProjectEvidence = {
+        language: 'go',
+        occurrencesByFile: new Map([
+            [
+                'main.go',
+                [
+                    {
+                        sourceFile: 'main.go',
+                        callSpan: { startByte: 70, endByte: 85, startLine: 7, endLine: 7, startColumn: 4, endColumn: 19 },
+                        // targetProvenance is intentionally undefined
+                        targetProvenance: undefined,
+                        proof: { strategy: 'direct_call' },
+                        decision: 'resolved',
+                        confidence: 1.0,
+                    },
+                ],
+            ],
+        ]),
+    };
+
+    const result = engine.resolveCalls({
+        registry,
+        analysisByFile: new Map(),
+        semanticEvidence,
+    });
+
+    assert.equal(result.records.length, 0);
+    const claims = result.claimsByFile?.get('main.go');
+    assert.ok(claims && claims.length === 1);
+    assert.equal(claims[0].decision, 'unresolved');
+    assert.equal(claims[0].targetInstanceId, undefined);
+    assert.equal(claims[0].relationshipType, 'REFERENCES');
+});
+
+test('CbmSemanticContributionEngine abstains when enclosing symbol is non-callable (e.g. interface/class)', () => {
+    const callerSpan = { startByte: 50, endByte: 150, startLine: 5, endLine: 10, startColumn: 0, endColumn: 1 };
+    const targetSpan = { startByte: 10, endByte: 45, startLine: 1, endLine: 4, startColumn: 0, endColumn: 1 };
+
+    const symbols: SymbolRecord[] = [
+        {
+            symbolKey: 'main.go#NonCallableInterface',
+            symbolInstanceId: 'inst-interface',
+            name: 'NonCallableInterface',
+            label: 'NonCallableInterface',
+            qualifiedName: 'NonCallableInterface',
+            kind: 'interface' as const, // non-callable
+            file: 'main.go',
+            language: 'go',
+            span: callerSpan,
+            parentQualifiedNamePath: [],
+            fileHash: 'fh-main',
+            extractorVersion: 'v1',
+        },
+        {
+            symbolKey: 'main.go#Process',
+            symbolInstanceId: 'inst-process',
+            name: 'Process',
+            label: 'Process',
+            qualifiedName: 'Process',
+            kind: 'function' as const,
+            file: 'main.go',
+            language: 'go',
+            span: targetSpan,
+            parentQualifiedNamePath: [],
+            fileHash: 'fh-main',
+            extractorVersion: 'v1',
+        },
+    ];
+
+    const registry: SymbolRegistry = {
+        symbols,
+        symbolsByFile: new Map([['main.go', symbols]]),
+        symbolsByKey: new Map(symbols.map((s) => [s.symbolKey, s])),
+        symbolsByInstanceId: new Map(symbols.map((s) => [s.symbolInstanceId, s])),
+        qualifiedNameRegistry: { byQn: new Map(), byKey: new Map() },
+        generationId: 'gen-test',
+        schemaVersion: 'v1',
+        createdAt: new Date().toISOString(),
+    };
+
+    const engine = new CbmSemanticContributionEngine('go');
+    const semanticEvidence: SemanticProjectEvidence = {
+        language: 'go',
+        occurrencesByFile: new Map([
+            [
+                'main.go',
+                [
+                    {
+                        sourceFile: 'main.go',
+                        callSpan: { startByte: 70, endByte: 85, startLine: 7, endLine: 7, startColumn: 4, endColumn: 19 },
+                        targetProvenance: {
+                            file: 'main.go',
+                            span: targetSpan,
+                            name: 'Process',
+                            kind: 'function',
+                        },
+                        proof: { strategy: 'direct_call' },
+                        decision: 'resolved',
+                        confidence: 1.0,
+                    },
+                ],
+            ],
+        ]),
+    };
+
+    const result = engine.resolveCalls({
+        registry,
+        analysisByFile: new Map(),
+        semanticEvidence,
+    });
+
+    // Enclosing symbol is an interface (non-callable), so no claims or records emitted
+    assert.equal(result.records.length, 0);
+    assert.equal(result.claimsByFile?.get('main.go')?.length ?? 0, 0);
+});

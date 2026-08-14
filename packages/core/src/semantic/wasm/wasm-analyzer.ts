@@ -125,6 +125,10 @@ export class WasmSemanticProjectAnalyzer implements SemanticProjectAnalyzer {
                     };
                 }
 
+                if (decision === 'resolved' && !targetProvenance) {
+                    decision = 'unresolved';
+                }
+
                 const occurrence: SemanticResolvedOccurrence = {
                     sourceFile: raw.sourceFile,
                     callSpan: srcMap.span(raw.callStartByte, raw.callEndByte),
