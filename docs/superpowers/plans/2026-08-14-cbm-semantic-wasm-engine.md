@@ -280,7 +280,7 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
 
 ### Task A1: Characterize Current Python & Syntactic Records/Claims/TESTS
 
-- [ ] **A1.1 Document Baseline Output**:
+- [x] **A1.1 Document Baseline Output**:
   - Add characterization tests in `packages/core/src/relationships/builder.test.ts` capturing:
     - Python records, resolution claims, and flow proof steps.
     - JS/TS direct call records and derived `TESTS` edges.
@@ -290,21 +290,21 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
 
 ### Task A2: Resolution Strategy Registry with Canonical Language IDs
 
-- [ ] **A2.1 Create `packages/core/src/relationships/resolution-strategy-registry.ts`**:
+- [x] **A2.1 Create `packages/core/src/relationships/resolution-strategy-registry.ts`**:
   - Define `LanguageResolutionStrategy`: `'python_native' | 'syntactic' | 'cbm_semantic' | 'none'`.
   - Implement `LanguageResolutionStrategyRegistry` using canonical language IDs from `languages/registry.ts`:
     - `python` -> `python_native`
     - `javascript`, `typescript` -> `syntactic`
     - `go`, `rust`, `java`, `csharp`, `cpp`, etc. -> `none` (initially)
   - Method `strategyForLanguage(languageId: string): LanguageResolutionStrategy`.
-- [ ] **A2.2 Unit Tests (`resolution-strategy-registry.test.ts`)**:
+- [x] **A2.2 Unit Tests (`resolution-strategy-registry.test.ts`)**:
   - Verify canonical resolution, alias normalization, and default fallback.
 
 ---
 
 ### Task A3: Introduce `CallResolutionContribution` Contract & `RelationshipBuildMode`
 
-- [ ] **A3.1 Create `packages/core/src/relationships/contributions/contracts.ts`**:
+- [x] **A3.1 Create `packages/core/src/relationships/contributions/contracts.ts`**:
   ```typescript
   export type RelationshipBuildMode =
       | { readonly kind: 'production' }
@@ -332,7 +332,7 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
 
 ### Task A4: Wrap Python Resolution Unchanged
 
-- [ ] **A4.1 Create `packages/core/src/relationships/contributions/python.ts`**:
+- [x] **A4.1 Create `packages/core/src/relationships/contributions/python.ts`**:
   - Implement `CallResolutionEngine` wrapping `resolvePythonRelationships()` from `python-resolution.ts`:
     ```typescript
     export class PythonResolutionContributionEngine implements CallResolutionEngine {
@@ -349,24 +349,24 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
         }
     }
     ```
-- [ ] **A4.2 Parity Tests (`contributions/python.test.ts`)**:
+- [x] **A4.2 Parity Tests (`contributions/python.test.ts`)**:
   - Verify exact output equality with `python-resolution.test.ts`.
 
 ---
 
 ### Task A5: Extract Syntactic Non-Python Resolution with `TESTS` Derivation
 
-- [ ] **A5.1 Create `packages/core/src/relationships/contributions/syntactic.ts`**:
+- [x] **A5.1 Create `packages/core/src/relationships/contributions/syntactic.ts`**:
   - Extract the generic non-Python name-matching loop from `builder.ts` into `SyntacticResolutionContributionEngine`.
   - Preserves exact direct call matching, unambiguous target resolution, confidence assignment, and derived `TESTS` edge generation when test files call production symbols.
-- [ ] **A5.2 Parity Tests (`contributions/syntactic.test.ts`)**:
+- [x] **A5.2 Parity Tests (`contributions/syntactic.test.ts`)**:
   - Verify identical records and `TESTS` edges for JS/TS fixtures.
 
 ---
 
 ### Task A6: Define Provider-Neutral `SemanticProjectAnalyzer` & Exact Source Contracts
 
-- [ ] **A6.1 Create `packages/core/src/semantic/contracts.ts`**:
+- [x] **A6.1 Create `packages/core/src/semantic/contracts.ts`**:
   ```typescript
   export interface SemanticSourceFile {
       readonly path: string;
@@ -420,7 +420,7 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
       readonly occurrencesByFile: ReadonlyMap<string, readonly SemanticResolvedOccurrence[]>;
   }
   ```
-- [ ] **A6.2 Create `packages/core/src/semantic/analyzer-port.ts` & `noop-analyzer.ts`**:
+- [x] **A6.2 Create `packages/core/src/semantic/analyzer-port.ts` & `noop-analyzer.ts`**:
   ```typescript
   export interface SemanticProjectAnalyzer {
       supportsLanguage(language: string): boolean;
@@ -433,7 +433,7 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
 
 ### Task A7: Move Full Relationship Orchestration into `IndexGenerationWorkflow`
 
-- [ ] **A7.1 Unify Full & Incremental Relationship Construction in `IndexGenerationWorkflow`**:
+- [x] **A7.1 Unify Full & Incremental Relationship Construction in `IndexGenerationWorkflow`**:
   - Move relationship building out of `Context.writeSymbolRegistryForCompletedIndex()` into `IndexGenerationWorkflow`:
     - Full Indexing: Capture `semanticSources` in `ProcessedFileList` (only when `semanticAnalyzer.supportsLanguage(lang)` is true), await `semanticAnalyzer.analyze()`, and invoke `buildRelationshipsForRegistry()`.
     - Incremental Sync: Already invokes `buildRelationshipDelta()` inside `IndexGenerationWorkflow`.
@@ -443,26 +443,27 @@ void satori_semantic_destroy(SatoriSemanticHandle handle);
     - Implement `admitResolvedCallClaims()` for claim admission.
     - Dispatch through `LanguageResolutionStrategyRegistry`, `PythonResolutionContributionEngine`, and `SyntacticResolutionContributionEngine`.
     - Attach claims during emit.
-- [ ] **A7.2 Wire `NoopSemanticProjectAnalyzer` in `Context`**:
+- [x] **A7.2 Wire `NoopSemanticProjectAnalyzer` in `Context`**:
   - Inject `NoopSemanticProjectAnalyzer` when constructing `IndexGenerationWorkflow`.
 
 ---
 
 ### Task A8: Parity Proof, Commit & Release Qualification Checkpoint
 
-- [ ] **A8.1 Run Core Test Suite & Verify Zero Behavior Divergence**:
+- [x] **A8.1 Run Core Test Suite & Verify Zero Behavior Divergence**:
   ```bash
   pnpm --filter @zokizuan/satori-core test
   ```
-- [ ] **A8.2 Commit on Clean Tree**:
+- [x] **A8.2 Commit on Clean Tree**:
   - Commit: `refactor(core): establish provider-driven language intelligence spine`.
-- [ ] **A8.3 Run Full Release Qualification on Clean Commit**:
+- [x] **A8.3 Run Full Release Qualification on Clean Commit**:
   ```bash
   pnpm run check
   pnpm run release:check
   ```
-- [ ] **A8.4 STOP & Review Checkpoint**:
+- [x] **A8.4 STOP & Review Checkpoint**:
   - Verify: Python output identical, JS/TS output identical, zero new CALLS edges, zero capability changes.
+
 
 ---
 
