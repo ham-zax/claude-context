@@ -211,25 +211,25 @@ satori/
 - [x] Enforce descriptor-manifest alignment and fail-closed manifest checking in `WasmSemanticProjectAnalyzer` and `verifySemanticEngine()`.
 - [x] Add TypeScript Layer Acceptance test proving second CBM language integration with zero builder/dispatch code modifications.
 
-#### Task B3: Incremental Semantic Rebuild & Descriptor-Driven Auxiliary Observation
-- [ ] **Incremental CBM Rebuild**: In `rebuildNavigationArtifactsForSyncDelta()` and `buildRelationshipDelta()`, when any source or semantic auxiliary for a CBM language changes in a sync delta:
+#### Task B3: Incremental Semantic Rebuild & Descriptor-Driven Auxiliary Observation (COMPLETED)
+- [x] **Incremental CBM Rebuild**: In `rebuildNavigationArtifactsForSyncDelta()` and `buildRelationshipDelta()`, when any source or semantic auxiliary for a CBM language changes in a sync delta:
   - Reread current complete source snapshot for that language.
   - Rerun semantic analysis to produce fresh `semanticEvidenceByLanguage`.
   - Re-resolve and replace affected language claims and relationships during delta publication.
-- [ ] **Descriptor-Driven Auxiliary Observation**: Separate semantic auxiliary observation from vector search indexing (auxiliary input ≠ searchable/vector-indexed document) using root-bound/freshness-safe observation.
-- [ ] **Capability Decoupling & Qualification**: Maintain strict separation between descriptor existence, compiled native engine availability, and Satori publication capability (`callGraphBuild`).
+- [x] **Descriptor-Driven Auxiliary Observation**: Separate semantic auxiliary observation from vector search indexing (auxiliary input ≠ searchable/vector-indexed document) using root-bound/freshness-safe observation (`collectSemanticAuxiliariesForLanguage`).
+- [x] **Capability Decoupling & Qualification**: Maintain strict separation between descriptor existence, compiled native engine availability, and Satori publication capability (`callGraphBuild`).
 
-#### Task B4: Architectural & Upstream Documentation Deliverables
-- [ ] Author `docs/architecture/LANGUAGE_INTELLIGENCE.md` covering the full platform architecture, extension invariants, and future language migration steps (including strategic second-language selection: Rust / TypeScript).
-- [ ] Author `third_party/cbm-semantic/UPDATING.md` covering upstream synchronization, Emscripten toolchain pinning, asset generation, and verification.
+#### Task B4: Architectural & Upstream Documentation Deliverables (COMPLETED)
+- [x] Author `docs/architecture/LANGUAGE_INTELLIGENCE.md` covering the full platform architecture, extension invariants, and future language migration steps (including strategic second-language selection: Rust / TypeScript).
+- [x] Author `third_party/cbm-semantic/UPDATING.md` covering upstream synchronization, Emscripten toolchain pinning, asset generation, and verification.
 
-#### Task B5: Characterization, Parity & Release Qualification Gate
-- [ ] Update end-to-end multi-file characterization tests in `packages/core/src/relationships/go-call-characterization.test.ts` to test CBM contribution engine through generic builder.
-- [ ] Run full test suites across all packages:
-  - `pnpm --filter @zokizuan/satori-core test`
-  - `pnpm --filter @zokizuan/satori-mcp test`
-  - `pnpm --filter @zokizuan/satori-cli test`
-  - `pnpm run check` (lint, typecheck, version freshness)
-  - `pnpm run semantic:verify`
-  - `pnpm run release:check`
-- [ ] Inspect complete diff to verify clean adherence to the generalized language-intelligence platform architecture.
+#### Task B5: Characterization, Parity & Release Qualification Gate (COMPLETED)
+- [x] Update end-to-end multi-file characterization tests in `packages/core/src/relationships/go-call-characterization.test.ts` to test CBM contribution engine through generic builder.
+- [x] Run full test suites across all packages:
+  - `pnpm --filter @zokizuan/satori-core test` (863 tests passing)
+  - `pnpm --filter @zokizuan/satori-mcp test` (19 tests passing)
+  - `pnpm --filter @zokizuan/satori-cli test` (366 tests passing)
+  - `pnpm run check` (lint, typecheck, version freshness clean across all packages)
+  - `pnpm run semantic:verify` (reproducibility digest & descriptor alignment verified)
+  - `pnpm run release:check` (clean build, packed smoke, CLI/MCP packaged runs pass)
+- [x] Inspect complete diff to verify clean adherence to the generalized language-intelligence platform architecture.
