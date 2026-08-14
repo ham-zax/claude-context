@@ -420,7 +420,7 @@ function relationshipContentDigest(records: RelationshipRecord[]): string {
     ]));
 }
 
-function createSchema(database: DatabaseSync): void {
+function createTables(database: DatabaseSync): void {
     database.exec(`
         CREATE TABLE navigation_manifest(
             key TEXT PRIMARY KEY,
@@ -471,12 +471,22 @@ function createSchema(database: DatabaseSync): void {
             end_column INTEGER,
             confidence TEXT NOT NULL
         );
+    `);
+}
+
+function createSecondaryIndexes(database: DatabaseSync): void {
+    database.exec(`
         CREATE INDEX idx_symbols_key ON symbols(symbol_key);
         CREATE INDEX idx_symbols_file_span ON symbols(file_path, start_line, end_line);
         CREATE INDEX idx_relationship_source ON relationships(source_instance_id, type);
         CREATE INDEX idx_relationship_target ON relationships(target_instance_id, type);
         CREATE INDEX idx_relationship_file ON relationships(file_path, type);
     `);
+}
+
+function createSchema(database: DatabaseSync): void {
+    createTables(database);
+    createSecondaryIndexes(database);
 }
 
 function readExistingRegistryState(input: NavigationStoreInput, rootPath: string): NavigationRegistryState {
@@ -837,7 +847,7 @@ export async function importNavigationToSqlite(input: ImportNavigationToSqliteIn
     let database: DatabaseSync | undefined;
     try {
         database = openDatabase(temporarySqlitePath);
-        createSchema(database);
+        createTables(database);
         database.exec('BEGIN');
 
         insertManifestValue(database, 'schema_version', NAVIGATION_SQLITE_SCHEMA_VERSION);
@@ -958,6 +968,7 @@ export async function importNavigationToSqlite(input: ImportNavigationToSqliteIn
             insertManifestValue(database, 'relationship_content_hash', '');
         }
 
+        createSecondaryIndexes(database);
         database.exec('COMMIT');
         closeDatabase(database);
         database = undefined;
