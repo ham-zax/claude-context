@@ -9,6 +9,7 @@ import type { Embedding } from '../embedding';
 
 function createMockVectorDb(): VectorDatabase {
     return {
+        writeDocuments: async () => ({ rowsWritten: 0 }),
         insertVector: async () => {},
         insertVectors: async () => {},
         searchVectors: async () => [],
@@ -21,13 +22,22 @@ function createMockVectorDb(): VectorDatabase {
     } as unknown as VectorDatabase;
 }
 
+
 function createMockEmbedding(): Embedding {
     return {
-        dimension: 768,
-        embed: async () => new Float32Array(768),
-        embedBatch: async (texts: string[]) => texts.map(() => new Float32Array(768)),
+        getDimension: () => 768,
+        embedQuery: async () => ({ vector: new Array(768).fill(0), dimension: 768 }),
+        embedDocuments: async (texts: string[]) => texts.map(() => ({ vector: new Array(768).fill(0), dimension: 768 })),
+        getIdentity: () => ({
+            provider: 'test',
+            model: 'test',
+            dimension: 768,
+            artifactDigest: 'digest',
+            normalizationPolicy: 'none',
+        }),
     } as unknown as Embedding;
 }
+
 
 import type { RepositoryRelativePath } from '../paths/repository-path';
 
@@ -66,18 +76,63 @@ test('IndexingPipeline does not retain semanticSources when semantic analyzer su
 });
 
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
+
 test('IndexingPipeline retains exact source and sourceHash when semantic analyzer supports language', async () => {
-    const testSemanticAnalyzer: SemanticProjectAnalyzer = {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-indexing-pipeline-test-'));
+    try {
+        const goContent = 'package main\n\nfunc main() {\n    println("hello")\n}\n';
+        const goFile = path.join(tempDir, 'main.go');
+        fs.writeFileSync(goFile, goContent, 'utf8');
 
-        supportsLanguage(lang: string) {
-            return lang === 'go';
-        },
-        async analyze(_input: SemanticProjectInput): Promise<SemanticProjectEvidence> {
-            return { language: 'go', occurrencesByFile: new Map() };
-        },
-    };
+        const languageAnalyzer = createLanguageAnalysisService();
+        const testSemanticAnalyzer: SemanticProjectAnalyzer = {
+            supportsLanguage(lang: string) {
+                return lang === 'go';
+            },
+            async analyze(_input: SemanticProjectInput): Promise<SemanticProjectEvidence> {
+                return { language: 'go', occurrencesByFile: new Map() };
+            },
+        };
 
-    assert.equal(testSemanticAnalyzer.supportsLanguage('go'), true);
-    assert.equal(testSemanticAnalyzer.supportsLanguage('python'), false);
-    assert.equal(noopSemanticProjectAnalyzer.supportsLanguage('go'), false);
+        const pipeline = new IndexingPipeline({
+            getVectorDatabase: () => createMockVectorDb(),
+            languageAnalyzer,
+            semanticAnalyzer: testSemanticAnalyzer,
+            getEmbedding: () => createMockEmbedding(),
+            assertEmbeddingIdentityCurrent: () => ({
+                provider: 'test',
+                model: 'test',
+                dimension: 768,
+                artifactDigest: 'digest',
+                normalizationPolicy: 'none',
+            }),
+            isHybridEnabled: () => false,
+            canonicalizeCodebasePath: (p) => p,
+            normalizeRelativePathForCodebase: (_cb, p) => path.relative(tempDir, p) as unknown as RepositoryRelativePath,
+            getIndexedExtensionsForCodebase: () => ['.go', '.ts', '.py'],
+            matchesIgnorePattern: () => false,
+            getSymbolExtractorVersion: () => 'extractor-v1',
+        });
+
+        const result = await pipeline.processFileList({
+            filePaths: [goFile],
+            codebasePath: tempDir,
+            collectionName: 'test_col',
+        });
+
+        assert.equal(result.processedFiles, 1);
+        assert.ok(result.semanticSources);
+        assert.equal(result.semanticSources.length, 1);
+        assert.equal(result.semanticSources[0].path, 'main.go');
+        assert.equal(result.semanticSources[0].source, goContent);
+        const expectedHash = crypto.createHash('sha256').update(goContent, 'utf8').digest('hex');
+        assert.equal(result.semanticSources[0].sourceHash, expectedHash);
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
 });
+

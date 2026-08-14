@@ -355,18 +355,8 @@ export interface IndexGenerationWorkflowPorts {
             indexPolicyHash?: string,
             runId?: string,
         ): Promise<IndexCompletionMarkerDocument>;
-    writeSymbolRegistryForCompletedIndex(
-            codebasePath: string,
-            symbolRecords: SymbolRecord[],
-            symbolManifestFiles: SymbolRegistryManifestFile[],
-            assertMutationCurrent?: () => void,
-            suppliedAnalysisByFile?: Map<string, RelationshipAnalysisEvidence>,
-            publishMutation?: (publish: () => void) => void,
-            deferPublication?: boolean,
-            indexPolicy?: ResolvedIndexPolicy,
-            semanticSources?: readonly SemanticSourceFile[],
-        ): Promise<StagedNavigationSidecarGeneration | undefined>;
     buildIndexPolicyHash(codebasePath: string): string;
+
     readIndexableFileInsideRoot(
             absoluteFile: string,
             canonicalRoot: string,
@@ -476,9 +466,6 @@ export class IndexGenerationWorkflow {
 
         const analysisByFile = new Map(suppliedAnalysisByFile ?? []);
         for (const file of manifestFiles) {
-            if (analysisByFile.has(file.path)) {
-                continue;
-            }
             const absoluteFile = path.resolve(canonicalRoot, file.path);
             const relativeFromRoot = path.relative(canonicalRoot, absoluteFile);
             if (!relativeFromRoot || relativeFromRoot.startsWith('..') || path.isAbsolute(relativeFromRoot)) {
@@ -492,6 +479,9 @@ export class IndexGenerationWorkflow {
             if (observedHash !== file.hash) {
                 throw new Error(`Source changed before navigation publication for '${file.path}'.`);
             }
+            if (analysisByFile.has(file.path)) {
+                continue;
+            }
             const analysis = await this.ports.languageAnalyzer.analyze({
                 content,
                 language: file.language,
@@ -504,6 +494,7 @@ export class IndexGenerationWorkflow {
                 pythonFlowFacts: analysis.pythonFlowFacts ?? [],
             });
         }
+
 
         if (this.ports.semanticAnalyzer && semanticSources && semanticSources.length > 0) {
             const sourcesByLanguage = new Map<string, SemanticSourceFile[]>();

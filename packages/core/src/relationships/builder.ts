@@ -74,6 +74,7 @@ function resolveUniqueLocalSymbol(
         symbol.file === file
         && symbol.kind !== 'file'
         && symbol.name === name
+        && symbol.parentQualifiedNamePath.length === 0
     ));
     return matches.length === 1 ? matches[0] : undefined;
 }
@@ -97,9 +98,13 @@ function attachResolutionClaims(
     for (const [file, claims] of claimsByFile.entries()) {
         const evidence = getEvidence(analysisByFile, file);
         if (!evidence) continue;
-        (evidence as { resolutionClaims?: readonly ResolutionClaim[] }).resolutionClaims = claims;
+        (evidence as { resolutionClaims?: readonly ResolutionClaim[] }).resolutionClaims =
+            [...claims].sort((left, right) =>
+                left.callSpan.startByte - right.callSpan.startByte
+            );
     }
 }
+
 
 /**
  * Centrally admits resolved call claims proposed by language providers,

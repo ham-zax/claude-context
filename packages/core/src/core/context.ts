@@ -945,30 +945,8 @@ export class Context {
             writeCompletedIndexMarker: (codebasePath, indexedFiles, totalChunks, collectionName, indexStatus, assertMutationCurrent, navigationCandidate, indexPolicyHash, runId) => (
                 this.writeCompletedIndexMarker(codebasePath, indexedFiles, totalChunks, collectionName, indexStatus, assertMutationCurrent, navigationCandidate, indexPolicyHash, runId)
             ),
-            writeSymbolRegistryForCompletedIndex: (
-                codebasePath,
-                symbolRecords,
-                symbolManifestFiles,
-                assertMutationCurrent,
-                suppliedAnalysisByFile,
-                publishMutation,
-                deferPublication,
-                indexPolicy,
-                semanticSources,
-            ) => (
-                this.writeSymbolRegistryForCompletedIndex(
-                    codebasePath,
-                    symbolRecords,
-                    symbolManifestFiles,
-                    assertMutationCurrent,
-                    suppliedAnalysisByFile,
-                    publishMutation,
-                    deferPublication,
-                    indexPolicy,
-                    semanticSources,
-                )
-            ),
         });
+
 
 
         this.indexingPipeline = new IndexingPipeline({
