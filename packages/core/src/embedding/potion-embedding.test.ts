@@ -22,6 +22,7 @@ type TestPotionEmbeddingConstructor = new (config: {
     requestTimeoutMs: number;
     startupTimeoutMs: number;
     maxBatchItems: number;
+    maxPendingItems?: number;
 }) => PotionEmbedding;
 
 const TestPotionEmbedding = PotionEmbedding as unknown as TestPotionEmbeddingConstructor;
@@ -126,7 +127,7 @@ lines.on('line', (line) => {
 
 async function createFakeEmbedding(
     t: TestContext,
-    overrides: { requestTimeoutMs?: number; maxBatchItems?: number } = {},
+    overrides: { requestTimeoutMs?: number; maxBatchItems?: number; maxPendingItems?: number } = {},
 ): Promise<PotionEmbedding> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-potion-worker-'));
     const helperPath = path.join(root, 'fake-worker.cjs');
@@ -139,6 +140,7 @@ async function createFakeEmbedding(
         requestTimeoutMs: overrides.requestTimeoutMs ?? 500,
         startupTimeoutMs: 1_000,
         maxBatchItems: overrides.maxBatchItems ?? 4,
+        maxPendingItems: overrides.maxPendingItems,
     });
     await (embedding as unknown as { start(): Promise<void> }).start();
     t.after(async () => {
@@ -163,6 +165,30 @@ test('Potion worker limits remain bounded', () => {
         startupTimeoutMs: 1_000,
         maxBatchItems: 65,
     }), /no greater than 64/);
+    assert.throws(() => new TestPotionEmbedding({
+        helperPath: '/tmp/helper',
+        modelPath: '/tmp/model',
+        requestTimeoutMs: 1_000,
+        startupTimeoutMs: 1_000,
+        maxBatchItems: 1,
+        maxPendingItems: 0,
+    }), /pending capacity/);
+    assert.throws(() => new TestPotionEmbedding({
+        helperPath: '/tmp/helper',
+        modelPath: '/tmp/model',
+        requestTimeoutMs: 1_000,
+        startupTimeoutMs: 1_000,
+        maxBatchItems: 1,
+        maxPendingItems: 257,
+    }), /no greater than 256/);
+    assert.throws(() => new TestPotionEmbedding({
+        helperPath: '/tmp/helper',
+        modelPath: '/tmp/model',
+        requestTimeoutMs: 1_000,
+        startupTimeoutMs: 1_000,
+        maxBatchItems: 32,
+        maxPendingItems: 8,
+    }), /no smaller than the maximum batch size/);
 });
 
 test('Potion provider preserves the frozen semantic identity and exact symmetric input', async (t) => {
@@ -198,27 +224,50 @@ test('Potion provider batches on one bounded worker and preserves input order', 
     );
 });
 
-test('Potion pending queue capacity enforces maxBatchItems and recovers on request completion', async (t) => {
-    const embedding = await createFakeEmbedding(t, { maxBatchItems: 4 });
+test('Potion worker pending capacity bounds total outstanding work and recovers on completion', async (t) => {
+    const embedding = await createFakeEmbedding(t, { maxBatchItems: 4, maxPendingItems: 8 });
 
-    // Send a 4-item batch with delay to keep the queue occupied
-    const delayedPromise = embedding.embedDocuments(['__delay_100ms__', 'doc2', 'doc3', 'doc4']);
+    // Keep two 4-item batches in flight to occupy the full pending capacity
+    const firstBatch = embedding.embedDocuments(['__delay_100ms__doc1', 'doc2', 'doc3', 'doc4']);
+    const secondBatch = embedding.embedDocuments(['doc5', 'doc6', 'doc7', 'doc8']);
 
-    // 5th item while 4 are pending must immediately reject with queue full
+    // A 9th item while 8 are pending must immediately reject with queue full
     await assert.rejects(
-        embedding.embedDocuments(['doc5']),
+        embedding.embedDocuments(['doc9']),
         (error: unknown) => error instanceof EmbeddingProviderError
             && error.code === 'EMBEDDING_PROVIDER_INVALID_REQUEST'
             && error.message.includes('queue is full'),
     );
 
-    // Wait for the in-flight batch to finish
-    const delayedDocs = await delayedPromise;
-    assert.equal(delayedDocs.length, 4);
+    // Wait for the in-flight batches to finish
+    assert.equal((await firstBatch).length, 4);
+    assert.equal((await secondBatch).length, 4);
 
-    // Queue capacity is now available again
-    const subsequentDocs = await embedding.embedDocuments(['doc5']);
+    // Pending capacity is now available again
+    const subsequentDocs = await embedding.embedDocuments(['doc9']);
     assert.equal(subsequentDocs.length, 1);
+});
+
+test('concurrent foreground query is accepted while a full 32-item background batch is pending', async (t) => {
+    const embedding = await createFakeEmbedding(t, { maxBatchItems: 32 });
+
+    // Hold a full 32-item document batch in flight (delayed first item keeps the
+    // worker busy while the client has all 32 items pending).
+    const batchTexts = ['__delay_150ms__item0', ...Array.from({ length: 31 }, (_, i) => `item${i + 1}`)];
+    const batchPromise = embedding.embedDocuments(batchTexts);
+
+    // The batch dispatch is synchronous, so all 32 items are pending here.
+    // A foreground query must not be rejected as "queue is full".
+    const queryPromise = embedding.embedQuery('foreground query');
+
+    const [batchDocs, queryDoc] = await Promise.all([batchPromise, queryPromise]);
+    assert.equal(batchDocs.length, 32);
+    assert.equal(queryDoc.vector.length, POTION_DIMENSION);
+    assert.ok(queryDoc.vector.every(Number.isFinite));
+    for (const doc of batchDocs) {
+        assert.equal(doc.vector.length, POTION_DIMENSION);
+        assert.ok(doc.vector.every(Number.isFinite));
+    }
 });
 
 test('Potion provider classifies native invalid input without exposing source text', async (t) => {
@@ -675,7 +724,7 @@ test('pinned L1 helper satisfies legacy single-encode vs native batch-encode par
     for (let i = 0; i < testTexts.length; i++) {
         const text = testTexts[i];
         const singleRes = await rawWorker.send({ op: 'encode', role: 'document', text });
-        const batchRes = await rawWorker.send({ op: 'encode_batch', role: 'document', texts: [text] });
+        const batchRes = await rawWorker.send({ op: 'encode_batch', texts: [text] });
 
         assert.equal(singleRes.ok, true, `singleRes must be ok for text ${i}`);
         assert.equal(batchRes.ok, true, `batchRes must be ok for text ${i}`);
@@ -706,7 +755,7 @@ test('pinned L1 helper satisfies legacy single-encode vs native batch-encode par
     }
 
     // 2. Multi-item batch against sequential singles
-    const multiBatchRes = await rawWorker.send({ op: 'encode_batch', role: 'document', texts: testTexts });
+    const multiBatchRes = await rawWorker.send({ op: 'encode_batch', texts: testTexts });
     assert.equal(multiBatchRes.ok, true);
     assert.equal(multiBatchRes.items?.length, testTexts.length);
 
@@ -729,7 +778,7 @@ test('pinned L1 helper satisfies legacy single-encode vs native batch-encode par
     assert.equal(singleEmpty.ok, false);
     assert.equal(singleEmpty.errorCode, 'EMPTY_INPUT');
 
-    const batchEmpty = await rawWorker.send({ op: 'encode_batch', role: 'document', texts: ['valid text', ''] });
+    const batchEmpty = await rawWorker.send({ op: 'encode_batch', texts: ['valid text', ''] });
     assert.equal(batchEmpty.ok, false);
     assert.equal(batchEmpty.errorCode, 'EMPTY_INPUT');
 

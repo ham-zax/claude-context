@@ -6,11 +6,10 @@ import {
     EMBEDDING_PROJECTION_VERSION,
     LEXICAL_PROJECTION_VERSION,
     POTION_DIMENSION,
-    POTION_INFERENCE_CONTRACT_DIGEST,
     POTION_MODEL_ID,
     PotionEmbedding,
     resolveOllamaModelIdentity,
-    verifyPinnedPotionArtifacts,
+    restoreVerifiedOwnerExecutableBit,
     type ResolvedOllamaModelIdentity,
     type VectorDatabase,
 } from "@zokizuan/satori-core";
@@ -29,7 +28,7 @@ import type {
 const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
 const DEFAULT_POTION_REQUEST_TIMEOUT_MS = "5000";
 const PREFLIGHT_COLLECTION = "satori_install_preflight";
-const POTION_MANIFEST_SHA256 = "1a352372df87443420ff564384024c113c66c12e15588a6f5021a487ab9ed81b";
+const POTION_MANIFEST_SHA256 = "3a60d94511aa3344adc29abfb82f88ed302542b3c49534c6f163c1ec9e44cf34";
 
 export interface InstallPreflightInput {
     runtime: InstallRuntime;
@@ -80,7 +79,6 @@ interface PotionArtifactManifest {
     platform: string;
     architecture: string;
     model: { identity: string };
-    embeddingInferenceContractDigest: string;
     files: Array<{
         path: string;
         bytes: number;
@@ -133,7 +131,6 @@ export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<vo
         || manifest.platform !== "linux"
         || manifest.architecture !== "x64"
         || manifest.model?.identity !== POTION_MODEL_ID
-        || manifest.embeddingInferenceContractDigest !== POTION_INFERENCE_CONTRACT_DIGEST
         || !Array.isArray(manifest.files)
     ) {
         throw new Error("Bundled Potion manifest does not match the pinned runtime authority.");
@@ -172,7 +169,18 @@ export async function verifyBundledPotionRuntime(assetsRoot: string): Promise<vo
         }
     }
     const { helperPath, modelPath } = potionRuntimePaths(assetsRoot);
-    await verifyPinnedPotionArtifacts({ helperPath, modelPath });
+
+    // Installation/preflight is the single integrity owner: repair the owner
+    // execute bit on the checksum-verified helper before runtime validation.
+    const helperArtifact = manifest.files.find((artifact) => artifact.path === "satori-potion");
+    if (!helperArtifact) {
+        throw new Error("Bundled Potion manifest does not declare the helper artifact.");
+    }
+    await restoreVerifiedOwnerExecutableBit({
+        filePath: helperPath,
+        expectedSha256: helperArtifact.sha256,
+        label: "helper",
+    });
 
     // Capability verification: structural presence is insufficient; prove the
     // worker starts, loads the model, completes a smoke embedding, and exits cleanly.

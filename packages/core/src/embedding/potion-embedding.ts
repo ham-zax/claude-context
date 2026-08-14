@@ -16,24 +16,24 @@ export const POTION_SEMANTIC_VERSION = 'potion_semantics_v1';
 export const POTION_DIMENSION = 256;
 export const POTION_RETAINED_TOKEN_LIMIT = 4096;
 export const POTION_MAX_TIMEOUT_MS = 300_000;
+/**
+ * @deprecated The inference-contract digest is no longer a runtime or index
+ * compatibility authority. Installation integrity is owned by the pinned
+ * Potion manifest (see packages/cli/src/install-preflight.ts), and index
+ * compatibility is owned by POTION_SEMANTIC_VERSION. Retained only for
+ * published-surface compatibility; scheduled for removal.
+ */
 export const POTION_INFERENCE_CONTRACT_DIGEST =
     'e716e695cc5895150602501601832a1e7467a09bf9dae1c347b1ff80accf0364';
-
-const POTION_HELPER_SHA256 =
-    '0ecc35fe604e10074a7219f2ed82aa0e4fdb023fc4c99e62c6657938a55681a2';
-const POTION_MODEL_SHA256 =
-    '75cf7a6c2171b230ad19b1e7d8e0b1aee86da5a02af8e7cacedd9921d227623c';
-const POTION_TOKENIZER_SHA256 =
-    '107bbdcbad4bff1d299b7a4c3a2fb17c52890688b7dd0e4c9deab79d3c4f3d45';
-const POTION_CONFIG_SHA256 =
-    '148e5691a6fcc553437156859701fba017a1ba5d340b170f17e0f3668fb861a7';
 
 const MAX_WORKER_FRAME_BYTES = 1_048_576;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_BATCH_ITEMS = 32;
 const MAX_BATCH_ITEMS = 64;
+const MAX_PENDING_ITEMS = 256;
 const NORMALIZATION_TOLERANCE = 1e-5;
+const POTION_STARTUP_SMOKE_TEXT = 'satori potion runtime conformance smoke';
 
 export interface PotionEmbeddingConfig {
     helperPath: string;
@@ -41,6 +41,8 @@ export interface PotionEmbeddingConfig {
     requestTimeoutMs?: number;
     startupTimeoutMs?: number;
     maxBatchItems?: number;
+    /** Total outstanding worker item capacity (defaults to 2x maxBatchItems). */
+    maxPendingItems?: number;
 }
 
 interface WorkerResponse {
@@ -93,15 +95,34 @@ function boundedPositiveInteger(
 
 function serializeBatchRequest(
     id: string,
-    role: 'document' | 'query',
     texts: readonly string[],
 ): string {
     return `${JSON.stringify({
         op: 'encode_batch',
         id,
-        role,
         texts,
     })}\n`;
+}
+
+function classifyNativePotionError(response: WorkerResponse): EmbeddingProviderError | null {
+    if (response.ok === true) return null;
+    const nativeCode = typeof response.errorCode === 'string'
+        ? response.errorCode
+        : 'UNCLASSIFIED_NATIVE_ERROR';
+    const invalidInput = new Set([
+        'EMPTY_INPUT',
+        'ALL_UNKNOWN_INPUT',
+        'OVERSIZED_INPUT',
+        'FRAME_TOO_LARGE',
+        'INVALID_FRAME',
+    ]).has(nativeCode);
+    return providerError({
+        code: invalidInput
+            ? 'EMBEDDING_PROVIDER_INVALID_REQUEST'
+            : 'EMBEDDING_PROVIDER_ERROR',
+        retryable: false,
+        message: `Potion embedding request was rejected (${nativeCode}).`,
+    });
 }
 
 async function sha256File(filePath: string): Promise<string> {
@@ -136,9 +157,10 @@ async function assertFileDigest(filePath: string, expected: string, label: strin
 }
 
 /**
- * Restore the owner execute bit on a pinned artifact only after exact byte
- * verification. The repair is limited to the owner execute bit; group and
- * world modes are never widened.
+ * Repair the owner execute bit on a pinned artifact after exact byte
+ * verification. Installation/preflight is the single owner of this integrity
+ * repair; runtime startup never attempts it. The repair is limited to the
+ * owner execute bit; group and world modes are never widened.
  */
 export async function restoreVerifiedOwnerExecutableBit(input: {
     filePath: string;
@@ -185,6 +207,12 @@ export async function restoreVerifiedOwnerExecutableBit(input: {
     }
 }
 
+/**
+ * Structurally validate the pinned Potion runtime closure at startup - without
+ * re-hashing. Byte integrity is owned by install/preflight (pinned manifest and
+ * artifact closure); PotionEmbedding.create() proves execution through the
+ * readiness contract and a capability smoke embedding.
+ */
 export async function verifyPinnedPotionArtifacts(config: {
     helperPath: string;
     modelPath: string;
@@ -203,17 +231,38 @@ export async function verifyPinnedPotionArtifacts(config: {
             message: 'Potion helper and model paths must be absolute.',
         });
     }
-    await restoreVerifiedOwnerExecutableBit({
-        filePath: config.helperPath,
-        expectedSha256: POTION_HELPER_SHA256,
-        label: 'helper',
-    });
-    const requiredFiles = [
-        { path: path.join(config.modelPath, 'model.safetensors'), expected: POTION_MODEL_SHA256, label: 'model' },
-        { path: path.join(config.modelPath, 'tokenizer.json'), expected: POTION_TOKENIZER_SHA256, label: 'tokenizer' },
-        { path: path.join(config.modelPath, 'config.json'), expected: POTION_CONFIG_SHA256, label: 'configuration' },
+    let helperStats: fs.Stats;
+    try {
+        helperStats = await fs.promises.lstat(config.helperPath);
+    } catch {
+        throw providerError({
+            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+            retryable: false,
+            message: 'Pinned Potion helper is unavailable.',
+        });
+    }
+    if (helperStats.isSymbolicLink() || !helperStats.isFile()) {
+        throw providerError({
+            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+            retryable: false,
+            message: 'Pinned Potion helper must be a regular file.',
+        });
+    }
+    try {
+        await fs.promises.access(config.helperPath, fs.constants.X_OK);
+    } catch {
+        throw providerError({
+            code: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+            retryable: false,
+            message: 'Pinned Potion helper is not executable.',
+        });
+    }
+    const requiredModelFiles = [
+        { path: path.join(config.modelPath, 'model.safetensors'), label: 'model' },
+        { path: path.join(config.modelPath, 'tokenizer.json'), label: 'tokenizer' },
+        { path: path.join(config.modelPath, 'config.json'), label: 'configuration' },
     ];
-    for (const item of requiredFiles) {
+    for (const item of requiredModelFiles) {
         let stats: fs.Stats;
         try {
             stats = await fs.promises.lstat(item.path);
@@ -231,7 +280,6 @@ export async function verifyPinnedPotionArtifacts(config: {
                 message: `Pinned Potion ${item.label} must be a regular file.`,
             });
         }
-        await assertFileDigest(item.path, item.expected, item.label);
     }
 }
 
@@ -242,6 +290,7 @@ export class PotionEmbedding extends Embedding {
     private readonly requestTimeoutMs: number;
     private readonly startupTimeoutMs: number;
     private readonly maxBatchItems: number;
+    private readonly maxPendingItems: number;
     private readonly pending = new Map<string, PendingRequest>();
     private pendingItemsCount = 0;
     private child: ChildProcessWithoutNullStreams | null = null;
@@ -275,6 +324,15 @@ export class PotionEmbedding extends Embedding {
             MAX_BATCH_ITEMS,
             'Potion maximum batch size',
         );
+        this.maxPendingItems = boundedPositiveInteger(
+            config.maxPendingItems,
+            2 * this.maxBatchItems,
+            MAX_PENDING_ITEMS,
+            'Potion worker pending capacity',
+        );
+        if (this.maxPendingItems < this.maxBatchItems) {
+            throw new Error('Potion worker pending capacity must be no smaller than the maximum batch size.');
+        }
     }
 
     private nextRequestId(): string {
@@ -289,6 +347,10 @@ export class PotionEmbedding extends Embedding {
         const embedding = new PotionEmbedding(config);
         try {
             await embedding.start();
+            // Capability smokes: installation-integrity ownership lives in
+            // install/preflight; startup proves the worker executes, loads the
+            // model, and returns a valid normalized embedding.
+            await embedding.embedDocuments([POTION_STARTUP_SMOKE_TEXT]);
             return embedding;
         } catch (error) {
             await embedding.close();
@@ -532,7 +594,7 @@ export class PotionEmbedding extends Embedding {
             }));
         }
         const itemCount = 1;
-        if (this.pendingItemsCount + itemCount > this.maxBatchItems) {
+        if (this.pendingItemsCount + itemCount > this.maxPendingItems) {
             return Promise.reject(providerError({
                 code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
                 retryable: false,
@@ -580,7 +642,7 @@ export class PotionEmbedding extends Embedding {
                 message: 'Potion worker is not available.',
             }));
         }
-        if (this.pendingItemsCount + itemCount > this.maxBatchItems) {
+        if (this.pendingItemsCount + itemCount > this.maxPendingItems) {
             return Promise.reject(providerError({
                 code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
                 retryable: false,
@@ -662,48 +724,14 @@ export class PotionEmbedding extends Embedding {
     }
 
     private validateResponse(response: WorkerResponse): EmbeddingVector {
-        if (response.ok !== true) {
-            const nativeCode = typeof response.errorCode === 'string'
-                ? response.errorCode
-                : 'UNCLASSIFIED_NATIVE_ERROR';
-            const invalidInput = new Set([
-                'EMPTY_INPUT',
-                'ALL_UNKNOWN_INPUT',
-                'OVERSIZED_INPUT',
-                'FRAME_TOO_LARGE',
-                'INVALID_FRAME',
-            ]).has(nativeCode);
-            throw providerError({
-                code: invalidInput
-                    ? 'EMBEDDING_PROVIDER_INVALID_REQUEST'
-                    : 'EMBEDDING_PROVIDER_ERROR',
-                retryable: false,
-                message: `Potion embedding request was rejected (${nativeCode}).`,
-            });
-        }
+        const nativeError = classifyNativePotionError(response);
+        if (nativeError) throw nativeError;
         return this.validateItem(response);
     }
 
     private validateBatchResponse(response: WorkerResponse, expectedCount: number): EmbeddingVector[] {
-        if (response.ok !== true) {
-            const nativeCode = typeof response.errorCode === 'string'
-                ? response.errorCode
-                : 'UNCLASSIFIED_NATIVE_ERROR';
-            const invalidInput = new Set([
-                'EMPTY_INPUT',
-                'ALL_UNKNOWN_INPUT',
-                'OVERSIZED_INPUT',
-                'FRAME_TOO_LARGE',
-                'INVALID_FRAME',
-            ]).has(nativeCode);
-            throw providerError({
-                code: invalidInput
-                    ? 'EMBEDDING_PROVIDER_INVALID_REQUEST'
-                    : 'EMBEDDING_PROVIDER_ERROR',
-                retryable: false,
-                message: `Potion embedding request was rejected (${nativeCode}).`,
-            });
-        }
+        const nativeError = classifyNativePotionError(response);
+        if (nativeError) throw nativeError;
         if (!Array.isArray(response.items) || response.items.length !== expectedCount) {
             throw providerError({
                 code: 'EMBEDDING_PROVIDER_ERROR',
@@ -740,7 +768,7 @@ export class PotionEmbedding extends Embedding {
         let currentFrame = '';
 
         for (const text of texts) {
-            const singleFrame = serializeBatchRequest(currentId, 'document', [text]);
+            const singleFrame = serializeBatchRequest(currentId, [text]);
             if (Buffer.byteLength(singleFrame, 'utf8') > MAX_WORKER_FRAME_BYTES) {
                 throw providerError({
                     code: 'EMBEDDING_PROVIDER_INVALID_REQUEST',
@@ -753,22 +781,22 @@ export class PotionEmbedding extends Embedding {
                 subbatches.push({ id: currentId, texts: currentTexts, frame: currentFrame });
                 currentId = this.nextRequestId();
                 currentTexts = [text];
-                currentFrame = serializeBatchRequest(currentId, 'document', currentTexts);
+                currentFrame = serializeBatchRequest(currentId, currentTexts);
             } else if (currentTexts.length > 0) {
                 const candidateTexts = [...currentTexts, text];
-                const candidateFrame = serializeBatchRequest(currentId, 'document', candidateTexts);
+                const candidateFrame = serializeBatchRequest(currentId, candidateTexts);
                 if (Buffer.byteLength(candidateFrame, 'utf8') > MAX_WORKER_FRAME_BYTES) {
                     subbatches.push({ id: currentId, texts: currentTexts, frame: currentFrame });
                     currentId = this.nextRequestId();
                     currentTexts = [text];
-                    currentFrame = serializeBatchRequest(currentId, 'document', currentTexts);
+                    currentFrame = serializeBatchRequest(currentId, currentTexts);
                 } else {
                     currentTexts = candidateTexts;
                     currentFrame = candidateFrame;
                 }
             } else {
                 currentTexts = [text];
-                currentFrame = serializeBatchRequest(currentId, 'document', currentTexts);
+                currentFrame = serializeBatchRequest(currentId, currentTexts);
             }
         }
         if (currentTexts.length > 0) {

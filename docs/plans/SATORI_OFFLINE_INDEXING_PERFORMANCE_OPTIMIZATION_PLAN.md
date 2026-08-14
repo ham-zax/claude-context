@@ -40,7 +40,7 @@ graph TD
 | Workload Class | Original Baseline | Phase 1 (LanceDB 256 Aggregation) | Phase 2 (Potion Batch IPC) | Phase 3 (Combined Rebaseline) | Phase 4 (SQLite Deferred Indexing) | Cumulative Measured Gain |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`satori`** (TS, 19.5k chunks) | **~75–120s** (Writes: ~55s, Embed: ~41.5s) | **68.81s** (78 writes / 4.29s) | *Verified Parity: $\le 10^{-6}$ max diff* | **46.79s** (Embed: **21.91s**, Writes: **3.18s**) | **58.37s** (*Parity & Indexing Verified*) | **~17–62s wall-clock speedup (2x embedding throughput, 17x write speedup)** |
-| **`tradingview_ratio`** (Python, 19.6k chunks) | **146.10s** (Writes: ~55s, Embed: ~45s) | **77.30s** (warm: **67.6s–68.6s**) | *Verified Parity: $\le 10^{-6}$ max diff* | **72.34s** (warm: **64.52s–69.42s**) | **71.45s–75.90s** (Cold nav: **26.3s $\to$ 14.69s**) | **~74.6s wall-clock speedup (1.9–2.0x overall speedup)** |
+| **`tradingview_ratio`** (Python, 19.6k chunks) | **146.10s** (Writes: ~55s, Embed: ~45s) | **77.30s** (warm: **67.6s–68.6s**) | *Verified Parity: $\le 10^{-6}$ max diff* | **72.34s** (warm: **64.52s–69.42s**) | **71.45s–75.90s** (Cold nav: **26.3s $\to$ 14.69s**, single observation) | **~74.6s wall-clock speedup (1.9–2.0x overall speedup)** |
 
 > [!NOTE]
 > 256 rows represents the selected **bounded-memory tradeoff** (512 remains the maximum-throughput point). Release acceptance is governed by verified empirical call-count reductions, frozen inference parity, and absence of correctness/install regressions.
@@ -72,20 +72,29 @@ Absence of `getWriteAggregationPolicy()` means no Core-side write aggregation is
 Separate physical package integrity from index compatibility:
 
 ```text
-ARTIFACT INTEGRITY (Install & Startup)
-──────────────────────────────────────
-helper SHA-256
-model SHA-256
-tokenizer SHA-256
-config SHA-256
-manifest SHA-256 (CLI install preflight)
+INSTALLATION INTEGRITY (install/package preflight)
+─────────────────────────────────────────────────
+manifest SHA-256 (pinned POTION_MANIFEST_SHA256)
+artifact closure byte verification (manifest per-file SHA-256)
+one-time owner execute-bit repair
 
-→ Verified during installation and preflight.
+→ Verified once during installation and preflight.
 → Does NOT force codebase reindexing.
 
+RUNTIME STARTUP (PotionEmbedding.create)
+────────────────────────────────────────
+validate absolute paths
+regular non-symlink files
+executable helper (fail closed)
+model files exist
+worker starts
+readiness contract
+capability/conformance smoke embedding
 
-EMBEDDING SEMANTICS (Index Fingerprint)
-───────────────────────────────────────
+→ No runtime re-hashing; integrity is owned by install/preflight.
+
+SEMANTIC VERSION → INDEX COMPATIBILITY
+──────────────────────────────────────
 model identity (POTION_MODEL_ID)
 explicit semantic version (POTION_SEMANTIC_VERSION = 'potion_semantics_v1')
 dimension (256)
@@ -105,7 +114,7 @@ artifactDigest: null
       return this.buildIdentity(`${POTION_MODEL_ID}+${POTION_SEMANTIC_VERSION}`, null);
   }
   ```
-* **Execution Integrity:** Shipping binaries rely on package manager integrity and OS permissions. Startup verifies helper existence and executable bit, failing closed (`EMBEDDING_PROVIDER_UNAVAILABLE`) if non-executable rather than attempting runtime self-repair.
+* **Execution Integrity:** Installation/preflight is the single integrity owner: it verifies the pinned manifest and artifact closure once and repairs the owner execute bit if packaging removed it. Runtime startup does not re-hash; it validates absolute paths, regular non-symlink files, and an executable helper (failing closed with `EMBEDDING_PROVIDER_UNAVAILABLE`), then proves execution through the worker readiness contract and a capability/conformance smoke embedding.
 
 ---
 
@@ -123,7 +132,7 @@ Decouple `EmbeddingBatchPolicy` ($\le 32$ items for Potion) from vector persiste
   * [`packages/core/src/vectordb/types.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/types.ts): Declare `VectorWriteAggregationPolicy` interface and `getWriteAggregationPolicy?()`.
   * [`packages/core/src/vectordb/lancedb-vectordb.ts`](file:///home/hamza/repo/satori/packages/core/src/vectordb/lancedb-vectordb.ts): Implement `getWriteAggregationPolicy(): VectorWriteAggregationPolicy { return { preferredMaxRows: 256 }; }`.
   * [`packages/core/src/core/indexing-pipeline.ts`](file:///home/hamza/repo/satori/packages/core/src/core/indexing-pipeline.ts):
-    * **Policy Validation:** Validate `Number.isSafeInteger(policy.preferredMaxRows) && policy.preferredMaxRows > 0`. If invalid, disable aggregation to avoid infinite `splice(0, 0)` loops.
+    * **Policy Validation:** Validate `Number.isSafeInteger(policy.preferredMaxRows) && policy.preferredMaxRows > 0`. The invalid policy fails fast (`EMBEDDING_PROVIDER_ERROR` on the vector write path); it never falls back to silent unbuffered dispatch.
     * Maintain write buffer as local operation state: `const pendingVectorWrites: IndexedVectorDocument[] = [];` inside `processFileList()`.
     * Exact-size flush loop with final tail flush at EOF:
       ```ts

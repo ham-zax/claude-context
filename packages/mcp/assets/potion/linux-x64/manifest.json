@@ -11,7 +11,7 @@
   },
   "helper": {
     "sourceRepository": "satori/experiments/potion-l0-l1",
-    "sourceRevision": "d04eac35af2addad7b68525f91b0c6dacd8b94da",
+    "sourceRevision": "2b8ac198baee7dae43c292b999782a3af030e099",
     "model2vecRsRevision": "6f51c7afe2436bcb76fc467bad54eaa94f8db30d",
     "rustToolchain": "1.97.1",
     "features": [
@@ -24,12 +24,11 @@
       "libgcc_s"
     ]
   },
-  "embeddingInferenceContractDigest": "e716e695cc5895150602501601832a1e7467a09bf9dae1c347b1ff80accf0364",
   "files": [
     {
       "path": "satori-potion",
-      "bytes": 4227880,
-      "sha256": "0ecc35fe604e10074a7219f2ed82aa0e4fdb023fc4c99e62c6657938a55681a2",
+      "bytes": 4227240,
+      "sha256": "4a70aade643a14ef3b98fb95f1a02e723f9d48945ca6a62cbddd0e5ff7ebf027",
       "executable": true
     },
     {

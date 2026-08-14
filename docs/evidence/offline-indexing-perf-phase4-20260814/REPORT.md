@@ -58,5 +58,5 @@ In `importNavigationToSqlite`:
 
 ## 4. Empirical Evaluation
 
-* Cold navigation staging duration on Python (`tradingview_ratio`) dropped from **26.30s down to 14.69s**.
+* The observed cold navigation staging run on Python (`tradingview_ratio`) changed from **26.30s to 14.69s**. Repeated controlled cold/warm A/B attribution was not performed, so a general ~44% navigation improvement is not claimed.
 * All secondary indexes built in a single fast sequential pass without per-row B-tree penalty.
