@@ -313,7 +313,7 @@ export interface SemanticProjectAnalyzer {
 }
 ```
 
-- [ ] **Step 3: Make Context own the analyzer**
+- [x] **Step 3: Make Context own the analyzer**
 
 Add optional `semanticAnalyzer?: SemanticProjectAnalyzer` to `ContextConfig`, store:
 
@@ -323,7 +323,7 @@ private readonly semanticAnalyzer: SemanticProjectAnalyzer;
 
 Initialize with injected analyzer or `new ThreadedWasmSemanticProjectAnalyzer()`, pass that field to the workflow, and add idempotent `Context.dispose()` that awaits `this.semanticAnalyzer.dispose?.()`.
 
-- [ ] **Step 4: Wire actual runtime owners**
+- [x] **Step 4: Wire actual runtime owners**
 
 After sync lifecycle drain:
 - `SharedRuntimeHost.shutdown()` calls `await this.localContext.dispose()`.
@@ -331,11 +331,11 @@ After sync lifecycle drain:
 
 Avoid double-closing shared resources; analyzer disposal must be idempotent.
 
-- [ ] **Step 5: Run Core and MCP lifecycle tests**
+- [x] **Step 5: Run Core and MCP lifecycle tests**
 
 Expected: fake analyzer dispose count is exactly one per Context; worker-backed analyzer terminates cleanly.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/core/src/semantic/analyzer-port.ts \
@@ -411,48 +411,50 @@ git commit -m "fix(mcp): report causal freshness sync triggers"
 
 **Files:** none unless qualification exposes a defect.
 
-- [x] Run semantic artifact verification:
+> **Status after branch-history alignment:** intentionally pending. Tasks 1-6 are implemented, but the compatibility identity, CI fixture, evidence ancestry, and real product harness were aligned after the earlier qualification receipts. Run every item below on the exact pulled final head before marking Task 7 complete.
+
+- [ ] Run semantic artifact verification:
 
 ```bash
 pnpm semantic:verify
 ```
 
-- [x] Run workspace checks:
+- [ ] Run workspace checks:
 
 ```bash
 pnpm run check
 ```
 
-- [x] Run Core tests:
+- [ ] Run Core tests:
 
 ```bash
 pnpm --filter @zokizuan/satori-core test
 ```
 
-- [x] Run MCP tests:
+- [ ] Run MCP tests:
 
 ```bash
 pnpm --filter @zokizuan/satori-mcp test
 ```
 
-- [x] Run installer tests because runtime lifecycle ownership changed:
+- [ ] Run installer tests because runtime lifecycle ownership changed:
 
 ```bash
 node --test scripts/install-local-mcp-runtime.test.mjs
 ```
 
-- [x] Run packed/release verification:
+- [ ] Run packed/release verification:
 
 ```bash
 pnpm run release:check
 ```
 
-- [x] Product characterization on the exact qualified head:
-  1. Hold a real sync in `writing`.
-  2. Fire five parallel searches without a settle/throwaway ritual.
-  3. Require 5/5 tool responses with no `-32001` and no `not_ready` solely because sync is active.
-  4. Require each response to identify the served immutable publication and pending sync.
-  5. Complete activation and verify new requests switch to the new publication.
+- [ ] Product characterization on the exact qualified head:
+  1. Run `pnpm --filter @zokizuan/satori-mcp exec tsx ../../scripts/trufflehog-mvcc-product-run.ts` from the repository after pulling the final branch head. Set `SATORI_TASK7_REPO` if the TruffleHog checkout is elsewhere.
+  2. The harness must observe a real sync in `writing` after creating a reversible tracked Go-source delta.
+  3. It must fire five parallel searches without a settle/throwaway ritual and require 5/5 `status=ok` responses.
+  4. Every response must identify the same immutable publication N and the exact pending sync generation.
+  5. The exact sync must complete and activate a distinct publication N+1; a post-activation search must succeed while N+1 remains authoritative.
 
 ## Explicit Follow-Ups — Not Part of This Repair
 
