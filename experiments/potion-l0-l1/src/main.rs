@@ -88,7 +88,6 @@ enum WorkerRequest {
     },
     EncodeBatch {
         id: String,
-        role: Role,
         texts: Vec<String>,
     },
     InjectPanic {
@@ -212,8 +211,7 @@ fn run_worker(model_dir: PathBuf, block_network: bool) -> Result<()> {
                     },
                 }
             }
-            WorkerRequest::EncodeBatch { role, texts, .. } => {
-                let _ = role;
+            WorkerRequest::EncodeBatch { texts, .. } => {
                 match model.encode_batch(&texts) {
                     Ok(encodings) => {
                         let items = encodings
