@@ -257,9 +257,11 @@ export async function runExactRegistryFastPath(
         };
     }
 
+    const publicationOnlyStaleRead = input.freshnessDecision.mode === "served_previous_generation";
     let exactRegistrySymbol = exactRegistryMatch.symbol;
     const normalizedExactPath = exactRegistrySymbol.file.replace(/\\/g, "/").replace(/^\/+/, "");
-    const exactTargetWasDirty = input.dirtyFilesNotFreshened
+    const exactTargetWasDirty = !publicationOnlyStaleRead
+        && input.dirtyFilesNotFreshened
         && input.observedChangedFilesState.files.has(normalizedExactPath);
     let currentSourceEvidence;
     if (exactTargetWasDirty) {
@@ -377,9 +379,11 @@ export async function runExactRegistryFastPath(
     }
 
     const exactMatches = await Promise.all(resultSymbols.map(async (symbol) => {
-        const sourceEvidence = symbol.symbolInstanceId === exactRegistrySymbol.symbolInstanceId
-            ? (currentSourceEvidence ??= await readCurrentSourceEvidence(input.effectiveRoot, symbol.file))
-            : await readCurrentSourceEvidence(input.effectiveRoot, symbol.file);
+        const sourceEvidence = publicationOnlyStaleRead
+            ? undefined
+            : (symbol.symbolInstanceId === exactRegistrySymbol.symbolInstanceId
+                ? (currentSourceEvidence ??= await readCurrentSourceEvidence(input.effectiveRoot, symbol.file))
+                : await readCurrentSourceEvidence(input.effectiveRoot, symbol.file));
         const sourceContent = sourceEvidence
             ? sliceHashMatchedCurrentSourceSymbolContent(
                 sourceEvidence,
