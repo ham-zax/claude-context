@@ -36,9 +36,6 @@ export const INDEXABLE_EXTENSIONLESS_FILENAMES = [
 
 export const INDEXABLE_EXACT_FILENAMES = [
     ...INDEXABLE_EXTENSIONLESS_FILENAMES,
-    'go.mod',
-    'go.work',
-    'go.sum',
 ] as const;
 
 

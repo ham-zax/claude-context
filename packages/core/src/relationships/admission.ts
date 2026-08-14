@@ -1,10 +1,11 @@
-import type { RelationshipRecord, SymbolRegistry } from '../symbols';
+import { isCallableSymbolKind, type RelationshipRecord, type SymbolRegistry } from '../symbols';
 import type { ResolutionClaim } from './resolution';
 
 /**
  * Centrally admits resolved call claims proposed by language providers,
  * verifying that the decision is resolved, authority is approved, both
- * source and target symbol instances exist in the current registry, and
+ * source and target symbol instances exist in the current registry,
+ * both symbols are callable kinds, and
  * provenance boundaries (source file match, span containment) hold.
  */
 export function admitAuthoritativeProofBackedCalls(input: {
@@ -30,6 +31,9 @@ export function admitAuthoritativeProofBackedCalls(input: {
         const source = symbolsByInstanceId.get(claim.sourceInstanceId);
         const target = symbolsByInstanceId.get(claim.targetInstanceId);
         if (!source || !target) continue;
+
+        // Invariant: both source (caller) and target (callee) must be callable symbol kinds
+        if (!isCallableSymbolKind(source.kind) || !isCallableSymbolKind(target.kind)) continue;
 
         // Invariant: claim sourceFile must match source symbol file
         if (claim.sourceFile !== source.file) continue;

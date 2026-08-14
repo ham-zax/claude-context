@@ -135,11 +135,24 @@ typedef struct {
     uint32_t reserved[9];     /* 36 bytes padding to 64 bytes */
 } SatoriSemanticDiagnosticV1;
 
-/* Static assertions for exact 64-byte struct sizes */
+/* Static assertions for exact 64-byte struct sizes and key field offsets */
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(SatoriSemanticResultV1) == 64, "SatoriSemanticResultV1 must be exactly 64 bytes");
+_Static_assert(offsetof(SatoriSemanticResultV1, source_file_offset) == 0, "source_file_offset offset");
+_Static_assert(offsetof(SatoriSemanticResultV1, target_file_offset) == 16, "target_file_offset offset");
+_Static_assert(offsetof(SatoriSemanticResultV1, receiver_type_offset) == 40, "receiver_type_offset offset");
+_Static_assert(offsetof(SatoriSemanticResultV1, receiver_binding_kind) == 56, "receiver_binding_kind offset");
+_Static_assert(offsetof(SatoriSemanticResultV1, confidence) == 60, "confidence offset");
+
 _Static_assert(sizeof(SatoriSemanticDefinitionV1) == 64, "SatoriSemanticDefinitionV1 must be exactly 64 bytes");
+_Static_assert(offsetof(SatoriSemanticDefinitionV1, name_offset) == 0, "name_offset offset");
+_Static_assert(offsetof(SatoriSemanticDefinitionV1, span_start_byte) == 16, "span_start_byte offset");
+_Static_assert(offsetof(SatoriSemanticDefinitionV1, kind) == 40, "kind offset");
+
 _Static_assert(sizeof(SatoriSemanticDiagnosticV1) == 64, "SatoriSemanticDiagnosticV1 must be exactly 64 bytes");
+_Static_assert(offsetof(SatoriSemanticDiagnosticV1, message_offset) == 0, "message_offset offset");
+_Static_assert(offsetof(SatoriSemanticDiagnosticV1, span_start_byte) == 16, "span_start_byte offset");
+_Static_assert(offsetof(SatoriSemanticDiagnosticV1, severity) == 24, "severity offset");
 #endif
 
 #ifdef __cplusplus

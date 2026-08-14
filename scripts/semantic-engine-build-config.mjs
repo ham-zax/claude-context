@@ -192,9 +192,10 @@ export function validateSemanticLanguagesConfig(raw) {
         if (!Array.isArray(entry.extensions) || entry.extensions.length === 0) {
             throw new Error(`Invalid descriptor '${entry.language}': 'extensions' must be non-empty array`);
         }
-        for (const ext of entry.extensions) {
-            if (typeof ext !== 'string' || !ext.startsWith('.') || ext.length < 2) {
-                throw new Error(`Invalid extension '${ext}' in '${entry.language}'`);
+        for (let extIdx = 0; extIdx < entry.extensions.length; extIdx++) {
+            const ext = entry.extensions[extIdx];
+            if (typeof ext !== 'string' || !/^\.[a-zA-Z0-9_-]+$/.test(ext)) {
+                throw new Error(`Invalid descriptor '${entry.language}': extension at index ${extIdx} must match pattern ^\\.[a-zA-Z0-9_-]+$ (e.g. '.go')`);
             }
         }
         if (!Array.isArray(entry.auxiliaryFiles)) {

@@ -65,7 +65,11 @@ import {
     stageNavigationSidecarGeneration,
     SYMBOL_REGISTRY_SCHEMA_VERSION,
 } from '../symbols';
-import { assertDescriptorBoundIndexingSupported } from '../sync/root-bound-fs';
+import {
+    assertDescriptorBoundIndexingSupported,
+    isRealPathInsideRoot,
+    resolveInsideRoot,
+} from '../sync/root-bound-fs';
 import {
     INDEX_COMPLETION_MARKER_DOC_ID,
 } from '../vectordb';
@@ -502,22 +506,9 @@ export class IndexGenerationWorkflow {
         const semanticEvidenceByLanguage = new Map<string, SemanticProjectEvidence>();
         if (this.ports.semanticAnalyzer && semanticSources && semanticSources.length > 0) {
             const sourcesByLanguage = new Map<string, SemanticSourceFile[]>();
-            const auxiliaryFilesByLanguage = new Map<string, SemanticAuxiliaryFile[]>();
             const registry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
 
             for (const src of semanticSources) {
-                const auxMatches = registry.matchAuxiliaries(src.path);
-                for (const match of auxMatches) {
-                    const list = auxiliaryFilesByLanguage.get(match.language) ?? [];
-                    list.push({
-                        path: src.path,
-                        role: match.role,
-                        source: src.source,
-                        sourceHash: src.sourceHash,
-                    });
-                    auxiliaryFilesByLanguage.set(match.language, list);
-                }
-
                 const fileEntry = manifestFiles.find((f) => f.path === src.path);
                 const lang = fileEntry?.language ?? '';
                 if (this.ports.semanticAnalyzer.supportsLanguage(lang)) {
@@ -527,10 +518,11 @@ export class IndexGenerationWorkflow {
                 }
             }
             for (const [language, sourceFiles] of sourcesByLanguage) {
+                const auxiliaryFiles = this.collectSemanticAuxiliariesForLanguage(codebasePath, language, registry);
                 const evidence = await this.ports.semanticAnalyzer.analyze({
                     language,
                     sourceFiles,
-                    auxiliaryFiles: auxiliaryFilesByLanguage.get(language) ?? [],
+                    auxiliaryFiles,
                 });
                 semanticEvidenceByLanguage.set(language, evidence);
             }
@@ -1945,26 +1937,32 @@ export class IndexGenerationWorkflow {
                 await this.ports.clearIndexCompletionMarkerFromCollection(targetCollectionName, options.assertMutationCurrent);
             }
 
+            const semanticRegistry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
+            const isAuxiliary = (f: string) => semanticRegistry.isAuxiliaryPath(f);
+            const searchableAdded = added.filter((f) => !isAuxiliary(f));
+            const searchableRemoved = removed.filter((f) => !isAuxiliary(f));
+            const searchableModified = modified.filter((f) => !isAuxiliary(f));
+
             // An added source path should not normally have payload, but stale rows
             // can survive an older source generation. Reconcile them before insert
             // so the exact-count proof can converge instead of failing every retry.
-            for (const file of added) {
+            for (const file of searchableAdded) {
                 await this.ports.deleteFileChunks(targetCollectionName, file, options.assertMutationCurrent);
             }
 
             // Handle removed files
-            for (const file of removed) {
+            for (const file of searchableRemoved) {
                 await this.ports.deleteFileChunks(targetCollectionName, file, options.assertMutationCurrent);
                 updateProgress(`Removed ${file}`);
             }
 
             // Handle modified files
-            for (const file of modified) {
+            for (const file of searchableModified) {
                 await this.ports.deleteFileChunks(targetCollectionName, file, options.assertMutationCurrent);
             }
 
             // Handle added and modified files
-            const filesToIndex = [...added, ...modified].map(f => path.join(codebasePath, f));
+            const filesToIndex = [...searchableAdded, ...searchableModified].map(f => path.join(codebasePath, f));
 
             let indexedDelta: {
                 processedFiles: number;
@@ -2290,32 +2288,53 @@ export class IndexGenerationWorkflow {
             try {
                 entries = fs.readdirSync(currentDir, { withFileTypes: true });
             } catch {
-                return;
+                throw new Error(`Failed to read directory during semantic auxiliary discovery: ${currentDir}`);
             }
             for (const entry of entries) {
                 if (entry.isDirectory()) {
                     if (['.git', 'node_modules', 'dist', 'build', '.satori'].includes(entry.name)) {
                         continue;
                     }
-                    walk(path.join(currentDir, entry.name), relDir ? `${relDir}/${entry.name}` : entry.name);
+                    const subDir = path.join(currentDir, entry.name);
+                    let realSubDir: string;
+                    try {
+                        realSubDir = fs.realpathSync(subDir);
+                    } catch {
+                        continue;
+                    }
+                    if (!isRealPathInsideRoot(realSubDir, codebasePath)) {
+                        continue;
+                    }
+                    walk(subDir, relDir ? `${relDir}/${entry.name}` : entry.name);
                 } else if (entry.isFile()) {
                     const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
                     const matches = registry.matchAuxiliaries(relPath).filter((m) => m.language === language);
                     for (const match of matches) {
                         if (visited.has(relPath)) continue;
                         visited.add(relPath);
+                        const fullPath = path.join(currentDir, entry.name);
+                        let realPath: string;
                         try {
-                            const content = fs.readFileSync(path.join(currentDir, entry.name), 'utf8');
-                            const sourceHash = crypto.createHash('sha256').update(content).digest('hex');
-                            results.push({
-                                path: relPath,
-                                role: match.role,
-                                source: content,
-                                sourceHash,
-                            });
+                            realPath = fs.realpathSync(fullPath);
                         } catch {
-                            // ignore unreadable auxiliary
+                            throw new Error(`Failed to resolve realpath for semantic auxiliary file: ${relPath}`);
                         }
+                        if (!isRealPathInsideRoot(realPath, codebasePath)) {
+                            throw new Error(`Semantic auxiliary file ${relPath} escapes codebase root`);
+                        }
+                        let content: string;
+                        try {
+                            content = fs.readFileSync(realPath, 'utf8');
+                        } catch {
+                            throw new Error(`Failed to read semantic auxiliary file: ${relPath}`);
+                        }
+                        const sourceHash = crypto.createHash('sha256').update(content).digest('hex');
+                        results.push({
+                            path: relPath,
+                            role: match.role,
+                            source: content,
+                            sourceHash,
+                        });
                     }
                 }
             }
@@ -2444,14 +2463,22 @@ export class IndexGenerationWorkflow {
                     const sourceFiles: SemanticSourceFile[] = [];
                     const langFiles = mergedManifestFiles.filter((f) => f.language === lang);
                     for (const f of langFiles) {
-                        try {
-                            const fullPath = path.resolve(codebasePath, f.path);
-                            const source = fs.readFileSync(fullPath, 'utf8');
-                            const sourceHash = crypto.createHash('sha256').update(source).digest('hex');
-                            sourceFiles.push({ path: f.path, source, sourceHash });
-                        } catch {
-                            // ignore unreadable file
+                        const fullPath = path.resolve(codebasePath, f.path);
+                        const realPath = await resolveInsideRoot(fullPath, codebasePath);
+                        if (!realPath) {
+                            throw new Error(`Failed to resolve semantic source file inside root: ${f.path}`);
                         }
+                        let source: string;
+                        try {
+                            source = fs.readFileSync(realPath, 'utf8');
+                        } catch {
+                            throw new Error(`Failed to read semantic source file during delta rebuild: ${f.path}`);
+                        }
+                        const sourceHash = crypto.createHash('sha256').update(source).digest('hex');
+                        if (f.hash && f.hash !== sourceHash) {
+                            throw new Error(`Semantic source hash mismatch for ${f.path}: expected ${f.hash}, got ${sourceHash}`);
+                        }
+                        sourceFiles.push({ path: f.path, source, sourceHash });
                     }
                     const auxiliaryFiles = this.collectSemanticAuxiliariesForLanguage(codebasePath, lang, semanticRegistry);
                     const evidence = await this.ports.semanticAnalyzer.analyze({

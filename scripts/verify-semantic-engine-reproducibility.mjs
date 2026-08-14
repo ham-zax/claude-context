@@ -1,8 +1,7 @@
-#!/usr/bin/env node
-
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import Ajv from 'ajv';
 import {
     ASSETS_DIR,
     MANIFEST_PATH,
@@ -38,6 +37,17 @@ export function verifySemanticEngine() {
 
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
     const descriptorRaw = JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8'));
+    const schema = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+
+    // 1. Verify against committed JSON Schema
+    const ajv = new Ajv({ allErrors: true });
+    const validateSchema = ajv.compile(schema);
+    if (!validateSchema(descriptorRaw)) {
+        const errorDetails = (validateSchema.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message}`).join(', ');
+        throw new Error(`Descriptor failed JSON schema validation: ${errorDetails}`);
+    }
+
+    // 2. Verify runtime config parser
     const descriptorJson = validateSemanticLanguagesConfig(descriptorRaw);
     const sourceDigest = computeSourceDigest();
     const recipeDigest = computeLogicalRecipeDigest();

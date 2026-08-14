@@ -197,8 +197,7 @@ satori/
 - [x] Centralize ownership and cleanup of Tree-sitter trees, parsers, and temporary resolution structures across success and error paths; verify repeated lifecycle stability.
 - [x] Enforce C ABI language validation (reject unsupported languages at create time).
 - [x] Verify `wasm-smoke.test.ts`, `wasm-engine.test.ts`, `wasm-stress.test.ts`, `packed-core-smoke.test.ts`, `utf8-span-parity.test.ts`, and `go-call-characterization.test.ts` pass executing real WASM.
-- [x] Verify logical recipe reproducibility digest and SHA256 integrity via `pnpm semantic:verify`.
-- [x] **USER REVIEW APPROVED FOR TASK B1.**
+- [x] **B1 implementation review passed; user acceptance pending**
 
 #### Task B2: Declarative Language Registry & Generic CBM Contribution Engine (IMPLEMENTED & HARDENED)
 - [x] Create authoritative `packages/core/assets/semantic-engine/semantic-languages.json` with draft-07 JSON schema `semantic-languages.schema.json` and fail-closed loader in `descriptor.ts`.

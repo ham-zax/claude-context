@@ -1,4 +1,4 @@
-import type { SymbolRecord, SymbolRegistry } from '../../symbols';
+import { isCallableSymbolKind, type SymbolRecord, type SymbolRegistry } from '../../symbols';
 import type {
     CallResolutionContribution,
     CallResolutionEngine,
@@ -27,7 +27,7 @@ function findEnclosingCaller(
 
     for (const sym of fileSymbols) {
         if (!sym.span) continue;
-        if (sym.kind === 'file') continue;
+        if (!isCallableSymbolKind(sym.kind)) continue;
 
         let contains = false;
         if (hasByteCoords) {

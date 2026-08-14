@@ -391,6 +391,160 @@ static const SatoriDefLoc *def_locs_find(const SatoriDefLocArray *arr, const cha
     return NULL;
 }
 
+static const char *extract_module_name(CBMArena *arena, const SatoriAuxiliaryFile *auxiliaries, uint32_t aux_count) {
+    if (!auxiliaries || aux_count == 0) return NULL;
+    for (uint32_t i = 0; i < aux_count; i++) {
+        const SatoriAuxiliaryFile *aux = &auxiliaries[i];
+        if (!aux->path || !aux->source) continue;
+        const char *base = strrchr(aux->path, '/');
+        const char *fname = base ? base + 1 : aux->path;
+        if (strcmp(fname, "go.mod") == 0 || (aux->role && strcmp(aux->role, "manifest") == 0)) {
+            const char *src = aux->source;
+            const char *p = src;
+            while (*p) {
+                while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+                if (strncmp(p, "module", 6) == 0 && (p[6] == ' ' || p[6] == '\t')) {
+                    p += 6;
+                    while (*p == ' ' || *p == '\t') p++;
+                    const char *start = p;
+                    while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
+                    uint32_t len = (uint32_t)(p - start);
+                    if (len > 0) {
+                        char *mod = (char *)cbm_arena_alloc(arena, len + 1);
+                        if (mod) {
+                            memcpy(mod, start, len);
+                            mod[len] = '\0';
+                            return mod;
+                        }
+                    }
+                }
+                while (*p && *p != '\n') p++;
+            }
+        }
+    }
+    return NULL;
+}
+
+static const char *compute_go_package_qn(CBMArena *arena, const char *module_name, const char *pkg_clause_name, const char *file_path) {
+    if (!file_path || !file_path[0]) return pkg_clause_name ? pkg_clause_name : "main";
+
+    const char *last_slash = strrchr(file_path, '/');
+    char dir[512] = "";
+    if (last_slash) {
+        size_t dlen = (size_t)(last_slash - file_path);
+        if (dlen >= sizeof(dir)) dlen = sizeof(dir) - 1;
+        memcpy(dir, file_path, dlen);
+        dir[dlen] = '\0';
+    }
+
+    if (module_name && module_name[0]) {
+        if (dir[0] && strcmp(dir, ".") != 0) {
+            return cbm_arena_sprintf(arena, "%s/%s", module_name, dir);
+        }
+        if (pkg_clause_name && strcmp(pkg_clause_name, "main") == 0) {
+            return "main";
+        }
+        return module_name;
+    }
+
+    if (dir[0] && strcmp(dir, ".") != 0) {
+        return cbm_arena_sprintf(arena, "%s", dir);
+    }
+    return pkg_clause_name ? pkg_clause_name : "main";
+}
+
+static const char *extract_package_name(CBMArena *arena, TSNode root, const char *source) {
+    if (ts_node_is_null(root) || !source) return "main";
+    uint32_t count = ts_node_named_child_count(root);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(root, i);
+        if (ts_node_is_null(child)) continue;
+        if (strcmp(ts_node_type(child), "package_clause") == 0) {
+            uint32_t pc_count = ts_node_named_child_count(child);
+            for (uint32_t j = 0; j < pc_count; j++) {
+                TSNode id_node = ts_node_named_child(child, j);
+                if (!ts_node_is_null(id_node)) {
+                    char *name = cbm_node_text(arena, id_node, source);
+                    if (name && name[0]) return name;
+                }
+            }
+        }
+    }
+    return "main";
+}
+
+static void extract_ast_imports(GoLSPContext *ctx, TSNode root, const char *source) {
+    if (ts_node_is_null(root) || !source) return;
+    uint32_t count = ts_node_named_child_count(root);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(root, i);
+        if (ts_node_is_null(child)) continue;
+        if (strcmp(ts_node_type(child), "import_declaration") == 0) {
+            uint32_t ic = ts_node_named_child_count(child);
+            for (uint32_t j = 0; j < ic; j++) {
+                TSNode spec = ts_node_named_child(child, j);
+                if (ts_node_is_null(spec)) continue;
+                const char *stype = ts_node_type(spec);
+                if (strcmp(stype, "import_spec_list") == 0) {
+                    uint32_t sc = ts_node_named_child_count(spec);
+                    for (uint32_t k = 0; k < sc; k++) {
+                        TSNode ispec = ts_node_named_child(spec, k);
+                        if (!ts_node_is_null(ispec) && strcmp(ts_node_type(ispec), "import_spec") == 0) {
+                            TSNode path_node = ts_node_child_by_field_name(ispec, "path", 4);
+                            TSNode name_node = ts_node_child_by_field_name(ispec, "name", 4);
+                            if (!ts_node_is_null(path_node)) {
+                                char *ptext = cbm_node_text(ctx->arena, path_node, source);
+                                if (ptext) {
+                                    if (ptext[0] == '"' || ptext[0] == '`') {
+                                        ptext++;
+                                        size_t plen = strlen(ptext);
+                                        if (plen > 0 && (ptext[plen - 1] == '"' || ptext[plen - 1] == '`')) {
+                                            ptext[plen - 1] = '\0';
+                                        }
+                                    }
+                                    char *lname = NULL;
+                                    if (!ts_node_is_null(name_node)) {
+                                        lname = cbm_node_text(ctx->arena, name_node, source);
+                                    }
+                                    if (!lname || !lname[0]) {
+                                        const char *last_slash = strrchr(ptext, '/');
+                                        lname = (char *)(last_slash ? last_slash + 1 : ptext);
+                                    }
+                                    go_lsp_add_import(ctx, lname, ptext);
+                                }
+                            }
+                        }
+                    }
+                } else if (strcmp(stype, "import_spec") == 0) {
+                    TSNode path_node = ts_node_child_by_field_name(spec, "path", 4);
+                    TSNode name_node = ts_node_child_by_field_name(spec, "name", 4);
+                    if (!ts_node_is_null(path_node)) {
+                        char *ptext = cbm_node_text(ctx->arena, path_node, source);
+                        if (ptext) {
+                            if (ptext[0] == '"' || ptext[0] == '`') {
+                                ptext++;
+                                size_t plen = strlen(ptext);
+                                if (plen > 0 && (ptext[plen - 1] == '"' || ptext[plen - 1] == '`')) {
+                                    ptext[plen - 1] = '\0';
+                                }
+                            }
+                            char *lname = NULL;
+                            if (!ts_node_is_null(name_node)) {
+                                lname = cbm_node_text(ctx->arena, name_node, source);
+                            }
+                            if (!lname || !lname[0]) {
+                                const char *last_slash = strrchr(ptext, '/');
+                                lname = (char *)(last_slash ? last_slash + 1 : ptext);
+                            }
+                            go_lsp_add_import(ctx, lname, ptext);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 static bool extract_ast_definitions(CBMArena *arena, CBMTypeRegistry *reg, SatoriDefLocArray *def_locs, TSNode root, const char *source, const char *pkg_name, const char *file_path, uint32_t file_path_len) {
     if (ts_node_is_null(root) || !source || !pkg_name) return true;
     uint32_t kn = 0;
@@ -523,6 +677,8 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
         goto cleanup;
     }
 
+    const char *module_name = extract_module_name(&s->arena, s->auxiliaries, s->aux_count);
+
     // Phase 1: Parse AST and collect declarations into registry and definition map
     for (uint32_t i = 0; i < s->source_count; i++) {
         SatoriSourceFile *sf = &s->sources[i];
@@ -533,7 +689,9 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
             goto cleanup;
         }
         TSNode root = ts_tree_root_node(trees[i]);
-        if (!extract_ast_definitions(&s->arena, &reg, &def_locs, root, sf->source, "main", sf->path, sf->path_len)) {
+        const char *pkg_clause = extract_package_name(&s->arena, root, sf->source);
+        const char *pkg_qn = compute_go_package_qn(&s->arena, module_name, pkg_clause, sf->path);
+        if (!extract_ast_definitions(&s->arena, &reg, &def_locs, root, sf->source, pkg_qn, sf->path, sf->path_len)) {
             set_session_error(s, "Out of memory recording AST definitions");
             status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
             goto cleanup;
@@ -548,11 +706,14 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
         if (!trees[i]) continue;
         SatoriSourceFile *sf = &s->sources[i];
         TSNode root = ts_tree_root_node(trees[i]);
+        const char *pkg_clause = extract_package_name(&s->arena, root, sf->source);
+        const char *pkg_qn = compute_go_package_qn(&s->arena, module_name, pkg_clause, sf->path);
         CBMResolvedCallArray resolved_calls;
         memset(&resolved_calls, 0, sizeof(resolved_calls));
 
         GoLSPContext ctx;
-        go_lsp_init(&ctx, &s->arena, sf->source, sf->source_len, &reg, "main", &resolved_calls);
+        go_lsp_init(&ctx, &s->arena, sf->source, sf->source_len, &reg, pkg_qn, &resolved_calls);
+        extract_ast_imports(&ctx, root, sf->source);
         go_lsp_process_file(&ctx, root);
 
         ts_tree_delete(trees[i]);
@@ -648,7 +809,7 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
                                     status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
                                     goto cleanup;
                                 }
-                                dst->receiver_binding_kind = (uint8_t)SATORI_BINDING_TYPED_PARAMETER;
+                                dst->receiver_binding_kind = (uint8_t)SATORI_BINDING_NONE;
                             }
                         }
                     }

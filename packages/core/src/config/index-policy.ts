@@ -116,3 +116,41 @@ export async function isIndexableFileByPolicy(
         await handle?.close();
     }
 }
+
+import { DefaultSemanticLanguageRegistry } from '../semantic/descriptor';
+
+let defaultRegistry: DefaultSemanticLanguageRegistry | null = null;
+function getDefaultRegistry(): DefaultSemanticLanguageRegistry {
+    if (!defaultRegistry) {
+        defaultRegistry = new DefaultSemanticLanguageRegistry();
+    }
+    return defaultRegistry;
+}
+
+export function isSemanticAuxiliaryFilename(relativePath: string): boolean {
+    return getDefaultRegistry().isAuxiliaryPath(relativePath);
+}
+
+export async function isObservableFileObservationByPolicy(
+    relativePath: string,
+    size: number,
+    supportedExtensions: string[],
+    readProbe: () => Promise<Buffer>,
+): Promise<boolean> {
+    if (isSemanticAuxiliaryFilename(relativePath)) {
+        return true;
+    }
+    return isIndexableFileObservationByPolicy(relativePath, size, supportedExtensions, readProbe);
+}
+
+export async function isObservableFileByPolicy(
+    relativePath: string,
+    absolutePath: string,
+    size: number,
+    supportedExtensions: string[],
+): Promise<boolean> {
+    if (isSemanticAuxiliaryFilename(relativePath)) {
+        return true;
+    }
+    return isIndexableFileByPolicy(relativePath, absolutePath, size, supportedExtensions);
+}

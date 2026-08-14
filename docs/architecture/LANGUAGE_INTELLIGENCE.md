@@ -48,14 +48,14 @@ Relationship construction in `packages/core/src/relationships/builder.ts` is ful
 1. **Resolution Strategy Selection:** Each source file is routed to its designated strategy (`python_native`, `cbm_semantic`, `syntactic`) based on the declarative registry.
 2. **Generic CBM Contribution Engine (`cbm.ts`):** Handles any CBM-backed language uniformly by consuming `SemanticProjectEvidence` produced by the semantic analyzer.
 3. **Neutral Central Admission (`admission.ts`):** `admitAuthoritativeProofBackedCalls` validates every call claim against the repository's `SymbolRegistry`:
-   - Enforces exact byte span containment within source callable symbols.
-   - Enforces existence and matching of target symbols.
-   - Stamps deterministic confidence (`high` for intra-file, `low` for cross-file) and authoritative proof provenance (`direct_binding`, `receiver_match`, etc.).
+   - Enforces exact byte span containment within source callable symbols (`function`, `method`, `component`, `hook`, `test`).
+   - Enforces existence and matching of target callable symbols.
+   - Stamps deterministic confidence (`high` for intra-file, `low` for cross-file) and authoritative proof provenance (`direct_binding`, `origin_flow`).
 
 ### Tier 3: High-Performance WebAssembly Engine
 Semantic analysis for CBM languages is executed in a sandboxed, high-performance WebAssembly module compiled from C11 sources (`third_party/cbm-semantic/`) with Emscripten:
 
-* **64-Byte POD ABI:** Relationships, definitions, and diagnostics are exported as fixed-width, memory-aligned 64-byte C structures (`SatoriSemanticResultV1`, `SatoriSemanticDefinitionV1`, `SatoriSemanticDiagnosticV1`) with static assertions on offsets and struct sizes.
+* **64-Byte POD ABI:** Relationships, definitions, and diagnostics are exported as fixed-width, memory-aligned 64-byte C structures (`SatoriSemanticResultV1`, `SatoriSemanticDefinitionV1`, `SatoriSemanticDiagnosticV1`) with static compile-time assertions on struct sizes and field offsets.
 * **String Table Offsets:** All strings cross the WASM/TS boundary as 32-bit byte offsets into a contiguous UTF-8 buffer, eliminating dynamic string allocation overhead.
 * **Dynamic Memory & Resource Budgets:** Linear memory growth is bounded (up to 1 GiB), session handles are capped at 64, aggregate source bytes at 100 MiB, auxiliary bytes at 10 MiB, and total input at 110 MiB with deterministic error codes.
 
@@ -65,7 +65,7 @@ Semantic analysis for CBM languages is executed in a sandboxed, high-performance
 
 1. **Symmetrical Fail-Closed Target & Caller Binding:**
    - **Target Binding:** Target symbols are matched strictly by `{ targetFile, startByte, endByte }`. Same-name decoys at differing byte spans are rejected.
-   - **Caller Binding:** Call spans must be strictly contained within the byte span of a callable symbol (`function`, `method`, `constructor`). If no callable symbol encloses the call, the binder **abstains** (`undefined`), producing zero synthetic edges.
+   - **Caller Binding:** Call spans must be strictly contained within the byte span of a callable symbol (`function`, `method`, `component`, `hook`, `test`). If no callable symbol encloses the call, the binder **abstains** (`undefined`), producing zero synthetic edges.
 2. **Three-Way Decoupling of Capabilities:**
    - **Descriptor Registration:** Language exists in `semantic-languages.json`.
    - **Compiled Native Availability:** Language grammar and resolver are compiled into `satori-semantic-engine.wasm` and listed in `semantic-engine.manifest.json`.
@@ -94,4 +94,4 @@ Adding a second or third CBM-backed language to Satori requires **zero changes t
    - Run `pnpm semantic:verify`.
    - Add characterization tests in `packages/core/src/relationships/`.
 5. **Promote Language:**
-   - Enable `'callGraphBuild'` capability in `packages/core/src/config/capabilities.ts`.
+   - Enable `'callGraphBuild'` capability in `packages/core/src/languages/capabilities.ts`.

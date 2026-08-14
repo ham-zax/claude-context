@@ -139,7 +139,7 @@ test('validateSemanticLanguagesConfig rejects invalid strategy, missing fields, 
     // 5. Reject invalid extension format
     assert.throws(
         () => validateSemanticLanguagesConfig({ languages: [{ ...validDescriptor, extensions: ['go'] }] }),
-        /extension at index 0 must be a valid extension/,
+        /extension at index 0 must match pattern/,
     );
 
     // 6. Reject empty languages array

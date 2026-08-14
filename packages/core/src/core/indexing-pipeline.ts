@@ -522,10 +522,7 @@ export class IndexingPipeline {
                 const { relativePath } = analyzed;
                 analysisByFile.set(relativePath, symbolFacts.relationshipEvidence);
                 indexedFileHashes.set(relativePath, analyzed.sourceHash);
-                if (
-                    this.semanticAnalyzer?.supportsLanguage(analyzed.language) ||
-                    this.semanticLanguageRegistry.isAuxiliaryPath(analyzed.relativePath)
-                ) {
+                if (this.semanticAnalyzer?.supportsLanguage(analyzed.language)) {
                     semanticSources.push({
                         path: analyzed.relativePath,
                         source: analyzed.source,

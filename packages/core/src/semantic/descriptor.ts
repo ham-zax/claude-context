@@ -111,8 +111,8 @@ export function validateSemanticLanguagesConfig(raw: unknown): { languages: Sema
         }
         for (let extIdx = 0; extIdx < entry.extensions.length; extIdx++) {
             const ext = entry.extensions[extIdx];
-            if (typeof ext !== 'string' || !ext.startsWith('.') || ext.length < 2) {
-                throw new Error(`Invalid descriptor '${entry.language}': extension at index ${extIdx} must be a valid extension (e.g. '.go')`);
+            if (typeof ext !== 'string' || !/^\.[a-zA-Z0-9_-]+$/.test(ext)) {
+                throw new Error(`Invalid descriptor '${entry.language}': extension at index ${extIdx} must match pattern ^\\.[a-zA-Z0-9_-]+$ (e.g. '.go')`);
             }
         }
 
