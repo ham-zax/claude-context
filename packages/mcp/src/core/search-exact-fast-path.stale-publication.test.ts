@@ -7,6 +7,7 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import type { CapabilityResolver } from "./capabilities.js";
 
 const testSymbol: SymbolRecord = {
+    symbolKey: "src/target.ts:10:20:function:TargetFunction",
     symbolInstanceId: "sym-1",
     name: "TargetFunction",
     qualifiedName: "TargetFunction",
@@ -16,7 +17,8 @@ const testSymbol: SymbolRecord = {
     label: "function TargetFunction()",
     span: { startLine: 10, endLine: 20 },
     language: "typescript",
-    characterOffsets: { start: 100, end: 200 },
+    fileHash: "hash-1",
+    extractorVersion: "1.0.0",
 };
 
 function buildInput(): SearchExactFastPathInput {
@@ -52,7 +54,7 @@ function buildInput(): SearchExactFastPathInput {
             changedFilesBoostSkippedForLargeChangeSet: false,
         },
         partialIndexSearchWarnings: [],
-        phaseTimings: {},
+        phaseTimings: {} as any,
         readiness: {
             proofMode: "warm",
             invalidationReason: "none",
@@ -64,6 +66,7 @@ function buildInput(): SearchExactFastPathInput {
                 warmReceiptRevalidations: 0,
                 exactPayloadRecounts: 0,
                 registryLoads: 0,
+                navigationValidationRuns: 0,
             },
         },
         candidateLimit: 10,
@@ -99,15 +102,14 @@ function buildInput(): SearchExactFastPathInput {
 
 test("runExactRegistryFastPath uses publication-only symbols without reading current source during served_previous_generation", async () => {
     const mockRegistry: SymbolRegistry = {
-        manifestHash: "man-1",
         manifest: { builtAt: "2026-08-15T00:00:00Z" } as any,
         symbols: [testSymbol],
         symbolsByInstanceId: new Map([["sym-1", testSymbol]]),
-        symbolsByName: new Map([["TargetFunction", [testSymbol]]]),
+        symbolsByKey: new Map([["src/target.ts:10:20:function:TargetFunction", [testSymbol]]]),
         symbolsByFile: new Map([["src/target.ts", [testSymbol]]]),
-        fileIdentifiers: new Map(),
-        exactSymbols: new Map([["TargetFunction", [testSymbol]]]),
-        fileDigests: new Map(),
+        symbolsByLabel: new Map([["function TargetFunction()", [testSymbol]]]),
+        symbolsByQualifiedName: new Map([["TargetFunction", [testSymbol]]]),
+        warnings: [],
     };
 
     const support = new SearchQuerySupport({
@@ -163,7 +165,7 @@ test("runExactRegistryFastPath uses publication-only symbols without reading cur
         if (outcome.finalized.kind === "ok") {
             const envelope = outcome.finalized.envelope;
             assert.equal(envelope.results.length, 1);
-            const group = envelope.results[0]!;
+            const group = envelope.results[0] as import("./search-types.js").SearchGroupedResultV2;
             assert.equal(group.target.file, "src/target.ts");
             assert.equal(group.target.symbolId, "sym-1");
             assert.equal(group.displayLabel, "function TargetFunction()");

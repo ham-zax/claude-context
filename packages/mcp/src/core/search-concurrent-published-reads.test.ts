@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runSearchFrontDoor, type SearchFrontDoorHost } from './search-frontdoor.js';
+import { SearchRequestCoordinator } from './search-request-coordinator.js';
+import { SearchQuerySupport } from './search-query-support.js';
+import { CapabilityResolver } from './capabilities.js';
+import { ToolResponseBuilders } from './tool-response-builders.js';
 import { buildGroupedSearchEnvelope } from './search-response-envelopes.js';
 import type { SearchResponseCommonInput } from './search-response-envelopes.js';
 import { SEARCH_RESPONSE_FORMAT_VERSION } from './search-types.js';
@@ -130,109 +134,282 @@ test('parallel searches execute concurrently against pinned publication during a
     }
 });
 
-test('SearchRequestCoordinator executes stale-while-sync with publication_consistent_stale_read barrier and generation pinning', async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-coord-stale-sync-'));
+test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1 activation while B binds Gen N+1', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-mvcc-race-'));
+    let coordinator: SearchRequestCoordinator | undefined;
     try {
-        // Create dummy source file to simulate filesystem changes mid-sync
-        fs.writeFileSync(path.join(tempRoot, 'main.go'), 'package main\nfunc ModifiedDuringSync() {}\n');
+        fs.writeFileSync(path.join(tempRoot, 'main.ts'), 'export const a = 1;\n');
 
-        const gen15Receipt = {
-            collectionName: 'col_gen_15',
+        const genNReceipt = {
+            collectionName: 'col_gen_n',
             marker: {
-                runId: 'run-15',
+                runId: 'run-n',
                 totalChunks: 10,
-                indexPolicyHash: 'pol-15',
-                navigation: { status: 'sealed' as const, generationId: 'nav-15', sealHash: 'seal-15' },
+                indexPolicyHash: 'pol-n',
+                navigation: { status: 'sealed' as const, generationId: 'nav-n', sealHash: 'seal-n', navigationSealHash: 'seal-n', symbolRegistryManifestHash: 'sym-n' },
             },
-            policy: { canonicalRoot: tempRoot, policyHash: 'pol-15' },
-            policyDocumentDigest: 'digest-15',
+            policy: { canonicalRoot: tempRoot, policyHash: 'pol-n' },
+            policyDocumentDigest: 'digest-n',
             exactPayloadCount: 10,
-            observations: { profileFileToken: null, policyFileToken: 'tok-15' },
+            observations: { profileFileToken: null, policyFileToken: 'tok-n' },
         };
 
-        const gen16Receipt = {
-            collectionName: 'col_gen_16',
+        const genN1Receipt = {
+            collectionName: 'col_gen_n1',
             marker: {
-                runId: 'run-16',
+                runId: 'run-n1',
                 totalChunks: 12,
-                indexPolicyHash: 'pol-16',
-                navigation: { status: 'sealed' as const, generationId: 'nav-16', sealHash: 'seal-16' },
+                indexPolicyHash: 'pol-n1',
+                navigation: { status: 'sealed' as const, generationId: 'nav-n1', sealHash: 'seal-n1', navigationSealHash: 'seal-n1', symbolRegistryManifestHash: 'sym-n1' },
             },
-            policy: { canonicalRoot: tempRoot, policyHash: 'pol-16' },
-            policyDocumentDigest: 'digest-16',
+            policy: { canonicalRoot: tempRoot, policyHash: 'pol-n1' },
+            policyDocumentDigest: 'digest-n1',
             exactPayloadCount: 12,
-            observations: { profileFileToken: null, policyFileToken: 'tok-16' },
+            observations: { profileFileToken: null, policyFileToken: 'tok-n1' },
         };
 
-        // Simulate 5 parallel search queries during active sync
-        const executeSearchQuery = async (queryIndex: number) => {
-            // Front door resolves to ready with served_previous_generation
-            const frontDoorResult = {
-                kind: 'ready' as const,
-                absolutePath: tempRoot,
-                effectiveRoot: tempRoot,
-                searchableRoot: { path: tempRoot, info: { status: 'indexed' as const } },
-                vectorReceipt: gen15Receipt,
-                generationReceipt: gen15Receipt,
-                navigationStatus: 'valid' as const,
-                preparedObservation: 'obs-15',
-                partialIndexSearchWarnings: [],
-                freshnessDecision: {
-                    mode: 'served_previous_generation' as const,
+        let currentGeneration = 'N';
+        let currentAuthorityObservation = 'obs-n';
+
+        const boundCollectionsForA: string[] = [];
+        const boundCollectionsForB: string[] = [];
+        let unpinnedSemanticSearchCalls = 0;
+
+        let searchAInFlightResolve!: () => void;
+        const searchAInFlight = new Promise<void>((resolve) => {
+            searchAInFlightResolve = resolve;
+        });
+
+        let releaseSearchAResolve!: () => void;
+        const releaseSearchA = new Promise<void>((resolve) => {
+            releaseSearchAResolve = resolve;
+        });
+
+        const activeLeases = new Set<string>();
+
+        const capabilities = new CapabilityResolver({
+            name: 'test',
+            version: '1.0.0',
+            stateRoot: tempRoot,
+            executionProfile: 'connected',
+            networkPolicy: { kind: 'local-only' },
+            vectorStoreProvider: 'LanceDB',
+            encoderProvider: 'VoyageAI',
+            encoderModel: 'voyage-4-large',
+            encoderOutputDimension: 1024,
+            rankerModel: undefined,
+        } as any);
+
+        const support = new SearchQuerySupport({
+            normalizeSearchPath: (value) => value,
+            hasPathSegment: () => false,
+            isGeneratedPath: () => false,
+            isTestPath: () => false,
+            isFixturePath: () => false,
+            isDocPath: () => false,
+            getContextActiveIgnorePatterns: () => [],
+            getContextTrackedRelativePaths: () => [],
+            classifyPathCategory: () => "core",
+            shouldIncludeCategoryInScope: () => true,
+            getSyncWatchDebounceMs: () => 0,
+            capabilities,
+            runtimeFingerprint: { schemaVersion: "hybrid-v1" } as any,
+            reranker: null,
+            gitignoreForceReloadEveryN: 1000,
+        });
+
+        const toolResponseBuilders = new ToolResponseBuilders({
+            buildManageIndexRecommendedAction: () => ({ action: 'none', label: '' } as any),
+            buildCreateHint: () => ({ tool: 'manage_index', args: { action: 'create', path: tempRoot } }),
+            buildReindexHint: () => ({ tool: 'manage_index', args: { action: 'reindex', path: tempRoot } }),
+            buildRepairHint: () => ({ tool: 'manage_index', args: { action: 'repair', path: tempRoot } }),
+            buildSyncHint: () => ({ tool: 'manage_index', args: { action: 'sync', path: tempRoot } }),
+            buildStatusHint: () => ({ tool: 'manage_index', args: { action: 'status', path: tempRoot } }),
+            buildStaleLocalHint: () => ({}),
+            buildStaleLocalMessage: () => '',
+            buildIndexingMetadata: () => ({ formatVersion: 'test' } as any),
+            buildCompatibilityDiagnostics: () => ({ status: 'valid' } as any),
+            buildRuntimeMismatchHint: () => ({ tool: 'manage_index', args: { action: 'status', path: tempRoot } }),
+            isRuntimeFingerprintMismatch: () => false,
+            summarizeFingerprint: () => 'fp',
+        });
+
+        coordinator = new SearchRequestCoordinator({
+            readiness: {
+                touchWatchedCodebaseBestEffort: async () => {},
+                ensureFreshness: async () => ({
+                    mode: currentGeneration === 'N' ? 'served_previous_generation' : 'synced',
                     checkedAt: new Date().toISOString(),
                     thresholdMs: 0,
-                    servedCollection: 'col_gen_15',
-                    servedRunId: 'run-15',
-                    servedGenerationId: 'nav-15',
-                    pendingOperation: { action: 'sync', generation: 16 },
+                    servedCollection: currentGeneration === 'N' ? 'col_gen_n' : undefined,
+                    servedRunId: currentGeneration === 'N' ? 'run-n' : undefined,
+                }),
+                prepareTrackedRootReadWithObservation: async (): Promise<any> => {
+                    const isN = currentGeneration === 'N';
+                    const receipt = isN ? genNReceipt : genN1Receipt;
+                    const obs = isN ? 'obs-n' : 'obs-n1';
+                    if (isN) {
+                        return {
+                            state: 'indexing' as const,
+                            codebasePath: tempRoot,
+                            operation: { action: 'sync' as const, generation: 16, phase: 'writing', id: 'op-16' },
+                            searchableGenerationAvailable: true,
+                            searchableRead: {
+                                state: 'ready' as const,
+                                codebasePath: tempRoot,
+                                collectionName: receipt.collectionName,
+                                manifestHash: 'man-' + receipt.collectionName,
+                                root: { path: tempRoot, info: { status: 'indexed' as const } },
+                                proofDebugHint: undefined,
+                                vectorReceipt: receipt,
+                                generationReceipt: receipt,
+                                navigationStatus: 'valid' as const,
+                                preparedObservation: obs,
+                                navigationAuthorityMode: 'canonical_v4' as const,
+                            },
+                        };
+                    }
+                    return {
+                        state: 'ready' as const,
+                        codebasePath: tempRoot,
+                        collectionName: receipt.collectionName,
+                        manifestHash: 'man-' + receipt.collectionName,
+                        root: { path: tempRoot, info: { status: 'indexed' as const } },
+                        proofDebugHint: undefined,
+                        vectorReceipt: receipt,
+                        generationReceipt: receipt,
+                        navigationStatus: 'valid' as const,
+                        preparedObservation: obs,
+                        navigationAuthorityMode: 'canonical_v4' as const,
+                    };
                 },
-            };
-
-            // Simulate coordinator session read with publication_consistent_stale_read
-            assert.equal(frontDoorResult.freshnessDecision.mode, 'served_previous_generation');
-            assert.equal(frontDoorResult.vectorReceipt.collectionName, 'col_gen_15');
-            assert.equal(frontDoorResult.freshnessDecision.servedCollection, 'col_gen_15');
-            assert.equal(frontDoorResult.freshnessDecision.servedRunId, 'run-15');
-            assert.equal(frontDoorResult.freshnessDecision.servedGenerationId, 'nav-15');
-
-            // Simulate query latency
-            await new Promise((resolve) => setTimeout(resolve, 15));
-            return {
-                queryIndex,
-                collectionRead: frontDoorResult.vectorReceipt.collectionName,
-                runId: frontDoorResult.freshnessDecision.servedRunId,
-            };
-        };
-
-        const concurrentSearches = await Promise.all([0, 1, 2, 3, 4].map(executeSearchQuery));
-        assert.equal(concurrentSearches.length, 5);
-        for (const res of concurrentSearches) {
-            assert.equal(res.collectionRead, 'col_gen_15');
-            assert.equal(res.runId, 'run-15');
-        }
-
-        // Subsequent query after sync activation binds Gen 16
-        const postSyncQuery = {
-            kind: 'ready' as const,
-            absolutePath: tempRoot,
-            effectiveRoot: tempRoot,
-            searchableRoot: { path: tempRoot, info: { status: 'indexed' as const } },
-            vectorReceipt: gen16Receipt,
-            generationReceipt: gen16Receipt,
-            navigationStatus: 'valid' as const,
-            preparedObservation: 'obs-16',
-            partialIndexSearchWarnings: [],
-            freshnessDecision: {
-                mode: 'synced' as const,
-                checkedAt: new Date().toISOString(),
-                thresholdMs: 0,
+                loadRegistryValidatedCallGraphSidecar: async () => ({ relationshipReady: false }),
+                getWatcherObservation: () => ({ coverage: 'ready', available: true, snapshot: 'watch' } as any),
+                getChangedFilesForCodebase: () => ({ available: true, files: new Set() }),
+                waitForSearchableSync: async () => true,
+                getTrackedRootReadiness: () => ({} as any),
+                isPartialIndexNavigationUnavailable: () => false,
+                getIndexingOperationForReadiness: () => undefined,
+                canSyncStaleLocal: () => false,
+                probeLocalSearchCollectionState: async () => ({ state: 'ready' }),
             },
-        };
+            hints: {
+                stringifyToolJson: (p) => JSON.stringify(p),
+                getToolResponseBuilders: () => toolResponseBuilders,
+                getSearchNavigationHelpers: () => ({
+                    now: () => Date.now(),
+                    sanitizeIndexedRelativeFilePath: (f: string) => f,
+                    isCallGraphLanguageSupported: () => false,
+                    getOutlineStatusForLanguage: () => 'valid' as any,
+                }),
+                buildGeneratedArtifactsVerificationHint: () => undefined,
+                buildChangedCodeDebug: async () => undefined,
+                withProofDebugHint: (p) => p,
+                buildSyncHint: () => ({ tool: 'manage_index', args: { action: 'sync', path: tempRoot } }),
+                buildStaleLocalMessage: () => '',
+                buildStaleLocalHint: () => ({}),
+                buildRepairHint: () => ({ tool: 'manage_index', args: { action: 'repair', path: tempRoot } }),
+                buildRelationshipBackedCallGraph: async () => null,
+                buildManageIndexRecommendedAction: () => ({ action: 'none', label: '' } as any),
+                buildCreateHint: () => ({ tool: 'manage_index', args: { action: 'create', path: tempRoot } }),
+                sanitizeIndexedRelativeFilePath: (f) => f,
+            },
+            preparedRead: {
+                loadPreparedNavigationManifest: async (): Promise<any> => ({ status: 'unavailable', reason: 'unsupported', rootPath: tempRoot }),
+                getPreparedReadCacheObservation: () => ({
+                    observation: currentAuthorityObservation,
+                    sourceObservation: currentAuthorityObservation,
+                }),
+                getPreparedAuthorityObservation: () => currentAuthorityObservation,
+                seedPreparedRead: () => {},
+                evictPreparedRead: () => {},
+                loadPreparedNavigationCompatibility: async (): Promise<any> => ({ status: 'incompatible', reason: 'unsupported', rootPath: tempRoot, registry: { status: 'unavailable', reason: 'unsupported', rootPath: tempRoot }, relationships: { status: 'unavailable', reason: 'unsupported', rootPath: tempRoot } }),
+                getCachedPreparedRead: async (): Promise<any> => ({ status: 'miss', reason: 'cold_initial' }),
+                acquirePublicationReadLease: async () => {
+                    const leaseId = 'lease-' + Math.random();
+                    activeLeases.add(leaseId);
+                    return () => {
+                        activeLeases.delete(leaseId);
+                    };
+                },
+            },
+            freshness: {
+                getSourceFreshnessPort: () => undefined,
+                inspectSourceFreshnessCheckpoint: async () => ({} as any),
+                compareAllSourceToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
+                compareSourceObservationToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
+                compareSourcePathsToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
+                getPreparedGenerationRevalidator: () => undefined,
+            },
+            environment: {
+                now: () => Date.now(),
+                getCapabilities: () => capabilities,
+                getReadFileMaxBytes: () => 100000,
+                parseIndexedAtMs: () => Date.now(),
+                getEmbeddingProviderName: () => 'test-encoder',
+                semanticSearch: async () => {
+                    unpinnedSemanticSearchCalls += 1;
+                    return [];
+                },
+                semanticSearchInProvenGeneration: async (receipt) => {
+                    if (receipt.collectionName === 'col_gen_n') {
+                        boundCollectionsForA.push(receipt.collectionName);
+                        searchAInFlightResolve();
+                        await releaseSearchA;
+                    } else if (receipt.collectionName === 'col_gen_n1') {
+                        boundCollectionsForB.push(receipt.collectionName);
+                    }
+                    return [];
+                },
+            },
+        }, support, null);
 
-        assert.equal(postSyncQuery.freshnessDecision.mode, 'synced');
-        assert.equal(postSyncQuery.vectorReceipt.collectionName, 'col_gen_16');
-        assert.equal(postSyncQuery.vectorReceipt.marker.runId, 'run-16');
+        // 1. Start Search A on Gen N
+        const searchAPromise = coordinator.attempt({
+            path: tempRoot,
+            query: 'query for A',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+        });
+
+        // 2. Wait until Search A has acquired its lease and entered semanticSearch on Gen N
+        await searchAInFlight;
+
+        // 3. Switch prepared authority to Gen N+1 (simulating sync activation)
+        currentGeneration = 'N+1';
+        currentAuthorityObservation = 'obs-n1';
+
+        // 4. Start Search B and verify it completes against Gen N+1
+        const searchBResult = await coordinator.attempt({
+            path: tempRoot,
+            query: 'query for B',
+            scope: 'runtime',
+            groupBy: 'symbol',
+            resultMode: 'grouped',
+            limit: 5,
+        });
+
+        // 5. Release Search A
+        releaseSearchAResolve();
+        const searchAResult = await searchAPromise;
+
+        // 6. Assertions
+        assert.ok(boundCollectionsForA.length > 0);
+        assert.ok(boundCollectionsForA.every((c) => c === 'col_gen_n'));
+        assert.ok(boundCollectionsForB.length > 0);
+        assert.ok(boundCollectionsForB.every((c) => c === 'col_gen_n1'));
+        assert.equal(unpinnedSemanticSearchCalls, 0);
+
+        const aEnvelope = JSON.parse(searchAResult.content[0]!.text);
+        const bEnvelope = JSON.parse(searchBResult.content[0]!.text);
+        assert.equal(aEnvelope.status, 'ok');
+        assert.equal(bEnvelope.status, 'ok');
+        assert.equal(aEnvelope.freshness?.servedCollection, 'col_gen_n');
+        assert.equal(aEnvelope.freshness?.state, 'sync_in_progress');
     } finally {
+        coordinator?.releaseContinuationOwnership();
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });

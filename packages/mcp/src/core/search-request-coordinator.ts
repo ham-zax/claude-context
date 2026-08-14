@@ -855,7 +855,7 @@ export class SearchRequestCoordinator {
 
     public async attempt(
         args: ToolArgs,
-        sourceDriftRetryCount: 0 | 1,
+        sourceDriftRetryCount: 0 | 1 = 0,
     ): Promise<SearchToolTextResponse> {
         const scope = (typeof args.scope === 'string' ? args.scope : 'runtime') as SearchScope;
         const resultMode = (typeof args.resultMode === 'string' ? args.resultMode : 'grouped') as SearchResultMode;
@@ -1428,7 +1428,7 @@ export class SearchRequestCoordinator {
                                 freshnessComparisonMode: 'full',
                                 exactPathCount: 0,
                                 checkpointBindings: 0,
-                                preRetrievalFullComparisons: 1,
+                                preRetrievalFullComparisons: 0,
                                 finalFullComparisons: 0,
                             };
                         }
@@ -1762,7 +1762,8 @@ export class SearchRequestCoordinator {
                         : boundEnvelope;
                 };
                 if (
-                    preparedObservation
+                    freshnessDecision.mode !== "served_previous_generation"
+                    && preparedObservation
                     && this.preparedRead.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
                 ) {
                     this.preparedRead.evictPreparedRead(effectiveRoot);
@@ -1942,7 +1943,8 @@ export class SearchRequestCoordinator {
                 }
 
                 if (
-                    preparedObservation
+                    freshnessDecision.mode !== "served_previous_generation"
+                    && preparedObservation
                     && this.preparedRead.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
                 ) {
                     this.preparedRead.evictPreparedRead(effectiveRoot);

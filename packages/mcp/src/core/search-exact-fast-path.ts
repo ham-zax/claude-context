@@ -75,7 +75,7 @@ type NavigationState = {
     warning?: string;
 };
 
-type SearchExactFastPathInput = {
+export type SearchExactFastPathInput = {
     absolutePath: string;
     effectiveRoot: string;
     requestedSubdirectory: RequestedSearchSubdirectory | null;
