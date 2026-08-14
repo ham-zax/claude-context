@@ -1,50 +1,20 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {
+    ASSETS_DIR,
+    MANIFEST_PATH,
+    JS_PATH,
+    WASM_PATH,
+    PINNED_UPSTREAM_COMMIT,
+    PINNED_EMSCRIPTEN_VERSION,
+    computeLogicalRecipeDigest,
+    computeSourceDigest,
+} from './semantic-engine-build-config.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.resolve(__dirname, '..');
-
-const CBM_SRC_DIR = path.join(REPO_ROOT, 'third_party', 'cbm-semantic');
-const ASSETS_DIR = path.join(REPO_ROOT, 'packages', 'core', 'assets', 'semantic-engine');
-const MANIFEST_PATH = path.join(ASSETS_DIR, 'semantic-engine.manifest.json');
-const JS_PATH = path.join(ASSETS_DIR, 'satori-semantic-engine.js');
-const WASM_PATH = path.join(ASSETS_DIR, 'satori-semantic-engine.wasm');
-
-export function computeSourceDigest(rootDir = CBM_SRC_DIR) {
-    const files = [];
-
-    function walk(dir) {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-                walk(fullPath);
-            } else if (entry.isFile()) {
-                const ext = path.extname(entry.name);
-                if (['.c', '.h'].includes(ext)) {
-                    files.push(fullPath);
-                }
-            }
-        }
-    }
-
-    walk(rootDir);
-    files.sort();
-
-    const hash = crypto.createHash('sha256');
-    for (const file of files) {
-        const rel = path.relative(rootDir, file).replace(/\\/g, '/');
-        const content = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
-        hash.update(`${rel}\n${content}\n`);
-    }
-
-    return hash.digest('hex');
-}
+export { computeSourceDigest, computeLogicalRecipeDigest };
 
 export function verifySemanticEngine() {
     if (!fs.existsSync(MANIFEST_PATH)) {
@@ -59,15 +29,22 @@ export function verifySemanticEngine() {
 
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
     const sourceDigest = computeSourceDigest();
+    const recipeDigest = computeLogicalRecipeDigest();
 
     if (manifest.abiVersion !== 1) {
         throw new Error(`Manifest abiVersion mismatch: expected 1, saw ${manifest.abiVersion}`);
     }
-    if (manifest.upstreamCommit !== 'd150ebe4fc78a9a3f85013d2087a849e5d59eb0f') {
-        throw new Error(`Manifest upstreamCommit mismatch: expected d150ebe4fc78a9a3f85013d2087a849e5d59eb0f, saw ${manifest.upstreamCommit}`);
+    if (manifest.upstreamCommit !== PINNED_UPSTREAM_COMMIT) {
+        throw new Error(`Manifest upstreamCommit mismatch: expected ${PINNED_UPSTREAM_COMMIT}, saw ${manifest.upstreamCommit}`);
+    }
+    if (manifest.emscriptenVersion !== PINNED_EMSCRIPTEN_VERSION) {
+        throw new Error(`Manifest emscriptenVersion mismatch: expected ${PINNED_EMSCRIPTEN_VERSION}, saw ${manifest.emscriptenVersion}`);
     }
     if (manifest.semanticSourceDigest !== sourceDigest) {
         throw new Error(`Manifest source digest mismatch:\n  manifest: ${manifest.semanticSourceDigest}\n  computed: ${sourceDigest}`);
+    }
+    if (manifest.buildRecipeDigest !== recipeDigest) {
+        throw new Error(`Manifest build recipe digest mismatch:\n  manifest: ${manifest.buildRecipeDigest}\n  computed: ${recipeDigest}`);
     }
 
     const jsBytes = fs.readFileSync(JS_PATH);
@@ -85,8 +62,9 @@ export function verifySemanticEngine() {
     return {
         abiVersion: manifest.abiVersion,
         upstreamCommit: manifest.upstreamCommit,
+        emscriptenVersion: manifest.emscriptenVersion,
         semanticSourceDigest: sourceDigest,
-        buildRecipeDigest: manifest.buildRecipeDigest,
+        buildRecipeDigest: recipeDigest,
         jsSha256: jsHash,
         wasmSha256: wasmHash,
     };
@@ -96,14 +74,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     try {
         const result = verifySemanticEngine();
         console.log(`✔ Satori Semantic Engine verification passed:`);
-        console.log(`  ABI Version: ${result.abiVersion}`);
-        console.log(`  Upstream Commit: ${result.upstreamCommit}`);
-        console.log(`  Source Digest: ${result.semanticSourceDigest}`);
-        if (result.buildRecipeDigest) {
-            console.log(`  Recipe Digest: ${result.buildRecipeDigest}`);
-        }
-        console.log(`  JS Digest: ${result.jsSha256}`);
-        console.log(`  WASM Digest: ${result.wasmSha256}`);
+        console.log(`  ABI Version:        ${result.abiVersion}`);
+        console.log(`  Upstream Commit:    ${result.upstreamCommit}`);
+        console.log(`  Emscripten Version: ${result.emscriptenVersion}`);
+        console.log(`  Source Digest:      ${result.semanticSourceDigest}`);
+        console.log(`  Recipe Digest:      ${result.buildRecipeDigest}`);
+        console.log(`  JS Digest:          ${result.jsSha256}`);
+        console.log(`  WASM Digest:        ${result.wasmSha256}`);
     } catch (err) {
         console.error(`✖ Semantic engine verification failed: ${err.message}`);
         process.exit(1);

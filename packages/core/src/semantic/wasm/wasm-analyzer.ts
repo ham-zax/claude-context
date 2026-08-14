@@ -12,14 +12,18 @@ import type {
     SemanticTargetProvenance,
 } from '../contracts';
 import { Utf8SourceMap } from '../../language-analysis/source-map';
+import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '../descriptor';
 import { WasmSemanticEngine } from './wasm-engine';
 import { ReceiverBindingKind, SemanticDecision as WasmSemanticDecision, SemanticStrategy as WasmSemanticStrategy } from './wasm-types';
 
 export class WasmSemanticProjectAnalyzer implements SemanticProjectAnalyzer {
-    constructor(private readonly engineProvider: () => Promise<WasmSemanticEngine> = () => WasmSemanticEngine.create()) {}
+    constructor(
+        private readonly engineProvider: () => Promise<WasmSemanticEngine> = () => WasmSemanticEngine.create(),
+        private readonly languageRegistry: SemanticLanguageRegistry = defaultSemanticLanguageRegistry,
+    ) {}
 
     supportsLanguage(language: string): boolean {
-        return language === 'go';
+        return this.languageRegistry.supportsLanguage(language);
     }
 
     async analyze(input: SemanticProjectInput): Promise<SemanticProjectEvidence> {

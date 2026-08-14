@@ -96,14 +96,13 @@ open_symbol file_outline call_graph   search context
 * **Maximum String Table Size**: `64 MiB` (`SATORI_MAX_STR_TABLE_BYTES`, deterministic error propagation)
 * **Maximum Relationship Records**: `500,000` (`SATORI_MAX_RESULTS`)
 * **Multi-stream POD ABI**: Fixed 64-byte POD struct layouts for Relationships (`SatoriSemanticResultV1`), Definitions (`SatoriSemanticDefinitionV1`), and Diagnostics (`SatoriSemanticDiagnosticV1`) with compile-time static assertions.
-* **Arena Structural Capacity**: up to `4,096 × 64 KiB` blocks (`256 MiB` theoretical per-session arena ceiling). Linear memory is shared across all active sessions and runtime state; this is not guaranteed allocatable capacity for every concurrent session.
+* **Arena Structural Capacity**: `4,096` block structural limit; normal block size `64 KiB`; oversized allocations may use larger blocks; WASM linear memory remains the hard aggregate ceiling.
 * **WASM Initial Linear Memory**: `64 MiB` (`-sINITIAL_MEMORY=67108864`)
 * **WASM Maximum Linear Memory**: `1 GiB` (`-sMAXIMUM_MEMORY=1073741824` hard ceiling for module linear memory)
 * **WASM Stack Size**: `2 MiB` (`-sSTACK_SIZE=2097152`)
 * **Toolchain Pin & Verification Modes**:
-  - `build` requires exact Emscripten `3.1.64` matching.
-  - `semantic:verify` validates source digest, build recipe digest, committed JS/WASM digests, and manifest integrity without requiring Emscripten installed.
-  - `semantic:rebuild-verify` performs clean temporary rebuild and byte/digest comparison when Emscripten 3.1.64 is present.
+  - `semantic:build` requires exact Emscripten `3.1.64` matching and records logical build recipe digest.
+  - `semantic:verify` validates source digest, logical build recipe digest, recorded Emscripten version, committed JS/WASM digests, and manifest integrity without requiring Emscripten installed.
 
 ---
 

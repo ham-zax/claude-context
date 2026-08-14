@@ -14,7 +14,7 @@ import {
 import type { ResolutionClaim } from './resolution';
 import { pythonResolutionContributionEngine } from './contributions/python';
 import { syntacticResolutionContributionEngine } from './contributions/syntactic';
-import { goResolutionContributionEngine } from './contributions/go';
+import { CbmSemanticContributionEngine } from './contributions/cbm';
 import type { RelationshipBuildMode } from './contributions/contracts';
 import {
     type LanguageResolutionStrategyRegistry,
@@ -151,8 +151,13 @@ export function admitAuthoritativeProofBackedCalls(input: {
     for (const claim of input.claims) {
         if (claim.decision !== 'resolved') continue;
         if (claim.relationshipType !== 'CALLS') continue;
-        if (!claim.sourceInstanceId || !claim.targetInstanceId) continue;
-        if (claim.resolutionAuthority !== 'direct_binding' && claim.resolutionAuthority !== 'origin_flow') continue;
+        if (claim.resolutionAuthority !== 'direct_binding' && claim.resolutionAuthority !== 'origin_flow') {
+            continue;
+        }
+
+        if (!claim.sourceInstanceId || !claim.targetInstanceId) {
+            continue;
+        }
 
         const source = symbolsByInstanceId.get(claim.sourceInstanceId);
         const target = symbolsByInstanceId.get(claim.targetInstanceId);
@@ -163,11 +168,21 @@ export function admitAuthoritativeProofBackedCalls(input: {
 
         // Invariant: call span must fall within source symbol line boundaries if span is defined
         if (source.span) {
-            if (claim.callSpan.startLine < source.span.startLine || claim.callSpan.endLine > source.span.endLine) {
+            const withinLine =
+                claim.callSpan.startLine >= source.span.startLine &&
+                claim.callSpan.endLine <= source.span.endLine;
+            const withinByte =
+                source.span.startByte === undefined ||
+                source.span.endByte === undefined ||
+                claim.callSpan.startByte === undefined ||
+                claim.callSpan.endByte === undefined ||
+                (claim.callSpan.startByte >= source.span.startByte &&
+                    claim.callSpan.endByte <= source.span.endByte);
+
+            if (!withinLine || !withinByte) {
                 continue;
             }
         }
-
 
         const record: RelationshipRecord = {
             sourceKey: source.symbolKey,
@@ -187,100 +202,118 @@ export function admitAuthoritativeProofBackedCalls(input: {
 
 export const admitResolvedCallClaims = admitAuthoritativeProofBackedCalls;
 
-
-
 export function buildCallRelationshipsForRegistry(input: BuildCallRelationshipsForRegistryInput): RelationshipRecord[] {
     const strategyRegistry = input.strategyRegistry ?? defaultResolutionStrategyRegistry;
     const recordsByKey = new Map<string, RelationshipRecord>();
     const allClaimsByFile = new Map<string, ResolutionClaim[]>();
 
-    // 1. Partition files by strategy, evaluating capability eligibility per language
-    const pythonFiles = new Set<string>();
-    const syntacticFiles = new Set<string>();
-    const goFiles = new Set<string>();
+    // 1. Partition files by strategy and language, evaluating capability eligibility per language
+    const filesByStrategyAndLanguage = new Map<string, Map<string, Set<string>>>();
 
     for (const file of input.registry.manifest.files) {
         if (input.sourceFiles && !input.sourceFiles.has(file.path)) continue;
 
         const strategy = strategyRegistry.strategyForLanguage(file.language);
         const isEligible = isLanguageCapabilitySupportedForLanguage(file.language, 'callGraphBuild')
-            || (input.mode?.kind === 'qualification' && input.mode.enabledUnpromotedCallLanguages.has(file.language))
-            || strategy === 'cbm_semantic';
+            || (input.mode?.kind === 'qualification' && input.mode.enabledUnpromotedCallLanguages.has(file.language));
         if (!isEligible) continue;
 
-        if (strategy === 'python_native') {
-            pythonFiles.add(file.path);
-        } else if (strategy === 'syntactic') {
-            syntacticFiles.add(file.path);
-        } else if (strategy === 'cbm_semantic') {
-            goFiles.add(file.path);
+        let langMap = filesByStrategyAndLanguage.get(strategy);
+        if (!langMap) {
+            langMap = new Map();
+            filesByStrategyAndLanguage.set(strategy, langMap);
         }
+        let fileSet = langMap.get(file.language);
+        if (!fileSet) {
+            fileSet = new Set();
+            langMap.set(file.language, fileSet);
+        }
+        fileSet.add(file.path);
     }
 
-    // 2. Dispatch Python engine only for python_native files
-    if (pythonFiles.size > 0) {
-        const pythonResult = pythonResolutionContributionEngine.resolveCalls({
-            registry: input.registry,
-            analysisByFile: input.analysisByFile,
-            sourceFiles: pythonFiles,
-            mode: input.mode,
-            strategyRegistry,
-        });
-        for (const record of pythonResult.records) {
-            recordsByKey.set(relationshipKey(record), record);
+    // 2. Dispatch Python engine for python_native files
+    const pythonLangs = filesByStrategyAndLanguage.get('python_native');
+    if (pythonLangs) {
+        const pythonFiles = new Set<string>();
+        for (const files of pythonLangs.values()) {
+            for (const f of files) pythonFiles.add(f);
         }
-        if (pythonResult.claimsByFile) {
-            for (const [file, claims] of pythonResult.claimsByFile) {
-                allClaimsByFile.set(file, [...claims]);
+        if (pythonFiles.size > 0) {
+            const pythonResult = pythonResolutionContributionEngine.resolveCalls({
+                registry: input.registry,
+                analysisByFile: input.analysisByFile,
+                sourceFiles: pythonFiles,
+                mode: input.mode,
+                strategyRegistry,
+            });
+            for (const record of pythonResult.records) {
+                recordsByKey.set(relationshipKey(record), record);
+            }
+            if (pythonResult.claimsByFile) {
+                for (const [file, claims] of pythonResult.claimsByFile) {
+                    allClaimsByFile.set(file, [...claims]);
+                }
             }
         }
     }
 
-    // 3. Dispatch Syntactic engine only for syntactic files
-    if (syntacticFiles.size > 0) {
-        const syntacticResult = syntacticResolutionContributionEngine.resolveCalls({
-            registry: input.registry,
-            analysisByFile: input.analysisByFile,
-            sourceFiles: syntacticFiles,
-            mode: input.mode,
-            strategyRegistry,
-        });
-        for (const record of syntacticResult.records) {
-            recordsByKey.set(relationshipKey(record), record);
+    // 3. Dispatch Syntactic engine for syntactic files
+    const syntacticLangs = filesByStrategyAndLanguage.get('syntactic');
+    if (syntacticLangs) {
+        const syntacticFiles = new Set<string>();
+        for (const files of syntacticLangs.values()) {
+            for (const f of files) syntacticFiles.add(f);
         }
-        if (syntacticResult.claimsByFile) {
-            for (const [file, claims] of syntacticResult.claimsByFile) {
-                const existing = allClaimsByFile.get(file) ?? [];
-                existing.push(...claims);
-                allClaimsByFile.set(file, existing);
+        if (syntacticFiles.size > 0) {
+            const syntacticResult = syntacticResolutionContributionEngine.resolveCalls({
+                registry: input.registry,
+                analysisByFile: input.analysisByFile,
+                sourceFiles: syntacticFiles,
+                mode: input.mode,
+                strategyRegistry,
+            });
+            for (const record of syntacticResult.records) {
+                recordsByKey.set(relationshipKey(record), record);
+            }
+            if (syntacticResult.claimsByFile) {
+                for (const [file, claims] of syntacticResult.claimsByFile) {
+                    const existing = allClaimsByFile.get(file) ?? [];
+                    existing.push(...claims);
+                    allClaimsByFile.set(file, existing);
+                }
             }
         }
     }
 
-    // 4. Dispatch Go CBM semantic engine for cbm_semantic files
-    if (goFiles.size > 0) {
-        let semanticEvidence: SemanticProjectEvidence | undefined;
-        if (input.semanticEvidenceByLanguage) {
-            semanticEvidence = input.semanticEvidenceByLanguage instanceof Map
-                ? input.semanticEvidenceByLanguage.get('go')
-                : (input.semanticEvidenceByLanguage as Record<string, SemanticProjectEvidence>)['go'];
-        }
-        const goResult = goResolutionContributionEngine.resolveCalls({
-            registry: input.registry,
-            analysisByFile: input.analysisByFile,
-            sourceFiles: goFiles,
-            mode: input.mode,
-            strategyRegistry,
-            semanticEvidence,
-        });
-        for (const record of goResult.records) {
-            recordsByKey.set(relationshipKey(record), record);
-        }
-        if (goResult.claimsByFile) {
-            for (const [file, claims] of goResult.claimsByFile) {
-                const existing = allClaimsByFile.get(file) ?? [];
-                existing.push(...claims);
-                allClaimsByFile.set(file, existing);
+    // 4. Dispatch generic CBM contribution engine for each cbm_semantic language
+    const cbmLangs = filesByStrategyAndLanguage.get('cbm_semantic');
+    if (cbmLangs) {
+        for (const [language, files] of cbmLangs) {
+            if (files.size === 0) continue;
+            let semanticEvidence: SemanticProjectEvidence | undefined;
+            if (input.semanticEvidenceByLanguage) {
+                semanticEvidence = input.semanticEvidenceByLanguage instanceof Map
+                    ? input.semanticEvidenceByLanguage.get(language)
+                    : (input.semanticEvidenceByLanguage as Record<string, SemanticProjectEvidence>)[language];
+            }
+            const cbmEngine = new CbmSemanticContributionEngine(language);
+            const cbmResult = cbmEngine.resolveCalls({
+                registry: input.registry,
+                analysisByFile: input.analysisByFile,
+                sourceFiles: files,
+                mode: input.mode,
+                strategyRegistry,
+                semanticEvidence,
+            });
+            for (const record of cbmResult.records) {
+                recordsByKey.set(relationshipKey(record), record);
+            }
+            if (cbmResult.claimsByFile) {
+                for (const [file, claims] of cbmResult.claimsByFile) {
+                    const existing = allClaimsByFile.get(file) ?? [];
+                    existing.push(...claims);
+                    allClaimsByFile.set(file, existing);
+                }
             }
         }
     }

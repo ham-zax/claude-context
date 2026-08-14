@@ -1,4 +1,5 @@
 export * from './contracts';
+export * from './descriptor';
 export * from './analyzer-port';
 export * from './noop-analyzer';
 export { WasmSemanticProjectAnalyzer } from './wasm/wasm-analyzer';

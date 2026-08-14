@@ -24,6 +24,7 @@ import type { SymbolRegistry } from '../symbols/registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
 import { buildRelationshipDelta, buildRelationshipsForRegistry } from '../relationships';
 import type { SemanticAuxiliaryFile, SemanticProjectAnalyzer, SemanticProjectEvidence, SemanticSourceFile } from '../semantic';
+import { defaultSemanticLanguageRegistry } from '../semantic/descriptor';
 import type { LanguageAnalysisPort } from '../language-analysis';
 import type { RelationshipRecord } from '../symbols/contracts';
 
@@ -502,18 +503,11 @@ export class IndexGenerationWorkflow {
             const auxiliaryFiles: SemanticAuxiliaryFile[] = [];
 
             for (const src of semanticSources) {
-                const basename = path.basename(src.path).toLowerCase();
-                if (basename === 'go.mod') {
+                const auxMatch = defaultSemanticLanguageRegistry.matchAuxiliaryRole(src.path);
+                if (auxMatch) {
                     auxiliaryFiles.push({
                         path: src.path,
-                        role: 'go_mod',
-                        source: src.source,
-                        sourceHash: src.sourceHash,
-                    });
-                } else if (basename === 'go.work') {
-                    auxiliaryFiles.push({
-                        path: src.path,
-                        role: 'go_work',
+                        role: auxMatch.role,
                         source: src.source,
                         sourceHash: src.sourceHash,
                     });

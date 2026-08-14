@@ -179,6 +179,10 @@ func TestService(t *testing.T) {
     const records = buildRelationshipsForRegistry({
         registry,
         analysisByFile,
+        mode: {
+            kind: 'qualification',
+            enabledUnpromotedCallLanguages: new Set(['go']),
+        },
         semanticEvidenceByLanguage: new Map([['go', evidence]]),
     });
 
@@ -198,10 +202,14 @@ func TestService(t *testing.T) {
     assert.ok(mainHelperCall, 'main -> Helper CALLS edge must exist');
     assert.equal(mainHelperCall.resolutionAuthority, 'direct_binding');
 
-    // Verify TestService -> Execute (TESTS edge)
-    const testExec = records.find(
-        (r) => r.sourceKey === 'service_test.go#TestService' && r.targetKey === 'main.go#Execute' && r.type === 'TESTS',
+    // Verify TestService -> Execute (CALLS edge)
+    const testExecCall = records.find(
+        (r) => r.sourceKey === 'service_test.go#TestService' && r.targetKey === 'main.go#Execute' && r.type === 'CALLS',
     );
-    assert.ok(testExec, 'TestService -> Execute TESTS edge must exist');
-    assert.equal(testExec.resolutionAuthority, 'direct_binding');
+    assert.ok(testExecCall, 'TestService -> Execute CALLS edge must exist');
+    assert.equal(testExecCall.resolutionAuthority, 'direct_binding');
+
+    // Go semantic engine does NOT produce language-specific TESTS edges at this phase
+    const testTestsEdge = records.find((r) => r.type === 'TESTS');
+    assert.equal(testTestsEdge, undefined, 'Go does not produce language-specific TESTS edges at this phase');
 });
