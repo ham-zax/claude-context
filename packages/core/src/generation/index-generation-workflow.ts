@@ -3705,11 +3705,15 @@ export class IndexGenerationWorkflow {
         preparedObservedTotalChunks?: number | null,
     ): Promise<void> {
         const canonicalRoot = this.ports.canonicalizeCodebasePath(codebasePath);
+        const semanticRegistry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
+        const searchablePreparedFileHashes = new Map(
+            [...preparedFileHashes.entries()].filter(([filePath]) => !semanticRegistry.isAuxiliaryPath(filePath)),
+        );
         if (navigationCandidate) {
-            const preparedFiles = [...preparedFileHashes].map(([filePath, hash]) => ({ path: filePath, hash }));
+            const preparedFiles = [...searchablePreparedFileHashes].map(([filePath, hash]) => ({ path: filePath, hash }));
             if (
                 navigationCandidate.normalizedRootPath !== canonicalRoot
-                || navigationCandidate.sourceFileCount !== preparedFileHashes.size
+                || navigationCandidate.sourceFileCount !== searchablePreparedFileHashes.size
                 || navigationCandidate.sourceFilesDigest !== computeNavigationSourceFilesDigest(preparedFiles)
             ) {
                 throw new Error(
@@ -3749,12 +3753,12 @@ export class IndexGenerationWorkflow {
             const manifestHashes = new Map(
                 registryState.registry.manifest.files.map((file) => [file.path, file.hash]),
             );
-            if (manifestHashes.size !== preparedFileHashes.size) {
+            if (manifestHashes.size !== searchablePreparedFileHashes.size) {
                 throw new Error(
                     `Cannot publish incremental completion proof: synchronizer tracks ${preparedFileHashes.size} files but navigation seals ${manifestHashes.size}.`,
                 );
             }
-            for (const [relativePath, expectedHash] of preparedFileHashes) {
+            for (const [relativePath, expectedHash] of searchablePreparedFileHashes) {
                 if (manifestHashes.get(relativePath) !== expectedHash) {
                     throw new Error(
                         `Cannot publish incremental completion proof: source hash for '${relativePath}' does not match the prepared synchronizer checkpoint.`,

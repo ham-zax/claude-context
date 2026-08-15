@@ -1712,6 +1712,39 @@ test('Context.reindexByChange activates one immutable vector, navigation, graph,
     }
 });
 
+test('Context.reindexByChange publishes a delta when the synchronizer checkpoint tracks semantic auxiliary files', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-atomic-aux-delta-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'runtime.ts');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(sourcePath, 'export const runtime = 1;\n', 'utf8');
+        fs.writeFileSync(path.join(codebasePath, 'go.mod'), 'module example.com/fixture\n\ngo 1.21\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        const previous = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(previous);
+
+        fs.writeFileSync(sourcePath, 'export const runtime = 2;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+
+        const current = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(current);
+        assert.notEqual(current.collectionName, previous!.collectionName);
+        assert.ok(await context.revalidateProvenGeneration(codebasePath, current));
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context.reindexByChange publishes one complete generation after deleting a source file', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-atomic-delete-'));
     const stateRoot = path.join(tempRoot, 'state');
