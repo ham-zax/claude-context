@@ -1428,6 +1428,10 @@ export class IndexGenerationWorkflow {
                 throw new Error('Atomic delta publication did not prepare reusable navigation state.');
             }
             const preparedNavigationState = preparedNavigationResult.state;
+            const semanticRegistry = this.ports.semanticLanguageRegistry ?? defaultSemanticLanguageRegistry;
+            const searchablePreparedFileHashes = new Map(
+                [...input.preparedChanges.fileHashes.entries()].filter(([filePath]) => !semanticRegistry.isAuxiliaryPath(filePath)),
+            );
             const activationResult = await measurePublicationPhase(
                 'publication_activation',
                 async () => {
@@ -1441,7 +1445,7 @@ export class IndexGenerationWorkflow {
                     );
                     const publishedMarker = await this.ports.writeCompletedIndexMarker(
                         input.codebasePath,
-                        input.preparedChanges.fileHashes.size,
+                        searchablePreparedFileHashes.size,
                         totalChunks,
                         candidateCollectionName,
                         'completed',
@@ -1613,7 +1617,7 @@ export class IndexGenerationWorkflow {
                 modified: modified.length,
                 changedFiles,
                 collectionName: candidateCollectionName,
-                indexedFiles: input.preparedChanges.fileHashes.size,
+                indexedFiles: searchablePreparedFileHashes.size,
                 totalChunks,
                 indexStatus: 'completed',
                 generationReceipt,
@@ -2016,7 +2020,7 @@ export class IndexGenerationWorkflow {
                     throw new Error(`Incremental payload accounting produced an invalid chunk count for '${codebasePath}'.`);
                 }
                 preparedMarkerStats = {
-                    indexedFiles: preparedChanges.fileHashes.size,
+                    indexedFiles: [...preparedChanges.fileHashes.entries()].filter(([filePath]) => !semanticRegistry.isAuxiliaryPath(filePath)).length,
                     totalChunks: expectedTotalChunks,
                 };
             }

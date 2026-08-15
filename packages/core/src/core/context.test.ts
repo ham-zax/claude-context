@@ -1745,6 +1745,40 @@ test('Context.reindexByChange publishes a delta when the synchronizer checkpoint
     }
 });
 
+test('Context.reindexByChange keeps completion-marker indexedFiles stable across generations when the checkpoint tracks auxiliary files', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-aux-marker-stability-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'runtime.ts');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(sourcePath, 'export const runtime = 1;\n', 'utf8');
+        fs.writeFileSync(path.join(codebasePath, 'go.mod'), 'module example.com/fixture\n\ngo 1.21\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        const created = await context.getIndexCompletionMarker(codebasePath);
+        assert.ok(created);
+        assert.equal(created.indexedFiles, 1, 'full index marker must count only searchable files');
+
+        fs.writeFileSync(sourcePath, 'export const runtime = 2;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+
+        const synced = await context.getIndexCompletionMarker(codebasePath);
+        assert.ok(synced);
+        assert.equal(synced.indexedFiles, created!.indexedFiles, 'marker indexedFiles must not change meaning across generations');
+        assert.equal(synced.indexedFiles, 1, 'sync marker must count only searchable files');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context.reindexByChange publishes one complete generation after deleting a source file', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-atomic-delete-'));
     const stateRoot = path.join(tempRoot, 'state');
