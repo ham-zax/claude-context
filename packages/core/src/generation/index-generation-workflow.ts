@@ -3712,31 +3712,6 @@ export class IndexGenerationWorkflow {
                 || navigationCandidate.sourceFileCount !== preparedFileHashes.size
                 || navigationCandidate.sourceFilesDigest !== computeNavigationSourceFilesDigest(preparedFiles)
             ) {
-                if (process.env.SATORI_TASK7_DEBUG === '1') {
-                    const recent = [...preparedFileHashes.entries()]
-                        .map(([filePath, hash]) => {
-                            let mtime = '';
-                            try {
-                                mtime = new Date(fs.statSync(filePath).mtimeMs).toISOString();
-                            } catch {
-                                mtime = 'unreadable';
-                            }
-                            return { filePath, hash, mtime };
-                        })
-                        .sort((left, right) => right.mtime.localeCompare(left.mtime))
-                        .slice(0, 5);
-                    console.error(
-                        '[TASK7-DEBUG][sync-publish-check] '
-                        + JSON.stringify({
-                            root: canonicalRoot,
-                            stagedSourceFileCount: navigationCandidate.sourceFileCount,
-                            preparedFileCount: preparedFileHashes.size,
-                            stagedDigest: navigationCandidate.sourceFilesDigest,
-                            preparedDigest: computeNavigationSourceFilesDigest(preparedFiles),
-                            recentPreparedEntries: recent,
-                        }),
-                    );
-                }
                 throw new Error(
                     'Cannot publish incremental completion proof: staged navigation does not match the prepared synchronizer checkpoint.',
                 );
