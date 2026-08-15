@@ -293,9 +293,12 @@ async function main(): Promise<void> {
         console.log(`Publication N: ${publicationN.collectionName} / ${publicationN.markerRunId}`);
 
         console.log('\n[2/5] Creating one real tracked Go-source delta...');
-        const marker = `\n// satori-task7-mvcc-${qualifiedHead.slice(0, 12)}-${Date.now()}\n`;
+        const markerTs = Date.now();
+        const mutationIdentifier = `satoriTask7Mvcc_${qualifiedHead.slice(0, 12)}_${markerTs}`;
+        const relativeMutationPath = path.relative(TARGET_REPO, mutationPath);
+        const marker = `\n// satori-task7-mvcc-${qualifiedHead.slice(0, 12)}-${markerTs}\nvar ${mutationIdentifier} = true\n`;
         fs.writeFileSync(mutationPath, Buffer.concat([originalBytes, Buffer.from(marker, 'utf8')]));
-        console.log(`Mutated tracked source: ${path.relative(TARGET_REPO, mutationPath)}`);
+        console.log(`Mutated tracked source: ${relativeMutationPath} (mutation identifier: ${mutationIdentifier})`);
 
         console.log('[3/5] Starting real sync and requiring observation of its writing phase...');
         const syncRequest = session.callTool('manage_index', {
@@ -369,6 +372,13 @@ async function main(): Promise<void> {
                 );
             }
             const resultCount = Array.isArray(result.response.results) ? result.response.results.length : 0;
+            if (resultCount === 0) {
+                debug(`Search #${result.index + 1} empty result envelope`, result.response);
+                throw new Error(
+                    `Search #${result.index + 1} returned zero results while serving publication N; ` 
+                    + 'a stale read must return useful published-generation retrieval.',
+                );
+            }
             console.log(
                 `  Search #${result.index + 1}: ok, ${result.elapsedMs.toFixed(1)}ms, `
                 + `${resultCount} results, served N`,
@@ -407,15 +417,32 @@ async function main(): Promise<void> {
         }
         console.log(`Publication N+1: ${publicationN1.collectionName} / ${publicationN1.markerRunId}`);
 
-        console.log('[5/5] Verifying a post-activation search succeeds while N+1 remains authoritative...');
+        console.log('[5/5] Verifying a post-activation search reads publication N+1...');
         const postSearch = parseFirstText(await session.callTool('search_codebase', {
             path: TARGET_REPO,
-            query: 'detector verification',
+            query: mutationIdentifier,
             limit: 5,
         }));
         debug('Post-activation search response', postSearch);
         if (postSearch.status !== 'ok') {
             throw new Error(`Post-activation search returned status=${String(postSearch.status)}.`);
+        }
+        const postResults = Array.isArray(postSearch.results)
+            ? postSearch.results as Array<{ target?: { file?: string }; preview?: string }>
+            : [];
+        const mutationHits = postResults.filter(
+            (result) => (
+                result?.target?.file === relativeMutationPath
+                && typeof result.preview === 'string'
+                && result.preview.includes(mutationIdentifier)
+            ),
+        );
+        if (mutationHits.length === 0) {
+            debug('Post-activation search did not return the N+1 mutation', postSearch);
+            throw new Error(
+                'Post-activation search did not prove it read publication N+1: '
+                + 'no result contained the unique N+1 mutation identifier.',
+            );
         }
         const postStatus = await readStatus(session);
         debug('Post-activation manage_index status', postStatus);
@@ -432,10 +459,10 @@ async function main(): Promise<void> {
         console.log(`Exact head: ${qualifiedHead}`);
         console.log(' - real tracked source delta forced a non-noop sync');
         console.log(` - exact sync generation ${syncOperation.generation} was observed in writing`);
-        console.log(' - 5/5 parallel searches returned status=ok during writing');
+        console.log(' - 5/5 parallel searches returned status=ok with non-empty results during writing');
         console.log(' - every search identified the same immutable publication N and pending sync');
         console.log(' - the exact sync completed and activated a distinct publication N+1');
-        console.log(' - a post-activation search succeeded with N+1 still authoritative');
+        console.log(' - the post-activation search proved N+1 by returning the unique mutation identifier from the mutated file');
         console.log('='.repeat(80));
     } catch (error) {
         failure = error;
