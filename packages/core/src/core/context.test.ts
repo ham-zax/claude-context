@@ -9778,7 +9778,7 @@ test('Context.reindexByChange clears incomplete navigation when a changed file p
         fs.writeFileSync(authPath, 'export function login() { return false; }\n', 'utf8');
         await assert.rejects(
             () => context.reindexByChange(codebasePath),
-            /synchronizer tracks 2 files but navigation seals 1/,
+            /synchronizer tracks 2 searchable files but navigation seals 1/,
         );
         const nextRegistry = await readSymbolRegistrySidecar({ stateRoot, normalizedRootPath: codebasePath });
 

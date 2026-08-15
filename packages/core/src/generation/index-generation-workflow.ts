@@ -3759,7 +3759,7 @@ export class IndexGenerationWorkflow {
             );
             if (manifestHashes.size !== searchablePreparedFileHashes.size) {
                 throw new Error(
-                    `Cannot publish incremental completion proof: synchronizer tracks ${preparedFileHashes.size} files but navigation seals ${manifestHashes.size}.`,
+                    `Cannot publish incremental completion proof: synchronizer tracks ${searchablePreparedFileHashes.size} searchable files but navigation seals ${manifestHashes.size}.`,
                 );
             }
             for (const [relativePath, expectedHash] of searchablePreparedFileHashes) {
