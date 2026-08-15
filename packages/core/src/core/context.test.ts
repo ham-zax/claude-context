@@ -6829,6 +6829,175 @@ test('Context hybrid search uses the proven collection without a non-gating quer
     }
 });
 
+test('Context serves a bound proven read while the mutable generation reports an active mutation', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-bound-read-active-mutation-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const boundActiveValue = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        let mutationObservation = { generation: 1, mutationActive: false };
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+            mutationGenerationObserver: () => mutationObservation,
+        });
+        await context.indexCodebase(codebasePath);
+        const vectorReceipt = await context.proveVectorGeneration(codebasePath);
+        assert.ok(vectorReceipt);
+
+        const retrievalTargets: string[] = [];
+        const retrieveDense = vectorDatabase.retrieveDense.bind(vectorDatabase);
+        vectorDatabase.retrieveDense = async (collectionName, request) => {
+            retrievalTargets.push(collectionName);
+            return retrieveDense(collectionName, request);
+        };
+        const retrieveLexical = vectorDatabase.retrieveLexical.bind(vectorDatabase);
+        vectorDatabase.retrieveLexical = async (collectionName, request) => {
+            retrievalTargets.push(collectionName);
+            return retrieveLexical(collectionName, request);
+        };
+
+        mutationObservation = { generation: 1, mutationActive: true };
+        const results = await context.semanticSearchInProvenGeneration(vectorReceipt, {
+            codebasePath,
+            query: 'boundActiveValue',
+            topK: 5,
+            retrievalMode: 'hybrid',
+            scorePolicy: { kind: 'topk_only' },
+        });
+        assert.ok(results.length > 0);
+        assert.deepEqual(retrievalTargets, [
+            vectorReceipt.collectionName,
+            vectorReceipt.collectionName,
+        ]);
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context holds a bound proven read on generation N while the current binding switches to N+1', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-bound-read-generation-switch-'));
+    const codebasePath = path.join(tempRoot, 'repo');
+    const sourcePath = path.join(codebasePath, 'runtime.ts');
+    let releaseRead: (() => void) | undefined;
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(sourcePath, 'export const generationNMarker = 1;\n', 'utf8');
+        const vectorDatabase = new ForkingInMemoryLanceVectorDatabase();
+        let markSearchEmbedArrived!: () => void;
+        const searchEmbedArrived = new Promise<void>((resolve) => {
+            markSearchEmbedArrived = resolve;
+        });
+        let releaseSearchEmbed!: () => void;
+        const searchEmbedGate = new Promise<void>((resolve) => {
+            releaseSearchEmbed = resolve;
+        });
+        let gateArmed = false;
+        let gateConsumed = false;
+        class GatedTestEmbedding extends TestEmbedding {
+            async embedQuery(text: string): Promise<EmbeddingVector> {
+                const result = await super.embedQuery(text);
+                if (gateArmed && !gateConsumed) {
+                    gateConsumed = true;
+                    markSearchEmbedArrived();
+                    await searchEmbedGate;
+                }
+                return result;
+            }
+        }
+        const context = new Context({
+            embedding: new GatedTestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: path.join(tempRoot, 'state'),
+            indexPolicyStateRoot: path.join(tempRoot, 'policies'),
+            mutationGenerationObserver: () => ({ generation: 1, mutationActive: false }),
+        });
+        await context.recreateSynchronizerForCodebase(codebasePath);
+        await context.indexCodebase(codebasePath);
+        await publishCurrentAuthorityCheckpoint(context, codebasePath);
+        const receiptN = await context.proveVectorGeneration(codebasePath);
+        assert.ok(receiptN);
+
+        releaseRead = await context.acquirePublicationReadLease(codebasePath);
+
+        const retrievalTargets: string[] = [];
+        const retrieveDense = vectorDatabase.retrieveDense.bind(vectorDatabase);
+        vectorDatabase.retrieveDense = async (collectionName, request) => {
+            retrievalTargets.push(collectionName);
+            return retrieveDense(collectionName, request);
+        };
+        const retrieveLexical = vectorDatabase.retrieveLexical.bind(vectorDatabase);
+        vectorDatabase.retrieveLexical = async (collectionName, request) => {
+            retrievalTargets.push(collectionName);
+            return retrieveLexical(collectionName, request);
+        };
+
+        gateArmed = true;
+        const boundSearch = context.semanticSearchInProvenGeneration(receiptN, {
+            codebasePath,
+            query: 'generationNMarker',
+            topK: 5,
+            retrievalMode: 'hybrid',
+            scorePolicy: { kind: 'topk_only' },
+        });
+        await searchEmbedArrived;
+
+        fs.writeFileSync(sourcePath, 'export const generationNPlusOneMarker = 1;\n', 'utf8');
+        await context.reindexByChange(codebasePath);
+        const activeAfterSwitch = await context.proveIndexedGeneration(codebasePath);
+        assert.ok(activeAfterSwitch);
+        assert.notEqual(activeAfterSwitch.collectionName, receiptN.collectionName);
+        assert.equal(await vectorDatabase.hasCollection(receiptN.collectionName), true);
+
+        releaseSearchEmbed();
+        const results = await boundSearch;
+        assert.ok(results.length > 0);
+        assert.deepEqual(retrievalTargets, [
+            receiptN.collectionName,
+            receiptN.collectionName,
+        ]);
+        assert.ok(results.every((result) => result.content.includes('generationNMarker')));
+    } finally {
+        releaseRead?.();
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
+test('Context unbound hybrid search rejects an active mutable generation', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-unbound-read-active-mutation-'));
+    const stateRoot = path.join(tempRoot, 'state');
+    const codebasePath = path.join(tempRoot, 'repo');
+    try {
+        fs.mkdirSync(codebasePath, { recursive: true });
+        fs.writeFileSync(path.join(codebasePath, 'runtime.ts'), 'export const unboundActiveValue = 1;\n', 'utf8');
+        const vectorDatabase = new InMemoryLanceVectorDatabase();
+        const context = new Context({
+            embedding: new TestEmbedding(),
+            vectorDatabase,
+            symbolRegistryStateRoot: stateRoot,
+            indexPolicyStateRoot: path.join(stateRoot, 'policies'),
+            mutationGenerationObserver: () => ({ generation: 1, mutationActive: true }),
+        });
+        await context.indexCodebase(codebasePath);
+        await assert.rejects(
+            context.semanticSearch({
+                codebasePath,
+                query: 'unboundActiveValue',
+                topK: 5,
+                retrievalMode: 'hybrid',
+                scorePolicy: { kind: 'topk_only' },
+            }),
+            /Index generation changed during hybrid retrieval/,
+        );
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+});
+
 test('Context rejects malformed filters before embedding or retrieval', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-filter-boundary-'));
     const stateRoot = path.join(tempRoot, 'state');
@@ -7129,7 +7298,7 @@ test('Context diagnostic-only retrieval failures preserve dense, lexical, and hy
     }
 });
 
-test('Context rejects hybrid candidates when the proven generation changes between arms', async () => {
+test('Context serves a bound proven read when the generation changes between hybrid arms', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-hybrid-generation-race-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -7164,16 +7333,14 @@ test('Context rejects hybrid candidates when the proven generation changes betwe
             return retrieveLexical(collectionName, request);
         };
 
-        await assert.rejects(
-            context.semanticSearchInProvenGeneration(vectorReceipt!, {
-                codebasePath,
-                query: 'changingValue',
-                topK: 5,
-                retrievalMode: 'hybrid',
-                scorePolicy: { kind: 'topk_only' },
-            }),
-            /Index generation changed during hybrid retrieval/,
-        );
+        const results = await context.semanticSearchInProvenGeneration(vectorReceipt!, {
+            codebasePath,
+            query: 'changingValue',
+            topK: 5,
+            retrievalMode: 'hybrid',
+            scorePolicy: { kind: 'topk_only' },
+        });
+        assert.ok(results.length > 0);
         assert.equal(vectorDatabase.searchCalls > 0, true);
         assert.equal(vectorDatabase.sparseSearchCalls > 0, true);
     } finally {
@@ -7181,7 +7348,7 @@ test('Context rejects hybrid candidates when the proven generation changes betwe
     }
 });
 
-test('Context rejects dense candidates when generation authority is withdrawn during retrieval', async () => {
+test('Context serves a bound dense proven read when generation authority is withdrawn during retrieval', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-dense-generation-race-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -7206,23 +7373,21 @@ test('Context rejects dense candidates when generation authority is withdrawn du
             return results;
         };
 
-        await assert.rejects(
-            context.semanticSearchInProvenGeneration(vectorReceipt, {
+        const results = await context.semanticSearchInProvenGeneration(vectorReceipt, {
                 codebasePath,
                 query: 'changingValue',
                 topK: 5,
                 retrievalMode: 'dense',
                 scorePolicy: { kind: 'topk_only' },
-            }),
-            /Index generation changed during dense retrieval/,
-        );
+            });
+        assert.ok(results.length > 0);
         assert.equal(vectorDatabase.searchCalls, 1);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
 
-test('Context rejects lexical candidates when generation authority is withdrawn during retrieval', async () => {
+test('Context serves a bound lexical proven read when generation authority is withdrawn during retrieval', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-lexical-generation-race-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -7247,23 +7412,21 @@ test('Context rejects lexical candidates when generation authority is withdrawn 
             return results;
         };
 
-        await assert.rejects(
-            context.semanticSearchInProvenGeneration(vectorReceipt, {
+        const results = await context.semanticSearchInProvenGeneration(vectorReceipt, {
                 codebasePath,
                 query: 'changingValue',
                 topK: 5,
                 retrievalMode: 'lexical',
                 scorePolicy: { kind: 'topk_only' },
-            }),
-            /Index generation changed during lexical retrieval/,
-        );
+            });
+        assert.ok(results.length > 0);
         assert.equal(vectorDatabase.sparseSearchCalls, 1);
     } finally {
         fs.rmSync(tempRoot, { recursive: true, force: true });
     }
 });
 
-test('Context rejects hybrid candidates after an ABA mutation restores the original marker', async () => {
+test('Context serves a bound proven read after an ABA mutation restores the original marker', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-context-hybrid-aba-race-'));
     const stateRoot = path.join(tempRoot, 'state');
     const codebasePath = path.join(tempRoot, 'repo');
@@ -7306,12 +7469,6 @@ test('Context rejects hybrid candidates after an ABA mutation restores the origi
         const retrieveDense = vectorDatabase.retrieveDense.bind(vectorDatabase);
         const retrieveLexical = vectorDatabase.retrieveLexical.bind(vectorDatabase);
         vectorDatabase.retrieveDense = async (collectionName, request) => {
-            const results = await retrieveDense(collectionName, request);
-            markDenseComplete();
-            return results;
-        };
-        vectorDatabase.retrieveLexical = async (collectionName, request) => {
-            await denseComplete;
             mutationGeneration++;
             mutationActive = true;
             await vectorDatabase.deleteControl(collectionName, INDEX_COMPLETION_MARKER_DOC_ID);
@@ -7319,6 +7476,12 @@ test('Context rejects hybrid candidates after an ABA mutation restores the origi
                 ...originalPayload,
                 content: `${originalPayload.content}\n// temporary mutation`,
             });
+            const mutatedResults = await retrieveDense(collectionName, request);
+            markDenseComplete();
+            return mutatedResults;
+        };
+        vectorDatabase.retrieveLexical = async (collectionName, request) => {
+            await denseComplete;
             const transitionalResults = await retrieveLexical(collectionName, request);
             collection.set(originalPayload.id, originalPayload);
             await vectorDatabase.insertControl(collectionName, originalMarker);
@@ -7326,16 +7489,14 @@ test('Context rejects hybrid candidates after an ABA mutation restores the origi
             return transitionalResults;
         };
 
-        await assert.rejects(
-            context.semanticSearchInProvenGeneration(vectorReceipt, {
+        const results = await context.semanticSearchInProvenGeneration(vectorReceipt, {
                 codebasePath,
                 query: 'restoredValue',
                 topK: 5,
                 retrievalMode: 'hybrid',
                 scorePolicy: { kind: 'topk_only' },
-            }),
-            /Index generation changed during hybrid retrieval/,
-        );
+            });
+        assert.ok(results.length > 0);
         assert.equal(mutationActive, false);
         assert.deepEqual(
             await vectorDatabase.getControl(
