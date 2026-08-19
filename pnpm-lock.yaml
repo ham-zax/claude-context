@@ -28,6 +28,9 @@ importers:
       assert:
         specifier: ^2.1.0
         version: 2.1.0
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       browserify-zlib:
         specifier: ^0.2.0
         version: 0.2.0

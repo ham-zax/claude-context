@@ -54,6 +54,7 @@
     "@typescript-eslint/eslint-plugin": "^8.63.0",
     "@typescript-eslint/parser": "^8.63.0",
     "assert": "^2.1.0",
+    "ajv": "^8.20.0",
     "browserify-zlib": "^0.2.0",
     "eslint": "^9.28.0",
     "https-browserify": "^1.0.0",
