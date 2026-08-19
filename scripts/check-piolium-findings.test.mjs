@@ -15,7 +15,32 @@ import {
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const ANCESTOR_SHA = '94a3dc659d3edce892f6f7f859a6c70597343751';
-const NON_ANCESTOR_SHA = '39acf868ceca54af3f10ec6a5d7d0fbb3fdb8d42';
+
+function createDivergedHistoryRepo() {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-findings-git-'));
+  const git = (...args) => execFileSync('git', args, {
+    cwd: repoRoot,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Satori Test',
+      GIT_AUTHOR_EMAIL: 'satori-test@example.invalid',
+      GIT_COMMITTER_NAME: 'Satori Test',
+      GIT_COMMITTER_EMAIL: 'satori-test@example.invalid',
+    },
+  });
+
+  git('init', '-q');
+  git('commit', '--allow-empty', '-m', 'base');
+  const ancestorSha = resolveCommit('HEAD', repoRoot);
+  git('checkout', '-q', '-b', 'side');
+  git('commit', '--allow-empty', '-m', 'side');
+  const nonAncestorSha = resolveCommit('HEAD', repoRoot);
+  git('checkout', '-q', '--detach', ancestorSha);
+  git('commit', '--allow-empty', '-m', 'head');
+
+  return { repoRoot, ancestorSha, nonAncestorSha };
+}
 
 function createFindingWorkspace(files) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-findings-'));
@@ -65,9 +90,14 @@ test('parseCheckArgs resolves defaults and overrides', () => {
 });
 
 test('resolveCommit and isAncestor use real repository history', () => {
-  assert.equal(resolveCommit('HEAD', REPO_ROOT).length, 40);
-  assert.equal(isAncestor(ANCESTOR_SHA, 'HEAD', REPO_ROOT), true);
-  assert.equal(isAncestor(NON_ANCESTOR_SHA, 'HEAD', REPO_ROOT), false);
+  const history = createDivergedHistoryRepo();
+  try {
+    assert.equal(resolveCommit('HEAD', history.repoRoot).length, 40);
+    assert.equal(isAncestor(history.ancestorSha, 'HEAD', history.repoRoot), true);
+    assert.equal(isAncestor(history.nonAncestorSha, 'HEAD', history.repoRoot), false);
+  } finally {
+    fs.rmSync(history.repoRoot, { recursive: true, force: true });
+  }
 });
 
 test('valid open finding passes', () => {
@@ -146,17 +176,23 @@ test('fixed finding without fix_verified_at fails', () => {
 });
 
 test('historical verified_at not ancestral to HEAD fails', () => {
+  const history = createDivergedHistoryRepo();
   const root = createFindingWorkspace({
     'W9/draft.md': draft(
       ['id: W9', 'slug: fixture-historical', 'status: open', 'poc_kind: theoretical',
-       'introduced_at: "94a3dc659d3edce892f6f7f859a6c70597343751"',
-       'verified_at: "39acf868ceca54af3f10ec6a5d7d0fbb3fdb8d42"',
+       `introduced_at: "${history.ancestorSha}"`,
+       `verified_at: "${history.nonAncestorSha}"`,
        'fixed_in: ""', 'fix_verified_at: ""'].join('\n'),
     ),
   });
-  const result = checkFindings({ head: 'HEAD', root, repoRoot: REPO_ROOT });
-  assert.equal(result.errors.length, 1);
-  assert.match(result.errors[0], /historical|unverified|not an ancestor/);
+  try {
+    const result = checkFindings({ head: 'HEAD', root, repoRoot: history.repoRoot });
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /historical|unverified|not an ancestor/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(history.repoRoot, { recursive: true, force: true });
+  }
 });
 
 test('unknown status value fails', () => {
