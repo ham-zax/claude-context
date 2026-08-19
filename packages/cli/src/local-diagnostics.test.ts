@@ -230,6 +230,7 @@ test("recordLocalDiagnosticEvent refuses a symlinked diagnostics file", () => {
     const targetPath = path.join(tempDir, "target.txt");
     try {
         fs.writeFileSync(targetPath, "PRIVATE_PATH=/secret/repo\n", { mode: 0o644 });
+        const targetModeBefore = fs.statSync(targetPath).mode & 0o777;
         fs.symlinkSync(targetPath, diagnosticsPath);
 
         recordLocalDiagnosticEvent(diagnosticsPath, {
@@ -241,7 +242,7 @@ test("recordLocalDiagnosticEvent refuses a symlinked diagnostics file", () => {
         }, { lockTimeoutMs: 0 });
 
         assert.equal(fs.readFileSync(targetPath, "utf8"), "PRIVATE_PATH=/secret/repo\n");
-        assert.equal(fs.statSync(targetPath).mode & 0o777, 0o644);
+        assert.equal(fs.statSync(targetPath).mode & 0o777, targetModeBefore);
         assert.equal(fs.lstatSync(diagnosticsPath).isSymbolicLink(), true);
         assert.equal(readLocalDiagnosticsSummary(diagnosticsPath).eventsRead, 0);
         assert.equal(fs.readFileSync(targetPath, "utf8"), "PRIVATE_PATH=/secret/repo\n");
