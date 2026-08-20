@@ -573,8 +573,8 @@ A stale read is not "a currently revalidated receipt for an older marker." It is
 6. finalize vector collection
 7. perform the one backend-specific activation check that is actually needed
 8. revalidate mutation lease and source/policy observation once
-9. fsync local generation state
-10. atomically replace current.json with publicationId while the same Core-owned lease is current
+9. fsync the complete local candidate generation and required containing directories
+10. write/fsync a temporary current pointer, atomically rename it to current.json, then fsync the pointer's parent directory while the same Core-owned lease is current
 11. publish runtime notification / release writer lease
 12. GC old unpinned publications asynchronously
 ```
@@ -584,24 +584,28 @@ No component receives a generic cross-layer `publishMutation(callback)`. The Cor
 ### Read lifecycle
 
 ```text
-1. resolve current publicationId
-2. verify the publication's captured selection-policy signature is still admissible
-3. acquire read lease for that publicationId
-4. load/cache immutable Publication by publicationId
-5. execute vector/navigation read only against its resources
+1. atomically resolve + pin the current publication through PublicationStore.acquireCurrentRead(root)
+2. receive one immutable PublicationLease containing the exact publicationId/resources retained for this request
+3. verify the pinned publication's captured selection-policy signature is still admissible
+4. load/cache immutable Publication state by the pinned publicationId
+5. execute vector/navigation read only against the pinned publication's resources
 6. where current fail-closed policy semantics require it, revalidate the selection-policy admission token before returning results
-7. release lease
+7. release the PublicationLease
 ```
 
 Working-tree source freshness may decide whether to schedule sync or annotate freshness, but it must not mutate the identity of a pinned publication. Selection-policy freshness is stricter: a read must be admitted only when the publication's captured selection policy still matches the currently accepted selection policy, or when an equivalent current exclusion gate is applied before any result can escape.
 
+`acquireCurrentRead(root)` is a required atomic retention primitive, not shorthand for `getCurrent(root)` followed later by `acquireRead(publicationId)`. Current-publication resolution and retention pinning must be serialized with activation/GC so there is no window in which N can be selected, N+1 activated, and N deleted before the reader establishes its lease. `getCurrent()` may still exist for diagnostics/status, but normal GC-sensitive reads must not compose the two steps themselves.
+
 ### Crash semantics
 
 - Crash before current pointer swap: current publication is unchanged. Candidate resources are orphaned and may be garbage-collected.
-- Crash during pointer write: atomic temp-write/fsync/rename means readers see old or new complete pointer, never a multi-file half-publication.
+- Crash during pointer write: activation uses `write temp -> fsync(temp) -> rename(temp, current.json) -> fsync(parent directory)`, so readers see old or new complete pointer, never a multi-file half-publication, and the rename is durably recorded.
 - Crash after pointer swap: pointer references a fully staged immutable generation.
 - No policy/navigation two-file rollback transaction is required.
 - If explicit operator rollback is ever needed, it is an atomic pointer move to an existing retained publication, not a journal that reconstructs several mutable authority files.
+
+The candidate generation must be durably complete before its ID can become reachable from `current.json`. `PublicationStore.activate()` therefore owns the ordering: finish/fsync required publication-local metadata and directories first, then perform the pointer temp-write/fsync/rename/parent-directory-fsync sequence. A successfully returned activation means both the referenced generation and the current pointer are crash-durable according to that contract.
 
 ## Verification model: one check per real boundary
 
@@ -765,16 +769,17 @@ Avoid immediately creating a directory full of publication abstractions. Start w
 
 **Interfaces:**
 - Consumes: canonical root and state root.
-- Produces: current-format `Publication`, `PublicationId`, `PublicationRef`, `PublicationLease`, `getCurrent()`, `getById()`, `activate()`, `clearCurrent()`, lease/GC eligibility operations, and the one Core-owned root mutation operation used by all mutation paths.
+- Produces: current-format `Publication`, `PublicationId`, `PublicationRef`, `PublicationLease`, `getCurrent()`, `getById()`, atomic `acquireCurrentRead()`, `activate()`, `clearCurrent()`, lease/GC eligibility operations, and the one Core-owned root mutation operation used by all mutation paths.
 
 **Steps:**
 - [ ] Define one current-only `Publication` descriptor with no legacy union.
 - [ ] Move the existing mutation-lease semantics from MCP into Core rather than creating a second writer lock. Migrate create/reindex/sync/clear to that one owner; Task 0 has already removed repair.
 - [ ] Ensure direct Core mutation entry points cannot bypass the writer fence. Current non-MCP callers such as `scripts/trufflehog-experiment.ts` demonstrate why publication safety cannot remain MCP-owned.
 - [ ] Use one generation directory per publication and one `current.json` pointer per root.
-- [ ] Implement candidate descriptor write/fsync before activation.
-- [ ] Implement current pointer replacement through temp write + fsync + atomic rename.
+- [ ] Implement candidate descriptor/resource durability before activation; no publication ID may become reachable from `current.json` until every required publication-local file/directory is durably complete.
+- [ ] Implement current pointer replacement as `write temp -> fsync(temp) -> atomic rename -> fsync(parent directory)`, matching the durability discipline already used by the current policy/restore code.
 - [ ] Put read-lease ownership in the same publication owner initially; key leases by publication ID.
+- [ ] Make `PublicationStore.acquireCurrentRead(root)` atomically resolve the current publication and establish its retention lease with respect to activation/GC. Do not implement normal reads as `getCurrent()` followed by a later `acquireRead(id)`.
 - [ ] Make `PublicationStore.activate()` perform the pointer replacement while the Core-owned mutation operation is current. Do not pass an MCP publication callback into Core.
 - [ ] Do not add a compatibility reader for completion markers, policy v3/v4/v5, navigation current pointers, or existing synchronizer authority.
 - [ ] Keep old code live only until first-party callers are migrated in subsequent tasks; do not add adapter code from old formats into Publication.
@@ -784,6 +789,9 @@ Avoid immediately creating a directory full of publication abstractions. Start w
 - Direct Core mutations and MCP-driven mutations share one Core-owned writer-fence owner.
 - Publication N remains addressable by ID after N+1 becomes current.
 - A candidate that never reaches `activate()` cannot become readable authority.
+- `acquireCurrentRead(root)` cannot return a publication that GC can delete before the returned lease is established.
+- A successful `activate()` has fsynced both the newly referenced publication state and the parent directory containing the atomically replaced current pointer.
+- Destructive GC is disabled or conservative when the supported single publication-runtime ownership boundary for the state root cannot be established.
 - The new owner has no dependency on MCP.
 
 ### Task 2: Make Core own full candidate construction end to end
@@ -919,7 +927,7 @@ Avoid immediately creating a directory full of publication abstractions. Start w
 - [ ] Remove full-index/sync call-graph rebuild hooks and previous `callGraphSidecar` preservation.
 - [ ] Remove `CallGraphSidecarInfo` from MCP config/snapshot/status state, and remove provider/shared-runtime construction/injection of the manager.
 - [ ] Rename `loadRegistryValidatedCallGraphSidecar()` to relationship/navigation terminology because it now checks canonical relationship evidence, not a v3 call-graph sidecar.
-- [ ] Rename the public traversal response's `sidecar` summary to current graph/traversal terminology; add no compatibility alias for the old field.
+- [ ] Rename the public traversal response's `sidecar` summary to current graph/traversal terminology; add no compatibility alias for the old field. Treat this as an intentional public contract break and record it in the clean-break release notes/API migration notes.
 - [ ] Keep Core `callGraphBuild` language capability and its relationship-builder uses. Do not disable relationship extraction or the `call_graph` tool.
 
 **Acceptance criteria:**
@@ -1001,7 +1009,7 @@ Avoid immediately creating a directory full of publication abstractions. Start w
 - Modify: `packages/mcp/src/core/search-request-coordinator.ts`
 
 **Interfaces:**
-- Consumes: `PublicationStore.acquireCurrentRead(root)` or `acquireRead(publicationId)`.
+- Consumes: `PublicationStore.acquireCurrentRead(root)` for normal current-publication reads. `acquireRead(publicationId)` is only for a publication ID that is already explicitly pinned/retained by a higher-level continuation or equivalent publication-bound context; it must not be used as `getCurrent(root)` followed by a later lease acquisition.
 - Produces: a request-bound immutable publication lease and simple readiness/freshness metadata.
 
 **Steps:**
@@ -1016,6 +1024,7 @@ Avoid immediately creating a directory full of publication abstractions. Start w
 
 **Acceptance criteria:**
 - One request holds one publication ID from start to finish.
+- Every ordinary read that begins from a root obtains that ID and its retention lease through one atomic `acquireCurrentRead(root)` call.
 - Activation during a request does not make that request's publication lease stale.
 - No read performs exact payload recount, marker comparison, policy-document digest comparison, or navigation seal re-proof merely to use an already-pinned immutable publication.
 
@@ -1053,12 +1062,14 @@ Avoid immediately creating a directory full of publication abstractions. Start w
 - [ ] Read navigation/call-graph capability metadata from the actual current Publication navigation state; remove snapshot copies of call-graph sidecar metadata.
 - [ ] On restart, enumerate current Publications to restore watchers/tracked roots. An orphan candidate is handled by PublicationStore GC; there is no stale `indexing` row to repair or promote.
 - [ ] Accept that completed/failed operation history is not durable across restart. Do not add a replacement status-log file in this refactor.
+- [ ] Treat the loss of persisted post-restart operation receipts as an intentional public behavior change: today `manage_index status` advertises that it can return the latest persisted operation after restart. Update the public tool description/release notes so the new process-lifetime operation semantics are explicit rather than an accidental regression.
 
 **Acceptance criteria:**
 - No MCP code reads or writes the old codebase snapshot file.
 - Indexed/searchable/tracked-root truth after restart is derived from PublicationStore.
 - Active progress is live mutation state, not a cross-process merged snapshot record.
 - Snapshot V1/V2/V3 migration, lock, merge, tombstone, quarantine, and interrupted-promotion code is gone.
+- Public `manage_index status` documentation no longer claims persisted operation history survives process restart.
 
 ### Task 9: Collapse pass-through ports and intentionally shrink the Core surface
 
@@ -1156,13 +1167,16 @@ This plan simplifies *how* correctness is established; it does not weaken the ob
 The final implementation must continue to prove these product-level facts:
 
 1. a healthy published generation remains readable while a new generation builds;
-2. one search request reads exactly one immutable publication;
-3. five parallel stale reads can use the same prior publication during an active sync;
-4. activation makes a distinct new publication current for new requests;
-5. a reader already pinned to the old publication survives activation;
-6. the old publication is not physically removed until its readers release it;
-7. stale reads do not mix working-tree/current-source evidence with the pinned publication;
-8. after activation, a query for uniquely changed source proves the new publication is actually being searched.
+2. `acquireCurrentRead(root)` atomically resolves and pins one immutable publication, including the race where activation/retention starts concurrently;
+3. one search request reads exactly one immutable publication;
+4. five parallel stale reads can use the same prior publication during an active sync;
+5. activation makes a distinct new publication current for new requests;
+6. a reader already pinned to the old publication survives activation;
+7. the old publication is not physically removed until its readers release it;
+8. destructive GC refuses or conservatively retains old publications when the supported single-publication-runtime ownership boundary cannot be established;
+9. stale reads do not mix working-tree/current-source evidence with the pinned publication;
+10. activation durability proves the candidate is complete before reachability and the current-pointer rename is followed by parent-directory fsync;
+11. after activation, a query for uniquely changed source proves the new publication is actually being searched.
 
 Do not recreate the old internal proof tests merely because their symbols disappear. Reuse or adapt product/integration oracles to the new Publication contract. Internal tests that only assert legacy schemas, giant receipt shapes, pairwise hash equality, or compatibility façades should be deleted with those contracts.
 
@@ -1188,6 +1202,11 @@ Remove/reinitialize the local Satori state and perform a fresh index.
 Do not add code that translates old completion markers, policy documents, synchronizer snapshots, navigation pointers, proof receipts, or MCP snapshots into the new Publication model.
 
 If package consumers outside this repository depend on internal exports removed here, that is an intentional breaking API change and should be released accordingly; do not restore adapters inside the architecture to avoid a major-version break.
+
+Also call out these user-visible contract changes explicitly in the breaking release notes:
+
+- `manage_index status` no longer promises a durable completed/failed operation receipt after process restart; live operation state comes from the current Core mutation owner.
+- `call_graph` no longer exposes the legacy `sidecar`-named traversal summary after the v3 sidecar is deleted; the replacement field uses relationship/navigation/graph terminology with no compatibility alias.
 
 ## Execution ordering and stopping rules
 
@@ -1228,7 +1247,15 @@ The target deliberately makes the local current-publication pointer the authorit
 
 ### Reader coordination across processes
 
-The current shared-runtime design centralizes root-keyed read/retention state in one host process. Keep per-publication read leases simple under that support model. If the product later permits independent processes to read the same publication while another process performs retention, add an explicit cross-process reader-liveness mechanism before enabling destructive GC; do not pre-build that machinery speculatively.
+The current shared-runtime design centralizes root-keyed read/retention state in one host process, but Core also exposes direct `Context` read/mutation APIs. This plan must therefore define the GC support boundary explicitly rather than assuming every possible reader is represented in one process-local lease map.
+
+For this clean break, prefer the smaller product rule instead of inventing a distributed lease service:
+
+> All readers that participate in destructive publication GC for one Satori state root must be coordinated by the same publication-runtime owner. Independent Core processes concurrently reading that same state root while another process activates/GCs publications are unsupported.
+
+Encode/enforce that support boundary before destructive GC is enabled. If Core cannot establish that the state root has one supported publication-runtime owner, GC must be conservative and retain old publications rather than infer safety from a zero process-local reader count. Direct Core APIs remain usable, but they must not create a configuration in which one process can delete a publication another supported process may still be reading.
+
+If the product later chooses to support independent concurrent Core readers against the same state root, that is the point to add cross-process publication read leases/liveness. Do not pre-build distributed reader coordination in this refactor.
 
 ## Explicit non-goals
 
@@ -1245,11 +1272,14 @@ The current shared-runtime design centralizes root-keyed read/retention state in
 The refactor is complete when all of the following are true:
 
 - `current.json` (or its final equivalent) is the sole durable selector of current index publication.
+- Its activation durability contract is explicit: candidate publication durable first, then pointer temp write/fsync, atomic rename, and parent-directory fsync.
 - A Publication ID is sufficient to locate all vector, source-checkpoint, and navigation resources for that publication.
 - Core owns the single root mutation fence; direct Core mutation and MCP-driven mutation cannot bypass it.
 - Candidate construction never mutates current publication state before the atomic activation point.
 - A read pins one Publication ID and can finish after a newer publication activates.
+- Current-publication resolution and read retention are one atomic `acquireCurrentRead(root)` operation with respect to activation/GC.
 - GC uses publication liveness/read leases, not proof reconstruction, to decide when old resources can be removed.
+- Destructive GC is enabled only inside the explicit supported reader-coordination boundary; a zero local lease count is not sufficient if another supported process could still be reading the state root.
 - Policy/configuration is a captured build input, not an independently mutable publication authority.
 - Selection-policy drift remains fail-closed for read admission when it can change which files are allowed to be disclosed.
 - Source freshness describes divergence from live source; it does not retroactively invalidate immutable publication contents.
@@ -1262,6 +1292,7 @@ The refactor is complete when all of the following are true:
 - Navigation has one persisted representation; the additive SQLite backend, dual-read parity, backend selector, and JSON fallback are gone.
 - The obsolete v3 MCP call-graph sidecar build/storage/manager is gone; relationship-backed navigation is the graph authority.
 - `publishMutation(callback)` is gone from the cross-layer architecture; the Core-owned writer lease protects the mutation and single activation operation directly.
+- `PublicationStore.activate()` makes the candidate durably complete before reachability, then persists the current-pointer transition with temp-file fsync, atomic rename, and parent-directory fsync.
 - Old policy/completion/snapshot compatibility readers and deprecated architecture adapters are gone.
 - The Core public surface contains only intentional product APIs.
 - The stale-while-sync product behavior remains correct end to end on the exact final head.
