@@ -28,7 +28,7 @@ const TOOLS = new Set([
     "call_graph",
     "read_file",
 ]);
-const LIFECYCLE_ACTIONS = new Set(["create", "reindex", "sync", "status", "clear", "repair"]);
+const LIFECYCLE_ACTIONS = new Set(["create", "reindex", "sync", "status", "clear"]);
 const OUTCOMES = new Set([
     "ok",
     "error",
@@ -64,7 +64,7 @@ export type LocalDiagnosticOutcome =
     | "ambiguous"
     | "outside_indexed_root"
     | "unknown";
-export type LocalDiagnosticLifecycleAction = "create" | "reindex" | "sync" | "status" | "clear" | "repair";
+export type LocalDiagnosticLifecycleAction = "create" | "reindex" | "sync" | "status" | "clear";
 
 export interface LocalDiagnosticEvent {
     schemaVersion: typeof SCHEMA_VERSION;
@@ -77,7 +77,6 @@ export interface LocalDiagnosticEvent {
     warningCodes?: string[];
     fallbackUsed?: true;
     lifecycleAction?: LocalDiagnosticLifecycleAction;
-    recoverySuccess?: boolean;
 }
 
 export interface LocalDiagnosticsSummary {
@@ -99,7 +98,6 @@ export interface LocalDiagnosticsSummary {
     warningCodes: Array<{ code: string; count: number }>;
     fallbackUses: number;
     lifecycleOutcomes: Array<{ action: LocalDiagnosticLifecycleAction; outcome: LocalDiagnosticOutcome; count: number }>;
-    recovery: { attempts: number; successes: number };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -300,7 +298,6 @@ export function buildLocalDiagnosticEvent(input: {
         ...(warningCodes.length === 0 ? {} : { warningCodes }),
         ...(hasFallbackEvidence(envelope, warningCodes) ? { fallbackUsed: true as const } : {}),
         ...(lifecycleAction ? { lifecycleAction } : {}),
-        ...(lifecycleAction === "repair" ? { recoverySuccess: outcome === "ok" } : {}),
     };
 }
 
@@ -341,9 +338,6 @@ function parseEvent(value: unknown): LocalDiagnosticEvent | null {
         ...(warningCodes && warningCodes.length > 0 ? { warningCodes } : {}),
         ...(value.fallbackUsed === true ? { fallbackUsed: true as const } : {}),
         ...(lifecycleAction ? { lifecycleAction } : {}),
-        ...(lifecycleAction === "repair" && typeof value.recoverySuccess === "boolean"
-            ? { recoverySuccess: value.recoverySuccess }
-            : {}),
     };
 }
 
@@ -457,8 +451,6 @@ export function readLocalDiagnosticsSummary(diagnosticsPath: string): LocalDiagn
     const warnings = new Map<string, number>();
     const lifecycle = new Map<string, number>();
     let fallbackUses = 0;
-    let recoveryAttempts = 0;
-    let recoverySuccesses = 0;
     for (const event of events) {
         const tool = tools.get(event.tool) || {
             count: 0,
@@ -483,10 +475,6 @@ export function readLocalDiagnosticsSummary(diagnosticsPath: string): LocalDiagn
             const key = `${event.lifecycleAction}\0${event.outcome}`;
             lifecycle.set(key, (lifecycle.get(key) || 0) + 1);
         }
-        if (event.lifecycleAction === "repair") {
-            recoveryAttempts += 1;
-            recoverySuccesses += event.recoverySuccess ? 1 : 0;
-        }
     }
 
     return {
@@ -503,6 +491,5 @@ export function readLocalDiagnosticsSummary(diagnosticsPath: string): LocalDiagn
             const [action, outcome] = key.split("\0") as [LocalDiagnosticLifecycleAction, LocalDiagnosticOutcome];
             return { action, outcome, count };
         }),
-        recovery: { attempts: recoveryAttempts, successes: recoverySuccesses },
     };
 }

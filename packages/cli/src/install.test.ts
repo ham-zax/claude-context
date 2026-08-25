@@ -1931,7 +1931,6 @@ test("managed offline launchers attach independent sessions to one shared runtim
         POTION_MODEL_PATH: path.join(homeDir, "potion-model"),
         POTION_REQUEST_TIMEOUT_MS: "5000",
         MCP_ENABLE_WATCHER: "false",
-        MCP_WATCH_DEBOUNCE_MS: "5000",
     };
     let first: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;
     let second: Awaited<ReturnType<typeof connectCliMcpSession>> | undefined;

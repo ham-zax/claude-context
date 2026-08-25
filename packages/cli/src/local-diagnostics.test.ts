@@ -66,11 +66,11 @@ test("buildLocalDiagnosticEvent limits resultCount to search result envelopes", 
     }
 });
 
-test("buildLocalDiagnosticEvent records lifecycle outcome and repair success without a root", () => {
+test("buildLocalDiagnosticEvent records current lifecycle outcomes without a root", () => {
     const event = buildLocalDiagnosticEvent({
         toolName: "manage_index",
-        args: { action: "repair", path: "/private/worktree" },
-        result: toolResult({ status: "ok", path: "/private/worktree", proof: { marker: "matched" } }),
+        args: { action: "sync", path: "/private/worktree" },
+        result: toolResult({ status: "ok", path: "/private/worktree" }),
         durationMs: 4,
     });
 
@@ -80,8 +80,7 @@ test("buildLocalDiagnosticEvent records lifecycle outcome and repair success wit
         tool: "manage_index",
         durationMs: 4,
         outcome: "ok",
-        lifecycleAction: "repair",
-        recoverySuccess: true,
+        lifecycleAction: "sync",
     });
 });
 
@@ -217,7 +216,6 @@ test("recordLocalDiagnosticEvent caps the local log and readLocalDiagnosticsSumm
             ],
             fallbackUses: 1,
             lifecycleOutcomes: [{ action: "sync", outcome: "ok", count: 1 }],
-            recovery: { attempts: 0, successes: 0 },
         });
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });

@@ -51,7 +51,6 @@ export const SATORI_RUNTIME_ENV_VARS = [
     "MILVUS_TOKEN",
     "READ_FILE_MAX_LINES",
     "MCP_ENABLE_WATCHER",
-    "MCP_WATCH_DEBOUNCE_MS",
 ] as const;
 
 export const LAUNCHER_OWNED_RUNTIME_ENV_VARS = [

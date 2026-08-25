@@ -1012,7 +1012,6 @@ test("runCli doctor defaults to a human summary without starting an MCP session"
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
                 eventsRead: 0, malformedEventsSkipped: 0, totalDurationMs: 0,
                 toolCalls: [], warningCodes: [], fallbackUses: 0, lifecycleOutcomes: [],
-                recovery: { attempts: 0, successes: 0 },
             },
         }),
         connectSession: async () => {
@@ -1053,7 +1052,6 @@ test("runCli doctor renders configured client runtimes instead of one global def
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
                 eventsRead: 0, malformedEventsSkipped: 0, totalDurationMs: 0,
                 toolCalls: [], warningCodes: [], fallbackUses: 0, lifecycleOutcomes: [],
-                recovery: { attempts: 0, successes: 0 },
             },
         }),
     });
@@ -1086,7 +1084,6 @@ test("runCli doctor preserves complete JSON output through both explicit forms",
                     privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
                     eventsRead: 3, malformedEventsSkipped: 0, totalDurationMs: 0,
                     toolCalls: [], warningCodes: [], fallbackUses: 0, lifecycleOutcomes: [],
-                    recovery: { attempts: 0, successes: 0 },
                 },
             }),
         });
@@ -1121,7 +1118,6 @@ test("runCli doctor reports stale MCP clients independently without changing JSO
             privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
             eventsRead: 0, malformedEventsSkipped: 0, totalDurationMs: 0,
             toolCalls: [], warningCodes: [], fallbackUses: 0, lifecycleOutcomes: [],
-            recovery: { attempts: 0, successes: 0 },
         },
     };
     const humanIo = captureIo();
@@ -1221,7 +1217,6 @@ test("runCli doctor text mode hides sensitive diagnostic details", async () => {
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
                 eventsRead: 0, malformedEventsSkipped: 0, totalDurationMs: 0,
                 toolCalls: [], warningCodes: [], fallbackUses: 0, lifecycleOutcomes: [],
-                recovery: { attempts: 0, successes: 0 },
             },
         }),
     });
@@ -1256,7 +1251,6 @@ test("runCli doctor verbose mode includes complete support details", async () =>
                 privacy: "No source, query text, path, symbol name, or repository identifier is stored.",
                 eventsRead: 2, malformedEventsSkipped: 0, totalDurationMs: 3921,
                 toolCalls: [], warningCodes: [], fallbackUses: 0, lifecycleOutcomes: [],
-                recovery: { attempts: 0, successes: 0 },
             },
         }),
     });

@@ -31,7 +31,6 @@ function resultWithActiveRuntime(): DoctorResult {
             warningCodes: [],
             fallbackUses: 0,
             lifecycleOutcomes: [],
-            recovery: { attempts: 0, successes: 0 },
         },
     };
 }

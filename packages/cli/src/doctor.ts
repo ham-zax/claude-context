@@ -1062,7 +1062,7 @@ function inspectLeaseFile(
         || typeof lease.operationId !== "string"
         || lease.operationId.length === 0
         || typeof lease.action !== "string"
-        || !["create", "reindex", "sync", "repair", "clear"].includes(lease.action)
+        || !["create", "reindex", "sync", "clear", "gc"].includes(lease.action)
         || typeof lease.pid !== "number"
         || !Number.isSafeInteger(lease.pid)
         || lease.pid <= 0
