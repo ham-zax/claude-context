@@ -3,15 +3,16 @@
 **Repository:** `/home/hamza/repo/satori`  
 **Source of truth:** `docs/plans/2026-08-20-go-calls-v0-promotion-plan.md`  
 **Implementation base:** `de5c439f77d49d1e88287739cc062eb361edec57`  
-**Execution shape:** parallel Wave 1, then integration/qualification  
-**Current wave:** 1
+**Execution shape:** parallel Wave 1 integrated; qualification/promotion remains sequential
+**Current wave:** Wave 1 complete; Wave 2 blocked on explicit test authorization
 
 ## Current frontier
 
 | Mission | Type | Status | Can start | Workspace | Isolation reason | Blocked by |
 |---|---|---|---|---|---|---|
-| Agent A — Tier-3 direct-call admission boundary | executable | ready | now | `/home/hamza/repo/satori-agent-a-go-calls-v0` | concurrent writer; owns generic semantic/CBM files | none |
-| Agent B — Native Go semantic v2 correctness | executable/config | ready | now | `/home/hamza/repo/satori-agent-b-go-calls-v0` | concurrent writer; owns native engine/assets/version files | none |
+| Agent A — Tier-3 direct-call admission boundary | executable | integrated | complete | `/home/hamza/repo/satori-agent-a-go-calls-v0` | concurrent writer; owned generic semantic/CBM files | none |
+| Agent B — Native Go semantic v2 correctness | executable/config | integrated | complete | `/home/hamza/repo/satori-agent-b-go-calls-v0` | concurrent writer; owned native engine/assets/version files | none |
+| Wave 2 — Direct Go relationship qualification while `symbol_only` | executable/test evidence | blocked | after explicit test authorization | integration checkout | one writer; qualifications touch shared test/evidence surfaces | explicit test authorization |
 
 ## Dependency map
 
@@ -23,7 +24,8 @@ Agent A: generic Tier-3 boundary      Agent B: Go semantic v2
       |                                           |
       +-------------------+-----------------------+
                           |
-                 planner integration review
+              integrated on `integrate/language-spine-cbm-go`
+                 (`2eab4c02`, `d6e227fb`)
                           |
                explicit test authorization
                           |
@@ -59,9 +61,9 @@ Wave 1 has two genuinely concurrent executable writers, so each receives an isol
 
 ## Integration policy
 
-Do not merge either branch merely because its local mission completes. The planner/integration session must inspect both complete diffs together because Agent A defines which semantic strategies may become authoritative while Agent B changes the Go evidence and global relationship compatibility identity.
+Wave 1 was jointly inspected before integration. No overlapping files or Blocker/Major integration finding survived review. Agent A was integrated as `2eab4c02`; Agent B was integrated as `d6e227fb` on `integrate/language-spine-cbm-go`.
 
-The public Go capability remains `symbol_only` in Wave 1. No capability flip, MCP/docs promotion, or release claim is part of these missions.
+The public Go capability remains `symbol_only`. No capability flip, MCP/docs promotion, or release claim is authorized until the qualification wave passes.
 
 ## Execution lifetime policy
 
@@ -69,11 +71,11 @@ Both Wave-1 missions are ordinary bounded implementation sessions. Use normal re
 
 ## Validation policy
 
-No test creation, test modification, or test execution is authorized in Wave 1. Agent B may run `pnpm semantic:build` because regeneration is part of its implementation artifact and may run the non-test `pnpm semantic:verify` check from the source plan. Agent A has no required validation command in this wave beyond direct code/diff inspection unless mandatory repository policy requires one.
+No test creation, test modification, or test execution was authorized in Wave 1. Agent B ran `pnpm semantic:build` and `pnpm semantic:verify`, both passing on its isolated candidate. After integration, the planner ran `pnpm --filter @zokizuan/satori-core typecheck` and `git diff --check f6c59194..HEAD`; both passed. No tests were run.
 
 ## Future / blocked work
 
-- Direct Go relationship qualification while Go remains `symbol_only` — blocked on both Wave-1 candidates and explicit test authorization.
+- Direct Go relationship qualification while Go remains `symbol_only` — Wave-1 implementation prerequisites are integrated; still blocked only on explicit test authorization.
 - Remove the test-only Go contribution wrapper/test — belongs to the authorized qualification wave, not Wave 1.
 - Go capability promotion to `calls_v0` — blocked on qualification evidence.
 - MCP/docs claim update — blocked on capability promotion.
@@ -83,3 +85,6 @@ No test creation, test modification, or test execution is authorized in Wave 1. 
 ## Status log
 
 - `2026-08-25` — Wave 1 materialized from clean implementation base `de5c439f`: two disjoint production candidates, no tests authorized.
+- `2026-08-25` — Agent A report verified: source commit `6a010d30`, integrated as `2eab4c02`; generic Tier-3 admission is direct-call-only and unknown strategies fail closed.
+- `2026-08-25` — Agent B report verified: source commit `d1382df6`, integrated as `d6e227fb`; Go semantic v2/module-package/build-context candidate and generated assets integrated. Agent B semantic build/verify passed.
+- `2026-08-25` — Combined integration review found no Blocker/Major issue. Core typecheck and integrated diff check passed. Go remains `symbol_only`; Wave 2 is blocked on explicit test authorization.
