@@ -27,8 +27,8 @@ type OperationIdentity = {
 };
 
 type PublicationIdentity = {
+    publicationId: string;
     collectionName: string;
-    markerRunId: string;
 };
 
 type StatusTraceEntry = {
@@ -87,14 +87,14 @@ function readPublication(response: JsonRecord): PublicationIdentity | undefined 
     const publication = asRecord(response.publication);
     if (
         !publication
+        || typeof publication.publicationId !== 'string'
+        || publication.publicationId.length === 0
         || typeof publication.collectionName !== 'string'
         || publication.collectionName.length === 0
-        || typeof publication.markerRunId !== 'string'
-        || publication.markerRunId.length === 0
     ) return undefined;
     return {
+        publicationId: publication.publicationId,
         collectionName: publication.collectionName,
-        markerRunId: publication.markerRunId,
     };
 }
 
@@ -290,7 +290,7 @@ async function main(): Promise<void> {
 
         console.log('\n[1/5] Establishing immutable publication N in isolated Satori state...');
         const publicationN = await establishPublicationN(session);
-        console.log(`Publication N: ${publicationN.collectionName} / ${publicationN.markerRunId}`);
+        console.log(`Publication N: ${publicationN.collectionName} / ${publicationN.publicationId}`);
 
         console.log('\n[2/5] Creating one real tracked Go-source delta...');
         const markerTs = Date.now();
@@ -357,7 +357,7 @@ async function main(): Promise<void> {
             }
             if (
                 freshness.servedCollection !== publicationN.collectionName
-                || freshness.servedRunId !== publicationN.markerRunId
+                || freshness.servedPublicationId !== publicationN.publicationId
             ) {
                 throw new Error(
                     `Search #${result.index + 1} was not pinned to publication N: ${JSON.stringify(freshness)}`,
@@ -412,10 +412,10 @@ async function main(): Promise<void> {
         );
         debug('Completed sync status', completed.status);
         const publicationN1 = requirePublication(completed.status, 'Publication N+1');
-        if (publicationN1.markerRunId === publicationN.markerRunId) {
-            throw new Error('Sync completed without activating a distinct publication markerRunId.');
+        if (publicationN1.publicationId === publicationN.publicationId) {
+            throw new Error('Sync completed without activating a distinct Publication ID.');
         }
-        console.log(`Publication N+1: ${publicationN1.collectionName} / ${publicationN1.markerRunId}`);
+        console.log(`Publication N+1: ${publicationN1.collectionName} / ${publicationN1.publicationId}`);
 
         console.log('[5/5] Verifying a post-activation search reads publication N+1...');
         const postSearch = parseFirstText(await session.callTool('search_codebase', {
@@ -449,7 +449,7 @@ async function main(): Promise<void> {
         const postPublication = requirePublication(postStatus, 'Post-activation publication');
         if (
             postPublication.collectionName !== publicationN1.collectionName
-            || postPublication.markerRunId !== publicationN1.markerRunId
+            || postPublication.publicationId !== publicationN1.publicationId
         ) {
             throw new Error('Active publication changed unexpectedly during the post-activation search.');
         }

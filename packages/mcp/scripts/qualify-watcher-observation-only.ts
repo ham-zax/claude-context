@@ -117,7 +117,6 @@ async function main(): Promise<void> {
         POTION_MODEL_PATH: modelPath,
         POTION_REQUEST_TIMEOUT_MS: "5000",
         MCP_ENABLE_WATCHER: "true",
-        MCP_WATCH_DEBOUNCE_MS: "1",
         SATORI_SHARED_RUNTIME_DISABLE: "1",
     });
 
@@ -136,7 +135,7 @@ async function main(): Promise<void> {
         }
         // The provider runtime intentionally runs one background freshness pass
         // five seconds after startup. Let that distinct owner settle before
-        // isolating the former watcher-debounce interval.
+        // observing watcher-only source-event behavior.
         await new Promise((resolve) => setTimeout(resolve, BACKGROUND_STARTUP_SETTLE_MS));
 
         const beforeEdit = parseFirstText(await session.callTool("manage_index", {

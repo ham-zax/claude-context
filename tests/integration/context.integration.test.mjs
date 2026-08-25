@@ -9,10 +9,13 @@ const require = createRequire(import.meta.url);
 const { Context } = require('../../packages/core/dist/context.js');
 const {
   EMBEDDING_NORMALIZATION_POLICY_VERSION,
-  FileSynchronizer,
   RemoteCollectionDeletePendingError,
   deleteCollectionWithVerification
 } = require('../../packages/core/dist/index.js');
+const {
+  RootMutationRuntime,
+  createSharedPublicationRuntime,
+} = require('../../packages/core/dist/integration.js');
 
 class DeterministicEmbedding {
   async detectDimension() {
@@ -82,6 +85,28 @@ class InMemoryVectorDatabase {
     return Array.from(this.collections.keys());
   }
 
+  getPublicationCapabilities() {
+    return { atomicCandidatePublication: 'collection_fork' };
+  }
+
+  async forkCollection(sourceCollectionName, targetCollectionName) {
+    const source = this.collections.get(sourceCollectionName);
+    if (!source) throw new Error(`Collection not found: ${sourceCollectionName}`);
+    if (this.collections.has(targetCollectionName)) {
+      throw new Error(`Collection already exists: ${targetCollectionName}`);
+    }
+    this.collections.set(targetCollectionName, {
+      dimension: source.dimension,
+      docs: new Map(source.docs),
+    });
+    return {
+      sourceCollectionName,
+      targetCollectionName,
+      strategy: 'row_copy',
+      copiedDocuments: source.docs.size,
+    };
+  }
+
   filterDocuments(documents, filter) {
     const matches = (doc, candidate) => {
       if (!candidate) return true;
@@ -106,33 +131,6 @@ class InMemoryVectorDatabase {
 
   async writeDocuments(collectionName, documents) {
     return this.storeDocuments(collectionName, documents);
-  }
-
-  async insertControl(collectionName, record) {
-    return this.storeDocuments(collectionName, [{
-      id: record.id,
-      vector: [],
-      content: '',
-      relativePath: '.__satori__/control.json',
-      startLine: 0,
-      endLine: 0,
-      fileExtension: '.satori_meta',
-      metadata: { ...record.metadata, kind: record.kind },
-    }]);
-  }
-
-  async getControl(collectionName, id) {
-    const document = this.collections.get(collectionName)?.docs.get(id);
-    if (!document) return null;
-    return {
-      id,
-      kind: typeof document.metadata?.kind === 'string' ? document.metadata.kind : '',
-      metadata: { ...document.metadata },
-    };
-  }
-
-  async deleteControl(collectionName, id) {
-    return this.deleteDocuments(collectionName, [id]);
   }
 
   async retrieveDense(collectionName, request) {
@@ -212,35 +210,15 @@ function createContext() {
   const options = arguments[0] || {};
   process.env.HYBRID_MODE = options.hybridMode ? 'true' : 'false';
   const vectorDatabase = options.vectorDatabase || new InMemoryVectorDatabase();
+  const rootMutationRuntime = new RootMutationRuntime();
+  const publicationRuntime = createSharedPublicationRuntime(rootMutationRuntime);
   const context = new Context({
     embedding: new DeterministicEmbedding(),
     vectorDatabase,
+    rootMutationRuntime,
+    publicationRuntime,
   });
   return { context, vectorDatabase };
-}
-
-async function publishCurrentAuthorityCheckpoint(context, codebasePath) {
-  const collectionName = await context.getActiveIndexedCollectionName(codebasePath);
-  const marker = await context.getIndexCompletionMarker(codebasePath);
-  assert.ok(collectionName, 'expected an active collection before publishing its source checkpoint');
-  assert.ok(marker, 'expected a completion marker before publishing its source checkpoint');
-
-  const synchronizer = new FileSynchronizer(
-    codebasePath,
-    context.getActiveIgnorePatterns(codebasePath),
-    context.getIndexedExtensionsForCodebase(codebasePath),
-    {
-      checkpointIdentity: collectionName,
-      checkpointAuthority: {
-        collectionName,
-        markerRunId: marker.runId,
-        indexPolicyHash: marker.indexPolicyHash,
-      },
-    },
-  );
-  await synchronizer.initialize();
-  context.registerSynchronizer(context.resolveCollectionName(codebasePath), synchronizer);
-  return collectionName;
 }
 
 class FailingInsertVectorDatabase extends InMemoryVectorDatabase {
@@ -350,7 +328,6 @@ test('integration: reindex_by_change tracks add/modify/remove deltas', async () 
 
   try {
     await context.indexCodebase(codebasePath);
-    await publishCurrentAuthorityCheckpoint(context, codebasePath);
 
     const baseline = await context.reindexByChange(codebasePath);
     assert.equal(baseline.added, 0);
@@ -446,7 +423,7 @@ test('integration: clearIndex retries timed-out remote drops until verified abse
   }
 });
 
-test('integration: clearIndex rejects successful drop calls that leave collection present', async () => {
+test('integration: clearIndex keeps authority cleared when an acknowledged remote drop leaves residue', async () => {
   const { context } = createContext({
     vectorDatabase: new SuccessfulNoopDropVectorDatabase(),
   });
@@ -460,13 +437,14 @@ test('integration: clearIndex rejects successful drop calls that leave collectio
       () => context.clearIndex(codebasePath),
       /Remote collection deletion did not complete/
     );
-    assert.equal(await context.hasIndexedCollection(codebasePath), true);
+    assert.equal(context.getCurrentPublication(codebasePath), null);
+    assert.equal(await context.hasIndexedCollection(codebasePath), false);
   } finally {
     fs.rmSync(codebasePath, { recursive: true, force: true });
   }
 });
 
-test('integration: clearIndex preserves local state when drop timeout leaves collection present', async () => {
+test('integration: clearIndex keeps authority cleared when remote deletion times out with residue', async () => {
   const { context } = createContext({
     vectorDatabase: new PersistentDeadlineVectorDatabase(),
   });
@@ -480,13 +458,14 @@ test('integration: clearIndex preserves local state when drop timeout leaves col
       () => context.clearIndex(codebasePath),
       /DEADLINE_EXCEEDED/
     );
-    assert.equal(await context.hasIndexedCollection(codebasePath), true);
+    assert.equal(context.getCurrentPublication(codebasePath), null);
+    assert.equal(await context.hasIndexedCollection(codebasePath), false);
   } finally {
     fs.rmSync(codebasePath, { recursive: true, force: true });
   }
 });
 
-test('integration: clearIndex preserves local state when drop timeout leaves remote state indeterminate', async () => {
+test('integration: clearIndex keeps authority cleared when remote deletion state is indeterminate', async () => {
   const { context } = createContext({
     vectorDatabase: new IndeterminateDeadlineVectorDatabase(),
   });
@@ -500,7 +479,8 @@ test('integration: clearIndex preserves local state when drop timeout leaves rem
       () => context.clearIndex(codebasePath),
       /DEADLINE_EXCEEDED/
     );
-    assert.equal(await context.hasIndexedCollection(codebasePath), true);
+    assert.equal(context.getCurrentPublication(codebasePath), null);
+    assert.equal(await context.hasIndexedCollection(codebasePath), false);
   } finally {
     fs.rmSync(codebasePath, { recursive: true, force: true });
   }
@@ -514,21 +494,24 @@ test('integration: clearIndex removes local sync state when remote collection is
 
   try {
     await context.indexCodebase(codebasePath);
-    const collectionName = await publishCurrentAuthorityCheckpoint(context, codebasePath);
+    const publication = context.getCurrentPublication(codebasePath);
+    assert.ok(publication);
+    const collectionName = publication.publication.vector.collectionName;
     const baseline = await context.reindexByChange(codebasePath);
     assert.equal(baseline.added, 0);
     assert.equal(baseline.removed, 0);
     assert.equal(baseline.modified, 0);
     assert.deepEqual(baseline.changedFiles, []);
 
-    const snapshotPath = FileSynchronizer.getSnapshotPathForGeneration(codebasePath, collectionName);
-    assert.equal(fs.existsSync(snapshotPath), true);
-
     await vectorDatabase.dropCollection(collectionName);
     await context.clearIndex(codebasePath);
 
+    assert.equal(context.getCurrentPublication(codebasePath), null);
     assert.equal(await context.hasIndexedCollection(codebasePath), false);
-    assert.equal(fs.existsSync(snapshotPath), false);
+
+    const rebuilt = await context.reindexByChange(codebasePath);
+    assert.equal(rebuilt.added, 1);
+    assert.deepEqual(rebuilt.changedFiles, ['src/service.ts']);
   } finally {
     fs.rmSync(codebasePath, { recursive: true, force: true });
   }
@@ -668,7 +651,6 @@ test('integration: reindex_by_change ignores excluded files but tracks unignored
       customIgnorePatterns: ['generated/**', '!generated/keep.ts'],
     });
     const stats = await context.indexCodebase(codebasePath, undefined, false, { indexPolicy: policy });
-    await publishCurrentAuthorityCheckpoint(context, codebasePath);
 
     fs.writeFileSync(path.join(codebasePath, 'generated/drop.ts'), 'export const dropped = false;', 'utf8');
     const ignoredOnlyDelta = await context.reindexByChange(codebasePath);
@@ -697,7 +679,6 @@ test('integration: reindex_by_change tracks safe-broad text and config file chan
 
   try {
     await context.indexCodebase(codebasePath);
-    await publishCurrentAuthorityCheckpoint(context, codebasePath);
 
     const baseline = await context.reindexByChange(codebasePath);
     assert.equal(baseline.added, 0);
@@ -736,7 +717,6 @@ test('integration: hidden supported files stay synchronized when not ignored', a
   try {
     const stats = await context.indexCodebase(codebasePath);
     assert.equal(stats.indexedFiles, 1);
-    await publishCurrentAuthorityCheckpoint(context, codebasePath);
 
     const firstResults = await context.semanticSearch({
       codebasePath,

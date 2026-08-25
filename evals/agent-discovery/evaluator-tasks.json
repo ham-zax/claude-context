@@ -51,25 +51,21 @@
     {
       "id": "unknown-freshness-reuse",
       "kind": "unknown_target",
-      "prompt": "Find the production code path that decides whether initial prepared-read evidence may be reused after source-freshness processing. Report the owning file, owning symbol, and its complete 1-based inclusive source span. Identify the exact predicate or evidence conditions that permit reuse and the branch that forces a second readiness proof. Report all three graded relationships: one production caller, the authority-preservation helper, and the second-readiness-proof callback referenced by the owner code. Verify every claim from source or relationship evidence.",
-      "satoriQuery": "Find the production code path that decides whether initial prepared-read evidence may be reused after source-freshness processing. Identify the exact predicate or evidence conditions that permit reuse and the branch that forces a second readiness proof.",
+      "prompt": "Find the production code path that re-proves tracked-root readiness after source-freshness processing. Report the owning file, owning symbol, and its complete 1-based inclusive source span. Identify the active-sync branch that may serve the pinned previous Publication, the freshness-blocking branch, the second readiness proof after freshness, and the root-identity guard before search proceeds. Report all three graded relationships: one production caller, the blocked-readiness helper, and the second-readiness-proof callback referenced by the owner code. Verify every claim from source or relationship evidence.",
+      "satoriQuery": "Find the production code path that re-proves tracked-root readiness after source-freshness processing. Identify the active-sync previous-Publication branch, freshness blocking, the second readiness proof, and the root-identity guard.",
       "taskFactsTemplate": {
-        "acceptedFreshnessModes": [
-          "string"
-        ],
-        "requiresFirstAttempt": "boolean",
-        "requiresReadyInitialState": "boolean",
-        "requiresExistingObservation": "boolean",
-        "requiresInitialObservationMatch": "boolean",
-        "requiresStableObservation": "boolean",
+        "servesPreviousGenerationDuringSync": "boolean",
+        "freshnessBlockedStopsBeforeSecondProof": "boolean",
+        "requiresSecondReadinessAfterFreshness": "boolean",
+        "requiresStableRootIdentity": "boolean",
         "secondProofSymbol": "exact bare symbol identifier"
       },
       "expected": {
         "ownerFile": "packages/mcp/src/core/search-frontdoor.ts",
         "ownerSymbol": "runSearchFrontDoor",
         "ownerSpan": {
-          "startLine": 238,
-          "endLine": 470
+          "startLine": 205,
+          "endLine": 315
         },
         "requiredRelations": [
           {
@@ -79,12 +75,8 @@
           },
           {
             "relation": "helper",
-            "symbol": "freshnessDecisionPreservesAuthority",
-            "file": "packages/mcp/src/core/search-frontdoor.ts",
-            "span": {
-              "startLine": 139,
-              "endLine": 142
-            }
+            "symbol": "buildBlockedReadinessPayload",
+            "file": "packages/mcp/src/core/search-frontdoor.ts"
           },
           {
             "relation": "second_readiness_proof",
@@ -93,15 +85,10 @@
           }
         ],
         "taskFacts": {
-          "acceptedFreshnessModes": [
-            "skipped_recent",
-            "skipped_source_checkpoint_unavailable"
-          ],
-          "requiresFirstAttempt": true,
-          "requiresReadyInitialState": true,
-          "requiresExistingObservation": true,
-          "requiresInitialObservationMatch": true,
-          "requiresStableObservation": true,
+          "servesPreviousGenerationDuringSync": true,
+          "freshnessBlockedStopsBeforeSecondProof": true,
+          "requiresSecondReadinessAfterFreshness": true,
+          "requiresStableRootIdentity": true,
           "secondProofSymbol": "preparePostFreshnessTrackedRootRead"
         }
       }

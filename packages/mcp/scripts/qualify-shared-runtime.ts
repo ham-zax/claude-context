@@ -420,7 +420,6 @@ async function main(): Promise<void> {
         POTION_MODEL_PATH: modelPath,
         POTION_REQUEST_TIMEOUT_MS: "5000",
         MCP_ENABLE_WATCHER: "false",
-        MCP_WATCH_DEBOUNCE_MS: "5000",
     };
     fs.writeFileSync(launcherPath, buildLauncherScript({
         command: process.execPath,

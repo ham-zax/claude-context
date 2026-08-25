@@ -79,8 +79,8 @@ The corpus currently contains:
 1. `known-exact-target`: locate and trace the supplied exact identifier
    `runExactRegistryFastPath`.
 2. `unknown-freshness-reuse`: discover, from a behavioral description, the
-   owner that decides whether prepared-read evidence survives freshness
-   processing.
+   owner that re-proves tracked-root readiness after freshness processing and
+   preserves the pinned previous Publication during an active sync.
 
 The first task measures a known target. The second is a fixed semantic query
 whose answer is real in this repository. Both arms receive the exact same task

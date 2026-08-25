@@ -318,7 +318,7 @@ test("unknown-target prompt explicitly requests every graded relationship", () =
     const task = manifest.tasks.find((candidate) => candidate.id === "unknown-freshness-reuse");
 
     assert.match(task.prompt, /production caller/i);
-    assert.match(task.prompt, /authority-preservation helper/i);
+    assert.match(task.prompt, /blocked-readiness helper/i);
     assert.match(task.prompt, /second-readiness-proof/i);
 });
 

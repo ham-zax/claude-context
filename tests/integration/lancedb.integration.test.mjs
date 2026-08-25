@@ -87,11 +87,6 @@ test('built Core LanceDB adapter is visible from a fresh Node process', async (t
         },
     }]);
     await database.finalizeCollectionForSearch(collectionName);
-    await database.insertControl(collectionName, {
-        id: 'built-control',
-        kind: 'publication_probe',
-        metadata: { owner: 'integration' },
-    });
 
     const childScript = `
         const { LanceDbVectorDatabase } = require(${JSON.stringify(path.join(path.dirname(builtCorePath), "lancedb.js"))});
@@ -99,9 +94,8 @@ test('built Core LanceDB adapter is visible from a fresh Node process', async (t
             const database = new LanceDbVectorDatabase({ databasePath: process.env.SATORI_TEST_LANCEDB_PATH });
             const collection = process.env.SATORI_TEST_LANCEDB_COLLECTION;
             const lexical = await database.retrieveLexical(collection, { query: 'builtprocessprobe', limit: 5 });
-            const control = await database.getControl(collection, 'built-control');
             await database.close();
-            process.stdout.write(JSON.stringify({ ids: lexical.map((entry) => entry.document.id), control }));
+            process.stdout.write(JSON.stringify({ ids: lexical.map((entry) => entry.document.id) }));
         })().catch((error) => {
             console.error(error);
             process.exitCode = 1;
@@ -118,11 +112,6 @@ test('built Core LanceDB adapter is visible from a fresh Node process', async (t
 
     assert.deepEqual(JSON.parse(child.stdout), {
         ids: ['built-document'],
-        control: {
-            id: 'built-control',
-            kind: 'publication_probe',
-            metadata: { owner: 'integration' },
-        },
     });
 });
 
@@ -156,10 +145,11 @@ test('Core publishes and reopens a LanceDB-backed hybrid generation', async (t) 
 
     const stats = await context.indexCodebase(repositoryPath, undefined, true);
     assert.ok(stats.totalChunks > 0);
-    const collectionName = await context.getActiveIndexedCollectionName(repositoryPath);
-    assert.ok(collectionName);
-    const marker = await context.getIndexCompletionMarker(repositoryPath);
-    assert.equal(marker?.fingerprint.vectorStoreProvider, 'LanceDB');
+    const publication = context.getCurrentPublication(repositoryPath);
+    assert.ok(publication);
+    const collectionName = publication.publication.vector.collectionName;
+    const indexFormat = JSON.parse(publication.publication.format.indexFormatVersion);
+    assert.equal(indexFormat.vectorStoreProvider, 'LanceDB');
 
     const results = await context.semanticSearch({
         codebasePath: repositoryPath,
@@ -180,10 +170,10 @@ test('Core publishes and reopens a LanceDB-backed hybrid generation', async (t) 
         symbolRegistryStateRoot: path.join(root, 'navigation'),
         indexPolicyStateRoot: path.join(root, 'policy'),
     });
-    assert.equal(
-        await reopenedContext.getActiveIndexedCollectionName(repositoryPath),
-        collectionName,
-    );
+    const reopenedPublication = reopenedContext.getCurrentPublication(repositoryPath);
+    assert.ok(reopenedPublication);
+    assert.equal(reopenedPublication.id, publication.id);
+    assert.equal(reopenedPublication.publication.vector.collectionName, collectionName);
 });
 
 test('LanceDB all-terms lexical retrieval excludes partial-term matches', async (t) => {
