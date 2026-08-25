@@ -1,3 +1,4 @@
+import { getLanguageCapabilityDeclaration } from '../../language';
 import { isCallableSymbolKind, type SymbolRecord, type SymbolRegistry } from '../../symbols';
 import type {
     CallResolutionContribution,
@@ -131,6 +132,8 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
         const providerId = this.descriptor.providerId;
         const providerVersion = this.descriptor.providerVersion;
         const environmentConfigId = this.descriptor.environmentConfigId;
+        const typeReceiverAwareReady =
+            getLanguageCapabilityDeclaration(this.language)?.typeReceiverAwareCapability === 'production_ready';
 
         const sourceFilter = input.sourceFiles;
 
@@ -143,6 +146,13 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
             const fileClaims: ResolutionClaim[] = [];
 
             for (const occ of occurrences) {
+                const receiverAwareStrategy = occ.proof.strategy === 'type_dispatch'
+                    || occ.proof.strategy === 'embed_dispatch'
+                    || occ.proof.strategy === 'interface_dispatch';
+                if (occ.proof.strategy !== 'direct_call' && !(typeReceiverAwareReady && receiverAwareStrategy)) {
+                    continue;
+                }
+
                 const caller = findEnclosingCaller(fileSymbols, occ.callSpan);
                 if (!caller) continue;
 

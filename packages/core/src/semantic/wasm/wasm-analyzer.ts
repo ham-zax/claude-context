@@ -86,8 +86,9 @@ export class WasmSemanticProjectAnalyzer implements SemanticProjectAnalyzer {
                 const occurrences = occurrencesByFile.get(raw.sourceFile) ?? [];
                 const srcMap = sourceMapByFile.get(raw.sourceFile) ?? new Utf8SourceMap('');
 
-                let strategy: SemanticStrategy = 'direct_call';
-                if (raw.strategy === WasmSemanticStrategy.TYPE_DISPATCH) strategy = 'type_dispatch';
+                let strategy: SemanticStrategy = 'unknown';
+                if (raw.strategy === WasmSemanticStrategy.DIRECT_CALL) strategy = 'direct_call';
+                else if (raw.strategy === WasmSemanticStrategy.TYPE_DISPATCH) strategy = 'type_dispatch';
                 else if (raw.strategy === WasmSemanticStrategy.EMBED_DISPATCH) strategy = 'embed_dispatch';
                 else if (raw.strategy === WasmSemanticStrategy.INTERFACE_DISPATCH) strategy = 'interface_dispatch';
 
