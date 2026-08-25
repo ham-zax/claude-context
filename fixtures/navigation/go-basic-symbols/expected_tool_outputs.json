@@ -1,6 +1,6 @@
 {
     "language": "go",
-    "tier": "symbol_only",
+    "tier": "calls_v0",
     "fileOutline": {
         "status": "ok"
     },
@@ -13,10 +13,12 @@
         }
     },
     "searchCodebase": {
-        "nextActionsCallGraph": false
+        "navigation": {
+            "graph": "ready"
+        }
     },
     "callGraph": {
-        "supported": false,
-        "reason": "unsupported_language"
+        "status": "ok",
+        "supported": true
     }
 }

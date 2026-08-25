@@ -15,5 +15,6 @@ func add(a, b int) int {
 type Service struct{}
 
 func (s *Service) Start() error {
+  _ = add(1, 2)
   return nil
 }

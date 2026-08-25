@@ -1127,11 +1127,13 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
               syntax are intentionally skipped.
             </p>
             <p>
-              TypeScript, JavaScript, and Python provide production-ready
-              <code>CALLS v0</code> navigation. C++, C#, Go, Java, Rust, and
-              Scala are <code>symbol_only</code>: Publication symbol navigation
-              provides ownership, outlines, and exact symbol opens, while graph
-              traversal returns <code>unsupported_language</code>.
+              TypeScript, JavaScript, Python, and Go provide production-ready
+              <code>CALLS v0</code> navigation when the current Publication has
+              compatible relationship navigation. Go is direct-call only: it does
+              not claim receiver/type, embedded/interface dispatch, callbacks, or
+              callable-alias resolution. C++, C#, Java, Rust, and Scala remain
+              <code>symbol_only</code>; graph traversal for those languages returns
+              <code>unsupported_language</code>.
             </p>
           </div>
           <div class="panel">

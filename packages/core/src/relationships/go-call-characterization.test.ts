@@ -47,7 +47,7 @@ function createGoTestRegistry(files: Array<{ path: string; symbols: SymbolRecord
 
 
 
-test('Go call characterization: qualification admits only direct calls while Go remains symbol_only', async () => {
+test('Go call characterization: production calls_v0 admits only direct calls', async () => {
     const mainGo = `package main
 
 type Service struct{}
@@ -179,10 +179,6 @@ func TestService(t *testing.T) {
     const records = buildRelationshipsForRegistry({
         registry,
         analysisByFile,
-        mode: {
-            kind: 'qualification',
-            enabledUnpromotedCallLanguages: new Set(['go']),
-        },
         semanticEvidenceByLanguage: new Map([['go', evidence]]),
     });
 

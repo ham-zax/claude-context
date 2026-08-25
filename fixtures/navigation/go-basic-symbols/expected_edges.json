@@ -1,3 +1,16 @@
 {
-    "calls": []
+    "calls": [
+        {
+            "sourceKey": "symkey_b99a61df5253af970865d57182ca94cd",
+            "targetKey": "symkey_3e228091d1489771643aef7d448be248",
+            "type": "CALLS",
+            "file": "svc.go",
+            "span": {
+                "startLine": 18,
+                "endLine": 18
+            },
+            "confidence": "high",
+            "resolutionAuthority": "direct_binding"
+        }
+    ]
 }

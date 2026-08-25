@@ -30,7 +30,11 @@ test('language registry is backed by canonical capability declarations', () => {
     assert.equal(go?.parserCapability, 'production_ready');
     assert.equal(go?.symbolExtractionCapability, 'production_ready');
     assert.equal(go?.ownerExtractionCapability, 'production_ready');
-    assert.notEqual(go?.callsCapability, 'production_ready');
+    assert.equal(go?.importExportCapability, 'none');
+    assert.equal(go?.callsCapability, 'production_ready');
+    assert.equal(go?.typeReceiverAwareCapability, 'none');
+    assert.equal(go?.testReferenceCapability, 'none');
+    assert.equal(go?.publicClaim, 'calls_v0');
 });
 
 test('language registry routes modern module and systems extensions through qualified capability tiers', () => {
@@ -55,8 +59,8 @@ test('language registry routes modern module and systems extensions through qual
     assert.equal(isLanguageCapabilitySupportedForExtension('.kts', 'owner'), false);
 });
 
-test('L1 candidate languages do not claim graph capabilities by routing alone', () => {
-    for (const language of ['go', 'rust', 'java', 'csharp', 'cpp', 'scala', 'php', 'ruby', 'kotlin', 'swift']) {
+test('unpromoted L1 candidate languages do not claim graph capabilities by routing alone', () => {
+    for (const language of ['rust', 'java', 'csharp', 'cpp', 'scala', 'php', 'ruby', 'kotlin', 'swift']) {
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'search'), true, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraph'), false, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'callGraphBuild'), false, language);
@@ -73,6 +77,15 @@ test('L1 candidate languages do not claim graph capabilities by routing alone', 
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'owner'), false, language);
         assert.equal(isLanguageCapabilitySupportedForLanguage(language, 'fileOutline'), false, language);
     }
+
+    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'callGraph'), true);
+    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'callGraphBuild'), true);
+    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'callGraphQuery'), true);
+    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'imports'), false);
+    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'testLinks'), false);
+    assert.equal(isLanguageCapabilitySupportedForExtension('.go', 'callGraph'), true);
+    assert.equal(isLanguageCapabilitySupportedForExtension('.go', 'callGraphBuild'), true);
+    assert.equal(isLanguageCapabilitySupportedForExtension('.go', 'callGraphQuery'), true);
 });
 
 test('language registry exposes search-only frontend/style containers until extractors exist', () => {

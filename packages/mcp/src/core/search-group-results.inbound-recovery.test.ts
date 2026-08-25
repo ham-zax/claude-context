@@ -11,7 +11,7 @@ import type { SearchNavigationHelpers, SearchNavigationState } from "./search-na
 const helpers: SearchNavigationHelpers = {
     now: () => Date.parse("2026-01-01T00:00:00.000Z"),
     sanitizeIndexedRelativeFilePath: (relativeFilePath) => relativeFilePath.replace(/\\/g, "/"),
-    isCallGraphLanguageSupported: (language) => language === "typescript" || language === "javascript",
+    isCallGraphLanguageSupported: (language) => ["typescript", "javascript", "python", "go"].includes(language),
     getOutlineStatusForLanguage: () => "ok",
 };
 
@@ -120,9 +120,9 @@ test("exact registry result publishes one concrete target and compact graph veri
     }
 });
 
-test("unsupported graph language keeps exact read identity without a caller term", () => {
+test("still-symbol-only graph language keeps exact read identity without a caller term", () => {
     const result = buildExactRegistryGroupResult({
-        symbol: makeSymbol({ language: "go" }),
+        symbol: makeSymbol({ language: "rust" }),
         indexedAt: "2026-01-01T00:00:00.000Z",
         navigationState: navState,
         debugMode: 'none',

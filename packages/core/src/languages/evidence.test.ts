@@ -51,11 +51,12 @@ test('language capability evidence combines declarations with observed registry 
     assert.deepEqual(typescript.degradationReasons, []);
 
     const go = summary.languages[0];
-    assert.equal(go.declaredClaim, 'symbol_only');
+    assert.equal(go.declaredClaim, 'calls_v0');
     assert.equal(go.capabilities.exactSymbol, 'ready');
     assert.equal(go.capabilities.outline, 'ready');
-    assert.equal(go.capabilities.callGraph, 'not_applicable');
-    assert.equal(go.relationshipEvidence, 'not_applicable');
+    assert.equal(go.capabilities.callGraph, 'ready');
+    assert.equal(go.relationshipEvidence, 'compatible');
+    assert.deepEqual(go.degradationReasons, []);
 
     const text = summary.languages[1];
     assert.equal(text.declaredClaim, 'search_only');
@@ -71,6 +72,22 @@ test('language capability evidence combines declarations with observed registry 
     assert.equal(text.capabilities.exactSymbol, 'not_applicable');
     assert.equal(text.capabilities.outline, 'not_applicable');
     assert.equal(text.capabilities.callGraph, 'not_applicable');
+});
+
+test('Go call graph evidence requires compatible Publication relationship navigation', () => {
+    const summary = computeLanguageCapabilityEvidence({
+        searchable: true,
+        registryStatus: 'compatible',
+        relationshipStatus: 'missing',
+        files: [{ language: 'go', definitionStatus: 'definitions_present' }],
+        symbols: [{ language: 'go', kind: 'function', file: 'main.go' }],
+    });
+
+    const go = summary.languages[0];
+    assert.equal(go.declaredClaim, 'calls_v0');
+    assert.equal(go.relationshipEvidence, 'missing');
+    assert.equal(go.capabilities.callGraph, 'unavailable');
+    assert.deepEqual(go.degradationReasons, ['relationship_sidecar_missing']);
 });
 
 test('language capability evidence fails closed for unavailable sidecars and non-searchable lifecycle state', () => {

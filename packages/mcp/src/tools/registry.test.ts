@@ -75,18 +75,23 @@ test('search_codebase and manage_index descriptions include ignore-remediation g
     assert.match(manageTool!.description, /current Publication is incompatible, missing, or unprovable/i);
 });
 
-// F-AC-01: MCP tool description must calibrate CALLS as heuristic/bounded/advisory.
-test('call_graph description states CALLS v0 is heuristic, bounded, and advisory', () => {
+// F-AC-01: MCP tool description must calibrate CALLS as capability-gated, conservative, bounded, and advisory.
+test('call_graph description is capability-based and calibrates conservative CALLS v0', () => {
     const tools = getMcpToolList(buildContext());
     const callGraphTool = tools.find((tool) => tool.name === 'call_graph');
     assert.ok(callGraphTool);
 
+    assert.match(callGraphTool!.description, /canonical language capability/i);
+    assert.match(callGraphTool!.description, /current Publication/i);
     assert.match(callGraphTool!.description, /heuristic/i);
     assert.match(callGraphTool!.description, /name-based/i);
+    assert.match(callGraphTool!.description, /Go.*qualified direct calls/i);
+    assert.match(callGraphTool!.description, /excludes receiver\/type-aware dispatch/i);
     assert.match(callGraphTool!.description, /bounded/i);
     assert.match(callGraphTool!.description, /advisory/i);
     assert.match(callGraphTool!.description, /not authoritative blast-radius/i);
     assert.match(callGraphTool!.description, /not a compiler-grade call graph/i);
+    assert.doesNotMatch(callGraphTool!.description, /TS\/JS\/Python/i);
 });
 
 test('search_codebase schema exposes scoped grouped/raw controls', () => {

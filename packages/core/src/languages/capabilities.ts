@@ -273,10 +273,18 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
         },
     }),
-    symbolOnlyLanguage({
+    declaration({
         languageId: 'go',
         aliases: [],
         extensions: ['.go'],
+        searchEligibility: PRODUCTION_READY,
+        parserCapability: PRODUCTION_READY,
+        symbolExtractionCapability: PRODUCTION_READY,
+        ownerExtractionCapability: PRODUCTION_READY,
+        importExportCapability: NONE,
+        callsCapability: PRODUCTION_READY,
+        typeReceiverAwareCapability: NONE,
+        testReferenceCapability: NONE,
         fixtures: {
             navigation: [
                 'fixtures/navigation/go-basic-symbols/expected_symbols.json',
@@ -286,7 +294,9 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             ownerMetadata: ['packages/mcp/src/core/search-group-results.ownership.test.ts'],
             fileOutline: ['packages/mcp/src/tools/file_outline.test.ts'],
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
+            calls: ['packages/core/src/relationships/go-call-qualification.test.ts'],
         },
+        publicClaim: 'calls_v0',
     }),
     symbolOnlyLanguage({
         languageId: 'java',

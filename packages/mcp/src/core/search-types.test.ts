@@ -69,7 +69,7 @@ test("navigation response contracts include call_graph non-ok envelopes", () => 
             supported: false,
             reason: "unsupported_language",
             path: "/repo",
-            symbolRef: { file: "main.go", symbolId: "syminst_go" },
+            symbolRef: { file: "main.rs", symbolId: "syminst_rust" },
             nodes: [],
             edges: [],
             notes: []
