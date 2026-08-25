@@ -7,7 +7,7 @@ This guide covers contribution rules specific to the MCP server package.
 Only these tools are supported:
 
 - `list_codebases`
-- `manage_index` (`action`: `create | reindex | sync | status | clear | repair`)
+- `manage_index` (`action`: `create | reindex | sync | status | clear`)
 - `search_codebase`
 - `file_outline`
 - `call_graph`
@@ -43,9 +43,9 @@ pnpm --filter @zokizuan/satori-mcp docs:check
 
 - Keep routing and tool exposure capability-driven (no direct env checks in handlers).
 - Keep tool schemas canonical in `src/tools/*` Zod definitions; JSON Schema must be generated from those definitions.
-- Keep snapshot format at `v3` with fingerprints.
+- Treat the selected immutable Publication as the sole durable indexed/source/navigation/policy authority; unsupported pre-clean-break state requires a fresh index/reindex.
 - Preserve deterministic "train in the error" responses for reindex requirements.
 - Do not reintroduce compatibility aliases for removed tools.
 - Keep `search_codebase` telemetry as structured stderr JSON (`event=search_executed`).
 - Keep `read_file` line-range semantics 1-based and inclusive (`start_line`/`end_line`), with deterministic truncation hints when capped by `READ_FILE_MAX_LINES`.
-- If watcher mode is enabled, keep it debounced (`MCP_WATCH_DEBOUNCE_MS`) and status-gated (`indexed`/`sync_completed` only), and ensure ignored/hidden paths are excluded from watch triggers.
+- If watcher mode is enabled, keep filesystem events observation-only: record source/freshness epochs, exclude ignored/hidden paths, and leave publication work to explicit or background freshness synchronization.

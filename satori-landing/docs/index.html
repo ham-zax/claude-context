@@ -996,9 +996,12 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
               <code>manage_index action="create" path="/absolute/path/to/repo"</code>.
               Use the repository root for the first index unless you have a
               specific subdirectory workflow. Create returns after accepting
-              the operation; poll <code>manage_index action="status"</code>
-              until its durable operation reaches <code>completed</code>,
-              <code>failed</code>, or <code>blocked</code>.
+              the operation; while the same runtime is active, poll
+              <code>manage_index action="status"</code> until its process-lifetime
+              operation phase reaches <code>completed</code>, <code>failed</code>,
+              or <code>blocked</code>. Phase, progress, and error are process-lifetime
+              state and are not reconstructed after restart; status then reports
+              the durable current Publication state.
             </p>
           </div>
           <div class="step">
@@ -1087,11 +1090,11 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
       </section>
 
       <section class="section" id="navigation-sidecars">
-        <h2>Symbol-Owned Navigation</h2>
+        <h2>Publication-Owned Navigation</h2>
         <p class="lede">
-          Completed full indexes write derived navigation sidecars. Files stay
-          the source of truth; sidecars are deterministic views over the indexed
-          snapshot.
+          Each completed Publication owns one immutable JSON navigation tree
+          alongside its exact vector and source checkpoint. Reads select and pin
+          that Publication before resolving symbols or relationships.
         </p>
         <div class="grid">
           <div class="panel">
@@ -1106,9 +1109,9 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
           </div>
           <div class="panel">
-            <h3>Relationship Sidecar</h3>
+            <h3>Relationship Navigation</h3>
             <p>
-              The current relationship sidecar stores conservative
+              Publication relationship navigation stores conservative
               <code>CALLS v0</code> edges plus TS/JS <code>IMPORTS</code> and
               <code>EXPORTS v0</code> edges. Same-file unique calls can be high
               confidence; cross-file name-only calls are low confidence; ambiguous
@@ -1126,21 +1129,18 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             <p>
               TypeScript, JavaScript, and Python provide production-ready
               <code>CALLS v0</code> navigation. C++, C#, Go, Java, Rust, and
-              Scala are <code>symbol_only</code>: compatible sidecars provide
-              ownership, outlines, and exact symbol opens, while graph traversal
-              returns <code>unsupported_language</code>.
+              Scala are <code>symbol_only</code>: Publication symbol navigation
+              provides ownership, outlines, and exact symbol opens, while graph
+              traversal returns <code>unsupported_language</code>.
             </p>
           </div>
           <div class="panel">
             <h3>Runtime Navigation</h3>
             <p>
-              <code>call_graph</code> now traverses compatible relationship
-              sidecars directly. Canonical JSON sidecars remain the serving
-              source by default, while <code>navigation.sqlite</code> is an
-              additive cache for validation or explicit experimental reads.
-              Explicit SQLite serving requires parity with the canonical JSON
-              registry and relationship sidecars; SQLite is never trusted as
-              truth by itself.
+              <code>call_graph</code> traverses relationship navigation from the
+              exact Publication pinned for the request. Immutable JSON is the
+              serving representation; there is no alternate SQLite backend or
+              fallback navigation authority.
             </p>
           </div>
         </div>
@@ -1163,11 +1163,11 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
           <div class="panel">
             <h3>manage_index</h3>
             <p>
-              Creates, syncs, checks status, reindexes, repairs local readiness
-              when vector payload and fingerprint proof match, or clears indexes.
+              Creates, syncs, checks status, reindexes, or clears indexes.
               Create and reindex return a kickoff response; poll status for the
-              persisted operation phase and terminal result. Status includes
-              health diagnostics when available.
+              current Publication state and any process-lifetime mutation
+              projection still available in this runtime. Status includes health
+              diagnostics when available.
             </p>
           </div>
           <div class="panel">
@@ -1194,8 +1194,8 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
           <div class="panel">
             <h3>file_outline</h3>
             <p>
-              Reads sidecar symbol outlines and resolves exact symbols without
-              guessing when matches are ambiguous.
+              Reads Publication symbol outlines and resolves exact symbols
+              without guessing when matches are ambiguous.
             </p>
           </div>
           <div class="panel">
@@ -1220,8 +1220,9 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
         <h2>Sync, Reindex, and Clear</h2>
         <p class="lede">
           Lifecycle operations have different meanings. Use sync for ordinary
-          file changes, reindex for fingerprint or sidecar incompatibility, and
-          clear only when you intentionally want to remove a tracked codebase.
+          file changes, reindex for runtime or Publication-navigation
+          incompatibility, and clear only when you intentionally want to remove
+          a tracked codebase.
           Create, reindex, sync, and clear are blocked when another live Satori
           MCP runtime has a different fingerprint, version, or config identity.
         </p>
@@ -1268,19 +1269,18 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
             </p>
             <ul>
               <li>Index state and remediation reason.</li>
-              <li>Completion marker proof.</li>
-              <li>Fingerprint match or mismatch.</li>
-              <li>Sidecar readiness and stale-state signals.</li>
+              <li>Current Publication proof.</li>
+              <li>Current runtime compatibility.</li>
+              <li>Publication navigation readiness and stale-state signals.</li>
               <li>Watcher state and indexed file/chunk counts.</li>
             </ul>
           </div>
           <div class="panel">
-            <h3>Repair</h3>
+            <h3>Reindex recovery</h3>
             <p>
-              <code>manage_index action="repair"</code> rebuilds local readiness
-              only when the existing vector payload and a trusted runtime
-              fingerprint proof still match. If they do not, use create or
-              reindex instead of repair.
+              <code>manage_index action="reindex"</code> rebuilds an index when
+              the current Publication is missing, incompatible, or unprovable.
+              Use <code>action="sync"</code> for ordinary source divergence.
             </p>
           </div>
         </div>
@@ -1319,21 +1319,20 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
           <div class="panel">
             <h3>Diagnostic Causes</h3>
             <p>
-              <code>fingerprint_mismatch</code>,
-              <code>completion_marker_missing</code>,
+              Current Publication state,
               <code>missing_symbol_registry</code>,
-              <code>missing_relationship_sidecar</code>,
+              <code>missing_relationship_navigation</code>,
               <code>incompatible_symbol_registry</code>,
-              <code>incompatible_relationship_sidecar</code>, watcher state,
-              and sidecar readiness explain why the tool chose a lifecycle
-              state. Legacy <code>missing_sidecar</code> wording is less
-              precise and should not be preferred for new public paths.
+              <code>incompatible_relationship_navigation</code>, watcher state,
+              and Publication navigation readiness explain why the tool chose a
+              lifecycle state. Incompatible or unsupported pre-clean-break
+              index state requires a fresh index or reindex.
             </p>
           </div>
           <div class="panel">
             <h3>Debug Payloads</h3>
             <p>
-              Use <code>debug=true</code> on <code>search_codebase</code> when
+              Use <code>debugMode=full</code> on <code>search_codebase</code> when
               you need ranking, filter, freshness, exact-registry,
               tracked-lexical, reranker, or phase-timing explanations. Start
               with <code>hints.debugSummary</code>, then drill into
@@ -1347,8 +1346,8 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
         <h2>Debugging Search</h2>
         <p class="lede">
           Normal search output should stay compact. Use
-          <code>debug=true</code> when you need to understand ranking, filters,
-          fallback passes, or exclusions.
+          <code>debugMode=summary|ranking|freshness|full</code> when you need to
+          understand ranking, filters, fallback passes, or exclusions.
         </p>
         <div class="grid">
           <div class="panel">

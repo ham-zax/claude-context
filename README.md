@@ -267,7 +267,7 @@ Restart OpenCode after restoring the published runtime.
 
 | Tool | Purpose |
 |---|---|
-| `manage_index` | Create, synchronize, inspect, repair, reindex, or clear a repository index. Use status and repair guidance instead of guessing whether an index is ready. |
+| `manage_index` | Create, synchronize, inspect, reindex, or clear a repository index. Use status to inspect readiness, sync for source changes, and reindex when current authority is missing, corrupt, or incompatible. |
 | `search_codebase` | Run freshness-aware hybrid search and return symbol-owned evidence. Start here for behavior, ownership, configuration, or path discovery. |
 | `continue_search` | Reveal more of one frozen result set without rerunning retrieval. Use it when the initial disclosure is relevant but incomplete. |
 | `file_outline` | List the indexed symbols and spans in one file. Use it to choose an exact owner before reading implementation. |
@@ -338,15 +338,9 @@ Run `doctor` after changing runtime configuration. Restart every Satori MCP clie
 
 ## How Publication Works
 
-Satori keeps source-derived navigation separate from model-specific vectors. A completed publication binds vector and lexical state, navigation, relationship evidence, source observation, checkpoint, and receipt to one generation. Readers use the complete previous generation or the complete new generation; failed candidate work does not replace the active publication.
+Satori stores each index generation as one immutable Publication. A complete Publication owns the vector collection, navigation, selection policy and format identity, and source checkpoint for that generation. Readers pin one Publication for the lifetime of a request; activation makes a complete replacement Publication current, while failed candidate work leaves the active Publication unchanged.
 
-Incremental synchronization scans for changed files, embeds changed chunks only, updates per-file navigation and graph contributions, and activates the complete replacement generation. Missing, corrupt, stale, or incompatible authority fails closed to repair or reindex guidance.
-
-Repair is intentionally narrow. A fully proven healthy V4 publication is an
-exact no-op; navigation-only damage on an otherwise valid V4 publication uses
-the existing graph-only activation path. V3, missing, corrupt, changed, or
-ambiguous source authority requires a reindex instead of fabricating a
-compatible publication.
+Incremental synchronization scans for source changes, embeds changed chunks only, updates navigation and relationship evidence, and activates the complete replacement Publication. Ordinary source divergence converges through `sync`. Missing, corrupt, or incompatible current authority requires `reindex`; Satori does not expose a repair command or salvage retired authority formats into the current Publication model.
 
 ## Offline Local Reranking
 
