@@ -1258,23 +1258,27 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
                     dst->strategy == SATORI_STRATEGY_EMBED_DISPATCH ||
                     dst->strategy == SATORI_STRATEGY_INTERFACE_DISPATCH) {
                     dst->target_kind = (uint8_t)SATORI_TARGET_METHOD;
-                    if (rc->callee_qn) {
-                        const char *first_dot = strchr(rc->callee_qn, '.');
-                        const char *last_dot = strrchr(rc->callee_qn, '.');
-                        if (first_dot && last_dot && last_dot > first_dot) {
-                            uint32_t rlen = (uint32_t)(last_dot - first_dot - 1);
-                            char recv_buf[128];
-                            if (rlen < sizeof(recv_buf)) {
-                                memcpy(recv_buf, first_dot + 1, rlen);
-                                recv_buf[rlen] = '\0';
-                                if (!str_table_intern_checked(&s->str_table, recv_buf, rlen,
-                                                              &dst->receiver_type_offset,
-                                                              &dst->receiver_type_length)) {
-                                    set_session_error(s, "String table resource limit exceeded");
-                                    status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
-                                    goto cleanup;
+                    if (rc->callee_qn && dl && dl->package_qn) {
+                        size_t package_len = strlen(dl->package_qn);
+                        if (strncmp(rc->callee_qn, dl->package_qn, package_len) == 0 &&
+                            rc->callee_qn[package_len] == '.') {
+                            const char *receiver_start = rc->callee_qn + package_len + 1;
+                            const char *last_dot = strrchr(receiver_start, '.');
+                            if (last_dot && last_dot > receiver_start) {
+                                uint32_t rlen = (uint32_t)(last_dot - receiver_start);
+                                char recv_buf[128];
+                                if (rlen < sizeof(recv_buf)) {
+                                    memcpy(recv_buf, receiver_start, rlen);
+                                    recv_buf[rlen] = '\0';
+                                    if (!str_table_intern_checked(&s->str_table, recv_buf, rlen,
+                                                                  &dst->receiver_type_offset,
+                                                                  &dst->receiver_type_length)) {
+                                        set_session_error(s, "String table resource limit exceeded");
+                                        status = SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED;
+                                        goto cleanup;
+                                    }
+                                    dst->receiver_binding_kind = (uint8_t)SATORI_BINDING_NONE;
                                 }
-                                dst->receiver_binding_kind = (uint8_t)SATORI_BINDING_NONE;
                             }
                         }
                     }

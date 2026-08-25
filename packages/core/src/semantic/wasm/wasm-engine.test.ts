@@ -56,7 +56,14 @@ test('WasmSemanticProjectAnalyzer supports Go, rejects Python, and produces stru
 
     const evidence = await analyzer.analyze({
         language: 'go',
-        auxiliaryFiles: [],
+        auxiliaryFiles: [
+            {
+                path: 'go.mod',
+                role: 'manifest',
+                source: 'module example.com/app\n\ngo 1.22\n',
+                sourceHash: 'sha-mod',
+            },
+        ],
         sourceFiles: [
             {
                 path: 'main.go',

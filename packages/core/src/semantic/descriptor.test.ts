@@ -6,6 +6,7 @@ import {
     validateSemanticLanguagesConfig,
     type SemanticLanguageDescriptor,
 } from './descriptor';
+import { RELATIONSHIP_BUILDER_VERSION } from '../language-analysis/versions';
 
 test('defaultSemanticLanguageRegistry loads from packaged assets and supports Go', () => {
     assert.equal(defaultSemanticLanguageRegistry.supportsLanguage('go'), true);
@@ -16,9 +17,15 @@ test('defaultSemanticLanguageRegistry loads from packaged assets and supports Go
     assert.ok(desc);
     assert.equal(desc.language, 'go');
     assert.equal(desc.strategy, 'cbm_semantic');
-    assert.equal(desc.semanticRevision, 'go-v1');
+    assert.equal(desc.semanticRevision, 'go-v2');
     assert.equal(desc.grammar, 'tree-sitter-go');
     assert.equal(desc.providerId, 'satori-cbm-semantic-go');
+    assert.equal(desc.providerVersion, 'cbm-d150ebe4+satori-go-semantic-v2');
+    assert.equal(desc.environmentConfigId, 'cbm-go-semantic-v2');
+    assert.equal(
+        RELATIONSHIP_BUILDER_VERSION,
+        'relationship-v11+go-cbm-v2+python-cross-module-constructors+python-native-resolution-v1',
+    );
 
     assert.equal(defaultSemanticLanguageRegistry.getStrategyForLanguage('go'), 'cbm_semantic');
 });

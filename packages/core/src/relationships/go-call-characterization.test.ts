@@ -47,7 +47,7 @@ function createGoTestRegistry(files: Array<{ path: string; symbols: SymbolRecord
 
 
 
-test('Go call characterization: direct calls, method dispatch, and test edges end-to-end', async () => {
+test('Go call characterization: qualification admits only direct calls while Go remains symbol_only', async () => {
     const mainGo = `package main
 
 type Service struct{}
@@ -186,30 +186,24 @@ func TestService(t *testing.T) {
         semanticEvidenceByLanguage: new Map([['go', evidence]]),
     });
 
-    assert.ok(records.length >= 3, `Expected at least 3 relationship records, saw ${records.length}`);
+    const calls = records.filter((record) => record.type === 'CALLS');
+    assert.equal(calls.length, 1);
 
-    // Verify main -> Execute
-    const mainExecCall = records.find(
-        (r) => r.sourceKey === 'main.go#main' && r.targetKey === 'main.go#Execute' && r.type === 'CALLS',
+    const mainHelperCall = calls.find(
+        (r) => r.sourceKey === 'main.go#main' && r.targetKey === 'main.go#Helper',
     );
-    assert.ok(mainExecCall, 'main -> Execute CALLS edge must exist');
-    assert.equal(mainExecCall.resolutionAuthority, 'direct_binding');
-
-    // Verify main -> Helper
-    const mainHelperCall = records.find(
-        (r) => r.sourceKey === 'main.go#main' && r.targetKey === 'main.go#Helper' && r.type === 'CALLS',
-    );
-    assert.ok(mainHelperCall, 'main -> Helper CALLS edge must exist');
+    assert.ok(mainHelperCall, 'main -> Helper direct CALLS edge must exist');
     assert.equal(mainHelperCall.resolutionAuthority, 'direct_binding');
 
-    // Verify TestService -> Execute (CALLS edge)
-    const testExecCall = records.find(
-        (r) => r.sourceKey === 'service_test.go#TestService' && r.targetKey === 'main.go#Execute' && r.type === 'CALLS',
+    assert.equal(
+        calls.some((record) => record.targetKey === 'main.go#Execute'),
+        false,
+        'receiver/type-dispatch evidence must abstain at Tier 3',
     );
-    assert.ok(testExecCall, 'TestService -> Execute CALLS edge must exist');
-    assert.equal(testExecCall.resolutionAuthority, 'direct_binding');
-
-    // Go semantic engine does NOT produce language-specific TESTS edges at this phase
-    const testTestsEdge = records.find((r) => r.type === 'TESTS');
-    assert.equal(testTestsEdge, undefined, 'Go does not produce language-specific TESTS edges at this phase');
+    assert.equal(
+        calls.some((record) => record.sourceKey === 'service_test.go#TestService'),
+        false,
+        '_test.go callers must not produce initial Go v2 CALLS',
+    );
+    assert.equal(records.some((record) => record.type === 'TESTS'), false);
 });

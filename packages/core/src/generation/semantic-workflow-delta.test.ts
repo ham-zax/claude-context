@@ -237,7 +237,7 @@ test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic
     }
 });
 
-test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) triggers semantic reanalysis without vector payload churn', async () => {
+test('IndexGenerationWorkflow delta rebuild: go.mod/go.work deltas trigger whole-project semantic reanalysis without vector payload churn', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-semantic-delta-aux-'));
     const stateRoot = path.join(tmpDir, '.satori-state');
     fs.mkdirSync(stateRoot, { recursive: true });
@@ -245,12 +245,15 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
     try {
         const fileA = 'main.go';
         const auxMod = 'go.mod';
+        const auxWork = 'go.work';
 
         const contentA = 'package main\n\nfunc main() {\n\tprintln("hello")\n}\n';
         const contentMod1 = 'module example.com/app\n\ngo 1.21\n';
+        const contentWork1 = 'go 1.21\n\nuse ./\n';
 
         fs.writeFileSync(path.join(tmpDir, fileA), contentA, 'utf8');
         fs.writeFileSync(path.join(tmpDir, auxMod), contentMod1, 'utf8');
+        fs.writeFileSync(path.join(tmpDir, auxWork), contentWork1, 'utf8');
 
         const analyzer = new WasmSemanticProjectAnalyzer();
         let analyzeCallCount = 0;
@@ -260,7 +263,7 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
             supportsLanguage: (lang: string) => analyzer.supportsLanguage(lang),
             analyze: async (input: Parameters<typeof analyzer.analyze>[0]) => {
                 analyzeCallCount++;
-                lastAuxiliaryFiles = (input.auxiliaryFiles ?? []).map((f) => f.path);
+                lastAuxiliaryFiles = (input.auxiliaryFiles ?? []).map((f) => f.path).sort();
                 return analyzer.analyze(input);
             },
         };
@@ -350,7 +353,7 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
         );
         assert.ok(initialPublication);
         assert.equal(analyzeCallCount, 1);
-        assert.deepEqual(lastAuxiliaryFiles, ['go.mod']);
+        assert.deepEqual(lastAuxiliaryFiles, ['go.mod', 'go.work']);
 
         // 2. Modify go.mod (auxiliary-only change, 0 source files modified)
         const contentMod2 = 'module example.com/app\n\ngo 1.22\n';
@@ -375,7 +378,28 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
         assert.ok(deltaResult.candidate);
         // Semantic reanalysis was triggered for Go due to go.mod auxiliary change
         assert.equal(analyzeCallCount, 2);
-        assert.deepEqual(lastAuxiliaryFiles, ['go.mod']);
+        assert.deepEqual(lastAuxiliaryFiles, ['go.mod', 'go.work']);
+
+        // 4. A go.work-only delta invalidates the same whole Go semantic project.
+        const contentWork2 = 'go 1.22\n\nuse ./\n';
+        fs.writeFileSync(path.join(tmpDir, auxWork), contentWork2, 'utf8');
+        const workDeltaPublicationId = 'publication-delta-work';
+        const workDeltaNavigationRoot = path.join(stateRoot, workDeltaPublicationId, 'navigation');
+        const workDeltaResult = await internals.rebuildNavigationArtifactsForSyncDelta(
+            tmpDir,
+            initialRegistry,
+            [auxWork],
+            [],
+            [],
+            initialPublicationId,
+            initialNavigationRoot,
+            workDeltaPublicationId,
+            workDeltaNavigationRoot,
+        );
+
+        assert.ok(workDeltaResult.candidate);
+        assert.equal(analyzeCallCount, 3);
+        assert.deepEqual(lastAuxiliaryFiles, ['go.mod', 'go.work']);
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }

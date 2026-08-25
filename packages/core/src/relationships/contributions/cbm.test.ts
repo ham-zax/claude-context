@@ -319,3 +319,44 @@ test('CbmSemanticContributionEngine abstains when enclosing symbol is non-callab
     assert.equal(result.records.length, 0);
     assert.equal(result.claimsByFile?.get('main.go')?.length ?? 0, 0);
 });
+
+test('CbmSemanticContributionEngine admits only direct-call evidence for Go Tier-3 qualification', () => {
+    const registry = createMockRegistryWithDecoy();
+    const engine = new CbmSemanticContributionEngine('go');
+    const nonDirectStrategies = ['type_dispatch', 'embed_dispatch', 'interface_dispatch', 'unknown'] as const;
+
+    for (const strategy of nonDirectStrategies) {
+        const semanticEvidence: SemanticProjectEvidence = {
+            language: 'go',
+            occurrencesByFile: new Map([
+                [
+                    'main.go',
+                    [
+                        {
+                            sourceFile: 'main.go',
+                            callSpan: { startByte: 70, endByte: 85, startLine: 7, endLine: 7, startColumn: 4, endColumn: 19 },
+                            targetProvenance: {
+                                file: 'main.go',
+                                span: { startByte: 10, endByte: 45, startLine: 1, endLine: 4, startColumn: 0, endColumn: 1 },
+                                name: 'Process',
+                                kind: strategy === 'type_dispatch' ? 'method' : 'function',
+                            },
+                            proof: { strategy },
+                            decision: 'resolved',
+                            confidence: 1.0,
+                        },
+                    ],
+                ],
+            ]),
+        };
+
+        const result = engine.resolveCalls({
+            registry,
+            analysisByFile: new Map(),
+            semanticEvidence,
+        });
+
+        assert.equal(result.records.length, 0, `${strategy} must not produce authoritative Go CALLS`);
+        assert.equal(result.claimsByFile?.get('main.go')?.length ?? 0, 0, `${strategy} must abstain before claims`);
+    }
+});
