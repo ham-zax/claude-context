@@ -116,7 +116,7 @@ async function build() {
             wasmSha256,
             languages: {
                 go: {
-                    semanticRevision: 'go-v1',
+                    semanticRevision: 'go-v2',
                     grammar: 'tree-sitter-go',
                 },
             },

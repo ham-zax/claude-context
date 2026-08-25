@@ -48,13 +48,13 @@ void go_lsp_init(GoLSPContext* ctx, CBMArena* arena, const char* source, int sou
     }
 }
 
-void go_lsp_add_import(GoLSPContext* ctx, const char* local_name, const char* pkg_qn) {
+bool go_lsp_add_import(GoLSPContext* ctx, const char* local_name, const char* pkg_qn) {
     // Store in parallel arrays (arena-allocated, grow by doubling)
     if (ctx->import_count % 32 == 0) {
         int new_cap = ctx->import_count + 32;
         const char** new_names = (const char**)cbm_arena_alloc(ctx->arena, (new_cap + 1) * sizeof(const char*));
         const char** new_qns = (const char**)cbm_arena_alloc(ctx->arena, (new_cap + 1) * sizeof(const char*));
-        if (!new_names || !new_qns) return;
+        if (!new_names || !new_qns) return false;
         if (ctx->import_local_names && ctx->import_count > 0) {
             memcpy(new_names, ctx->import_local_names, ctx->import_count * sizeof(const char*));
             memcpy(new_qns, ctx->import_package_qns, ctx->import_count * sizeof(const char*));
@@ -62,9 +62,13 @@ void go_lsp_add_import(GoLSPContext* ctx, const char* local_name, const char* pk
         ctx->import_local_names = new_names;
         ctx->import_package_qns = new_qns;
     }
-    ctx->import_local_names[ctx->import_count] = cbm_arena_strdup(ctx->arena, local_name);
-    ctx->import_package_qns[ctx->import_count] = cbm_arena_strdup(ctx->arena, pkg_qn);
+    const char *name_copy = cbm_arena_strdup(ctx->arena, local_name);
+    const char *qn_copy = cbm_arena_strdup(ctx->arena, pkg_qn);
+    if (!name_copy || !qn_copy) return false;
+    ctx->import_local_names[ctx->import_count] = name_copy;
+    ctx->import_package_qns[ctx->import_count] = qn_copy;
     ctx->import_count++;
+    return true;
 }
 
 // --- Helper: get node text ---
@@ -76,12 +80,15 @@ static char* lsp_node_text(GoLSPContext* ctx, TSNode node) {
 // --- Helper: resolve import alias to package QN ---
 
 static const char* resolve_import(GoLSPContext* ctx, const char* local_name) {
+    const char *match = NULL;
     for (int i = 0; i < ctx->import_count; i++) {
-        if (strcmp(ctx->import_local_names[i], local_name) == 0) {
-            return ctx->import_package_qns[i];
+        if (strcmp(ctx->import_local_names[i], local_name) != 0) continue;
+        if (match && strcmp(match, ctx->import_package_qns[i]) != 0) {
+            return NULL;
         }
+        match = ctx->import_package_qns[i];
     }
-    return NULL;
+    return match;
 }
 
 // --- Helper: check if name is a Go builtin ---

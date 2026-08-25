@@ -38,8 +38,8 @@ typedef struct {
 void go_lsp_init(GoLSPContext* ctx, CBMArena* arena, const char* source, int source_len,
     const CBMTypeRegistry* registry, const char* package_qn, CBMResolvedCallArray* out);
 
-// Add an import mapping.
-void go_lsp_add_import(GoLSPContext* ctx, const char* local_name, const char* package_qn);
+// Add an import mapping. Returns false when arena allocation fails.
+bool go_lsp_add_import(GoLSPContext* ctx, const char* local_name, const char* package_qn);
 
 // Process all functions in a file's AST, evaluating types and resolving calls.
 // root is the tree-sitter root node of the file.
