@@ -1,8 +1,8 @@
 # Go `calls_v0` Promotion Implementation Plan
 
-**Rebaseline:** 2026-08-25 against `5de0dde383548caa4beddca73744c7f5145cfc68`, after the Publication clean break.
+**Rebaseline:** 2026-08-25 against the post-clean-break code state at `5de0dde383548caa4beddca73744c7f5145cfc68`, re-reviewed at `3c51716a5a3b86912645b1b9f031547c3d3f9a63` (plan-only delta since the code baseline).
 
-**Readiness:** Ready with the changes below. The original product goal remains sound; the cleanup removed several stale MCP owners and made the promotion materially simpler.
+**Readiness:** Ready after the correctness corrections in this revision. The product goal remains sound, but production Go `calls_v0` is deliberately narrower than the native resolver's existing capability: only conservative direct calls are promotable in this wave.
 
 **Goal:** Promote Go from `symbol_only` to production `calls_v0` through the existing CBM/WASM relationship pipeline and Publication-owned navigation, then prove the public `search_codebase -> call_graph` path on a real Go repository.
 
@@ -35,58 +35,129 @@ Important current facts:
 
 ## Scope and constraints
 
-- Keep the work limited to Go call-resolution correctness, the Go capability declaration, current-facing Go graph claims, and the evidence needed to justify promotion.
+- Keep the work limited to Go direct-call correctness, the Go capability declaration, current-facing Go graph claims, and the evidence needed to justify promotion.
+- Treat the authoritative Tier-3 contract literally: `calls_v0` is conservative direct-call extraction. Package-qualified functions such as `pkg.Func()` are direct calls when the import binding is exact; receiver/type dispatch, embedded dispatch, interface dispatch, callable aliases/callbacks, and other non-direct strategies are not production `CALLS` in this wave.
 - Do not add `if (language === "go")` branches to `packages/core/src/relationships/builder.ts`, `packages/core/src/generation/index-generation-workflow.ts`, `packages/core/src/core/context.ts`, or MCP navigation handlers.
-- Keep Go `TESTS`, imports/exports, and type-receiver-aware public tiers unchanged. This promotion is `CALLS v0` only.
+- Keep Go `TESTS`, imports/exports, and `type_receiver_aware` public tiers unchanged.
 - Preserve the public `call_graph` request/response contract. Do not add a Go-specific MCP tool or response shape.
-- Ambiguous, duplicate, unresolved, or unproven targets must abstain. A wrong authoritative edge is a blocker; lower recall is acceptable.
-- Do not add a second graph store, sidecar, compatibility reader, or Go-specific Publication format.
-- Do not introduce a helper abstraction only for Go if the existing generic CBM path already owns the behavior.
-- This plan does not itself authorize test creation or execution. Full promotion requires explicit testing authorization when implementation begins; without it, do not start the promotion wave because the semantic identity change and capability flip must land with their qualification evidence.
+- Any source or target whose Go build inclusion depends on an unmodeled build context must be ineligible for authoritative Go `CALLS`. Lower recall is preferable to a cross-build false edge.
+- Ambiguous, duplicate, unresolved, or unproven targets must abstain. A wrong authoritative edge is a blocker.
+- Do not add a second graph store, sidecar, compatibility reader, per-language Publication format, or Go-specific serving path.
+- This plan does not itself authorize test creation or execution. Full promotion requires explicit testing authorization when implementation begins; without it, do not start the promotion wave because the capability flip must land with its qualification evidence.
 
 ## Rebaseline decisions
 
-### 1. Fix module ownership in the native semantic engine
+### 1. Enforce the Tier-3 direct-call boundary before promotion
 
-The existing `extract_module_name()` model is not safe for nested or multi-module repositories. Replace it with one bounded module table built from all `go.mod` auxiliaries.
+The native Go engine already emits `direct_call`, `type_dispatch`, `embed_dispatch`, and `interface_dispatch` evidence. It also emits callable-alias strategies that currently arrive at TypeScript as WASM `UNKNOWN`; `WasmSemanticProjectAnalyzer` presently defaults every unrecognized raw strategy to `direct_call`. That is too permissive for a Tier-3 public claim.
 
-Each `.go` source must bind to the deepest `go.mod` module root that is an ancestor path boundary of the source. `go.work` remains an observed invalidation/topology input; module ownership comes from `go.mod` roots.
+Keep native semantic evidence available for later tiers, but make public CBM admission capability-aware:
 
-### 2. Canonicalize module-owned package identity to import-path identity
+- map WASM `UNKNOWN` to semantic strategy `unknown`, not `direct_call`;
+- allow a CBM occurrence to become an authoritative `CALLS` candidate only when `proof.strategy === "direct_call"`, unless that language's `typeReceiverAwareCapability` is explicitly production-ready in a later promotion;
+- keep package-qualified `pkg.Func()` calls in `direct_call` when their import binding is exact;
+- do not promote receiver-method, embedded, interface, callback/callable-alias, or unknown-strategy success as part of Go `calls_v0`.
 
-The first plan said to preserve the internal root-module identity exactly. That is too strict: the current special case maps a module-root `package main` to the global string `"main"`, which can collide across nested modules.
+This belongs in the generic semantic/CBM boundary, not a Go branch in the relationship builder.
 
-Preserve observable single-module resolution behavior, not that internal string. For every module-owned package, including a module-root `package main`, use the canonical import-path identity:
+### 2. Model modules and packages separately
+
+Replace the one-global-module `extract_module_name()` model with deterministic module and package tables built from the already-bounded semantic inputs.
+
+Module table entry:
 
 ```text
-modulePath + sourceDirectoryRelativeToModuleRoot
+{ moduleRoot, modulePath }
 ```
 
-At the module root, the package identity is the module path itself. A source outside every known module keeps the existing module-less repository-relative fallback and must not borrow an unrelated module path.
+Package table entry:
 
-### 3. Remove the test-only Go contribution wrapper instead of versioning it
+```text
+{ moduleRoot, modulePath, sourceDir, importPath, declaredPackageName, callsEligible }
+```
 
-`packages/core/src/relationships/contributions/go.ts` is not used by production dispatch; it wraps `CbmSemanticContributionEngine("go")` and is referenced only by its own test. Keeping separate provider constants there duplicates the descriptor as a second truth source.
+Rules:
 
-Delete that wrapper and its wrapper-only test during the promotion. Keep Go-specific qualification in `go-call-characterization.test.ts` and generic admission behavior in the existing CBM tests.
+- parse every `go.mod` auxiliary and bind each source to the deepest ancestor `moduleRoot` at a path-component boundary;
+- at a module root, `importPath` is the module path; below it, `importPath` is `modulePath + sourceDirectoryRelativeToModuleRoot`;
+- do not collapse module-root `package main` to a global `"main"` identity;
+- a source outside all module roots uses a module-less repository-relative local identity and must not borrow another module path;
+- for a default import, bind the local selector from the unique target package's `declaredPackageName`, not from the import-path basename. Thus `import "example.com/project/v2"` may correctly bind selector `project`;
+- an explicit import alias continues to use the explicit local name, but the target package identity remains the exact import path;
+- multiple eligible package declarations for one source directory/import path are ambiguous. Do not merge them into one namespace or choose one by input order.
 
-### 4. Keep the existing global relationship compatibility boundary
+### 3. Fail closed on unmodeled Go build context
 
-Publication/symbol/relationship compatibility is keyed by the global `relationshipVersion`; the relationship manifest does not carry a per-language semantic-provider compatibility map. A Go semantic/provider change therefore cannot safely reuse a pre-promotion Publication once Go becomes publicly graph-capable.
+The current semantic project receives every indexed `.go` file and does not evaluate Go build selection. A project-wide registry can therefore join files that never coexist in one Go build.
 
-Bump `RELATIONSHIP_BUILDER_VERSION` for Go v2 and accept the existing clean-break consequence: pre-promotion Publications become relationship-incompatible and require reindex after the upgrade. Do not add a per-Go compatibility reader, repair path, or second version mechanism just to avoid that reindex.
+Go v2 will not implement a full `go/build` evaluator. Instead, mark a file `callsEligible=false` when any of these apply:
 
-### 5. Do not rebuild deleted MCP test/sidecar architecture
+- a leading build-constraint region contains `//go:build` or legacy `// +build`;
+- the basename carries a recognized implicit GOOS/GOARCH suffix (`*_GOOS.go`, `*_GOARCH.go`, or `*_GOOS_GOARCH.go`), using one deterministic native table tied to the Go semantic revision;
+- the file is `*_test.go`, because this wave does not model normal-build versus `go test` package composition;
+- the file imports pseudo-package `"C"`, because this wave does not model `CGO_ENABLED`.
 
-The old plan named deleted files such as `handlers.call_graph.test.ts`, `handlers.file_outline.test.ts`, and `core/call-graph.ts`. They are no longer owners. The current public path already consumes Publication relationship navigation and capability gates.
+Do not register authoritative call targets from an ineligible file and do not emit authoritative calls from it. This guarantees that an unconstrained source cannot bind to a platform/test/cgo-only target and that constrained callers do not publish edges for an unknown build context.
 
-The expected production MCP change is only the capability-driven tool wording in `packages/mcp/src/tools/call_graph.ts`. Any further MCP production edit requires a demonstrated failure after the capability flip.
+An external test package such as `package foo_test` must therefore not contaminate the importable `foo` package identity. Qualification should prove that its presence does not change ordinary package resolution, while `_test.go` itself remains outside the initial Go `CALLS` evidence set.
+
+### 4. Make ambiguity and resource failure deterministic
+
+Do not add a second silent capacity policy. The semantic ABI already bounds inputs at `SATORI_MAX_AUXILIARIES` and `SATORI_MAX_SOURCES`; size module/package working storage from those bounded inputs or fail allocation explicitly.
+
+Failure rules:
+
+- exceeding existing semantic input/result/string-table limits returns the existing `SATORI_SEMANTIC_ERR_RESOURCE_LIMIT_EXCEEDED` path;
+- allocation failure returns the existing out-of-memory path;
+- a malformed `go.mod` that cannot provide one usable module directive, or duplicate normalized module roots with conflicting module paths, fails semantic resolution rather than falling back to a parent/module-less identity;
+- longest-ancestor selection and package-table construction must be deterministic independent of auxiliary/source input order;
+- one import path mapping to more than one eligible local package is ambiguous and that import must abstain;
+- one qualified callable identity mapping to more than one eligible definition is ambiguous. Replace first-match `def_locs_find()` behavior with a unique lookup/result state so no arbitrary target is emitted;
+- an ambiguous source directory/package identity must not fall back to a merged namespace.
+
+### 5. Define the complete Go v2 identity bump
+
+Use these exact production identities:
+
+```text
+providerId:          satori-cbm-semantic-go        (unchanged)
+semanticRevision:    go-v2
+engine/providerVersion:
+                     cbm-d150ebe4+satori-go-semantic-v2
+environmentConfigId: cbm-go-semantic-v2
+relationshipVersion: relationship-v11+go-cbm-v2+python-cross-module-constructors+python-native-resolution-v1
+ABI version:         1                              (unchanged)
+```
+
+Update all live owners of those identities:
+
+- `third_party/cbm-semantic/satori_semantic.c` engine version;
+- `packages/core/assets/semantic-engine/semantic-languages.json` descriptor identity;
+- `scripts/build-semantic-engine.mjs` compiled Go semantic revision;
+- `packages/core/src/language-analysis/versions.ts` global relationship compatibility identity;
+- regenerated JS/WASM artifacts and `semantic-engine.manifest.json`.
+
+When tests are authorized, update assertions that intentionally track the live production identity, including the default-descriptor assertion in `packages/core/src/semantic/descriptor.test.ts` and the engine-version assertion in `packages/core/src/semantic/wasm/wasm-smoke.test.ts`. Audit synthetic descriptors such as `cbm-multi-language-acceptance.test.ts`; do not mechanically rewrite `go-v1` literals whose purpose is merely to exercise a custom descriptor.
+
+The global relationship-version bump intentionally makes pre-promotion Publications relationship-incompatible and requires reindex. Do not add per-Go compatibility or repair machinery to avoid that clean break.
+
+### 6. Remove the test-only Go contribution wrapper
+
+`packages/core/src/relationships/contributions/go.ts` is not used by production dispatch; it only wraps `CbmSemanticContributionEngine("go")` and is imported by its own test. Delete the wrapper and test together when test changes are authorized. Keep Go qualification in the real generic CBM path.
+
+### 7. Do not rebuild deleted MCP graph architecture
+
+Publication relationship navigation is already the sole serving authority. The deleted handler test files, SnapshotManager path, and legacy `core/call-graph.ts`/sidecar manager are not part of this promotion and must not return.
+
+The expected production MCP change is the capability-driven public wording in `packages/mcp/src/tools/call_graph.ts`. Any additional MCP production edit requires a demonstrated failure through the current Publication-backed path.
 
 ## Current implementation file map
 
 ### Production and generated artifacts
 
 - `third_party/cbm-semantic/satori_semantic.c`
+- `packages/core/src/semantic/wasm/wasm-analyzer.ts`
+- `packages/core/src/relationships/contributions/cbm.ts`
 - `packages/core/assets/semantic-engine/semantic-languages.json`
 - `scripts/build-semantic-engine.mjs`
 - `packages/core/src/language-analysis/versions.ts`
@@ -103,12 +174,15 @@ The expected production MCP change is only the capability-driven tool wording in
 - `packages/core/src/relationships/contributions/go.ts`
 - `packages/core/src/relationships/contributions/go.test.ts`
 
-The wrapper is imported only by its test, so delete both in the same authorized change. Do not delete `go.ts` alone.
-
 ### Qualification/evidence files when testing is authorized
 
 - `packages/core/src/relationships/go-call-characterization.test.ts`
+- `packages/core/src/relationships/contributions/cbm.test.ts`
 - `packages/core/src/generation/semantic-workflow-delta.test.ts`
+- `packages/core/src/semantic/descriptor.test.ts`
+- `packages/core/src/semantic/wasm/wasm-smoke.test.ts`
+- `packages/core/src/semantic/wasm/wasm-engine.test.ts`
+- `packages/core/src/relationships/cbm-multi-language-acceptance.test.ts` (audit only; change only production-coupled assertions)
 - `packages/core/src/languages/capabilities.test.ts`
 - `packages/core/src/languages/evidence.test.ts`
 - `packages/core/src/language/registry.test.ts`
@@ -128,44 +202,46 @@ The wrapper is imported only by its test, so delete both in the same authorized 
 - `packages/mcp/src/core/navigation-handlers.ts`
 - `packages/mcp/src/core/relationship-backed-call-graph.ts`
 
-A required edit to one of these files is evidence that a generic contract is missing; fix that contract only if the failure is real, and do not add a Go branch.
+A required edit to one of these files is evidence that a generic contract is missing; fix that contract only if the failure is real, and never add a Go-specific branch.
 
-## Task 1: Correct Go module/package identity and regenerate the semantic engine
+## Task 1: Freeze the direct `calls_v0` semantic boundary
 
-**Files:**
+**Production owners:**
 
-- Modify `third_party/cbm-semantic/satori_semantic.c`.
-- Modify `packages/core/assets/semantic-engine/semantic-languages.json`.
-- Modify `scripts/build-semantic-engine.mjs`.
-- Modify `packages/core/src/language-analysis/versions.ts`.
-- Regenerate the committed JS/WASM runtime and manifest.
-
-The test-only Go contribution wrapper is removed with its importing test in Task 2, not ahead of it.
+- `packages/core/src/semantic/wasm/wasm-analyzer.ts`
+- `packages/core/src/relationships/contributions/cbm.ts`
 
 **Implementation:**
 
-- Replace `extract_module_name()` with a bounded table of `{ moduleRoot, modulePath }` parsed from every `go.mod` auxiliary.
-- Treat the repository-root module root as `""`; nested module roots are normalized slash-separated repository-relative directories.
-- Ignore `go.sum` and `go.work` for ownership. They remain observable semantic inputs and therefore already participate in Publication source freshness and delta invalidation.
-- For each `.go` source, choose the longest module root that matches the source at a path-component boundary.
-- For a module-owned source, compute package identity from the owning `modulePath` plus the source directory relative to that module root. Do not append the repository-relative module-root prefix twice.
-- Use the module path itself for a source at the module root, including `package main`; do not collapse module-root main packages to the global `"main"` identity.
-- For a source outside all module roots, keep the existing module-less repository-relative package fallback.
-- Keep imported Go package paths as the package identity used for cross-package binding.
-- Make target lookup unique. The current `def_locs_find()` returns the first matching qualified name; replace or constrain it so duplicate qualified targets abstain instead of selecting an arbitrary definition.
-- Preserve the `SatoriSemanticResultV1` ABI and exact target file/byte-span provenance.
-- Bump Go semantic identity from v1 to v2 in the descriptor/build recipe and bump the global relationship version's Go component from `go-cbm-v1` to `go-cbm-v2` so existing Publications cannot be treated as Go-v2 relationship truth. This intentionally requires reindex for pre-promotion Publications under the current clean-break compatibility contract.
-- Rebuild the committed semantic engine with the pinned Emscripten toolchain.
+- Map raw WASM strategy `UNKNOWN` to semantic `unknown`; do not default unrecognized native strategies to `direct_call`.
+- In generic CBM relationship contribution, permit authoritative `CALLS` admission for `direct_call` evidence only while `typeReceiverAwareCapability` is not production-ready.
+- Keep non-direct semantic evidence available but non-authoritative for Tier 3.
+- Do not add a Go special case: the admission rule must follow the language capability declaration.
 
 **Acceptance:**
 
-- A normal single-module repository still resolves the same observable calls.
-- A nested source uses its nearest module path, not the first/root manifest.
-- Two modules with the same short package/function names but different module paths bind imports to the exact module-qualified target.
-- Two definitions that collapse to the same qualified identity do not produce a first-match authoritative edge.
-- A source outside every module cannot resolve through an unrelated `go.mod`.
-- Module-root `package main` identities do not collide across modules.
-- The native ABI remains 64 bytes and target provenance remains exact.
+- package-local `Func()` and exactly bound imported `pkg.Func()` evidence can reach the existing proof-backed admission path;
+- `type_dispatch`, `embed_dispatch`, `interface_dispatch`, `unknown`, and callable-alias/callback evidence cannot become public Go `CALLS` under `calls_v0`;
+- the native resolver may continue producing receiver evidence for a future `type_receiver_aware` promotion without changing the public Tier-3 claim.
+
+## Task 2: Correct Go project identity/build selection and produce semantic v2
+
+**Production owners:**
+
+- `third_party/cbm-semantic/satori_semantic.c`
+- `packages/core/assets/semantic-engine/semantic-languages.json`
+- `scripts/build-semantic-engine.mjs`
+- `packages/core/src/language-analysis/versions.ts`
+- generated semantic engine artifacts
+
+**Implementation:**
+
+- Build the module/package tables and exact default-import binding described above.
+- Exclude build-context-sensitive files from authoritative call source/target registration.
+- Make module/package/import/definition ambiguity fail closed with the deterministic rules above.
+- Preserve exact target file/byte-span provenance and the 64-byte `SatoriSemanticResultV1` ABI.
+- Apply the exact Go v2 identity values above.
+- Rebuild the committed semantic engine with the pinned Emscripten toolchain.
 
 **Required non-test checks:**
 
@@ -174,108 +250,123 @@ pnpm semantic:build
 pnpm semantic:verify
 ```
 
-## Task 2: Qualify Go relationship behavior while Go remains `symbol_only`
+**Acceptance:**
 
-This task is required before promotion but is test work. Execute it only when the implementation request explicitly authorizes test changes/execution.
+- ordinary single-module direct calls still resolve observably;
+- nearest-`go.mod` ownership works for nested modules;
+- module-root `package main` identities do not collide across modules;
+- a default import whose declared package name differs from its path basename resolves through the declared name;
+- external `_test` packages do not merge into the importable package namespace;
+- explicit/implicit build-constrained, `_test.go`, and cgo files cannot create authoritative cross-context targets;
+- duplicate/ambiguous package or callable identities never resolve by first/input order;
+- malformed/conflicting module ownership and resource overflow cannot silently degrade into fallback identity.
 
-Reuse the real owners already present:
+## Task 3: Qualify direct Go behavior while Go remains `symbol_only`
 
-- Delete `packages/core/src/relationships/contributions/go.ts` together with `packages/core/src/relationships/contributions/go.test.ts`; production already dispatches through the generic CBM engine.
-- `packages/core/src/relationships/go-call-characterization.test.ts` for end-to-end semantic evidence -> canonical `RelationshipRecord` qualification.
-- `packages/core/src/generation/semantic-workflow-delta.test.ts` for auxiliary/source invalidation and whole-language semantic reanalysis.
-- Existing generic CBM admission tests for proof, exact-span, callable-caller, and ambiguity contracts. Do not copy those cases into Go-specific files.
+This task is required before promotion and is test work. Execute it only when implementation is explicitly authorized to change/run tests.
 
-Qualification must cover:
+Delete the test-only Go wrapper and its test here, then qualify through `WasmSemanticProjectAnalyzer -> CbmSemanticContributionEngine -> central admission`.
 
-- existing direct function calls;
-- existing receiver-method calls;
-- cross-file same-package calls;
-- imported package aliases;
-- nested modules with nearest-`go.mod` ownership;
-- two modules with the same short package/function names but different module paths;
-- module-root `package main` in more than one module;
-- source outside all module roots;
-- unresolved calls;
-- duplicate/ambiguous target identities;
-- zero authoritative `CALLS` for any unproven case;
-- no Go-specific `TESTS` relationships.
+Positive qualification cases:
+
+- same-file direct function call;
+- cross-file same-package direct function call;
+- exact imported package function with explicit alias;
+- exact imported package function with default selector derived from `declaredPackageName`, including a versioned import path whose basename differs;
+- nested/multi-module imported direct function call;
+- same short function name in another module/package is not selected;
+- two module-root `package main` projects remain isolated.
+
+Negative/fail-closed qualification cases:
+
+- receiver/type dispatch, embedded dispatch, interface dispatch, callable alias/callback, and unknown strategies produce no authoritative Tier-3 `CALLS`;
+- unresolved and duplicate/ambiguous targets produce no authoritative `CALLS`;
+- explicit `//go:build` and legacy `// +build` constrained source/target files produce no authoritative edge;
+- mutually exclusive GOOS/GOARCH filename-constrained files produce no authoritative edge;
+- `_test.go` and external `package foo_test` files do not contaminate ordinary package resolution or produce initial v2 `CALLS`;
+- cgo-sensitive files (`import "C"`) produce no authoritative edge;
+- source outside all module roots cannot borrow an unrelated module;
+- malformed/conflicting module metadata fails closed;
+- Go still emits no language-specific `TESTS` relationships.
+
+Use `semantic-workflow-delta.test.ts` only for the existing owner boundary: changing `go.mod`/`go.work` or relevant Go source must cause the whole affected Go semantic project to be reanalyzed for the candidate Publication. Do not create package-scoped incremental machinery in this promotion.
 
 Go remains publicly `symbol_only` until this qualification is green.
 
-## Task 3: Promote the canonical Go capability
+## Task 4: Promote the canonical Go capability
 
 **Production owner:** `packages/core/src/languages/capabilities.ts`.
 
-Do not use `fullNavigationLanguage(...)` for Go because that helper also declares production `testReferenceCapability`. Go needs symbol/owner support plus production calls, with tests/imports/type-aware tiers still disabled. Use one direct declaration unless another current language genuinely needs the same tier.
+Do not use `fullNavigationLanguage(...)` for Go because it also declares production `testReferenceCapability`. Use a direct declaration unless another current language genuinely needs the same tier.
 
-The promoted Go declaration must be:
+The promoted Go declaration is exactly:
 
-- `searchEligibility: production_ready`
-- `parserCapability: production_ready`
-- `symbolExtractionCapability: production_ready`
-- `ownerExtractionCapability: production_ready`
-- `callsCapability: production_ready`
-- `importExportCapability: none`
-- `typeReceiverAwareCapability: none`
-- `testReferenceCapability: none`
-- `publicClaim: calls_v0`
+```text
+searchEligibility:            production_ready
+parserCapability:             production_ready
+symbolExtractionCapability:   production_ready
+ownerExtractionCapability:    production_ready
+callsCapability:              production_ready
+importExportCapability:       none
+typeReceiverAwareCapability:  none
+testReferenceCapability:      none
+publicClaim:                  calls_v0
+```
 
 When test/evidence changes are authorized:
 
-- add `fixtures.calls` pointing to the real Go relationship qualification;
-- move Go out of the `symbol_only` expectations and into the production call-graph set;
+- add `fixtures.calls` pointing at direct-call Go qualification evidence;
+- move Go out of `symbol_only` expectations and into the production call-graph set;
 - update language-evidence expectations so Go call-graph readiness requires compatible Publication relationship navigation;
-- update the registry expectation so `.go` derives `callGraph`, `callGraphBuild`, and `callGraphQuery` as true;
-- add one deterministic call to `fixtures/navigation/go-basic-symbols/svc.go`, record the expected edge, and change its public navigation expectation from `unsupported_language` to graph-ready.
+- update `.go` registry expectations so `callGraph`, `callGraphBuild`, and `callGraphQuery` are true;
+- make `fixtures/navigation/go-basic-symbols` contain one deterministic direct function call and change its public graph expectation from `unsupported_language` to ready.
 
-**Acceptance:** the capability flip alone admits Go into production `buildRelationshipsForRegistry()` through generic `cbm_semantic` dispatch. No Go branch is added to the builder or workflow.
+**Acceptance:** the capability flip makes production `buildRelationshipsForRegistry()` admit qualified Go through the existing generic `cbm_semantic` path. No Go branch is added to the builder, workflow, Context, or MCP serving code.
 
-## Task 4: Make current public MCP/docs claims capability-driven
+## Task 5: Update current public MCP/docs claims
 
-The cleanup already completed the serving architecture. Do not recreate old handler/sidecar code.
+The Publication-backed serving path already supports any language whose canonical capability says `callGraphQuery` and whose current Publication has compatible relationship navigation.
 
-**Production changes:**
+**Production/docs changes:**
 
-- Change `packages/mcp/src/tools/call_graph.ts` from the hard-coded "TS/JS/Python" description to capability-based wording.
-- Update `README.md` so the current call-graph support text names Go as production `calls_v0` after the capability flip.
-- Update `satori-landing/docs/index.html` so Go no longer appears in the `symbol_only` group.
-
-No production edit is expected in `handlers.ts`, `navigation-handlers.ts`, or `relationship-backed-call-graph.ts`: they already gate by `callGraphQuery`, load compatible Publication relationship navigation, and traverse `RelationshipRecord`s.
+- make `packages/mcp/src/tools/call_graph.ts` capability-based rather than hard-coded to TS/JS/Python;
+- update `README.md` to list Go as production `calls_v0` while keeping the claim explicitly conservative/direct-call and advisory;
+- update `satori-landing/docs/index.html` so Go leaves the `symbol_only` group and does not imply receiver/type-aware support.
 
 When tests are authorized:
 
 - move the generic `unsupported_language` witness in `packages/mcp/src/core/search-group-results.inbound-recovery.test.ts` from Go to a language that remains symbol-only, such as Rust;
-- update `packages/mcp/src/tools/registry.test.ts` only if it snapshots or asserts the changed tool description;
-- do not resurrect the deleted handler test suite merely to add a Go case. The real public path is better proven by the product witness below.
+- update `packages/mcp/src/tools/registry.test.ts` only where its description contract is affected;
+- do not recreate deleted handler tests merely to add a Go case.
 
-**Acceptance:** a Go symbol is graph-ready only when both the capability and current Publication relationship navigation are compatible; missing/incompatible navigation keeps the existing structured reindex/not-ready behavior.
+**Acceptance:** a Go symbol is graph-ready only when both the Go capability and current Publication relationship navigation are compatible; missing/incompatible navigation keeps the existing structured not-ready/reindex behavior.
 
-## Task 5: Real TruffleHog public-product witness
+## Task 6: Prove the real public path on TruffleHog
 
 This is qualification/test work and requires explicit authorization before creation or execution.
 
-Create `scripts/trufflehog-go-call-graph-product-run.ts`, modeled on `scripts/trufflehog-mvcc-product-run.ts` without creating a shared harness abstraction.
+Create `scripts/trufflehog-go-call-graph-product-run.ts`, modeled directly on `scripts/trufflehog-mvcc-product-run.ts` without introducing a shared harness abstraction.
 
 The witness must:
 
 - require clean Satori and TruffleHog worktrees;
-- record and hold one exact Satori HEAD and one exact TruffleHog HEAD;
-- build the exact Satori HEAD and use an isolated Satori state root;
+- hold one exact Satori HEAD and one exact TruffleHog HEAD;
+- build the exact Satori HEAD and use isolated Satori state;
 - use one live MCP runtime for create/status polling because mutation phase/progress/error are process-lifetime state;
 - index `/home/hamza/repo/trufflehog` through public `manage_index`;
-- search for `CheckPackageDir` in `hack/checksecretparts/check.go` and require a canonical target with `navigation.graph="ready"`;
-- call public `call_graph(direction="callees")` for that returned target and require `CheckPackageDir -> checkFiles`;
+- search for `CheckPackageDir` in `hack/checksecretparts/check.go` and require its canonical result to report `navigation.graph="ready"`;
+- call `call_graph(direction="callees")` and require the direct `CheckPackageDir -> checkFiles` edge;
 - resolve `checkFiles`, call `call_graph(direction="callers")`, and require `CheckPackageDir`;
-- require call site, files, symbol IDs, and `navigationAuthority.publicationId` to agree with the current Publication;
+- require call site, files, symbol IDs, and `navigationAuthority.publicationId` to agree with the serving Publication;
 - leave both repositories clean and remove isolated state in `finally` unless an explicitly requested debugging mode preserves it.
 
-The real repository witness is intentionally single-module. Synthetic qualification in Task 2 owns nested/multi-module correctness.
+The real witness is intentionally a direct single-module call. Synthetic qualification owns nested modules, build constraints, package-name mismatches, and ambiguity negatives.
 
-## Task 6: Freeze one candidate and qualify it
+## Task 7: Freeze one candidate and qualify it
 
-Complete all production/docs changes before freezing the candidate HEAD. Do not write a receipt and then create another functional commit.
+Complete production, generated, test/evidence, and docs changes before freezing the candidate HEAD. Do not record a qualification receipt and then create another functional commit.
 
-Without test authorization, the candidate-final checks are limited to the relevant non-test gates:
+Without test authorization, do not start this promotion wave. The following non-test commands remain useful implementation checks but are not sufficient to ship `calls_v0`:
 
 ```bash
 pnpm semantic:verify
@@ -283,7 +374,7 @@ pnpm run check
 pnpm run build
 ```
 
-A production `calls_v0` claim is not complete without the qualification lane. When explicit testing/release qualification is authorized, run the proportional exact-head gates needed to prove the capability:
+When explicit testing/release qualification is authorized, run the exact-head promotion gates:
 
 ```bash
 pnpm --filter @zokizuan/satori-core test
@@ -292,21 +383,23 @@ pnpm run release:check
 pnpm --filter @zokizuan/satori-mcp exec tsx ../../scripts/trufflehog-go-call-graph-product-run.ts
 ```
 
-All qualification commands must run on the same exact HEAD. Stop when the required gates pass; do not begin another language in this wave.
+All qualification commands must run on the same exact HEAD. Stop when they pass; do not begin another language in the same wave.
 
 ## Promotion exit criteria
 
-Go may be called production `calls_v0` only when all of these are true:
+Go may be called production `calls_v0` only when all of these are true on one exact candidate:
 
-1. Module ownership is nearest-`go.mod`, and module-owned package identity is canonical import-path identity.
-2. Direct, receiver, alias, cross-file, nested-module, and multi-module call cases resolve to exact target file/span/instance identities.
-3. Ambiguous, duplicate, unresolved, and unproven calls produce zero wrong authoritative edges.
-4. Production indexing admits Go only through generic `cbm_semantic` dispatch; there is no Go branch in the generic workflow/builder.
-5. Go capability metadata reports `calls_v0` while imports/exports, type-aware, and test-reference tiers remain unchanged.
-6. Search/file-outline graph hints require compatible Publication relationship navigation.
-7. Public `call_graph` traverses Go `RelationshipRecord`s in caller and callee directions from the serving Publication.
-8. The TruffleHog witness proves `CheckPackageDir -> checkFiles` through the public MCP surface on the exact qualified HEAD.
-9. Required semantic/build checks and explicitly authorized qualification/release gates pass on that same HEAD.
-10. The repository is clean after qualification.
+1. Public CBM admission accepts only Tier-3 direct-call strategies for Go; receiver/type/embedded/interface/callback/unknown semantic evidence is not exposed as authoritative `CALLS`.
+2. Every source binds to deterministic nearest-`go.mod` ownership, with package/import identity using exact import path plus declared package name.
+3. Build-tagged, GOOS/GOARCH-specific, `_test.go`, external-test-package, and cgo-sensitive files cannot create authoritative cross-context edges.
+4. Direct same-file, same-package cross-file, explicit-alias import, default-declared-name import, nested-module, and multi-module cases bind exact target file/span/instance identities.
+5. Ambiguous package/import/callable identities, malformed/conflicting module ownership, unresolved calls, and resource-limit paths fail closed; no first/input-order target wins.
+6. Go v2 identity is exactly `go-v2` / `cbm-d150ebe4+satori-go-semantic-v2` / `cbm-go-semantic-v2` / `relationship-v11+go-cbm-v2+python-cross-module-constructors+python-native-resolution-v1`, with ABI v1 unchanged.
+7. Production indexing admits Go only through generic `cbm_semantic` dispatch; there is no Go branch in the generic workflow/builder/serving path.
+8. Go capability metadata reports `calls_v0` while imports/exports, `type_receiver_aware`, and test-reference tiers remain disabled.
+9. Search/file-outline graph hints require compatible Publication relationship navigation, and public `call_graph` traverses the serving Publication's Go `RelationshipRecord`s in both directions.
+10. The TruffleHog witness proves direct `CheckPackageDir -> checkFiles` end to end on the same qualified HEAD.
+11. Required semantic/build checks and explicitly authorized Core/MCP/release/product gates pass on that exact HEAD.
+12. The repository is clean after qualification.
 
-After promotion, Go is the reference CBM language: future CBM language promotions should reuse descriptor -> semantic engine -> generic CBM contribution -> capability gate -> Publication relationship navigation -> public `call_graph`, not add language-specific pipeline machinery.
+After promotion, Go is the reference Tier-3 CBM language: future CBM `calls_v0` promotions should reuse descriptor -> semantic engine -> generic CBM direct-call admission -> capability gate -> Publication relationship navigation -> public `call_graph`. Receiver/type-aware promotion is a separate later tier.
