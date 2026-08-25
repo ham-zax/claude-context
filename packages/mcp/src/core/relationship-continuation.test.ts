@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { CallGraphEdge } from "./call-graph.js";
+import type { CallGraphEdgeResult as CallGraphEdge } from "./search-types.js";
 import {
     InvalidRelationshipContinuationError,
     buildRelationshipEdgeKey,

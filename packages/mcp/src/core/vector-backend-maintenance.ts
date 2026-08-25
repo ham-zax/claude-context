@@ -2,17 +2,16 @@ import {
     COLLECTION_LIMIT_MESSAGE,
     Context,
     deleteCollectionWithVerification,
-    INDEX_COMPLETION_MARKER_DOC_ID,
-    inspectCompletionMarker,
     type VectorDatabase,
     SATORI_COLLECTION_FAMILY_PREFIXES,
 } from "@zokizuan/satori-core";
 import path from "node:path";
-import type { SnapshotManager } from "./snapshot.js";
 import {
-    MutationLeaseCoordinator,
-    type RootMutationLease,
-} from "./mutation-lease.js";
+    RootMutationInProgressError,
+    RootMutationRuntime,
+    type MutationOperationPhase,
+    type RootMutationActivity,
+} from "@zokizuan/satori-core/integration";
 
 const MIN_RELIABLE_COLLECTION_CREATED_AT_MS = Date.UTC(2000, 0, 1);
 
@@ -37,19 +36,15 @@ type VectorStoreBackendInfoView = {
 
 type VectorBackendMaintenanceHost = {
     context: Context;
-    snapshotManager: SnapshotManager;
-    getSnapshotAllCodebases(): Array<{ path: string; info: { lastUpdated?: string } }>;
     canonicalizeCodebasePath(codebasePath: string): string;
     resolveCollectionName(codebasePath: string): string;
-    markCodebaseCleared(codebasePath: string, collectionName?: string): void;
-    saveSnapshotIfSupported(): void;
     unwatchCodebase(codebasePath: string): Promise<void>;
-    mutationLeaseCoordinator: MutationLeaseCoordinator | null;
+    mutationRuntime: RootMutationRuntime;
 };
 
 export type ZillizCollectionDropResult =
     | { status: "dropped"; droppedCodebasePath?: string }
-    | { status: "blocked"; activeLease: RootMutationLease }
+    | { status: "blocked"; activeMutation: RootMutationActivity }
     | { status: "unmapped" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,15 +141,15 @@ export class VectorBackendMaintenance {
             : null;
     }
 
-    private buildSnapshotCollectionOwnership(): {
+    private buildPublicationCollectionOwnership(): {
         byCollectionName: Map<string, string>;
         ambiguousCollections: Set<string>;
     } {
         const byCollectionName = new Map<string, string>();
         const ambiguousCollections = new Set<string>();
-        for (const entry of this.host.getSnapshotAllCodebases()) {
-            const canonicalRoot = this.host.canonicalizeCodebasePath(entry.path);
-            const collectionName = this.host.resolveCollectionName(canonicalRoot);
+        for (const publication of this.host.context.listCurrentPublications()) {
+            const canonicalRoot = this.host.canonicalizeCodebasePath(publication.publication.canonicalRoot);
+            const collectionName = publication.publication.vector.collectionName;
             const existingRoot = byCollectionName.get(collectionName);
             if (existingRoot && existingRoot !== canonicalRoot) {
                 byCollectionName.delete(collectionName);
@@ -178,37 +173,6 @@ export class VectorBackendMaintenance {
             return undefined;
         }
         const knownPath = byCollectionName.get(collectionName);
-
-        try {
-            const marker = await vectorDb.getControl(
-                collectionName,
-                INDEX_COMPLETION_MARKER_DOC_ID,
-            );
-            if (marker) {
-                const inspected = inspectCompletionMarker(marker.metadata);
-                const ownership = inspected.status === "current"
-                    ? { kind: inspected.value.kind, codebasePath: inspected.value.codebasePath }
-                    : inspected.status === "requires_reindex"
-                        ? inspected.ownership
-                        : undefined;
-                if (
-                    marker.id !== INDEX_COMPLETION_MARKER_DOC_ID
-                    || !ownership
-                    || marker.kind !== ownership.kind
-                ) {
-                    // A malformed control cannot override the independently
-                    // derived snapshot mapping, but it is not safe payload evidence.
-                    return knownPath;
-                }
-                const markerPath = this.parseCodebaseFromMetadata(ownership);
-                if (markerPath === null || markerPath === undefined) return knownPath;
-                return knownPath && knownPath !== markerPath
-                    ? undefined
-                    : markerPath;
-            }
-        } catch {
-            // Payload rows remain a bounded fallback for legacy or partially available backends.
-        }
 
         try {
             const results = await vectorDb.queryDocuments(collectionName, {
@@ -260,17 +224,17 @@ export class VectorBackendMaintenance {
     private resolveCollectionSortTimestampMs(
         createdAt: string | undefined,
         codebasePath: string | undefined,
-        snapshotLastUpdatedByPath: Map<string, number>,
+        publicationCreatedAtByPath: Map<string, number>,
     ): number | undefined {
         const createdAtMs = this.parseTimestampMs(createdAt);
-        const snapshotMs = codebasePath ? snapshotLastUpdatedByPath.get(codebasePath) : undefined;
+        const publicationMs = codebasePath ? publicationCreatedAtByPath.get(codebasePath) : undefined;
 
         if (createdAtMs !== undefined && createdAtMs >= MIN_RELIABLE_COLLECTION_CREATED_AT_MS) {
             return createdAtMs;
         }
 
-        if (snapshotMs !== undefined) {
-            return snapshotMs;
+        if (publicationMs !== undefined) {
+            return publicationMs;
         }
 
         return createdAtMs;
@@ -282,13 +246,13 @@ export class VectorBackendMaintenance {
         const collectionDetails = await this.listCollectionDetailsWithFallback(vectorDb);
         const codeCollections = collectionDetails.filter((detail) => this.isSatoriCodeCollection(detail.name));
 
-        const { byCollectionName, ambiguousCollections } = this.buildSnapshotCollectionOwnership();
+        const { byCollectionName, ambiguousCollections } = this.buildPublicationCollectionOwnership();
 
-        const snapshotLastUpdatedByPath = new Map<string, number>();
-        for (const entry of this.host.getSnapshotAllCodebases()) {
-            const lastUpdatedMs = this.parseTimestampMs(entry.info.lastUpdated);
-            if (lastUpdatedMs !== undefined) {
-                snapshotLastUpdatedByPath.set(entry.path, lastUpdatedMs);
+        const publicationCreatedAtByPath = new Map<string, number>();
+        for (const publication of this.host.context.listCurrentPublications()) {
+            const createdAtMs = this.parseTimestampMs(publication.publication.createdAt);
+            if (createdAtMs !== undefined) {
+                publicationCreatedAtByPath.set(publication.publication.canonicalRoot, createdAtMs);
             }
         }
 
@@ -308,7 +272,7 @@ export class VectorBackendMaintenance {
                 sortTimestampMs: this.resolveCollectionSortTimestampMs(
                     detail.createdAt,
                     codebasePath,
-                    snapshotLastUpdatedByPath,
+                    publicationCreatedAtByPath,
                 ),
             });
         }
@@ -378,7 +342,6 @@ Agent instructions:
 
     public async dropZillizCollectionForCreate(
         collectionName: string,
-        createLease?: RootMutationLease,
     ): Promise<ZillizCollectionDropResult> {
         const trimmedName = collectionName.trim();
         if (trimmedName.length === 0) {
@@ -394,7 +357,7 @@ Agent instructions:
             throw new Error(`Collection '${trimmedName}' does not exist in the connected Zilliz cluster.`);
         }
 
-        const { byCollectionName, ambiguousCollections } = this.buildSnapshotCollectionOwnership();
+        const { byCollectionName, ambiguousCollections } = this.buildPublicationCollectionOwnership();
         const droppedCodebasePath = await this.resolveCollectionCodebasePath(
             vectorDb,
             trimmedName,
@@ -404,111 +367,57 @@ Agent instructions:
         if (!droppedCodebasePath) {
             return { status: "unmapped" };
         }
-        const coordinator = this.host.mutationLeaseCoordinator;
-        let droppedRootLease: RootMutationLease | undefined;
-        let operationTerminal = false;
-        const persistDroppedRootPhase = (phase: import("../config.js").IndexOperationPhase, mutateSnapshot?: () => void): void => {
-            if (!droppedRootLease) {
-                mutateSnapshot?.();
-                if (mutateSnapshot) {
-                    this.host.saveSnapshotIfSupported();
-                }
-                return;
-            }
-            coordinator?.assertCurrent(droppedRootLease);
-            if (typeof this.host.snapshotManager.commitOperationPhase === "function") {
-                this.host.snapshotManager.commitOperationPhase(
-                    droppedRootLease,
-                    phase,
-                    mutateSnapshot,
-                    () => coordinator?.assertCurrent(droppedRootLease!),
-                );
-            } else if (phase === "accepted" && typeof this.host.snapshotManager.startOperation === "function") {
-                this.host.snapshotManager.startOperation(droppedRootLease);
-                mutateSnapshot?.();
-                if (this.host.snapshotManager.saveCodebaseSnapshot() === false) {
-                    throw new Error(`Failed to persist clear phase '${phase}' for '${droppedCodebasePath}'.`);
-                }
-            } else if (typeof this.host.snapshotManager.transitionOperation === "function") {
-                this.host.snapshotManager.transitionOperation(droppedRootLease, phase);
-                mutateSnapshot?.();
-                if (this.host.snapshotManager.saveCodebaseSnapshot() === false) {
-                    throw new Error(`Failed to persist clear phase '${phase}' for '${droppedCodebasePath}'.`);
-                }
-            } else {
-                mutateSnapshot?.();
-                if (mutateSnapshot) {
-                    this.host.saveSnapshotIfSupported();
-                }
-            }
-            operationTerminal = phase === "completed" || phase === "failed" || phase === "blocked";
-        };
-
-        if (
-            coordinator
-            && (!createLease || !coordinator.isLeaseForRoot(createLease, droppedCodebasePath))
-        ) {
-            const leaseResult = coordinator.acquire(droppedCodebasePath, "clear");
-            if (!leaseResult.acquired) {
-                return { status: "blocked", activeLease: leaseResult.activeLease };
-            }
-            droppedRootLease = leaseResult.lease;
-        }
 
         try {
-            if (droppedRootLease && typeof this.host.snapshotManager.startOperation === "function") {
-                persistDroppedRootPhase("accepted");
-            }
-            if (createLease) {
-                coordinator?.assertCurrent(createLease);
-            }
-            if (droppedRootLease) {
-                coordinator?.assertCurrent(droppedRootLease);
-                persistDroppedRootPhase("writing");
-            }
-            await deleteCollectionWithVerification(vectorDb, trimmedName, {
-                beforeDropAttempt: () => {
-                    if (createLease) {
-                        coordinator?.assertCurrent(createLease);
-                    }
-                    if (droppedRootLease) {
-                        coordinator?.assertCurrent(droppedRootLease);
-                    }
-                },
-            });
+            return await this.host.mutationRuntime.run(droppedCodebasePath, "clear", async () => {
+                const operation = this.host.mutationRuntime.getCurrentOperation(droppedCodebasePath);
+                const ownsClearOperation = operation?.action === "clear";
+                const updateDroppedRootPhase = (
+                    phase: MutationOperationPhase,
+                    update: { error?: string } = {},
+                ): void => {
+                    if (!ownsClearOperation) return;
+                    this.host.mutationRuntime.updateCurrentOperation(droppedCodebasePath, phase, update);
+                };
 
-            if (createLease) {
-                coordinator?.assertCurrent(createLease);
-            }
-            if (droppedRootLease) {
-                coordinator?.assertCurrent(droppedRootLease);
-                persistDroppedRootPhase("publishing");
-            }
-            if (droppedCodebasePath) {
-                persistDroppedRootPhase("completed", () => {
-                    this.host.markCodebaseCleared(droppedCodebasePath, trimmedName);
-                });
                 try {
-                    await this.host.unwatchCodebase(droppedCodebasePath);
-                } catch {
-                    // Best-effort watcher cleanup; dropping cloud collection remains successful.
+                    this.host.mutationRuntime.assertCurrent(droppedCodebasePath);
+                    updateDroppedRootPhase("writing");
+                    const currentPublication = this.host.context.getCurrentPublication(droppedCodebasePath);
+                    const dropsCurrentPublication = currentPublication?.publication.vector.collectionName === trimmedName;
+
+                    if (dropsCurrentPublication) {
+                        await this.host.context.clearIndex(droppedCodebasePath);
+                        try {
+                            await this.host.unwatchCodebase(droppedCodebasePath);
+                        } catch {
+                            // Best-effort watcher cleanup; Publication teardown remains authoritative.
+                        }
+                    } else {
+                        await deleteCollectionWithVerification(vectorDb, trimmedName, {
+                            beforeDropAttempt: () => this.host.mutationRuntime.assertCurrent(droppedCodebasePath),
+                        });
+                    }
+
+                    this.host.mutationRuntime.assertCurrent(droppedCodebasePath);
+                    updateDroppedRootPhase("completed");
+                    return { status: "dropped" as const, droppedCodebasePath };
+                } catch (error) {
+                    if (ownsClearOperation && this.host.mutationRuntime.isCurrent(droppedCodebasePath)) {
+                        try {
+                            updateDroppedRootPhase("failed", { error: formatUnknownError(error) });
+                        } catch {
+                            // The Core mutation scope is authoritative; never overwrite a newer mutation.
+                        }
+                    }
+                    throw error;
                 }
-            }
+            });
         } catch (error) {
-            if (droppedRootLease && !operationTerminal && coordinator?.isCurrent(droppedRootLease)) {
-                try {
-                    persistDroppedRootPhase("failed");
-                } catch {
-                    // Lease fencing is authoritative; never overwrite a newer writer's receipt.
-                }
+            if (error instanceof RootMutationInProgressError) {
+                return { status: "blocked", activeMutation: error.activeMutation };
             }
             throw error;
-        } finally {
-            if (droppedRootLease) {
-                coordinator?.release(droppedRootLease);
-            }
         }
-
-        return { status: "dropped", droppedCodebasePath };
     }
 }

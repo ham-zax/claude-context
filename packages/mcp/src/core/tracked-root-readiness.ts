@@ -1,10 +1,9 @@
 import {
     compareContractStrings,
-    type ProvenGenerationReceipt,
-    type ProvenVectorGenerationReceipt,
+    type PublicationNavigationStatus,
+    type PublicationRef,
 } from "@zokizuan/satori-core";
-import type { CodebaseInfo } from "../config.js";
-import type { CallGraphDirection, CallGraphSymbolRef } from "./call-graph.js";
+import type { CallGraphDirection, CallGraphSymbolRef } from "./search-types.js";
 import type {
     CompletionProofReason,
     CompletionProofValidationResult,
@@ -24,9 +23,9 @@ import type {
 } from "./search-types.js";
 import { SEARCH_RESPONSE_FORMAT_VERSION } from "./search-types.js";
 
-type CodebaseStatus = CodebaseInfo["status"];
+type CodebaseStatus = "indexed" | "indexing";
 
-type TrackedCodebaseInfo = Record<string, unknown> & {
+export type TrackedCodebaseInfo = Record<string, unknown> & {
     status: CodebaseStatus;
     lastUpdated?: string;
     indexStatus?: unknown;
@@ -69,7 +68,7 @@ type CallGraphContext = {
 };
 
 export type TrackedRootIndexingOperation = {
-    action: "create" | "reindex" | "sync" | "repair";
+    action: "create" | "reindex" | "sync";
     phase: string;
     generation: number;
 };
@@ -78,23 +77,10 @@ export type TrackedRootReadinessState =
     | {
         state: "ready";
         root: TrackedRootEntry;
-        navigationAuthorityMode: "canonical_v4" | "source_backed_fingerprint_compatibility";
-        sourceBackedNavigationBinding?: {
-            generationId: string;
-            symbolRegistryManifestHash: string;
-            relationshipManifestHash: string;
-            navigationSealHash: string;
-            publicationCompletedAt: string;
-        };
-        sourceBackedNavigationBindingValidated?: true;
+        navigationAuthorityMode: "canonical_v4";
         proofDebugHint?: CompletionProbeDebugHint;
-        vectorReceipt?: ProvenVectorGenerationReceipt;
-        generationReceipt?: ProvenGenerationReceipt;
-        navigationStatus?: CompletionProofValidationResult['navigationStatus'];
-        preparedObservation?: string;
-        /** One-use proof prepared by manage_index status in this process. */
-        statusPrepared?: true;
-        exactPayloadRecounts?: number;
+        publication: PublicationRef;
+        navigationStatus: PublicationNavigationStatus;
     }
     | { state: "requires_reindex"; codebasePath: string; message?: string }
     | {
@@ -111,18 +97,10 @@ export type TrackedRootReadinessState =
 
 export type TrackedRootReadinessHost = {
     onReadinessPhase?(phase: ReadinessPhase, durationMs: number): void;
-    refreshSnapshotStateFromDisk(): void;
     isPathWithinCodebase(targetPath: string, rootPath: string): boolean;
-    getTrackedRootEntryForPath(codebasePath: string): TrackedRootEntry | null;
-    getMatchingBlockedRoot(absolutePath: string): { path: string; message?: string } | null;
-    getSnapshotAllCodebases(): Array<{ path: string; info: CodebaseInfo }>;
-    getSnapshotIndexedCodebases(): string[];
-    getSnapshotIndexingCodebases(): string[];
-    getSnapshotCodebaseInfo(codebasePath: string): TrackedCodebaseInfo | undefined;
-    getSnapshotCodebaseStatus(codebasePath: string): CodebaseStatus | "not_found";
+    listTrackedRoots(): TrackedRootEntry[];
     getIndexingOperation?(codebasePath: string): TrackedRootIndexingOperation | undefined;
     hasSearchableGeneration?(codebasePath: string): boolean;
-    enforceFingerprintGate(codebasePath: string): { blockedResponse?: unknown; message?: string; reason?: string };
     validateCompletionProof(codebasePath: string): Promise<CompletionProofValidationResult>;
     probeLocalSearchCollectionState(codebasePath: string): Promise<{
         state: "ready" | "missing" | "unknown";
@@ -135,9 +113,7 @@ export type TrackedRootReadinessHost = {
 };
 
 export type ReadinessPhase =
-    | "snapshot_reload"
     | "tracked_root_resolution"
-    | "fingerprint_gate"
     | "completion_proof"
     | "collection_probe";
 
@@ -179,40 +155,13 @@ export class TrackedRootReadiness {
         statuses: CodebaseStatus[],
     ): TrackedRootEntry | null {
         const statusSet = new Set(statuses);
-        const allEntries = this.host.getSnapshotAllCodebases();
-
-        const mergedByPath = new Map<string, TrackedRootEntry>();
-        for (const entry of allEntries) {
-            if (!entry || typeof entry.path !== "string" || !entry.info) {
-                continue;
-            }
-            mergedByPath.set(entry.path, { path: entry.path, info: entry.info as unknown as TrackedCodebaseInfo });
-        }
-
-        for (const codebasePath of this.host.getSnapshotIndexedCodebases()) {
-            if (!mergedByPath.has(codebasePath)) {
-                mergedByPath.set(codebasePath, { path: codebasePath, info: { status: "indexed", lastUpdated: new Date(0).toISOString() } });
-            }
-        }
-
-        for (const codebasePath of this.host.getSnapshotIndexingCodebases()) {
-            if (!mergedByPath.has(codebasePath)) {
-                mergedByPath.set(codebasePath, { path: codebasePath, info: { status: "indexing", lastUpdated: new Date(0).toISOString() } });
-            }
-        }
-
-        const directEntry = this.host.getTrackedRootEntryForPath(absolutePath);
-        if (directEntry && !mergedByPath.has(directEntry.path)) {
-            mergedByPath.set(directEntry.path, directEntry);
-        }
-
-        const matches = Array.from(mergedByPath.values())
-            .filter((entry) => statusSet.has(entry.info.status) && this.host.isPathWithinCodebase(absolutePath, entry.path))
+        const matches = this.host.listTrackedRoots()
+            .filter((entry) => (
+                statusSet.has(entry.info.status)
+                && this.host.isPathWithinCodebase(absolutePath, entry.path)
+            ))
             .sort((a, b) => b.path.length - a.path.length || compareContractStrings(a.path, b.path));
-        if (matches.length === 0) {
-            return null;
-        }
-        return matches[0];
+        return matches[0] ?? null;
     }
 
     public buildMissingLocalCollectionMessage(codebasePath: string, requestedPath: string, collectionName?: string): string {
@@ -302,7 +251,7 @@ export class TrackedRootReadiness {
             recommendedNextAction: this.host.buildManageIndexRecommendedAction(
                 "create",
                 codebasePath,
-                "Restart indexing because the previous attempt failed before completion marker proof.",
+                "Restart indexing because the previous attempt failed before a current Publication became readable.",
             ),
             hints: {
                 create: this.host.buildCreateHint(codebasePath),
@@ -411,39 +360,15 @@ export class TrackedRootReadiness {
         absolutePath: string,
         accessMode: "semantic" | "navigation" = "semantic",
         onPhase?: (phase: ReadinessPhase, durationMs: number) => void,
-        options: { observePreparedRead?: (root: string) => string | null } = {},
     ): Promise<TrackedRootReadinessState> {
-        this.measurePhase("snapshot_reload", () => this.host.refreshSnapshotStateFromDisk(), onPhase);
-
-        const { blockedRoot, searchableRoot, indexingRoot, failedRoot } = this.measurePhase(
+        const { searchableRoot, indexingRoot } = this.measurePhase(
             "tracked_root_resolution",
             () => ({
-                blockedRoot: this.host.getMatchingBlockedRoot(absolutePath),
-                searchableRoot: this.resolveTrackedRoot(absolutePath, ["indexed", "sync_completed"]),
+                searchableRoot: this.resolveTrackedRoot(absolutePath, ["indexed"]),
                 indexingRoot: this.resolveTrackedRoot(absolutePath, ["indexing"]),
-                failedRoot: this.resolveTrackedRoot(absolutePath, ["indexfailed"]),
             }),
             onPhase,
         );
-        if (blockedRoot) {
-            return {
-                state: "requires_reindex",
-                codebasePath: blockedRoot.path,
-                message: blockedRoot.message,
-            };
-        }
-
-        if (
-            failedRoot
-            && (!searchableRoot || failedRoot.path.length >= searchableRoot.path.length)
-            && (!indexingRoot || failedRoot.path.length >= indexingRoot.path.length)
-        ) {
-            return {
-                state: "index_failed",
-                codebasePath: failedRoot.path,
-                info: failedRoot.info,
-            };
-        }
 
         if (!searchableRoot && indexingRoot) {
             const operation = this.host.getIndexingOperation?.(indexingRoot.path);
@@ -451,7 +376,7 @@ export class TrackedRootReadiness {
                 this.host.hasSearchableGeneration?.(indexingRoot.path) ?? false;
             let searchableRead: Extract<TrackedRootReadinessState, { state: "ready" }> | undefined;
             if (searchableGenerationAvailable && operation?.action === "sync") {
-                const evaluated = await this.evaluateRootReadiness(indexingRoot, accessMode, onPhase, options);
+                const evaluated = await this.evaluateRootReadiness(indexingRoot, accessMode, onPhase);
                 if (evaluated.state === "ready") {
                     searchableRead = evaluated;
                 }
@@ -471,38 +396,19 @@ export class TrackedRootReadiness {
             };
         }
 
-        return this.evaluateRootReadiness(searchableRoot, accessMode, onPhase, options);
+        return this.evaluateRootReadiness(searchableRoot, accessMode, onPhase);
     }
 
     private async evaluateRootReadiness(
         targetRoot: TrackedRootEntry,
         accessMode: "semantic" | "navigation",
         onPhase?: (phase: ReadinessPhase, durationMs: number) => void,
-        options: { observePreparedRead?: (root: string) => string | null } = {},
     ): Promise<TrackedRootReadinessState> {
         const effectiveRoot = targetRoot.path;
-        const preparedObservationBefore = options.observePreparedRead?.(effectiveRoot);
-        let navigationAuthorityMode: Extract<
+        const navigationAuthorityMode: Extract<
             TrackedRootReadinessState,
             { state: "ready" }
         >["navigationAuthorityMode"] = "canonical_v4";
-        const gateResult = this.measurePhase(
-            "fingerprint_gate",
-            () => this.host.enforceFingerprintGate(effectiveRoot),
-            onPhase,
-        );
-        if (gateResult.blockedResponse) {
-            if (accessMode === "navigation" && gateResult.reason === "fingerprint_mismatch") {
-                // Navigation sidecars are source-backed and can still be safe under a runtime-model mismatch.
-                navigationAuthorityMode = "source_backed_fingerprint_compatibility";
-            } else {
-                return {
-                    state: "requires_reindex",
-                    codebasePath: effectiveRoot,
-                    message: gateResult.message,
-                };
-            }
-        }
 
         const completionProof = await this.measureAsyncPhase(
             "completion_proof",
@@ -516,96 +422,53 @@ export class TrackedRootReadiness {
                 message: "The accepted index policy is incompatible with the repository's current runtime policy inputs.",
             };
         }
-        if (completionProof.outcome === "fingerprint_mismatch") {
-            if (accessMode === "navigation") {
-                // Completion proof mismatch blocks semantic/vector search, not source-backed navigation.
-                navigationAuthorityMode = "source_backed_fingerprint_compatibility";
-            } else {
-                return {
-                    state: "requires_reindex",
-                    codebasePath: effectiveRoot,
-                    message: "Completion proof fingerprint does not match the current runtime fingerprint.",
-                };
-            }
-        }
-
         if (completionProof.outcome === "stale_local") {
-            if (
-                completionProof.reason === "requires_reindex"
-                || completionProof.reason === "unsupported_authority"
-            ) {
+            if (completionProof.reason === "requires_reindex") {
                 return {
                     state: "requires_reindex",
                     codebasePath: effectiveRoot,
-                    message: completionProof.reason === "unsupported_authority"
-                        ? "The persisted index authority was written by an unsupported newer format. Upgrade this runtime before rebuilding the index."
-                        : "The persisted index authority uses a retired format and must be reindexed.",
+                    message: "The current Publication requires a fresh reindex for this runtime.",
                 };
             }
             return {
                 state: "stale_local",
                 codebasePath: effectiveRoot,
-                reason: completionProof.reason || "missing_marker_doc",
+                reason: completionProof.reason || "missing_publication",
             };
         }
 
-        const proofDebugHint: CompletionProbeDebugHint | undefined = completionProof.outcome === "probe_failed"
-            ? {
-                ok: false,
-                reason: "probe_failed",
-                message: "Completion proof could not be checked, so readiness is based on the local snapshot state.",
-                action: "If navigation looks stale or inconsistent, run manage_index status and then reindex only when the response asks for it.",
-            }
-            : undefined;
+        if (
+            completionProof.outcome !== "valid"
+            || !completionProof.publication
+            || !completionProof.navigationStatus
+        ) {
+            return {
+                state: "stale_local",
+                codebasePath: effectiveRoot,
+                reason: completionProof.reason ?? "probe_failed",
+            };
+        }
 
-        const collectionState = completionProof.outcome === "valid" && completionProof.collectionName
-            ? { state: "ready" as const, collectionName: completionProof.collectionName }
-            : await this.measureAsyncPhase(
-                "collection_probe",
-                () => this.host.probeLocalSearchCollectionState(effectiveRoot),
-                onPhase,
-            );
+        const collectionName = completionProof.publication.publication.vector.collectionName;
+        const collectionState = await this.measureAsyncPhase(
+            "collection_probe",
+            () => this.host.probeLocalSearchCollectionState(effectiveRoot),
+            onPhase,
+        );
         if (collectionState.state === "missing") {
             return {
                 state: "missing_collection",
                 codebasePath: effectiveRoot,
-                collectionName: collectionState.collectionName,
-                proofDebugHint,
+                collectionName: collectionState.collectionName ?? collectionName,
             };
         }
 
-        const preparedObservationAfter = options.observePreparedRead?.(effectiveRoot);
         return {
             state: "ready",
             root: targetRoot,
             navigationAuthorityMode,
-            ...(navigationAuthorityMode === "source_backed_fingerprint_compatibility"
-                && completionProof.marker?.navigation.status === "sealed"
-                ? {
-                    sourceBackedNavigationBinding: {
-                        generationId: completionProof.marker.navigation.generationId,
-                        symbolRegistryManifestHash:
-                            completionProof.marker.navigation.symbolRegistryManifestHash,
-                        relationshipManifestHash:
-                            completionProof.marker.navigation.relationshipManifestHash,
-                        navigationSealHash: completionProof.marker.navigation.sealHash,
-                        publicationCompletedAt: completionProof.marker.completedAt,
-                    },
-                }
-                : {}),
-            proofDebugHint,
-            ...(completionProof.vectorReceipt ? { vectorReceipt: completionProof.vectorReceipt } : {}),
-            ...(completionProof.generationReceipt ? { generationReceipt: completionProof.generationReceipt } : {}),
-            navigationStatus: completionProof.navigationStatus ?? 'unverified',
-            exactPayloadRecounts: completionProof.outcome === "valid"
-                ? completionProof.exactPayloadRecounts ?? 1
-                : collectionState.state === "ready"
-                    ? 1
-                    : 0,
-            ...(preparedObservationBefore
-                && preparedObservationAfter === preparedObservationBefore
-                ? { preparedObservation: preparedObservationAfter }
-                : {}),
+            publication: completionProof.publication,
+            navigationStatus: completionProof.navigationStatus,
         };
     }
 }

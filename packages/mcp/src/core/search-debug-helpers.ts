@@ -1,5 +1,8 @@
 import * as path from "path";
-import type { CallGraphEdge, CallGraphNode } from "./call-graph.js";
+import type {
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNodeResult as CallGraphNode,
+} from "./search-types.js";
 import type { SearchDebugHint, SearchResponseEnvelope, SearchSpan } from "./search-types.js";
 
 type ChangedCodeDebug = NonNullable<SearchDebugHint["changedCode"]>;
@@ -7,7 +10,7 @@ type ChangedCodeDebugSymbol = ChangedCodeDebug["symbols"][number];
 type ChangedCodeDebugDirectCaller = ChangedCodeDebug["directCallers"][number];
 
 export function buildChangedCodeDebug(input: {
-    sidecar: { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null | undefined;
+    graph: { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null | undefined;
     changedFilesState: { available: boolean; files: Set<string> };
     normalizeRelativeFilePath: (relativeFilePath: string) => string;
     normalizeSearchSymbolLabel: (label: string | null | undefined) => string | undefined;
@@ -20,7 +23,7 @@ export function buildChangedCodeDebug(input: {
     if (!input.changedFilesState.available || input.changedFilesState.files.size === 0) {
         return undefined;
     }
-    if (!input.sidecar || !Array.isArray(input.sidecar.nodes) || !Array.isArray(input.sidecar.edges)) {
+    if (!input.graph || !Array.isArray(input.graph.nodes) || !Array.isArray(input.graph.edges)) {
         return undefined;
     }
 
@@ -30,13 +33,13 @@ export function buildChangedCodeDebug(input: {
         .sort((a, b) => a.localeCompare(b));
     const changedFileSet = new Set(changedFiles);
     const nodeById = new Map<string, CallGraphNode>();
-    for (const node of input.sidecar.nodes) {
+    for (const node of input.graph.nodes) {
         if (node && typeof node.symbolId === "string") {
             nodeById.set(node.symbolId, node);
         }
     }
 
-    const changedSymbols = input.sidecar.nodes
+    const changedSymbols = input.graph.nodes
         .filter((node) => node && typeof node.file === "string" && changedFileSet.has(input.normalizeRelativeFilePath(node.file)))
         .map((node): ChangedCodeDebugSymbol => {
             const symbolLabel = input.normalizeSearchSymbolLabel(node.symbolLabel);
@@ -61,7 +64,7 @@ export function buildChangedCodeDebug(input: {
         });
 
     const changedSymbolIds = new Set(changedSymbols.map((symbol) => symbol.symbolId));
-    const directCallers = input.sidecar.edges
+    const directCallers = input.graph.edges
         .filter((edge) => edge && changedSymbolIds.has(edge.dstSymbolId))
         .map((edge): ChangedCodeDebugDirectCaller | null => {
             const caller = nodeById.get(edge.srcSymbolId);

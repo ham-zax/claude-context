@@ -128,7 +128,7 @@ function compactSourceRange(lines: string[], startLine: number, endLine: number,
     };
 }
 
-type ReadFileSearchableStatus = 'indexed' | 'sync_completed' | 'indexing';
+type ReadFileSearchableStatus = 'indexed' | 'indexing';
 type ReadFileCodebaseCandidate = {
     path: string;
     status: ReadFileSearchableStatus;
@@ -145,10 +145,10 @@ type ToolTextResponse = {
     isError?: boolean;
 };
 
-const READ_FILE_DISCOVERY_STATUSES = new Set<ReadFileSearchableStatus>(['indexed', 'sync_completed', 'indexing']);
-const READ_FILE_RESOLVE_STATUSES = new Set<ReadFileSearchableStatus>(['indexed', 'sync_completed']);
+const READ_FILE_DISCOVERY_STATUSES = new Set<ReadFileSearchableStatus>(['indexed', 'indexing']);
+const READ_FILE_RESOLVE_STATUSES = new Set<ReadFileSearchableStatus>(['indexed']);
 /** Statuses that may serve file content via read_file. */
-const READ_FILE_CONTENT_ALLOW_STATUSES = new Set<ReadFileSearchableStatus>(['indexed', 'sync_completed']);
+const READ_FILE_CONTENT_ALLOW_STATUSES = new Set<ReadFileSearchableStatus>(['indexed']);
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -321,21 +321,6 @@ function relativePathRejectedResponse(requestedPath: string): ToolTextResponse {
     };
 }
 
-function toReadFileSearchableStatus(status: unknown): ReadFileSearchableStatus | undefined {
-    if (status === 'indexed' || status === 'sync_completed' || status === 'indexing') {
-        return status;
-    }
-    return undefined;
-}
-
-function refreshSnapshotState(ctx: ToolContext): void {
-    const snapshotManager = ctx.snapshotManager as unknown as {
-        refreshFromDiskIfChanged?: () => boolean;
-    };
-    if (typeof snapshotManager.refreshFromDiskIfChanged === 'function') {
-        snapshotManager.refreshFromDiskIfChanged();
-    }
-}
 
 /**
  * Resolve to an absolute path and, when the target exists, its real path
@@ -363,50 +348,18 @@ function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
 const READ_FILE_CHANGED_FILES_CACHE = new Map<string, ChangedFilesCacheEntry>();
 
 /**
- * The published searchable-file manifest for a resolved root: the persisted
- * snapshot manifest (set on every index completion) plus the synchronizer's
- * live tracked paths when the session context exposes them. Membership is
- * decided on forward-slash relative paths, matching the authorization helper.
+ * The published searchable-file manifest for a resolved root is the exact file
+ * coverage recorded in the current Publication's source.json. Partial
+ * Publication unprocessedPaths are deliberately excluded because those paths
+ * were not published into the vector generation.
  */
 function resolvePublishedRelativePaths(codebaseRoot: string, ctx: ToolContext): Set<string> {
-    const published = new Set<string>();
-    refreshSnapshotState(ctx);
-    const allCodebases = typeof ctx.snapshotManager?.getAllCodebases === "function"
-        ? ctx.snapshotManager.getAllCodebases()
-        : [];
-    if (Array.isArray(allCodebases)) {
-        for (const item of allCodebases) {
-            if (!item || typeof item.path !== "string") {
-                continue;
-            }
-            const rootResult = requireAbsoluteFilesystemPath(item.path, "codebase.path");
-            if (!rootResult.ok) {
-                continue;
-            }
-            if (canonicalizeFilesystemPath(rootResult.absolutePath) !== codebaseRoot) {
-                continue;
-            }
-            const manifest = (item.info as { indexManifest?: { indexedPaths?: unknown } } | undefined)?.indexManifest;
-            if (manifest && Array.isArray(manifest.indexedPaths)) {
-                for (const entry of manifest.indexedPaths) {
-                    if (typeof entry === "string" && entry.length > 0) {
-                        published.add(normalizeRelativePath(entry));
-                    }
-                }
-            }
-            break;
-        }
-    }
-    const tracked = (ctx.context as { getTrackedRelativePaths?: (root: string) => string[] } | undefined)
-        ?.getTrackedRelativePaths?.(codebaseRoot);
-    if (Array.isArray(tracked)) {
-        for (const entry of tracked) {
-            if (typeof entry === "string" && entry.length > 0) {
-                published.add(normalizeRelativePath(entry));
-            }
-        }
-    }
-    return published;
+    const publication = ctx.context.getCurrentPublication(codebaseRoot);
+    if (!publication) return new Set<string>();
+    const checkpoint = ctx.context.getPublicationSourceCheckpoint(publication);
+    return new Set(
+        (checkpoint?.fileHashes ?? []).map(([relativePath]) => normalizeRelativePath(relativePath)),
+    );
 }
 
 /**
@@ -468,38 +421,28 @@ function collectCodebaseCandidatesForFile(
     ctx: ToolContext,
     allowedStatuses: ReadonlySet<ReadFileSearchableStatus>
 ): ReadFileCodebaseCandidate[] {
-    refreshSnapshotState(ctx);
-    const allCodebases = typeof ctx.snapshotManager?.getAllCodebases === "function"
-        ? ctx.snapshotManager.getAllCodebases()
-        : [];
-    if (!Array.isArray(allCodebases)) {
-        return [];
+    const tracked = new Map<string, ReadFileSearchableStatus>();
+    for (const publication of ctx.context.listCurrentPublications()) {
+        tracked.set(publication.publication.canonicalRoot, 'indexed');
+    }
+    for (const activity of ctx.mutationRuntime.listActiveMutations()) {
+        if (activity.action === 'create' || activity.action === 'reindex') {
+            tracked.set(activity.canonicalRoot, 'indexing');
+        }
     }
 
     const canonicalTarget = canonicalizeFilesystemPath(absolutePath);
     const candidates: ReadFileCodebaseCandidate[] = [];
-    for (const item of allCodebases) {
-        if (!item || typeof item.path !== "string") {
-            continue;
-        }
-        // Snapshot roots must already be absolute. Never CWD-resolve relative/legacy roots.
-        const rootResult = requireAbsoluteFilesystemPath(item.path, "codebase.path");
-        if (!rootResult.ok) {
-            continue;
-        }
+    for (const [rootPath, status] of tracked) {
+        const rootResult = requireAbsoluteFilesystemPath(rootPath, "codebase.path");
+        if (!rootResult.ok) continue;
         const candidatePath = canonicalizeFilesystemPath(rootResult.absolutePath);
-        // Only roots visible to this session may serve reads; a missing policy
-        // fails closed (authorizeRoot throws) rather than authorizing anything.
         try {
             ctx.workspacePolicy.authorizeRoot(candidatePath);
         } catch {
             continue;
         }
-        if (!isPathInsideRoot(canonicalTarget, candidatePath)) {
-            continue;
-        }
-        const status = toReadFileSearchableStatus(item.info?.status);
-        if (!status || !allowedStatuses.has(status)) {
+        if (!isPathInsideRoot(canonicalTarget, candidatePath) || !allowedStatuses.has(status)) {
             continue;
         }
         candidates.push({ path: candidatePath, status });
@@ -511,7 +454,7 @@ function collectCodebaseCandidatesForFile(
 
 /**
  * Returns the longest searchable root that contains the canonical path, or undefined.
- * Only `indexed` and `sync_completed` roots may serve content.
+ * Only roots with a current Publication may serve content.
  */
 function resolveContentAllowedRoot(canonicalPath: string, ctx: ToolContext): string | undefined {
     const candidates = collectCodebaseCandidatesForFile(canonicalPath, ctx, READ_FILE_CONTENT_ALLOW_STATUSES);
@@ -569,68 +512,40 @@ async function touchResolvedCodebaseRoot(absolutePath: string, ctx: ToolContext)
 }
 
 function resolveIndexingBlockForFile(absolutePath: string, ctx: ToolContext): ReadFileIndexingBlock | undefined {
-    refreshSnapshotState(ctx);
-    const allCodebases = typeof ctx.snapshotManager?.getAllCodebases === "function"
-        ? ctx.snapshotManager.getAllCodebases()
-        : [];
-    if (!Array.isArray(allCodebases)) {
-        return undefined;
-    }
-
     const canonicalTarget = canonicalizeFilesystemPath(absolutePath);
     const candidates: Array<{
         codebaseRoot: string;
-        info: { indexingPercentage: number; lastUpdated: string };
-        matches: boolean;
+        progressPct: number | null;
+        lastUpdated: string | null;
     }> = [];
 
-    for (const item of allCodebases) {
-        if (!item || typeof item.path !== "string" || !item.info || item.info.status !== "indexing") {
-            continue;
-        }
-        // Snapshot roots must already be absolute. Never CWD-resolve relative/legacy roots.
-        const rootResult = requireAbsoluteFilesystemPath(item.path, "codebase.path");
-        if (!rootResult.ok) {
-            continue;
-        }
+    for (const activity of ctx.mutationRuntime.listActiveMutations()) {
+        if (activity.action !== 'create' && activity.action !== 'reindex') continue;
+        const rootResult = requireAbsoluteFilesystemPath(activity.canonicalRoot, "codebase.path");
+        if (!rootResult.ok) continue;
         const codebaseRoot = canonicalizeFilesystemPath(rootResult.absolutePath);
-        // Only roots visible to this session may contribute indexing-status
-        // disclosure; a missing policy fails closed (authorizeRoot throws)
-        // rather than leaking an out-of-workspace root's path or progress.
         try {
             ctx.workspacePolicy.authorizeRoot(codebaseRoot);
         } catch {
             continue;
         }
+        if (!isPathInsideRoot(canonicalTarget, codebaseRoot)) continue;
+        const operation = ctx.mutationRuntime.getOperation(activity.canonicalRoot);
         candidates.push({
             codebaseRoot,
-            info: item.info,
-            matches: isPathInsideRoot(canonicalTarget, codebaseRoot)
+            progressPct: operation?.progress ?? null,
+            lastUpdated: operation?.updatedAt ?? activity.acceptedAt,
         });
     }
 
-    const matchingCandidates = candidates
-        .filter((item) => item.matches)
-        .sort((a, b) => b.codebaseRoot.length - a.codebaseRoot.length || a.codebaseRoot.localeCompare(b.codebaseRoot));
-
-    if (matchingCandidates.length === 0) {
-        return undefined;
-    }
-
-    const match = matchingCandidates[0];
-    const progressRaw = match.info?.indexingPercentage;
-    const lastUpdatedRaw = match.info?.lastUpdated;
-    return {
-        codebaseRoot: match.codebaseRoot,
-        progressPct: Number.isFinite(progressRaw) ? Number(progressRaw) : null,
-        lastUpdated: typeof lastUpdatedRaw === "string" ? lastUpdatedRaw : null
-    };
+    candidates.sort((a, b) => b.codebaseRoot.length - a.codebaseRoot.length || a.codebaseRoot.localeCompare(b.codebaseRoot));
+    return candidates[0];
 }
 
 export const readFileTool: McpTool = {
     name: "read_file",
     description: () =>
-        "Read source only under an indexed/searchable Satori root. open_symbol / symbol_context requests return bounded symbol source with continuation-aware excerpts: exact symbolId/symbolLabel requests require mode plus open_symbol contractVersion 2 and exactly one context or continuation operation, while unversioned open_symbol startLine/endLine requests return exact source text. Ordinary explicit start_line/end_line ranges return the exact requested source range; ranges longer than 40 lines return a compact one-line envelope with a declaration preview and the complete exact source. presentation='full' returns raw multiline source, subject to the read_file byte/range limits. The canonical real path must remain inside a tracked indexed or sync_completed root.",
+        "Read source only under a Satori root with a current Publication. open_symbol / symbol_context requests return bounded symbol source with continuation-aware excerpts: exact symbolId/symbolLabel requests require mode plus open_symbol contractVersion 2 and exactly one context or continuation operation, while unversioned open_symbol startLine/endLine requests return exact source text. Ordinary explicit start_line/end_line ranges return the exact requested source range; ranges longer than 40 lines return a compact one-line envelope with a declaration preview and the complete exact source. presentation='full' returns raw multiline source, subject to the read_file byte/range limits. The canonical real path must remain inside the published source coverage of a current Publication.",
     inputSchemaZod: () => readFileInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = readFileInputSchema.safeParse(args || {});
@@ -695,7 +610,7 @@ export const readFileTool: McpTool = {
                                     }
                                 },
                                 debugIndexing: {
-                                    completionProof: "marker_doc"
+                                    completionProof: "current_publication"
                                 }
                             },
                             indexing: {

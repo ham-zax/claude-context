@@ -34,7 +34,6 @@ function offlineEnv(root: string): NodeJS.ProcessEnv {
         VECTOR_STORE_PROVIDER: "LanceDB",
         LANCEDB_PATH: path.join(root, "lancedb"),
         MCP_ENABLE_WATCHER: "true",
-        MCP_WATCH_DEBOUNCE_MS: "5000",
     };
 }
 
@@ -50,11 +49,6 @@ test("shared runtime identity is exact, non-secret, and bounded to eligible Linu
     assert.equal(isSharedOfflineRuntimeEligible({ ...env, EMBEDDING_PROVIDER: "Ollama" }), false);
 
     const identity = buildSharedRuntimeIdentity(runtimeEntry, env);
-    const changed = buildSharedRuntimeIdentity(runtimeEntry, {
-        ...env,
-        MCP_WATCH_DEBOUNCE_MS: "6000",
-    });
-    assert.equal(identity.hash, changed.hash);
     assert.notEqual(
         buildSharedRuntimeIdentity(runtimeEntry, {
             ...env,
@@ -115,13 +109,6 @@ test("shared runtime identity is exact, non-secret, and bounded to eligible Linu
             SATORI_LATEON_PROFILE: "lateon_offline_quality_projection_v2_d32_v2",
         }).hash,
         lateOnD32Identity.hash,
-    );
-    assert.notEqual(
-        buildSharedRuntimeIdentity(runtimeEntry, {
-            ...env,
-            SATORI_NAVIGATION_BACKEND: "sqlite",
-        }).hash,
-        identity.hash,
     );
     assert.equal(JSON.stringify(identity).includes("must-not-be-hashed"), false);
     assert.equal(identity.stateRoot, root);

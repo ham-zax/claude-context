@@ -3,7 +3,9 @@ import * as path from "path";
 import {
     analyzePythonSymbolStructure,
     getSupportedExtensionsForCapability,
-    type NavigationStore,
+    JsonNavigationStore,
+    type PublicationLease,
+    type PublicationRef,
     type PythonStructuralAnalysis,
     type SymbolRecord,
 } from "@zokizuan/satori-core";
@@ -34,19 +36,17 @@ import type {
     TrackedRootReadiness,
     TrackedRootReadinessState,
 } from "./tracked-root-readiness.js";
-import type {
-    CallGraphDirection,
-    CallGraphEdge,
-    CallGraphNode,
-    CallGraphNote,
-    CallGraphSymbolRef,
-    CallGraphTestReference,
-} from "./call-graph.js";
-import { resolveCallGraphNavigationAuthority } from "./relationship-backed-call-graph.js";
+import {
+    resolveCallGraphNavigationAuthority,
+    type RelationshipBackedCallGraphResult,
+} from "./relationship-backed-call-graph.js";
 import { ToolResponseBuilders } from "./tool-response-builders.js";
 import type {
+    CallGraphDirection,
+    CallGraphEdgeResult as CallGraphEdge,
     CallGraphHint,
     CallGraphResponseEnvelope,
+    CallGraphSymbolRef,
     FileOutlineInput,
     FileOutlineResponseEnvelope,
     FileOutlineStatus,
@@ -60,10 +60,10 @@ type ToolTextResponse = {
     isError?: boolean;
 };
 
-type CallGraphUnavailableReason = "missing_symbol" | "stale_symbol_ref" | "unsupported_language" | "missing_relationship_sidecar" | "incompatible_relationship_sidecar" | "missing_symbol_registry" | "incompatible_symbol_registry";
+type CallGraphUnavailableReason = "missing_symbol" | "stale_symbol_ref" | "unsupported_language" | "missing_relationship_navigation" | "incompatible_relationship_navigation" | "missing_symbol_registry" | "incompatible_symbol_registry";
 
 const OUTLINE_SUPPORTED_EXTENSIONS = getSupportedExtensionsForCapability("fileOutline");
-const PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_DETAIL = "Partial index/search data may exist, but navigation sidecars were not published because indexing stopped before completion.";
+const PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_DETAIL = "Partial index/search data may exist, but Publication navigation was not published because indexing stopped before completion.";
 
 type NavigationHandlersHost = {
     toolResponseBuilders: ToolResponseBuilders;
@@ -82,38 +82,23 @@ type NavigationHandlersHost = {
     prepareNavigationRead(absolutePath: string): Promise<TrackedRootReadinessState>;
 
 
-    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
-
-
-    getPreparedReadCacheObservation(codebasePath: string): {
-        observation: string | null;
-        sourceObservation: string | null;
-        unavailableReason?: string;
-    };
-
-
-    isPreparedNavigationReadCurrent(
-        preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
-    ): boolean;
-
-
+    acquirePublicationLease(codebasePath: string): PublicationLease | undefined;
+    isPublicationAdmitted(publication: PublicationRef): Promise<boolean>;
+    getPublicationNavigationAddress(publication: PublicationRef): {
+        publicationId: string;
+        navigationRoot: string;
+    } | null;
+    getPublicationNavigationStatus(publication: PublicationRef): Promise<import("@zokizuan/satori-core").PublicationNavigationStatus>;
     loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         file: string,
-    ): ReturnType<NavigationStore["getSymbolsByFile"]>;
+    ): ReturnType<JsonNavigationStore["getSymbolsByFile"]>;
 
 
     loadPreparedNavigationCompatibility(
         preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
         expectedSymbolRegistryManifestHash: string,
-    ): ReturnType<NavigationStore["getCompatibilityState"]>;
-
-
-    isPreparedNavigationReadCurrent(
-        preparedRead: Extract<TrackedRootReadinessState, { state: "ready" }>,
-    ): boolean;
-
-
+    ): ReturnType<JsonNavigationStore["getCompatibilityState"]>;
     stringifyToolJson(value: unknown): string;
 
 
@@ -146,7 +131,7 @@ type NavigationHandlersHost = {
     buildStaleSymbolRefFileOutlinePayload(codebasePath: string, args: Record<string, unknown>, detail?: string): FileOutlineResponseEnvelope;
 
 
-    loadRegistryValidatedCallGraphSidecar(input: {
+    loadRegistryValidatedRelationshipNavigation(input: {
         codebaseRoot: string;
         registryManifestHash?: string;
         registryUnavailableReason?: CallGraphUnavailableReason;
@@ -170,16 +155,6 @@ type NavigationHandlersHost = {
 
 
     touchWatchedCodebase(codebasePath: string): Promise<void>;
-
-
-    getWatcherObservation(codebasePath: string): {
-        observedEventEpoch: number;
-        comparedThroughEventEpoch: number;
-        coverage: "starting" | "ready" | "disabled" | "failed" | "stopped";
-        coverageGapSinceEpoch?: number;
-    };
-
-
     buildSyncHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
 
 
@@ -207,7 +182,8 @@ type NavigationHandlersHost = {
 
     buildRelationshipBackedCallGraph(input: {
         codebaseRoot: string;
-        generationId?: string;
+        publicationId: string;
+        navigationRoot: string;
         registry: {
             symbolsByInstanceId: Map<string, SymbolRecord>;
         };
@@ -218,54 +194,8 @@ type NavigationHandlersHost = {
         depth: number;
         limit: number;
         readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
-    }): Promise<{
-        supported: true;
-        direction: CallGraphDirection;
-        depth: number;
-        limit: number;
-        nodes: CallGraphNode[];
-        edges: CallGraphEdge[];
-        notes: CallGraphNote[];
-        warnings?: string[];
-        testReferences?: CallGraphTestReference[];
-        notesTruncated: boolean;
-        totalNoteCount: number;
-        returnedNoteCount: number;
-        sidecar: {
-            builtAt: string;
-            nodeCount: number;
-            edgeCount: number;
-        };
-        hints?: Record<string, unknown>;
-    } | null>;
+    }): Promise<RelationshipBackedCallGraphResult | null>;
 };
-
-function sourceObservationUnavailable(
-    host: Pick<NavigationHandlersHost, "getWatcherObservation">,
-    codebasePath: string,
-): boolean {
-    const observation = host.getWatcherObservation(codebasePath);
-    const hasPendingEvent = observation.observedEventEpoch > observation.comparedThroughEventEpoch;
-    const observationUnavailable = observation.coverage !== "ready"
-        || observation.coverageGapSinceEpoch !== undefined;
-    return hasPendingEvent || observationUnavailable;
-}
-
-type NavigationSourceBarrier = ReturnType<NavigationHandlersHost["getWatcherObservation"]>;
-
-function navigationSourceBarrierMatches(
-    left: NavigationSourceBarrier,
-    right: NavigationSourceBarrier,
-): boolean {
-    return left.coverage === "ready"
-        && right.coverage === "ready"
-        && left.coverageGapSinceEpoch === undefined
-        && right.coverageGapSinceEpoch === undefined
-        && left.observedEventEpoch === left.comparedThroughEventEpoch
-        && right.observedEventEpoch === right.comparedThroughEventEpoch
-        && left.observedEventEpoch === right.observedEventEpoch
-        && left.comparedThroughEventEpoch === right.comparedThroughEventEpoch;
-}
 
 function buildSourceStateUnverifiedFileOutlinePayload(
     host: Pick<NavigationHandlersHost, "buildSyncHint">,
@@ -344,26 +274,6 @@ function buildAnalysisUnavailableFileOutlinePayload(
         hasMore: false,
         message,
     };
-}
-
-function sourceBarrierMatches(
-    left: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>,
-    right: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>,
-): boolean {
-    return left.observation !== null
-        && left.sourceObservation !== null
-        && left.unavailableReason === undefined
-        && right.observation === left.observation
-        && right.sourceObservation === left.sourceObservation
-        && right.unavailableReason === undefined;
-}
-
-function preparedNavigationBarrierMatches(
-    preparedReadWasCurrent: boolean,
-    preparedReadIsCurrent: boolean,
-): boolean {
-    return preparedReadWasCurrent
-        && preparedReadIsCurrent;
 }
 
 function withPythonStructuralAnalysis(
@@ -524,8 +434,6 @@ export class NavigationHandlers {
             : "summary";
 
         let effectiveRoot = "";
-        let preparedNavigationReadWasCurrent = false;
-        let navigationSourceBarrier: NavigationSourceBarrier | undefined;
         try {
             const absoluteRootResult = requireAbsoluteFilesystemPath(args.path, "path");
             if (!absoluteRootResult.ok) {
@@ -609,24 +517,14 @@ export class NavigationHandlers {
 
             const session = new PreparedPublicationReadSession<TrackedRootReadinessState>({
                 prepareReadiness: () => this.host.prepareNavigationRead(absoluteRoot),
-                acquirePublicationReadLease: (prepared) => (
+                acquirePublicationLease: (prepared) => (
                     prepared.state === 'ready'
-                        ? this.host.acquirePublicationReadLease(prepared.root.path)
-                        : Promise.resolve(undefined)
+                        ? this.host.acquirePublicationLease(prepared.root.path)
+                        : undefined
                 ),
-                revalidateAuthority: (prepared) => (
-                    prepared.state !== 'ready'
-                    || (navigationSourceBarrier !== undefined
-                        && preparedNavigationBarrierMatches(
-                            preparedNavigationReadWasCurrent,
-                            this.host.isPreparedNavigationReadCurrent(prepared),
-                        ) && navigationSourceBarrierMatches(
-                            navigationSourceBarrier,
-                            this.host.getWatcherObservation(prepared.root.path),
-                        ))
-                ),
+                isLeaseAdmitted: (_prepared, lease) => this.host.isPublicationAdmitted(lease),
             });
-            const outcome = await session.read(async (trackedRootState): Promise<ToolTextResponse> => {
+            const outcome = await session.read(async (trackedRootState, lease): Promise<ToolTextResponse> => {
             if (trackedRootState.state === "requires_reindex") {
                 const payload = this.host.buildRequiresReindexFileOutlinePayload(trackedRootState.codebasePath, {
                     ...args,
@@ -685,28 +583,16 @@ export class NavigationHandlers {
                 };
             }
 
-            const matchedRoot = trackedRootState.root;
+            const leasedRootState: Extract<TrackedRootReadinessState, { state: 'ready' }> = {
+                ...trackedRootState,
+                publication: lease,
+                navigationStatus: await this.host.getPublicationNavigationStatus(lease),
+            };
+            const matchedRoot = leasedRootState.root;
             effectiveRoot = matchedRoot.path;
-            navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-            preparedNavigationReadWasCurrent =
-                this.host.isPreparedNavigationReadCurrent(trackedRootState);
-            if (sourceObservationUnavailable(this.host, effectiveRoot)) {
-                await this.host.touchWatchedCodebase(effectiveRoot);
-                const payload = buildSourceStateUnverifiedFileOutlinePayload(
-                    this.host,
-                    effectiveRoot,
-                    normalizedFile,
-                );
-                return {
-                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
-                };
-            }
-            const analysisBarrier = detail === "analysis"
-                ? this.host.getPreparedReadCacheObservation(effectiveRoot)
-                : undefined;
             const absoluteFile = path.resolve(effectiveRoot, normalizedFile);
 
-            const proofDebugHint = trackedRootState.proofDebugHint;
+            const proofDebugHint = leasedRootState.proofDebugHint;
 
             if (this.host.isPartialIndexNavigationUnavailable(matchedRoot.info)) {
                 const payload = this.host.withProofDebugHint(this.host.buildRequiresReindexFileOutlinePayload(
@@ -729,7 +615,7 @@ export class NavigationHandlers {
                 : requestedEndLine;
 
             const registryState = await this.host.loadPreparedNavigationSymbolsByFile(
-                trackedRootState,
+                leasedRootState,
                 normalizedFile,
             );
             if (registryState.status !== "ok") {
@@ -796,7 +682,7 @@ export class NavigationHandlers {
                     absoluteFile,
                     sourceBytes,
                     registryState,
-                    trackedRootState,
+                    trackedRootState: leasedRootState,
                     proofDebugHint,
                     limitSymbols,
                     resolveMode,
@@ -805,9 +691,7 @@ export class NavigationHandlers {
                     windowStart,
                     windowEnd,
                     detail,
-                    analysisBarrier,
-                    preparedNavigationReadWasCurrent,
-                    navigationSourceBarrier,
+                    lease,
                     workspacePolicy,
                     publishedRelativePaths,
                 });
@@ -945,8 +829,6 @@ export class NavigationHandlers {
         }
 
         let effectiveRoot = "";
-        let preparedNavigationReadWasCurrent = false;
-        let navigationSourceBarrier: NavigationSourceBarrier | undefined;
         try {
             const absolutePath = absolutePathResult.absolutePath;
             if (!fs.existsSync(absolutePath)) {
@@ -992,24 +874,14 @@ export class NavigationHandlers {
 
             const session = new PreparedPublicationReadSession<TrackedRootReadinessState>({
                 prepareReadiness: () => this.host.prepareNavigationRead(absolutePath),
-                acquirePublicationReadLease: (prepared) => (
+                acquirePublicationLease: (prepared) => (
                     prepared.state === 'ready'
-                        ? this.host.acquirePublicationReadLease(prepared.root.path)
-                        : Promise.resolve(undefined)
+                        ? this.host.acquirePublicationLease(prepared.root.path)
+                        : undefined
                 ),
-                revalidateAuthority: (prepared) => (
-                    prepared.state !== 'ready'
-                    || (navigationSourceBarrier !== undefined
-                        && preparedNavigationBarrierMatches(
-                            preparedNavigationReadWasCurrent,
-                            this.host.isPreparedNavigationReadCurrent(prepared),
-                        ) && navigationSourceBarrierMatches(
-                            navigationSourceBarrier,
-                            this.host.getWatcherObservation(prepared.root.path),
-                        ))
-                ),
+                isLeaseAdmitted: (_prepared, lease) => this.host.isPublicationAdmitted(lease),
             });
-            const outcome = await session.read(async (trackedRootState): Promise<ToolTextResponse> => {
+            const outcome = await session.read(async (trackedRootState, lease): Promise<ToolTextResponse> => {
             if (trackedRootState.state === "requires_reindex") {
                 const payload = this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     trackedRootState.codebasePath,
@@ -1102,12 +974,14 @@ export class NavigationHandlers {
                 };
             }
 
-            const searchableRoot = trackedRootState.root;
+            const leasedRootState: Extract<TrackedRootReadinessState, { state: 'ready' }> = {
+                ...trackedRootState,
+                publication: lease,
+                navigationStatus: await this.host.getPublicationNavigationStatus(lease),
+            };
+            const searchableRoot = leasedRootState.root;
             effectiveRoot = searchableRoot.path;
-            navigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-            preparedNavigationReadWasCurrent =
-                this.host.isPreparedNavigationReadCurrent(trackedRootState);
-            const proofDebugHint = trackedRootState.proofDebugHint;
+            const proofDebugHint = leasedRootState.proofDebugHint;
 
             if (this.host.isPartialIndexNavigationUnavailable(searchableRoot.info)) {
                 const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
@@ -1129,7 +1003,7 @@ export class NavigationHandlers {
 
             const normalizedSymbolFile = this.host.normalizeRelativeFilePath(symbolRef.file);
             const registryState = await this.host.loadPreparedNavigationSymbolsByFile(
-                trackedRootState,
+                leasedRootState,
                 normalizedSymbolFile,
             );
             if (registryState.status !== "ok") {
@@ -1331,16 +1205,16 @@ export class NavigationHandlers {
             }
 
             const compatibility = await this.host.loadPreparedNavigationCompatibility(
-                trackedRootState,
+                leasedRootState,
                 registryState.manifestHash,
             );
             if (compatibility.relationships.status !== "ok") {
                 const reason = compatibility.relationships.status === "missing"
-                    ? "missing_relationship_sidecar"
-                    : "incompatible_relationship_sidecar";
+                    ? "missing_relationship_navigation"
+                    : "incompatible_relationship_navigation";
                 const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
                     effectiveRoot,
-                    `Relationship sidecar is ${compatibility.relationships.status}: ${compatibility.relationships.reason}`,
+                    `Relationship navigation is ${compatibility.relationships.status}: ${compatibility.relationships.reason}`,
                     {
                         path: absolutePath,
                         symbolRef,
@@ -1355,15 +1229,28 @@ export class NavigationHandlers {
                 };
             }
 
+            const servingNavigation = this.host.getPublicationNavigationAddress(lease);
+            if (!servingNavigation) {
+                const payload = this.host.withProofDebugHint(this.host.toolResponseBuilders.buildRequiresReindexCallGraphPayload(
+                    effectiveRoot,
+                    "Publication navigation identity is unavailable for call-graph traversal.",
+                    {
+                        path: absolutePath,
+                        symbolRef,
+                        direction,
+                        depth,
+                        limit,
+                    },
+                ), proofDebugHint);
+                return {
+                    content: [{ type: "text", text: this.host.stringifyToolJson(payload) }],
+                };
+            }
+
             const relationshipBackedGraph = await this.host.buildRelationshipBackedCallGraph({
                 codebaseRoot: effectiveRoot,
-                ...(trackedRootState.generationReceipt
-                    || trackedRootState.sourceBackedNavigationBinding
-                    ? {
-                        generationId: trackedRootState.generationReceipt?.navigation.generationId
-                            ?? trackedRootState.sourceBackedNavigationBinding?.generationId,
-                    }
-                    : {}),
+                publicationId: servingNavigation.publicationId,
+                navigationRoot: servingNavigation.navigationRoot,
                 registry: registryState.registry,
                 registryManifestHash: registryState.manifestHash,
                 resolvedSymbol,
@@ -1392,15 +1279,10 @@ export class NavigationHandlers {
 
             await this.host.touchWatchedCodebase(effectiveRoot);
             const navigationAuthority = resolveCallGraphNavigationAuthority({
-                generationId: trackedRootState.generationReceipt?.navigation.generationId
-                    ?? trackedRootState.sourceBackedNavigationBinding?.generationId,
-                navigationSealHash: trackedRootState.generationReceipt?.navigation.navigationSealHash
-                    ?? trackedRootState.sourceBackedNavigationBinding?.navigationSealHash,
-                relationshipManifestHash: trackedRootState.generationReceipt?.navigation.relationshipManifestHash
-                    ?? trackedRootState.sourceBackedNavigationBinding?.relationshipManifestHash,
+                publicationId: servingNavigation.publicationId,
+                relationshipManifestHash: compatibility.relationships.manifestHash,
                 relationshipBuiltAt: compatibility.relationships.manifest.builtAt,
-                publicationCompletedAt: trackedRootState.generationReceipt?.marker?.completedAt
-                    ?? trackedRootState.sourceBackedNavigationBinding?.publicationCompletedAt,
+                publicationCompletedAt: lease.publication.createdAt,
             });
             const payload = this.host.withProofDebugHint({
                 status: "ok" as const,
@@ -1499,9 +1381,7 @@ export class NavigationHandlers {
         windowStart?: number;
         windowEnd?: number;
         detail: "summary" | "analysis" | "relationships";
-        analysisBarrier?: ReturnType<NavigationHandlersHost["getPreparedReadCacheObservation"]>;
-        preparedNavigationReadWasCurrent: boolean;
-        navigationSourceBarrier: ReturnType<NavigationHandlersHost["getWatcherObservation"]>;
+        lease: PublicationLease;
         workspacePolicy: SessionWorkspacePolicy;
         publishedRelativePaths: ReadonlySet<string>;
     }): Promise<ToolTextResponse> {
@@ -1521,9 +1401,7 @@ export class NavigationHandlers {
             windowStart,
             windowEnd,
             detail,
-            analysisBarrier,
-            preparedNavigationReadWasCurrent,
-            navigationSourceBarrier,
+            lease,
             workspacePolicy,
             publishedRelativePaths,
         } = input;
@@ -1576,7 +1454,7 @@ export class NavigationHandlers {
             }
         };
 
-        const relationshipGraph = await this.host.loadRegistryValidatedCallGraphSidecar({
+        const relationshipGraph = await this.host.loadRegistryValidatedRelationshipNavigation({
             codebaseRoot: effectiveRoot,
             registryManifestHash: registryState.manifestHash,
             preparedRead: trackedRootState,
@@ -1603,19 +1481,7 @@ export class NavigationHandlers {
         await this.host.touchWatchedCodebase(effectiveRoot);
         let projectedPayload = payload;
         if (detail === "analysis" && payload.status === "ok") {
-            if (
-                !analysisBarrier
-                || analysisBarrier.observation === null
-                || analysisBarrier.sourceObservation === null
-                || analysisBarrier.unavailableReason !== undefined
-            ) {
-                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                    effectiveRoot,
-                    normalizedFile,
-                    "Satori could not verify this analysis against the current source.",
-                );
-            } else {
-                const selectedSymbol = payload.outline?.symbols[0];
+            const selectedSymbol = payload.outline?.symbols[0];
                 if (!selectedSymbol) {
                     projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
                         effectiveRoot,
@@ -1639,20 +1505,7 @@ export class NavigationHandlers {
                             span: selectedSymbol.span,
                         },
                     });
-                    const finalBarrier = this.host.getPreparedReadCacheObservation(effectiveRoot);
-                    if (!sourceBarrierMatches(analysisBarrier, finalBarrier)) {
-                        projectedPayload = buildSourceStateUnverifiedFileOutlinePayload(
-                            this.host,
-                            effectiveRoot,
-                            normalizedFile,
-                            "source_changed_during_request",
-                            {
-                                ...args,
-                                path: effectiveRoot,
-                                file: normalizedFile,
-                            },
-                        );
-                    } else if (analysisResult.status === "ok") {
+                    if (analysisResult.status === "ok") {
                         projectedPayload = withPythonStructuralAnalysis(
                             payload,
                             analysisResult.analysis,
@@ -1670,7 +1523,6 @@ export class NavigationHandlers {
                         );
                     }
                 }
-            }
         }
         if (detail === "relationships" && payload.status === "ok") {
             const selectedSymbol = payload.outline?.symbols[0];
@@ -1690,13 +1542,8 @@ export class NavigationHandlers {
                     payload,
                     unavailableRelationshipMetadata("unsupported"),
                 );
-            } else if (!preparedNavigationReadWasCurrent) {
-                projectedPayload = withRelationshipMetadata(
-                    payload,
-                    unavailableRelationshipMetadata("unavailable"),
-                );
             } else {
-                const navigationBinding = trackedRootState.generationReceipt?.navigation;
+                const navigationBinding = this.host.getPublicationNavigationAddress(lease);
                 const compatibility = navigationBinding
                     ? await this.host.loadPreparedNavigationCompatibility(
                         trackedRootState,
@@ -1704,14 +1551,11 @@ export class NavigationHandlers {
                     )
                     : undefined;
                 const relationshipState = compatibility?.relationships;
-                const traversals = (
-                    navigationBinding
-                    && registryState.manifestHash === navigationBinding.symbolRegistryManifestHash
-                    && relationshipState?.status === "ok"
-                    && relationshipState.manifestHash === navigationBinding.relationshipManifestHash
-                )
+                const traversals = navigationBinding && relationshipState?.status === "ok"
                     ? await prepareRelationshipTraversals({
                         rootPath: effectiveRoot,
+                        publicationId: navigationBinding.publicationId,
+                        navigationRoot: navigationBinding.navigationRoot,
                         registryManifestIdentity: registryState.manifestHash,
                         relationshipManifestIdentity: relationshipState.manifestHash,
                         registry: registryState.registry,
@@ -1721,10 +1565,7 @@ export class NavigationHandlers {
                         relationshipWarnings: relationshipState.warnings || [],
                     })
                     : undefined;
-                if (
-                    !traversals
-                    || !this.host.isPreparedNavigationReadCurrent(trackedRootState)
-                ) {
+                if (!traversals) {
                     projectedPayload = withRelationshipMetadata(
                         payload,
                         unavailableRelationshipMetadata("unavailable"),
@@ -1741,22 +1582,8 @@ export class NavigationHandlers {
                 }
             }
         }
-        const finalNavigationSourceBarrier = this.host.getWatcherObservation(effectiveRoot);
-        const guidedPayload = !preparedNavigationBarrierMatches(
-            preparedNavigationReadWasCurrent,
-            this.host.isPreparedNavigationReadCurrent(trackedRootState),
-        ) || !navigationSourceBarrierMatches(
-                navigationSourceBarrier,
-                finalNavigationSourceBarrier,
-            )
-            ? buildSourceStateUnverifiedFileOutlinePayload(
-                this.host,
-                effectiveRoot,
-                normalizedFile,
-            )
-            : projectedPayload;
         return {
-            content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(guidedPayload, proofDebugHint)) }],
+            content: [{ type: "text", text: this.host.stringifyToolJson(this.host.withProofDebugHint(projectedPayload, proofDebugHint)) }],
         };
     }
 }

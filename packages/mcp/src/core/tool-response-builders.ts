@@ -1,6 +1,6 @@
 import { DEFAULT_MANAGE_RETRY_AFTER_MS } from "../config.js";
 import type { VectorBackendDiagnostic } from "./backend-diagnostics.js";
-import type { CallGraphDirection, CallGraphSymbolRef } from "./call-graph.js";
+import type { CallGraphDirection, CallGraphSymbolRef } from "./search-types.js";
 import type { CompletionProofReason } from "./completion-proof.js";
 import type {
     ManageIndexAction,
@@ -52,13 +52,12 @@ type CallGraphContext = {
 
 export type ToolResponseBuildersHost = {
     buildManageIndexRecommendedAction(
-        action: "create" | "reindex" | "sync" | "status" | "repair",
+        action: "create" | "reindex" | "sync" | "status",
         codebasePath: string,
         rationale: string,
     ): SearchRecommendedNextAction;
     buildCreateHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildReindexHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
-    buildRepairHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildSyncHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildStatusHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
     buildStaleLocalHint(codebasePath: string, reason: CompletionProofReason): Record<string, unknown>;
@@ -69,9 +68,6 @@ export type ToolResponseBuildersHost = {
         phase: string | null;
     };
     buildCompatibilityDiagnostics(codebasePath: string): FingerprintCompatibilityDiagnostics;
-    buildRuntimeMismatchHint(codebasePath: string, diagnostics: FingerprintCompatibilityDiagnostics): Record<string, unknown>;
-    isRuntimeFingerprintMismatch(diagnostics: FingerprintCompatibilityDiagnostics): boolean;
-    summarizeFingerprint(fingerprint: FingerprintCompatibilityDiagnostics["runtimeFingerprint"]): string;
 };
 
 export class ToolResponseBuilders {
@@ -108,7 +104,6 @@ export class ToolResponseBuilders {
             syncStats?: ManageIndexResponseEnvelope["syncStats"];
             operation?: ManageIndexResponseEnvelope["operation"];
             publication?: ManageIndexResponseEnvelope["publication"];
-            repairProof?: ManageIndexResponseEnvelope["repairProof"];
         } = {},
     ): ManageIndexResponseEnvelope {
         const envelope: ManageIndexResponseEnvelope = {
@@ -157,9 +152,6 @@ export class ToolResponseBuilders {
         if (options.publication) {
             envelope.publication = options.publication;
         }
-        if (options.repairProof) {
-            envelope.repairProof = options.repairProof;
-        }
         return envelope;
     }
 
@@ -191,7 +183,6 @@ export class ToolResponseBuilders {
             languageCapabilities?: ManageIndexResponseEnvelope["languageCapabilities"];
             syncStats?: ManageIndexResponseEnvelope["syncStats"];
             operation?: ManageIndexResponseEnvelope["operation"];
-            repairProof?: ManageIndexResponseEnvelope["repairProof"];
         } = {},
     ): { content: Array<{ type: "text"; text: string }> } {
         return this.manageResponseFromEnvelope(
@@ -205,7 +196,6 @@ export class ToolResponseBuilders {
         diagnostic: VectorBackendDiagnostic,
         humanText = diagnostic.message,
         operation?: ManageIndexResponseEnvelope["operation"],
-        repairProof?: ManageIndexResponseEnvelope["repairProof"],
     ): { content: Array<{ type: "text"; text: string }> } {
         return this.manageResponse(action, codebasePath, "error", humanText, {
             reason: "vector_backend_unavailable",
@@ -213,7 +203,6 @@ export class ToolResponseBuilders {
             message: diagnostic.message,
             hints: diagnostic.hints,
             operation,
-            repairProof,
         });
     }
 
@@ -233,16 +222,7 @@ export class ToolResponseBuilders {
             limit: searchContext.limit,
         } : {};
         const compatibility = this.host.buildCompatibilityDiagnostics(codebasePath);
-        const runtimeMismatch = this.host.isRuntimeFingerprintMismatch(compatibility);
-        const message = runtimeMismatch
-            ? (() => {
-                const indexedFingerprint = compatibility.indexedFingerprint
-                    ? this.host.summarizeFingerprint(compatibility.indexedFingerprint)
-                    : "the indexed runtime fingerprint";
-                const runtimeFingerprint = this.host.summarizeFingerprint(compatibility.runtimeFingerprint);
-                return `${detailLine}The current Satori runtime does not match the existing index at '${codebasePath}'. Recovery: restart Satori with ${indexedFingerprint} to reuse the current index. Reindex only if you intentionally want to migrate this repo to ${runtimeFingerprint}.`;
-            })()
-            : `${detailLine}The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`;
+        const message = `${detailLine}The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`;
         return {
             ...base,
             status: "requires_reindex",
@@ -250,22 +230,12 @@ export class ToolResponseBuilders {
             codebasePath,
             results: [],
             message,
-            recommendedNextAction: runtimeMismatch
-                ? this.host.buildManageIndexRecommendedAction(
-                    "status",
-                    codebasePath,
-                    "Inspect the indexed/runtime fingerprints, then restart a matching runtime unless you intend to migrate the index.",
-                )
-                : this.host.buildManageIndexRecommendedAction(
-                    "reindex",
-                    codebasePath,
-                    "Rebuild the incompatible index before retrying search.",
-                ),
+            recommendedNextAction: this.host.buildManageIndexRecommendedAction(
+                "reindex",
+                codebasePath,
+                "Rebuild the incompatible index before retrying search.",
+            ),
             hints: {
-                ...(runtimeMismatch ? {
-                    status: this.host.buildStatusHint(codebasePath),
-                    runtimeMismatch: this.host.buildRuntimeMismatchHint(codebasePath, compatibility),
-                } : {}),
                 reindex: this.host.buildReindexHint(codebasePath),
             },
             compatibility,
@@ -281,13 +251,12 @@ export class ToolResponseBuilders {
             | "requires_reindex"
             | "partial_index_navigation_unavailable"
             | "missing_symbol_registry"
-            | "missing_relationship_sidecar"
+            | "missing_relationship_navigation"
             | "incompatible_symbol_registry"
-            | "incompatible_relationship_sidecar"
+            | "incompatible_relationship_navigation"
         > = "requires_reindex",
     ): CallGraphResponseEnvelope {
         const detailLine = detail ? `${detail}\n\n` : "";
-        const preferRepair = reason === "missing_symbol_registry" || reason === "missing_relationship_sidecar";
         return {
             status: "requires_reindex",
             supported: false,
@@ -301,11 +270,8 @@ export class ToolResponseBuilders {
             nodes: [],
             edges: [],
             notes: [],
-            message: preferRepair
-                ? `${detailLine}The index at '${codebasePath}' is missing navigation sidecars. Please run manage_index with {"action":"repair","path":"${codebasePath}"}.`
-                : `${detailLine}The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
+            message: `${detailLine}The index at '${codebasePath}' is missing or has incompatible Publication navigation and must be rebuilt. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
             hints: {
-                ...(preferRepair ? { repair: this.host.buildRepairHint(codebasePath) } : {}),
                 reindex: this.host.buildReindexHint(codebasePath),
             },
             compatibility: this.host.buildCompatibilityDiagnostics(codebasePath),
@@ -337,7 +303,7 @@ export class ToolResponseBuilders {
             hints: {
                 status: this.host.buildStatusHint(codebasePath),
                 debugIndexing: {
-                    completionProof: "marker_doc",
+                    completionProof: "current_publication",
                 },
             },
             indexing: this.host.buildIndexingMetadata(codebasePath),
@@ -566,7 +532,7 @@ export class ToolResponseBuilders {
             hints: {
                 status: this.host.buildStatusHint(codebasePath),
                 debugIndexing: {
-                    completionProof: "marker_doc",
+                    completionProof: "current_publication",
                 },
             },
             indexing: this.host.buildIndexingMetadata(codebasePath),
@@ -580,15 +546,15 @@ export class ToolResponseBuilders {
     ): FileOutlineResponseEnvelope & Record<string, unknown> {
         if (staleLocal) {
             return {
-                status: "not_indexed",
-                reason: "not_indexed",
+                status: "requires_reindex",
+                reason: "requires_reindex",
                 path: requestedPath,
                 file,
                 outline: null,
                 hasMore: false,
                 message: this.host.buildStaleLocalMessage(staleLocal.codebaseRoot, requestedPath, staleLocal.reason),
                 hints: {
-                    create: this.host.buildCreateHint(staleLocal.codebaseRoot),
+                    reindex: this.host.buildReindexHint(staleLocal.codebaseRoot),
                     staleLocal: this.host.buildStaleLocalHint(staleLocal.codebaseRoot, staleLocal.reason),
                 },
             };
@@ -631,16 +597,16 @@ export class ToolResponseBuilders {
     ): CallGraphResponseEnvelope {
         const baseHints: Record<string, unknown> = staleLocal
             ? {
-                create: this.host.buildCreateHint(staleLocal.codebaseRoot),
+                reindex: this.host.buildReindexHint(staleLocal.codebaseRoot),
                 staleLocal: this.host.buildStaleLocalHint(staleLocal.codebaseRoot, staleLocal.reason),
             }
             : {
                 create: this.host.buildCreateHint(context.path),
             };
         return {
-            status: "not_indexed",
+            status: staleLocal ? "requires_reindex" : "not_indexed",
             supported: false,
-            reason: "not_indexed",
+            reason: staleLocal ? "requires_reindex" : "not_indexed",
             path: context.path,
             symbolRef: context.symbolRef,
             direction: context.direction,
@@ -677,7 +643,7 @@ export class ToolResponseBuilders {
             hints: {
                 status: this.host.buildStatusHint(codebasePath),
                 debugIndexing: {
-                    completionProof: "marker_doc",
+                    completionProof: "current_publication",
                 },
             },
             indexing: this.host.buildIndexingMetadata(codebasePath),

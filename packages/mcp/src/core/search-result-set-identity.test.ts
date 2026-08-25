@@ -13,16 +13,11 @@ function input(): SearchRankedSetBindingInput {
         rankingPolicyIdentity: SEARCH_NATIVE_RERANKER_ORDER_POLICY_ID,
         disclosurePolicyVersion: "search_disclosure_v1",
         publicationIdentity: {
+            publicationId: "publication-1",
             collectionName: "repo-generation",
-            marker: { runId: "run-1", indexPolicyHash: "b".repeat(64) },
-            policyDocumentDigest: "c".repeat(64),
-            navigation: {
-                status: "sealed",
-                receipt: { generationId: "navigation-1", sealHash: "d".repeat(64) },
-            },
+            policyHash: "b".repeat(64),
+            navigation: { status: "bound" },
         },
-        preparedObservation: "prepared-1",
-        sourceObservation: "source-1",
         rerankerIdentity: {
             kind: "provider",
             provider: "lateon",
@@ -99,13 +94,10 @@ test("ranked-set binding is canonical across equivalent object key order", () =>
     const reordered = withMutation((value) => ({
         ...value,
         publicationIdentity: {
-            navigation: {
-                status: "sealed",
-                receipt: { sealHash: "d".repeat(64), generationId: "navigation-1" },
-            },
-            policyDocumentDigest: "c".repeat(64),
-            marker: { indexPolicyHash: "b".repeat(64), runId: "run-1" },
+            navigation: { status: "bound" },
+            policyHash: "b".repeat(64),
             collectionName: "repo-generation",
+            publicationId: "publication-1",
         },
     }));
 
@@ -131,7 +123,7 @@ test("ranked-set digest binds every pageable group field and complete order", ()
             return value;
         }),
         withMutation((value) => {
-            value.orderedResults[0]!.navigation = { graph: "missing_relationship_sidecar" };
+            value.orderedResults[0]!.navigation = { graph: "missing_relationship_navigation" };
             return value;
         }),
         withMutation((value) => ({
@@ -152,15 +144,13 @@ test("ranked-set digest binds every pageable group field and complete order", ()
     }
 });
 
-test("ranked-set digest binds publication, observations, policies, model, and projection", () => {
+test("ranked-set digest binds publication, policies, model, and projection", () => {
     const baseline = buildSearchRankedSetBinding(input()).rankedSetDigest;
     const variants = [
         withMutation((value) => ({
             ...value,
             publicationIdentity: { ...value.publicationIdentity, collectionName: "other" },
         })),
-        withMutation((value) => ({ ...value, preparedObservation: "prepared-2" })),
-        withMutation((value) => ({ ...value, sourceObservation: "source-2" })),
         withMutation((value) => ({ ...value, queryPolicyDigest: "f".repeat(64) })),
         withMutation((value) => ({ ...value, rankingPolicyIdentity: "ranking-v2" })),
         withMutation((value) => ({ ...value, disclosurePolicyVersion: "disclosure-v2" })),
@@ -201,7 +191,7 @@ test("ranked-set binding rejects incomplete publication authority", () => {
         ...input(),
         publicationIdentity: {
             ...input().publicationIdentity,
-            policyDocumentDigest: "",
+            publicationId: "",
         },
     }), /publication identity must be complete/);
     assert.throws(() => buildSearchRankedSetBinding({

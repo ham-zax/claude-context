@@ -69,7 +69,7 @@ function formatWorkspaceAuthorizationError(
 
 export const callGraphTool: McpTool = {
     name: 'call_graph',
-    description: () => 'Traverse registry-resolved caller/callee relationships for indexed TS/JS/Python code. When a grouped search result has navigation.graph="ready", pass its target directly as symbolRef and use the envelope codebaseRoot as path. Relationship-backed CALLS v0 is heuristic and name-based (not a compiler-grade call graph); traversal is bounded, incomplete, advisory, and not authoritative blast-radius proof, so empty or short edge lists are not proof of no callers. Verify impact with search_codebase, read_file, tests, or direct references. In successful responses, sidecar.nodeCount and sidecar.edgeCount count only records returned in that response.',
+    description: () => 'Traverse Publication relationship navigation for indexed TS/JS/Python code. When a grouped search result has navigation.graph="ready", pass its target directly as symbolRef and use the envelope codebaseRoot as path. Relationship-backed CALLS v0 is heuristic and name-based (not a compiler-grade call graph); traversal is bounded, incomplete, advisory, and not authoritative blast-radius proof, so empty or short edge lists are not proof of no callers. Verify impact with search_codebase, read_file, tests, or direct references. In successful responses, graph.nodeCount and graph.edgeCount count only records returned in that response.',
     inputSchemaZod: () => callGraphInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const normalizedArgs = (args && typeof args === 'object')

@@ -6,14 +6,12 @@ import crypto from "node:crypto";
 import {
     assertNetworkPolicyAllowsEndpoint,
     EMBEDDING_NORMALIZATION_POLICY_VERSION,
-    indexFingerprintsEqual as coreIndexFingerprintsEqual,
     envManager,
     EMBEDDING_PROJECTION_VERSION,
     LANGUAGE_PARSER_VERSION,
     LEXICAL_PROJECTION_VERSION,
     RELATIONSHIP_BUILDER_VERSION,
     SYMBOL_EXTRACTOR_VERSION,
-    parseIndexFingerprint as parseCoreIndexFingerprint,
     POTION_DIMENSION,
     POTION_MAX_TIMEOUT_MS,
     POTION_MODEL_ID,
@@ -21,7 +19,6 @@ import {
     resolveExecutionPolicy,
     resolveOllamaModelIdentity,
     type ExecutionProfile,
-    type IndexFingerprint as CoreIndexFingerprint,
     type NetworkPolicy,
     type ResolvedOllamaModelIdentity,
 } from "@zokizuan/satori-core";
@@ -39,21 +36,16 @@ export type RerankerProvider = 'none' | 'voyage' | 'lateon';
 export type ResolvedVectorStoreConfig =
     | { vectorStoreProvider: 'Milvus' }
     | { vectorStoreProvider: 'LanceDB'; lanceDbPath: string };
-export type FingerprintSource = 'verified' | 'assumed_v2';
 /**
  * Distinct freshness / sync timing knobs. Values may coincide numerically but
  * must not be treated as one concept (see docs/plans/INCREMENTAL_INDEX_FRESHNESS_PLAN.md).
  *
- * WATCHER_DEBOUNCE_MS — quiet period after FS events before forced ensureFreshness(0).
  * BACKGROUND_SYNC_INITIAL_DELAY_MS — first background tick after embedding runtime starts.
  * BACKGROUND_SYNC_INTERVAL_MS — delay between background ticks (self-scheduling).
  * SEARCH_FRESHNESS_THRESHOLD_MS — search-path ensureFreshness max age for skipped_recent.
  * BACKGROUND_FRESHNESS_THRESHOLD_MS — background-path ensureFreshness max age.
  * MANUAL_SYNC_FRESHNESS_THRESHOLD_MS — manage_index sync force-check (0 = always compare).
  */
-export const WATCHER_DEBOUNCE_MS = 5_000;
-/** @deprecated Prefer WATCHER_DEBOUNCE_MS; kept for existing imports. */
-export const DEFAULT_WATCH_DEBOUNCE_MS = WATCHER_DEBOUNCE_MS;
 export const BACKGROUND_SYNC_INITIAL_DELAY_MS = 5_000;
 export const BACKGROUND_SYNC_INTERVAL_MS = 3 * 60 * 1000;
 export const SEARCH_FRESHNESS_THRESHOLD_MS = 3 * 60 * 1000;
@@ -97,51 +89,19 @@ export function resolveMcpPackageVersion(): string {
     return "0.0.0";
 }
 
-export type IndexFingerprint = Omit<
-    CoreIndexFingerprint,
-    'embeddingProvider' | 'vectorStoreProvider' | 'schemaVersion'
-> & {
+export interface IndexFingerprint {
     embeddingProvider: EmbeddingProvider;
+    embeddingModel: string;
+    embeddingDimension: number;
+    embeddingArtifactDigest?: string | null;
+    embeddingNormalizationPolicy?: string;
     vectorStoreProvider: VectorStoreProvider;
     schemaVersion: 'dense_v3' | 'hybrid_v3';
-};
-
-export function parseIndexFingerprint(value: unknown): IndexFingerprint | null {
-    const record = parseCoreIndexFingerprint(value);
-    if (
-        !record
-        || !['OpenAI', 'VoyageAI', 'Gemini', 'Ollama', 'Potion'].includes(record.embeddingProvider)
-        || !['Milvus', 'LanceDB'].includes(record.vectorStoreProvider)
-        || (record.schemaVersion !== 'dense_v3' && record.schemaVersion !== 'hybrid_v3')
-    ) {
-        return null;
-    }
-    return {
-        embeddingProvider: record.embeddingProvider as EmbeddingProvider,
-        embeddingModel: record.embeddingModel,
-        embeddingDimension: record.embeddingDimension,
-        ...(record.embeddingArtifactDigest !== undefined
-            ? { embeddingArtifactDigest: record.embeddingArtifactDigest }
-            : {}),
-        ...(record.embeddingNormalizationPolicy !== undefined
-            ? { embeddingNormalizationPolicy: record.embeddingNormalizationPolicy }
-            : {}),
-        vectorStoreProvider: record.vectorStoreProvider as VectorStoreProvider,
-        schemaVersion: record.schemaVersion,
-        ...(record.parserVersion !== undefined ? { parserVersion: record.parserVersion } : {}),
-        ...(record.extractorVersion !== undefined ? { extractorVersion: record.extractorVersion } : {}),
-        ...(record.relationshipVersion !== undefined ? { relationshipVersion: record.relationshipVersion } : {}),
-        ...(record.embeddingProjectionVersion !== undefined
-            ? { embeddingProjectionVersion: record.embeddingProjectionVersion }
-            : {}),
-        ...(record.lexicalProjectionVersion !== undefined
-            ? { lexicalProjectionVersion: record.lexicalProjectionVersion }
-            : {}),
-    };
-}
-
-export function indexFingerprintsEqual(left: IndexFingerprint, right: IndexFingerprint): boolean {
-    return coreIndexFingerprintsEqual(left, right);
+    parserVersion?: string;
+    extractorVersion?: string;
+    relationshipVersion?: string;
+    embeddingProjectionVersion?: string;
+    lexicalProjectionVersion?: string;
 }
 
 export function summarizeIndexFingerprint(fingerprint: IndexFingerprint): string {
@@ -162,25 +122,6 @@ export function summarizeIndexFingerprint(fingerprint: IndexFingerprint): string
         `embedding_projection=${summarizeIdentity(fingerprint.embeddingProjectionVersion)}`,
         `lexical_projection=${summarizeIdentity(fingerprint.lexicalProjectionVersion)}`,
     ].join('/');
-}
-
-export type IndexOperationAction = 'create' | 'reindex' | 'sync' | 'repair' | 'clear';
-export type IndexOperationPhase = 'accepted' | 'preflight' | 'scanning' | 'writing' | 'proving' | 'publishing' | 'completed' | 'failed' | 'blocked';
-
-export interface IndexOperationReceipt {
-    id: string;
-    action: IndexOperationAction;
-    canonicalRoot: string;
-    generation: number;
-    acceptedAt: string;
-    phase: IndexOperationPhase;
-    lastDurableTransitionAt: string;
-    runtimeFingerprint: IndexFingerprint;
-    writer: {
-        ownerId: string;
-        pid: number;
-        satoriVersion: string;
-    };
 }
 
 export interface ContextMcpConfig {
@@ -232,8 +173,6 @@ export interface ContextMcpConfig {
     readFileMaxBytes?: number;
     // Filesystem observation behavior
     watchSyncEnabled?: boolean;
-    /** @deprecated Accepted for compatibility but ignored by observation-only watching. */
-    watchDebounceMs?: number;
 }
 
 export function resolveRerankerProvider(config: ContextMcpConfig): RerankerProvider {
@@ -266,111 +205,6 @@ export function assertExecutionPolicyAllowsRuntime(input: {
         );
     }
 }
-
-export interface CallGraphSidecarInfo {
-    version: 'v3';
-    sidecarPath: string;
-    builtAt: string;
-    nodeCount: number;
-    edgeCount: number;
-    noteCount: number;
-    fingerprint: IndexFingerprint;
-}
-
-export interface CodebaseIndexManifest {
-    indexedPaths: string[];
-    updatedAt: string;
-}
-
-export interface CodebaseClearTombstone {
-    clearedAt: string;
-    collectionName?: string;
-}
-
-// Legacy format (v1) - for backward compatibility
-export interface CodebaseSnapshotV1 {
-    indexedCodebases: string[];
-    indexingCodebases: string[] | Record<string, number>;  // Array (legacy) or Map of codebase path to progress percentage
-    lastUpdated: string;
-}
-
-interface CodebaseInfoBase {
-    lastUpdated: string;
-    collectionName?: string;
-    indexFingerprint?: IndexFingerprint;
-    fingerprintSource?: FingerprintSource;
-    reindexReason?: 'legacy_unverified_fingerprint' | 'fingerprint_mismatch' | 'missing_fingerprint' | 'navigation_recovery_failed' | 'backend_requires_full_rebuild' | 'index_policy_changed';
-    callGraphSidecar?: CallGraphSidecarInfo;
-    indexManifest?: CodebaseIndexManifest;
-    ignoreRulesVersion?: number;
-    ignoreControlSignature?: string;
-}
-
-// Indexing state - when indexing is in progress
-export interface CodebaseInfoIndexing extends CodebaseInfoBase {
-    status: 'indexing';
-    indexingPercentage: number;  // Current progress percentage
-}
-
-// Indexed state - when indexing completed successfully
-export interface CodebaseInfoIndexed extends CodebaseInfoBase {
-    status: 'indexed';
-    indexedFiles: number;        // Number of files indexed
-    totalChunks: number;         // Total number of chunks generated
-    indexStatus: 'completed' | 'limit_reached';  // Status from indexing result
-}
-
-// Index failed state - when indexing failed
-export interface CodebaseInfoIndexFailed extends CodebaseInfoBase {
-    status: 'indexfailed';
-    errorMessage: string;        // Error message from the failure
-    lastAttemptedPercentage?: number;  // Progress when failure occurred
-}
-
-// Sync completed state - when incremental sync completed
-export interface CodebaseInfoSyncCompleted extends CodebaseInfoBase {
-    status: 'sync_completed';
-    added: number;               // Number of new files added
-    removed: number;             // Number of files removed
-    modified: number;            // Number of files modified
-    totalChanges: number;        // Total number of changes
-    indexedFiles?: number;       // Completion-proof file count for rollback authority
-    totalChunks?: number;        // Completion-proof payload count for rollback authority
-    indexStatus?: 'completed' | 'limit_reached';
-}
-
-// Reindex required state - fingerprint mismatch or legacy assumptions
-export interface CodebaseInfoRequiresReindex extends CodebaseInfoBase {
-    status: 'requires_reindex';
-    message: string;
-}
-
-// Union type for all codebase information states
-export type CodebaseInfo =
-    | CodebaseInfoIndexing
-    | CodebaseInfoIndexed
-    | CodebaseInfoIndexFailed
-    | CodebaseInfoSyncCompleted
-    | CodebaseInfoRequiresReindex;
-
-// New format (v2) - structured with codebase information (legacy compatibility)
-export interface CodebaseSnapshotV2 {
-    formatVersion: 'v2';
-    codebases: Record<string, Omit<CodebaseInfo, 'status'> & { status: 'indexing' | 'indexed' | 'indexfailed' | 'sync_completed' }>;
-    lastUpdated: string;
-}
-
-// Snapshot v3
-export interface CodebaseSnapshotV3 {
-    formatVersion: 'v3';
-    codebases: Record<string, CodebaseInfo>;  // codebasePath -> CodebaseInfo
-    clearTombstones?: Record<string, CodebaseClearTombstone>;
-    latestOperations?: Record<string, IndexOperationReceipt>;
-    lastUpdated: string;
-}
-
-// Union type for all supported formats
-export type CodebaseSnapshot = CodebaseSnapshotV1 | CodebaseSnapshotV2 | CodebaseSnapshotV3;
 
 // Helper function to get default model for each provider
 export function getDefaultModelForProvider(provider: string): string {
@@ -844,18 +678,6 @@ export function createMcpConfig(): ContextMcpConfig {
         ? watchSyncEnabledRaw.toLowerCase() === 'true'
         : true;
 
-    let watchDebounceMs = DEFAULT_WATCH_DEBOUNCE_MS;
-    const watchDebounceRaw = envManager.get('MCP_WATCH_DEBOUNCE_MS');
-    if (watchDebounceRaw) {
-        const parsed = Number.parseInt(watchDebounceRaw, 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-            watchDebounceMs = parsed;
-        } else {
-            console.warn(`[WARN] Invalid MCP_WATCH_DEBOUNCE_MS value: ${watchDebounceRaw}. The deprecated value is ignored.`);
-        }
-        console.warn('[WARN] MCP_WATCH_DEBOUNCE_MS is deprecated and ignored; filesystem watching records source events but does not schedule synchronization.');
-    }
-
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Satori MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || resolveMcpPackageVersion(),
@@ -913,7 +735,6 @@ export function createMcpConfig(): ContextMcpConfig {
         readFileMaxBytes,
         // filesystem observation behavior
         watchSyncEnabled,
-        watchDebounceMs,
     };
 
     return config;
@@ -1008,7 +829,6 @@ Environment Variables:
 
   Filesystem Observation:
   MCP_ENABLE_WATCHER      Observe source changes for freshness-aware reads (default: true)
-  MCP_WATCH_DEBOUNCE_MS   Deprecated compatibility input; accepted but ignored
 
 Examples:
   # Install resident MCP config without package-manager startup on every client launch

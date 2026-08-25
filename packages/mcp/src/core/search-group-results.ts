@@ -288,7 +288,7 @@ function buildGraphEvidence(callGraphHint: CallGraphHint): NonNullable<SearchGro
     }
     return {
         validatedAt: callGraphHint.validatedAt,
-        sidecarBuiltAt: callGraphHint.sidecarBuiltAt,
+        relationshipBuiltAt: callGraphHint.relationshipBuiltAt,
     };
 }
 

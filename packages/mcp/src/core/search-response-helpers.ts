@@ -51,7 +51,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             severity: "caution",
             blocksUse: false,
             message: "The stored Python symbol span ended before the full body; Satori extended it from source.",
-            action: "Prefer the repaired span for reads and treat older sidecar graph edges as suspect until reindexed.",
+            action: "Prefer the repaired span for reads and treat older relationship graph edges as suspect until reindexed.",
         };
     }
     if (code === "SEARCH_SYMBOL_SPAN_UNVERIFIED") {
@@ -177,7 +177,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             severity: "degraded",
             blocksUse: false,
             message: "Structural reranker context was omitted because the relationship publication does not match the sealed generation. Source- and symbol-backed documents remain usable, but relationship enrichment is not authoritative.",
-            action: "Run manage_index repair to rebuild compatible navigation from the proven vector generation; reindex only if repair proof requires it.",
+            action: "Run manage_index reindex to rebuild authoritative relationship navigation.",
         };
     }
     if (code === WARNING_CODES.RERANKER_SKIPPED_INPUT) {
@@ -198,7 +198,7 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Use the recommended action for the best result, or retry with a narrower path:/must: query.",
         };
     }
-    if (code.startsWith("SEARCH_RELATIONSHIP_SIDECAR_UNAVAILABLE:")) {
+    if (code.startsWith("SEARCH_RELATIONSHIP_NAVIGATION_UNAVAILABLE:")) {
         return {
             code,
             severity: "degraded",
@@ -207,13 +207,13 @@ function buildSearchWarningDetail(warning: string): SearchWarningDetail {
             action: "Open the symbol first; use lexical search or tests to verify inbound impact.",
         };
     }
-    if (code === WARNING_CODES.NAVIGATION_REPAIR_REQUIRED) {
+    if (code === WARNING_CODES.NAVIGATION_REINDEX_REQUIRED) {
         return {
             code,
             severity: "degraded",
             blocksUse: false,
-            message: "The vector generation remains proven, but its local symbol or relationship navigation evidence needs repair.",
-            action: "Run manage_index repair for this codebase; do not reindex unless the repair proof explicitly requires it.",
+            message: "The vector generation remains proven, but its local symbol or relationship navigation evidence is not authoritative.",
+            action: "Run manage_index reindex for this codebase to rebuild authoritative navigation.",
         };
     }
     if (code === SEARCH_PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_WARNING) {

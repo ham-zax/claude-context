@@ -3,7 +3,10 @@ import {
     type SymbolRecord,
     type SymbolRegistry,
 } from "@zokizuan/satori-core";
-import type { CallGraphEdge, CallGraphNote } from "./call-graph.js";
+import type {
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNoteResult as CallGraphNote,
+} from "./search-types.js";
 import {
     BOUNDED_SOURCE_SELECTION_POLICY_VERSION,
     selectBoundedSource,

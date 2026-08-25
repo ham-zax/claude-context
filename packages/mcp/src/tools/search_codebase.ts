@@ -267,24 +267,14 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
     limit: z.number().int().positive().max(ctx.capabilities.getMaxSearchResultTotal()).default(ctx.capabilities.getDefaultSearchLimit()).optional().describe("Grouped mode: total frozen result-set bound across continuation pages. Raw mode: maximum returned chunk count. It is not the initial grouped page size."),
     disclosureLimit: z.number().int().positive().max(ctx.capabilities.getMaxSearchPageSize()).optional().describe("Initial grouped-result page size only. Grouped searches show at most 10 results initially when omitted. For example, limit=20 and disclosureLimit=6 returns up to 6 initially and freezes up to 20 total for continuation. Retrieval depth and reranker admission are independent."),
     includeResultIndex: z.boolean().optional().describe("Optional grouped-mode compact index over the frozen ranked results. Defaults to false when omitted."),
-    debug: z.boolean().optional().describe("Backward-compatible debug toggle. true selects full diagnostics when debugMode is omitted."),
-    debugMode: z.enum(["summary", "ranking", "freshness", "full"]).optional().describe("Bounded diagnostic projection. May be used without debug; debug=true remains an alias for full."),
+    debugMode: z.enum(["summary", "ranking", "freshness", "full"]).optional().describe("Bounded diagnostic projection."),
     debugCandidateLimit: z.number().int().positive().max(SEARCH_MAX_DIAGNOSTIC_CANDIDATES).optional().describe("Diagnostic-only retrieval depth. Valid only with full diagnostics; it does not change the visible result limit or reranker ceilings."),
-}).superRefine((value, refinementContext) => {
-    if (value.debug === false && value.debugMode !== undefined) {
-        refinementContext.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["debugMode"],
-            message: "debugMode cannot be combined with explicit debug=false.",
-        });
-    }
-    const fullDebugSelected = value.debugMode === "full"
-        || (value.debugMode === undefined && value.debug === true);
-    if (value.debugCandidateLimit !== undefined && !fullDebugSelected) {
+}).strict().superRefine((value, refinementContext) => {
+    if (value.debugCandidateLimit !== undefined && value.debugMode !== "full") {
         refinementContext.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["debugCandidateLimit"],
-            message: "debugCandidateLimit requires debugMode=full or debug=true.",
+            message: "debugCandidateLimit requires debugMode=full.",
         });
     }
     if (value.disclosureLimit !== undefined && value.resultMode === "raw") {
@@ -322,7 +312,7 @@ const buildSearchSchema = (ctx: ToolContext) => z.object({
 export const searchCodebaseTool: McpTool = {
     name: "search_codebase",
     description: () =>
-        "Unified semantic search with a runtime-first scope=\"runtime\" default, grouped/raw output modes, and deterministic ranking/freshness behavior. Operators are parsed from a query prefix block: lang:, path:, -path:, must:, exclude: (escape with \\\\ to keep literals). must: values are case-sensitive raw substrings and every must: value must match; recall is bounded and never exhaustive; hints.mustCoverage always publishes exhaustive:false and reports that more matches may exist together with the MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET warning. Grouped formatVersion 3 results publish one canonical target, bounded source-only preview, quality evidence, and compact graph readiness; use the envelope-level recommendedNextAction first. In grouped mode, limit bounds the total frozen result set across continuation pages; in raw mode, it caps returned chunks. disclosureLimit only controls the initial grouped page. For example, limit=20 and disclosureLimit=6 returns up to 6 initially and freezes up to 20 total without changing retrieval depth or reranker admission. includeResultIndex can add compact navigation metadata for the frozen grouped ranking. A grouped envelope without continuation reports pagination.continuation=\"complete\", meaning complete for the caller-bounded frozen set only; omittedBeyondLimitGroupCount reports groups excluded by the caller limit, and resultCounts.availableGroupCount reports the full pool. When continuation is present, pass its opaque handle and exact nextOffset to continue_search to reveal more groups from the same frozen ranking. A not_ready reason=\"indexing\" response carries retryAfterMs and the active indexingOperation (action/phase/generation) when known; retry after retryAfterMs. A concrete target opens through the returned canonical read_file request, which includes mode, open_symbol contractVersion 2, one identity, and one bounded context operation; a target without symbolId opens through its 1-based inclusive span. Pass a target directly to call_graph only when navigation.graph=\"ready\". Every graph-ready result carries navigation.inbound=\"verify\"; callerSearchTerm is an optional identifier for a separate must:<term> <term> inbound-reference verification search. Follow structured blocker actions and remediation hints; use .satoriignore plus manage_index sync to remove persistent indexed noise. Normal successful responses omit internal freshness evidence; use debugMode=summary|ranking|freshness|full for bounded diagnostics. debug:true remains a backward-compatible alias for full.",
+        "Unified semantic search with a runtime-first scope=\"runtime\" default, grouped/raw output modes, and deterministic ranking/freshness behavior. Operators are parsed from a query prefix block: lang:, path:, -path:, must:, exclude: (escape with \\\\ to keep literals). must: values are case-sensitive raw substrings and every must: value must match; recall is bounded and never exhaustive; hints.mustCoverage always publishes exhaustive:false and reports that more matches may exist together with the MUST_RESULTS_MAY_BE_INCOMPLETE_WITHIN_RETRIEVAL_BUDGET warning. Grouped formatVersion 3 results publish one canonical target, bounded source-only preview, quality evidence, and compact graph readiness; use the envelope-level recommendedNextAction first. In grouped mode, limit bounds the total frozen result set across continuation pages; in raw mode, it caps returned chunks. disclosureLimit only controls the initial grouped page. For example, limit=20 and disclosureLimit=6 returns up to 6 initially and freezes up to 20 total without changing retrieval depth or reranker admission. includeResultIndex can add compact navigation metadata for the frozen grouped ranking. A grouped envelope without continuation reports pagination.continuation=\"complete\", meaning complete for the caller-bounded frozen set only; omittedBeyondLimitGroupCount reports groups excluded by the caller limit, and resultCounts.availableGroupCount reports the full pool. When continuation is present, pass its opaque handle and exact nextOffset to continue_search to reveal more groups from the same frozen ranking. A not_ready reason=\"indexing\" response carries retryAfterMs and the active indexingOperation (action/phase/generation) when known; retry after retryAfterMs. A concrete target opens through the returned canonical read_file request, which includes mode, open_symbol contractVersion 2, one identity, and one bounded context operation; a target without symbolId opens through its 1-based inclusive span. Pass a target directly to call_graph only when navigation.graph=\"ready\". Every graph-ready result carries navigation.inbound=\"verify\"; callerSearchTerm is an optional identifier for a separate must:<term> <term> inbound-reference verification search. Follow structured blocker actions and remediation hints; use .satoriignore plus manage_index sync to remove persistent indexed noise. Normal successful responses omit internal freshness evidence; use debugMode=summary|ranking|freshness|full for bounded diagnostics.",
     inputSchemaZod: (ctx: ToolContext) => buildSearchSchema(ctx),
     execute: async (args: unknown, ctx: ToolContext) => {
         const schema = buildSearchSchema(ctx);
@@ -378,9 +368,8 @@ export const searchCodebaseTool: McpTool = {
             throw error;
         }
 
-        const { debug: publicDebug, ...normalizedInput } = parsed.data;
-        const normalizedDebugMode: PublicSearchDebugMode = normalizedInput.debugMode
-            ?? (publicDebug === true ? "full" : "none");
+        const normalizedInput = parsed.data;
+        const normalizedDebugMode: PublicSearchDebugMode = normalizedInput.debugMode ?? "none";
         const input = {
             ...normalizedInput,
             path: authorized.canonicalPath,

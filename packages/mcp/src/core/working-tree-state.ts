@@ -23,12 +23,6 @@ export type ReindexPreflightResult = {
     probeFailed?: boolean;
 };
 
-type SnapshotFingerprintGate = {
-    allowed: boolean;
-    changed: boolean;
-    reason?: unknown;
-};
-
 type GetChangedFilesForCodebaseInput = {
     codebasePath: string;
     nowMs: number;
@@ -39,8 +33,7 @@ type GetChangedFilesForCodebaseInput = {
 
 type EvaluateReindexPreflightInput = {
     codebasePath: string;
-    currentStatus: string;
-    ensureFingerprintCompatibility: (codebasePath: string) => SnapshotFingerprintGate;
+    hasCurrentPublication: boolean;
     getWorkingTreeChangedPathsForPreflight: (codebasePath: string) => WorkingTreeChangedPathsState;
 };
 
@@ -178,24 +171,6 @@ export function getWorkingTreeChangedPathsForPreflight(
 }
 
 export function evaluateReindexPreflight(input: EvaluateReindexPreflightInput): ReindexPreflightResult {
-    const isIndexedLikeStatus = input.currentStatus === "indexed" || input.currentStatus === "sync_completed";
-    if (input.currentStatus === "requires_reindex") {
-        return {
-            outcome: "reindex_required",
-            warnings: [],
-            confidence: "high",
-        };
-    }
-
-    const gate = input.ensureFingerprintCompatibility(input.codebasePath);
-    if (!gate.allowed || gate.changed || gate.reason) {
-        return {
-            outcome: "reindex_required",
-            warnings: [],
-            confidence: "high",
-        };
-    }
-
     const workingTree = input.getWorkingTreeChangedPathsForPreflight(input.codebasePath);
     if (!workingTree.available || workingTree.probeFailed) {
         return {
@@ -217,7 +192,7 @@ export function evaluateReindexPreflight(input: EvaluateReindexPreflightInput): 
 
     const ignoreOnlySet = new Set([".gitignore", ".satoriignore", "satori.toml"]);
     if (changedFiles.every((changedFile) => ignoreOnlySet.has(changedFile))) {
-        if (!isIndexedLikeStatus) {
+        if (!input.hasCurrentPublication) {
             return {
                 outcome: "unknown",
                 warnings: [WARNING_CODES.REINDEX_PREFLIGHT_UNKNOWN],

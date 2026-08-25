@@ -47,7 +47,7 @@ const manageIndexInputSchema = z.object({
 export const manageIndexTool: McpTool = {
     name: "manage_index",
     description: () =>
-        "Manage index lifecycle operations (create/reindex/sync/status/clear/repair) for a codebase path. repair rebuilds local readiness only when existing vector payload and trusted runtime fingerprint proof match. Repair responses may include optional `repairProof` evidence for collection, snapshot, marker, fingerprint, payload, staleRemoteChunks, and navigation. No related collection routes to create; an existing incompatible, incomplete, stale, malformed, or unprovable generation routes to reindex; backend failures preserve partial proof when collection began and should be diagnosed before retrying repair. Successful repair may write a fresh completion marker and rebuild navigation, but it does not re-embed or rewrite source chunks. Ignore-rule edits in repo-root .satoriignore/.gitignore reconcile automatically in the normal sync path. Use action=\"sync\" for immediate convergence and action=\"reindex\" for full rebuild recovery (preflight may block unnecessary ignore-only reindex churn unless allowUnnecessaryReindex=true). Successful sync responses include `syncStats` with `added`, `removed`, and `modified` counts; consume those fields instead of parsing `humanText`. create/reindex return the kickoff response immediately and do not poll to terminal state; use action=\"status\" to observe progress. Status defaults to detail=summary; use capabilities for full symbol/language evidence, diagnostics for compatibility/runtime-owner evidence, or full for both. Mutation responses may include a durable `operation` receipt with `id`, canonical root, generation, accepted time, current phase, last durable transition, runtime fingerprint, and writer identity. Status returns the latest persisted receipt after restart. In a status envelope, top-level `action` remains `status` while `operation.action` names the observed mutation. Terminal phases are `completed`, `failed`, and `blocked`; `operation` is absent when no durable operation exists or contention was rejected before lease acquisition.",
+        "Manage index lifecycle operations (create/reindex/sync/status/clear) for a codebase path. Ignore-rule edits in repo-root .satoriignore/.gitignore reconcile automatically in the normal sync path. Use action=\"sync\" for immediate source convergence and action=\"reindex\" when the current Publication is incompatible, missing, or unprovable (preflight may block unnecessary ignore-only reindex churn unless allowUnnecessaryReindex=true). Successful sync responses include `syncStats` with `added`, `removed`, and `modified` counts; consume those fields instead of parsing `humanText`. create/reindex return the kickoff response immediately and do not poll to terminal state; use action=\"status\" to observe progress. Status defaults to detail=summary; use capabilities for full symbol/language evidence, diagnostics for compatibility/runtime-owner evidence, or full for both. Mutation responses may include a process-lifetime `operation` projection with `id`, canonical root, generation, accepted time, phase, update time, and optional progress/error. This projection belongs to the exact live Core root mutation and is not persisted as operation history. After process restart, status derives indexed state from the current Publication and may omit `operation`. In a status envelope, top-level `action` remains `status` while `operation.action` names the observed mutation. Terminal phases are `completed`, `failed`, and `blocked`; `operation` is absent when this process has no matching operation projection or contention was rejected before lease acquisition.",
     inputSchemaZod: () => manageIndexInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = manageIndexInputSchema.safeParse(args || {});
@@ -74,7 +74,7 @@ export const manageIndexTool: McpTool = {
 
         // Session workspace gate: every action (including status) must be
         // authorized before provider resolution, filesystem existence checks,
-        // vector operations, mutation leases, or snapshot mutation. An
+        // vector operations or mutation leases. An
         // unbound policy fails closed with WORKSPACE_POLICY_NOT_BOUND.
         const workspacePolicy = ctx.workspacePolicy;
         if (!workspacePolicy) {
@@ -108,7 +108,7 @@ export const manageIndexTool: McpTool = {
         };
         const providerOperation = input.action === "clear"
             ? "vector_only"
-            : (input.action === "create" || input.action === "reindex" || input.action === "sync" || input.action === "repair")
+            : (input.action === "create" || input.action === "reindex" || input.action === "sync")
                 ? "embedding_vector"
                 : null;
         let executionContext: ToolContext | MissingProviderConfigIssue;
@@ -171,9 +171,6 @@ export const manageIndexTool: McpTool = {
                     break;
                 case 'clear':
                     response = await executionContext.toolHandlers.handleClearIndex(input);
-                    break;
-                case 'repair':
-                    response = await executionContext.toolHandlers.handleRepairIndex(input);
                     break;
                 default:
                     return {
@@ -249,8 +246,8 @@ function withStatusDetail(
 }
 
 /**
- * When provider config is incomplete, status may still load snapshot fingerprints and
- * report requires_reindex/stale narratives driven by defaulted runtime config. Prefer
+ * When provider config is incomplete, status may still report compatibility/stale
+ * narratives driven by defaulted runtime config. Prefer
  * missing_provider_config for those cases; keep pure not_indexed / path errors intact.
  */
 function preferProviderIncompleteForStatus(

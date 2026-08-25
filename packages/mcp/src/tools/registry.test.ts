@@ -67,12 +67,12 @@ test('search_codebase and manage_index descriptions include ignore-remediation g
     assert.match(searchTool!.description, /scope=\"runtime\"/);
     assert.match(searchTool!.description, /runtime-first/i);
     assert.match(searchTool!.description, /must:/);
-    assert.match(searchTool!.description, /debug:true/i);
+    assert.match(searchTool!.description, /debugMode=summary\|ranking\|freshness\|full/i);
     assert.match(searchTool!.description, /hints/i);
 
     assert.match(manageTool!.description, /Ignore-rule edits/i);
     assert.match(manageTool!.description, /normal sync path/i);
-    assert.match(manageTool!.description, /full rebuild recovery/i);
+    assert.match(manageTool!.description, /current Publication is incompatible, missing, or unprovable/i);
 });
 
 // F-AC-01: MCP tool description must calibrate CALLS as heuristic/bounded/advisory.
@@ -99,7 +99,7 @@ test('search_codebase schema exposes scoped grouped/raw controls', () => {
     assert.ok(properties.resultMode);
     assert.ok(properties.groupBy);
     assert.ok(properties.rankingMode);
-    assert.ok(properties.debug);
+    assert.equal(properties.debug, undefined);
     assert.ok(properties.debugMode);
     assert.ok(properties.debugCandidateLimit);
     assert.equal(properties.scope.default, 'runtime');

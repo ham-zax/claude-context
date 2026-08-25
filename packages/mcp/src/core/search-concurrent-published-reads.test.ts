@@ -11,20 +11,52 @@ import { ToolResponseBuilders } from './tool-response-builders.js';
 import { buildGroupedSearchEnvelope } from './search-response-envelopes.js';
 import type { SearchResponseCommonInput } from './search-response-envelopes.js';
 import { SEARCH_RESPONSE_FORMAT_VERSION } from './search-types.js';
+import type { PublicationLease, PublicationRef } from '@zokizuan/satori-core';
+
+function publicationRef(
+    root: string,
+    id: string,
+    collectionName: string,
+    policyHash: string,
+    totalChunks = 1,
+): PublicationRef {
+    return {
+        id,
+        publication: {
+            version: 1,
+            id,
+            canonicalRoot: root,
+            createdAt: '2026-08-15T00:00:00.000Z',
+            status: 'complete',
+            policy: {
+                profile: 'default',
+                customExtensions: [],
+                customIgnorePatterns: [],
+                fileBasedIgnorePatterns: [],
+                supportedExtensions: ['.ts'],
+                effectiveIgnorePatterns: [],
+                policyHash,
+                controlSignature: `control-${id}`,
+            },
+            format: {
+                indexFormatVersion: 'hybrid_v3',
+                embeddingIdentity: 'test-embedding',
+                relationshipVersion: 'relationship-v1',
+            },
+            vector: { collectionName, indexedFiles: 1, totalChunks },
+            navigation: { relativeRoot: 'navigation' },
+        },
+    };
+}
 
 test('parallel searches execute concurrently against pinned publication during active sync (FrontDoor)', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-concurrent-reads-'));
     const preparedRead = {
         state: 'ready' as const,
-        codebasePath: tempRoot,
-        collectionName: 'col_gen_15',
-        manifestHash: 'man-15',
         root: { path: tempRoot, info: { status: 'indexed' as const } },
         proofDebugHint: undefined,
-        vectorReceipt: { collectionName: 'col_gen_15', marker: { runId: 'run-15' } },
-        generationReceipt: { marker: { runId: 'run-15' } },
+        publication: publicationRef(tempRoot, 'publication-15', 'col_gen_15', 'pol-15'),
         navigationStatus: 'valid' as const,
-        preparedObservation: 'obs-15',
         navigationAuthorityMode: 'canonical_v4' as const,
     };
 
@@ -46,7 +78,6 @@ test('parallel searches execute concurrently against pinned publication during a
                 searchableRead: preparedRead,
             };
         },
-        getPreparedReadObservation: () => 'obs-15',
         ensureSearchFreshness: async () => {
             throw new Error('ensureSearchFreshness should not be invoked during stale-while-sync');
         },
@@ -91,7 +122,7 @@ test('parallel searches execute concurrently against pinned publication during a
             if (res.kind === 'ready') {
                 assert.equal(res.freshnessDecision.mode, 'served_previous_generation');
                 assert.equal(res.freshnessDecision.servedCollection, 'col_gen_15');
-                assert.equal(res.freshnessDecision.servedRunId, 'run-15');
+                assert.equal(res.freshnessDecision.servedPublicationId, 'publication-15');
                 assert.deepEqual(res.freshnessDecision.pendingOperation, { action: 'sync', generation: 16 });
 
                 // Construct envelope and verify metadata
@@ -124,7 +155,7 @@ test('parallel searches execute concurrently against pinned publication during a
                 assert.deepEqual(envelope.freshness, {
                     state: 'sync_in_progress',
                     servedCollection: 'col_gen_15',
-                    servedRunId: 'run-15',
+                    servedPublicationId: 'publication-15',
                     pendingOperation: { action: 'sync', generation: 16 },
                 });
             }
@@ -140,33 +171,8 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
     try {
         fs.writeFileSync(path.join(tempRoot, 'main.ts'), 'export const a = 1;\n');
 
-        const genNReceipt = {
-            collectionName: 'col_gen_n',
-            marker: {
-                runId: 'run-n',
-                totalChunks: 10,
-                indexPolicyHash: 'pol-n',
-                navigation: { status: 'sealed' as const, generationId: 'nav-n', sealHash: 'seal-n', navigationSealHash: 'seal-n', symbolRegistryManifestHash: 'sym-n' },
-            },
-            policy: { canonicalRoot: tempRoot, policyHash: 'pol-n' },
-            policyDocumentDigest: 'digest-n',
-            exactPayloadCount: 10,
-            observations: { profileFileToken: null, policyFileToken: 'tok-n' },
-        };
-
-        const genN1Receipt = {
-            collectionName: 'col_gen_n1',
-            marker: {
-                runId: 'run-n1',
-                totalChunks: 12,
-                indexPolicyHash: 'pol-n1',
-                navigation: { status: 'sealed' as const, generationId: 'nav-n1', sealHash: 'seal-n1', navigationSealHash: 'seal-n1', symbolRegistryManifestHash: 'sym-n1' },
-            },
-            policy: { canonicalRoot: tempRoot, policyHash: 'pol-n1' },
-            policyDocumentDigest: 'digest-n1',
-            exactPayloadCount: 12,
-            observations: { profileFileToken: null, policyFileToken: 'tok-n1' },
-        };
+        const publicationN = publicationRef(tempRoot, 'publication-n', 'col_gen_n', 'pol-n', 10);
+        const publicationN1 = publicationRef(tempRoot, 'publication-n1', 'col_gen_n1', 'pol-n1', 12);
 
         let currentGeneration = 'N';
         let currentAuthorityObservation = 'obs-n';
@@ -211,7 +217,6 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
             getContextTrackedRelativePaths: () => [],
             classifyPathCategory: () => "core",
             shouldIncludeCategoryInScope: () => true,
-            getSyncWatchDebounceMs: () => 0,
             capabilities,
             runtimeFingerprint: { schemaVersion: "hybrid-v1" } as any,
             reranker: null,
@@ -222,17 +227,15 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
             buildManageIndexRecommendedAction: () => ({ action: 'none', label: '' } as any),
             buildCreateHint: () => ({ tool: 'manage_index', args: { action: 'create', path: tempRoot } }),
             buildReindexHint: () => ({ tool: 'manage_index', args: { action: 'reindex', path: tempRoot } }),
-            buildRepairHint: () => ({ tool: 'manage_index', args: { action: 'repair', path: tempRoot } }),
             buildSyncHint: () => ({ tool: 'manage_index', args: { action: 'sync', path: tempRoot } }),
             buildStatusHint: () => ({ tool: 'manage_index', args: { action: 'status', path: tempRoot } }),
-            buildStaleLocalHint: () => ({}),
             buildStaleLocalMessage: () => '',
             buildIndexingMetadata: () => ({ formatVersion: 'test' } as any),
             buildCompatibilityDiagnostics: () => ({ status: 'valid' } as any),
             buildRuntimeMismatchHint: () => ({ tool: 'manage_index', args: { action: 'status', path: tempRoot } }),
             isRuntimeFingerprintMismatch: () => false,
             summarizeFingerprint: () => 'fp',
-        });
+        } as any);
 
         coordinator = new SearchRequestCoordinator({
             readiness: {
@@ -242,55 +245,36 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
                     checkedAt: new Date().toISOString(),
                     thresholdMs: 0,
                     servedCollection: currentGeneration === 'N' ? 'col_gen_n' : undefined,
-                    servedRunId: currentGeneration === 'N' ? 'run-n' : undefined,
+                    servedPublicationId: currentGeneration === 'N' ? publicationN.id : undefined,
                 }),
                 prepareTrackedRootReadWithObservation: async (): Promise<any> => {
                     const isN = currentGeneration === 'N';
-                    const receipt = isN ? genNReceipt : genN1Receipt;
-                    const obs = isN ? 'obs-n' : 'obs-n1';
-                    if (isN) {
-                        return {
-                            state: 'indexing' as const,
-                            codebasePath: tempRoot,
-                            operation: { action: 'sync' as const, generation: 16, phase: 'writing', id: 'op-16' },
-                            searchableGenerationAvailable: true,
-                            searchableRead: {
-                                state: 'ready' as const,
-                                codebasePath: tempRoot,
-                                collectionName: receipt.collectionName,
-                                manifestHash: 'man-' + receipt.collectionName,
-                                root: { path: tempRoot, info: { status: 'indexed' as const } },
-                                proofDebugHint: undefined,
-                                vectorReceipt: receipt,
-                                generationReceipt: receipt,
-                                navigationStatus: 'valid' as const,
-                                preparedObservation: obs,
-                                navigationAuthorityMode: 'canonical_v4' as const,
-                            },
-                        };
-                    }
-                    return {
+                    const publication = isN ? publicationN : publicationN1;
+                    const ready = {
                         state: 'ready' as const,
-                        codebasePath: tempRoot,
-                        collectionName: receipt.collectionName,
-                        manifestHash: 'man-' + receipt.collectionName,
                         root: { path: tempRoot, info: { status: 'indexed' as const } },
                         proofDebugHint: undefined,
-                        vectorReceipt: receipt,
-                        generationReceipt: receipt,
+                        publication,
                         navigationStatus: 'valid' as const,
-                        preparedObservation: obs,
                         navigationAuthorityMode: 'canonical_v4' as const,
                     };
+                    return isN
+                        ? {
+                            state: 'indexing' as const,
+                            codebasePath: tempRoot,
+                            operation: { action: 'sync' as const, generation: 16, phase: 'writing' },
+                            searchableGenerationAvailable: true,
+                            searchableRead: ready,
+                        }
+                        : ready;
                 },
-                loadRegistryValidatedCallGraphSidecar: async () => ({ relationshipReady: false }),
+                loadRegistryValidatedRelationshipNavigation: async () => ({ relationshipReady: false }),
                 getWatcherObservation: () => ({ coverage: 'ready', available: true, snapshot: 'watch' } as any),
                 getChangedFilesForCodebase: () => ({ available: true, files: new Set() }),
                 waitForSearchableSync: async () => true,
                 getTrackedRootReadiness: () => ({} as any),
                 isPartialIndexNavigationUnavailable: () => false,
                 getIndexingOperationForReadiness: () => undefined,
-                canSyncStaleLocal: () => false,
                 probeLocalSearchCollectionState: async () => ({ state: 'ready' }),
             },
             hints: {
@@ -307,8 +291,6 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
                 withProofDebugHint: (p) => p,
                 buildSyncHint: () => ({ tool: 'manage_index', args: { action: 'sync', path: tempRoot } }),
                 buildStaleLocalMessage: () => '',
-                buildStaleLocalHint: () => ({}),
-                buildRepairHint: () => ({ tool: 'manage_index', args: { action: 'repair', path: tempRoot } }),
                 buildRelationshipBackedCallGraph: async () => null,
                 buildManageIndexRecommendedAction: () => ({ action: 'none', label: '' } as any),
                 buildCreateHint: () => ({ tool: 'manage_index', args: { action: 'create', path: tempRoot } }),
@@ -316,30 +298,35 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
             },
             preparedRead: {
                 loadPreparedNavigationManifest: async (): Promise<any> => ({ status: 'unavailable', reason: 'unsupported', rootPath: tempRoot }),
-                getPreparedReadCacheObservation: () => ({
-                    observation: currentAuthorityObservation,
-                    sourceObservation: currentAuthorityObservation,
-                }),
                 getPreparedAuthorityObservation: () => currentAuthorityObservation,
+                getPublicationNavigationAddress: (publication) => ({
+                    publicationId: publication.id,
+                    navigationRoot: path.join(tempRoot, '.navigation', publication.id),
+                }),
                 seedPreparedRead: () => {},
                 evictPreparedRead: () => {},
                 loadPreparedNavigationCompatibility: async (): Promise<any> => ({ status: 'incompatible', reason: 'unsupported', rootPath: tempRoot, registry: { status: 'unavailable', reason: 'unsupported', rootPath: tempRoot }, relationships: { status: 'unavailable', reason: 'unsupported', rootPath: tempRoot } }),
                 getCachedPreparedRead: async (): Promise<any> => ({ status: 'miss', reason: 'cold_initial' }),
-                acquirePublicationReadLease: async () => {
+                acquirePublicationLease: (_codebasePath, publicationId) => {
+                    const publication = publicationId === undefined
+                        ? (currentGeneration === 'N+1' ? publicationN1 : publicationN)
+                        : (publicationId === publicationN1.id ? publicationN1 : publicationN);
                     const leaseId = 'lease-' + Math.random();
                     activeLeases.add(leaseId);
-                    return () => {
-                        activeLeases.delete(leaseId);
-                    };
+                    return {
+                        ...publication,
+                        release: () => activeLeases.delete(leaseId),
+                    } satisfies PublicationLease;
                 },
+                isPublicationLeaseAdmitted: async () => true,
+                isPublicationAdmitted: async () => true,
+                getPublicationNavigationStatus: async () => 'valid',
             },
             freshness: {
-                getSourceFreshnessPort: () => undefined,
                 inspectSourceFreshnessCheckpoint: async () => ({} as any),
                 compareAllSourceToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
                 compareSourceObservationToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
                 compareSourcePathsToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
-                getPreparedGenerationRevalidator: () => undefined,
             },
             environment: {
                 now: () => Date.now(),
@@ -351,13 +338,14 @@ test('SearchRequestCoordinator preserves pinned reader A on Gen N across Gen N+1
                     unpinnedSemanticSearchCalls += 1;
                     return [];
                 },
-                semanticSearchInProvenGeneration: async (receipt) => {
-                    if (receipt.collectionName === 'col_gen_n') {
-                        boundCollectionsForA.push(receipt.collectionName);
+                semanticSearchInPublication: async (publication) => {
+                    const collectionName = publication.publication.vector.collectionName;
+                    if (collectionName === 'col_gen_n') {
+                        boundCollectionsForA.push(collectionName);
                         searchAInFlightResolve();
                         await releaseSearchA;
-                    } else if (receipt.collectionName === 'col_gen_n1') {
-                        boundCollectionsForB.push(receipt.collectionName);
+                    } else if (collectionName === 'col_gen_n1') {
+                        boundCollectionsForB.push(collectionName);
                     }
                     return [];
                 },
@@ -422,14 +410,8 @@ test('coordinator characterization: five parallel stale reads stay pinned across
     try {
         fs.writeFileSync(path.join(tempRoot, 'main.ts'), 'export const x = 1;\n');
 
-        const genNReceipt = {
-            collectionName: 'col_gen_n',
-            marker: { runId: 'run-n', generation: 10 },
-        };
-        const genN1Receipt = {
-            collectionName: 'col_gen_n1',
-            marker: { runId: 'run-n1', generation: 11 },
-        };
+        const publicationN = publicationRef(tempRoot, 'publication-n', 'col_gen_n', 'pol-n', 10);
+        const publicationN1 = publicationRef(tempRoot, 'publication-n1', 'col_gen_n1', 'pol-n1', 12);
 
         let currentGeneration = 'N';
         let currentAuthorityObservation = 'obs-n';
@@ -460,7 +442,6 @@ test('coordinator characterization: five parallel stale reads stay pinned across
             getContextTrackedRelativePaths: () => [],
             classifyPathCategory: () => "core",
             shouldIncludeCategoryInScope: () => true,
-            getSyncWatchDebounceMs: () => 0,
             capabilities,
             runtimeFingerprint: { schemaVersion: "hybrid-v1" } as any,
             reranker: null,
@@ -471,17 +452,15 @@ test('coordinator characterization: five parallel stale reads stay pinned across
             buildManageIndexRecommendedAction: () => ({ action: 'none', label: '' } as any),
             buildCreateHint: () => ({ tool: 'manage_index', args: { action: 'create', path: tempRoot } }),
             buildReindexHint: () => ({ tool: 'manage_index', args: { action: 'reindex', path: tempRoot } }),
-            buildRepairHint: () => ({ tool: 'manage_index', args: { action: 'repair', path: tempRoot } }),
             buildSyncHint: () => ({ tool: 'manage_index', args: { action: 'sync', path: tempRoot } }),
             buildStatusHint: () => ({ tool: 'manage_index', args: { action: 'status', path: tempRoot } }),
-            buildStaleLocalHint: () => ({}),
             buildStaleLocalMessage: () => '',
             buildIndexingMetadata: () => ({ formatVersion: 'test' } as any),
             buildCompatibilityDiagnostics: () => ({ status: 'valid' } as any),
             buildRuntimeMismatchHint: () => ({ tool: 'manage_index', args: { action: 'status', path: tempRoot } }),
             isRuntimeFingerprintMismatch: () => false,
             summarizeFingerprint: () => 'fp',
-        });
+        } as any);
 
         coordinator = new SearchRequestCoordinator({
             readiness: {
@@ -491,55 +470,36 @@ test('coordinator characterization: five parallel stale reads stay pinned across
                     checkedAt: new Date().toISOString(),
                     thresholdMs: 0,
                     servedCollection: currentGeneration === 'N' ? 'col_gen_n' : undefined,
-                    servedRunId: currentGeneration === 'N' ? 'run-n' : undefined,
+                    servedPublicationId: currentGeneration === 'N' ? publicationN.id : undefined,
                 }),
                 prepareTrackedRootReadWithObservation: async (): Promise<any> => {
                     const isN = currentGeneration === 'N';
-                    const receipt = isN ? genNReceipt : genN1Receipt;
-                    const obs = isN ? 'obs-n' : 'obs-n1';
-                    if (isN) {
-                        return {
-                            state: 'indexing' as const,
-                            codebasePath: tempRoot,
-                            operation: { action: 'sync' as const, generation: 11, phase: 'writing', id: 'op-11' },
-                            searchableGenerationAvailable: true,
-                            searchableRead: {
-                                state: 'ready' as const,
-                                codebasePath: tempRoot,
-                                collectionName: receipt.collectionName,
-                                manifestHash: 'man-' + receipt.collectionName,
-                                root: { path: tempRoot, info: { status: 'indexed' as const } },
-                                proofDebugHint: undefined,
-                                vectorReceipt: receipt,
-                                generationReceipt: receipt,
-                                navigationStatus: 'valid' as const,
-                                preparedObservation: obs,
-                                navigationAuthorityMode: 'canonical_v4' as const,
-                            },
-                        };
-                    }
-                    return {
+                    const publication = isN ? publicationN : publicationN1;
+                    const ready = {
                         state: 'ready' as const,
-                        codebasePath: tempRoot,
-                        collectionName: receipt.collectionName,
-                        manifestHash: 'man-' + receipt.collectionName,
                         root: { path: tempRoot, info: { status: 'indexed' as const } },
                         proofDebugHint: undefined,
-                        vectorReceipt: receipt,
-                        generationReceipt: receipt,
+                        publication,
                         navigationStatus: 'valid' as const,
-                        preparedObservation: obs,
                         navigationAuthorityMode: 'canonical_v4' as const,
                     };
+                    return isN
+                        ? {
+                            state: 'indexing' as const,
+                            codebasePath: tempRoot,
+                            operation: { action: 'sync' as const, generation: 11, phase: 'writing' },
+                            searchableGenerationAvailable: true,
+                            searchableRead: ready,
+                        }
+                        : ready;
                 },
-                loadRegistryValidatedCallGraphSidecar: async () => ({ relationshipReady: false }),
+                loadRegistryValidatedRelationshipNavigation: async () => ({ relationshipReady: false }),
                 getWatcherObservation: () => ({ coverage: 'ready', available: true, snapshot: 'watch' } as any),
                 getChangedFilesForCodebase: () => ({ available: true, files: new Set() }),
                 waitForSearchableSync: async () => true,
                 getTrackedRootReadiness: () => ({} as any),
                 isPartialIndexNavigationUnavailable: () => false,
                 getIndexingOperationForReadiness: () => undefined,
-                canSyncStaleLocal: () => false,
                 probeLocalSearchCollectionState: async () => ({ state: 'ready' }),
             },
             hints: {
@@ -556,8 +516,6 @@ test('coordinator characterization: five parallel stale reads stay pinned across
                 withProofDebugHint: (p) => p,
                 buildSyncHint: () => ({ tool: 'manage_index', args: { action: 'sync', path: tempRoot } }),
                 buildStaleLocalMessage: () => '',
-                buildStaleLocalHint: () => ({}),
-                buildRepairHint: () => ({ tool: 'manage_index', args: { action: 'repair', path: tempRoot } }),
                 buildRelationshipBackedCallGraph: async () => null,
                 buildManageIndexRecommendedAction: () => ({ action: 'none', label: '' } as any),
                 buildCreateHint: () => ({ tool: 'manage_index', args: { action: 'create', path: tempRoot } }),
@@ -565,24 +523,30 @@ test('coordinator characterization: five parallel stale reads stay pinned across
             },
             preparedRead: {
                 loadPreparedNavigationManifest: async (): Promise<any> => ({ status: 'unavailable', reason: 'unsupported', rootPath: tempRoot }),
-                getPreparedReadCacheObservation: () => ({
-                    observation: currentAuthorityObservation,
-                    sourceObservation: currentAuthorityObservation,
-                }),
                 getPreparedAuthorityObservation: () => currentAuthorityObservation,
+                getPublicationNavigationAddress: (publication) => ({
+                    publicationId: publication.id,
+                    navigationRoot: path.join(tempRoot, '.navigation', publication.id),
+                }),
                 seedPreparedRead: () => {},
                 evictPreparedRead: () => {},
                 loadPreparedNavigationCompatibility: async (): Promise<any> => ({ status: 'incompatible', reason: 'unsupported', rootPath: tempRoot, registry: { status: 'unavailable', reason: 'unsupported', rootPath: tempRoot }, relationships: { status: 'unavailable', reason: 'unsupported', rootPath: tempRoot } }),
                 getCachedPreparedRead: async (): Promise<any> => ({ status: 'miss', reason: 'cold_initial' }),
-                acquirePublicationReadLease: async () => () => {},
+                acquirePublicationLease: (_codebasePath, publicationId) => {
+                    const publication = publicationId === undefined
+                        ? (currentGeneration === 'N+1' ? publicationN1 : publicationN)
+                        : (publicationId === publicationN1.id ? publicationN1 : publicationN);
+                    return { ...publication, release: () => undefined } satisfies PublicationLease;
+                },
+                isPublicationLeaseAdmitted: async () => true,
+                isPublicationAdmitted: async () => true,
+                getPublicationNavigationStatus: async () => 'valid',
             },
             freshness: {
-                getSourceFreshnessPort: () => undefined,
                 inspectSourceFreshnessCheckpoint: async () => ({} as any),
                 compareAllSourceToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
                 compareSourceObservationToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
                 compareSourcePathsToFreshnessCheckpoint: async () => ({ status: 'matches', changedFiles: [] } as any),
-                getPreparedGenerationRevalidator: () => undefined,
             },
             environment: {
                 now: () => Date.now(),
@@ -594,8 +558,8 @@ test('coordinator characterization: five parallel stale reads stay pinned across
                     unpinnedSemanticSearchCalls += 1;
                     return [];
                 },
-                semanticSearchInProvenGeneration: async (receipt) => {
-                    servedCollections.push(receipt.collectionName);
+                semanticSearchInPublication: async (publication) => {
+                    servedCollections.push(publication.publication.vector.collectionName);
                     return [];
                 },
             },

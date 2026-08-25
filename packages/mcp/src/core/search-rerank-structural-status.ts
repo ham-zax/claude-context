@@ -7,12 +7,7 @@ import type { SearchRerankStructuralContextStatus } from "./search-rerank-projec
  */
 export function resolveSearchRerankStructuralContextStatus(input: {
     relationshipStatus: string;
-    relationshipManifestHash?: string;
-    expectedRelationshipManifestHash: string;
 }): SearchRerankStructuralContextStatus {
     if (input.relationshipStatus === "incompatible") return "incompatible";
-    if (input.relationshipStatus !== "ok") return "unavailable";
-    return input.relationshipManifestHash === input.expectedRelationshipManifestHash
-        ? "available"
-        : "incompatible";
+    return input.relationshipStatus === "ok" ? "available" : "unavailable";
 }

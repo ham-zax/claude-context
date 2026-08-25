@@ -6,12 +6,9 @@ import path from "node:path";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { SearchContinuationCoordinator } from "../core/handlers.js";
 import type { SearchRequestCoordinator } from "../core/search-request-coordinator.js";
-import { CallGraphSidecarManager } from "../core/call-graph.js";
-import { SnapshotManager } from "../core/snapshot.js";
 import {
     buildRuntimeIndexFingerprint,
     ContextMcpConfig,
-    parseIndexFingerprint,
     resolveVectorStoreConfig,
 } from "../config.js";
 import type { ToolContext } from "../tools/types.js";
@@ -46,7 +43,6 @@ function baseConfig(overrides: Partial<ContextMcpConfig> = {}): ContextMcpConfig
         encoderOutputDimension: 1024,
         readFileMaxLines: 1000,
         watchSyncEnabled: false,
-        watchDebounceMs: 5000,
         ...overrides,
     };
 }
@@ -58,13 +54,10 @@ function createRuntime(
     const runtimeFingerprint = buildRuntimeIndexFingerprint(config, resolveConfiguredEmbeddingDimension(config));
     return new ProviderRuntime({
         config,
-        snapshotManager: new SnapshotManager(runtimeFingerprint),
         runtimeFingerprint,
         capabilities: new CapabilityResolver(config),
         readFileMaxLines: 1000,
         watchSyncEnabled: false,
-        watchDebounceMs: 5000,
-        callGraphManager: new CallGraphSidecarManager(runtimeFingerprint),
         searchContinuationCoordinator,
     });
 }
@@ -132,7 +125,6 @@ test("LanceDB runtime selection seals backend identity without requiring Milvus"
     });
     const fingerprint = buildRuntimeIndexFingerprint(config, 1024);
     assert.equal(fingerprint.vectorStoreProvider, "LanceDB");
-    assert.deepEqual(parseIndexFingerprint(fingerprint), fingerprint);
 
     const searchContinuationCoordinator = new SearchContinuationCoordinator();
     const runtime = createRuntime(config, searchContinuationCoordinator);
@@ -152,16 +144,8 @@ test("LanceDB runtime selection seals backend identity without requiring Milvus"
     await vectorStore.createCollection("runtime_probe", 2);
     assert.deepEqual(await vectorStore.listCollections(), ["runtime_probe"]);
 
-    const contextFingerprint = (
-        toolContext.context as unknown as {
-            buildIndexCompletionFingerprint(): {
-                vectorStoreProvider: string;
-                embeddingArtifactDigest: string | null;
-            };
-        }
-    ).buildIndexCompletionFingerprint();
-    assert.equal(contextFingerprint.vectorStoreProvider, "LanceDB");
-    assert.equal(contextFingerprint.embeddingArtifactDigest, "a".repeat(64));
+    const embeddingIdentity = toolContext.context.getEmbeddingEngine().getIdentity();
+    assert.equal(embeddingIdentity.artifactDigest, "a".repeat(64));
 
     const stored = searchContinuationCoordinator.store(
         (
@@ -226,17 +210,10 @@ test("vector-only context preserves the configured embedding identity", () => {
         embeddingArtifactDigest: "b".repeat(64),
     });
     const context = createLocalOnlyContext(config);
-    const fingerprint = (
-        context as unknown as {
-            buildIndexCompletionFingerprint(): {
-                embeddingModel: string;
-                embeddingArtifactDigest: string | null;
-            };
-        }
-    ).buildIndexCompletionFingerprint();
+    const identity = context.getEmbeddingEngine().getIdentity();
 
-    assert.equal(fingerprint.embeddingModel, "voyage-code-3");
-    assert.equal(fingerprint.embeddingArtifactDigest, "b".repeat(64));
+    assert.equal(identity.model, "voyage-code-3");
+    assert.equal(identity.artifactDigest, "b".repeat(64));
 });
 
 test("MILVUS_TOKEN is not a substitute for MILVUS_ADDRESS", () => {

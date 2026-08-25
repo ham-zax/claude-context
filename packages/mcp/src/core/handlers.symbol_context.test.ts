@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
+import type { PublicationLease, SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
 import { ToolHandlers } from "./handlers.js";
 import type { PrepareSymbolContextSnapshotResult } from "./symbol-context-composer.js";
 
 type SnapshotAdapterHost = {
-    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
+    acquirePublicationLease(codebasePath: string): PublicationLease | undefined;
+    isPublicationLeaseAdmitted(lease: PublicationLease): Promise<boolean>;
+    context: {
+        getPublicationNavigationAddress(lease: PublicationLease): {
+            publicationId: string;
+            navigationRoot: string;
+        } | undefined;
+    };
     prepareNavigationRead(absolutePath: string): Promise<unknown>;
-    getPreparedNavigationIdentity(preparedRead: unknown): string | null;
     loadPreparedNavigationSymbolsByFile(
         preparedRead: unknown,
         relativeFile: string,
@@ -66,28 +72,36 @@ test("symbol-context handler adapter binds prepared navigation and relationship 
         symbolsByLabel: new Map(symbols.map((entry) => [entry.label, [entry]])),
         symbolsByQualifiedName: new Map(symbols.map((entry) => [entry.qualifiedName, [entry]])),
     } as unknown as SymbolRegistry;
+    const publicationId = "publication-1";
     const preparedRead = {
         state: "ready",
         root: { path: "/repo" },
-        generationReceipt: {
-            navigation: {
-                symbolRegistryManifestHash: "registry-manifest",
-                relationshipManifestHash: "relationship-manifest",
-            },
-        },
+        publication: { id: publicationId },
+        navigationStatus: "valid",
     };
-    let navigationIdentity: string | null = "prepared-generation";
+    let leaseAdmitted = true;
     let loadedRelationshipManifestHash = "relationship-manifest";
+    const lease = {
+        id: publicationId,
+        publication: {},
+        release: () => undefined,
+    } as unknown as PublicationLease;
     const host: SnapshotAdapterHost = {
-        acquirePublicationReadLease: async (codebasePath) => {
+        acquirePublicationLease: (codebasePath) => {
             assert.equal(codebasePath, "/repo");
-            return undefined;
+            return lease;
+        },
+        isPublicationLeaseAdmitted: async () => leaseAdmitted,
+        context: {
+            getPublicationNavigationAddress: () => ({
+                publicationId,
+                navigationRoot: "/state/publication-1/navigation",
+            }),
         },
         prepareNavigationRead: async (absolutePath) => {
             assert.equal(absolutePath, "/repo/src/example.ts");
             return preparedRead;
         },
-        getPreparedNavigationIdentity: () => navigationIdentity,
         loadPreparedNavigationSymbolsByFile: async (read, relativeFile) => {
             assert.equal(read, preparedRead);
             assert.equal(relativeFile, "src/example.ts");
@@ -180,20 +194,9 @@ test("symbol-context handler adapter binds prepared navigation and relationship 
     );
     assert.equal(await result.snapshot.validateAuthority(), true);
 
+    // The compatibility loader owns relationship-manifest validation now; this
+    // adapter consumes only already-validated relationship state.
     loadedRelationshipManifestHash = "different-relationship-manifest";
-    const mismatched = await prepareSnapshot.call(host, {
-        codebaseRoot: "/repo",
-        relativeFile: "src/example.ts",
-        symbolId: "target",
-    });
-    assert.equal(mismatched.status, "ready");
-    if (mismatched.status !== "ready") return;
-    assert.deepEqual(mismatched.snapshot.relationships, {
-        status: "unavailable",
-        authority: "unavailable",
-        reason: "relationship_manifest_identity_changed",
-    });
-
-    navigationIdentity = "replacement-generation";
+    leaseAdmitted = false;
     assert.equal(await result.snapshot.validateAuthority(), false);
 });

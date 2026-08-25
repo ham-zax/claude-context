@@ -6,41 +6,33 @@ import {
     AtomicIncrementalPublicationUnsupportedError,
     computeIndexPolicyControlSignature,
     Context,
-    type SourceFreshnessPort,
-    type ProvenGenerationReceipt,
-    type ProvenVectorGenerationReceipt,
+    type PublicationRef,
 } from "@zokizuan/satori-core";
-import { SnapshotManager } from "./snapshot.js";
+import {
+    RootMutationInProgressError,
+    RootMutationRuntime,
+    type MutationOperationPhase,
+    type RootMutationActivity,
+    type RootMutationOperation,
+} from "@zokizuan/satori-core/integration";
 import {
     BACKGROUND_FRESHNESS_THRESHOLD_MS,
     BACKGROUND_SYNC_INITIAL_DELAY_MS,
     BACKGROUND_SYNC_INTERVAL_MS,
-    DEFAULT_WATCH_DEBOUNCE_MS,
-    type IndexOperationPhase,
-    type IndexOperationReceipt,
 } from "../config.js";
-import {
-    formatMutationLeaseBlockedMessage,
-    MutationLeaseCoordinator,
-    type RootMutationLease,
-} from "./mutation-lease.js";
 import {
     SourceObservationState,
 } from "./source-observation-state.js";
 
 interface SyncManagerOptions {
     watchEnabled?: boolean;
-    watchDebounceMs?: number;
     now?: () => number;
     onSyncCompleted?: (
         codebasePath: string,
         stats: SyncStats,
         assertMutationCurrent: () => void,
     ) => Promise<void> | void;
-    mutationLeaseCoordinator?: MutationLeaseCoordinator;
-    sourceFreshnessPort?: SourceFreshnessPort;
-    crossProcessJoinTimeoutMs?: number;
-    crossProcessJoinPollMs?: number;
+    mutationRuntime: RootMutationRuntime;
     onLifecycleActivityChanged?: () => void;
 }
 
@@ -75,12 +67,11 @@ export interface FreshnessDecision {
     errorMessage?: string;
     fallbackSyncExecuted?: boolean;
     fallbackStats?: { added: number; removed: number; modified: number };
-    activeMutation?: RootMutationLease;
-    operation?: IndexOperationReceipt;
+    activeMutation?: RootMutationActivity;
+    operation?: RootMutationOperation;
     checkpointStatus?: 'missing' | 'corrupt';
     servedCollection?: string;
-    servedRunId?: string;
-    servedGenerationId?: string;
+    servedPublicationId?: string;
     servedGeneration?: number;
     pendingOperation?: {
         action: string;
@@ -142,14 +133,12 @@ export type WatcherBootstrapCapture = Readonly<{
 
 export type FullIndexSourceHandoffInput = Readonly<{
     capture: WatcherBootstrapCapture;
-    candidatePolicyHash: string;
+    publicationId: string;
     checkpointObservation: string;
-    provenGeneration: ProvenVectorGenerationReceipt;
 }>;
 
 export type FullIndexSourceHandoffBarrierInput = Readonly<{
-    candidatePolicyHash: string;
-    markerRunId: string;
+    publicationId: string;
 }>;
 
 export interface WatcherObservationSnapshot {
@@ -219,8 +208,8 @@ interface SyncExecutionOutcome {
         'skipped_recent' | 'skipped_source_unchanged' | 'skipped_source_checkpoint_unavailable'
     >;
     stats?: SyncStats;
-    activeMutation?: RootMutationLease;
-    operation?: IndexOperationReceipt;
+    activeMutation?: RootMutationActivity;
+    operation?: RootMutationOperation;
     errorMessage?: string;
 }
 
@@ -234,7 +223,6 @@ interface SyncStats {
     indexedFiles?: number;
     totalChunks?: number;
     indexStatus?: 'completed' | 'limit_reached';
-    generationReceipt?: ProvenGenerationReceipt;
 }
 
 type SourceFreshnessCheckpointEvidence = Awaited<
@@ -262,8 +250,7 @@ interface EnsureFreshnessOptions {
     reason?: 'default' | 'ignore_change';
     coalescedEdits?: number;
     skipIgnoreControlCheck?: boolean;
-    mutationLease?: RootMutationLease;
-    preparedVectorReceipt?: ProvenVectorGenerationReceipt;
+    preparedPublication?: PublicationRef;
     exactSourceComparisonPaths?: readonly string[];
     fullSourceComparison?: boolean;
     onPhaseTiming?: (
@@ -281,13 +268,12 @@ interface EnsureFreshnessOptions {
             | 'publication_sidecar_stage'
             | 'publication_checkpoint_stage'
             | 'publication_payload_count'
-            | 'publication_activation'
-            | 'publication_retention_proof',
+            | 'publication_activation',
         durationMs: number,
     ) => void;
 }
 
-type CrossProcessSyncJoinRequest = Pick<
+type SyncExecutionRequest = Pick<
     EnsureFreshnessOptions,
     'exactSourceComparisonPaths' | 'onPhaseTiming'
 >;
@@ -300,8 +286,6 @@ interface IgnoreReloadResult {
 
 // v1 policy: only root-level control files trigger index-policy reconciliation.
 const IGNORE_RULE_CONTROL_FILES = new Set(['.satoriignore', '.gitignore', 'satori.toml']);
-const DEFAULT_CROSS_PROCESS_JOIN_TIMEOUT_MS = 15_000;
-const DEFAULT_CROSS_PROCESS_JOIN_POLL_MS = 25;
 
 function errorMessage(error: unknown, fallback = "unknown_error"): string {
     if (error instanceof Error && error.message) {
@@ -329,7 +313,7 @@ export class SyncOperationError extends Error {
 
     constructor(
         message: string,
-        public readonly operation: IndexOperationReceipt | undefined,
+        public readonly operation: RootMutationOperation | undefined,
         options?: { cause?: unknown },
     ) {
         super(message);
@@ -340,8 +324,6 @@ export class SyncOperationError extends Error {
 
 export class SyncManager {
     private context: Context;
-    private snapshotManager: SnapshotManager;
-    private sourceFreshnessPort: SourceFreshnessPort | null;
     private activeSyncs: Map<string, Promise<SyncExecutionOutcome>> = new Map();
     private lastSyncTimes: Map<string, number> = new Map();
     private backgroundSyncTimer: NodeJS.Timeout | null = null;
@@ -364,47 +346,33 @@ export class SyncManager {
     private readonly sourceObservationState: SourceObservationState;
     private readonly now: () => number;
     private readonly onSyncCompleted?: SyncManagerOptions['onSyncCompleted'];
-    private readonly mutationLeaseCoordinator?: MutationLeaseCoordinator;
-    private readonly crossProcessJoinTimeoutMs: number;
-    private readonly crossProcessJoinPollMs: number;
+    private readonly mutationRuntime: RootMutationRuntime;
     private readonly onLifecycleActivityChanged?: () => void;
 
-    constructor(context: Context, snapshotManager: SnapshotManager, options: SyncManagerOptions = {}) {
+    constructor(context: Context, options: SyncManagerOptions) {
         this.context = context;
-        this.snapshotManager = snapshotManager;
         this.watchEnabled = options.watchEnabled === true;
         this.now = options.now || (() => Date.now());
         this.onSyncCompleted = options.onSyncCompleted;
-        this.mutationLeaseCoordinator = options.mutationLeaseCoordinator;
-        this.sourceFreshnessPort = options.sourceFreshnessPort ?? null;
+        this.mutationRuntime = options.mutationRuntime;
         this.onLifecycleActivityChanged = options.onLifecycleActivityChanged;
         this.sourceObservationState = new SourceObservationState({
-            assertMutationCurrent: (lease) => this.assertMutationCurrent(lease),
+            assertMutationCurrent: (root) => this.mutationRuntime.assertCurrent(root),
             hasCurrentWatcherCapture: (root, capture) => this.hasCurrentWatcherCapture(root, capture),
             coverWatcherObservation: (root, observedEventEpoch) => (
                 this.coverWatcherObservation(root, observedEventEpoch)
             ),
-            proveVectorGeneration: (root) => this.context.proveVectorGeneration(root),
-            inspectSourceFreshnessCheckpoint: (root, checkpointIdentity, requestBoundReceipt) => (
-                this.context.inspectSourceFreshnessCheckpoint(
-                    root,
-                    checkpointIdentity,
-                    requestBoundReceipt,
-                )
+            inspectSourceFreshnessCheckpoint: (root) => (
+                this.context.inspectSourceFreshnessCheckpoint(root)
             ),
-            getRegisteredSourceFreshnessCheckpointObservation: (root) => (
-                this.context.getRegisteredSourceFreshnessCheckpointObservation(root)
+            getCurrentPublicationSourceObservation: (root) => (
+                this.context.getCurrentPublicationSourceObservation(root)
             ),
             isPreparedReadAvailable: (root) => this.getPreparedReadObservation(root).available,
         });
-        this.crossProcessJoinTimeoutMs = Math.max(
-            1,
-            options.crossProcessJoinTimeoutMs ?? DEFAULT_CROSS_PROCESS_JOIN_TIMEOUT_MS,
-        );
-        this.crossProcessJoinPollMs = Math.max(
-            1,
-            options.crossProcessJoinPollMs ?? DEFAULT_CROSS_PROCESS_JOIN_POLL_MS,
-        );
+        for (const publication of this.context.listCurrentPublications()) {
+            this.watchedCodebases.add(this.canonicalWatcherRoot(publication.publication.canonicalRoot));
+        }
     }
 
     private hasCurrentWatcherCapture(
@@ -570,43 +538,39 @@ export class SyncManager {
     public beginFullIndexSourceHandoff(
         codebasePath: string,
         input: FullIndexSourceHandoffBarrierInput,
-        mutationLease?: RootMutationLease,
     ): void {
         const root = this.canonicalWatcherRoot(codebasePath);
-        this.sourceObservationState.beginHandoff(root, input, mutationLease);
+        this.sourceObservationState.beginHandoff(root, input);
     }
 
     public rejectFullIndexSourceHandoff(
         codebasePath: string,
         input: FullIndexSourceHandoffBarrierInput,
-        mutationLease?: RootMutationLease,
     ): boolean {
         const root = this.canonicalWatcherRoot(codebasePath);
-        return this.sourceObservationState.rejectHandoff(root, input, mutationLease);
+        return this.sourceObservationState.rejectHandoff(root, input);
     }
 
     private supersedeFullIndexSourceHandoffAfterSync(
         codebasePath: string,
-        provenGeneration: ProvenVectorGenerationReceipt | undefined,
+        publicationId: string | undefined,
     ): boolean {
         const root = this.canonicalWatcherRoot(codebasePath);
-        return this.sourceObservationState.supersedeHandoffAfterSync(root, provenGeneration);
+        return this.sourceObservationState.supersedeHandoffAfterSync(root, publicationId);
     }
 
     /**
      * Binds an already-proven completed generation/checkpoint to the watcher
-     * observation captured for the same candidate. This deliberately does not
-     * use the ordinary snapshot-status-gated checkpoint validator: the full
-     * index lifecycle is still marked indexing until this handoff succeeds or
-     * fails closed.
+     * observation captured for the same candidate. This deliberately bypasses
+     * ordinary current-Publication checkpoint lookup because the candidate is
+     * not current until this handoff succeeds or fails closed.
      */
     public async completeFullIndexSourceHandoff(
         codebasePath: string,
         input: FullIndexSourceHandoffInput,
-        mutationLease?: RootMutationLease,
     ): Promise<boolean> {
         const root = this.canonicalWatcherRoot(codebasePath);
-        return this.sourceObservationState.completeHandoff(root, input, mutationLease);
+        return this.sourceObservationState.completeHandoff(root, input);
     }
 
     private hasPendingWatcherObservation(codebasePath: string): boolean {
@@ -676,9 +640,7 @@ export class SyncManager {
 
         const checkpointInspectionSupported = typeof this.context.inspectSourceFreshnessCheckpoint === 'function';
         const checkpointObservation = this.sourceObservationState.getCheckpointObservation(root);
-        const currentCheckpointObservation = this.sourceFreshnessPort
-            ? this.sourceFreshnessPort.currentObservationToken(root)
-            : this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
+        const currentCheckpointObservation = this.context.getCurrentPublicationSourceObservation(root);
         const checkpointStatus = this.sourceObservationState.getCheckpointStatus(root);
         if (checkpointInspectionSupported && checkpointStatus === 'missing') {
             return unavailable('checkpoint_missing');
@@ -711,9 +673,7 @@ export class SyncManager {
             ? 'unverified' as const
             : this.sourceObservationState.getCheckpointStatus(root) ?? 'unverified';
         const checkpointObservation = this.sourceObservationState.getCheckpointObservation(root);
-        const registeredCheckpointObservation = this.sourceFreshnessPort
-            ? this.sourceFreshnessPort.currentObservationToken(root)
-            : this.context.getRegisteredSourceFreshnessCheckpointObservation?.(root);
+        const registeredCheckpointObservation = this.context.getCurrentPublicationSourceObservation(root);
         const checkpointStatus = checkpointState === 'valid'
             && (!checkpointObservation || registeredCheckpointObservation !== checkpointObservation)
             ? 'observation_mismatch'
@@ -733,31 +693,13 @@ export class SyncManager {
 
     private async inspectSourceFreshnessCheckpoint(
         codebasePath: string,
-        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
+        preparedPublication?: PublicationRef,
     ) {
-        const status = this.snapshotManager.getCodebaseStatus(codebasePath);
-        if (status !== 'indexed' && status !== 'sync_completed') return null;
-        const info = this.snapshotManager.getCodebaseInfo?.(codebasePath) as { indexStatus?: unknown } | undefined;
-        if (info?.indexStatus === 'limit_reached') return null;
-        if (this.sourceFreshnessPort) {
-            const prepared = await this.sourceFreshnessPort.prepareCurrentSourceObservation(
-                codebasePath,
-                { requestBoundReceipt: preparedVectorReceipt },
-            );
-            return prepared.available ? prepared.evidence : null;
-        }
-        const inspect = this.context.inspectSourceFreshnessCheckpoint as (
-            this: Context,
-            codebasePath: string,
-            checkpointIdentity?: string,
-            requestBoundReceipt?: ProvenVectorGenerationReceipt,
-        ) => ReturnType<Context['inspectSourceFreshnessCheckpoint']>;
-        if (typeof inspect !== 'function') return null;
-        return inspect.call(
-            this.context,
+        const publication = preparedPublication ?? this.context.getCurrentPublication(codebasePath) ?? undefined;
+        if (!publication || publication.publication.status !== 'complete') return null;
+        return this.context.inspectSourceFreshnessCheckpoint(
             codebasePath,
-            undefined,
-            preparedVectorReceipt,
+            preparedPublication,
         );
     }
 
@@ -765,11 +707,11 @@ export class SyncManager {
         codebasePath: string,
         checkedAt: string,
         thresholdMs: number,
-        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
+        preparedPublication?: PublicationRef,
     ): Promise<SourceFreshnessCheckpointValidation> {
         const checkpointEvidence = await this.inspectSourceFreshnessCheckpoint(
             codebasePath,
-            preparedVectorReceipt,
+            preparedPublication,
         );
         if (checkpointEvidence?.status === 'valid') {
             const previousObservation = this.sourceObservationState.recordValidCheckpointObservation(
@@ -797,141 +739,16 @@ export class SyncManager {
         };
     }
 
-    private persistOwnedOperationStart(lease: RootMutationLease | undefined, ownsLease: boolean): IndexOperationReceipt | undefined {
-        if (!lease || !ownsLease || typeof this.snapshotManager.startOperation !== "function") {
-            return undefined;
-        }
-        this.assertMutationCurrent(lease);
-        const operation = typeof this.snapshotManager.commitOperationPhase === "function"
-            ? this.snapshotManager.commitOperationPhase(
-                lease,
-                "accepted",
-                undefined,
-                () => this.assertMutationCurrent(lease),
-            )
-            : this.snapshotManager.startOperation(lease);
-        if (
-            typeof this.snapshotManager.commitOperationPhase !== "function"
-            && this.snapshotManager.saveCodebaseSnapshot() === false
-        ) {
-            throw new Error(`Failed to persist accepted sync operation receipt for '${lease.canonicalRoot}'.`);
-        }
-        return operation;
+    private getLiveOperation(codebasePath: string): RootMutationOperation | undefined {
+        return this.mutationRuntime.getCurrentOperation(codebasePath);
     }
 
-    private persistOwnedOperationPhase(
-        lease: RootMutationLease | undefined,
-        ownsLease: boolean,
-        phase: IndexOperationPhase,
-        mutateSnapshot?: () => void,
-    ): IndexOperationReceipt | undefined {
-        if (!lease || !ownsLease) {
-            mutateSnapshot?.();
-            return undefined;
-        }
-        if (typeof this.snapshotManager.transitionOperation !== "function") {
-            mutateSnapshot?.();
-            return undefined;
-        }
-        this.assertMutationCurrent(lease);
-        const operation = typeof this.snapshotManager.commitOperationPhase === "function"
-            ? this.snapshotManager.commitOperationPhase(
-                lease,
-                phase,
-                mutateSnapshot,
-                () => this.assertMutationCurrent(lease),
-            )
-            : (() => {
-                const next = this.snapshotManager.transitionOperation(lease, phase);
-                mutateSnapshot?.();
-                if (this.snapshotManager.saveCodebaseSnapshot() === false) {
-                    throw new Error(`Failed to persist sync operation phase '${phase}' for '${lease.canonicalRoot}'.`);
-                }
-                return next;
-            })();
-        return operation;
-    }
-
-    public async recordCurrentIgnoreControlSignature(
+    private publishOperationPhase(
         codebasePath: string,
-        existingLease?: RootMutationLease,
-    ): Promise<void> {
-        return this.recordIgnoreControlSignature(
-            codebasePath,
-            () => this.computeIgnoreControlSignature(codebasePath),
-            existingLease,
-        );
-    }
-
-    public async recordObservedIgnoreControlSignature(
-        codebasePath: string,
-        observedIgnoreControlSignature: string,
-        existingLease?: RootMutationLease,
-    ): Promise<void> {
-        if (typeof this.snapshotManager.setCodebaseIgnoreControlSignature !== 'function') {
-            return;
-        }
-        if (!observedIgnoreControlSignature.startsWith('v1:')) {
-            throw new Error('Observed ignore-control signature is invalid.');
-        }
-        return this.recordIgnoreControlSignature(
-            codebasePath,
-            async () => observedIgnoreControlSignature,
-            existingLease,
-        );
-    }
-
-    private async recordIgnoreControlSignature(
-        codebasePath: string,
-        resolveIgnoreControlSignature: () => Promise<string>,
-        existingLease?: RootMutationLease,
-    ): Promise<void> {
-        if (typeof this.snapshotManager.setCodebaseIgnoreControlSignature !== 'function') {
-            return;
-        }
-
-        let lease = existingLease;
-        let releaseLease = false;
-        let lastDurableOperation: IndexOperationReceipt | undefined;
-        if (this.mutationLeaseCoordinator) {
-            if (lease) {
-                this.mutationLeaseCoordinator.assertCurrent(lease);
-            } else {
-                const acquired = this.mutationLeaseCoordinator.acquire(codebasePath, 'sync');
-                if (!acquired.acquired) {
-                    throw new Error(formatMutationLeaseBlockedMessage(acquired.activeLease));
-                }
-                lease = acquired.lease;
-                releaseLease = true;
-            }
-        }
-
-        try {
-            lastDurableOperation = this.persistOwnedOperationStart(lease, releaseLease);
-            const ignoreControlSignature = await resolveIgnoreControlSignature();
-            this.assertMutationCurrent(lease);
-            const operation = this.persistOwnedOperationPhase(lease, releaseLease, "completed", () => {
-                this.snapshotManager.setCodebaseIgnoreControlSignature(codebasePath, ignoreControlSignature);
-            });
-            if (operation) {
-                lastDurableOperation = operation;
-            } else {
-                this.snapshotManager.saveCodebaseSnapshot();
-            }
-        } catch (error) {
-            if (releaseLease && lease && this.mutationLeaseCoordinator?.isCurrent(lease)) {
-                try {
-                    lastDurableOperation = this.persistOwnedOperationPhase(lease, true, "failed") ?? lastDurableOperation;
-                } catch {
-                    // Preserve the last receipt this operation durably owned.
-                }
-            }
-            throw new SyncOperationError(errorMessage(error), lastDurableOperation, { cause: error });
-        } finally {
-            if (releaseLease && lease) {
-                this.mutationLeaseCoordinator?.release(lease);
-            }
-        }
+        phase: MutationOperationPhase,
+        update: { progress?: number; error?: string } = {},
+    ): RootMutationOperation {
+        return this.mutationRuntime.updateCurrentOperation(codebasePath, phase, update);
     }
 
     /**
@@ -951,21 +768,23 @@ export class SyncManager {
         }
         const checkedAtMs = this.now();
         const checkedAt = new Date(checkedAtMs).toISOString();
+        const sourcePublication = options.preparedPublication
+            ?? this.context.getCurrentPublication(codebasePath)
+            ?? undefined;
 
         if (options.reason === 'ignore_change') {
             const checkpointValidation = await this.validateSourceFreshnessCheckpoint(
                 codebasePath,
                 checkedAt,
                 thresholdMs,
-                options.preparedVectorReceipt,
+                sourcePublication,
             );
             if ('failure' in checkpointValidation) return checkpointValidation.failure;
             const decision = await this.runIgnoreReconcile(
                 codebasePath,
                 options.coalescedEdits,
                 undefined,
-                options.mutationLease,
-                checkpointValidation.checkpoint?.generationReceipt,
+                sourcePublication,
             );
             if (decision.mode === 'reconciled_ignore_change') {
                 this.coverWatcherObservation(codebasePath, flightEpoch);
@@ -974,7 +793,7 @@ export class SyncManager {
         }
 
         // Join a live mutation before inspecting its checkpoint. The owner may be
-        // between marker withdrawal and checkpoint publication.
+        // between Publication activation and checkpoint publication.
         if (this.activeSyncs.has(codebasePath)) {
             console.log(`[SYNC] 🛡️ Request Coalesced: Attaching to active sync for '${codebasePath}'`);
             const outcome = await this.activeSyncs.get(codebasePath);
@@ -996,14 +815,14 @@ export class SyncManager {
         }
 
         // Source-freshness ownership is a precondition for every incremental path,
-        // including ignore reconciliation. The identity comes from Core authority,
-        // never from the lifecycle snapshot.
+        // including ignore reconciliation. The identity comes from the current
+        // Publication and its source checkpoint.
         const checkpointValidationStartedAt = Date.now();
         const checkpointValidation = await this.validateSourceFreshnessCheckpoint(
             codebasePath,
             checkedAt,
             thresholdMs,
-            options.preparedVectorReceipt,
+            sourcePublication,
         );
         options.onPhaseTiming?.(
             'checkpoint_proof',
@@ -1014,59 +833,22 @@ export class SyncManager {
         let currentIgnoreControlSignature: string | undefined;
         if (options.skipIgnoreControlCheck !== true) {
             currentIgnoreControlSignature = await this.computeIgnoreControlSignature(codebasePath);
-            const persistedIgnoreControlSignature = this.snapshotManager.getCodebaseIgnoreControlSignature?.(codebasePath);
-            const publishedPolicy = checkpointValidation.checkpoint
-                ?.generationReceipt
-                ?.policy;
-            const publishedIgnoreControlSignature = publishedPolicy?.controlSignature;
-            const acceptedIgnoreControlSignature = publishedIgnoreControlSignature
-                ?? persistedIgnoreControlSignature;
-            const requiresDurableControlBinding = publishedPolicy !== undefined
-                && publishedIgnoreControlSignature === undefined;
+            const acceptedIgnoreControlSignature = sourcePublication?.publication.policy.controlSignature;
 
-            if (typeof acceptedIgnoreControlSignature === 'string') {
-                if (
-                    requiresDurableControlBinding
-                    || acceptedIgnoreControlSignature !== currentIgnoreControlSignature
-                ) {
-                    const decision = await this.runIgnoreReconcile(
-                        codebasePath,
-                        1,
-                        currentIgnoreControlSignature,
-                        options.mutationLease,
-                        checkpointValidation.checkpoint?.generationReceipt,
-                    );
-                    if (decision.mode === 'reconciled_ignore_change') {
-                        this.coverWatcherObservation(codebasePath, flightEpoch);
-                    }
-                    return decision;
-                }
-            } else if (
-                (this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexed'
-                    || this.snapshotManager.getCodebaseStatus(codebasePath) === 'sync_completed')
-                && typeof this.snapshotManager.setCodebaseIgnoreControlSignature === 'function'
+            if (
+                typeof acceptedIgnoreControlSignature === 'string'
+                && acceptedIgnoreControlSignature !== currentIgnoreControlSignature
             ) {
-                const indexedPaths = typeof this.snapshotManager.getCodebaseIndexedPaths === 'function'
-                    ? this.snapshotManager.getCodebaseIndexedPaths(codebasePath)
-                    : [];
-                const hasSynchronizer = typeof this.context.hasSynchronizerForCodebase === 'function'
-                    ? this.context.hasSynchronizerForCodebase(codebasePath)
-                    : false;
-
-                if (indexedPaths.length > 0 || hasSynchronizer) {
-                    const decision = await this.runIgnoreReconcile(
-                        codebasePath,
-                        1,
-                        currentIgnoreControlSignature,
-                        options.mutationLease,
-                        checkpointValidation.checkpoint?.generationReceipt,
-                    );
-                    if (decision.mode === 'reconciled_ignore_change') {
-                        this.coverWatcherObservation(codebasePath, flightEpoch);
-                    }
-                    return decision;
+                const decision = await this.runIgnoreReconcile(
+                    codebasePath,
+                    1,
+                    currentIgnoreControlSignature,
+                    sourcePublication,
+                );
+                if (decision.mode === 'reconciled_ignore_change') {
+                    this.coverWatcherObservation(codebasePath, flightEpoch);
                 }
-
+                return decision;
             }
         }
 
@@ -1080,7 +862,7 @@ export class SyncManager {
                     this.context,
                     codebasePath,
                     exactSourceComparisonPaths,
-                    options.preparedVectorReceipt,
+                    sourcePublication,
                 );
                 exactComparisonResult = comparison;
                 options.onPhaseTiming?.(
@@ -1105,7 +887,7 @@ export class SyncManager {
                 const comparison = await compareAllSource.call(
                     this.context,
                     codebasePath,
-                    options.preparedVectorReceipt,
+                    sourcePublication,
                 );
                 fullComparisonResult = comparison;
                 options.onPhaseTiming?.(
@@ -1152,13 +934,12 @@ export class SyncManager {
             try {
                 return await this.syncCodebase(
                     codebasePath,
-                    options.mutationLease,
                     currentIgnoreControlSignature,
                     {
                         exactSourceComparisonPaths: options.exactSourceComparisonPaths,
                         onPhaseTiming: options.onPhaseTiming,
                     },
-                    checkpointValidation.checkpoint?.generationReceipt,
+                    sourcePublication,
                 );
             } catch (e) {
                 // Log and rethrow to allow callers to handle/see failure
@@ -1173,10 +954,7 @@ export class SyncManager {
         this.activeSyncs.set(codebasePath, syncPromise);
         const outcome = await syncPromise;
         const committedCheckpointStartedAt = Date.now();
-        const committedCheckpoint = await this.inspectSourceFreshnessCheckpoint(
-            codebasePath,
-            outcome.stats?.generationReceipt,
-        );
+        const committedCheckpoint = await this.inspectSourceFreshnessCheckpoint(codebasePath);
         options.onPhaseTiming?.(
             'checkpoint_proof',
             Math.max(0, Date.now() - committedCheckpointStartedAt),
@@ -1214,7 +992,7 @@ export class SyncManager {
             if (committedCheckpoint?.status === 'valid') {
                 this.supersedeFullIndexSourceHandoffAfterSync(
                     codebasePath,
-                    committedCheckpoint.generationReceipt,
+                    committedCheckpoint.publicationId,
                 );
             }
         }
@@ -1225,8 +1003,7 @@ export class SyncManager {
         codebasePath: string,
         coalescedEdits: number = 1,
         nextIgnoreControlSignature?: string,
-        existingLease?: RootMutationLease,
-        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
+        preparedPublication?: PublicationRef,
     ): Promise<FreshnessDecision> {
         const reconcileKey = this.normalizeReconcileKey(codebasePath);
         const inFlight = this.activeIgnoreReconciles.get(reconcileKey);
@@ -1243,66 +1020,56 @@ export class SyncManager {
             };
         }
 
-        let lease = existingLease;
-        let releaseLease = false;
-        let lastDurableOperation: IndexOperationReceipt | undefined;
-        if (this.mutationLeaseCoordinator) {
-            if (lease) {
-                this.mutationLeaseCoordinator.assertCurrent(lease);
-            } else {
-                const acquired = this.mutationLeaseCoordinator.acquire(codebasePath, 'sync');
-                if (!acquired.acquired) {
-                    return {
-                        mode: 'skipped_mutation_in_progress',
-                        checkedAt,
-                        thresholdMs: 0,
-                        activeMutation: acquired.activeLease,
-                    };
-                }
-                lease = acquired.lease;
-                releaseLease = true;
-            }
-        }
-
         try {
-            lastDurableOperation = this.persistOwnedOperationStart(lease, releaseLease);
-            console.log(`[SYNC] 🔁 Ignore control files changed for '${codebasePath}', running reconciliation.`);
-            const promise = this.reconcileIgnoreRulesChange(
-                codebasePath,
-                coalescedEdits,
-                nextIgnoreControlSignature,
-                lease,
-                preparedVectorReceipt,
-            );
-            this.activeIgnoreReconciles.set(reconcileKey, promise);
-            const decision = await promise;
-            const phase = decision.mode === "ignore_reload_failed"
-                ? "failed"
-                : decision.mode === "skipped_requires_reindex"
-                    ? "blocked"
-                    : "completed";
-            const operation = this.persistOwnedOperationPhase(lease, releaseLease, phase);
-            if (operation) {
-                lastDurableOperation = operation;
-            }
-            return {
-                ...decision,
-                ...(lastDurableOperation ? { operation: lastDurableOperation } : {}),
-            };
-        } catch (error) {
-            if (releaseLease && lease && this.mutationLeaseCoordinator?.isCurrent(lease)) {
+            return await this.mutationRuntime.run(codebasePath, 'sync', async () => {
+                let lastOperation = this.getLiveOperation(codebasePath);
                 try {
-                    lastDurableOperation = this.persistOwnedOperationPhase(lease, true, "failed") ?? lastDurableOperation;
-                } catch {
-                    // Preserve the last receipt this operation durably owned.
+                    console.log(`[SYNC] 🔁 Ignore control files changed for '${codebasePath}', running reconciliation.`);
+                    const promise = this.reconcileIgnoreRulesChange(
+                        codebasePath,
+                        coalescedEdits,
+                        nextIgnoreControlSignature,
+                        preparedPublication,
+                    );
+                    this.activeIgnoreReconciles.set(reconcileKey, promise);
+                    const decision = await promise;
+                    const phase = decision.mode === "ignore_reload_failed"
+                        ? "failed"
+                        : decision.mode === "skipped_requires_reindex"
+                            ? "blocked"
+                            : "completed";
+                    lastOperation = this.publishOperationPhase(codebasePath, phase);
+                    return {
+                        ...decision,
+                        operation: lastOperation,
+                    };
+                } catch (error) {
+                    if (this.mutationRuntime.isCurrent(codebasePath)) {
+                        try {
+                            lastOperation = this.publishOperationPhase(
+                                codebasePath,
+                                "failed",
+                                { error: errorMessage(error) },
+                            );
+                        } catch {
+                            // Keep the last live state this operation owned.
+                        }
+                    }
+                    throw new SyncOperationError(errorMessage(error), lastOperation, { cause: error });
+                } finally {
+                    this.activeIgnoreReconciles.delete(reconcileKey);
                 }
+            });
+        } catch (error) {
+            if (error instanceof RootMutationInProgressError) {
+                return {
+                    mode: 'skipped_mutation_in_progress',
+                    checkedAt,
+                    thresholdMs: 0,
+                    activeMutation: error.activeMutation,
+                };
             }
-            throw new SyncOperationError(errorMessage(error), lastDurableOperation, { cause: error });
-        } finally {
-            this.activeIgnoreReconciles.delete(reconcileKey);
-            if (releaseLease && lease) {
-                this.mutationLeaseCoordinator?.release(lease);
-            }
+            throw error;
         }
     }
 
@@ -1310,14 +1077,14 @@ export class SyncManager {
         codebasePath: string,
         coalescedEdits: number = 1,
         nextIgnoreControlSignature?: string,
-        mutationLease?: RootMutationLease,
-        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
+        preparedPublication?: PublicationRef,
     ): Promise<FreshnessDecision> {
         const checkedAtMs = this.now();
         const checkedAt = new Date(checkedAtMs).toISOString();
         const startedAt = checkedAtMs;
-        let resolvedIgnoreControlSignature = nextIgnoreControlSignature ?? await this.computeIgnoreControlSignature(codebasePath);
-        let indexedStateMutated = false;
+        if (nextIgnoreControlSignature !== undefined && !nextIgnoreControlSignature.startsWith('v1:')) {
+            throw new Error('Observed ignore-control signature is invalid.');
+        }
         let policyObservationEstablished = false;
 
         try {
@@ -1328,15 +1095,8 @@ export class SyncManager {
 
             const candidatePolicy = await this.context.observeIndexPolicyForIncrementalReconciliation(codebasePath);
             policyObservationEstablished = true;
-            resolvedIgnoreControlSignature = candidatePolicy.controlSignature;
-            this.assertMutationCurrent(mutationLease);
+            this.mutationRuntime.assertCurrent(codebasePath);
             if (!await this.context.activateObservedIndexPolicyForIncrementalReconciliation(candidatePolicy)) {
-                this.snapshotManager.setCodebaseRequiresReindex(
-                    codebasePath,
-                    'index_policy_changed',
-                    'Repository index-policy inputs changed. A full reindex is required before the new policy can become authoritative.',
-                );
-                this.snapshotManager.saveCodebaseSnapshot();
                 return {
                     mode: 'skipped_requires_reindex',
                     checkedAt,
@@ -1347,86 +1107,44 @@ export class SyncManager {
                 };
             }
 
-            const manifestIndexedPaths = typeof this.snapshotManager.getCodebaseIndexedPaths === 'function'
-                ? this.snapshotManager.getCodebaseIndexedPaths(codebasePath)
-                : [];
-            const hasSynchronizer = typeof this.context.hasSynchronizerForCodebase === 'function'
-                ? this.context.hasSynchronizerForCodebase(codebasePath)
-                : false;
-            let indexedPathsBeforeReload = manifestIndexedPaths;
-            if (indexedPathsBeforeReload.length === 0 && hasSynchronizer && typeof this.context.getTrackedRelativePaths === 'function') {
-                indexedPathsBeforeReload = this.context.getTrackedRelativePaths(codebasePath);
+            const sourcePublication = preparedPublication ?? this.context.getCurrentPublication(codebasePath) ?? undefined;
+            const sourceCheckpoint = sourcePublication
+                ? this.context.getPublicationSourceCheckpoint(sourcePublication)
+                : null;
+            if (!sourceCheckpoint) {
+                throw new Error('missing_publication_source_checkpoint');
             }
-            if (indexedPathsBeforeReload.length === 0 && !hasSynchronizer) {
-                throw new Error('missing_manifest_and_synchronizer');
-            }
+            const indexedPathsBeforeReload = sourceCheckpoint.fileHashes.map(([relativePath]) => relativePath);
 
-            const { previousMatcher, matcher, version } = await this.refreshIgnoreMatcherForCodebase(
+            const { previousMatcher, matcher, version } = await this.refreshIgnoreMatcherForCodebase(codebasePath);
+
+            this.mutationRuntime.assertCurrent(codebasePath);
+            await this.context.recreateSynchronizerForCodebase(
                 codebasePath,
-                mutationLease,
+                { requireAuthorityCheckpoint: true },
             );
-
-            if (typeof this.context.recreateSynchronizerForCodebase === 'function') {
-                this.assertMutationCurrent(mutationLease);
-                await this.context.recreateSynchronizerForCodebase(
-                    codebasePath,
-                    mutationLease ? () => this.assertMutationCurrent(mutationLease) : undefined,
-                    mutationLease
-                        ? (publish: () => void) => {
-                            if (!this.mutationLeaseCoordinator) {
-                                throw new Error(`Cannot publish synchronizer baseline for '${codebasePath}' without a mutation lease coordinator.`);
-                            }
-                            this.mutationLeaseCoordinator.publishWhileCurrent(mutationLease, publish);
-                        }
-                        : undefined,
-                    { requireAuthorityCheckpoint: true },
-                );
-                this.assertMutationCurrent(mutationLease);
-            }
+            this.mutationRuntime.assertCurrent(codebasePath);
 
             // Self-healing delete rule: remove anything currently indexed that new matcher ignores.
             const toDelete = indexedPathsBeforeReload.filter((relativePath) => this.matcherIgnoresRelativePath(matcher, relativePath));
-            const retainedPaths = indexedPathsBeforeReload.filter((relativePath) => !this.matcherIgnoresRelativePath(matcher, relativePath));
 
-            if (toDelete.length > 0 && typeof this.context.deleteIndexedPathsByRelativePaths === 'function') {
-                if (mutationLease) {
-                    this.mutationLeaseCoordinator?.assertCurrent(mutationLease);
-                }
-                await this.context.deleteIndexedPathsByRelativePaths(
-                    codebasePath,
-                    toDelete,
-                    mutationLease ? () => this.assertMutationCurrent(mutationLease) : undefined,
-                );
-                indexedStateMutated = true;
+            if (toDelete.length > 0) {
+                this.mutationRuntime.assertCurrent(codebasePath);
+                await this.context.deleteIndexedPathsByRelativePaths(codebasePath, toDelete);
             }
-
-            if (typeof this.snapshotManager.setCodebaseIndexManifest === 'function') {
-                this.assertMutationCurrent(mutationLease);
-                this.snapshotManager.setCodebaseIndexManifest(codebasePath, retainedPaths);
-            }
-            this.assertMutationCurrent(mutationLease);
-            this.snapshotManager.saveCodebaseSnapshot();
 
             // Deleting newly ignored payload invalidates ordinary live proof.
             // Carry the pre-delete receipt so Core can revalidate that exact
             // source generation after the mutation lease is held.
             const syncDecision = await this.ensureFreshness(codebasePath, 0, {
                 skipIgnoreControlCheck: true,
-                mutationLease,
-                preparedVectorReceipt,
+                preparedPublication,
             });
             const lastSyncAt = syncDecision.lastSyncAt;
             const lastSyncMs = lastSyncAt ? Date.parse(lastSyncAt) : undefined;
             const newlyIgnoredCount = previousMatcher
                 ? indexedPathsBeforeReload.filter((relativePath) => !this.matcherIgnoresRelativePath(previousMatcher, relativePath) && this.matcherIgnoresRelativePath(matcher, relativePath)).length
                 : toDelete.length;
-
-            if (typeof this.snapshotManager.setCodebaseIgnoreControlSignature === 'function') {
-                this.assertMutationCurrent(mutationLease);
-                this.snapshotManager.setCodebaseIgnoreControlSignature(codebasePath, resolvedIgnoreControlSignature);
-            }
-            this.assertMutationCurrent(mutationLease);
-            this.snapshotManager.saveCodebaseSnapshot();
 
             return {
                 mode: 'reconciled_ignore_change',
@@ -1447,29 +1165,16 @@ export class SyncManager {
         } catch (error) {
             let fallbackSyncExecuted = false;
             let fallbackStats: { added: number; removed: number; modified: number } | undefined;
-            let fallbackRecovered = false;
             if (policyObservationEstablished) {
                 try {
                     const fallbackDecision = await this.ensureFreshness(codebasePath, 0, {
                         skipIgnoreControlCheck: true,
-                        mutationLease,
                     });
                     fallbackSyncExecuted = true;
                     fallbackStats = fallbackDecision.stats;
-                    fallbackRecovered = fallbackDecision.mode === 'synced';
                 } catch {
                     // Preserve primary failure metadata even if fallback sync fails.
                 }
-            }
-
-            if (indexedStateMutated && !fallbackRecovered) {
-                this.assertMutationCurrent(mutationLease);
-                this.snapshotManager.setCodebaseRequiresReindex(
-                    codebasePath,
-                    'navigation_recovery_failed',
-                    'Ignore-rule reconciliation deleted indexed paths, but sync recovery failed. Reindex is required before navigation tools are reliable.'
-                );
-                this.snapshotManager.saveCodebaseSnapshot();
             }
 
             return {
@@ -1488,459 +1193,161 @@ export class SyncManager {
 
     private async syncCodebase(
         codebasePath: string,
-        existingLease?: RootMutationLease,
-        currentIgnoreControlSignature?: string,
-        joinRequest: CrossProcessSyncJoinRequest = {},
-        preparedVectorReceipt?: ProvenVectorGenerationReceipt,
+        _currentIgnoreControlSignature?: string,
+        joinRequest: SyncExecutionRequest = {},
+        preparedPublication?: PublicationRef,
     ): Promise<SyncExecutionOutcome> {
-        if (!this.canRunFreshnessMutation(codebasePath)
-            && this.snapshotManager.getCodebaseStatus(codebasePath) === 'indexing') {
-            console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because indexing is active.`);
-            return { mode: 'skipped_indexing' };
+        const currentPublication = preparedPublication ?? this.context.getCurrentPublication(codebasePath) ?? undefined;
+        if (!currentPublication) {
+            const activeMutation = this.mutationRuntime.getActiveMutation(codebasePath);
+            if (activeMutation?.action === 'create' || activeMutation?.action === 'reindex') {
+                console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because indexing is active.`);
+                return { mode: 'skipped_indexing', activeMutation };
+            }
+            return { mode: 'skipped_requires_reindex' };
         }
-
-        if (this.snapshotManager.getCodebaseStatus(codebasePath) === 'requires_reindex') {
-            console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because it requires reindex.`);
+        if (currentPublication.publication.status !== 'complete') {
+            console.log(`[SYNC] ⏭️  Skipping sync for '${codebasePath}' because the current Publication is partial.`);
             return { mode: 'skipped_requires_reindex' };
         }
 
-        let lease = existingLease;
-        let releaseLease = false;
-        let lastDurableOperation: IndexOperationReceipt | undefined;
-        if (this.mutationLeaseCoordinator) {
-            if (lease) {
-                this.mutationLeaseCoordinator.assertCurrent(lease);
-            } else {
-                const acquired = this.mutationLeaseCoordinator.acquire(codebasePath, 'sync');
-                if (!acquired.acquired) {
-                    if (acquired.activeLease.action === 'sync') {
-                        return this.joinCrossProcessSync(
-                            codebasePath,
-                            acquired.activeLease,
-                            joinRequest,
+        try {
+            return await this.mutationRuntime.run(codebasePath, 'sync', async () => {
+                let lastOperation = this.getLiveOperation(codebasePath);
+                try {
+                    let pathMissing = false;
+                    try {
+                        this.mutationRuntime.assertCurrent(codebasePath);
+                        await fs.promises.access(codebasePath);
+                    } catch (error) {
+                        const code = errorCode(error);
+                        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+                        pathMissing = true;
+                    }
+
+                    if (pathMissing) {
+                        console.log(`[SYNC] 🗑️ Codebase '${codebasePath}' no longer exists. Clearing Publication-owned index state.`);
+                        this.mutationRuntime.assertCurrent(codebasePath);
+                        await this.context.clearIndex(codebasePath);
+                        this.mutationRuntime.assertCurrent(codebasePath);
+                        lastOperation = this.publishOperationPhase(codebasePath, "completed", { progress: 100 });
+                        await this.unwatchCodebase(codebasePath);
+                        return { mode: 'skipped_missing_path', operation: lastOperation };
+                    }
+
+                    const fencedCheckpointStartedAt = Date.now();
+                    const fencedCheckpoint = await this.inspectSourceFreshnessCheckpoint(
+                        codebasePath,
+                        currentPublication,
+                    );
+                    joinRequest.onPhaseTiming?.(
+                        'checkpoint_proof',
+                        Math.max(0, Date.now() - fencedCheckpointStartedAt),
+                    );
+                    if (fencedCheckpoint && fencedCheckpoint.status !== 'valid') {
+                        throw new Error(
+                            `Incremental sync cannot continue because its authoritative source checkpoint is ${fencedCheckpoint.status}: ${fencedCheckpoint.message}`,
                         );
                     }
-                    return { mode: 'skipped_mutation_in_progress', activeMutation: acquired.activeLease };
-                }
-                lease = acquired.lease;
-                releaseLease = true;
-            }
-        }
-
-        try {
-            lastDurableOperation = this.persistOwnedOperationStart(lease, releaseLease);
-            // Async existence check to avoid blocking event loop.
-            let pathMissing = false;
-            try {
-                this.assertMutationCurrent(lease);
-                await fs.promises.access(codebasePath);
-            } catch (error) {
-                const code = errorCode(error);
-                if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-                    throw error;
-                }
-                pathMissing = true;
-            }
-
-            if (pathMissing) {
-                // Clear vector/navigation state before dropping snapshot ownership
-                // so a recreated path cannot inherit it.
-                console.log(`[SYNC] 🗑️ Codebase '${codebasePath}' no longer exists. Clearing index state and removing from snapshot.`);
-                this.assertMutationCurrent(lease);
-                await this.context.clearIndex(codebasePath, undefined, {
-                    ...(lease ? { assertMutationCurrent: () => this.assertMutationCurrent(lease) } : {}),
-                });
-                this.assertMutationCurrent(lease);
-                const operation = this.persistOwnedOperationPhase(lease, releaseLease, "completed", () => {
-                    this.snapshotManager.removeIndexedCodebase(codebasePath);
-                });
-                if (operation) {
-                    lastDurableOperation = operation;
-                } else {
-                    this.snapshotManager.saveCodebaseSnapshot();
-                }
-                await this.unwatchCodebase(codebasePath);
-                return { mode: 'skipped_missing_path', operation: lastDurableOperation };
-            }
-
-            const assertCurrent = lease
-                ? () => this.assertMutationCurrent(lease)
-                : undefined;
-            const publishCurrent = lease
-                ? (publish: () => void) => {
-                    if (!this.mutationLeaseCoordinator) {
-                        throw new Error(`Cannot publish sync checkpoint for '${codebasePath}' without a mutation lease coordinator.`);
-                    }
-                    this.mutationLeaseCoordinator.publishWhileCurrent(lease, publish);
-                }
-                : undefined;
-            const fencedCheckpointStartedAt = Date.now();
-            const fencedCheckpoint = await this.inspectSourceFreshnessCheckpoint(
-                codebasePath,
-                preparedVectorReceipt,
-            );
-            joinRequest.onPhaseTiming?.(
-                'checkpoint_proof',
-                Math.max(0, Date.now() - fencedCheckpointStartedAt),
-            );
-            if (fencedCheckpoint && fencedCheckpoint.status !== 'valid') {
-                throw new Error(
-                    `Incremental sync cannot continue because its authoritative source checkpoint is ${fencedCheckpoint.status}: ${fencedCheckpoint.message}`,
-                );
-            }
-            if (fencedCheckpoint?.status === 'valid') {
-                this.sourceObservationState.recordCheckpointObservation(
-                    codebasePath,
-                    fencedCheckpoint.observationToken,
-                );
-                const registeredObservation = this.context.getRegisteredSourceFreshnessCheckpointObservation?.(codebasePath);
-                if (
-                    registeredObservation !== fencedCheckpoint.observationToken
-                    && typeof this.context.recreateSynchronizerForCodebase === 'function'
-                ) {
-                    await this.context.recreateSynchronizerForCodebase(
-                        codebasePath,
-                        assertCurrent,
-                        publishCurrent,
-                        { requireAuthorityCheckpoint: true },
-                    );
-                    this.assertMutationCurrent(lease);
-                }
-            }
-
-            // Incremental sync
-            const syncOptions = {
-                maintainCompletionMarker: true,
-                ...(fencedCheckpoint?.status === 'valid' && fencedCheckpoint.generationReceipt ? {
-                    sourceGenerationReceipt: fencedCheckpoint.generationReceipt,
-                } : {}),
-                ...(lease ? {
-                    publicationAuthority: {
-                        ownerId: lease.ownerId,
-                        generation: lease.generation,
-                        operationId: lease.operationId,
-                    },
-                } : {}),
-                ...(assertCurrent && publishCurrent ? {
-                    assertMutationCurrent: assertCurrent,
-                    publishMutation: publishCurrent,
-                } : {}),
-                ...(joinRequest.onPhaseTiming
-                    ? { onPhaseTiming: joinRequest.onPhaseTiming }
-                    : {}),
-            };
-            if (lease) {
-                this.mutationLeaseCoordinator?.assertCurrent(lease);
-            }
-            const writingOperation = this.persistOwnedOperationPhase(lease, releaseLease, "writing");
-            if (writingOperation) {
-                lastDurableOperation = writingOperation;
-            }
-            const publicationStartedAt = Date.now();
-            const stats: SyncStats = await this.context.reindexByChange(codebasePath, undefined, syncOptions);
-            joinRequest.onPhaseTiming?.(
-                'incremental_publication',
-                Math.max(0, Date.now() - publicationStartedAt),
-            );
-            if (lease) {
-                this.mutationLeaseCoordinator?.assertCurrent(lease);
-            }
-
-            if (typeof this.context.getTrackedRelativePaths === 'function') {
-                const trackedPaths = this.context.getTrackedRelativePaths(codebasePath);
-                if (typeof this.snapshotManager.setCodebaseIndexManifest === 'function') {
-                    this.assertMutationCurrent(lease);
-                    this.snapshotManager.setCodebaseIndexManifest(codebasePath, trackedPaths);
-                }
-            }
-
-            if (
-                currentIgnoreControlSignature !== undefined
-                && typeof this.snapshotManager.setCodebaseIgnoreControlSignature === 'function'
-            ) {
-                this.assertMutationCurrent(lease);
-                this.snapshotManager.setCodebaseIgnoreControlSignature(codebasePath, currentIgnoreControlSignature);
-            }
-
-            // Centralized State Update
-            this.lastSyncTimes.set(codebasePath, this.now());
-
-            if (stats.navigationRecovery === 'failed') {
-                this.assertMutationCurrent(lease);
-                const operation = this.persistOwnedOperationPhase(lease, releaseLease, "failed", () => {
-                    this.snapshotManager.setCodebaseRequiresReindex(
-                        codebasePath,
-                        'navigation_recovery_failed',
-                        'Incremental sync completed, but navigation sidecar recovery failed. Reindex is required before navigation tools are reliable.'
-                    );
-                });
-                if (operation) {
-                    lastDurableOperation = operation;
-                } else {
-                    this.snapshotManager.saveCodebaseSnapshot();
-                }
-                return { mode: 'skipped_requires_reindex', stats, operation: lastDurableOperation };
-            }
-
-            if (this.onSyncCompleted) {
-                const assertMutationCurrent = () => this.assertMutationCurrent(lease);
-                assertMutationCurrent();
-                await this.onSyncCompleted(codebasePath, {
-                    added: stats.added,
-                    removed: stats.removed,
-                    modified: stats.modified,
-                    changedFiles: Array.isArray(stats.changedFiles) ? stats.changedFiles : []
-                }, assertMutationCurrent);
-                assertMutationCurrent();
-            }
-
-            if (lease) {
-                this.mutationLeaseCoordinator?.assertCurrent(lease);
-            }
-            const operation = this.persistOwnedOperationPhase(lease, releaseLease, "completed", () => {
-                this.snapshotManager.setCodebaseSyncCompleted(codebasePath, stats, undefined, 'verified', stats.collectionName);
-            });
-            if (operation) {
-                lastDurableOperation = operation;
-            } else {
-                this.snapshotManager.saveCodebaseSnapshot();
-            }
-
-            if (stats.added > 0 || stats.removed > 0 || stats.modified > 0) {
-                console.log(`[SYNC] ✅ Sync Result for '${codebasePath}': +${stats.added}, -${stats.removed}, ~${stats.modified}`);
-            }
-            return { mode: 'synced', stats, operation: lastDurableOperation };
-        } catch (error) {
-            console.error(`[SYNC] Failed to sync '${codebasePath}':`, error);
-            if (error instanceof AtomicIncrementalPublicationUnsupportedError) {
-                const operation = this.persistOwnedOperationPhase(lease, releaseLease, 'blocked', () => {
-                    this.snapshotManager.setCodebaseRequiresReindex(
-                        codebasePath,
-                        'backend_requires_full_rebuild',
-                        error.message,
-                    );
-                });
-                if (operation) {
-                    lastDurableOperation = operation;
-                } else {
-                    this.snapshotManager.saveCodebaseSnapshot();
-                }
-                return {
-                    mode: 'skipped_requires_reindex',
-                    operation: lastDurableOperation,
-                };
-            }
-            if (releaseLease && lease && this.mutationLeaseCoordinator?.isCurrent(lease)) {
-                try {
-                    lastDurableOperation = this.persistOwnedOperationPhase(lease, true, "failed") ?? lastDurableOperation;
-                } catch {
-                    // Preserve the last receipt this operation durably owned.
-                }
-            }
-            throw new SyncOperationError(errorMessage(error), lastDurableOperation, { cause: error });
-        } finally {
-            if (releaseLease && lease) {
-                this.mutationLeaseCoordinator?.release(lease);
-            }
-        }
-    }
-
-    private async joinCrossProcessSync(
-        codebasePath: string,
-        activeLease: RootMutationLease,
-        request: CrossProcessSyncJoinRequest,
-    ): Promise<SyncExecutionOutcome> {
-        const observeOperation = this.snapshotManager.observeDurableLatestOperation;
-        const matchesRuntime = this.snapshotManager.operationMatchesRuntimeFingerprint;
-        if (
-            !this.mutationLeaseCoordinator
-            || typeof observeOperation !== 'function'
-            || typeof matchesRuntime !== 'function'
-        ) {
-            return {
-                mode: 'skipped_mutation_in_progress',
-                activeMutation: activeLease,
-            };
-        }
-
-        const deadline = Date.now() + this.crossProcessJoinTimeoutMs;
-        let lastOperation: IndexOperationReceipt | undefined;
-        while (Date.now() <= deadline) {
-            const operation = observeOperation.call(this.snapshotManager, codebasePath);
-            if (
-                operation
-                && operation.id === activeLease.operationId
-                && operation.generation === activeLease.generation
-                && operation.action === 'sync'
-                && operation.canonicalRoot === activeLease.canonicalRoot
-            ) {
-                lastOperation = operation;
-                if (!matchesRuntime.call(this.snapshotManager, operation)) {
-                    return {
-                        mode: 'coalesced',
-                        activeMutation: activeLease,
-                        operation,
-                        errorMessage: 'The in-flight sync uses an incompatible runtime fingerprint.',
-                    };
-                }
-                if (operation.phase === 'failed' || operation.phase === 'blocked') {
-                    return {
-                        mode: 'coalesced',
-                        activeMutation: activeLease,
-                        operation,
-                        errorMessage: `The joined sync ended in terminal phase '${operation.phase}'.`,
-                    };
-                }
-                if (operation.phase === 'completed') {
-                    let checkpoint = await this.inspectSourceFreshnessCheckpoint(codebasePath);
-                    if (!checkpoint || checkpoint.status !== 'valid') {
-                        return {
-                            mode: 'coalesced',
-                            activeMutation: activeLease,
-                            operation,
-                            errorMessage: 'The joined sync completed without a proven active source checkpoint.',
-                        };
-                    }
-
-                    const registeredObservation =
-                        this.context.getRegisteredSourceFreshnessCheckpointObservation?.(codebasePath);
-                    if (
-                        registeredObservation !== checkpoint.observationToken
-                        && typeof this.context.recreateSynchronizerForCodebase === 'function'
-                    ) {
-                        try {
+                    if (fencedCheckpoint?.status === 'valid') {
+                        this.sourceObservationState.recordCheckpointObservation(
+                            codebasePath,
+                            fencedCheckpoint.observationToken,
+                        );
+                        const registeredObservation = this.context.getCurrentPublicationSourceObservation(codebasePath);
+                        if (registeredObservation !== fencedCheckpoint.observationToken) {
                             await this.context.recreateSynchronizerForCodebase(
                                 codebasePath,
-                                undefined,
-                                undefined,
                                 { requireAuthorityCheckpoint: true },
                             );
-                        } catch {
-                            return {
-                                mode: 'coalesced',
-                                activeMutation: activeLease,
-                                operation,
-                                errorMessage: 'The joined sync completed, but this runtime could not bind its source checkpoint to the active publication.',
-                            };
-                        }
-                        checkpoint = await this.inspectSourceFreshnessCheckpoint(codebasePath);
-                        if (!checkpoint || checkpoint.status !== 'valid') {
-                            return {
-                                mode: 'coalesced',
-                                activeMutation: activeLease,
-                                operation,
-                                errorMessage: 'The joined sync source checkpoint changed while this runtime was binding it.',
-                            };
-                        }
-                        if (
-                            this.context.getRegisteredSourceFreshnessCheckpointObservation?.(codebasePath)
-                            !== checkpoint.observationToken
-                        ) {
-                            return {
-                                mode: 'coalesced',
-                                activeMutation: activeLease,
-                                operation,
-                                errorMessage: 'The joined sync source checkpoint did not bind to the active publication.',
-                            };
+                            this.mutationRuntime.assertCurrent(codebasePath);
                         }
                     }
 
-                    const paths = request.exactSourceComparisonPaths;
-                    if (paths && paths.length > 0) {
-                        const compareSourcePaths = this.context.compareSourcePathsToFreshnessCheckpoint;
-                        if (typeof compareSourcePaths !== 'function') {
-                            return {
-                                mode: 'coalesced',
-                                activeMutation: activeLease,
-                                operation,
-                                errorMessage: 'The joined sync cannot prove the requested source observation.',
-                            };
-                        }
-                        const comparison = await compareSourcePaths.call(
-                            this.context,
+                    const syncOptions = {
+                        sourcePublication: currentPublication,
+                        ...(joinRequest.onPhaseTiming
+                            ? { onPhaseTiming: joinRequest.onPhaseTiming }
+                            : {}),
+                    };
+                    this.mutationRuntime.assertCurrent(codebasePath);
+                    lastOperation = this.publishOperationPhase(codebasePath, "writing");
+                    const publicationStartedAt = Date.now();
+                    const stats: SyncStats = await this.context.reindexByChange(codebasePath, undefined, syncOptions);
+                    joinRequest.onPhaseTiming?.(
+                        'incremental_publication',
+                        Math.max(0, Date.now() - publicationStartedAt),
+                    );
+                    this.mutationRuntime.assertCurrent(codebasePath);
+
+                    this.lastSyncTimes.set(codebasePath, this.now());
+
+                    if (stats.navigationRecovery === 'failed') {
+                        lastOperation = this.publishOperationPhase(
                             codebasePath,
-                            paths,
+                            "failed",
+                            { error: 'Incremental sync completed, but Publication navigation recovery failed.' },
                         );
-                        if (comparison.status !== 'matches') {
-                            return {
-                                mode: 'coalesced',
-                                activeMutation: activeLease,
-                                operation,
-                                errorMessage: `The joined sync did not prove the requested source observation (${comparison.status}).`,
-                            };
-                        }
+                        return { mode: 'skipped_requires_reindex', stats, operation: lastOperation };
                     }
 
-                    const finalOperation = observeOperation.call(this.snapshotManager, codebasePath);
-                    if (
-                        !finalOperation
-                        || finalOperation.id !== operation.id
-                        || finalOperation.generation !== operation.generation
-                        || finalOperation.phase !== 'completed'
-                    ) {
+                    if (this.onSyncCompleted) {
+                        const assertMutationCurrent = () => this.mutationRuntime.assertCurrent(codebasePath);
+                        assertMutationCurrent();
+                        await this.onSyncCompleted(codebasePath, {
+                            added: stats.added,
+                            removed: stats.removed,
+                            modified: stats.modified,
+                            changedFiles: Array.isArray(stats.changedFiles) ? stats.changedFiles : []
+                        }, assertMutationCurrent);
+                        assertMutationCurrent();
+                    }
+
+                    lastOperation = this.publishOperationPhase(codebasePath, "completed", { progress: 100 });
+
+                    if (stats.added > 0 || stats.removed > 0 || stats.modified > 0) {
+                        console.log(`[SYNC] ✅ Sync Result for '${codebasePath}': +${stats.added}, -${stats.removed}, ~${stats.modified}`);
+                    }
+                    return { mode: 'synced', stats, operation: lastOperation };
+                } catch (error) {
+                    console.error(`[SYNC] Failed to sync '${codebasePath}':`, error);
+                    if (error instanceof AtomicIncrementalPublicationUnsupportedError) {
+                        lastOperation = this.publishOperationPhase(
+                            codebasePath,
+                            'blocked',
+                            { error: error.message },
+                        );
                         return {
-                            mode: 'coalesced',
-                            activeMutation: activeLease,
-                            ...(finalOperation ? { operation: finalOperation } : { operation }),
-                            errorMessage: 'The durable sync authority changed before the joined result could be accepted.',
+                            mode: 'skipped_requires_reindex',
+                            operation: lastOperation,
                         };
                     }
-
-                    this.sourceObservationState.recordValidCheckpointObservation(
-                        codebasePath,
-                        checkpoint.observationToken,
-                    );
-                    this.lastSyncTimes.set(codebasePath, this.now());
-                    return {
-                        mode: 'coalesced',
-                        activeMutation: activeLease,
-                        operation,
-                    };
+                    if (this.mutationRuntime.isCurrent(codebasePath)) {
+                        try {
+                            lastOperation = this.publishOperationPhase(
+                                codebasePath,
+                                "failed",
+                                { error: errorMessage(error) },
+                            );
+                        } catch {
+                            // Keep the last live state this operation owned.
+                        }
+                    }
+                    throw new SyncOperationError(errorMessage(error), lastOperation, { cause: error });
                 }
-            } else if (operation && operation.generation >= activeLease.generation) {
-                return {
-                    mode: 'coalesced',
-                    activeMutation: activeLease,
-                    operation,
-                    errorMessage: 'The durable sync operation no longer matches the active mutation lease.',
-                };
+            });
+        } catch (error) {
+            if (error instanceof RootMutationInProgressError) {
+                return { mode: 'skipped_mutation_in_progress', activeMutation: error.activeMutation };
             }
-
-            const currentLease = this.mutationLeaseCoordinator.getActiveLease(codebasePath);
-            if (
-                !currentLease
-                || currentLease.operationId !== activeLease.operationId
-                || currentLease.generation !== activeLease.generation
-            ) {
-                const terminal = observeOperation.call(this.snapshotManager, codebasePath);
-                if (
-                    terminal?.id === activeLease.operationId
-                    && terminal.generation === activeLease.generation
-                    && terminal.phase === 'completed'
-                ) {
-                    lastOperation = terminal;
-                    continue;
-                }
-                return {
-                    mode: 'coalesced',
-                    activeMutation: activeLease,
-                    ...(terminal ? { operation: terminal } : lastOperation ? { operation: lastOperation } : {}),
-                    errorMessage: 'The in-flight sync lost its durable owner before proving completion.',
-                };
-            }
-            await new Promise((resolve) => setTimeout(resolve, this.crossProcessJoinPollMs));
+            throw error;
         }
-
-        return {
-            mode: 'coalesced',
-            activeMutation: activeLease,
-            ...(lastOperation ? { operation: lastOperation } : {}),
-            errorMessage: 'Timed out waiting for the in-flight sync to prove completion.',
-        };
     }
 
     public async handleSyncIndex(): Promise<void> {
-        const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+        const indexedCodebases = this.context.listCurrentPublications()
+            .filter((publication) => publication.publication.status === 'complete')
+            .map((publication) => publication.publication.canonicalRoot);
         if (indexedCodebases.length === 0) return;
 
         // Execute sequentially to avoid resource spikes, but through the ensureFreshness gate.
@@ -2031,60 +1438,30 @@ export class SyncManager {
         return this.backgroundSyncFlight ? 1 : 0;
     }
 
-    public getWatchDebounceMs(): number {
-        return DEFAULT_WATCH_DEBOUNCE_MS;
-    }
-
     private canObserveRoot(codebasePath: string): boolean {
-        const status = this.snapshotManager.getCodebaseStatus(codebasePath);
-        return status === 'indexing' || status === 'indexed' || status === 'sync_completed';
-    }
-
-    private canRunFreshnessMutation(codebasePath: string): boolean {
-        const status = this.snapshotManager.getCodebaseStatus(codebasePath);
-        return status === 'indexed' || status === 'sync_completed';
+        if (this.context.getCurrentPublication(codebasePath)) return true;
+        const activeMutation = this.mutationRuntime.getActiveMutation(codebasePath);
+        return activeMutation?.action === 'create'
+            || activeMutation?.action === 'reindex'
+            || activeMutation?.action === 'sync';
     }
 
     private getIgnoreRuleVersion(codebasePath: string): number {
         const current = this.ignoreRulesVersions.get(codebasePath);
-        if (Number.isFinite(current)) {
-            return Number(current);
-        }
-
-        if (typeof this.snapshotManager.getCodebaseInfo === 'function') {
-            const info = this.snapshotManager.getCodebaseInfo(codebasePath) as { ignoreRulesVersion?: number } | undefined;
-            if (info && Number.isFinite(info.ignoreRulesVersion)) {
-                return Number(info.ignoreRulesVersion);
-            }
-        }
-
-        return 0;
+        return Number.isFinite(current) ? Number(current) : 0;
     }
 
-    private async refreshIgnoreMatcherForCodebase(
-        codebasePath: string,
-        mutationLease?: RootMutationLease,
-    ): Promise<IgnoreReloadResult> {
+    private async refreshIgnoreMatcherForCodebase(codebasePath: string): Promise<IgnoreReloadResult> {
         const previousMatcher = this.watcherIgnoreMatchers.get(codebasePath);
 
         const matcher = await this.buildIgnoreMatcherForCodebase(codebasePath);
-        this.assertMutationCurrent(mutationLease);
+        this.mutationRuntime.assertCurrent(codebasePath);
         this.watcherIgnoreMatchers.set(codebasePath, matcher);
 
         const version = this.getIgnoreRuleVersion(codebasePath) + 1;
         this.ignoreRulesVersions.set(codebasePath, version);
-        if (typeof this.snapshotManager.setCodebaseIgnoreRulesVersion === 'function') {
-            this.assertMutationCurrent(mutationLease);
-            this.snapshotManager.setCodebaseIgnoreRulesVersion(codebasePath, version);
-        }
 
         return { previousMatcher, matcher, version };
-    }
-
-    private assertMutationCurrent(lease?: RootMutationLease): void {
-        if (lease) {
-            this.mutationLeaseCoordinator?.assertCurrent(lease);
-        }
     }
 
     private async buildIgnoreMatcherForCodebase(
@@ -2380,16 +1757,15 @@ export class SyncManager {
         }
     }
 
-    public async refreshWatchersFromSnapshot(): Promise<void> {
-        await this.refreshWatchersFromWatchList();
-    }
-
     public async startWatcherMode(): Promise<void> {
         if (!this.watchEnabled || this.watcherModeStarted) {
             return;
         }
 
         this.watcherModeStarted = true;
+        for (const publication of this.context.listCurrentPublications()) {
+            this.watchedCodebases.add(this.canonicalWatcherRoot(publication.publication.canonicalRoot));
+        }
         await this.refreshWatchersFromWatchList();
         console.log(`[SYNC-WATCH] Watcher mode enabled.`);
     }

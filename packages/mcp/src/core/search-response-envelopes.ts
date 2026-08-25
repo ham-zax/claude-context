@@ -128,8 +128,8 @@ function projectGroupedDebugV2(debug: SearchGroupedDebugV2): SearchGroupedDebugV
                 ...(debug.graphEvidence.validatedAt !== undefined
                     ? { validatedAt: debug.graphEvidence.validatedAt }
                     : {}),
-                ...(debug.graphEvidence.sidecarBuiltAt !== undefined
-                    ? { sidecarBuiltAt: debug.graphEvidence.sidecarBuiltAt }
+                ...(debug.graphEvidence.relationshipBuiltAt !== undefined
+                    ? { relationshipBuiltAt: debug.graphEvidence.relationshipBuiltAt }
                     : {}),
             },
         } : {}),
@@ -220,8 +220,7 @@ export function buildGroupedSearchEnvelope(input: SearchResponseCommonInput & {
             freshness: {
                 state: "sync_in_progress" as const,
                 ...(input.freshnessDecision.servedCollection ? { servedCollection: input.freshnessDecision.servedCollection } : {}),
-                ...(input.freshnessDecision.servedRunId ? { servedRunId: input.freshnessDecision.servedRunId } : {}),
-                ...(input.freshnessDecision.servedGenerationId ? { servedGenerationId: input.freshnessDecision.servedGenerationId } : {}),
+                ...(input.freshnessDecision.servedPublicationId ? { servedPublicationId: input.freshnessDecision.servedPublicationId } : {}),
                 ...(input.freshnessDecision.servedGeneration ? { servedGeneration: input.freshnessDecision.servedGeneration } : {}),
                 ...(input.freshnessDecision.pendingOperation ? { pendingOperation: input.freshnessDecision.pendingOperation } : {}),
             },
@@ -259,8 +258,7 @@ export function buildRawSearchEnvelope(input: SearchResponseCommonInput & {
             freshness: {
                 state: "sync_in_progress" as const,
                 ...(input.freshnessDecision.servedCollection ? { servedCollection: input.freshnessDecision.servedCollection } : {}),
-                ...(input.freshnessDecision.servedRunId ? { servedRunId: input.freshnessDecision.servedRunId } : {}),
-                ...(input.freshnessDecision.servedGenerationId ? { servedGenerationId: input.freshnessDecision.servedGenerationId } : {}),
+                ...(input.freshnessDecision.servedPublicationId ? { servedPublicationId: input.freshnessDecision.servedPublicationId } : {}),
                 ...(input.freshnessDecision.servedGeneration ? { servedGeneration: input.freshnessDecision.servedGeneration } : {}),
                 ...(input.freshnessDecision.pendingOperation ? { pendingOperation: input.freshnessDecision.pendingOperation } : {}),
             },

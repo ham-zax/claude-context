@@ -1,9 +1,8 @@
 import type {
     LanguageCapabilityEvidenceSummary,
-    RepairProof,
     SymbolQualitySummary,
 } from "@zokizuan/satori-core";
-import type { IndexOperationReceipt } from "../config.js";
+import type { RootMutationOperation } from "@zokizuan/satori-core/integration";
 import { WarningCode } from "./warnings.js";
 
 /** Public manage_index action set (SSOT for schema, docs, and contract tests). */
@@ -13,7 +12,6 @@ export const MANAGE_INDEX_ACTIONS = [
     "sync",
     "status",
     "clear",
-    "repair",
 ] as const;
 
 export type ManageIndexAction = (typeof MANAGE_INDEX_ACTIONS)[number];
@@ -48,8 +46,7 @@ export type ManageIndexReason =
     | "vector_backend_unavailable"
     | "runtime_owner_conflict"
     | "mutation_in_progress"
-    | "needs_create"
-    | "repair_proof_limit";
+    | "needs_create";
 
 export type VectorBackendResponseCode =
     | "ZILLIZ_CLUSTER_STOPPED"
@@ -75,10 +72,9 @@ export type ManageCompactSymbolQuality = Pick<
 >;
 
 export interface IndexPublicationReceipt {
+    publicationId: string;
     collectionName: string;
-    markerRunId: string;
-    indexPolicyHash: string;
-    policyDocumentDigest: string;
+    policyHash: string;
 }
 
 export interface ManageIndexResponseEnvelope {
@@ -100,10 +96,9 @@ export interface ManageIndexResponseEnvelope {
         confidence: "high" | "low";
         probeFailed?: boolean;
     };
-    operation?: IndexOperationReceipt;
+    operation?: RootMutationOperation;
     /** Stable published-generation identity, independent of sync operation ids. */
     publication?: IndexPublicationReceipt;
-    repairProof?: RepairProof;
     /** Observed symbol quality from registry (F9); not parser-cause diagnosis. */
     symbolQuality?: SymbolQualitySummary | ManageCompactSymbolQuality;
     /** Declared claims combined with compatible per-language navigation evidence. */

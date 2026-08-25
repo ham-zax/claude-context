@@ -4,10 +4,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-    withSourceMeasurementOperation,
-    type SourceMeasurementLedgerRecord,
-} from "@zokizuan/satori-core";
+import { withSourceMeasurementOperation } from "@zokizuan/satori-core";
+
+type SourceMeasurementLedgerRecord =
+    | { kind: "source_io"; bytesObtained: number }
+    | { kind: "source_observation_outcome"; status: string }
+    | { kind: "source_observation" | "source_processing"; [key: string]: unknown };
 import { prepareInspectableSource } from "./inspectable-source.js";
 
 function readLedger(ledgerFile: string): SourceMeasurementLedgerRecord[] {

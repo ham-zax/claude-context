@@ -55,7 +55,7 @@ type ChangedFilesState = {
     files: Set<string>;
 };
 
-type CallGraphUnavailableReason = "missing_symbol" | "stale_symbol_ref" | "unsupported_language" | "missing_relationship_sidecar" | "incompatible_relationship_sidecar" | "missing_symbol_registry" | "incompatible_symbol_registry";
+type CallGraphUnavailableReason = "missing_symbol" | "stale_symbol_ref" | "unsupported_language" | "missing_relationship_navigation" | "incompatible_relationship_navigation" | "missing_symbol_registry" | "incompatible_symbol_registry";
 
 type RegistryManifestState =
     | {
@@ -143,13 +143,13 @@ export type SearchExactFastPathHost = {
         run: () => Promise<T>,
     ) => Promise<T>;
     loadRegistryManifest: (normalizedRootPath: string) => Promise<RegistryManifestState>;
-    loadRegistryValidatedCallGraphSidecar: (input: {
+    loadRegistryValidatedRelationshipNavigation: (input: {
         codebaseRoot: string;
         registryManifestHash?: string;
         registryUnavailableReason?: CallGraphUnavailableReason;
     }) => Promise<NavigationState>;
     buildRelationshipBackedCallGraph: (
-        input: RelationshipBackedCallGraphInput,
+        input: Omit<RelationshipBackedCallGraphInput, 'publicationId' | 'navigationRoot'>,
     ) => Promise<RelationshipBackedCallGraphResult | null>;
     buildChangedCodeDebug: (
         codebaseRoot: string,
@@ -290,7 +290,7 @@ export async function runExactRegistryFastPath(
     const callGraphNavigationState = input.queryPlan.route.kind === "references"
         ? await host.measureSearchPhase(
             "navigationValidation",
-            () => host.loadRegistryValidatedCallGraphSidecar({
+            () => host.loadRegistryValidatedRelationshipNavigation({
                 codebaseRoot: input.effectiveRoot,
                 registryManifestHash: registryState.manifestHash,
             }),
@@ -299,7 +299,7 @@ export async function runExactRegistryFastPath(
             ? { relationshipReady: true }
             : {
                 relationshipReady: false,
-                relationshipUnavailableReason: "missing_relationship_sidecar" as const,
+                relationshipUnavailableReason: "missing_relationship_navigation" as const,
             };
 
     let resultSymbols = [exactRegistrySymbol];

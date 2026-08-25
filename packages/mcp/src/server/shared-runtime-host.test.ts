@@ -51,7 +51,6 @@ function config(root: string): ContextMcpConfig {
         potionModelPath: path.join(root, "model"),
         potionRequestTimeoutMs: 5000,
         watchSyncEnabled: false,
-        watchDebounceMs: 5000,
     };
 }
 
@@ -69,7 +68,6 @@ function env(root: string): NodeJS.ProcessEnv {
         VECTOR_STORE_PROVIDER: "LanceDB",
         LANCEDB_PATH: path.join(root, "lancedb"),
         MCP_ENABLE_WATCHER: "false",
-        MCP_WATCH_DEBOUNCE_MS: "5000",
     };
 }
 

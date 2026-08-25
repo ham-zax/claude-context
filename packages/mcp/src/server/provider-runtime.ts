@@ -1,7 +1,7 @@
 import {
     Context,
-    createGenerationProofCoordinator,
     Embedding,
+    type ContextConfig,
     EmbeddingVector,
     type EmbeddingIdentity,
     MilvusVectorDatabase,
@@ -12,14 +12,15 @@ import {
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { CapabilityResolver } from "../core/capabilities.js";
-import { CallGraphSidecarManager } from "../core/call-graph.js";
 import {
     SearchContinuationCoordinator,
     ToolHandlers,
 } from "../core/handlers.js";
 import type { RuntimeOwnerMutationGate } from "../core/runtime-owner.js";
-import { MutationLeaseCoordinator } from "../core/mutation-lease.js";
-import { SnapshotManager } from "../core/snapshot.js";
+import {
+    RootMutationRuntime,
+    type SharedPublicationRuntime,
+} from "@zokizuan/satori-core/integration";
 import { SyncManager } from "../core/sync.js";
 import {
     ContextMcpConfig,
@@ -65,7 +66,7 @@ type ProviderSyncLifecycle = Pick<
     "startBackgroundSync" | "stopBackgroundSync" | "startWatcherMode" | "stopWatcherMode"
 >;
 type SyncCompletionHook = NonNullable<
-    NonNullable<ConstructorParameters<typeof SyncManager>[2]>['onSyncCompleted']
+    NonNullable<ConstructorParameters<typeof SyncManager>[1]>['onSyncCompleted']
 >;
 
 const requireFromProviderRuntime = createRequire(import.meta.url);
@@ -188,9 +189,6 @@ class UnconfiguredVectorDatabase implements VectorDatabase {
     async hasCollection(): Promise<boolean> { this.throwMissing(); }
     async listCollections(): Promise<string[]> { this.throwMissing(); }
     async writeDocuments(): Promise<void> { this.throwMissing(); }
-    async insertControl(): Promise<void> { this.throwMissing(); }
-    async getControl(): Promise<null> { this.throwMissing(); }
-    async deleteControl(): Promise<void> { this.throwMissing(); }
     async retrieveDense(): Promise<VectorSearchResults> { this.throwMissing(); }
     async retrieveLexical(): Promise<VectorSearchResults> { this.throwMissing(); }
     async deleteDocuments(): Promise<void> { this.throwMissing(); }
@@ -203,24 +201,10 @@ class UnconfiguredVectorDatabase implements VectorDatabase {
 // Provider-backed tools must use ProviderRuntime.requireToolContext instead.
 export { resolveConfiguredEmbeddingDimension } from "../config.js";
 
-function createDurableAuthorityRecoveryPublisher(
-    coordinator: MutationLeaseCoordinator,
-): NonNullable<ConstructorParameters<typeof Context>[0]>['durableAuthorityRecoveryPublisher'] {
-    return (canonicalRoot, _mutationOwner, publish) => {
-        const acquired = coordinator.acquire(canonicalRoot, "repair");
-        if (!acquired.acquired) return false;
-        try {
-            coordinator.publishWhileCurrent(acquired.lease, publish);
-            return true;
-        } finally {
-            coordinator.release(acquired.lease);
-        }
-    };
-}
-
 export function createLocalOnlyContext(
     config: ContextMcpConfig,
-    mutationLeaseCoordinator?: MutationLeaseCoordinator,
+    mutationRuntime?: RootMutationRuntime,
+    publicationRuntime?: SharedPublicationRuntime,
 ): Context {
     return new Context({
         embedding: new MetadataOnlyEmbedding(
@@ -231,9 +215,8 @@ export function createLocalOnlyContext(
         ),
         vectorDatabase: new UnconfiguredVectorDatabase(),
         vectorStoreProvider: config.vectorStoreProvider,
-        ...(mutationLeaseCoordinator ? {
-            durableAuthorityRecoveryPublisher: createDurableAuthorityRecoveryPublisher(mutationLeaseCoordinator),
-        } : {}),
+        ...(mutationRuntime ? { rootMutationRuntime: mutationRuntime } : {}),
+        ...(publicationRuntime ? { publicationRuntime } : {}),
     });
 }
 
@@ -257,21 +240,18 @@ function createMissingConfigIssue(missingEnv: string[]): MissingProviderConfigIs
 
 export class ProviderRuntime {
     private readonly config: ContextMcpConfig;
-    private readonly snapshotManager: SnapshotManager;
     private readonly runtimeFingerprint: IndexFingerprint;
     private readonly capabilities: CapabilityResolver;
     private readonly readFileMaxLines: number;
     private readonly readFileMaxBytes: number;
     private readonly watchSyncEnabled: boolean;
-    private readonly watchDebounceMs: number;
     private readonly startSyncLifecycle: boolean;
-    private readonly callGraphManager: CallGraphSidecarManager;
     private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null;
-    private readonly mutationLeaseCoordinator: MutationLeaseCoordinator;
+    private readonly mutationRuntime: RootMutationRuntime;
+    private readonly publicationRuntime?: SharedPublicationRuntime;
     private readonly now: () => number;
     private readonly searchContinuationCoordinator: SearchContinuationCoordinator;
     private readonly onLifecycleActivityChanged?: () => void;
-    private readonly generationProofCoordinator = createGenerationProofCoordinator();
     private embeddingRuntimePromise: Promise<ToolContext> | null = null;
     private vectorRuntimePromise: Promise<ToolContext> | null = null;
     private activeContexts: ToolContext[] = [];
@@ -280,33 +260,29 @@ export class ProviderRuntime {
 
     constructor(args: {
         config: ContextMcpConfig;
-        snapshotManager: SnapshotManager;
         runtimeFingerprint: IndexFingerprint;
         capabilities: CapabilityResolver;
         readFileMaxLines: number;
         readFileMaxBytes?: number;
         watchSyncEnabled: boolean;
-        watchDebounceMs: number;
         startSyncLifecycle?: boolean;
-        callGraphManager: CallGraphSidecarManager;
         runtimeOwnerGate?: RuntimeOwnerMutationGate | null;
-        mutationLeaseCoordinator?: MutationLeaseCoordinator;
+        mutationRuntime?: RootMutationRuntime;
+        publicationRuntime?: SharedPublicationRuntime;
         searchContinuationCoordinator?: SearchContinuationCoordinator;
         onLifecycleActivityChanged?: () => void;
         now?: () => number;
     }) {
         this.config = args.config;
-        this.snapshotManager = args.snapshotManager;
         this.runtimeFingerprint = args.runtimeFingerprint;
         this.capabilities = args.capabilities;
         this.readFileMaxLines = args.readFileMaxLines;
         this.readFileMaxBytes = args.readFileMaxBytes ?? 8 * 1024 * 1024;
         this.watchSyncEnabled = args.watchSyncEnabled;
-        this.watchDebounceMs = args.watchDebounceMs;
         this.startSyncLifecycle = args.startSyncLifecycle === true;
-        this.callGraphManager = args.callGraphManager;
         this.runtimeOwnerGate = args.runtimeOwnerGate || null;
-        this.mutationLeaseCoordinator = args.mutationLeaseCoordinator || new MutationLeaseCoordinator();
+        this.mutationRuntime = args.mutationRuntime || new RootMutationRuntime();
+        this.publicationRuntime = args.publicationRuntime;
         this.searchContinuationCoordinator = args.searchContinuationCoordinator
             ?? new SearchContinuationCoordinator();
         this.onLifecycleActivityChanged = args.onLifecycleActivityChanged;
@@ -386,25 +362,18 @@ export class ProviderRuntime {
         const embedding = await this.createEmbeddingProvider(bootstrap);
         let reranker: Reranker | null = null;
         try {
-            const vectorDatabase = await this.createVectorBackend(bootstrap, embedding.getDimension());
+            const vectorDatabase = await this.createVectorBackend(bootstrap);
             const context = new Context({
                 embedding,
                 vectorDatabase,
                 vectorStoreProvider: this.config.vectorStoreProvider,
-                mutationGenerationObserver: (canonicalRoot) => (
-                    this.mutationLeaseCoordinator.observe(canonicalRoot)
-                ),
-                durableAuthorityRecoveryPublisher: createDurableAuthorityRecoveryPublisher(
-                    this.mutationLeaseCoordinator,
-                ),
-                generationProofCoordinator: this.generationProofCoordinator,
-            });
-            const syncManager = new SyncManager(context, this.snapshotManager, {
+                rootMutationRuntime: this.mutationRuntime,
+                ...(this.publicationRuntime ? { publicationRuntime: this.publicationRuntime } : {}),
+            } satisfies ContextConfig);
+            const syncManager = new SyncManager(context, {
                 watchEnabled: this.watchSyncEnabled,
-                watchDebounceMs: this.watchDebounceMs,
                 onSyncCompleted: this.createSyncCompletionHook(context),
-                sourceFreshnessPort: context.getSourceFreshnessPort(),
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+                mutationRuntime: this.mutationRuntime,
                 onLifecycleActivityChanged: this.onLifecycleActivityChanged,
             });
             reranker = this.createReranker(bootstrap);
@@ -415,17 +384,15 @@ export class ProviderRuntime {
             }
             const toolHandlers = new ToolHandlers(
                 context,
-                this.snapshotManager,
                 syncManager,
                 this.runtimeFingerprint,
                 this.capabilities,
+                this.mutationRuntime,
                 this.now,
-                this.callGraphManager,
                 reranker,
                 undefined,
                 undefined,
                 this.runtimeOwnerGate,
-                this.mutationLeaseCoordinator,
                 this.searchContinuationCoordinator,
                 { readFileMaxBytes: this.readFileMaxBytes },
             );
@@ -438,7 +405,7 @@ export class ProviderRuntime {
 
             const toolContext = {
                 context,
-                snapshotManager: this.snapshotManager,
+                mutationRuntime: this.mutationRuntime,
                 syncManager,
                 capabilities: this.capabilities,
                 reranker,
@@ -556,14 +523,13 @@ export class ProviderRuntime {
 
     private async createVectorBackend(
         bootstrap: ResolvedProviderRuntimeBootstrap,
-        vectorDimension: number,
     ): Promise<VectorDatabase> {
         switch (bootstrap.vectorBackend.kind) {
             case 'lancedb': {
                 const moduleSpecifier = '@zokizuan/satori-core/lancedb';
                 // Core deliberately publishes this native boundary as CommonJS.
                 // Requiring it lazily avoids Node's synthetic ESM named-export
-                // snapshot, which can observe getter-backed exports as undefined
+                // module namespace object, which can observe getter-backed exports as undefined
                 // in a detached compiled host.
                 let LanceDbVectorDatabase: new (
                     config: { databasePath: string },
@@ -592,7 +558,6 @@ export class ProviderRuntime {
                 return new MilvusVectorDatabase({
                     address: bootstrap.vectorBackend.address,
                     ...(bootstrap.vectorBackend.token ? { token: bootstrap.vectorBackend.token } : {}),
-                    vectorDimension,
                 });
         }
     }
@@ -627,10 +592,10 @@ export class ProviderRuntime {
     private createSyncCompletionHook(context: Context): SyncCompletionHook {
         return async (codebasePath, _stats, assertMutationCurrent) => {
             assertMutationCurrent();
-            const publication = await context.proveIndexedGeneration(codebasePath);
+            const publication = context.getCurrentPublication(codebasePath);
             assertMutationCurrent();
-            if (!publication) {
-                throw new Error(`Incremental publication for '${codebasePath}' is not readable as one complete generation.`);
+            if (!publication || publication.publication.status !== 'complete') {
+                throw new Error(`Incremental publication for '${codebasePath}' is not readable as one complete Publication.`);
             }
         };
     }

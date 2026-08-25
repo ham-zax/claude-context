@@ -48,7 +48,6 @@ function buildSupport() {
         getContextTrackedRelativePaths: () => [],
         classifyPathCategory: () => 'core',
         shouldIncludeCategoryInScope: () => true,
-        getSyncWatchDebounceMs: () => 0,
         capabilities: {
             hasReranker: () => false,
             getDefaultRerankEnabled: () => false,

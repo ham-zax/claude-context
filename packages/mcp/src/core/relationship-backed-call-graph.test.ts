@@ -5,7 +5,7 @@ import {
     prioritizeInboundSuppressedNotes,
     uniqueInboundCallerSiteFile,
 } from "./relationship-backed-call-graph.js";
-import type { CallGraphNote } from "./call-graph.js";
+import type { CallGraphNoteResult as CallGraphNote } from "./search-types.js";
 
 test("uniqueInboundCallerSiteFile returns sole suppressed caller site, else undefined", () => {
     const one: CallGraphNote[] = [{

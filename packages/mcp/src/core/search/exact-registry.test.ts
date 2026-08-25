@@ -4,7 +4,9 @@ import {
     SYMBOL_REGISTRY_SCHEMA_VERSION,
     buildSymbolRegistry,
 } from "@zokizuan/satori-core";
-import type { SymbolRecord, SymbolRegistryManifest, SymbolRegistryManifestFile } from "@zokizuan/satori-core";
+import type { SymbolRecord, SymbolRegistryManifest } from "@zokizuan/satori-core";
+
+type SymbolRegistryManifestFile = SymbolRegistryManifest["files"][number];
 import {
     findExactRegistryMatch,
     shouldAttemptExactRegistryLookup,

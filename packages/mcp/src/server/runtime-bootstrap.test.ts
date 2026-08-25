@@ -10,8 +10,6 @@ import {
 } from '@zokizuan/satori-core';
 import {
     createMcpConfig,
-    indexFingerprintsEqual,
-    parseIndexFingerprint,
     resolveMcpRuntimeBootstrap,
     type ContextMcpConfig,
 } from '../config.js';
@@ -200,14 +198,6 @@ test('Potion bootstrap seals the frozen L1 inference identity', async () => {
     );
     assert.equal(resolved.runtimeFingerprint.embeddingDimension, POTION_DIMENSION);
     assert.equal(resolved.runtimeFingerprint.embeddingArtifactDigest, null);
-    assert.deepEqual(
-        parseIndexFingerprint(resolved.runtimeFingerprint),
-        resolved.runtimeFingerprint,
-    );
-    assert.equal(indexFingerprintsEqual({
-        ...resolved.runtimeFingerprint,
-        embeddingArtifactDigest: 'b'.repeat(64),
-    }, resolved.runtimeFingerprint), false);
 });
 
 test('Potion is selected only through explicit offline configuration', () => {

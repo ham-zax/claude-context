@@ -9,13 +9,16 @@ import { withSourceMeasurementOperation } from "@zokizuan/satori-core";
 import type { ContextMcpConfig, IndexFingerprint } from "../config.js";
 import { CapabilityResolver } from "../core/capabilities.js";
 import { resolveRuntimeOwnerStateDir } from "../core/runtime-state-root.js";
-import { CallGraphSidecarManager } from "../core/call-graph.js";
 import {
     SearchContinuationCoordinator,
     SearchContinuationCoordinatorPool,
     ToolHandlers,
 } from "../core/handlers.js";
-import { MutationLeaseCoordinator } from "../core/mutation-lease.js";
+import {
+    RootMutationRuntime,
+    createSharedPublicationRuntime,
+    type SharedPublicationRuntime,
+} from "@zokizuan/satori-core/integration";
 import {
     RuntimeOwnerRegistry,
     buildRuntimeOwnerIdentityFromConfig,
@@ -25,7 +28,6 @@ import {
     createSessionWorkspacePolicy,
     type SessionWorkspacePolicy,
 } from "../core/session-workspace-policy.js";
-import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
 import { getMcpToolList, toolRegistry } from "../tools/registry.js";
 import type {
@@ -107,8 +109,7 @@ class SessionProviderRuntime {
     constructor(
         private readonly providerRuntime: ProviderRuntime,
         private readonly continuationCoordinator: SearchContinuationCoordinator,
-        private readonly mutationLeaseCoordinator: MutationLeaseCoordinator,
-        private readonly callGraphManager: CallGraphSidecarManager,
+        private readonly mutationRuntime: RootMutationRuntime,
         private readonly workspacePolicy: SessionWorkspacePolicy,
     ) {}
 
@@ -127,17 +128,15 @@ class SessionProviderRuntime {
 
         const toolHandlers = new ToolHandlers(
             shared.context,
-            shared.snapshotManager,
             shared.syncManager,
             shared.runtimeFingerprint,
             shared.capabilities,
+            this.mutationRuntime,
             () => Date.now(),
-            this.callGraphManager,
             shared.reranker,
             undefined,
             undefined,
             shared.runtimeOwnerGate,
-            this.mutationLeaseCoordinator,
             this.continuationCoordinator,
             { readFileMaxBytes: shared.readFileMaxBytes },
         );
@@ -173,10 +172,9 @@ type SessionResources = {
 
 export class SharedRuntimeHost {
     private readonly capabilities: CapabilityResolver;
-    private readonly snapshotManager: SnapshotManager;
-    private readonly callGraphManager: CallGraphSidecarManager;
     private readonly runtimeOwnerRegistry: RuntimeOwnerRegistry;
-    private readonly mutationLeaseCoordinator: MutationLeaseCoordinator;
+    private readonly mutationRuntime: RootMutationRuntime;
+    private readonly publicationRuntime: SharedPublicationRuntime;
     private readonly localContext: ReturnType<typeof createLocalOnlyContext>;
     private readonly localSyncManager: SyncManager;
     private readonly searchContinuationPool = new SearchContinuationCoordinatorPool();
@@ -184,7 +182,6 @@ export class SharedRuntimeHost {
     private readonly readFileMaxLines: number;
     private readonly readFileMaxBytes: number;
     private readonly watchSyncEnabled: boolean;
-    private readonly watchDebounceMs: number;
     private activeSessions = 0;
     private activeOperations = 0;
     private shutdownStarted = false;
@@ -199,7 +196,6 @@ export class SharedRuntimeHost {
         this.readFileMaxLines = Math.max(1, config.readFileMaxLines ?? 1000);
         this.readFileMaxBytes = Math.max(1, config.readFileMaxBytes ?? 8 * 1024 * 1024);
         this.watchSyncEnabled = config.watchSyncEnabled === true;
-        this.watchDebounceMs = Math.max(1, config.watchDebounceMs ?? 5000);
         console.log(`[FINGERPRINT] Runtime index fingerprint: ${JSON.stringify(runtimeFingerprint)}`);
 
         this.runtimeOwnerRegistry = new RuntimeOwnerRegistry({
@@ -223,36 +219,36 @@ export class SharedRuntimeHost {
             );
         }
 
-        this.mutationLeaseCoordinator = new MutationLeaseCoordinator();
-        this.snapshotManager = new SnapshotManager(runtimeFingerprint);
-        this.callGraphManager = new CallGraphSidecarManager(runtimeFingerprint);
-        this.localContext = createLocalOnlyContext(config, this.mutationLeaseCoordinator);
-        this.localSyncManager = new SyncManager(this.localContext, this.snapshotManager, {
+        this.mutationRuntime = new RootMutationRuntime();
+        this.publicationRuntime = createSharedPublicationRuntime(this.mutationRuntime, {
+            stateRoot: config.stateRoot,
+        });
+        this.localContext = createLocalOnlyContext(
+            config,
+            this.mutationRuntime,
+            this.publicationRuntime,
+        );
+        this.localSyncManager = new SyncManager(this.localContext, {
             watchEnabled: this.watchSyncEnabled,
-            watchDebounceMs: this.watchDebounceMs,
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
-            sourceFreshnessPort: this.localContext.getSourceFreshnessPort(),
+            mutationRuntime: this.mutationRuntime,
         });
         this.providerRuntime = new ProviderRuntime({
             config,
-            snapshotManager: this.snapshotManager,
             runtimeFingerprint,
             capabilities: this.capabilities,
             readFileMaxLines: this.readFileMaxLines,
             readFileMaxBytes: this.readFileMaxBytes,
             watchSyncEnabled: this.watchSyncEnabled,
-            watchDebounceMs: this.watchDebounceMs,
             startSyncLifecycle: runMode === "mcp" || runMode === "host",
-            callGraphManager: this.callGraphManager,
             runtimeOwnerGate: this.runtimeOwnerRegistry,
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+            mutationRuntime: this.mutationRuntime,
+            publicationRuntime: this.publicationRuntime,
             searchContinuationCoordinator: new SearchContinuationCoordinator(
                 this.searchContinuationPool,
             ),
             onLifecycleActivityChanged: () => this.notifyActivityChanged(),
         });
 
-        this.snapshotManager.loadCodebaseSnapshot();
     }
 
     createSession(workspacePolicy: SessionWorkspacePolicy): McpSession {
@@ -272,25 +268,22 @@ export class SharedRuntimeHost {
     ): SessionResources {
         const localHandlers = new ToolHandlers(
             this.localContext,
-            this.snapshotManager,
             this.localSyncManager,
             this.runtimeFingerprint,
             this.capabilities,
+            this.mutationRuntime,
             () => Date.now(),
-            this.callGraphManager,
             null,
             undefined,
             undefined,
             this.runtimeOwnerRegistry,
-            this.mutationLeaseCoordinator,
             continuationCoordinator,
             { readFileMaxBytes: this.readFileMaxBytes },
         );
         const providerRuntime = new SessionProviderRuntime(
             this.providerRuntime,
             continuationCoordinator,
-            this.mutationLeaseCoordinator,
-            this.callGraphManager,
+            this.mutationRuntime,
             workspacePolicy,
         );
         return {
@@ -298,7 +291,7 @@ export class SharedRuntimeHost {
             providerRuntime,
             toolContext: {
                 context: this.localContext,
-                snapshotManager: this.snapshotManager,
+                mutationRuntime: this.mutationRuntime,
                 syncManager: this.localSyncManager,
                 capabilities: this.capabilities,
                 reranker: null,
@@ -354,21 +347,6 @@ export class SharedRuntimeHost {
         for (const listener of this.activityListeners) {
             listener();
         }
-    }
-
-    async recoverInterruptedIndexingAtStartup(): Promise<void> {
-        if (this.snapshotManager.getIndexingCodebases().length === 0) {
-            console.log("[STARTUP] No interrupted indexing states required recovery");
-            return;
-        }
-        const providerContext = await this.providerRuntime.requireToolContext("vector_only");
-        if (isMissingProviderConfigIssue(providerContext)) {
-            console.warn(
-                `[STARTUP] Deferred interrupted-index recovery: ${providerContext.message}`,
-            );
-            return;
-        }
-        await providerContext.toolHandlers.recoverInterruptedIndexingAtStartup();
     }
 
     async shutdown(): Promise<void> {

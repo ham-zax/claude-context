@@ -26,18 +26,18 @@ test("navigation response contracts include call_graph invalid symbol refs", () 
     assert.equal(payload.reason, "invalid_symbol_ref");
 });
 
-test("navigation response contracts expose precise current callGraphHint sidecar reasons", () => {
+test("navigation response contracts expose precise current callGraphHint navigation reasons", () => {
     const missingRelationshipHint: CallGraphHint = {
         supported: false,
-        reason: "missing_relationship_sidecar"
+        reason: "missing_relationship_navigation"
     };
     const incompatibleRelationshipHint: CallGraphHint = {
         supported: false,
-        reason: "incompatible_relationship_sidecar"
+        reason: "incompatible_relationship_navigation"
     };
 
-    assert.equal(missingRelationshipHint.reason, "missing_relationship_sidecar");
-    assert.equal(incompatibleRelationshipHint.reason, "incompatible_relationship_sidecar");
+    assert.equal(missingRelationshipHint.reason, "missing_relationship_navigation");
+    assert.equal(incompatibleRelationshipHint.reason, "incompatible_relationship_navigation");
 });
 
 test("navigation response contracts centralize public unavailable reasons", () => {
@@ -46,15 +46,15 @@ test("navigation response contracts centralize public unavailable reasons", () =
         "stale_symbol_ref",
         "unsupported_language",
         "missing_symbol_registry",
-        "missing_relationship_sidecar",
+        "missing_relationship_navigation",
         "incompatible_symbol_registry",
-        "incompatible_relationship_sidecar"
+        "incompatible_relationship_navigation"
     ];
 
     assert.deepEqual(reasons.sort(), [
-        "incompatible_relationship_sidecar",
+        "incompatible_relationship_navigation",
         "incompatible_symbol_registry",
-        "missing_relationship_sidecar",
+        "missing_relationship_navigation",
         "missing_symbol",
         "missing_symbol_registry",
         "stale_symbol_ref",
@@ -87,13 +87,13 @@ test("navigation response contracts include call_graph non-ok envelopes", () => 
         {
             status: "requires_reindex",
             supported: false,
-            reason: "missing_relationship_sidecar",
+            reason: "missing_relationship_navigation",
             path: "/repo",
             symbolRef: { file: "src/runtime.ts", symbolId: "syminst_runtime" },
             nodes: [],
             edges: [],
             notes: [],
-            message: "Relationship sidecar is missing.",
+            message: "Relationship navigation is missing.",
             hints: {
                 reindex: { tool: "manage_index", args: { action: "reindex", path: "/repo" } }
             }
@@ -152,7 +152,7 @@ test("navigation response contracts include structured suppressed call_graph edg
         notesTruncated: false,
         totalNoteCount: 1,
         returnedNoteCount: 1,
-        sidecar: {
+        graph: {
             builtAt: "2026-01-01T00:00:00.000Z",
             nodeCount: 0,
             edgeCount: 0,

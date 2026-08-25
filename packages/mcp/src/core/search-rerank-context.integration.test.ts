@@ -57,7 +57,6 @@ function buildSupport(reranker: Reranker | null): SearchQuerySupport {
         getContextTrackedRelativePaths: () => [],
         classifyPathCategory: () => "srcRuntime",
         shouldIncludeCategoryInScope: () => true,
-        getSyncWatchDebounceMs: () => 0,
         capabilities: {
             hasReranker: () => reranker !== null,
             getDefaultRerankEnabled: () => reranker !== null,

@@ -3,21 +3,20 @@ import {
     getGraphNeighbors,
     getRelationshipsForSymbol,
     isTestOrFixturePath,
-    type NavigationStore,
+    JsonNavigationStore,
     type RelationshipRecord,
     type SymbolRecord,
     type SymbolRegistry,
 } from "@zokizuan/satori-core";
-import type { SnapshotManager } from "./snapshot.js";
 import type {
     CallGraphDirection,
-    CallGraphEdge,
-    CallGraphNode,
-    CallGraphNote,
-    CallGraphSidecarManager,
-    CallGraphTestReference,
-} from "./call-graph.js";
-import { DEFAULT_CALL_GRAPH_TEST_REFERENCE_LIMIT } from "./call-graph.js";
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNodeResult as CallGraphNode,
+    CallGraphNoteResult as CallGraphNote,
+    CallGraphTestReferenceResult as CallGraphTestReference,
+    InboundCoverageEvidence,
+    InboundCoverageReason,
+} from "./search-types.js";
 import {
     buildSourceBackedPythonCalleeFallback,
     buildSourceBackedPythonCallerFallback,
@@ -26,16 +25,15 @@ import {
 import { buildInboundVerificationSearchQuery } from "./search-response-helpers.js";
 
 type RelationshipBackedCallGraphHost = {
-    navigationStore: NavigationStore;
-    callGraphManager: CallGraphSidecarManager;
-    snapshotManager: Pick<SnapshotManager, "setCodebaseCallGraphSidecar" | "commitCodebaseCallGraphSidecar" | "saveCodebaseSnapshot">;
-    saveSnapshotIfSupported(): void;
-    getContextActiveIgnorePatterns(codebasePath: string): string[];
+    navigationStore: JsonNavigationStore;
 };
+
+const DEFAULT_CALL_GRAPH_TEST_REFERENCE_LIMIT = 50;
 
 export type RelationshipBackedCallGraphInput = {
     codebaseRoot: string;
-    generationId?: string;
+    publicationId: string;
+    navigationRoot: string;
     registry: SymbolRegistry;
     registryManifestHash: string;
     resolvedSymbol: SymbolRecord;
@@ -55,30 +53,27 @@ export type RelationshipBackedCallGraphInput = {
 };
 
 export type CallGraphNavigationAuthority = Readonly<{
-    generationId: string;
-    navigationSealSha256: string;
+    publicationId: string;
     relationshipManifestSha256: string;
     relationshipBuiltAt: string;
     publicationCompletedAt: string;
 }>;
 
 /**
- * Resolve the serving navigation generation attribution for a call-graph
- * traversal. Attribution is emitted only when the complete authority is
- * known: generation identity, navigation seal, relationship manifest, the
+ * Resolve the serving Publication navigation attribution for a call-graph
+ * traversal. Attribution is emitted only when the complete identity is
+ * known: Publication identity, relationship manifest, the
  * relationship artifact build time, and publication completion time. Partial
  * evidence yields no attribution rather than a guessed one.
  */
 export function resolveCallGraphNavigationAuthority(input: {
-    generationId: string | undefined;
-    navigationSealHash: string | undefined;
+    publicationId: string | undefined;
     relationshipManifestHash: string | undefined;
     relationshipBuiltAt: string | undefined;
     publicationCompletedAt: string | undefined;
 }): CallGraphNavigationAuthority | null {
     if (
-        !input.generationId
-        || !input.navigationSealHash
+        !input.publicationId
         || !input.relationshipManifestHash
         || !input.relationshipBuiltAt
         || !input.publicationCompletedAt
@@ -86,8 +81,7 @@ export function resolveCallGraphNavigationAuthority(input: {
         return null;
     }
     return Object.freeze({
-        generationId: input.generationId,
-        navigationSealSha256: input.navigationSealHash,
+        publicationId: input.publicationId,
         relationshipManifestSha256: input.relationshipManifestHash,
         relationshipBuiltAt: input.relationshipBuiltAt,
         publicationCompletedAt: input.publicationCompletedAt,
@@ -107,7 +101,7 @@ export type RelationshipBackedCallGraphResult = {
     notesTruncated: boolean;
     totalNoteCount: number;
     returnedNoteCount: number;
-    sidecar: {
+    graph: {
         builtAt: string;
         nodeCount: number;
         edgeCount: number;
@@ -115,25 +109,6 @@ export type RelationshipBackedCallGraphResult = {
     hints?: Record<string, unknown>;
     inboundCoverageEvidence?: InboundCoverageEvidence;
 };
-
-export type InboundCoverageReason =
-    | "no_relationships_extracted"
-    | "suppressed_low_confidence"
-    | "fallback_failed";
-
-/**
- * Structured evidence attached to empty-inbound call-graph traversals.
- * `no_relationships_extracted` means no extracted relationship evidence was
- * found — never that the symbol definitely has no callers.
- */
-export interface InboundCoverageEvidence {
-    reason: InboundCoverageReason;
-    retrievedRelationshipCount: number;
-    suppressedRelationshipCount: number;
-    fallbackAttempted: boolean;
-    fallbackRecoveredCount: number;
-    constructorResolutionApplicable: boolean;
-}
 
 /**
  * Deterministic precedence for the empty-inbound coverage reason. Kept as a
@@ -235,13 +210,6 @@ export function prioritizeInboundSuppressedNotes(notes: readonly CallGraphNote[]
         : [];
 
     return [...productionCallerNotes, ...keptTestNotes, ...summaryNotes, ...otherNotes];
-}
-
-function formatUnknownError(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message;
-    }
-    return String(error);
 }
 
 export class RelationshipBackedCallGraph {
@@ -444,7 +412,8 @@ export class RelationshipBackedCallGraph {
     public async build(input: RelationshipBackedCallGraphInput): Promise<RelationshipBackedCallGraphResult | null> {
         const neighbors = await getGraphNeighbors({
             normalizedRootPath: input.codebaseRoot,
-            generationId: input.generationId,
+            publicationId: input.publicationId,
+            navigationRoot: input.navigationRoot,
             expectedSymbolRegistryManifestHash: input.registryManifestHash,
             navigationStore: this.host.navigationStore,
             symbolInstanceId: input.resolvedSymbol.symbolInstanceId,
@@ -458,7 +427,8 @@ export class RelationshipBackedCallGraph {
         }
         const testRelationshipResult = await getRelationshipsForSymbol({
             normalizedRootPath: input.codebaseRoot,
-            generationId: input.generationId,
+            publicationId: input.publicationId,
+            navigationRoot: input.navigationRoot,
             expectedSymbolRegistryManifestHash: input.registryManifestHash,
             navigationStore: this.host.navigationStore,
             targetInstanceId: input.resolvedSymbol.symbolInstanceId,
@@ -690,7 +660,7 @@ export class RelationshipBackedCallGraph {
             notesTruncated: false,
             totalNoteCount: combinedNotes.length,
             returnedNoteCount: combinedNotes.length,
-            sidecar: {
+            graph: {
                 builtAt: neighbors.manifest.builtAt,
                 nodeCount: combinedNodes.length,
                 edgeCount: combinedEdges.length,
@@ -699,80 +669,5 @@ export class RelationshipBackedCallGraph {
             ...(hints ? { hints } : {}),
             ...(inboundCoverageEvidence ? { inboundCoverageEvidence } : {}),
         };
-    }
-
-    public async rebuildForIndex(
-        codebasePath: string,
-        assertMutationCurrent?: () => void,
-        effectiveIgnorePatterns?: string[],
-    ): Promise<void> {
-        try {
-            const sidecar = await this.host.callGraphManager.rebuildForCodebase(
-                codebasePath,
-                effectiveIgnorePatterns
-                    ? [...effectiveIgnorePatterns]
-                    : this.host.getContextActiveIgnorePatterns(codebasePath),
-                assertMutationCurrent,
-            );
-            assertMutationCurrent?.();
-            this.commitCallGraphSidecar(codebasePath, sidecar, assertMutationCurrent);
-            console.log(`[CALL-GRAPH] Rebuilt sidecar for '${codebasePath}' (${sidecar.nodeCount} nodes, ${sidecar.edgeCount} edges).`);
-        } catch (error) {
-            assertMutationCurrent?.();
-            console.warn(`[CALL-GRAPH] Failed to rebuild sidecar after indexing '${codebasePath}': ${formatUnknownError(error)}`);
-            throw error;
-        }
-    }
-
-    public async rebuildForSyncDelta(
-        codebasePath: string,
-        changedFiles: string[],
-        assertMutationCurrent?: () => void,
-    ): Promise<boolean> {
-        try {
-            const sidecar = await this.host.callGraphManager.rebuildIfSupportedDelta(
-                codebasePath,
-                changedFiles,
-                this.host.getContextActiveIgnorePatterns(codebasePath),
-                assertMutationCurrent,
-            );
-            if (!sidecar) {
-                return false;
-            }
-            assertMutationCurrent?.();
-            this.commitCallGraphSidecar(codebasePath, sidecar, assertMutationCurrent);
-            console.log(`[CALL-GRAPH] Rebuilt sidecar for '${codebasePath}' from sync delta (${sidecar.nodeCount} nodes, ${sidecar.edgeCount} edges).`);
-            return true;
-        } catch (error) {
-            assertMutationCurrent?.();
-            console.warn(`[CALL-GRAPH] Failed to rebuild sidecar after sync '${codebasePath}': ${formatUnknownError(error)}`);
-            return false;
-        }
-    }
-
-    private commitCallGraphSidecar(
-        codebasePath: string,
-        sidecar: Parameters<SnapshotManager["setCodebaseCallGraphSidecar"]>[1],
-        assertMutationCurrent?: () => void,
-    ): void {
-        if (typeof this.host.snapshotManager.commitCodebaseCallGraphSidecar === "function") {
-            const committed = this.host.snapshotManager.commitCodebaseCallGraphSidecar(
-                codebasePath,
-                sidecar,
-                assertMutationCurrent,
-            );
-            if (!committed) {
-                throw new Error(`Failed to persist call-graph sidecar for '${codebasePath}'.`);
-            }
-            return;
-        }
-        this.host.snapshotManager.setCodebaseCallGraphSidecar(codebasePath, sidecar);
-        if (typeof this.host.snapshotManager.saveCodebaseSnapshot === "function") {
-            if (this.host.snapshotManager.saveCodebaseSnapshot(false, assertMutationCurrent) === false) {
-                throw new Error(`Failed to persist call-graph sidecar for '${codebasePath}'.`);
-            }
-            return;
-        }
-        this.host.saveSnapshotIfSupported();
     }
 }

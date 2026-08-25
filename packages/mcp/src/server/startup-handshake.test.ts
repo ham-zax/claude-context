@@ -216,7 +216,7 @@ async function withProviderEnvSession(
     }
 }
 
-test("production MCP start invokes recovery without local-only background sync or watcher", async () => {
+test("production MCP start leaves provider sync and watcher lazy", async () => {
     const originalStartBackgroundSync = SyncManager.prototype.startBackgroundSync;
     const originalStartWatcherMode = SyncManager.prototype.startWatcherMode;
     let backgroundSyncCalls = 0;
@@ -232,8 +232,7 @@ test("production MCP start invokes recovery without local-only background sync o
     try {
         await withProviderEnvSession({
             MCP_ENABLE_WATCHER: "true",
-        }, async ({ logs }) => {
-            assert.equal(logs.filter((line) => line.includes("[STARTUP] Verifying interrupted indexing state")).length, 1);
+        }, async () => {
             // Periodic sync/watcher are owned by the embedding ProviderRuntime on first
             // provider-backed tool use, not by the unconfigured local-only SyncManager.
             assert.equal(backgroundSyncCalls, 0);
@@ -245,7 +244,7 @@ test("production MCP start invokes recovery without local-only background sync o
     }
 });
 
-test("production CLI start invokes recovery only", async () => {
+test("production CLI start leaves provider sync and watcher lazy", async () => {
     const originalStartBackgroundSync = SyncManager.prototype.startBackgroundSync;
     const originalStartWatcherMode = SyncManager.prototype.startWatcherMode;
     let backgroundSyncCalls = 0;
@@ -261,8 +260,7 @@ test("production CLI start invokes recovery only", async () => {
     try {
         await withProviderEnvSession({
             MCP_ENABLE_WATCHER: "true",
-        }, async ({ logs }) => {
-            assert.equal(logs.filter((line) => line.includes("[STARTUP] Verifying interrupted indexing state")).length, 1);
+        }, async () => {
             assert.equal(backgroundSyncCalls, 0);
             assert.equal(watcherCalls, 0);
         });

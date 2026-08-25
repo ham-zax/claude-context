@@ -24,41 +24,8 @@ export interface StartMcpServerOptions {
     args?: string[];
 }
 
-interface StartupLifecycleDependencies {
-    verifyCloudState: () => Promise<void>;
-    onVerifyCloudStateError: (error: unknown) => void;
-}
-
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Post-connect recovery only. Periodic sync and watcher ownership belong to the
- * embedding-capable ProviderRuntime SyncManager (startProviderSyncLifecycle).
- * The local-only SyncManager uses UnconfiguredVectorDatabase and must never run
- * ensureFreshness: it still shares MutationLeaseCoordinator, so a failed periodic
- * pass bumps mutation generation and invalidates warm prepared-read observations.
- */
-export async function runPostConnectStartupLifecycle(
-    runMode: ServerRunMode,
-    dependencies: StartupLifecycleDependencies
-): Promise<void> {
-    if (runMode === "postflight") {
-        return;
-    }
-    if (runMode === "cli") {
-        try {
-            await dependencies.verifyCloudState();
-        } catch (error) {
-            dependencies.onVerifyCloudStateError(error);
-        }
-        return;
-    }
-
-    void dependencies.verifyCloudState().catch((error) => {
-        dependencies.onVerifyCloudStateError(error);
-    });
 }
 
 function migrateLegacyStateDir(): void {
@@ -119,15 +86,6 @@ export class ContextMcpServer {
             this.protocolStdout,
         );
         console.log("MCP server started and listening on stdio.");
-        await runPostConnectStartupLifecycle(this.runMode, {
-            verifyCloudState: async () => {
-                console.log("[STARTUP] Verifying interrupted indexing state against completion markers...");
-                await this.host.recoverInterruptedIndexingAtStartup();
-            },
-            onVerifyCloudStateError: (error) => {
-                console.error("[STARTUP] Error verifying cloud state:", errorMessage(error));
-            },
-        });
     }
 
     async shutdown(): Promise<void> {

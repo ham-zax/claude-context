@@ -1,36 +1,17 @@
 import { z } from "zod";
 import {
-    computeNavigationGenerationSealHash,
-    computeSymbolQualitySummaryFromAggregate,
+    computeSymbolQualitySummaryFromSidecarRead,
     formatSymbolQualityMarker,
-    readNavigationGenerationSeal,
-    type ProvenGenerationReceipt,
-    unknownSymbolQualitySummary,
+    readSymbolRegistrySidecar,
+    type PublicationRef,
 } from "@zokizuan/satori-core";
 import { McpTool, ToolContext, formatZodError } from "./types.js";
 import { classifyVectorBackendError, isMissingProviderConfigIssue } from "./setup-errors.js";
-import { getCompletionMarkerReader, validateCompletionProof } from "../core/completion-proof.js";
+import { getPublicationProofReader, validateCompletionProof } from "../core/completion-proof.js";
 import { formatRuntimeOwnersStatusLine } from "../core/runtime-owner.js";
 
 const listCodebasesInputSchema = z.object({}).strict();
 const comparePathAsc = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-function formatSnapshotCorruptionWarning(warning: ReturnType<ToolContext["snapshotManager"]["getSnapshotCorruptionWarning"]>): string[] {
-    if (!warning) {
-        return [];
-    }
-    const lines = [
-        warning.quarantinedPath
-            ? "WARNING: Snapshot state was recovered after a corrupt snapshot was quarantined. Tracked codebases may be incomplete."
-            : "WARNING: Snapshot state could not be refreshed because the snapshot is corrupt. Last loaded state was preserved.",
-        `Snapshot path: ${warning.snapshotPath}`,
-    ];
-    if (warning.quarantinedPath) {
-        lines.push(`Quarantined snapshot: ${warning.quarantinedPath}`);
-    }
-    lines.push(`Reason: ${warning.message}`);
-    return lines;
-}
 
 export const listCodebasesTool: McpTool = {
     name: "list_codebases",
@@ -49,34 +30,54 @@ export const listCodebasesTool: McpTool = {
             };
         }
 
-        const all = ctx.snapshotManager.getAllCodebases()
-            .filter((entry) => {
-                // Session workspace gate: only roots authorized for this
-                // session are visible. Unbound or missing policies fail
-                // closed to an empty listing (never a leakage of sibling
-                // workspaces or an exception mid-listing).
-                if (!ctx.workspacePolicy) {
-                    return false;
-                }
-                try {
-                    ctx.workspacePolicy.authorizeRoot(entry.path);
-                    return true;
-                } catch {
-                    return false;
-                }
+        const trackedByPath = new Map<string, {
+            path: string;
+            info: Record<string, unknown> & { status: "indexed" | "indexing" };
+        }>();
+        for (const ref of ctx.context.listCurrentPublications()) {
+            const publication = ref.publication;
+            trackedByPath.set(publication.canonicalRoot, {
+                path: publication.canonicalRoot,
+                info: {
+                    status: "indexed",
+                    lastUpdated: publication.createdAt,
+                    indexStatus: publication.status === "complete" ? "completed" : "limit_reached",
+                    indexedFiles: publication.vector.indexedFiles,
+                    totalChunks: publication.vector.totalChunks,
+                },
             });
-        const rawSnapshotWarning = typeof ctx.snapshotManager.getSnapshotCorruptionWarning === "function"
-            ? ctx.snapshotManager.getSnapshotCorruptionWarning()
-            : undefined;
-        const snapshotWarning = formatSnapshotCorruptionWarning(rawSnapshotWarning);
+        }
+        for (const activity of ctx.mutationRuntime.listActiveMutations()) {
+            if (activity.action !== "create" && activity.action !== "reindex") continue;
+            const operation = ctx.mutationRuntime.getOperation(activity.canonicalRoot);
+            trackedByPath.set(activity.canonicalRoot, {
+                path: activity.canonicalRoot,
+                info: {
+                    status: "indexing",
+                    lastUpdated: operation?.updatedAt ?? activity.acceptedAt,
+                    ...(operation?.progress !== undefined
+                        ? { indexingPercentage: operation.progress }
+                        : {}),
+                },
+            });
+        }
+        const all = Array.from(trackedByPath.values()).filter((entry) => {
+            // Session workspace gate: only roots authorized for this session are visible.
+            // Missing/unbound policy fails closed to an empty listing.
+            if (!ctx.workspacePolicy) return false;
+            try {
+                ctx.workspacePolicy.authorizeRoot(entry.path);
+                return true;
+            } catch {
+                return false;
+            }
+        });
 
         if (all.length === 0) {
             return {
                 content: [{
                     type: "text",
                     text: [
-                        ...snapshotWarning,
-                        ...(snapshotWarning.length > 0 ? [""] : []),
                         "No codebases are currently tracked.",
                         "",
                         "Use manage_index with action='create' to index one.",
@@ -86,10 +87,6 @@ export const listCodebasesTool: McpTool = {
         }
 
         const lines: string[] = [];
-        if (snapshotWarning.length > 0) {
-            lines.push(...snapshotWarning);
-            lines.push('');
-        }
         lines.push('## Codebases');
         lines.push('');
 
@@ -99,7 +96,7 @@ export const listCodebasesTool: McpTool = {
             try {
                 const providerContext = await ctx.providerRuntime.requireToolContext("vector_only");
                 if (isMissingProviderConfigIssue(providerContext)) {
-                    // Provider gaps beat fake missing-marker / fingerprint narratives from a weak local context.
+                    // Provider gaps beat readiness narratives that require provider-backed validation.
                     providerIncomplete = { missingEnv: providerContext.missingEnv };
                 } else {
                     proofContext = providerContext;
@@ -114,29 +111,19 @@ export const listCodebasesTool: McpTool = {
         }
 
         const readyCandidates = all
-            .filter((e) => e.info.status === "indexed" || e.info.status === "sync_completed");
+            .filter((e) => e.info.status === "indexed");
         const ready: Array<{
             path: string;
             probeFailed?: boolean;
-            navigationStatus?: "valid" | "not_bound" | "missing" | "incompatible" | "corrupt" | "unverified";
-            generationReceipt?: ProvenGenerationReceipt;
+            navigationStatus?: "valid" | "not_bound" | "missing" | "incompatible" | "corrupt";
+            publication?: PublicationRef;
         }> = [];
         const requiresReindex: Array<{ path: string; reason: string }> = [];
-        // Real index failures always keep their original message. manage_index status
-        // reports these as status:"error" and preferProviderIncompleteForStatus preserves them.
-        const failed: Array<{ path: string; reason: string }> = all
-            .filter((e) => e.info.status === "indexfailed")
-            .map((entry) => ({
-                path: entry.path,
-                reason: "errorMessage" in entry.info
-                    ? String(entry.info.errorMessage)
-                    : "unknown",
-            }));
+        const failed: Array<{ path: string; reason: string }> = [];
 
         if (providerIncomplete) {
-            // Align with manage_index status (missing_provider_config):
-            // provider gaps beat fake ready / requires_reindex narratives, but never mask
-            // status:"error" / indexfailed root causes.
+            // Align with manage_index status (missing_provider_config): provider gaps
+            // beat readiness narratives that require provider-backed validation.
             const missing = providerIncomplete.missingEnv.length > 0
                 ? providerIncomplete.missingEnv.join(",")
                 : "unknown";
@@ -144,25 +131,12 @@ export const listCodebasesTool: McpTool = {
             for (const entry of readyCandidates) {
                 failed.push({ path: entry.path, reason });
             }
-            for (const entry of all.filter((e) => e.info.status === "requires_reindex")) {
-                failed.push({ path: entry.path, reason });
-            }
         } else {
-            for (const entry of all.filter((e) => e.info.status === "requires_reindex")) {
-                requiresReindex.push({
-                    path: entry.path,
-                    reason: "reindexReason" in entry.info && entry.info.reindexReason
-                        ? String(entry.info.reindexReason)
-                        : "unknown",
-                });
-            }
-
             const completionProofChecks = await Promise.all(readyCandidates.map(async (entry) => ({
                 entry,
                 proof: await validateCompletionProof({
                     codebasePath: entry.path,
-                    runtimeFingerprint: proofContext.runtimeFingerprint,
-                    getIndexCompletionMarker: getCompletionMarkerReader(proofContext.context)
+                    getCurrentPublication: getPublicationProofReader(proofContext.context)
                 })
             })));
 
@@ -171,7 +145,7 @@ export const listCodebasesTool: McpTool = {
                     ready.push({
                         path: entry.path,
                         ...(proof.navigationStatus ? { navigationStatus: proof.navigationStatus } : {}),
-                        ...(proof.generationReceipt ? { generationReceipt: proof.generationReceipt } : {}),
+                        ...(proof.publication ? { publication: proof.publication } : {}),
                     });
                     continue;
                 }
@@ -180,16 +154,8 @@ export const listCodebasesTool: McpTool = {
                     ready.push({ path: entry.path, probeFailed: true });
                     continue;
                 }
-                if (proof.outcome === "fingerprint_mismatch") {
-                    requiresReindex.push({ path: entry.path, reason: "completion_proof_fingerprint_mismatch" });
-                    continue;
-                }
-                const staleReason = proof.reason || "missing_marker_doc";
-                if (staleReason === "requires_reindex" || staleReason === "unsupported_authority") {
-                    requiresReindex.push({ path: entry.path, reason: staleReason });
-                    continue;
-                }
-                failed.push({ path: entry.path, reason: `stale_local:${staleReason}` });
+                const staleReason = proof.reason || "missing_publication";
+                requiresReindex.push({ path: entry.path, reason: staleReason });
             }
         }
 
@@ -205,41 +171,34 @@ export const listCodebasesTool: McpTool = {
         if (byStatus.indexed.length > 0) {
             lines.push('### Ready');
             // F9: compact observed quality marker per ready root from the
-            // digest-bound seal aggregate used by manage_index summary.
+            // Publication-local JSON registry used by manage_index summary.
             const qualityByPath = new Map<string, string>();
             await Promise.all(byStatus.indexed.map(async (item) => {
-                if (item.navigationStatus !== 'valid' || !item.generationReceipt) {
+                if (item.navigationStatus !== 'valid' || !item.publication) {
                     qualityByPath.set(item.path, 'symbolQuality=unknown');
                     return;
                 }
-                const receiptNavigation = item.generationReceipt.navigation;
-                const leaseOwner = proofContext.context as unknown as {
-                    acquirePublicationReadLease?: (codebasePath: string) => Promise<() => void>;
-                };
-                const releasePublicationReadLease = typeof leaseOwner.acquirePublicationReadLease === 'function'
-                    ? await leaseOwner.acquirePublicationReadLease.call(proofContext.context, item.path)
-                    : undefined;
+                const lease = proofContext.context.acquireCurrentPublicationRead(item.path);
+                if (!lease || lease.id !== item.publication.id) {
+                    lease?.release();
+                    qualityByPath.set(item.path, 'symbolQuality=unknown');
+                    return;
+                }
                 try {
-                    const sealRead = await readNavigationGenerationSeal(
-                        undefined,
-                        item.path,
-                        receiptNavigation.generationId,
-                    );
-                    const sealMatchesReceipt = sealRead.status === 'ok'
-                        && sealRead.seal.generationId === receiptNavigation.generationId
-                        && sealRead.seal.symbolRegistryManifestHash === receiptNavigation.symbolRegistryManifestHash
-                        && sealRead.seal.relationshipManifestHash === receiptNavigation.relationshipManifestHash
-                        && computeNavigationGenerationSealHash(sealRead.seal) === receiptNavigation.navigationSealHash;
-                    const summary = sealMatchesReceipt
-                        ? computeSymbolQualitySummaryFromAggregate(sealRead.seal.symbolQuality)
-                        : unknownSymbolQualitySummary(
-                            sealRead.status === 'ok'
-                                ? 'Observed symbol quality is not bound by the accepted generation.'
-                                : `Observed symbol quality unavailable (${sealRead.reason}).`,
-                        );
+                    const navigation = proofContext.context.getPublicationNavigationAddress(lease);
+                    if (!navigation) {
+                        qualityByPath.set(item.path, 'symbolQuality=unknown');
+                        return;
+                    }
+                    const registryRead = await readSymbolRegistrySidecar({
+                        normalizedRootPath: item.path,
+                        publicationId: navigation.publicationId,
+                        navigationRoot: navigation.navigationRoot,
+                    });
+                    const summary = computeSymbolQualitySummaryFromSidecarRead(registryRead);
                     qualityByPath.set(item.path, formatSymbolQualityMarker(summary));
                 } finally {
-                    releasePublicationReadLease?.();
+                    lease.release();
                 }
             }));
             for (const item of byStatus.indexed) {
@@ -255,8 +214,10 @@ export const listCodebasesTool: McpTool = {
         if (byStatus.indexing.length > 0) {
             lines.push('### Indexing');
             for (const item of byStatus.indexing) {
-                const progress = 'indexingPercentage' in item.info ? item.info.indexingPercentage.toFixed(1) : '0.0';
-                lines.push(`- \`${item.path}\` (${progress}%)`);
+                const progress = typeof item.info.indexingPercentage === "number"
+                    ? `${item.info.indexingPercentage.toFixed(1)}%`
+                    : "progress unavailable in this process";
+                lines.push(`- \`${item.path}\` (${progress})`);
             }
             lines.push('');
         }

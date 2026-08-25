@@ -176,7 +176,6 @@ export type SearchQuerySupportHost = {
     getContextTrackedRelativePaths(codebasePath: string): string[];
     classifyPathCategory(relativePath: string): PathCategory;
     shouldIncludeCategoryInScope(scope: SearchScope, category: PathCategory): boolean;
-    getSyncWatchDebounceMs(): number;
     capabilities: CapabilityResolver;
     runtimeFingerprint: IndexFingerprint;
     reranker: Reranker | null;
@@ -226,10 +225,6 @@ export class SearchQuerySupport {
 
     private shouldIncludeCategoryInScope(scope: SearchScope, category: PathCategory): boolean {
         return this.host.shouldIncludeCategoryInScope(scope, category);
-    }
-
-    private getSyncWatchDebounceMs(): number {
-        return this.host.getSyncWatchDebounceMs();
     }
 
     private get capabilities(): CapabilityResolver {
@@ -1174,7 +1169,6 @@ export class SearchQuerySupport {
             generated: this.roundRatio(counts.generated / topK),
             runtime: this.roundRatio(counts.runtime / topK),
         };
-        const debounceMs = this.getSyncWatchDebounceMs();
         const filtered = this.filterNoiseHintPatternsByRootGitignore(codebaseRoot, observedNoisyFiles);
         const isRootCoveredMessageEligible = filtered.matcherState === 'ready' && filtered.coveredByRootGitignore && filtered.suggestedIgnorePatterns.length === 0;
         const nextStepMiddle = filtered.suggestedIgnorePatterns.length > 0
@@ -1182,7 +1176,7 @@ export class SearchQuerySupport {
             : (isRootCoveredMessageEligible
                 ? 'Top noisy files appear already covered by root .gitignore (root-only check); .satoriignore changes may be unnecessary. If you changed ignores, run manage_index with {"action":"sync","path":"<same path used in search_codebase>"} for immediate convergence.'
                 : 'If you edit ignores, run manage_index with {"action":"sync","path":"<same path used in search_codebase>"} for immediate convergence.');
-        const nextStep = `Use scope="runtime" to reduce noise. ${nextStepMiddle} Reindex is only required when you see requires_reindex (fingerprint mismatch).`;
+        const nextStep = `Use scope="runtime" to reduce noise. ${nextStepMiddle} Reindex is only required when you see requires_reindex.`;
 
         return {
             reason: 'top_results_noise_dominant',
@@ -1190,7 +1184,6 @@ export class SearchQuerySupport {
             ratios,
             recommendedScope: 'runtime',
             suggestedIgnorePatterns: [...filtered.suggestedIgnorePatterns],
-            debounceMs,
             nextStep,
         };
     }

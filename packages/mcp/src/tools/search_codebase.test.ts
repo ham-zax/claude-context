@@ -103,7 +103,7 @@ test('search_codebase rejects operator-only queries without a positive retrieval
     assert.doesNotMatch(response.content[0]?.text || '', /handler must not run/);
 });
 
-test('search_codebase normalizes public debug selectors to the internal debugMode contract', async () => {
+test('search_codebase forwards public debugMode selectors to the handler contract', async () => {
     const capabilities = new CapabilityResolver(buildConfig());
     const calls: Array<Record<string, unknown>> = [];
     const ctx = {
@@ -143,21 +143,21 @@ test('search_codebase normalizes public debug selectors to the internal debugMod
     } as unknown as ToolContext;
 
     await searchCodebaseTool.execute({ path: '/repo', query: 'auth' }, ctx);
-    await searchCodebaseTool.execute({ path: '/repo', query: 'auth', debug: true }, ctx);
     await searchCodebaseTool.execute({ path: '/repo', query: 'auth', debugMode: 'freshness' }, ctx);
-    await searchCodebaseTool.execute({ path: '/repo', query: 'auth', debug: true, debugMode: 'ranking' }, ctx);
+    await searchCodebaseTool.execute({ path: '/repo', query: 'auth', debugMode: 'ranking' }, ctx);
+    await searchCodebaseTool.execute({ path: '/repo', query: 'auth', debugMode: 'full' }, ctx);
 
     assert.equal('debug' in (calls[0] ?? {}), false);
     assert.equal(calls[0]?.debugMode, 'none');
     assert.equal('debug' in (calls[1] ?? {}), false);
-    assert.equal(calls[1]?.debugMode, 'full');
+    assert.equal(calls[1]?.debugMode, 'freshness');
     assert.equal('debug' in (calls[2] ?? {}), false);
-    assert.equal(calls[2]?.debugMode, 'freshness');
+    assert.equal(calls[2]?.debugMode, 'ranking');
     assert.equal('debug' in (calls[3] ?? {}), false);
-    assert.equal(calls[3]?.debugMode, 'ranking');
+    assert.equal(calls[3]?.debugMode, 'full');
 });
 
-test('search_codebase rejects explicit debug false with debugMode', async () => {
+test('search_codebase rejects the retired debug selector', async () => {
     const capabilities = new CapabilityResolver(buildConfig());
     const response = await searchCodebaseTool.execute({
         path: '/repo',
@@ -167,7 +167,7 @@ test('search_codebase rejects explicit debug false with debugMode', async () => 
     }, { capabilities } as unknown as ToolContext);
 
     assert.equal(response.isError, true);
-    assert.match(response.content[0]?.text || '', /debug.*false.*debugMode|debugMode.*debug.*false/i);
+    assert.match(response.content[0]?.text || '', /Unrecognized key\(s\).*debug/i);
 });
 
 test('search_codebase accepts bounded diagnostic candidate depth only with full diagnostics', async () => {
@@ -516,8 +516,7 @@ test('search_codebase emits telemetry with diagnostics from handler meta', async
             scope: 'runtime',
             resultMode: 'grouped',
             groupBy: 'symbol',
-            limit: 10,
-            debug: false
+            limit: 10
         }, ctx);
 
         assert.equal(response.isError, undefined);
@@ -645,8 +644,7 @@ test('search_codebase falls back to parsed JSON response for telemetry diagnosti
             scope: 'docs',
             resultMode: 'raw',
             groupBy: 'file',
-            limit: 20,
-            debug: true
+            limit: 20
         }, ctx);
 
         assert.equal(response.isError, undefined);

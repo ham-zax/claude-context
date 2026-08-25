@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import * as path from "node:path";
-import type { CallGraphEdge } from "./call-graph.js";
+import type { CallGraphEdgeResult as CallGraphEdge } from "./search-types.js";
 import { serializeCanonicalJson } from "./canonical-json.js";
 import {
     RELATIONSHIP_CONFIDENCE_POLICY_VERSION,

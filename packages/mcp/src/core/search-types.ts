@@ -5,14 +5,12 @@ import type {
 } from "@zokizuan/satori-core";
 import type {
     FreshnessDecision,
-    PreparedReadObservationUnavailableReason,
     PreparedReadWatcherDiagnostics,
 } from "./sync.js";
 import { SearchGroupBy, SearchNoiseCategory, SearchRankingMode, SearchResultMode, SearchScope } from "./search-constants.js";
-import { FingerprintSource, IndexFingerprint } from "../config.js";
+import { IndexFingerprint } from "../config.js";
 import type { SearchRouteContract } from "./search-lexical-scoring.js";
 import type { EntrypointOwnerEvidenceResolution } from "./entrypoint-owner-evidence.js";
-import type { InboundCoverageEvidence } from "./relationship-backed-call-graph.js";
 import type { RerankBudgetReason } from "./search-rerank-policy.js";
 import type { SearchAnswerFocus, SearchCandidateRole } from "./search-rerank-context.js";
 import type {
@@ -41,9 +39,9 @@ export interface CallGraphSymbolRef {
 
 export type NavigationRegistryUnavailableReason =
     | "missing_symbol_registry"
-    | "missing_relationship_sidecar"
+    | "missing_relationship_navigation"
     | "incompatible_symbol_registry"
-    | "incompatible_relationship_sidecar";
+    | "incompatible_relationship_navigation";
 
 export type NavigationExactSymbolUnavailableReason =
     | "missing_symbol"
@@ -66,7 +64,7 @@ export type CallGraphHint =
         symbolRef: CallGraphSymbolRef;
         validated: true;
         validatedAt: string;
-        sidecarBuiltAt: string;
+        relationshipBuiltAt: string;
     }
     | {
         supported: false;
@@ -181,7 +179,7 @@ export interface SearchGroupedDebugV2 {
     };
     graphEvidence?: {
         validatedAt?: string;
-        sidecarBuiltAt?: string;
+        relationshipBuiltAt?: string;
     };
     provenance?: {
         retrievalPasses: string[];
@@ -357,10 +355,7 @@ export interface SearchCandidateSurvivalDebug {
 
 export interface FingerprintCompatibilityDiagnostics {
     runtimeFingerprint: IndexFingerprint;
-    indexedFingerprint?: IndexFingerprint;
-    fingerprintSource?: FingerprintSource;
-    reindexReason?: "legacy_unverified_fingerprint" | "fingerprint_mismatch" | "missing_fingerprint" | "navigation_recovery_failed" | "backend_requires_full_rebuild" | "index_policy_changed";
-    statusAtCheck?: "indexed" | "indexing" | "indexfailed" | "sync_completed" | "requires_reindex" | "not_found";
+    statusAtCheck?: "indexed" | "not_found";
 }
 
 export interface SearchNoiseMitigationHint {
@@ -369,7 +364,6 @@ export interface SearchNoiseMitigationHint {
     ratios: Record<SearchNoiseCategory, number>;
     recommendedScope: "runtime";
     suggestedIgnorePatterns: string[];
-    debounceMs: number;
     nextStep: string;
 }
 
@@ -396,22 +390,13 @@ export interface SearchReadinessDebugHint {
     proofMode: "cold" | "warm";
     invalidationReason: SearchReadinessInvalidationReason;
     auditClassification?: "proof_expiry_audit";
-    observationUnavailableReason?: PreparedReadObservationUnavailableReason;
     watcher?: PreparedReadWatcherDiagnostics;
-    requestProof?: {
-        freshnessComparisonMode: "full" | "exact_paths" | "stale_while_sync";
-        exactPathCount: number;
-        checkpointBindings: number;
-        preRetrievalFullComparisons: number;
-        finalFullComparisons: number;
-    };
     operations: {
         preparedCacheLookups: number;
         preparedCacheHits: number;
         coldReadinessChecks: number;
         postFreshnessColdChecks: number;
         warmReceiptRevalidations: number;
-        exactPayloadRecounts: number;
         registryLoads: number;
         navigationValidationRuns: number;
     };
@@ -515,9 +500,7 @@ export interface SearchDebugHint {
     };
     phaseTimingsMs?: {
         prepareRead: number;
-        snapshotReload: number;
         trackedRootResolution: number;
-        fingerprintGate: number;
         completionProof: number;
         collectionProbe: number;
         ensureFreshness: number;
@@ -542,7 +525,6 @@ export interface SearchDebugHint {
         publicationCheckpointStage: number;
         publicationPayloadCount: number;
         publicationActivation: number;
-        publicationRetentionProof: number;
         finalSourceValidation: number;
     };
     readiness: SearchReadinessDebugHint;
@@ -833,8 +815,7 @@ interface SearchBaseResponseEnvelope {
     freshness?: {
         state: "sync_in_progress";
         servedCollection?: string;
-        servedRunId?: string;
-        servedGenerationId?: string;
+        servedPublicationId?: string;
         servedGeneration?: number;
         pendingOperation?: {
             action: string;
@@ -1023,6 +1004,21 @@ export interface FileOutlineResponseEnvelope {
 }
 
 export type CallGraphDirection = "callers" | "callees" | "both";
+export type CallGraphEdgeKind = "call" | "import" | "dynamic";
+
+export type InboundCoverageReason =
+    | "no_relationships_extracted"
+    | "suppressed_low_confidence"
+    | "fallback_failed";
+
+export interface InboundCoverageEvidence {
+    reason: InboundCoverageReason;
+    retrievedRelationshipCount: number;
+    suppressedRelationshipCount: number;
+    fallbackAttempted: boolean;
+    fallbackRecoveredCount: number;
+    constructorResolutionApplicable: boolean;
+}
 
 export type CallGraphResponseStatus =
     | "ok"
@@ -1055,7 +1051,7 @@ export interface CallGraphNodeResult {
 export interface CallGraphEdgeResult {
     srcSymbolId: string;
     dstSymbolId: string;
-    kind: "call" | "import" | "dynamic";
+    kind: CallGraphEdgeKind;
     site: {
         file: string;
         startLine: number;
@@ -1085,7 +1081,7 @@ export interface CallGraphTestReferenceResult {
         endLine?: number;
     };
     targetSymbolId: string;
-    kind: "call" | "import" | "dynamic";
+    kind: CallGraphEdgeKind;
     confidence: number;
 }
 
@@ -1109,17 +1105,16 @@ export interface CallGraphTraversalResponseEnvelope {
     notesTruncated?: boolean;
     totalNoteCount?: number;
     returnedNoteCount?: number;
-    sidecar?: {
+    graph?: {
         builtAt: string;
-        /** Count of nodes returned in this traversal response, not total nodes stored for the codebase sidecar. */
+        /** Count of nodes returned in this traversal response. */
         nodeCount: number;
-        /** Count of edges returned in this traversal response, not total edges stored for the codebase sidecar. */
+        /** Count of edges returned in this traversal response. */
         edgeCount: number;
     };
-    /** The exact serving navigation generation and distinct relationship/publication timestamps. */
+    /** The exact serving Publication navigation and distinct relationship/publication timestamps. */
     navigationAuthority?: {
-        generationId: string;
-        navigationSealSha256: string;
+        publicationId: string;
         relationshipManifestSha256: string;
         relationshipBuiltAt: string;
         publicationCompletedAt: string;

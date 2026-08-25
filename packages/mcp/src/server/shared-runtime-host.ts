@@ -149,7 +149,6 @@ export class SharedRuntimeSocketHost {
     async start(): Promise<void> {
         let boundSocket: Readonly<{ device: number; inode: number }> | null = null;
         try {
-            await this.runtimeHost.recoverInterruptedIndexingAtStartup();
             await new Promise<void>((resolve, reject) => {
                 const onError = (error: Error): void => {
                     this.server.off("listening", onListening);

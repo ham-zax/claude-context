@@ -64,7 +64,6 @@ function buildInput(): SearchExactFastPathInput {
                 coldReadinessChecks: 0,
                 postFreshnessColdChecks: 0,
                 warmReceiptRevalidations: 0,
-                exactPayloadRecounts: 0,
                 registryLoads: 0,
                 navigationValidationRuns: 0,
             },
@@ -123,7 +122,6 @@ test("runExactRegistryFastPath uses publication-only symbols without reading cur
         getContextTrackedRelativePaths: () => [],
         classifyPathCategory: () => "core",
         shouldIncludeCategoryInScope: () => true,
-        getSyncWatchDebounceMs: () => 0,
         capabilities: {
             hasReranker: () => false,
             getDefaultRerankEnabled: () => false,
@@ -141,7 +139,7 @@ test("runExactRegistryFastPath uses publication-only symbols without reading cur
             registry: mockRegistry,
             manifestHash: "man-1",
         }),
-        loadRegistryValidatedCallGraphSidecar: async () => ({ relationshipReady: true }),
+        loadRegistryValidatedRelationshipNavigation: async () => ({ relationshipReady: true }),
         buildRelationshipBackedCallGraph: async () => null,
         buildChangedCodeDebug: async () => undefined,
         buildGeneratedArtifactsVerificationHint: () => undefined,
@@ -242,7 +240,6 @@ test("runExactRegistryFastPath preserves dirty relationship peers without readin
         getContextTrackedRelativePaths: () => [],
         classifyPathCategory: () => "core",
         shouldIncludeCategoryInScope: () => true,
-        getSyncWatchDebounceMs: () => 0,
         capabilities: {
             hasReranker: () => false,
             getDefaultRerankEnabled: () => false,
@@ -260,7 +257,7 @@ test("runExactRegistryFastPath preserves dirty relationship peers without readin
             registry: mockRegistry,
             manifestHash: "man-1",
         }),
-        loadRegistryValidatedCallGraphSidecar: async () => ({ relationshipReady: true }),
+        loadRegistryValidatedRelationshipNavigation: async () => ({ relationshipReady: true }),
         buildRelationshipBackedCallGraph: async () => ({
             supported: true,
             direction: "callers",

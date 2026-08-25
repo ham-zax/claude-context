@@ -63,11 +63,10 @@ function registry(records: SymbolRecord[]): SymbolRegistry {
 }
 
 const publication = {
+    publicationId: "publication-v1",
     collectionName: "collection-v1",
-    markerRunId: "run-v1",
-    policyDocumentDigest: "a".repeat(64),
     policyHash: "b".repeat(64),
-    navigationGenerationId: "generation-v1",
+    navigationPublicationId: "publication-v1",
     symbolRegistryManifestHash: "c".repeat(64),
 };
 

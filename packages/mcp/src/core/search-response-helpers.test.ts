@@ -45,20 +45,19 @@ test("buildSearchWarningDetails sorts warning codes with contract order (localeC
     }
 });
 
-test("incompatible reranker context warning preserves source-backed results and recommends repair", () => {
+test("incompatible reranker context warning preserves source-backed results and recommends reindex", () => {
     const [warning] = buildSearchWarningDetails(["RERANKER_CONTEXT_DEGRADED"]);
     assert.equal(warning?.blocksUse, false);
     assert.equal(warning?.severity, "degraded");
     assert.match(warning?.message ?? "", /relationship.*does not match.*generation/i);
-    assert.match(warning?.action ?? "", /manage_index repair/i);
+    assert.match(warning?.action ?? "", /manage_index reindex/i);
 });
 
-test("navigation repair warning preserves vector usability and recommends repair", () => {
-    const [warning] = buildSearchWarningDetails(["NAVIGATION_REPAIR_REQUIRED"]);
+test("navigation reindex warning preserves vector usability and recommends reindex", () => {
+    const [warning] = buildSearchWarningDetails(["NAVIGATION_REINDEX_REQUIRED"]);
     assert.equal(warning?.blocksUse, false);
     assert.equal(warning?.severity, "degraded");
-    assert.match(warning?.action ?? "", /^Run manage_index repair/i);
-    assert.match(warning?.action ?? "", /do not reindex/i);
+    assert.match(warning?.action ?? "", /^Run manage_index reindex/i);
 });
 
 test("source checkpoint warning preserves vector usability but requires reindex", () => {
@@ -200,7 +199,7 @@ test("caller term is a complete bounded ASCII identifier and only accompanies gr
             symbolRef: { file: "src/gate.ts", symbolId: "sym_gate" },
             validated: true,
             validatedAt: "2026-01-01T00:00:00.000Z",
-            sidecarBuiltAt: "2026-01-01T00:00:00.000Z",
+            relationshipBuiltAt: "2026-01-01T00:00:00.000Z",
         }, "checkMutation"),
         { graph: "ready", inbound: "verify", callerSearchTerm: "checkMutation" },
     );

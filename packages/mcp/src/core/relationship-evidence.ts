@@ -1,5 +1,8 @@
 import { compareContractStrings } from "@zokizuan/satori-core";
-import type { CallGraphEdge, CallGraphNote } from "./call-graph.js";
+import type {
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNoteResult as CallGraphNote,
+} from "./search-types.js";
 
 export const RELATIONSHIP_EVIDENCE_PROJECTION_POLICY_VERSION = "relationship_evidence_v1" as const;
 export const RELATIONSHIP_CONFIDENCE_POLICY_VERSION = "call_graph_score_bands_v1" as const;

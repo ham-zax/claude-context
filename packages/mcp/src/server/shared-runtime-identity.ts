@@ -50,8 +50,6 @@ export type SharedRuntimeIdentity = Readonly<{
     readFileMaxBytes: string;
     customExtensions: string;
     customIgnorePatterns: string;
-    navigationBackend: string;
-    navigationDualRead: string;
     allTextMaxBytes: string;
     syncHashConcurrency: string;
     syncFullHashEveryN: string;
@@ -203,8 +201,6 @@ export function buildSharedRuntimeIdentity(
         readFileMaxBytes: env.READ_FILE_MAX_BYTES ?? "",
         customExtensions: env.CUSTOM_EXTENSIONS ?? "",
         customIgnorePatterns: env.CUSTOM_IGNORE_PATTERNS ?? "",
-        navigationBackend: env.SATORI_NAVIGATION_BACKEND ?? "",
-        navigationDualRead: env.SATORI_NAVIGATION_DUAL_READ ?? "",
         allTextMaxBytes: env.SATORI_ALL_TEXT_MAX_BYTES ?? "",
         syncHashConcurrency: env.SATORI_SYNC_HASH_CONCURRENCY ?? "",
         syncFullHashEveryN: env.SATORI_SYNC_FULL_HASH_EVERY_N ?? "",

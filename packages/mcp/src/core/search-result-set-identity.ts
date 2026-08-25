@@ -25,12 +25,12 @@ export type SearchRerankerBindingIdentity =
     }>;
 
 export type SearchPublicationBindingIdentity = Readonly<{
+    publicationId: string;
     collectionName: string;
-    marker: unknown;
-    policyDocumentDigest: string;
+    policyHash: string;
     navigation:
         | Readonly<{ status: "not_bound" }>
-        | Readonly<{ status: "sealed"; receipt: unknown }>;
+        | Readonly<{ status: "bound" }>;
 }>;
 
 export type SearchRankedSetBindingInput = Readonly<{
@@ -38,8 +38,6 @@ export type SearchRankedSetBindingInput = Readonly<{
     rankingPolicyIdentity: string;
     disclosurePolicyVersion: string;
     publicationIdentity: SearchPublicationBindingIdentity;
-    preparedObservation: string;
-    sourceObservation: string | null;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
     rerankerRequestIdentity: SearchRerankRequestIdentityV1 | null;
@@ -53,8 +51,6 @@ export type SearchRankedSetBinding = Readonly<{
     rankingPolicyIdentity: string;
     disclosurePolicyVersion: string;
     publicationIdentity: JsonValue;
-    preparedObservation: string;
-    sourceObservation: string | null;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
     rerankerRequestIdentity: SearchRerankRequestIdentityV1 | null;
@@ -119,26 +115,15 @@ export function buildSearchRankedSetBinding(
         throw new Error("Ranked-set results and recommended actions must remain paired.");
     }
     if (
-        !input.publicationIdentity.collectionName.trim()
-        || !input.publicationIdentity.policyDocumentDigest.trim()
-        || !input.publicationIdentity.marker
-        || typeof input.publicationIdentity.marker !== "object"
+        !input.publicationIdentity.publicationId.trim()
+        || !input.publicationIdentity.collectionName.trim()
+        || !input.publicationIdentity.policyHash.trim()
     ) {
         throw new Error("Ranked-set publication identity must be complete.");
-    }
-    if (
-        input.publicationIdentity.navigation.status === "sealed"
-        && (
-            !input.publicationIdentity.navigation.receipt
-            || typeof input.publicationIdentity.navigation.receipt !== "object"
-        )
-    ) {
-        throw new Error("Ranked-set navigation publication identity must be complete.");
     }
     requireIdentityText(input.queryPolicyDigest, "query policy");
     requireIdentityText(input.rankingPolicyIdentity, "ranking policy");
     requireIdentityText(input.disclosurePolicyVersion, "disclosure policy");
-    requireIdentityText(input.preparedObservation, "prepared observation");
     requireIdentityText(input.rerankerProjectionIdentity, "reranker projection");
     if (input.rerankerIdentity.kind === "provider") {
         requireIdentityText(input.rerankerIdentity.provider, "reranker provider");
@@ -194,8 +179,6 @@ export function buildSearchRankedSetBinding(
         rankingPolicyIdentity: input.rankingPolicyIdentity,
         disclosurePolicyVersion: input.disclosurePolicyVersion,
         publicationIdentity: normalizeJson(input.publicationIdentity),
-        preparedObservation: input.preparedObservation,
-        sourceObservation: input.sourceObservation,
         rerankerIdentity: input.rerankerIdentity,
         rerankerProjectionIdentity: input.rerankerProjectionIdentity,
         rerankerRequestIdentity: input.rerankerRequestIdentity,

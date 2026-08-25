@@ -130,7 +130,7 @@ export type SearchResultFinalizationHost = {
         run: () => Promise<T>,
     ) => Promise<T>;
     loadRegistryManifest: (normalizedRootPath: string) => Promise<RegistryManifestState>;
-    loadRegistryValidatedCallGraphSidecar: (input: {
+    loadRegistryValidatedRelationshipNavigation: (input: {
         codebaseRoot: string;
         registryManifestHash?: string;
         registryUnavailableReason?: CallGraphUnavailableReason;
@@ -587,7 +587,7 @@ export async function finalizeSearchResults(
     const callGraphNavigationState = input.navigationAuthority === "valid"
         ? await host.measureSearchPhase(
             "navigationValidation",
-            () => host.loadRegistryValidatedCallGraphSidecar({
+            () => host.loadRegistryValidatedRelationshipNavigation({
                 codebaseRoot: input.effectiveRoot,
                 registryManifestHash: searchSymbolRegistryManifestHash,
                 registryUnavailableReason: searchSymbolRegistryUnavailableReason,

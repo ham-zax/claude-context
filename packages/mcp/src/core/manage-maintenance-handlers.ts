@@ -2,19 +2,17 @@ import * as fs from "fs";
 import {
     COLLECTION_LIMIT_MESSAGE,
     RemoteCollectionDeletePendingError,
-    computeSymbolQualitySummaryFromAggregate,
     computeSymbolQualitySummaryFromSidecarRead,
     formatSymbolQualityMarker,
     readSymbolRegistrySidecar,
-    readNavigationGenerationSeal,
     resolveLanguageCapabilityEvidence,
     unknownSymbolQualitySummary,
     type Context,
-    type IndexMutationPort,
+    type PublicationLease,
+    type PublicationRef,
     type LanguageCapabilityEvidenceSummary,
     type SymbolQualitySummary,
 } from "@zokizuan/satori-core";
-import type { SnapshotCorruptionWarning, SnapshotManager } from "./snapshot.js";
 import {
     SyncOperationError,
     type PreparedReadObservationUnavailableReason,
@@ -33,8 +31,6 @@ import {
 import { requireAbsoluteFilesystemPath } from "../utils.js";
 import {
     MANUAL_SYNC_FRESHNESS_THRESHOLD_MS,
-    type IndexOperationPhase,
-    type IndexOperationReceipt,
 } from "../config.js";
 import type {
     ManageIndexAction,
@@ -48,10 +44,13 @@ import {
     type RuntimeOwnersSummary,
 } from "./runtime-owner.js";
 import {
-    MutationLeaseCoordinator,
-    formatMutationLeaseBlockedMessage,
-    type RootMutationLease,
-} from "./mutation-lease.js";
+    RootMutationInProgressError,
+    RootMutationRuntime,
+    formatRootMutationBlockedMessage,
+    type MutationOperationPhase,
+    type RootMutationActivity,
+    type RootMutationOperation,
+} from "@zokizuan/satori-core/integration";
 
 type ToolArgs = Record<string, unknown>;
 
@@ -61,9 +60,8 @@ type ToolTextResponse = {
 };
 
 type ManageMaintenanceHandlersHost = {
-    context: Pick<Context, "clearIndex"> & Partial<Pick<Context, "inspectSourceFreshnessCheckpoint" | "getSourceFreshnessPort">>;
-    indexMutationPort: Pick<IndexMutationPort, "clearIndex">;
-    snapshotManager: Pick<SnapshotManager, "removeCodebaseCompletely" | "getLatestOperation" | "startOperation" | "transitionOperation" | "commitOperationPhase" | "saveCodebaseSnapshot">;
+    context: Pick<Context, "clearIndex" | "getCurrentPublication" | "listCurrentPublications" | "inspectSourceFreshnessCheckpoint">;
+    mutationRuntime: RootMutationRuntime;
     syncManager: Pick<SyncManager, "ensureFreshness"> & Partial<Pick<
         SyncManager,
         "getPreparedReadObservation" | "getPreparedReadDiagnostics"
@@ -73,21 +71,16 @@ type ManageMaintenanceHandlersHost = {
         "buildMissingLocalCollectionMessage"
     >;
     prepareStatusTrackedRootRead(absolutePath: string): Promise<TrackedRootReadinessState>;
-    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
-    getSnapshotAllCodebases(): string[];
-    getSnapshotIndexedCodebases(): string[];
-    getSnapshotIndexingCodebases(): string[];
-    getSnapshotCodebaseStatus(codebasePath: string): string;
-    getSnapshotCodebaseInfo(codebasePath: string): Record<string, unknown> | undefined;
-    getSnapshotCorruptionWarning(): SnapshotCorruptionWarning | undefined;
+    acquirePublicationLease(codebasePath: string): PublicationLease | undefined;
+    isPublicationAdmitted(publication: PublicationRef): Promise<boolean>;
+    getPublicationNavigationAddress(publication: PublicationRef): {
+        publicationId: string;
+        navigationRoot: string;
+    } | null;
     buildRuntimeOwnerConflictResponseIfBlocked(
         action: Extract<RuntimeOwnerMutationAction, "clear" | "sync">,
         codebasePath: string,
     ): Promise<ToolTextResponse | null>;
-    recoverStaleIndexingStateIfNeeded(
-        codebasePath: string,
-        existingLease?: RootMutationLease,
-    ): Promise<RootMutationLease | undefined>;
     manageResponse(
         action: ManageIndexAction | string,
         path: string,
@@ -96,7 +89,6 @@ type ManageMaintenanceHandlersHost = {
         options?: Record<string, unknown>,
     ): ToolTextResponse;
     buildCreateHint(codebasePath: string): Record<string, unknown>;
-    buildRepairHint(codebasePath: string): Record<string, unknown>;
     buildManageActionBlockedMessage(
         codebasePath: string,
         action: Extract<RuntimeOwnerMutationAction, "clear" | "sync">,
@@ -104,20 +96,14 @@ type ManageMaintenanceHandlersHost = {
     buildStatusHint(codebasePath: string): Record<string, unknown>;
     getManageRetryAfterMs(): number;
     buildIndexingMetadata(codebasePath: string): Record<string, unknown> | undefined;
-    markCodebaseCleared(codebasePath: string, collectionName: string): void;
-    resolveCollectionName(codebasePath: string): string;
     clearIndexingStats(): void;
-    saveSnapshotIfSupported(): void;
     unwatchCodebase(codebasePath: string): Promise<void>;
-    refreshSnapshotStateFromDisk(): void;
     buildReindexInstruction(codebasePath: string, detail?: string): string;
     buildCompatibilityStatusLines(codebasePath: string): string;
     buildManageRequiresReindexHints(codebasePath: string): Record<string, unknown>;
     buildSyncHint(codebasePath: string): Record<string, unknown>;
     buildStaleLocalHint(codebasePath: string, reason: string): Record<string, unknown>;
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: string): string;
-    canSyncStaleLocal(codebasePath: string, reason: string): boolean;
-    enforceFingerprintGate(codebasePath: string): { blockedResponse?: ToolTextResponse; message?: string };
     buildReindexHint(codebasePath: string): Record<string, unknown>;
     touchWatchedCodebase(codebasePath: string): Promise<void>;
     manageVectorBackendResponse(
@@ -125,11 +111,10 @@ type ManageMaintenanceHandlersHost = {
         path: string,
         diagnostic: VectorBackendDiagnostic,
         humanText?: string,
-        operation?: import("../config.js").IndexOperationReceipt,
+        operation?: RootMutationOperation,
     ): ToolTextResponse;
     /** Optional live MCP runtime owner summary for status diagnostics. */
     getLiveOwnersSummary?(): Promise<RuntimeOwnersSummary | null> | RuntimeOwnersSummary | null;
-    mutationLeaseCoordinator: MutationLeaseCoordinator | null;
 };
 
 function collectErrorFragments(
@@ -190,23 +175,6 @@ function collectErrorFragments(
     }
 }
 
-function operationMatchesLiveSyncLease(
-    lease: RootMutationLease | undefined,
-    operation: IndexOperationReceipt | undefined,
-): operation is IndexOperationReceipt {
-    return Boolean(
-        lease
-        && lease.action === "sync"
-        && operation
-        && operation.action === "sync"
-        && operation.id === lease.operationId
-        && operation.canonicalRoot === lease.canonicalRoot
-        && operation.generation === lease.generation
-        && operation.writer.ownerId === lease.ownerId
-        && operation.writer.pid === lease.pid
-    );
-}
-
 function formatUnknownError(error: unknown): string {
     if (error === COLLECTION_LIMIT_MESSAGE) {
         return COLLECTION_LIMIT_MESSAGE;
@@ -224,8 +192,8 @@ function formatUnknownError(error: unknown): string {
     }
 }
 
-function formatActiveMutationStatusLine(lease: RootMutationLease): string {
-    return `Active mutation: ${lease.action} operation=${lease.operationId} generation=${lease.generation} pid=${lease.pid} acquiredAt=${lease.acquiredAt}`;
+function formatActiveMutationStatusLine(activity: RootMutationActivity): string {
+    return `Active mutation: ${activity.action} operation=${activity.id} generation=${activity.generation} pid=${activity.pid} acquiredAt=${activity.acceptedAt}`;
 }
 
 const SOURCE_STATE_UNVERIFIED_REASONS = new Set<PreparedReadObservationUnavailableReason>([
@@ -250,222 +218,105 @@ export class ManageMaintenanceHandlers {
         if (!absolutePathResult.ok) {
             return this.host.manageResponse("clear", codebasePath, "error", absolutePathResult.message);
         }
-        const requestedPath = absolutePathResult.absolutePath;
-        let mutationLease: RootMutationLease | undefined;
-        let operationTerminal = false;
-        let lastDurableOperation: IndexOperationReceipt | undefined;
-        const persistOperation = (phase: IndexOperationPhase, mutateSnapshot?: () => void) => {
-            if (!mutationLease) {
-                mutateSnapshot?.();
-                return undefined;
-            }
-            if (typeof this.host.snapshotManager.transitionOperation !== "function") {
-                mutateSnapshot?.();
-                return undefined;
-            }
-            this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
-            const operation = typeof this.host.snapshotManager.commitOperationPhase === "function"
-                ? this.host.snapshotManager.commitOperationPhase(
-                    mutationLease,
-                    phase,
-                    mutateSnapshot,
-                    () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
-                )
-                : (() => {
-                    const next = this.host.snapshotManager.transitionOperation(mutationLease!, phase);
-                    mutateSnapshot?.();
-                    if (this.host.snapshotManager.saveCodebaseSnapshot() === false) {
-                        throw new Error(`Failed to persist clear operation receipt for '${requestedPath}'.`);
-                    }
-                    return next;
-                })();
-            lastDurableOperation = operation;
-            operationTerminal = phase === "completed" || phase === "failed" || phase === "blocked";
-            return operation;
-        };
-
-        if (this.host.getSnapshotAllCodebases().length === 0) {
-            return this.host.manageResponse(
-                "clear",
-                requestedPath,
-                "not_indexed",
-                "No codebases are currently tracked.",
-                { reason: "not_indexed" },
-            );
+        const absolutePath = absolutePathResult.absolutePath;
+        if (fs.existsSync(absolutePath) && !fs.statSync(absolutePath).isDirectory()) {
+            return this.host.manageResponse("clear", absolutePath, "error", `Error: Path '${absolutePath}' is not a directory`);
         }
 
+        const runtimeOwnerConflict = await this.host.buildRuntimeOwnerConflictResponseIfBlocked("clear", absolutePath);
+        if (runtimeOwnerConflict) return runtimeOwnerConflict;
+
         try {
-            const absolutePath = requestedPath;
-            const pathExists = fs.existsSync(absolutePath);
+            return await this.host.mutationRuntime.run(absolutePath, "clear", async () => {
+                let lastOperation = this.host.mutationRuntime.getCurrentOperation(absolutePath);
+                let publicationAuthorityCleared = false;
+                const updateOperation = (
+                    phase: MutationOperationPhase,
+                    update: { progress?: number; error?: string } = {},
+                ): RootMutationOperation => {
+                    lastOperation = this.host.mutationRuntime.updateCurrentOperation(absolutePath, phase, update);
+                    return lastOperation;
+                };
 
-            if (pathExists) {
-                const stat = fs.statSync(absolutePath);
-                if (!stat.isDirectory()) {
-                    return this.host.manageResponse("clear", absolutePath, "error", `Error: Path '${absolutePath}' is not a directory`);
+                try {
+                    console.log(`[CLEAR] Clearing codebase: ${absolutePath}`);
+                    updateOperation("writing", { progress: 0 });
+                    await this.host.context.clearIndex(absolutePath, (progress) => {
+                        if (progress.phase === "Removing index data...") publicationAuthorityCleared = true;
+                        const progressValue = Number.isFinite(progress.percentage)
+                            ? Math.max(0, Math.min(99, progress.percentage))
+                            : undefined;
+                        if (progressValue !== undefined) updateOperation("writing", { progress: progressValue });
+                    });
+                    publicationAuthorityCleared = true;
+                    updateOperation("completed", { progress: 100 });
+                    this.host.clearIndexingStats();
+                    await this.host.unwatchCodebase(absolutePath);
+
+                    let resultText = `Successfully cleared codebase '${absolutePath}'`;
+                    const remainingIndexed = this.host.context.listCurrentPublications().length;
+                    if (remainingIndexed > 0) {
+                        resultText += `\n${remainingIndexed} other indexed codebase(s) remain`;
+                    }
+                    return this.host.manageResponse(
+                        "clear",
+                        absolutePath,
+                        "ok",
+                        resultText,
+                        lastOperation ? { operation: lastOperation } : undefined,
+                    );
+                } catch (error: unknown) {
+                    const detail = formatUnknownError(error);
+                    if (this.host.mutationRuntime.isCurrent(absolutePath)) {
+                        try {
+                            updateOperation("failed", { error: detail });
+                        } catch (operationError) {
+                            console.error("Failed to publish terminal clear operation state:", operationError);
+                        }
+                    }
+                    if (error instanceof RemoteCollectionDeletePendingError) {
+                        const errorMsg = `Publication authority has already been cleared for ${absolutePath}. Remote vector cleanup is still pending; residual physical cleanup can be retried with manage_index clear. Details: ${detail}`;
+                        return this.host.manageResponse("clear", absolutePath, "error", errorMsg, {
+                            reason: "remote_delete_pending",
+                            hints: {
+                                retry: this.host.buildStatusHint(absolutePath),
+                                clear: { tool: "manage_index", args: { action: "clear", path: absolutePath } },
+                            },
+                            ...(lastOperation ? { operation: lastOperation } : {}),
+                        });
+                    }
+                    const errorMsg = publicationAuthorityCleared
+                        ? `Publication authority has already been cleared for ${absolutePath}, but post-clear physical/runtime cleanup failed before completion. Residual cleanup can be retried with manage_index clear. Details: ${detail}`
+                        : `Failed to clear ${absolutePath} before Publication authority removal completed: ${detail}`;
+                    if (detail === COLLECTION_LIMIT_MESSAGE || detail.includes(COLLECTION_LIMIT_MESSAGE)) {
+                        return this.host.manageResponse("clear", absolutePath, "error", COLLECTION_LIMIT_MESSAGE, lastOperation ? { operation: lastOperation } : undefined);
+                    }
+                    return this.host.manageResponse(
+                        "clear",
+                        absolutePath,
+                        "error",
+                        errorMsg,
+                        lastOperation ? { operation: lastOperation } : undefined,
+                    );
                 }
-            }
-
-            const runtimeOwnerConflict = await this.host.buildRuntimeOwnerConflictResponseIfBlocked("clear", absolutePath);
-            if (runtimeOwnerConflict) {
-                return runtimeOwnerConflict;
-            }
-
-            const leaseResult = this.host.mutationLeaseCoordinator?.acquire(absolutePath, "clear");
-            if (leaseResult && !leaseResult.acquired) {
+            });
+        } catch (error) {
+            if (error instanceof RootMutationInProgressError) {
                 return this.host.manageResponse(
                     "clear",
                     absolutePath,
                     "blocked",
-                    formatMutationLeaseBlockedMessage(leaseResult.activeLease),
+                    formatRootMutationBlockedMessage(error.activeMutation),
                     {
                         reason: "mutation_in_progress",
                         hints: {
                             status: this.host.buildStatusHint(absolutePath),
-                            activeMutation: leaseResult.activeLease,
+                            activeMutation: error.activeMutation,
                         },
                     },
                 );
             }
-            mutationLease = leaseResult?.lease;
-            if (mutationLease && typeof this.host.snapshotManager.startOperation === "function") {
-                const operation = typeof this.host.snapshotManager.commitOperationPhase === "function"
-                    ? this.host.snapshotManager.commitOperationPhase(
-                        mutationLease,
-                        "accepted",
-                        undefined,
-                        () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
-                    )
-                    : this.host.snapshotManager.startOperation(mutationLease);
-                if (
-                    typeof this.host.snapshotManager.commitOperationPhase !== "function"
-                    && this.host.snapshotManager.saveCodebaseSnapshot() === false
-                ) {
-                    throw new Error(`Failed to persist accepted clear operation receipt for '${absolutePath}'.`);
-                }
-                lastDurableOperation = operation;
-            }
-
-            if (pathExists) {
-                await this.host.recoverStaleIndexingStateIfNeeded(absolutePath, mutationLease);
-            }
-
-            const isIndexed = this.host.getSnapshotIndexedCodebases().includes(absolutePath);
-            const isIndexing = this.host.getSnapshotIndexingCodebases().includes(absolutePath);
-            const status = this.host.getSnapshotCodebaseStatus(absolutePath);
-            const isRequiresReindex = status === "requires_reindex";
-
-            if (!isIndexed && !isIndexing && !isRequiresReindex) {
-                const operation = persistOperation("blocked");
-                if (!pathExists) {
-                    return this.host.manageResponse("clear", absolutePath, "error", `Error: Path '${absolutePath}' does not exist. Original input: '${codebasePath}'`, operation ? { operation } : undefined);
-                }
-                return this.host.manageResponse(
-                    "clear",
-                    absolutePath,
-                    "not_indexed",
-                    `Error: Codebase '${absolutePath}' is not indexed or being indexed.`,
-                    {
-                        reason: "not_indexed",
-                        hints: {
-                            create: this.host.buildCreateHint(absolutePath),
-                        },
-                        ...(operation ? { operation } : {}),
-                    },
-                );
-            }
-
-            if (isIndexing) {
-                const operation = persistOperation("blocked");
-                return this.host.manageResponse(
-                    "clear",
-                    absolutePath,
-                    "not_ready",
-                    this.host.buildManageActionBlockedMessage(absolutePath, "clear"),
-                    {
-                        reason: "indexing",
-                        hints: {
-                            status: this.host.buildStatusHint(absolutePath),
-                            retryAfterMs: this.host.getManageRetryAfterMs(),
-                            indexing: this.host.buildIndexingMetadata(absolutePath),
-                        },
-                        ...(operation ? { operation } : {}),
-                    },
-                );
-            }
-
-            console.log(`[CLEAR] Clearing codebase: ${absolutePath}`);
-
-            try {
-                persistOperation("writing");
-                if (mutationLease) {
-                    this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
-                }
-                await this.host.indexMutationPort.clearIndex(absolutePath, undefined, {
-                    ...(mutationLease ? {
-                        assertMutationCurrent: () => this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease!),
-                    } : {}),
-                });
-                console.log(`[CLEAR] Successfully cleared index for: ${absolutePath}`);
-            } catch (error: unknown) {
-                if (error instanceof RemoteCollectionDeletePendingError) {
-                    const errorMsg = `Remote deletion is still pending for ${absolutePath}. Local index state was not changed. Details: ${formatUnknownError(error)}`;
-                    console.error(`[CLEAR] ${errorMsg}`);
-                    const operation = persistOperation("failed");
-                    return this.host.manageResponse("clear", absolutePath, "error", errorMsg, {
-                        reason: "remote_delete_pending",
-                        hints: {
-                            retry: this.host.buildStatusHint(absolutePath),
-                            clear: { tool: "manage_index", args: { action: "clear", path: absolutePath } },
-                        },
-                        ...(operation ? { operation } : {}),
-                    });
-                }
-                const errorMsg = `Failed to clear ${absolutePath}: ${formatUnknownError(error)}`;
-                console.error(`[CLEAR] ${errorMsg}`);
-                const operation = persistOperation("failed");
-                return this.host.manageResponse("clear", absolutePath, "error", errorMsg, operation ? { operation } : undefined);
-            }
-
-            if (mutationLease) {
-                this.host.mutationLeaseCoordinator?.assertCurrent(mutationLease);
-            }
-            const operation = persistOperation("completed", () => {
-                this.host.markCodebaseCleared(absolutePath, this.host.resolveCollectionName(absolutePath));
-            });
-            if (!operation) {
-                this.host.saveSnapshotIfSupported();
-            }
-            this.host.clearIndexingStats();
-            await this.host.unwatchCodebase(absolutePath);
-
-            let resultText = `Successfully cleared codebase '${absolutePath}'`;
-            const remainingIndexed = this.host.getSnapshotIndexedCodebases().length;
-            const remainingIndexing = this.host.getSnapshotIndexingCodebases().length;
-
-            if (remainingIndexed > 0 || remainingIndexing > 0) {
-                resultText += `\n${remainingIndexed} other indexed codebase(s) and ${remainingIndexing} indexing codebase(s) remain`;
-            }
-
-            return this.host.manageResponse("clear", absolutePath, "ok", resultText, operation ? { operation } : undefined);
-        } catch (error) {
-            let operation;
-            try {
-                operation = mutationLease && !operationTerminal && this.host.mutationLeaseCoordinator?.isCurrent(mutationLease)
-                    ? persistOperation("failed")
-                    : lastDurableOperation;
-            } catch (receiptError) {
-                console.error("Failed to persist terminal clear receipt:", receiptError);
-                operation = lastDurableOperation;
-            }
-            const errorMessage = typeof error === "string" ? error : (error instanceof Error ? error.message : String(error));
-            if (errorMessage === COLLECTION_LIMIT_MESSAGE || errorMessage.includes(COLLECTION_LIMIT_MESSAGE)) {
-                return this.host.manageResponse("clear", requestedPath, "error", COLLECTION_LIMIT_MESSAGE, operation ? { operation } : undefined);
-            }
-            return this.host.manageResponse("clear", requestedPath, "error", `Error clearing index: ${errorMessage}`, operation ? { operation } : undefined);
-        } finally {
-            if (mutationLease) {
-                this.host.mutationLeaseCoordinator?.release(mutationLease);
-            }
+            throw error;
         }
     }
 
@@ -488,10 +339,7 @@ export class ManageMaintenanceHandlers {
         try {
             const absolutePath = requestedPath;
 
-            this.host.refreshSnapshotStateFromDisk();
-            const latestOperation = typeof this.host.snapshotManager.getLatestOperation === "function"
-                ? this.host.snapshotManager.getLatestOperation(absolutePath)
-                : undefined;
+            const latestOperation = this.host.mutationRuntime.getOperation(absolutePath);
 
             if (!fs.existsSync(absolutePath)) {
                 return this.host.manageResponse("status", absolutePath, "error", `Error: Path '${absolutePath}' does not exist. Original input: '${codebasePath}'`, {
@@ -505,17 +353,9 @@ export class ManageMaintenanceHandlers {
                 return this.host.manageResponse("status", absolutePath, "error", `Error: Path '${absolutePath}' is not a directory`, { detail });
             }
 
-            const snapshotCorruptionWarning = this.host.getSnapshotCorruptionWarning();
-            await this.host.recoverStaleIndexingStateIfNeeded(absolutePath);
-
-            const liveSyncMutation = this.host.mutationLeaseCoordinator?.getActiveLease(absolutePath);
-            const currentOperation = typeof this.host.snapshotManager.getLatestOperation === "function"
-                ? this.host.snapshotManager.getLatestOperation(absolutePath)
-                : undefined;
+            const liveSyncMutation = this.host.mutationRuntime.getActiveMutation(absolutePath);
             if (liveSyncMutation?.action === "sync") {
-                const matchingOperation = operationMatchesLiveSyncLease(liveSyncMutation, currentOperation)
-                    ? currentOperation
-                    : undefined;
+                const matchingOperation = this.host.mutationRuntime.getOperation(absolutePath);
                 return this.host.manageResponse(
                     "status",
                     liveSyncMutation.canonicalRoot,
@@ -537,14 +377,12 @@ export class ManageMaintenanceHandlers {
 
             const trackedRootState = await this.host.prepareStatusTrackedRootRead(absolutePath);
             if (trackedRootState.state === "requires_reindex") {
-                const operation = typeof this.host.snapshotManager.getLatestOperation === "function"
-                    ? this.host.snapshotManager.getLatestOperation(trackedRootState.codebasePath)
-                    : undefined;
+                const operation = this.host.mutationRuntime.getOperation(trackedRootState.codebasePath);
                 const statusMessage = this.host.buildReindexInstruction(trackedRootState.codebasePath, trackedRootState.message);
                 const compatibilityStatus = includeDiagnostics
                     ? this.host.buildCompatibilityStatusLines(trackedRootState.codebasePath)
                     : "";
-                const activeMutation = this.host.mutationLeaseCoordinator?.getActiveLease(trackedRootState.codebasePath);
+                const activeMutation = this.host.mutationRuntime.getActiveMutation(trackedRootState.codebasePath);
                 const activeMutationLine = activeMutation ? `\n${formatActiveMutationStatusLine(activeMutation)}` : "";
                 const pathInfo = codebasePath !== trackedRootState.codebasePath
                     ? `\nNote: Input path '${codebasePath}' was resolved to absolute path '${trackedRootState.codebasePath}'`
@@ -567,32 +405,14 @@ export class ManageMaintenanceHandlers {
             }
 
             const sourceCheckpointEvidence = trackedRootState.state === "ready"
-                && trackedRootState.vectorReceipt?.marker.indexStatus === "completed"
-                && (
-                    typeof this.host.context.getSourceFreshnessPort === "function"
-                    || typeof this.host.context.inspectSourceFreshnessCheckpoint === "function"
-                )
-                ? await (async () => {
-                    if (typeof this.host.context.getSourceFreshnessPort === "function") {
-                        const prepared = await this.host.context
-                            .getSourceFreshnessPort()
-                            .prepareCurrentSourceObservation(
-                                trackedRootState.root.path,
-                                { checkpointIdentity: trackedRootState.vectorReceipt!.collectionName },
-                            );
-                        return prepared.evidence;
-                    }
-                    return this.host.context.inspectSourceFreshnessCheckpoint!(
-                        trackedRootState.root.path,
-                        trackedRootState.vectorReceipt!.collectionName,
-                    );
-                })()
+                && trackedRootState.publication.publication.status === "complete"
+                ? await this.host.context.inspectSourceFreshnessCheckpoint(trackedRootState.root.path)
                 : null;
 
             let sourceObservationUnavailableReason: PreparedReadObservationUnavailableReason | undefined;
             if (
                 trackedRootState.state === "ready"
-                && trackedRootState.vectorReceipt?.marker.indexStatus === "completed"
+                && trackedRootState.publication.publication.status === "complete"
                 && typeof this.host.syncManager.getPreparedReadObservation === "function"
                 && typeof this.host.syncManager.getPreparedReadDiagnostics === "function"
             ) {
@@ -626,17 +446,13 @@ export class ManageMaintenanceHandlers {
                 statusMessage = `❌ Codebase '${absolutePath}' is not indexed. Call manage_index with {"action":"create","path":"${absolutePath}"} to index it first.`;
             } else if (trackedRootState.state === "stale_local") {
                 envelopePath = trackedRootState.codebasePath;
-                envelopeStatus = "not_indexed";
-                envelopeReason = "not_indexed";
-                const syncable = this.host.canSyncStaleLocal(trackedRootState.codebasePath, trackedRootState.reason);
+                envelopeStatus = "requires_reindex";
+                envelopeReason = "requires_reindex";
                 envelopeHints = {
-                    ...(syncable ? { sync: this.host.buildSyncHint(trackedRootState.codebasePath) } : {}),
-                    create: this.host.buildCreateHint(trackedRootState.codebasePath),
+                    reindex: this.host.buildReindexHint(trackedRootState.codebasePath),
                     staleLocal: this.host.buildStaleLocalHint(trackedRootState.codebasePath, trackedRootState.reason),
                 };
-                const nextAction = syncable ? "sync" : trackedRootState.reason === "missing_marker_doc" ? "repair" : "create";
-                const nextVerb = syncable ? "sync it" : nextAction === "repair" ? "repair it" : "create it";
-                statusMessage = `❌ ${this.host.buildStaleLocalMessage(trackedRootState.codebasePath, absolutePath, trackedRootState.reason)} Run manage_index with {"action":"${nextAction}","path":"${trackedRootState.codebasePath}"} to ${nextVerb}.`;
+                statusMessage = `❌ ${this.host.buildStaleLocalMessage(trackedRootState.codebasePath, absolutePath, trackedRootState.reason)} Run manage_index with {"action":"reindex","path":"${trackedRootState.codebasePath}"} to establish fresh authoritative state.`;
             } else if (trackedRootState.state === "missing_collection") {
                 envelopePath = trackedRootState.codebasePath;
                 envelopeStatus = "not_indexed";
@@ -657,20 +473,18 @@ export class ManageMaintenanceHandlers {
                     retryAfterMs: this.host.getManageRetryAfterMs(),
                     indexing: this.host.buildIndexingMetadata(trackedRootState.codebasePath),
                 };
-                const info = this.host.getSnapshotCodebaseInfo(trackedRootState.codebasePath);
-                if (info?.status === "indexing") {
-                    const progressPercentage = typeof info.indexingPercentage === "number" && Number.isFinite(info.indexingPercentage)
-                        ? info.indexingPercentage
-                        : 0;
-                    statusMessage = `🔄 Codebase '${trackedRootState.codebasePath}' is currently being indexed. Progress: ${progressPercentage.toFixed(1)}%`;
-                    if (progressPercentage < 10) {
+                const activeMutation = this.host.mutationRuntime.getActiveMutation(trackedRootState.codebasePath);
+                const operation = activeMutation
+                    ? this.host.mutationRuntime.getOperation(trackedRootState.codebasePath)
+                    : undefined;
+                if (operation?.progress !== undefined) {
+                    statusMessage = `🔄 Codebase '${trackedRootState.codebasePath}' is currently being indexed. Progress: ${operation.progress.toFixed(1)}%`;
+                    if (operation.progress < 10) {
                         statusMessage += " (Preparing and scanning files...)";
-                    } else if (progressPercentage < 100) {
+                    } else if (operation.progress < 100) {
                         statusMessage += " (Processing files and generating embeddings...)";
                     }
-                    if (typeof info.lastUpdated === "string") {
-                        statusMessage += `\n🕐 Last updated: ${new Date(info.lastUpdated).toLocaleString()}`;
-                    }
+                    statusMessage += `\n🕐 Last updated: ${new Date(operation.updatedAt).toLocaleString()}`;
                 } else {
                     statusMessage = `🔄 Codebase '${trackedRootState.codebasePath}' is currently being indexed.`;
                 }
@@ -695,50 +509,17 @@ export class ManageMaintenanceHandlers {
             } else {
                 envelopePath = trackedRootState.root.path;
                 proofDebugHint = trackedRootState.proofDebugHint;
-                const status = this.host.getSnapshotCodebaseStatus(trackedRootState.root.path);
-                const info = trackedRootState.root.info || this.host.getSnapshotCodebaseInfo(trackedRootState.root.path);
-                switch (status) {
-                    case "indexed":
-                        if (info?.status === "indexed" && info.indexStatus === "limit_reached") {
-                            statusMessage = `⚠️ Codebase '${trackedRootState.root.path}' is partially indexed (limit_reached).`;
-                            statusMessage += `\n📊 Statistics: ${info.indexedFiles} files, ${info.totalChunks} chunks`;
-                            statusMessage += `\n📅 Status: ${info.indexStatus}`;
-                            statusMessage += `\nSearch may return incomplete results; file_outline/call_graph are unavailable until a full reindex completes.`;
-                            if (typeof info.lastUpdated === "string") {
-                                statusMessage += `\n🕐 Last updated: ${new Date(info.lastUpdated).toLocaleString()}`;
-                            }
-                        } else if (info?.status === "indexed") {
-                            statusMessage = `✅ Codebase '${trackedRootState.root.path}' is fully indexed and ready for search.`;
-                            statusMessage += `\n📊 Statistics: ${info.indexedFiles} files, ${info.totalChunks} chunks`;
-                            statusMessage += `\n📅 Status: ${info.indexStatus}`;
-                            if (typeof info.lastUpdated === "string") {
-                                statusMessage += `\n🕐 Last updated: ${new Date(info.lastUpdated).toLocaleString()}`;
-                            }
-                        } else {
-                            statusMessage = `✅ Codebase '${trackedRootState.root.path}' is fully indexed and ready for search.`;
-                        }
-                        break;
-
-                    case "sync_completed":
-                        if (info?.status === "sync_completed") {
-                            statusMessage = `🔄 Codebase '${trackedRootState.root.path}' sync completed.`;
-                            statusMessage += `\n📊 Changes: +${info.added} added, -${info.removed} removed, ~${info.modified} modified`;
-                            if (typeof info.lastUpdated === "string") {
-                                statusMessage += `\n🕐 Last synced: ${new Date(info.lastUpdated).toLocaleString()}`;
-                            }
-                        } else {
-                            statusMessage = `🔄 Codebase '${trackedRootState.root.path}' sync completed.`;
-                        }
-                        break;
-
-                    case "not_found":
-                    default:
-                        envelopeStatus = "not_indexed";
-                        envelopeReason = "not_indexed";
-                        envelopeHints = { create: this.host.buildCreateHint(trackedRootState.root.path) };
-                        statusMessage = `❌ Codebase '${trackedRootState.root.path}' is not indexed. Call manage_index with {"action":"create","path":"${trackedRootState.root.path}"} to index it first.`;
-                        break;
+                const publication = trackedRootState.publication.publication;
+                const isPartial = publication.status === "partial";
+                statusMessage = isPartial
+                    ? `⚠️ Codebase '${trackedRootState.root.path}' is partially indexed (limit_reached).`
+                    : `✅ Codebase '${trackedRootState.root.path}' is fully indexed and ready for search.`;
+                statusMessage += `\n📊 Statistics: ${publication.vector.indexedFiles} files, ${publication.vector.totalChunks} chunks`;
+                statusMessage += `\n📅 Status: ${isPartial ? "limit_reached" : "completed"}`;
+                if (isPartial) {
+                    statusMessage += `\nSearch may return incomplete results; file_outline/call_graph are unavailable until a full reindex completes.`;
                 }
+                statusMessage += `\n🕐 Published: ${new Date(publication.createdAt).toLocaleString()}`;
             }
 
             if (trackedRootState.state === "ready" && sourceObservationUnavailableReason) {
@@ -751,10 +532,10 @@ export class ManageMaintenanceHandlers {
                     sourceFreshness: {
                         status: "unverified",
                         reason: sourceObservationUnavailableReason,
-                        action: "Run manage_index sync to establish current-source authority for the durable generation.",
+                        action: "Run manage_index sync to establish current-source authority for the current Publication.",
                     },
                 };
-                statusMessage = `⏳ Codebase '${trackedRootState.root.path}' has a durable completed generation, but its current source state is unverified (${sourceObservationUnavailableReason}). Run manage_index with {"action":"sync","path":"${trackedRootState.root.path}"} before search or navigation.`;
+                statusMessage = `⏳ Codebase '${trackedRootState.root.path}' has a completed Publication, but its current source state is unverified (${sourceObservationUnavailableReason}). Run manage_index with {"action":"sync","path":"${trackedRootState.root.path}"} before search or navigation.`;
             }
 
             const warnings: WarningCode[] = [];
@@ -768,16 +549,16 @@ export class ManageMaintenanceHandlers {
                 && trackedRootState.navigationStatus !== "valid"
                 && trackedRootState.navigationStatus !== "not_bound"
             ) {
-                warnings.push(WARNING_CODES.NAVIGATION_REPAIR_REQUIRED);
+                warnings.push(WARNING_CODES.NAVIGATION_REINDEX_REQUIRED);
                 envelopeHints = {
                     ...(envelopeHints || {}),
-                    repair: this.host.buildRepairHint(trackedRootState.root.path),
+                    reindex: this.host.buildReindexHint(trackedRootState.root.path),
                     navigation: {
                         status: trackedRootState.navigationStatus,
-                        action: "Run manage_index repair to rebuild local navigation from the proven vector generation.",
+                        action: "Run manage_index reindex to rebuild authoritative local navigation.",
                     },
                 };
-                statusMessage += `\n⚠️ Local navigation is ${trackedRootState.navigationStatus}; vector search remains proven, but symbol navigation requires manage_index repair.`;
+                statusMessage += `\n⚠️ Local navigation is ${trackedRootState.navigationStatus}; vector search remains proven, but authoritative symbol navigation requires manage_index reindex.`;
             }
             if (sourceCheckpointEvidence && sourceCheckpointEvidence.status !== "valid") {
                 envelopeHints = {
@@ -796,60 +577,51 @@ export class ManageMaintenanceHandlers {
             let languageCapabilities: LanguageCapabilityEvidenceSummary | undefined;
             // Attach observed quality for lifecycle statuses that refer to a real root path.
             if (envelopeStatus === "ok" || envelopeStatus === "not_ready" || envelopeStatus === "not_indexed") {
-                const navigationGenerationId = trackedRootState.state === 'ready'
-                    ? trackedRootState.generationReceipt?.navigation.generationId
+                const lease = trackedRootState.state === 'ready'
+                    ? this.host.acquirePublicationLease(envelopePath)
                     : undefined;
-                const releasePublicationReadLease = navigationGenerationId
-                    ? await this.host.acquirePublicationReadLease(envelopePath)
-                    : undefined;
+                const leaseMatchesReadiness = Boolean(
+                    lease
+                    && trackedRootState.state === 'ready'
+                    && lease.id === trackedRootState.publication.id
+                    && await this.host.isPublicationAdmitted(lease)
+                );
+                const navigation = leaseMatchesReadiness && lease
+                    ? this.host.getPublicationNavigationAddress(lease)
+                    : null;
                 try {
-                    const sealRead = await readNavigationGenerationSeal(
-                        undefined,
-                        envelopePath,
-                        navigationGenerationId,
-                    );
-                    if (includeCapabilities) {
-                        const registryRead = await readSymbolRegistrySidecar({
+                    const registryRead = navigation
+                        ? await readSymbolRegistrySidecar({
                             normalizedRootPath: envelopePath,
-                            ...(navigationGenerationId ? { generationId: navigationGenerationId } : {}),
-                        });
-                        const evidenceAvailability: SymbolQualitySummary['evidenceAvailability'] =
-                            trackedRootState.state === 'ready'
-                                && trackedRootState.navigationStatus === 'valid'
-                                && sealRead.status === 'ok'
-                                && registryRead.status === 'ok'
-                                ? 'ready'
-                                : sealRead.status === 'missing' || registryRead.status === 'missing'
-                                    ? 'missing'
-                                    : 'unverified';
-                        symbolQuality = {
+                            publicationId: navigation.publicationId,
+                            navigationRoot: navigation.navigationRoot,
+                        })
+                        : undefined;
+                    const evidenceAvailability: SymbolQualitySummary['evidenceAvailability'] =
+                        trackedRootState.state === 'ready'
+                            && trackedRootState.navigationStatus === 'valid'
+                            && registryRead?.status === 'ok'
+                            ? 'ready'
+                            : !registryRead || registryRead.status === 'missing'
+                                ? 'missing'
+                                : 'unverified';
+                    symbolQuality = registryRead
+                        ? {
                             ...computeSymbolQualitySummaryFromSidecarRead(registryRead),
                             evidenceAvailability,
+                        }
+                        : {
+                            ...unknownSymbolQualitySummary('Observed symbol quality unavailable (Publication navigation missing).'),
+                            evidenceAvailability,
                         };
+                    if (includeCapabilities && registryRead && navigation) {
                         languageCapabilities = await resolveLanguageCapabilityEvidence({
                             normalizedRootPath: envelopePath,
                             searchable: envelopeStatus === "ok" && evidenceAvailability === 'ready',
-                            ...(navigationGenerationId ? { generationId: navigationGenerationId } : {}),
+                            publicationId: navigation.publicationId,
+                            navigationRoot: navigation.navigationRoot,
                             registryRead,
                         });
-                    } else {
-                        const evidenceAvailability: SymbolQualitySummary['evidenceAvailability'] =
-                            trackedRootState.state === 'ready'
-                                && trackedRootState.navigationStatus === 'valid'
-                                && sealRead.status === 'ok'
-                                ? 'ready'
-                                : sealRead.status === 'missing'
-                                    ? 'missing'
-                                    : 'unverified';
-                        const compactSymbolQuality = sealRead.status === 'ok'
-                            ? computeSymbolQualitySummaryFromAggregate(sealRead.seal.symbolQuality)
-                            : unknownSymbolQualitySummary(
-                                `Observed symbol quality unavailable (${sealRead.reason}).`,
-                            );
-                        symbolQuality = {
-                            ...compactSymbolQuality,
-                            evidenceAvailability,
-                        };
                     }
                     if (envelopeStatus === "ok") {
                         const observedSymbolQuality = symbolQuality;
@@ -858,7 +630,7 @@ export class ManageMaintenanceHandlers {
                         }
                     }
                 } finally {
-                    releasePublicationReadLease?.();
+                    lease?.release();
                 }
             }
 
@@ -868,19 +640,6 @@ export class ManageMaintenanceHandlers {
             const compatibilityStatus = includeDiagnostics
                 ? this.host.buildCompatibilityStatusLines(envelopePath)
                 : "";
-            const snapshotWarningText = snapshotCorruptionWarning
-                ? `\nWARNING: Snapshot state was recovered after a corrupt snapshot was quarantined. Tracked codebases may be incomplete.`
-                + `\nSnapshot path: ${snapshotCorruptionWarning.snapshotPath}`
-                + (typeof snapshotCorruptionWarning.quarantinedPath === "string" ? `\nQuarantined snapshot: ${snapshotCorruptionWarning.quarantinedPath}` : "")
-                + `\nReason: ${snapshotCorruptionWarning.message}`
-                : "";
-            if (snapshotCorruptionWarning) {
-                envelopeHints = {
-                    ...(envelopeHints || {}),
-                    snapshotCorruption: snapshotCorruptionWarning,
-                };
-            }
-
             let runtimeOwnersLine = "";
             if (includeDiagnostics && typeof this.host.getLiveOwnersSummary === "function") {
                 try {
@@ -897,7 +656,7 @@ export class ManageMaintenanceHandlers {
                 }
             }
 
-            const activeMutation = this.host.mutationLeaseCoordinator?.getActiveLease(envelopePath);
+            const activeMutation = this.host.mutationRuntime.getActiveMutation(envelopePath);
             const activeMutationLine = activeMutation ? `\n${formatActiveMutationStatusLine(activeMutation)}` : "";
             if (activeMutation) {
                 envelopeHints = {
@@ -906,15 +665,12 @@ export class ManageMaintenanceHandlers {
                 };
             }
 
-            const operation = typeof this.host.snapshotManager.getLatestOperation === "function"
-                ? this.host.snapshotManager.getLatestOperation(envelopePath)
-                : undefined;
-            const publication = trackedRootState.state === "ready" && trackedRootState.vectorReceipt
+            const operation = this.host.mutationRuntime.getOperation(envelopePath);
+            const publication = trackedRootState.state === "ready"
                 ? {
-                    collectionName: trackedRootState.vectorReceipt.collectionName,
-                    markerRunId: trackedRootState.vectorReceipt.marker.runId,
-                    indexPolicyHash: trackedRootState.vectorReceipt.marker.indexPolicyHash,
-                    policyDocumentDigest: trackedRootState.vectorReceipt.policyDocumentDigest,
+                    publicationId: trackedRootState.publication.id,
+                    collectionName: trackedRootState.publication.publication.vector.collectionName,
+                    policyHash: trackedRootState.publication.publication.policy.policyHash,
                 }
                 : undefined;
 
@@ -922,7 +678,7 @@ export class ManageMaintenanceHandlers {
                 "status",
                 envelopePath,
                 envelopeStatus,
-                statusMessage + compatibilityStatus + pathInfo + snapshotWarningText + runtimeOwnersLine + activeMutationLine,
+                statusMessage + compatibilityStatus + pathInfo + runtimeOwnersLine + activeMutationLine,
                 {
                     detail,
                     reason: envelopeReason,
@@ -974,44 +730,8 @@ export class ManageMaintenanceHandlers {
                 return runtimeOwnerConflict;
             }
 
-            await this.host.recoverStaleIndexingStateIfNeeded(absolutePath);
-
-            const syncGate = this.host.enforceFingerprintGate(absolutePath);
-            if (syncGate.blockedResponse) {
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "requires_reindex",
-                    this.host.buildReindexInstruction(absolutePath, syncGate.message),
-                    {
-                        reason: "requires_reindex",
-                        hints: {
-                            reindex: this.host.buildReindexHint(absolutePath),
-                            status: this.host.buildStatusHint(absolutePath),
-                        },
-                    },
-                );
-            }
-
-            if (this.host.getSnapshotIndexingCodebases().includes(absolutePath)) {
-                return this.host.manageResponse(
-                    "sync",
-                    absolutePath,
-                    "not_ready",
-                    this.host.buildManageActionBlockedMessage(absolutePath, "sync"),
-                    {
-                        reason: "indexing",
-                        hints: {
-                            status: this.host.buildStatusHint(absolutePath),
-                            retryAfterMs: this.host.getManageRetryAfterMs(),
-                            indexing: this.host.buildIndexingMetadata(absolutePath),
-                        },
-                    },
-                );
-            }
-
-            const isIndexed = this.host.getSnapshotIndexedCodebases().includes(absolutePath);
-            if (!isIndexed) {
+            const currentPublication = this.host.context.getCurrentPublication(absolutePath);
+            if (!currentPublication) {
                 return this.host.manageResponse(
                     "sync",
                     absolutePath,
@@ -1021,6 +741,21 @@ export class ManageMaintenanceHandlers {
                         reason: "not_indexed",
                         hints: {
                             create: this.host.buildCreateHint(absolutePath),
+                        },
+                    },
+                );
+            }
+            if (currentPublication.publication.status !== "complete") {
+                return this.host.manageResponse(
+                    "sync",
+                    absolutePath,
+                    "requires_reindex",
+                    this.host.buildReindexInstruction(absolutePath, "The current Publication is partial; incremental sync requires a complete Publication baseline."),
+                    {
+                        reason: "requires_reindex",
+                        hints: {
+                            reindex: this.host.buildReindexHint(absolutePath),
+                            status: this.host.buildStatusHint(absolutePath),
                         },
                     },
                 );
@@ -1070,7 +805,7 @@ export class ManageMaintenanceHandlers {
                     absolutePath,
                     "blocked",
                     activeMutation
-                        ? formatMutationLeaseBlockedMessage(activeMutation)
+                        ? formatRootMutationBlockedMessage(activeMutation)
                         : `Another mutation is already in progress for '${absolutePath}'. Use manage_index status to observe it.`,
                     {
                         reason: "mutation_in_progress",

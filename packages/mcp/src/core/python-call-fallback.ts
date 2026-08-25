@@ -3,7 +3,10 @@ import {
     type SymbolRecord,
     type SymbolRegistry,
 } from "@zokizuan/satori-core";
-import type { CallGraphEdge, CallGraphNote } from "./call-graph.js";
+import type {
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNoteResult as CallGraphNote,
+} from "./search-types.js";
 
 const PYTHON_DIRECT_CALL_CONTROL_KEYWORDS = new Set(["if", "for", "while", "return", "class", "def"]);
 const PYTHON_BUILTIN_CALL_NAMES = new Set([
@@ -455,7 +458,7 @@ export async function buildSourceBackedPythonCalleeFallback(input: {
             file: source.file,
             startLine: source.span.startLine,
             symbolId: source.symbolInstanceId,
-            detail: "Source-backed direct callee fallback synthesized edges because the relationship sidecar was built from a truncated Python span.",
+            detail: "Source-backed direct callee fallback synthesized edges because Publication relationship navigation was built from a truncated Python span.",
         }]
         : [];
     return {
@@ -582,7 +585,7 @@ export async function buildSourceBackedPythonCallerFallback(input: {
         file: source.file,
         startLine: source.span.startLine,
         symbolId: source.symbolInstanceId,
-        detail: "Source-backed direct caller fallback synthesized edges because the relationship sidecar suppressed a usable Python caller edge.",
+        detail: "Source-backed direct caller fallback synthesized edges because Publication relationship navigation suppressed a usable Python caller edge.",
     }));
     return {
         edges,

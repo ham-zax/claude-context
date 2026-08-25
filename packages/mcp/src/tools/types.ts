@@ -1,8 +1,8 @@
 import path from "node:path";
 import { z } from "zod";
 import { Context, type Reranker } from "@zokizuan/satori-core";
+import type { RootMutationRuntime } from "@zokizuan/satori-core/integration";
 import { CapabilityResolver } from "../core/capabilities.js";
-import { SnapshotManager } from "../core/snapshot.js";
 import { SyncManager } from "../core/sync.js";
 import { IndexFingerprint } from "../config.js";
 import { ToolHandlers } from "../core/handlers.js";
@@ -33,7 +33,7 @@ export interface ToolResponse {
 
 export interface ToolContext {
     context: Context;
-    snapshotManager: SnapshotManager;
+    mutationRuntime: RootMutationRuntime;
     syncManager: SyncManager;
     capabilities: CapabilityResolver;
     reranker: Reranker | null;

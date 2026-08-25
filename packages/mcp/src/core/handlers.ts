@@ -3,16 +3,9 @@ import crypto from "node:crypto";
 import {
     Context,
     COLLECTION_LIMIT_MESSAGE,
-    createIndexMutationPort,
-    createSourceFreshnessPort,
-    deleteCollectionWithVerification,
-    type IndexCompletionMarkerDocument,
-    type ProvenGenerationReceipt,
-    type ProvenVectorGenerationReceipt,
-    type PreparedGenerationRevalidation,
-    type SourceFreshnessPort,
-    createRuntimeNavigationStore,
-    type NavigationStore,
+    type PublicationLease,
+    type PublicationRef,
+    JsonNavigationStore,
     type Reranker,
     getSupportedExtensionsForCapability,
     isLanguageCapabilitySupportedForExtension,
@@ -23,23 +16,17 @@ import {
     recordSourceIo,
     recordSourceProcessing,
     sourceIoOwnerForCurrentOperation,
-    readNavigationGenerationSeal,
-    computeNavigationGenerationSealHash,
 } from "@zokizuan/satori-core";
 import type { RelationshipRecord, SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "./capabilities.js";
-import { AccessGateReason, SnapshotManager } from "./snapshot.js";
 import {
     SyncManager,
     type WatcherObservationSnapshot,
 } from "./sync.js";
 import {
     DEFAULT_MANAGE_RETRY_AFTER_MS,
-    DEFAULT_WATCH_DEBOUNCE_MS,
     IndexFingerprint,
-    indexFingerprintsEqual,
     summarizeIndexFingerprint,
-    type CodebaseInfo,
 } from "../config.js";
 import {
     SEARCH_CHANGED_FILES_CACHE_TTL_MS,
@@ -48,8 +35,12 @@ import {
     SearchScope
 } from "./search-constants.js";
 import {
+    CallGraphDirection,
+    CallGraphEdgeResult as CallGraphEdge,
     CallGraphHint,
+    CallGraphNodeResult as CallGraphNode,
     CallGraphResponseEnvelope,
+    CallGraphSymbolRef,
     FingerprintCompatibilityDiagnostics,
     FileOutlineInput,
     FileOutlineResponseEnvelope,
@@ -65,15 +56,6 @@ import {
 import {
     ManageIndexAction,
 } from "./manage-types.js";
-import {
-    CallGraphDirection,
-    CallGraphEdge,
-    CallGraphNode,
-    CallGraphNote,
-    CallGraphSidecarManager,
-    CallGraphSymbolRef,
-    CallGraphTestReference,
-} from "./call-graph.js";
 import {
     type PythonSourceBackedSpanRepair,
 } from "./python-call-fallback.js";
@@ -109,6 +91,7 @@ import { SearchQuerySupport } from "./search-query-support.js";
 import {
     TrackedRootReadiness,
     type ReadinessPhase,
+    type TrackedRootEntry,
     type TrackedRootReadinessState,
 } from "./tracked-root-readiness.js";
 import { NavigationHandlers } from "./navigation-handlers.js";
@@ -135,13 +118,14 @@ export {
     type FrozenSearchResultSet,
 };
 import { VectorBackendMaintenance } from "./vector-backend-maintenance.js";
-import { RelationshipBackedCallGraph } from "./relationship-backed-call-graph.js";
+import {
+    RelationshipBackedCallGraph,
+    type RelationshipBackedCallGraphResult,
+} from "./relationship-backed-call-graph.js";
 import { ToolResponseBuilders } from "./tool-response-builders.js";
 import {
     PreparedReadCacheOwner,
     type CachedPreparedReadResult,
-    type PreparedReadCacheObservationResult,
-    type PreparedReadSourceFreshnessPort,
 } from "./prepared-read-cache-owner.js";
 import {
     evaluateReindexPreflight as evaluateReindexPreflightHelper,
@@ -156,7 +140,7 @@ import type {
     CompletionProofValidationResult
 } from "./completion-proof.js";
 import {
-    getCompletionMarkerReader,
+    getPublicationProofReader,
     validateCompletionProof as validateIndexCompletionProof
 } from "./completion-proof.js";
 import type {
@@ -171,8 +155,7 @@ import {
     type RuntimeOwnerMutationGate,
     type RuntimeOwnerMutationGateResult,
 } from "./runtime-owner.js";
-import { MutationLeaseCoordinator, type RootMutationLease } from "./mutation-lease.js";
-import { InterruptedIndexRecoveryCoordinator } from "./interrupted-index-recovery-coordinator.js";
+import { RootMutationRuntime } from "@zokizuan/satori-core/integration";
 import { PreparedPublicationReadSession } from "./prepared-publication-read-session.js";
 import type { SessionWorkspacePolicy } from "./session-workspace-policy.js";
 
@@ -180,40 +163,17 @@ const SEARCH_DEBUG_CHANGED_CODE_MAX_FILES = 10;
 const SEARCH_DEBUG_CHANGED_CODE_MAX_SYMBOLS = 20;
 const SEARCH_DEBUG_CHANGED_CODE_MAX_DIRECT_CALLERS = 20;
 type CallGraphUnavailableReason = Extract<CallGraphHint, { supported: false }>['reason'];
-type CodebaseStatus = CodebaseInfo['status'];
-type TrackedCodebaseInfo = Record<string, unknown> & {
-    status: CodebaseStatus;
-    lastUpdated?: string;
-    indexStatus?: unknown;
-    indexedFiles?: unknown;
-    totalChunks?: unknown;
-    added?: unknown;
-    removed?: unknown;
-    modified?: unknown;
-    errorMessage?: unknown;
-    lastAttemptedPercentage?: unknown;
-    indexFingerprint?: IndexFingerprint;
-    fingerprintSource?: CodebaseInfo['fingerprintSource'];
-    reindexReason?: CodebaseInfo['reindexReason'];
-    collectionName?: unknown;
-    message?: unknown;
-};
-type TrackedRootEntry = {
-    path: string;
-    info: TrackedCodebaseInfo;
-};
 
-type IndexCompletionMarkerContext = {
-    getIndexCompletionMarker?: (codebasePath: string) => Promise<IndexCompletionMarkerDocument | null>;
-    getIndexCompletionMarkerForValidation?: (codebasePath: string) => Promise<unknown>;
+type PublicationAuthorityContext = {
+    getCurrentPublicationForValidation?: (codebasePath: string) => Promise<unknown>;
+    getCurrentPublication?: (codebasePath: string) => PublicationRef | null;
+    acquireCurrentPublicationRead?: (codebasePath: string) => PublicationLease | null;
+    acquirePublicationRead?: (codebasePath: string, publicationId: string) => PublicationLease | null;
+    isPublicationReadAdmitted?: (publication: PublicationRef) => Promise<boolean>;
+    getPublicationNavigationAddress?: (publication: PublicationRef) => { publicationId: string; navigationRoot: string } | null;
+    getPublicationNavigationStatus?: (publication: PublicationRef) => Promise<import("@zokizuan/satori-core").PublicationNavigationStatus>;
     getActiveIndexedCollectionName?: (codebasePath: string) => Promise<string | null>;
-    getCompletionProofCollectionName?: (codebasePath: string) => Promise<string | null>;
-    clearIndexCompletionMarker?: (codebasePath: string, assertMutationCurrent?: () => void) => Promise<void>;
-    pruneIndexedCollectionFamily?: (codebasePath: string, keepCollectionName: string, options?: { assertMutationCurrent?: () => void }) => Promise<string[]>;
-    pruneUnprovenStagedCollectionFamily?: (codebasePath: string, options?: {
-        assertMutationCurrent?: () => void;
-        discardUnprovenPayload?: boolean;
-    }) => Promise<string[]>;
+    getCurrentPublicationCollectionName?: (codebasePath: string) => Promise<string | null>;
 };
 
 type ToolTextResponse = {
@@ -249,64 +209,23 @@ type IndexProfileView = {
     configPath?: string;
 };
 
-type ContextLifecycleCapabilities = IndexCompletionMarkerContext & {
-    getIndexAuthorityObservations?: (codebasePath: string) => {
-        vector: string;
-        navigation: string;
-    } | null;
+type ContextLifecycleCapabilities = PublicationAuthorityContext & {
     resolveCollectionName?: (codebasePath: string) => string;
-    resolveStagedCollectionName?: (codebasePath: string, generationId: string) => string;
     loadIndexProfileForCodebase?: (codebasePath: string) => IndexProfileView;
     getActiveIgnorePatterns?: (codebasePath?: string) => string[];
     getIndexedExtensionsForCodebase?: (codebasePath: string) => string[];
     getIndexedExtensions?: () => string[];
     getTrackedRelativePaths?: (codebasePath: string) => string[];
-    isPreparedVectorReceiptBoundToCurrentAuthority?: (
-        codebasePath: string,
-        receipt: ProvenVectorGenerationReceipt,
-    ) => boolean;
-    revalidatePreparedGeneration?: (
-        codebasePath: string,
-        receipt: ProvenVectorGenerationReceipt,
-        options?: {
-            priorGenerationReceipt?: import('@zokizuan/satori-core').ProvenGenerationReceipt;
-            navigationObservationChanged?: boolean;
-        },
-    ) => Promise<PreparedGenerationRevalidation | null>;
-    semanticSearchInProvenGeneration?: (
-        receipt: ProvenVectorGenerationReceipt,
+    semanticSearchInPublication?: (
+        publication: PublicationRef,
         request: import('@zokizuan/satori-core').SemanticSearchRequest,
     ) => Promise<import('@zokizuan/satori-core').SemanticSearchResult[]>;
-    semanticSearchWithCandidateTraceInProvenGeneration?: (
-        receipt: ProvenVectorGenerationReceipt,
+    semanticSearchWithCandidateTraceInPublication?: (
+        publication: PublicationRef,
         request: import('@zokizuan/satori-core').SemanticSearchRequest,
         maxEntriesPerStage: number,
         options?: import('@zokizuan/satori-core').SemanticSearchCandidateTraceOptions,
     ) => Promise<import('@zokizuan/satori-core').SemanticSearchExecutionResult>;
-    acquirePublicationReadLease?: (codebasePath: string) => Promise<() => void>;
-};
-
-type SnapshotAccessGateResult = {
-    allowed: boolean;
-    changed: boolean;
-    reason?: AccessGateReason;
-    message?: string;
-};
-
-type SnapshotManagerCapabilities = {
-    getCodebaseInfo?: (codebasePath: string) => CodebaseInfo | undefined;
-    getCodebaseStatus?: (codebasePath: string) => CodebaseStatus | 'not_found';
-    getAllCodebases?: () => Array<{ path: string; info: CodebaseInfo }>;
-    getIndexedCodebases?: () => string[];
-    getIndexingCodebases?: () => string[];
-    getIndexingProgress?: (codebasePath: string) => number | undefined;
-    ensureFingerprintCompatibilityOnAccess?: (
-        codebasePath: string,
-        options?: { mutate?: boolean },
-    ) => SnapshotAccessGateResult;
-    getCodebaseCollectionName?: (codebasePath: string) => string | undefined;
-    markCodebaseCleared?: (codebasePath: string, collectionName?: string) => void;
-    saveCodebaseSnapshot?: () => boolean | void;
 };
 
 type CompletionProbeDebugHint = {
@@ -408,25 +327,16 @@ function formatUnknownError(error: unknown): string {
 
 export class ToolHandlers {
     private context: Context;
-    private snapshotManager: SnapshotManager;
     private syncManager: SyncManager;
     private readonly capabilities: CapabilityResolver;
     private runtimeFingerprint: IndexFingerprint;
     private indexingStats: { indexedFiles: number; totalChunks: number } | null = null;
     private currentWorkspace: string;
     private readonly now: () => number;
-    private readonly callGraphManager: CallGraphSidecarManager;
     private readonly reranker: Reranker | null;
-    private readonly navigationStore: NavigationStore;
-    private readonly canonicalNavigationAuthorityAvailable: boolean;
+    private readonly navigationStore: JsonNavigationStore;
     private readonly changedFilesCache = new Map<string, ChangedFilesCacheEntry>();
     private readonly preparedReadCacheOwner: PreparedReadCacheOwner;
-    private readonly interruptedIndexRecoveryCoordinator: InterruptedIndexRecoveryCoordinator;
-    private get preparedReadCache() {
-        // Compatibility-only view retained for existing focused tests. The owner
-        // remains the sole writer for all prepared-read cache state.
-        return this.preparedReadCacheOwner.cache;
-    }
 
     private readonly gitignoreForceReloadEveryN: number;
     private readonly searchQuerySupport: SearchQuerySupport;
@@ -442,103 +352,36 @@ export class ToolHandlers {
 
     constructor(
         context: Context,
-        snapshotManager: SnapshotManager,
         syncManager: SyncManager,
         runtimeFingerprint: IndexFingerprint,
         capabilities: CapabilityResolver,
+        private readonly mutationRuntime: RootMutationRuntime,
         now: () => number = () => Date.now(),
-        callGraphManager?: CallGraphSidecarManager,
         reranker?: Reranker | null,
         gitignoreForceReloadEveryN: number = SEARCH_GITIGNORE_FORCE_RELOAD_EVERY_N,
-        navigationStore: NavigationStore = createRuntimeNavigationStore(),
+        navigationStore: JsonNavigationStore = new JsonNavigationStore(),
         private readonly runtimeOwnerGate: RuntimeOwnerMutationGate | null = null,
-        private readonly mutationLeaseCoordinator: MutationLeaseCoordinator | null = null,
         searchContinuationCoordinator?: SearchContinuationCoordinator,
         options?: { readFileMaxBytes?: number },
     ) {
         this.context = context;
-        this.snapshotManager = snapshotManager;
         this.syncManager = syncManager;
         this.capabilities = capabilities;
         this.runtimeFingerprint = runtimeFingerprint;
         this.currentWorkspace = process.cwd();
         this.now = now;
-        this.callGraphManager = callGraphManager || new CallGraphSidecarManager(runtimeFingerprint, { now });
         this.reranker = reranker || null;
         this.readFileMaxBytes = Math.max(1, options?.readFileMaxBytes ?? READ_FILE_MAX_BYTES_DEFAULT);
         this.gitignoreForceReloadEveryN = Math.max(1, Math.trunc(gitignoreForceReloadEveryN));
         this.navigationStore = navigationStore;
-        this.canonicalNavigationAuthorityAvailable = Boolean(
-            mutationLeaseCoordinator
-            && typeof (
-                context as unknown as {
-                    getIndexAuthorityObservations?: unknown;
-                }
-            ).getIndexAuthorityObservations === "function"
-        );
-        const sourceFreshnessPort = this.getSourceFreshnessPort() ?? createSourceFreshnessPort({
-            inspectSourceFreshnessCheckpoint: (
-                codebasePath,
-                checkpointIdentity,
-                requestBoundReceipt,
-            ) => this.context.inspectSourceFreshnessCheckpoint(
-                codebasePath,
-                checkpointIdentity,
-                requestBoundReceipt,
-            ),
-            compareSourceObservationToFreshnessCheckpoint: (
-                codebasePath,
-                requestBoundReceipt,
-            ) => this.context.compareSourceObservationToFreshnessCheckpoint(
-                codebasePath,
-                requestBoundReceipt,
-            ),
-            compareAllSourceToFreshnessCheckpoint: (
-                codebasePath,
-                requestBoundReceipt,
-            ) => this.context.compareAllSourceToFreshnessCheckpoint(
-                codebasePath,
-                requestBoundReceipt,
-            ),
-            getRegisteredSourceFreshnessCheckpointObservation: (codebasePath) => (
-                this.context.getRegisteredSourceFreshnessCheckpointObservation(codebasePath)
-            ),
-        });
         this.preparedReadCacheOwner = new PreparedReadCacheOwner({
-            authority: {
-                getPreparedAuthorityObservation: (codebasePath) => (
-                    this.getPreparedAuthorityObservation(codebasePath)
-                ),
-                isPreparedVectorReceiptBoundToCurrentAuthority: (codebasePath, receipt) => (
-                    this.contextLifecycle().isPreparedVectorReceiptBoundToCurrentAuthority?.(codebasePath, receipt)
-                        === true
-                ),
-            },
-            sourceFreshness: Object.assign(sourceFreshnessPort, {
-                getPreparedReadObservation: (codebasePath: string) => (
-                    this.syncManager.getPreparedReadObservation(codebasePath)
-                ),
-            }) as PreparedReadSourceFreshnessPort,
-            getGenerationRevalidator: () => {
-                const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
-                if (typeof revalidate !== "function") return undefined;
-                return {
-                    revalidatePreparedGeneration: (codebasePath, receipt, options) => (
-                        revalidate.call(this.context, codebasePath, receipt, options)
-                    ),
-                };
-            },
+            getCurrentPublication: (codebasePath) => this.context.getCurrentPublication(codebasePath),
+            getPublicationNavigationAddress: (publication) => (
+                this.context.getPublicationNavigationAddress(publication)
+            ),
             navigationStore: this.navigationStore,
             clock: { now: () => this.now() },
             isPathWithinCodebase: (targetPath, root) => this.isPathWithinCodebase(targetPath, root),
-            canonicalNavigationAuthorityAvailable: this.canonicalNavigationAuthorityAvailable,
-        });
-        this.interruptedIndexRecoveryCoordinator = new InterruptedIndexRecoveryCoordinator({
-            context: this.context,
-            snapshotManager: this.snapshotManager,
-            runtimeFingerprint: this.runtimeFingerprint,
-            now: this.now,
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
         });
         const searchQuerySupportHost: ConstructorParameters<typeof SearchQuerySupport>[0] = {
             normalizeSearchPath: this.normalizeSearchPath.bind(this),
@@ -551,7 +394,6 @@ export class ToolHandlers {
             getContextTrackedRelativePaths: this.getContextTrackedRelativePaths.bind(this),
             classifyPathCategory: this.classifyPathCategory.bind(this),
             shouldIncludeCategoryInScope: this.shouldIncludeCategoryInScope.bind(this),
-            getSyncWatchDebounceMs: this.getSyncWatchDebounceMs.bind(this),
             capabilities: this.capabilities,
             runtimeFingerprint: this.runtimeFingerprint,
             reranker: this.reranker,
@@ -563,23 +405,15 @@ export class ToolHandlers {
             buildManageIndexRecommendedAction: this.buildManageIndexRecommendedAction.bind(this),
             buildCreateHint: this.buildCreateHint.bind(this),
             buildReindexHint: this.buildReindexHint.bind(this),
-            buildRepairHint: this.buildRepairHint.bind(this),
             buildSyncHint: this.buildSyncHint.bind(this),
             buildStatusHint: this.buildStatusHint.bind(this),
             buildStaleLocalHint: this.buildStaleLocalHint.bind(this),
             buildStaleLocalMessage: this.buildStaleLocalMessage.bind(this),
             buildIndexingMetadata: this.buildIndexingMetadata.bind(this),
             buildCompatibilityDiagnostics: this.buildCompatibilityDiagnostics.bind(this),
-            buildRuntimeMismatchHint: this.buildRuntimeMismatchHint.bind(this),
-            isRuntimeFingerprintMismatch: this.isRuntimeFingerprintMismatch.bind(this),
-            summarizeFingerprint: this.summarizeFingerprint.bind(this),
         };
         this.toolResponseBuilders = new ToolResponseBuilders(toolResponseBuildersHost);
 
-        const getSnapshotAllCodebaseInfoEntries = (): Array<{ path: string; info: CodebaseInfo }> => this.getSnapshotAllCodebases()
-            .map((entry) => ({ path: entry.path, info: entry.info as unknown as CodebaseInfo }));
-        const getSnapshotAllCodebasePaths = (): string[] => this.getSnapshotAllCodebases()
-            .map((entry) => entry.path);
         const buildRequiresReindexFileOutlinePayloadForNavigation = (
             codebasePath: string,
             args: Record<string, unknown>,
@@ -602,18 +436,10 @@ export class ToolHandlers {
         );
 
         const trackedRootReadinessHost: ConstructorParameters<typeof TrackedRootReadiness>[0] = {
-            refreshSnapshotStateFromDisk: this.refreshSnapshotStateFromDisk.bind(this),
             isPathWithinCodebase: this.isPathWithinCodebase.bind(this),
-            getTrackedRootEntryForPath: this.getTrackedRootEntryForPath.bind(this),
-            getMatchingBlockedRoot: this.getMatchingBlockedRoot.bind(this),
-            getSnapshotAllCodebases: getSnapshotAllCodebaseInfoEntries,
-            getSnapshotIndexedCodebases: this.getSnapshotIndexedCodebases.bind(this),
-            getSnapshotIndexingCodebases: this.getSnapshotIndexingCodebases.bind(this),
-            getSnapshotCodebaseInfo: this.getSnapshotCodebaseInfo.bind(this),
-            getSnapshotCodebaseStatus: this.getSnapshotCodebaseStatus.bind(this),
+            listTrackedRoots: this.listTrackedRoots.bind(this),
             getIndexingOperation: (codebasePath: string) => this.getIndexingOperationForReadiness(codebasePath),
             hasSearchableGeneration: (codebasePath: string) => this.hasSearchableGenerationForReadiness(codebasePath),
-            enforceFingerprintGate: this.enforceFingerprintGate.bind(this),
             validateCompletionProof: (codebasePath: string) => this.validateCompletionProof(codebasePath),
             probeLocalSearchCollectionState: (codebasePath: string) => this.probeLocalSearchCollectionState(codebasePath),
             buildCreateHint: this.buildCreateHint.bind(this),
@@ -625,36 +451,25 @@ export class ToolHandlers {
 
         const vectorBackendMaintenanceHost: ConstructorParameters<typeof VectorBackendMaintenance>[0] = {
             context: this.context,
-            snapshotManager: this.snapshotManager,
-            getSnapshotAllCodebases: this.getSnapshotAllCodebases.bind(this),
             canonicalizeCodebasePath: this.canonicalizeCodebasePath.bind(this),
             resolveCollectionName: this.resolveCollectionName.bind(this),
-            markCodebaseCleared: this.markCodebaseCleared.bind(this),
-            saveSnapshotIfSupported: this.saveSnapshotIfSupported.bind(this),
             unwatchCodebase: this.unwatchCodebase.bind(this),
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
+            mutationRuntime: this.mutationRuntime,
         };
         this.vectorBackendMaintenance = new VectorBackendMaintenance(vectorBackendMaintenanceHost);
 
         const relationshipBackedCallGraphHost: ConstructorParameters<typeof RelationshipBackedCallGraph>[0] = {
             navigationStore: this.navigationStore,
-            callGraphManager: this.callGraphManager,
-            snapshotManager: this.snapshotManager,
-            saveSnapshotIfSupported: this.saveSnapshotIfSupported.bind(this),
-            getContextActiveIgnorePatterns: this.getContextActiveIgnorePatterns.bind(this),
         };
         this.relationshipBackedCallGraph = new RelationshipBackedCallGraph(relationshipBackedCallGraphHost);
 
         const navigationHandlersHost: ConstructorParameters<typeof NavigationHandlers>[0] = {
             trackedRootReadiness: this.trackedRootReadiness,
             prepareNavigationRead: this.prepareNavigationRead.bind(this),
-            acquirePublicationReadLease: this.acquirePublicationReadLease.bind(this),
-            getPreparedReadCacheObservation: (codebasePath) => (
-                this.getPreparedReadCacheObservation(codebasePath)
-            ),
-            isPreparedNavigationReadCurrent: (preparedRead) => (
-                this.isPreparedNavigationReadCurrent(preparedRead)
-            ),
+            acquirePublicationLease: this.acquirePublicationLease.bind(this),
+            isPublicationAdmitted: (publication) => this.context.isPublicationReadAdmitted(publication),
+            getPublicationNavigationAddress: (publication) => this.context.getPublicationNavigationAddress(publication),
+            getPublicationNavigationStatus: (publication) => this.context.getPublicationNavigationStatus(publication),
             loadPreparedNavigationSymbolsByFile: this.loadPreparedNavigationSymbolsByFile.bind(this),
             loadPreparedNavigationCompatibility: this.loadPreparedNavigationCompatibility.bind(this),
             toolResponseBuilders: this.toolResponseBuilders,
@@ -669,11 +484,10 @@ export class ToolHandlers {
             // reader enforces its 8 MiB default.
             readFileMaxBytes: options?.readFileMaxBytes,
             buildStaleSymbolRefFileOutlinePayload: buildStaleSymbolRefFileOutlinePayloadForNavigation,
-            loadRegistryValidatedCallGraphSidecar: this.loadRegistryValidatedCallGraphSidecar.bind(this),
+            loadRegistryValidatedRelationshipNavigation: this.loadRegistryValidatedRelationshipNavigation.bind(this),
             buildRegistrySymbolCallGraphHint: this.buildRegistrySymbolCallGraphHint.bind(this),
             buildOutlineSpanWarningCodes: this.buildOutlineSpanWarningCodes.bind(this),
             touchWatchedCodebase: this.touchWatchedCodebase.bind(this),
-            getWatcherObservation: this.getWatcherObservation.bind(this),
             buildSyncHint: this.buildSyncHint.bind(this),
             getOutlineStatusForLanguage: this.getOutlineStatusForLanguage.bind(this),
             isCallGraphLanguageSupported: this.isCallGraphLanguageSupported.bind(this),
@@ -681,7 +495,8 @@ export class ToolHandlers {
             buildStaleSymbolRefCallGraphPayload: this.buildStaleSymbolRefCallGraphPayload.bind(this),
             buildRelationshipBackedCallGraph: (input) => this.buildRelationshipBackedCallGraph(input as {
                 codebaseRoot: string;
-                generationId?: string;
+                publicationId: string;
+                navigationRoot: string;
                 registry: SymbolRegistry;
                 registryManifestHash: string;
                 resolvedSymbol: SymbolRecord;
@@ -693,239 +508,48 @@ export class ToolHandlers {
         };
         this.navigationHandlers = new NavigationHandlers(navigationHandlersHost);
 
-        const getManageMaintenanceContext = () => this.context;
         const manageMaintenanceHandlersHost: ConstructorParameters<typeof ManageMaintenanceHandlers>[0] = {
             context: this.context,
-            get indexMutationPort() {
-                const context = getManageMaintenanceContext();
-                if (typeof context.getIndexMutationPort === "function") {
-                    return context.getIndexMutationPort();
-                }
-                // Compatibility fallback for hosts that do not expose the
-                // Phase 5.3 port yet: reproduce the exact previous direct
-                // Context clearIndex behavior.
-                return {
-                    clearIndex: (
-                        codebasePath: string,
-                        progressCallback?: Parameters<import("@zokizuan/satori-core").Context["clearIndex"]>[1],
-                        options?: Parameters<import("@zokizuan/satori-core").Context["clearIndex"]>[2],
-                    ) => context.clearIndex(codebasePath, progressCallback, options),
-                } as Pick<import("@zokizuan/satori-core").IndexMutationPort, "clearIndex">;
-            },
-            snapshotManager: this.snapshotManager,
+            mutationRuntime: this.mutationRuntime,
             syncManager: this.syncManager,
             trackedRootReadiness: this.trackedRootReadiness,
             prepareStatusTrackedRootRead: this.prepareStatusTrackedRootRead.bind(this),
-            acquirePublicationReadLease: this.acquirePublicationReadLease.bind(this),
-            getSnapshotAllCodebases: getSnapshotAllCodebasePaths,
-            getSnapshotIndexedCodebases: this.getSnapshotIndexedCodebases.bind(this),
-            getSnapshotIndexingCodebases: this.getSnapshotIndexingCodebases.bind(this),
-            getSnapshotCodebaseStatus: this.getSnapshotCodebaseStatus.bind(this),
-            getSnapshotCodebaseInfo: this.getSnapshotCodebaseInfo.bind(this),
-            getSnapshotCorruptionWarning: typeof this.snapshotManager.getSnapshotCorruptionWarning === "function"
-                ? this.snapshotManager.getSnapshotCorruptionWarning.bind(this.snapshotManager)
-                : () => undefined,
+            acquirePublicationLease: this.acquirePublicationLease.bind(this),
+            isPublicationAdmitted: (publication) => this.context.isPublicationReadAdmitted(publication),
+            getPublicationNavigationAddress: (publication) => this.context.getPublicationNavigationAddress(publication),
             buildRuntimeOwnerConflictResponseIfBlocked: this.buildRuntimeOwnerConflictResponseIfBlocked.bind(this),
-            recoverStaleIndexingStateIfNeeded: this.interruptedIndexRecoveryCoordinator.recoverStaleIndexingStateIfNeeded.bind(
-                this.interruptedIndexRecoveryCoordinator,
-            ),
             manageResponse: this.toolResponseBuilders.manageResponse.bind(this.toolResponseBuilders),
             buildCreateHint: this.buildCreateHint.bind(this),
-            buildRepairHint: this.buildRepairHint.bind(this),
             buildManageActionBlockedMessage: this.buildManageActionBlockedMessage.bind(this),
             buildStatusHint: this.buildStatusHint.bind(this),
             getManageRetryAfterMs: this.getManageRetryAfterMs.bind(this),
             buildIndexingMetadata: this.buildIndexingMetadata.bind(this),
-            markCodebaseCleared: this.markCodebaseCleared.bind(this),
-            resolveCollectionName: this.resolveCollectionName.bind(this),
             clearIndexingStats: this.clearIndexingStats.bind(this),
-            saveSnapshotIfSupported: this.saveSnapshotIfSupported.bind(this),
             unwatchCodebase: this.unwatchCodebase.bind(this),
-            refreshSnapshotStateFromDisk: this.refreshSnapshotStateFromDisk.bind(this),
             buildReindexInstruction: this.buildReindexInstruction.bind(this),
             buildCompatibilityStatusLines: this.buildCompatibilityStatusLines.bind(this),
             buildManageRequiresReindexHints: this.buildManageRequiresReindexHints.bind(this),
             buildStaleLocalHint: this.buildStaleLocalHint.bind(this),
             buildStaleLocalMessage: this.buildStaleLocalMessage.bind(this),
-            enforceFingerprintGate: this.enforceFingerprintGate.bind(this),
             buildReindexHint: this.buildReindexHint.bind(this),
             buildSyncHint: this.buildSyncHint.bind(this),
             touchWatchedCodebase: this.touchWatchedCodebase.bind(this),
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
-            canSyncStaleLocal: this.canSyncStaleLocal.bind(this),
             getLiveOwnersSummary: async () => {
                 if (!this.runtimeOwnerGate || typeof this.runtimeOwnerGate.getLiveOwnersSummary !== "function") {
                     return null;
                 }
                 return this.runtimeOwnerGate.getLiveOwnersSummary();
             },
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
         };
         this.manageMaintenanceHandlers = new ManageMaintenanceHandlers(manageMaintenanceHandlersHost);
 
-        const getManageIndexingContext = () => this.context;
-        const getManageIndexingSnapshotManager = () => this.snapshotManager;
-        const getManageIndexingSyncManager = () => this.syncManager;
-        const getManageIndexingRuntimeFingerprint = () => this.runtimeFingerprint;
-        const getManageIndexingStartBackgroundIndexing = () => (this as unknown as {
-            startBackgroundIndexing?: (
-                codebasePath: string,
-                forceReindex: boolean,
-                writeCollectionName?: string,
-                mutationLease?: import("./mutation-lease.js").RootMutationLease,
-            ) => Promise<void> | void;
-        }).startBackgroundIndexing;
         const manageIndexingHandlersHost: ConstructorParameters<typeof ManageIndexingHandlers>[0] = {
-            get indexMutationPort() {
-                const context = getManageIndexingContext();
-                if (typeof context.getIndexMutationPort === "function") {
-                    return context.getIndexMutationPort();
-                }
-                // Compatibility fallback for hosts that do not expose the
-                // Phase 5.3 port yet: reproduce the exact previous direct
-                // Context mutation/publication behavior.
-                return createIndexMutationPort({
-                    clearIndex: (codebasePath, progressCallback, options) => (
-                        context.clearIndex(codebasePath, progressCallback, options)
-                    ),
-                    checkCollectionLimit: () => context.getVectorStore().checkCollectionLimit(),
-                    deleteCollectionWithVerification: (collectionName, options) => (
-                        deleteCollectionWithVerification(context.getVectorStore(), collectionName, options)
-                    ),
-                    prepareIndexCollection: (codebasePath, binding, assertMutationCurrent) => (
-                        context.prepareIndexCollection(codebasePath, binding, assertMutationCurrent)
-                    ),
-                    discardPreparedIndexCollection: (receipt) => (
-                        context.discardPreparedIndexCollection(receipt)
-                    ),
-                    proveVectorGeneration: (codebasePath) => context.proveVectorGeneration(codebasePath),
-                    proveIndexedGeneration: (codebasePath) => context.proveIndexedGeneration(codebasePath),
-                    repairIndex: (codebasePath, options) => context.repairIndex(codebasePath, options),
-                    captureDurableIndexAuthority: (codebasePath) => (
-                        context.captureDurableIndexAuthority(codebasePath)
-                    ),
-                    restoreDurableIndexAuthority: (snapshot, publishMutation, expectedCurrent, mutationOwner) => (
-                        context.restoreDurableIndexAuthority(
-                            snapshot,
-                            publishMutation,
-                            expectedCurrent,
-                            mutationOwner,
-                        )
-                    ),
-                    publishCompletedIndexMarker: (
-                        codebasePath,
-                        indexedFiles,
-                        totalChunks,
-                        collectionName,
-                        indexStatus,
-                        assertMutationCurrent,
-                        navigationCandidate,
-                        indexPolicyHash,
-                        runId,
-                    ) => context.publishCompletedIndexMarker(
-                        codebasePath,
-                        indexedFiles,
-                        totalChunks,
-                        collectionName,
-                        indexStatus,
-                        assertMutationCurrent,
-                        navigationCandidate,
-                        indexPolicyHash,
-                        runId,
-                    ),
-                    publishNavigationCandidate: (candidate, assertMutationCurrent, publishMutation) => (
-                        context.publishNavigationCandidate(candidate, assertMutationCurrent, publishMutation)
-                    ),
-                    discardNavigationCandidate: (candidate, assertMutationCurrent) => (
-                        context.discardNavigationCandidate(candidate, assertMutationCurrent)
-                    ),
-                    resolveIndexPolicyForReindex: (codebasePath, update) => (
-                        context.resolveIndexPolicyForReindex(codebasePath, update)
-                    ),
-                    resolveIndexPolicyForCodebase: (codebasePath, update) => (
-                        context.resolveIndexPolicyForCodebase(codebasePath, update)
-                    ),
-                    describeEmbeddingProvider: () => {
-                        const encoderEngine = context.getEmbeddingEngine();
-                        return {
-                            provider: encoderEngine.getProvider(),
-                            dimension: encoderEngine.getDimension(),
-                        };
-                    },
-                    indexCodebase: (codebasePath, progressCallback, forceReindex, options) => (
-                        context.indexCodebase(codebasePath, progressCallback, forceReindex, options)
-                    ),
-                    isObservedIndexPolicyControlSignatureCurrent: (policy) => (
-                        context.isObservedIndexPolicyControlSignatureCurrent(policy)
-                    ),
-                    publishResolvedIndexPolicy: (policy, binding, publishMutation) => (
-                        context.publishResolvedIndexPolicy(policy, binding, publishMutation)
-                    ),
-                    registerSynchronizer: (collectionName, synchronizer) => (
-                        context.registerSynchronizer(collectionName, synchronizer)
-                    ),
-                    indexCompletionMarkersEqual: (left, right) => (
-                        context.indexCompletionMarkersEqual(left, right)
-                    ),
-                });
-            },
-            get sourceFreshnessPort() {
-                const context = getManageIndexingContext();
-                if (typeof context.getSourceFreshnessPort === "function") {
-                    return context.getSourceFreshnessPort();
-                }
-                // Compatibility fallback for hosts that do not expose the
-                // Phase 5.1 port yet: reproduce the exact previous direct
-                // source-freshness inspection behavior.
-                return createSourceFreshnessPort({
-                    inspectSourceFreshnessCheckpoint: (
-                        codebasePath,
-                        checkpointIdentity,
-                        requestBoundReceipt,
-                    ) => context.inspectSourceFreshnessCheckpoint(
-                        codebasePath,
-                        checkpointIdentity,
-                        requestBoundReceipt,
-                    ),
-                    compareSourceObservationToFreshnessCheckpoint: (
-                        codebasePath,
-                        requestBoundReceipt,
-                    ) => context.compareSourceObservationToFreshnessCheckpoint(
-                        codebasePath,
-                        requestBoundReceipt,
-                    ),
-                    compareAllSourceToFreshnessCheckpoint: (
-                        codebasePath,
-                        requestBoundReceipt,
-                    ) => context.compareAllSourceToFreshnessCheckpoint(
-                        codebasePath,
-                        requestBoundReceipt,
-                    ),
-                    getRegisteredSourceFreshnessCheckpointObservation: (codebasePath) => (
-                        context.getRegisteredSourceFreshnessCheckpointObservation(codebasePath)
-                    ),
-                });
-            },
-            get snapshotManager() {
-                return getManageIndexingSnapshotManager();
-            },
-            get syncManager() {
-                return getManageIndexingSyncManager();
-            },
-            get runtimeFingerprint() {
-                return getManageIndexingRuntimeFingerprint();
-            },
-            get startBackgroundIndexing() {
-                return getManageIndexingStartBackgroundIndexing();
-            },
+            context: this.context,
+            mutationRuntime: this.mutationRuntime,
+            syncManager: this.syncManager,
             manageResponse: this.toolResponseBuilders.manageResponse.bind(this.toolResponseBuilders),
             buildRuntimeOwnerConflictResponseIfBlocked: this.buildRuntimeOwnerConflictResponseIfBlocked.bind(this),
-            recoverStaleIndexingStateIfNeeded: this.interruptedIndexRecoveryCoordinator.recoverStaleIndexingStateIfNeeded.bind(
-                this.interruptedIndexRecoveryCoordinator,
-            ),
-            getSnapshotIndexingCodebases: this.getSnapshotIndexingCodebases.bind(this),
-            getSnapshotCodebaseInfo: this.getSnapshotCodebaseInfo.bind(this),
-            getSnapshotIndexedCodebases: this.getSnapshotIndexedCodebases.bind(this),
             buildManageActionBlockedMessage: this.buildManageActionBlockedMessage.bind(this),
             buildCreateHint: this.buildCreateHint.bind(this),
             buildReindexHint: this.buildReindexHint.bind(this),
@@ -935,31 +559,18 @@ export class ToolHandlers {
             buildReindexInstruction: this.buildReindexInstruction.bind(this),
             buildManageRequiresReindexHints: this.buildManageRequiresReindexHints.bind(this),
             validateCompletionProof: (codebasePath: string) => this.validateCompletionProof(codebasePath),
-            recoverIndexedSnapshotFromCompletionProof: this.interruptedIndexRecoveryCoordinator.recoverIndexedSnapshotFromCompletionProof.bind(
-                this.interruptedIndexRecoveryCoordinator,
-            ),
             isZillizBackend: this.isZillizBackend.bind(this),
-            resolveCollectionName: this.resolveCollectionName.bind(this),
             dropZillizCollectionForCreate: this.dropZillizCollectionForCreate.bind(this),
-            resolveStagedCollectionName: this.resolveStagedCollectionName.bind(this),
             buildCollectionLimitMessage: this.buildCollectionLimitMessage.bind(this),
             manageVectorBackendResponse: this.toolResponseBuilders.manageVectorBackendResponse.bind(this.toolResponseBuilders),
-            saveSnapshotIfSupported: this.saveSnapshotIfSupported.bind(this),
             touchWatchedCodebase: this.touchWatchedCodebase.bind(this),
             loadIndexProfileForCodebase: this.loadIndexProfileForCodebase.bind(this),
             getContextActiveIgnorePatterns: this.getContextActiveIgnorePatterns.bind(this),
             getContextIndexedExtensions: this.getContextIndexedExtensions.bind(this),
             canonicalizeCodebasePath: this.canonicalizeCodebasePath.bind(this),
-            pruneIndexedCollectionFamily: this.pruneIndexedCollectionFamily.bind(this),
-            pruneUnprovenStagedCollectionFamily: this.pruneUnprovenStagedCollectionFamily.bind(this),
-            getContextTrackedRelativePaths: this.getContextTrackedRelativePaths.bind(this),
             setIndexingStats: this.setIndexingStats.bind(this),
-            rebuildCallGraphForIndex: this.rebuildCallGraphForIndex.bind(this),
-            getSnapshotIndexingProgress: this.getSnapshotIndexingProgress.bind(this),
-            clearIndexCompletionMarker: this.clearIndexCompletionMarker.bind(this),
             evaluateReindexPreflight: this.evaluateReindexPreflight.bind(this),
             assertIndexMutationCapabilities: this.assertIndexMutationCapabilities.bind(this),
-            mutationLeaseCoordinator: this.mutationLeaseCoordinator,
         };
         this.manageIndexingHandlers = new ManageIndexingHandlers(manageIndexingHandlersHost);
         const searchContext = this.context;
@@ -983,8 +594,8 @@ export class ToolHandlers {
                 prepareTrackedRootReadWithObservation: (absolutePath, onPhase, accessMode) => (
                     this.prepareTrackedRootReadWithObservation(absolutePath, onPhase, accessMode)
                 ),
-                loadRegistryValidatedCallGraphSidecar: (input) => (
-                    this.loadRegistryValidatedCallGraphSidecar(input)
+                loadRegistryValidatedRelationshipNavigation: (input) => (
+                    this.loadRegistryValidatedRelationshipNavigation(input)
                 ),
                 getWatcherObservation: (codebasePath) => this.getWatcherObservation(codebasePath),
                 getChangedFilesForCodebase: (codebasePath, options) => (
@@ -999,9 +610,6 @@ export class ToolHandlers {
                 ),
                 getIndexingOperationForReadiness: (codebasePath) => (
                     this.getIndexingOperationForReadiness(codebasePath)
-                ),
-                canSyncStaleLocal: (codebasePath, reason) => (
-                    this.canSyncStaleLocal(codebasePath, reason)
                 ),
                 probeLocalSearchCollectionState: (codebasePath) => (
                     this.probeLocalSearchCollectionState(codebasePath)
@@ -1024,10 +632,6 @@ export class ToolHandlers {
                 buildStaleLocalMessage: (codebasePath, requestedPath, reason) => (
                     this.buildStaleLocalMessage(codebasePath, requestedPath, reason)
                 ),
-                buildStaleLocalHint: (codebasePath, reason) => (
-                    this.buildStaleLocalHint(codebasePath, reason)
-                ),
-                buildRepairHint: (codebasePath) => this.buildRepairHint(codebasePath),
                 buildRelationshipBackedCallGraph: (input) => (
                     this.buildRelationshipBackedCallGraph(input)
                 ),
@@ -1043,11 +647,11 @@ export class ToolHandlers {
                 loadPreparedNavigationManifest: (preparedRead, operations) => (
                     this.loadPreparedNavigationManifest(preparedRead, operations)
                 ),
-                getPreparedReadCacheObservation: (codebasePath) => (
-                    this.getPreparedReadCacheObservation(codebasePath)
-                ),
                 getPreparedAuthorityObservation: (codebasePath) => (
                     this.getPreparedAuthorityObservation(codebasePath)
+                ),
+                getPublicationNavigationAddress: (publication) => (
+                    this.context.getPublicationNavigationAddress(publication)
                 ),
                 seedPreparedRead: (state, preserveProofAge, statusPrepared) => (
                     this.seedPreparedRead(state, preserveProofAge, statusPrepared)
@@ -1059,39 +663,31 @@ export class ToolHandlers {
                 getCachedPreparedRead: (absolutePath, operations, requireNavigation) => (
                     this.getCachedPreparedRead(absolutePath, operations, requireNavigation)
                 ),
-                acquirePublicationReadLease: (codebasePath) => (
-                    this.acquirePublicationReadLease(codebasePath)
+                acquirePublicationLease: (codebasePath, publicationId) => (
+                    this.acquirePublicationLease(codebasePath, publicationId)
                 ),
+                isPublicationLeaseAdmitted: (lease) => this.isPublicationLeaseAdmitted(lease),
+                isPublicationAdmitted: (publication) => this.context.isPublicationReadAdmitted(publication),
+                getPublicationNavigationStatus: (publication) => this.context.getPublicationNavigationStatus(publication),
             },
             freshness: {
-                getSourceFreshnessPort: () => this.getSourceFreshnessPort(),
                 inspectSourceFreshnessCheckpoint: (
                     codebasePath: string,
-                    checkpointIdentity?: string,
-                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-                ) => this.context.inspectSourceFreshnessCheckpoint(codebasePath, checkpointIdentity, requestBoundReceipt),
+                    publication?: PublicationRef,
+                ) => this.context.inspectSourceFreshnessCheckpoint(codebasePath, publication),
                 compareAllSourceToFreshnessCheckpoint: (
                     codebasePath: string,
-                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-                ) => this.context.compareAllSourceToFreshnessCheckpoint(codebasePath, requestBoundReceipt),
+                    publication?: PublicationRef,
+                ) => this.context.compareAllSourceToFreshnessCheckpoint(codebasePath, publication),
                 compareSourceObservationToFreshnessCheckpoint: (
                     codebasePath: string,
-                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-                ) => this.context.compareSourceObservationToFreshnessCheckpoint(codebasePath, requestBoundReceipt),
+                    publication?: PublicationRef,
+                ) => this.context.compareSourceObservationToFreshnessCheckpoint(codebasePath, publication),
                 compareSourcePathsToFreshnessCheckpoint: (
                     codebasePath: string,
                     relativePaths: readonly string[],
-                    requestBoundReceipt?: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
-                ) => this.context.compareSourcePathsToFreshnessCheckpoint(codebasePath, relativePaths, requestBoundReceipt),
-                getPreparedGenerationRevalidator: () => {
-                    const revalidate = this.contextLifecycle().revalidatePreparedGeneration;
-                    if (typeof revalidate !== "function") {
-                        return undefined;
-                    }
-                    return (codebasePath, receipt, options) => (
-                        revalidate.call(this.context, codebasePath, receipt, options)
-                    );
-                },
+                    publication?: PublicationRef,
+                ) => this.context.compareSourcePathsToFreshnessCheckpoint(codebasePath, relativePaths, publication),
             },
             environment: {
                 now: () => this.now(),
@@ -1100,23 +696,23 @@ export class ToolHandlers {
                 parseIndexedAtMs: (indexedAt) => this.parseIndexedAtMs(indexedAt),
                 getEmbeddingProviderName: () => this.context.getEmbeddingEngine().getProvider(),
                 semanticSearch: (request: import("@zokizuan/satori-core").SemanticSearchRequest) => this.context.semanticSearch(request),
-                get semanticSearchInProvenGeneration() {
-                    const implementation = getSearchContextLifecycle().semanticSearchInProvenGeneration;
+                get semanticSearchInPublication() {
+                    const implementation = getSearchContextLifecycle().semanticSearchInPublication;
                     return typeof implementation === 'function'
-                        ? (receipt: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt, request: import("@zokizuan/satori-core").SemanticSearchRequest) => (
-                            implementation.call(searchContext, receipt, request)
+                        ? (publication: PublicationRef, request: import("@zokizuan/satori-core").SemanticSearchRequest) => (
+                            implementation.call(searchContext, publication, request)
                         )
                         : undefined;
                 },
-                get semanticSearchWithCandidateTraceInProvenGeneration() {
-                    const implementation = getSearchContextLifecycle().semanticSearchWithCandidateTraceInProvenGeneration;
+                get semanticSearchWithCandidateTraceInPublication() {
+                    const implementation = getSearchContextLifecycle().semanticSearchWithCandidateTraceInPublication;
                     return typeof implementation === 'function'
                         ? (
-                            receipt: import("@zokizuan/satori-core").ProvenVectorGenerationReceipt,
+                            publication: PublicationRef,
                             request: import("@zokizuan/satori-core").SemanticSearchRequest,
                             maxEntriesPerStage: number,
                             options?: import("@zokizuan/satori-core").SemanticSearchCandidateTraceOptions,
-                        ) => implementation.call(searchContext, receipt, request, maxEntriesPerStage, options)
+                        ) => implementation.call(searchContext, publication, request, maxEntriesPerStage, options)
                         : undefined;
                 },
             }
@@ -1140,14 +736,6 @@ export class ToolHandlers {
 
     private buildReindexInstruction(codebasePath: string, detail?: string): string {
         const detailLine = detail ? `${detail}\n\n` : '';
-        const compatibility = this.buildCompatibilityDiagnostics(codebasePath);
-        if (this.isRuntimeFingerprintMismatch(compatibility)) {
-            const indexedFingerprint = compatibility.indexedFingerprint
-                ? this.summarizeFingerprint(compatibility.indexedFingerprint)
-                : 'the indexed runtime fingerprint';
-            const runtimeFingerprint = this.summarizeFingerprint(compatibility.runtimeFingerprint);
-            return `${detailLine}Error: The current Satori runtime does not match the existing index at '${codebasePath}'. Recovery: restart Satori with ${indexedFingerprint} to reuse the current index. Reindex only if you intentionally want to migrate this repo to ${runtimeFingerprint}.`;
-        }
         return `${detailLine}Error: The index at '${codebasePath}' is incompatible with the current runtime and must be rebuilt.\nNext step: call manage_index with {\"action\":\"reindex\",\"path\":\"${codebasePath}\"}.`;
     }
 
@@ -1181,18 +769,8 @@ export class ToolHandlers {
         };
     }
 
-    private buildRepairHint(codebasePath: string): { tool: string; args: { action: string; path: string } } {
-        return {
-            tool: "manage_index",
-            args: {
-                action: "repair",
-                path: codebasePath
-            }
-        };
-    }
-
     private buildManageIndexRecommendedAction(
-        action: Extract<ManageIndexAction, "create" | "reindex" | "status" | "sync" | "repair">,
+        action: Extract<ManageIndexAction, "create" | "reindex" | "status" | "sync">,
         codebasePath: string,
         reason: string
     ): SearchRecommendedNextAction {
@@ -1214,13 +792,9 @@ export class ToolHandlers {
     }
 
     private buildManageRequiresReindexHints(codebasePath: string): Record<string, unknown> {
-        const compatibility = this.buildCompatibilityDiagnostics(codebasePath);
         return {
             reindex: this.buildReindexHint(codebasePath),
             status: this.buildStatusHint(codebasePath),
-            ...(this.isRuntimeFingerprintMismatch(compatibility)
-                ? { runtimeMismatch: this.buildRuntimeMismatchHint(codebasePath, compatibility) }
-                : {}),
         };
     }
 
@@ -1278,69 +852,25 @@ export class ToolHandlers {
         }
     }
 
-    /**
-     * Phase 5.1 — the narrow read-facing source freshness port, when the host
-     * context provides it. Test hosts may construct ToolHandlers with context
-     * mocks that lack the port; callers must fall back to the direct context
-     * checkpoint methods in that case and never throw.
-     */
-    private getSourceFreshnessPort(): SourceFreshnessPort | undefined {
-        const context = this.context as Context & {
-            getSourceFreshnessPort?: () => SourceFreshnessPort;
-        };
-        return typeof context.getSourceFreshnessPort === 'function'
-            ? context.getSourceFreshnessPort()
-            : undefined;
-    }
-
     private getPreparedAuthorityObservation(codebasePath: string): string | null {
-        try {
-            const mutationObservation = this.mutationLeaseCoordinator?.observe(codebasePath);
-            const authorityObservation = this.contextLifecycle().getIndexAuthorityObservations?.(codebasePath);
-            if (!mutationObservation || mutationObservation.mutationActive || !authorityObservation) {
-                return null;
-            }
-            return JSON.stringify({
-                vectorAuthority: authorityObservation.vector,
-                navigationAuthority: authorityObservation.navigation,
-                mutationGeneration: mutationObservation.generation,
-            });
-        } catch {
-            return null;
-        }
-    }
-
-    private getPreparedReadCacheObservation(codebasePath: string): PreparedReadCacheObservationResult {
-        return this.preparedReadCacheOwner.getPreparedReadCacheObservation(codebasePath);
+        return this.preparedReadCacheOwner.getPreparedAuthorityObservation(codebasePath);
     }
 
     private evictPreparedRead(codebasePath: string): void {
         this.preparedReadCacheOwner.evictPreparedRead(codebasePath);
     }
 
-    private getPreparedNavigationIdentity(
-        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
-    ): string | null {
-        return this.preparedReadCacheOwner.getPreparedNavigationIdentity(preparedRead);
-    }
-
-    private isPreparedNavigationReadCurrent(
-        preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
-    ): boolean {
-        return this.preparedReadCacheOwner.isPreparedNavigationReadCurrent(preparedRead);
-    }
-
     private async loadPreparedNavigationManifest(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         operations?: SearchReadinessDebugHint['operations'],
-    ): Promise<Awaited<ReturnType<NavigationStore['getManifest']>>> {
+    ): Promise<Awaited<ReturnType<JsonNavigationStore['getManifest']>>> {
         return this.preparedReadCacheOwner.loadPreparedNavigationManifest(preparedRead, operations);
     }
 
     private async loadPreparedNavigationSymbolsByFile(
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         file: string,
-    ): Promise<Awaited<ReturnType<NavigationStore['getSymbolsByFile']>>> {
+    ): Promise<Awaited<ReturnType<JsonNavigationStore['getSymbolsByFile']>>> {
         return this.preparedReadCacheOwner.loadPreparedNavigationSymbolsByFile(preparedRead, file);
     }
 
@@ -1348,7 +878,7 @@ export class ToolHandlers {
         preparedRead: Extract<TrackedRootReadinessState, { state: 'ready' }>,
         expectedSymbolRegistryManifestHash: string,
         operations?: SearchReadinessDebugHint['operations'],
-    ): Promise<Awaited<ReturnType<NavigationStore['getCompatibilityState']>>> {
+    ): Promise<Awaited<ReturnType<JsonNavigationStore['getCompatibilityState']>>> {
         return this.preparedReadCacheOwner.loadPreparedNavigationCompatibility(
             preparedRead,
             expectedSymbolRegistryManifestHash,
@@ -1384,18 +914,7 @@ export class ToolHandlers {
             () => undefined,
         );
         if (state.state === 'ready') {
-            // A process-cold status proof may initialize Core's published policy
-            // binding, so no observation existed before the proof. Bind the proven
-            // receipt to the first stable post-proof observation; seedPreparedRead
-            // immediately rechecks it and refuses any intervening authority change.
-            const preparedObservation = state.preparedObservation
-                ?? this.getPreparedAuthorityObservation(state.root.path)
-                ?? undefined;
-            this.seedPreparedRead(
-                { ...state, ...(preparedObservation ? { preparedObservation } : {}) },
-                false,
-                true,
-            );
+            this.seedPreparedRead(state, false, true);
         }
         return state;
     }
@@ -1409,49 +928,36 @@ export class ToolHandlers {
             absolutePath,
             accessMode,
             onPhase,
-            { observePreparedRead: (root) => this.getPreparedAuthorityObservation(root) },
         );
         if (state.state !== 'ready') {
             return state;
         }
 
-        const activeLease = this.mutationLeaseCoordinator?.getActiveLease(state.root.path);
-        if (!activeLease) {
+        const activeMutation = this.mutationRuntime.getActiveMutation(state.root.path);
+        if (!activeMutation) {
             return state;
         }
 
         this.evictPreparedRead(state.root.path);
-        const durableOperation = this.readLatestOperationReceipt(state.root.path);
         const operation = this.getIndexingOperationForReadiness(state.root.path);
-        const matchingActiveSync = Boolean(
-            state.vectorReceipt
-            && activeLease.action === 'sync'
-            && operation?.action === 'sync'
-            && operation.generation === activeLease.generation
-            && durableOperation?.id === activeLease.operationId
-        );
+        const matchingActiveSync = activeMutation.action === 'sync';
 
         if (process.env.SATORI_TASK7_DEBUG === '1') {
             console.error('[TASK7-DEBUG][readiness-wrapper] ' + JSON.stringify({
                 root: state.root.path,
                 accessMode,
-                vectorReceipt: state.vectorReceipt
-                    ? {
-                        collectionName: state.vectorReceipt.collectionName,
-                        markerRunId: state.vectorReceipt.marker?.runId ?? null,
-                    }
-                    : null,
-                activeLease: {
-                    action: activeLease.action,
-                    generation: activeLease.generation,
-                    operationId: activeLease.operationId,
+                publicationId: state.publication.id,
+                collectionName: state.publication.publication.vector.collectionName,
+                activeMutation: {
+                    action: activeMutation.action,
+                    generation: activeMutation.generation,
+                    operationId: activeMutation.id,
                 },
-                durableOperation: durableOperation
+                liveOperation: operation
                     ? {
-                        id: durableOperation.id ?? null,
-                        action: durableOperation.action,
-                        generation: durableOperation.generation,
-                        phase: durableOperation.phase,
+                        action: operation.action,
+                        generation: operation.generation,
+                        phase: operation.phase,
                     }
                     : null,
                 matchingActiveSync,
@@ -1477,7 +983,6 @@ export class ToolHandlers {
             coldReadinessChecks: 0,
             postFreshnessColdChecks: 0,
             warmReceiptRevalidations: 0,
-            exactPayloadRecounts: 0,
             registryLoads: 0,
             navigationValidationRuns: 0,
         };
@@ -1490,30 +995,6 @@ export class ToolHandlers {
             'navigation',
         );
         if (state.state === 'ready') {
-            if (
-                this.canonicalNavigationAuthorityAvailable
-                && state.navigationAuthorityMode
-                    === "source_backed_fingerprint_compatibility"
-                && state.sourceBackedNavigationBinding
-            ) {
-                const binding = state.sourceBackedNavigationBinding;
-                const sealRead = await readNavigationGenerationSeal(
-                    undefined,
-                    state.root.path,
-                    binding.generationId,
-                );
-                if (
-                    sealRead.status === "ok"
-                    && sealRead.seal.symbolRegistryManifestHash
-                        === binding.symbolRegistryManifestHash
-                    && sealRead.seal.relationshipManifestHash
-                        === binding.relationshipManifestHash
-                    && computeNavigationGenerationSealHash(sealRead.seal)
-                        === binding.navigationSealHash
-                ) {
-                    state.sourceBackedNavigationBindingValidated = true;
-                }
-            }
             this.seedPreparedRead(state, false);
         }
         return state;
@@ -1525,34 +1006,33 @@ export class ToolHandlers {
         symbolId?: string;
         symbolLabel?: string;
     }): Promise<PrepareSymbolContextSnapshotResult> {
-        let initialNavigationIdentity: string | null;
         const session = new PreparedPublicationReadSession<TrackedRootReadinessState>({
             prepareReadiness: () => this.prepareNavigationRead(
                 path.resolve(input.codebaseRoot, input.relativeFile),
             ),
-            // The lease is acquired only after readiness resolves; non-ready
-            // states never acquire it (Phase 5.2 lifetime contract).
-            acquirePublicationReadLease: (prepared) => (
+            acquirePublicationLease: (prepared) => (
                 prepared.state === 'ready'
-                    ? this.acquirePublicationReadLease(prepared.root.path)
-                    : Promise.resolve(undefined)
+                    ? this.acquirePublicationLease(prepared.root.path)
+                    : undefined
             ),
-            revalidateAuthority: (prepared) => (
-                prepared.state !== 'ready'
-                || this.getPreparedNavigationIdentity(prepared) === initialNavigationIdentity
+            isLeaseAdmitted: (prepared, lease) => (
+                prepared.state === 'ready'
+                && prepared.publication.id === lease.id
+                && this.isPublicationLeaseAdmitted(lease)
             ),
         });
         const executeSymbolContextRead = async (
             preparedRead: TrackedRootReadinessState,
+            lease: PublicationLease,
         ): Promise<PrepareSymbolContextSnapshotResult> => {
-            if (preparedRead.state !== 'ready') {
+            if (preparedRead.state !== 'ready' || preparedRead.publication.id !== lease.id) {
                 return {
                     status: 'unavailable',
                     reason: `prepared_navigation_${preparedRead.state}`,
                 };
             }
-            initialNavigationIdentity = this.getPreparedNavigationIdentity(preparedRead);
-            if (!initialNavigationIdentity) {
+            const navigation = this.context.getPublicationNavigationAddress(lease);
+            if (!navigation || preparedRead.navigationStatus !== 'valid') {
                 return { status: 'unavailable', reason: 'prepared_navigation_identity_unavailable' };
             }
             const registryState = await this.loadPreparedNavigationSymbolsByFile(
@@ -1565,34 +1045,23 @@ export class ToolHandlers {
                     reason: `symbol_registry_${registryState.status}`,
                 };
             }
-            const navigationBinding = preparedRead.generationReceipt?.navigation;
-            if (
-                !navigationBinding
-                || registryState.manifestHash !== navigationBinding.symbolRegistryManifestHash
-            ) {
-                return {
-                    status: 'unavailable',
-                    reason: 'prepared_navigation_registry_manifest_changed',
-                };
-            }
 
             const compatibility = await this.loadPreparedNavigationCompatibility(
                 preparedRead,
                 registryState.manifestHash,
             );
             const relationshipState = compatibility.relationships;
-            const relationshipManifestMatchesBinding = relationshipState.status === 'ok'
-                && relationshipState.manifestHash === navigationBinding.relationshipManifestHash;
             const exactTargets = findExactRegistrySymbols({
                 symbols: registryState.registry.symbolsByFile.get(input.relativeFile) || [],
                 ...(input.symbolId ? { symbolIdExact: input.symbolId } : {}),
                 ...(input.symbolLabel ? { symbolLabelExact: input.symbolLabel } : {}),
             });
             const preparedTraversals = relationshipState.status === 'ok'
-                && relationshipManifestMatchesBinding
                 && exactTargets.length === 1
                 ? await prepareRelationshipTraversals({
                     rootPath: preparedRead.root.path,
+                    publicationId: navigation.publicationId,
+                    navigationRoot: navigation.navigationRoot,
                     registryManifestIdentity: registryState.manifestHash,
                     relationshipManifestIdentity: relationshipState.manifestHash,
                     registry: registryState.registry,
@@ -1602,14 +1071,12 @@ export class ToolHandlers {
                     relationshipWarnings: relationshipState.warnings || [],
                 })
                 : undefined;
-            const relationships: PreparedRelationshipSnapshot = relationshipManifestMatchesBinding
+            const relationships: PreparedRelationshipSnapshot = relationshipState.status === 'ok'
                 && preparedTraversals
                 ? {
                     status: 'available',
-                    // getPreparedNavigationIdentity gates this adapter on navigationStatus=valid
-                    // plus a proven generation receipt; local-only readiness cannot reach here.
                     authority: 'remote_generation_proven',
-                    manifestIdentity: navigationBinding.relationshipManifestHash,
+                    manifestIdentity: relationshipState.manifestHash,
                     callers: preparedTraversals.callers,
                     callees: preparedTraversals.callees,
                 }
@@ -1617,23 +1084,18 @@ export class ToolHandlers {
                     status: 'unavailable',
                     authority: 'unavailable',
                     reason: relationshipState.status === 'ok'
-                        ? relationshipManifestMatchesBinding
-                            ? 'relationship_traversal_unavailable'
-                            : 'relationship_manifest_identity_changed'
-                        : `relationship_sidecar_${relationshipState.status}`,
+                        ? 'relationship_traversal_unavailable'
+                        : `relationship_navigation_${relationshipState.status}`,
                 };
             return {
                 status: 'ready',
                 snapshot: {
                     canonicalRoot: preparedRead.root.path,
-                    registryManifestIdentity: navigationBinding.symbolRegistryManifestHash,
+                    registryManifestIdentity: registryState.manifestHash,
                     registry: registryState.registry,
-                    // The same proven-generation gate above owns this classification.
                     navigationAuthority: 'remote_generation_proven',
                     relationships,
-                    validateAuthority: async () => (
-                        this.getPreparedNavigationIdentity(preparedRead) === initialNavigationIdentity
-                    ),
+                    validateAuthority: () => this.isPublicationLeaseAdmitted(lease),
                 },
             };
         };
@@ -1643,112 +1105,66 @@ export class ToolHandlers {
             : outcome.result;
     }
 
-    private getSyncWatchDebounceMs(): number {
-        const syncManager = this.syncManager as unknown as {
-            getWatchDebounceMs?: () => number;
-        };
-        const value = syncManager.getWatchDebounceMs?.();
-        return typeof value === 'number' && Number.isFinite(value) && value > 0
-            ? value
-            : DEFAULT_WATCH_DEBOUNCE_MS;
-    }
-
     private contextLifecycle(): ContextLifecycleCapabilities {
         return this.context as unknown as ContextLifecycleCapabilities;
     }
 
-    private async acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined> {
-        const acquire = this.contextLifecycle().acquirePublicationReadLease;
-        return typeof acquire === 'function'
-            ? acquire.call(this.context, codebasePath)
+    private acquirePublicationLease(
+        codebasePath: string,
+        publicationId?: string,
+    ): PublicationLease | undefined {
+        const lifecycle = this.contextLifecycle();
+        if (publicationId) {
+            const acquireExact = lifecycle.acquirePublicationRead;
+            return typeof acquireExact === 'function'
+                ? acquireExact.call(this.context, codebasePath, publicationId) ?? undefined
+                : undefined;
+        }
+        const acquireCurrent = lifecycle.acquireCurrentPublicationRead;
+        return typeof acquireCurrent === 'function'
+            ? acquireCurrent.call(this.context, codebasePath) ?? undefined
             : undefined;
     }
 
-    private snapshotCapabilities(): SnapshotManagerCapabilities {
-        return this.snapshotManager as unknown as SnapshotManagerCapabilities;
+    private async isPublicationLeaseAdmitted(lease: PublicationLease): Promise<boolean> {
+        const admit = this.contextLifecycle().isPublicationReadAdmitted;
+        return typeof admit === 'function'
+            && await admit.call(this.context, lease);
     }
 
-    private getSnapshotIndexedCodebases(): string[] {
-        const value = this.snapshotCapabilities().getIndexedCodebases?.();
-        return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
-    }
+    private listTrackedRoots(): TrackedRootEntry[] {
+        const roots = new Map<string, TrackedRootEntry>();
+        for (const ref of this.context.listCurrentPublications()) {
+            const publication = ref.publication;
+            roots.set(publication.canonicalRoot, {
+                path: publication.canonicalRoot,
+                info: {
+                    status: 'indexed',
+                    lastUpdated: publication.createdAt,
+                    indexStatus: publication.status === 'complete' ? 'completed' : 'limit_reached',
+                    indexedFiles: publication.vector.indexedFiles,
+                    totalChunks: publication.vector.totalChunks,
+                    collectionName: publication.vector.collectionName,
+                },
+            });
+        }
 
-    private getSnapshotIndexingCodebases(): string[] {
-        const value = this.snapshotCapabilities().getIndexingCodebases?.();
-        return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
-    }
+        for (const activity of this.mutationRuntime.listActiveMutations()) {
+            if (activity.action !== 'create' && activity.action !== 'reindex') continue;
+            const operation = this.mutationRuntime.getOperation(activity.canonicalRoot);
+            roots.set(activity.canonicalRoot, {
+                path: activity.canonicalRoot,
+                info: {
+                    status: 'indexing',
+                    lastUpdated: operation?.updatedAt ?? activity.acceptedAt,
+                    ...(operation?.progress !== undefined
+                        ? { indexingPercentage: operation.progress }
+                        : {}),
+                },
+            });
+        }
 
-    private getSnapshotAllCodebases(): TrackedRootEntry[] {
-        const value = this.snapshotCapabilities().getAllCodebases?.();
-        if (!Array.isArray(value)) {
-            return [];
-        }
-        return value
-            .filter((entry): entry is { path: string; info: CodebaseInfo } =>
-                Boolean(entry)
-                && typeof entry.path === 'string'
-                && Boolean(entry.info)
-                && typeof entry.info.status === 'string'
-            )
-            .map((entry) => ({ path: entry.path, info: entry.info as unknown as TrackedCodebaseInfo }));
-    }
-
-    private getSnapshotCodebaseStatus(codebasePath: string): CodebaseStatus | 'not_found' {
-        const capabilities = this.snapshotCapabilities();
-        const info = capabilities.getCodebaseInfo?.(codebasePath);
-        if (info?.status) {
-            return info.status;
-        }
-        const status = capabilities.getCodebaseStatus?.(codebasePath);
-        if (status) {
-            return status;
-        }
-        if (this.getSnapshotIndexedCodebases().includes(codebasePath)) {
-            return 'indexed';
-        }
-        if (this.getSnapshotIndexingCodebases().includes(codebasePath)) {
-            return 'indexing';
-        }
-        return 'not_found';
-    }
-
-    private getSnapshotCodebaseInfo(codebasePath: string): TrackedCodebaseInfo | undefined {
-        const info = this.snapshotCapabilities().getCodebaseInfo?.(codebasePath);
-        if (info?.status) {
-            return info as unknown as TrackedCodebaseInfo;
-        }
-        const status = this.getSnapshotCodebaseStatus(codebasePath);
-        if (status === 'not_found') {
-            return undefined;
-        }
-        return { status, lastUpdated: new Date(0).toISOString() };
-    }
-
-    private getSnapshotIndexingProgress(codebasePath: string): number | undefined {
-        const progress = this.snapshotCapabilities().getIndexingProgress?.(codebasePath);
-        return typeof progress === 'number' && Number.isFinite(progress) ? progress : undefined;
-    }
-
-    private ensureSnapshotFingerprintCompatibility(codebasePath: string): SnapshotAccessGateResult {
-        const gate = this.snapshotCapabilities().ensureFingerprintCompatibilityOnAccess?.(
-            codebasePath,
-            { mutate: false },
-        );
-        if (!gate || typeof gate.allowed !== 'boolean' || typeof gate.changed !== 'boolean') {
-            return { allowed: true, changed: false };
-        }
-        return gate;
-    }
-
-    private saveSnapshotIfSupported(): void {
-        const saveCodebaseSnapshot = this.snapshotCapabilities().saveCodebaseSnapshot;
-        if (typeof saveCodebaseSnapshot !== 'function') {
-            throw new Error('Missing required mutation capability: SnapshotManager.saveCodebaseSnapshot.');
-        }
-        const saved = saveCodebaseSnapshot.call(this.snapshotManager);
-        if (saved === false) {
-            throw new Error('Failed to persist snapshot state.');
-        }
+        return Array.from(roots.values()).sort((left, right) => left.path.localeCompare(right.path));
     }
 
     private canonicalizeCodebasePath(codebasePath: string): string {
@@ -1757,34 +1173,16 @@ export class ToolHandlers {
 
     private assertIndexMutationCapabilities(): void {
         const context = this.context as unknown as Record<string, unknown>;
-        const snapshot = this.snapshotManager as unknown as Record<string, unknown>;
         const requiredContextCapabilities = [
             'resolveCollectionName',
-            'resolveStagedCollectionName',
-            'prepareIndexCollection',
-            'discardPreparedIndexCollection',
             'getActiveIndexedCollectionName',
-            'clearIndexCompletionMarker',
-            'pruneIndexedCollectionFamily',
-            'pruneUnprovenStagedCollectionFamily',
-        ] as const;
-        const requiredSnapshotCapabilities = [
-            'saveCodebaseSnapshot',
-            'setCodebaseIndexing',
-            'setCodebaseIndexFailed',
-            'setCodebaseIndexed',
-            'setCodebaseIndexManifest',
-            'commitCodebaseLifecycleMutation',
+            'getCurrentPublication',
+            'listCurrentPublications',
         ] as const;
 
         for (const capability of requiredContextCapabilities) {
             if (typeof context[capability] !== 'function') {
                 throw new Error(`Missing required mutation capability: Context.${capability}.`);
-            }
-        }
-        for (const capability of requiredSnapshotCapabilities) {
-            if (typeof snapshot[capability] !== 'function') {
-                throw new Error(`Missing required mutation capability: SnapshotManager.${capability}.`);
             }
         }
     }
@@ -1795,14 +1193,6 @@ export class ToolHandlers {
             throw new Error('Context lifecycle capability resolveCollectionName is required.');
         }
         return resolve.call(this.context, codebasePath);
-    }
-
-    private resolveStagedCollectionName(codebasePath: string, generationId: string): string {
-        const resolve = this.contextLifecycle().resolveStagedCollectionName;
-        if (typeof resolve !== 'function') {
-            throw new Error('Context lifecycle capability resolveStagedCollectionName is required.');
-        }
-        return resolve.call(this.context, codebasePath, generationId);
     }
 
     private loadIndexProfileForCodebase(codebasePath: string): IndexProfileView {
@@ -1830,43 +1220,6 @@ export class ToolHandlers {
     private getContextTrackedRelativePaths(codebasePath: string): string[] {
         const paths = this.contextLifecycle().getTrackedRelativePaths?.(codebasePath);
         return Array.isArray(paths) ? paths.filter((entry): entry is string => typeof entry === 'string') : [];
-    }
-
-    private async clearIndexCompletionMarker(codebasePath: string, assertMutationCurrent?: () => void): Promise<void> {
-        const clear = this.contextLifecycle().clearIndexCompletionMarker;
-        if (typeof clear !== 'function') {
-            throw new Error('Context lifecycle capability clearIndexCompletionMarker is required.');
-        }
-        await clear.call(this.context, codebasePath, assertMutationCurrent);
-    }
-
-    private async pruneIndexedCollectionFamily(codebasePath: string, keepCollectionName: string, assertMutationCurrent?: () => void): Promise<string[]> {
-        const prune = this.contextLifecycle().pruneIndexedCollectionFamily;
-        if (typeof prune !== 'function') {
-            throw new Error('Context lifecycle capability pruneIndexedCollectionFamily is required.');
-        }
-        const dropped = await prune.call(this.context, codebasePath, keepCollectionName, { assertMutationCurrent });
-        return Array.isArray(dropped) ? dropped.filter((entry): entry is string => typeof entry === 'string') : [];
-    }
-
-    private async pruneUnprovenStagedCollectionFamily(
-        codebasePath: string,
-        assertMutationCurrent?: () => void,
-        discardUnprovenPayload: boolean = false,
-    ): Promise<string[]> {
-        const prune = this.contextLifecycle().pruneUnprovenStagedCollectionFamily;
-        if (typeof prune !== 'function') {
-            throw new Error('Context lifecycle capability pruneUnprovenStagedCollectionFamily is required.');
-        }
-        const dropped = await prune.call(this.context, codebasePath, {
-            assertMutationCurrent,
-            discardUnprovenPayload,
-        });
-        return Array.isArray(dropped) ? dropped.filter((entry): entry is string => typeof entry === 'string') : [];
-    }
-
-    private markCodebaseCleared(codebasePath: string, collectionName?: string): void {
-        this.snapshotCapabilities().markCodebaseCleared?.(codebasePath, collectionName);
     }
 
     private stringifyToolJson(payload: unknown): string {
@@ -1918,120 +1271,53 @@ export class ToolHandlers {
     }
 
     private buildIndexingMetadata(codebasePath: string): { progressPct: number | null; lastUpdated: string | null; phase: string | null } {
-        const info = this.getSnapshotCodebaseInfo(codebasePath);
-        if (!info || info.status !== 'indexing') {
+        const activity = this.mutationRuntime.getActiveMutation(codebasePath);
+        if (!activity) {
             return {
                 progressPct: null,
                 lastUpdated: null,
-                phase: null
+                phase: null,
             };
         }
-
+        const operation = this.mutationRuntime.getOperation(codebasePath);
         return {
-            progressPct: Number.isFinite(info.indexingPercentage) ? Number(info.indexingPercentage) : null,
-            lastUpdated: typeof info.lastUpdated === 'string' ? info.lastUpdated : null,
-            phase: null
+            progressPct: operation?.progress ?? null,
+            lastUpdated: operation?.updatedAt ?? activity.acceptedAt,
+            phase: operation?.phase ?? null,
         };
-    }
-
-    private readLatestOperationReceipt(codebasePath: string):
-        | { id?: string; action: string; phase: string; generation: number }
-        | undefined {
-        const reader = this.snapshotManager as unknown as {
-            getLatestOperation?: (path: string) => {
-                id?: string;
-                action: string;
-                phase: string;
-                generation: number;
-            } | undefined;
-        };
-        try {
-            return reader.getLatestOperation?.(codebasePath);
-        } catch {
-            return undefined;
-        }
     }
 
     private getIndexingOperationForReadiness(codebasePath: string):
-        | { action: "create" | "reindex" | "sync" | "repair"; phase: string; generation: number }
+        | { action: "create" | "reindex" | "sync"; phase: string; generation: number }
         | undefined {
-        const receipt = this.readLatestOperationReceipt(codebasePath);
-        if (!receipt) {
+        const activity = this.mutationRuntime.getActiveMutation(codebasePath);
+        if (!activity || (activity.action !== "create" && activity.action !== "reindex" && activity.action !== "sync")) {
             return undefined;
         }
-        if (
-            receipt.action !== "create"
-            && receipt.action !== "reindex"
-            && receipt.action !== "sync"
-            && receipt.action !== "repair"
-        ) {
+        const operation = this.mutationRuntime.getOperation(codebasePath);
+        if (!operation) return undefined;
+        if (operation.phase === "completed" || operation.phase === "failed" || operation.phase === "blocked") {
             return undefined;
         }
-        if (receipt.phase === "completed" || receipt.phase === "failed" || receipt.phase === "blocked") {
-            return undefined;
-        }
-        return { action: receipt.action, phase: receipt.phase, generation: receipt.generation };
+        return { action: activity.action, phase: operation.phase, generation: activity.generation };
     }
 
     private hasSearchableGenerationForReadiness(codebasePath: string): boolean {
-        // Only sync runs against an already-published, searchable generation.
-        const receipt = this.readLatestOperationReceipt(codebasePath);
-        return Boolean(receipt && receipt.action === "sync");
+        return this.context.getCurrentPublication(codebasePath) !== null;
     }
 
     private async waitForSearchableSync(codebasePath: string, timeoutMs: number): Promise<boolean> {
+        if (this.context.getCurrentPublication(codebasePath)) return true;
         const deadline = Date.now() + Math.max(0, Math.trunc(timeoutMs));
         for (;;) {
-            this.refreshSnapshotStateFromDisk();
-            const status = this.getSnapshotCodebaseStatus(codebasePath);
-            if (status === "indexed" || status === "sync_completed") {
-                return true;
-            }
-            const receipt = this.readLatestOperationReceipt(codebasePath);
-            const syncInFlight = Boolean(
-                receipt
-                && receipt.action === "sync"
-                && receipt.phase !== "completed"
-                && receipt.phase !== "failed"
-                && receipt.phase !== "blocked",
-            );
-            if (!syncInFlight || Date.now() >= deadline) {
-                return false;
-            }
+            const activity = this.mutationRuntime.getActiveMutation(codebasePath);
+            if (activity?.action !== "sync" || Date.now() >= deadline) return false;
             await new Promise((resolve) => setTimeout(
                 resolve,
                 Math.min(100, Math.max(1, deadline - Date.now())),
             ));
+            if (this.context.getCurrentPublication(codebasePath)) return true;
         }
-    }
-
-    /**
-     * Startup entry for interrupted-index recovery. Acquires a mutation lease per
-     * root, skips live writers, and reuses the fenced recovery path (no unfenced
-     * snapshot lifecycle publication).
-     */
-    public async recoverInterruptedIndexingAtStartup(): Promise<void> {
-        return this.interruptedIndexRecoveryCoordinator.recoverInterruptedIndexingAtStartup();
-    }
-
-    public async recoverIndexedSnapshotFromCompletionProof(
-        codebasePath: string,
-        completionProof: CompletionProofValidationResult,
-        lease: RootMutationLease,
-    ): Promise<boolean> {
-        return this.interruptedIndexRecoveryCoordinator.recoverIndexedSnapshotFromCompletionProof(
-            codebasePath,
-            completionProof,
-            lease,
-        );
-    }
-
-    public extractIndexedRecoveryFromCompletionProof(
-        completionProof: CompletionProofValidationResult,
-    ): ReturnType<InterruptedIndexRecoveryCoordinator["extractIndexedRecoveryFromCompletionProof"]> {
-        return this.interruptedIndexRecoveryCoordinator.extractIndexedRecoveryFromCompletionProof(
-            completionProof,
-        );
     }
 
     private buildManageActionBlockedMessage(codebasePath: string, action: RuntimeOwnerMutationAction): string {
@@ -2063,49 +1349,11 @@ export class ToolHandlers {
     }
 
     private buildStaleLocalHint(codebasePath: string, reason: CompletionProofReason): Record<string, unknown> {
-        const preferSync = this.canSyncStaleLocal(codebasePath, reason);
-        const preferRepair = !preferSync && reason === "missing_marker_doc";
         return {
             completionProof: reason,
-            recommendedAction: preferSync
-                ? this.buildSyncHint(codebasePath)
-                : preferRepair
-                ? this.buildRepairHint(codebasePath)
-                : this.buildCreateHint(codebasePath),
-            ...(preferSync ? { sync: this.buildSyncHint(codebasePath) } : {}),
-            ...(preferRepair ? { create: this.buildCreateHint(codebasePath) } : {})
+            recommendedAction: this.buildReindexHint(codebasePath),
+            reindex: this.buildReindexHint(codebasePath),
         };
-    }
-
-    private getSnapshotCollectionName(codebasePath: string): string | undefined {
-        const fromSnapshot = this.snapshotCapabilities().getCodebaseCollectionName?.(codebasePath);
-        if (typeof fromSnapshot === 'string' && fromSnapshot.trim().length > 0) {
-            return fromSnapshot.trim();
-        }
-        const fromInfo = this.getSnapshotCodebaseInfo(codebasePath)?.collectionName;
-        return typeof fromInfo === 'string' && fromInfo.trim().length > 0
-            ? fromInfo.trim()
-            : undefined;
-    }
-
-    private canSyncStaleLocal(codebasePath: string, reason: CompletionProofReason): boolean {
-        if (reason !== "missing_marker_doc") {
-            return false;
-        }
-        const info = this.getSnapshotCodebaseInfo(codebasePath);
-        if (!info || (info.status !== 'indexed' && info.status !== 'sync_completed')) {
-            return false;
-        }
-        if (info.fingerprintSource !== 'verified' || !info.indexFingerprint) {
-            return false;
-        }
-        if (!this.getSnapshotCollectionName(codebasePath)) {
-            return false;
-        }
-        if (!this.fingerprintsEqual(info.indexFingerprint, this.runtimeFingerprint)) {
-            return false;
-        }
-        return true;
     }
 
     private buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: CompletionProofReason): string {
@@ -2135,44 +1383,15 @@ export class ToolHandlers {
     private async validateCompletionProof(codebasePath: string): Promise<CompletionProofValidationResult> {
         return validateIndexCompletionProof({
             codebasePath,
-            runtimeFingerprint: this.runtimeFingerprint,
-            getIndexCompletionMarker: getCompletionMarkerReader(this.context),
+            getCurrentPublication: getPublicationProofReader(this.context),
             onProbeError: (error) => {
-                console.warn(`[INDEX-PROOF] Completion marker probe failed for '${codebasePath}': ${formatUnknownError(error)}`);
+                console.warn(`[INDEX-PROOF] Publication proof probe failed for '${codebasePath}': ${formatUnknownError(error)}`);
             }
         });
     }
 
-    private refreshSnapshotStateFromDisk(): void {
-        const snapshotManager = this.snapshotManager as unknown as {
-            refreshFromDiskIfChanged?: () => boolean;
-        };
-        if (typeof snapshotManager.refreshFromDiskIfChanged !== 'function') {
-            return;
-        }
-        snapshotManager.refreshFromDiskIfChanged();
-    }
-
     private isPathWithinCodebase(targetPath: string, rootPath: string): boolean {
         return targetPath === rootPath || targetPath.startsWith(`${rootPath}${path.sep}`);
-    }
-
-    private getTrackedRootEntryForPath(codebasePath: string): TrackedRootEntry | null {
-        const info = this.getSnapshotCodebaseInfo(codebasePath);
-        const status = info?.status
-            || this.getSnapshotCodebaseStatus(codebasePath);
-        if ((!info || typeof info !== 'object') && (!status || status === 'not_found')) {
-            return null;
-        }
-        if (status === 'not_found') {
-            return null;
-        }
-        return {
-            path: codebasePath,
-            info: info
-                ? info as unknown as TrackedCodebaseInfo
-                : { status, lastUpdated: new Date(0).toISOString() }
-        };
     }
 
     private async probeLocalSearchCollectionState(codebasePath: string): Promise<{
@@ -2227,152 +1446,22 @@ export class ToolHandlers {
         return summarizeIndexFingerprint(fingerprint);
     }
 
-    private fingerprintsEqual(left: IndexFingerprint, right: IndexFingerprint): boolean {
-        return indexFingerprintsEqual(left, right);
-    }
-
-    private isRuntimeFingerprintMismatch(diagnostics: FingerprintCompatibilityDiagnostics): boolean {
-        return Boolean(
-            diagnostics.indexedFingerprint
-            && !this.fingerprintsEqual(diagnostics.indexedFingerprint, diagnostics.runtimeFingerprint)
-        );
-    }
-
-    private buildRuntimeMismatchHint(codebasePath: string, diagnostics: FingerprintCompatibilityDiagnostics): Record<string, unknown> {
-        return {
-            reason: 'runtime_fingerprint_mismatch',
-            indexedFingerprint: diagnostics.indexedFingerprint ? this.summarizeFingerprint(diagnostics.indexedFingerprint) : null,
-            runtimeFingerprint: this.summarizeFingerprint(diagnostics.runtimeFingerprint),
-            nextStep: `Restart Satori with the indexed fingerprint for '${codebasePath}' to reuse the current index. Reindex only if you intentionally want to migrate the repo to the current runtime.`,
-        };
-    }
-
     private buildCompatibilityDiagnostics(codebasePath: string): FingerprintCompatibilityDiagnostics {
-        const info = this.getSnapshotCodebaseInfo(codebasePath);
-        const statusAtCheck = info?.status
-            || this.getSnapshotCodebaseStatus(codebasePath);
-        const diagnostics: FingerprintCompatibilityDiagnostics = {
+        return {
             runtimeFingerprint: this.runtimeFingerprint,
-            statusAtCheck
+            statusAtCheck: this.context.getCurrentPublication(codebasePath) ? 'indexed' : 'not_found',
         };
-
-        if (info?.indexFingerprint) {
-            diagnostics.indexedFingerprint = info.indexFingerprint;
-        }
-
-        if (info?.fingerprintSource) {
-            diagnostics.fingerprintSource = info.fingerprintSource;
-        }
-
-        if (info?.reindexReason) {
-            diagnostics.reindexReason = info.reindexReason;
-        }
-
-        if (!diagnostics.reindexReason && this.isRuntimeFingerprintMismatch(diagnostics)) {
-            diagnostics.reindexReason = 'fingerprint_mismatch';
-        }
-
-        return diagnostics;
     }
 
     private buildCompatibilityStatusLines(codebasePath: string): string {
-        const diagnostics = this.buildCompatibilityDiagnostics(codebasePath);
-        let lines = `\n🧬 Runtime fingerprint: ${this.summarizeFingerprint(diagnostics.runtimeFingerprint)}`;
-        lines += diagnostics.indexedFingerprint
-            ? `\n🧬 Indexed fingerprint: ${this.summarizeFingerprint(diagnostics.indexedFingerprint)}`
-            : `\n🧬 Indexed fingerprint: unavailable`;
-
-        if (diagnostics.fingerprintSource) {
-            lines += `\n🧬 Fingerprint source: ${diagnostics.fingerprintSource}`;
+        const publication = this.context.getCurrentPublication(codebasePath);
+        let lines = `\n🧬 Runtime fingerprint: ${this.summarizeFingerprint(this.runtimeFingerprint)}`;
+        if (publication) {
+            lines += `\n📜 Publication policy: ${publication.publication.policy.policyHash}`;
+            lines += `\n📜 Control signature: ${publication.publication.policy.controlSignature}`;
+            lines += `\n📦 Publication format: ${JSON.stringify(publication.publication.format)}`;
         }
-
-        if (diagnostics.reindexReason) {
-            lines += `\n🧬 Reindex reason: ${diagnostics.reindexReason}`;
-        }
-
         return lines;
-    }
-
-
-
-
-
-
-
-
-
-    private getMatchingBlockedRoot(absolutePath: string): { path: string; message?: string } | null {
-        const blocked = this.getSnapshotAllCodebases()
-            .filter((entry) => entry.info.status === 'requires_reindex');
-        if (blocked.length === 0) {
-            const directEntry = this.getTrackedRootEntryForPath(absolutePath);
-            if (!directEntry || directEntry.info?.status !== 'requires_reindex') {
-                return null;
-            }
-            const gate = this.ensureSnapshotFingerprintCompatibility(absolutePath);
-            if (gate.changed) {
-                this.saveSnapshotIfSupported();
-            }
-            if (gate.allowed === true && gate.changed === true) {
-                return null;
-            }
-            return {
-                path: absolutePath,
-                message: typeof directEntry.info.message === 'string' ? directEntry.info.message : undefined
-            };
-        }
-
-        blocked.sort((a, b) => b.path.length - a.path.length);
-        const match = blocked.find((entry) => {
-            if (!(absolutePath === entry.path || absolutePath.startsWith(`${entry.path}${path.sep}`))) {
-                return false;
-            }
-            const gate = this.ensureSnapshotFingerprintCompatibility(entry.path);
-            if (gate.changed) {
-                this.saveSnapshotIfSupported();
-            }
-            // A requires_reindex snapshot state is blocked by default. The only legal
-            // escape hatch is when the access gate actively recovers a resolved
-            // fingerprint mismatch and reports allowed=true together with changed=true.
-            return !(gate.allowed === true && gate.changed === true);
-        });
-        if (!match) {
-            return null;
-        }
-
-        const message = 'message' in match.info && typeof match.info.message === 'string'
-            ? match.info.message
-            : undefined;
-        return {
-            path: match.path,
-            message
-        };
-    }
-
-    private enforceFingerprintGate(codebasePath: string): { blockedResponse?: ToolTextResponse; message?: string; reason?: AccessGateReason } {
-        const gate = this.ensureSnapshotFingerprintCompatibility(codebasePath);
-        if (!gate.allowed) {
-            if (gate.changed) {
-                this.saveSnapshotIfSupported();
-            }
-            return {
-                reason: gate.reason,
-                message: gate.message,
-                blockedResponse: {
-                    content: [{
-                        type: "text",
-                        text: this.buildReindexInstruction(codebasePath, gate.message)
-                    }],
-                    isError: true
-                }
-            };
-        }
-
-        if (gate.changed) {
-            this.saveSnapshotIfSupported();
-        }
-
-        return {};
     }
 
     private normalizeSearchPath(relativePath: string): string {
@@ -2430,8 +1519,7 @@ export class ToolHandlers {
     private evaluateReindexPreflight(codebasePath: string): ReindexPreflightResult {
         return evaluateReindexPreflightHelper({
             codebasePath,
-            currentStatus: this.getSnapshotCodebaseStatus(codebasePath),
-            ensureFingerprintCompatibility: (value) => this.ensureSnapshotFingerprintCompatibility(value),
+            hasCurrentPublication: this.context.getCurrentPublication(codebasePath) !== null,
             getWorkingTreeChangedPathsForPreflight: (value) => this.getWorkingTreeChangedPathsForPreflight(value),
         });
     }
@@ -2474,7 +1562,7 @@ export class ToolHandlers {
         return isRecord(info) && info.indexStatus === 'limit_reached';
     }
 
-    private async loadRegistryValidatedCallGraphSidecar(input: {
+    private async loadRegistryValidatedRelationshipNavigation(input: {
         codebaseRoot: string;
         registryManifestHash?: string;
         registryUnavailableReason?: CallGraphUnavailableReason;
@@ -2493,24 +1581,26 @@ export class ToolHandlers {
             };
         }
 
-        const compatibility = input.preparedRead
-            ? await this.loadPreparedNavigationCompatibility(
-                input.preparedRead,
-                input.registryManifestHash,
-                input.operations,
-            )
-            : await this.navigationStore.getCompatibilityState({
-                normalizedRootPath: input.codebaseRoot,
-                expectedSymbolRegistryManifestHash: input.registryManifestHash,
-            });
+        if (!input.preparedRead) {
+            return {
+                relationshipReady: false,
+                relationshipUnavailableReason: 'missing_relationship_navigation',
+                warning: 'RELATIONSHIP_NAVIGATION_UNAVAILABLE:publication_identity_missing',
+            };
+        }
+        const compatibility = await this.loadPreparedNavigationCompatibility(
+            input.preparedRead,
+            input.registryManifestHash,
+            input.operations,
+        );
         if (compatibility.relationships.status !== 'ok') {
             const relationshipUnavailableReason = compatibility.relationships.status === 'missing'
-                ? 'missing_relationship_sidecar'
-                : 'incompatible_relationship_sidecar';
+                ? 'missing_relationship_navigation'
+                : 'incompatible_relationship_navigation';
             return {
                 relationshipReady: false,
                 relationshipUnavailableReason,
-                warning: `RELATIONSHIP_SIDECAR_UNAVAILABLE:${compatibility.relationships.status}`,
+                warning: `RELATIONSHIP_NAVIGATION_UNAVAILABLE:${compatibility.relationships.status}`,
             };
         }
 
@@ -2555,20 +1645,12 @@ export class ToolHandlers {
             return undefined;
         }
         const manifest = await this.loadPreparedNavigationManifest(preparedRead);
-        const navigation = preparedRead.generationReceipt?.navigation;
-        if (
-            manifest.status !== 'ok'
-            || !navigation
-            || manifest.manifestHash !== navigation.symbolRegistryManifestHash
-        ) return undefined;
+        if (manifest.status !== 'ok') return undefined;
         const compatibility = await this.loadPreparedNavigationCompatibility(
             preparedRead,
             manifest.manifestHash,
         );
-        if (
-            compatibility.relationships.status !== 'ok'
-            || compatibility.relationships.manifestHash !== navigation.relationshipManifestHash
-        ) return undefined;
+        if (compatibility.relationships.status !== 'ok') return undefined;
         const confidenceScore = (confidence: RelationshipRecord['confidence']): number => {
             if (confidence === 'high') return 0.95;
             if (confidence === 'medium') return 0.65;
@@ -2608,7 +1690,7 @@ export class ToolHandlers {
             }];
         });
         return buildSearchChangedCodeDebug({
-            sidecar: { nodes, edges },
+            graph: { nodes, edges },
             changedFilesState,
             normalizeRelativeFilePath: (relativeFilePath: string) => this.normalizeRelativeFilePath(relativeFilePath),
             normalizeSearchSymbolLabel: (label) => normalizeSearchSymbolLabelHelper(label),
@@ -2643,7 +1725,6 @@ export class ToolHandlers {
         reason: NonOkReason = 'requires_reindex'
     ): FileOutlineResponseEnvelope {
         const detailLine = detail ? `${detail}\n\n` : '';
-        const preferRepair = reason === 'missing_symbol_registry' || reason === 'missing_relationship_sidecar';
         return {
             status: 'requires_reindex',
             reason,
@@ -2651,11 +1732,8 @@ export class ToolHandlers {
             file: input.file,
             outline: null,
             hasMore: false,
-            message: preferRepair
-                ? `${detailLine}Relationship-backed navigation sidecars are missing. Please run manage_index with {"action":"repair","path":"${codebasePath}"}.`
-                : `${detailLine}Relationship-backed navigation sidecars are missing or incompatible. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
+            message: `${detailLine}Publication relationship navigation is missing or incompatible. Please run manage_index with {"action":"reindex","path":"${codebasePath}"}.`,
             hints: {
-                ...(preferRepair ? { repair: this.buildRepairHint(codebasePath) } : {}),
                 reindex: this.buildReindexHint(codebasePath)
             }
         };
@@ -2798,7 +1876,8 @@ export class ToolHandlers {
 
     private async buildRelationshipBackedCallGraph(input: {
         codebaseRoot: string;
-        generationId?: string;
+        publicationId: string;
+        navigationRoot: string;
         registry: SymbolRegistry;
         registryManifestHash: string;
         resolvedSymbol: SymbolRecord;
@@ -2807,42 +1886,8 @@ export class ToolHandlers {
         depth: number;
         limit: number;
         readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
-    }): Promise<{
-        supported: true;
-        direction: CallGraphDirection;
-        depth: number;
-        limit: number;
-        nodes: CallGraphNode[];
-        edges: CallGraphEdge[];
-        notes: CallGraphNote[];
-        warnings?: string[];
-        testReferences?: CallGraphTestReference[];
-        notesTruncated: boolean;
-        totalNoteCount: number;
-        returnedNoteCount: number;
-        sidecar: {
-            builtAt: string;
-            nodeCount: number;
-            edgeCount: number;
-        };
-    } | null> {
+    }): Promise<RelationshipBackedCallGraphResult | null> {
         return this.relationshipBackedCallGraph.build(input);
-    }
-
-    private async rebuildCallGraphForIndex(
-        codebasePath: string,
-        assertMutationCurrent?: () => void,
-        effectiveIgnorePatterns?: string[],
-    ): Promise<void> {
-        await this.relationshipBackedCallGraph.rebuildForIndex(
-            codebasePath,
-            assertMutationCurrent,
-            effectiveIgnorePatterns,
-        );
-    }
-
-    private async rebuildCallGraphForSyncDelta(codebasePath: string, changedFiles: string[]): Promise<boolean> {
-        return this.relationshipBackedCallGraph.rebuildForSyncDelta(codebasePath, changedFiles);
     }
 
     private isZillizBackend(): boolean {
@@ -2853,11 +1898,8 @@ export class ToolHandlers {
         return this.vectorBackendMaintenance.buildCollectionLimitMessage(targetCodebasePath);
     }
 
-    private async dropZillizCollectionForCreate(
-        collectionName: string,
-        createLease?: import("./mutation-lease.js").RootMutationLease,
-    ) {
-        return this.vectorBackendMaintenance.dropZillizCollectionForCreate(collectionName, createLease);
+    private async dropZillizCollectionForCreate(collectionName: string) {
+        return this.vectorBackendMaintenance.dropZillizCollectionForCreate(collectionName);
     }
 
     public async handleIndexCodebase(args: IndexCodebaseArgs) {
@@ -2866,10 +1908,6 @@ export class ToolHandlers {
 
     public async handleReindexCodebase(args: ReindexCodebaseArgs) {
         return this.manageIndexingHandlers.handleReindexCodebase(args);
-    }
-
-    public async handleRepairIndex(args: ToolArgs) {
-        return this.manageIndexingHandlers.handleRepairIndex(args);
     }
 
     public async handleSearchCode(args: ToolArgs): Promise<SearchToolTextResponse> {

@@ -1,13 +1,18 @@
 import {
     compareContractStrings,
     getGraphNeighbors,
-    type NavigationStore,
+    type GetRelationshipManifestInput,
     type RelationshipManifest,
     type RelationshipRecord,
     type SymbolRecord,
     type SymbolRegistry,
 } from "@zokizuan/satori-core";
-import type { CallGraphEdge, CallGraphNote } from "./call-graph.js";
+import type {
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNoteResult as CallGraphNote,
+} from "./search-types.js";
+
+type PreparedNavigationReader = NonNullable<GetRelationshipManifestInput["navigationStore"]>;
 
 export interface PreparedRelationshipDirectionTraversal {
     edges: CallGraphEdge[];
@@ -44,7 +49,7 @@ function createPreparedNavigationStore(input: {
     relationshipManifest: RelationshipManifest;
     relationshipRecords: RelationshipRecord[];
     relationshipWarnings: readonly string[];
-}): NavigationStore {
+}): PreparedNavigationReader {
     const registryState = () => ({
         status: "ok" as const,
         rootPath: input.rootPath,
@@ -63,21 +68,6 @@ function createPreparedNavigationStore(input: {
     });
     return {
         getManifest: async () => registryState(),
-        getSymbolsByFile: async ({ file }) => ({
-            ...registryState(),
-            symbols: [...(input.registry.symbolsByFile.get(file) || [])],
-        }),
-        getSymbolByInstanceId: async ({ symbolInstanceId }) => ({
-            ...registryState(),
-            symbol: input.registry.symbolsByInstanceId.get(symbolInstanceId) || null,
-        }),
-        getSymbolCandidatesByKey: async ({ symbolKey }) => ({
-            ...registryState(),
-            symbols: [...(input.registry.symbolsByKey.get(symbolKey) || [])],
-        }),
-        findOwnerForSpan: async () => {
-            throw new Error("Prepared relationship traversal does not resolve source-span owners.");
-        },
         getRelationships: async ({ expectedSymbolRegistryManifestHash }) => {
             if (
                 expectedSymbolRegistryManifestHash
@@ -91,11 +81,6 @@ function createPreparedNavigationStore(input: {
             }
             return relationshipsState();
         },
-        getCompatibilityState: async () => ({
-            rootPath: input.rootPath,
-            registry: registryState(),
-            relationships: relationshipsState(),
-        }),
     };
 }
 
@@ -186,6 +171,8 @@ async function prepareDirection(input: {
 
 export async function prepareRelationshipTraversals(input: {
     rootPath: string;
+    publicationId: string;
+    navigationRoot: string;
     registryManifestIdentity: string;
     relationshipManifestIdentity: string;
     registry: SymbolRegistry;
@@ -208,6 +195,8 @@ export async function prepareRelationshipTraversals(input: {
     });
     const neighbors = await getGraphNeighbors({
         normalizedRootPath: input.rootPath,
+        publicationId: input.publicationId,
+        navigationRoot: input.navigationRoot,
         expectedSymbolRegistryManifestHash: input.registryManifestIdentity,
         navigationStore,
         symbolInstanceId: input.target.symbolInstanceId,

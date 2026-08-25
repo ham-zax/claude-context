@@ -1,24 +1,11 @@
 /**
- * Phase 5.1 — single mutable MCP state owner for generation-scoped checkpoint
- * observations, full-index source handoff, and derived readiness inputs.
+ * MCP-owned watcher observation cache for Publication source freshness.
  *
- * This module owns the three checkpoint-observation maps that used to live on
- * SyncManager (source checkpoint observations, checkpoint statuses, and
- * full-index handoff barriers) plus the full-index handoff lifecycle
- * (begin/reject/complete/supersede). SyncManager keeps thin compatibility
- * delegates that forward to this owner so every public method signature and
- * observable behavior is preserved.
- *
- * Keying note: callers pass the same keys they used when the maps lived on
- * SyncManager (canonical watcher roots where SyncManager computed them, raw
- * codebase paths where it did not). This owner never canonicalizes, so the
- * stored key space is identical to the previous implementation.
+ * Durable source authority is PublicationStore/source.json. This owner keeps
+ * only compact watcher/checkpoint observations and the temporary full-index
+ * handoff barrier used while MCP lifecycle state is still "indexing".
  */
-import type {
-    ProvenSourceFreshnessCheckpointEvidence,
-    ProvenVectorGenerationReceipt,
-} from "@zokizuan/satori-core";
-import type { RootMutationLease } from "./mutation-lease.js";
+import type { ProvenSourceFreshnessCheckpointEvidence } from "@zokizuan/satori-core/integration";
 import type {
     FullIndexSourceHandoffBarrierInput,
     FullIndexSourceHandoffInput,
@@ -27,44 +14,22 @@ import type {
 
 export type SourceCheckpointObservationStatus = 'valid' | 'missing' | 'corrupt';
 
-/**
- * SyncManager-owned collaborators the handoff lifecycle needs. The owner stays
- * the single mutable owner of checkpoint observation/handoff state while the
- * watcher capture machinery remains SyncManager-owned.
- */
 export interface SourceObservationStateDependencies {
-    assertMutationCurrent(lease?: RootMutationLease): void;
+    assertMutationCurrent(root: string): void;
     hasCurrentWatcherCapture(root: string, capture: WatcherBootstrapCapture): boolean;
     coverWatcherObservation(root: string, observedEventEpoch: number | undefined): void;
-    proveVectorGeneration(root: string): Promise<ProvenVectorGenerationReceipt | null>;
-    inspectSourceFreshnessCheckpoint(
-        root: string,
-        checkpointIdentity?: string,
-        requestBoundReceipt?: ProvenVectorGenerationReceipt,
-    ): Promise<ProvenSourceFreshnessCheckpointEvidence>;
-    getRegisteredSourceFreshnessCheckpointObservation(root: string): string | null;
+    inspectSourceFreshnessCheckpoint(root: string): Promise<ProvenSourceFreshnessCheckpointEvidence>;
+    getCurrentPublicationSourceObservation(root: string): string | null;
     isPreparedReadAvailable(root: string): boolean;
 }
 
 export class SourceObservationState {
-    private readonly sourceCheckpointObservations: Map<string, string> = new Map();
-    private readonly sourceCheckpointStatuses: Map<string, SourceCheckpointObservationStatus> = new Map();
-    private readonly fullIndexSourceHandoffBarriers: Map<string, FullIndexSourceHandoffBarrierInput> = new Map();
-    private readonly deps: SourceObservationStateDependencies;
+    private readonly sourceCheckpointObservations = new Map<string, string>();
+    private readonly sourceCheckpointStatuses = new Map<string, SourceCheckpointObservationStatus>();
+    private readonly fullIndexSourceHandoffBarriers = new Map<string, FullIndexSourceHandoffBarrierInput>();
 
-    constructor(deps: SourceObservationStateDependencies) {
-        this.deps = deps;
-    }
+    constructor(private readonly deps: SourceObservationStateDependencies) {}
 
-    // ------------------------------------------------------------------
-    // Checkpoint observation recording (generation-scoped)
-    // ------------------------------------------------------------------
-
-    /**
-     * Record a valid checkpoint observation for a codebase. Returns the
-     * previously recorded observation token (or undefined) so callers can
-     * detect observation changes.
-     */
     recordValidCheckpointObservation(codebasePath: string, observationToken: string): string | undefined {
         const previous = this.sourceCheckpointObservations.get(codebasePath);
         this.sourceCheckpointStatuses.set(codebasePath, 'valid');
@@ -72,26 +37,15 @@ export class SourceObservationState {
         return previous;
     }
 
-    /**
-     * Record that the codebase's checkpoint is unavailable (missing/corrupt):
-     * the status is set and any recorded observation is cleared.
-     */
     recordUnavailableCheckpoint(codebasePath: string, status: 'missing' | 'corrupt'): void {
         this.sourceCheckpointStatuses.set(codebasePath, status);
         this.sourceCheckpointObservations.delete(codebasePath);
     }
 
-    /**
-     * Record a checkpoint observation token without touching the status
-     * (used by the fenced-checkpoint join path).
-     */
     recordCheckpointObservation(codebasePath: string, observationToken: string): void {
         this.sourceCheckpointObservations.set(codebasePath, observationToken);
     }
 
-    /**
-     * Clear a recorded checkpoint observation without touching the status.
-     */
     clearCheckpointObservation(codebasePath: string): void {
         this.sourceCheckpointObservations.delete(codebasePath);
     }
@@ -120,147 +74,70 @@ export class SourceObservationState {
         this.fullIndexSourceHandoffBarriers.clear();
     }
 
-    // ------------------------------------------------------------------
-    // Full-index source handoff lifecycle
-    // ------------------------------------------------------------------
-
-    /**
-     * Open a full-index source handoff barrier for a codebase. The barrier
-     * keeps prepared reads failing closed (checkpoint_unverified) until the
-     * handoff completes or is rejected/superseded.
-     */
     beginHandoff(
         codebasePath: string,
         input: FullIndexSourceHandoffBarrierInput,
-        mutationLease?: RootMutationLease,
     ): void {
-        this.deps.assertMutationCurrent(mutationLease);
-        if (input.candidatePolicyHash.length === 0 || input.markerRunId.length === 0) {
-            throw new TypeError('Full-index source handoff requires a candidate policy hash and marker run ID.');
+        this.deps.assertMutationCurrent(codebasePath);
+        if (input.publicationId.length === 0) {
+            throw new TypeError('Full-index source handoff requires a Publication ID.');
         }
         this.fullIndexSourceHandoffBarriers.set(codebasePath, Object.freeze({ ...input }));
     }
 
-    /**
-     * Reject an open full-index source handoff barrier. Returns true when the
-     * barrier matched the input and was removed.
-     */
     rejectHandoff(
         codebasePath: string,
         input: FullIndexSourceHandoffBarrierInput,
-        mutationLease?: RootMutationLease,
     ): boolean {
-        this.deps.assertMutationCurrent(mutationLease);
+        this.deps.assertMutationCurrent(codebasePath);
         const barrier = this.fullIndexSourceHandoffBarriers.get(codebasePath);
-        if (
-            barrier?.candidatePolicyHash !== input.candidatePolicyHash
-            || barrier.markerRunId !== input.markerRunId
-        ) {
-            return false;
-        }
+        if (barrier?.publicationId !== input.publicationId) return false;
         this.fullIndexSourceHandoffBarriers.delete(codebasePath);
         return true;
     }
 
-    /**
-     * Supersede (remove) a handoff barrier after a sync produced the proven
-     * completed generation the barrier was waiting for.
-     */
-    supersedeHandoffAfterSync(
-        codebasePath: string,
-        provenGeneration: ProvenVectorGenerationReceipt | undefined,
-    ): boolean {
+    supersedeHandoffAfterSync(codebasePath: string, publicationId: string | undefined): boolean {
         const barrier = this.fullIndexSourceHandoffBarriers.get(codebasePath);
         if (
             !barrier
-            || provenGeneration?.marker.runId !== barrier.markerRunId
-            || provenGeneration.marker.indexStatus !== 'completed'
-            || provenGeneration.marker.indexPolicyHash !== barrier.candidatePolicyHash
-            || provenGeneration.policy.canonicalRoot !== codebasePath
-            || provenGeneration.policy.policyHash !== barrier.candidatePolicyHash
-        ) {
-            return false;
-        }
+            || !publicationId
+            || this.deps.getCurrentPublicationSourceObservation(codebasePath) !== publicationId
+        ) return false;
         this.fullIndexSourceHandoffBarriers.delete(codebasePath);
         return true;
     }
 
-    /**
-     * Binds an already-proven completed generation/checkpoint to the watcher
-     * observation captured for the same candidate. This deliberately does not
-     * use the ordinary snapshot-status-gated checkpoint validator: the full
-     * index lifecycle is still marked indexing until this handoff succeeds or
-     * fails closed.
-     */
     async completeHandoff(
         codebasePath: string,
         input: FullIndexSourceHandoffInput,
-        mutationLease?: RootMutationLease,
     ): Promise<boolean> {
-        this.deps.assertMutationCurrent(mutationLease);
+        this.deps.assertMutationCurrent(codebasePath);
         const barrier = this.fullIndexSourceHandoffBarriers.get(codebasePath);
         if (
-            barrier?.candidatePolicyHash !== input.candidatePolicyHash
-            || barrier.markerRunId !== input.provenGeneration.marker.runId
+            barrier?.publicationId !== input.publicationId
             || input.capture.canonicalRoot !== codebasePath
-            || input.capture.candidatePolicyHash !== input.candidatePolicyHash
             || input.checkpointObservation.length === 0
-            || input.provenGeneration.collectionName.length === 0
-            || input.provenGeneration.policy.canonicalRoot !== codebasePath
-            || input.provenGeneration.marker.indexStatus !== 'completed'
-            || input.provenGeneration.marker.indexPolicyHash !== input.candidatePolicyHash
+        ) {
+            return false;
+        }
+        if (!this.deps.hasCurrentWatcherCapture(codebasePath, input.capture)) return false;
+
+        let currentCheckpoint: ProvenSourceFreshnessCheckpointEvidence;
+        try {
+            currentCheckpoint = await this.deps.inspectSourceFreshnessCheckpoint(codebasePath);
+        } catch {
+            return false;
+        }
+        if (
+            currentCheckpoint.status !== 'valid'
+            || currentCheckpoint.publicationId !== input.publicationId
+            || currentCheckpoint.observationToken !== input.checkpointObservation
+            || this.deps.getCurrentPublicationSourceObservation(codebasePath) !== input.checkpointObservation
         ) {
             return false;
         }
 
-        const matchesProvenGeneration = (
-            current: ProvenVectorGenerationReceipt,
-        ): boolean => current.collectionName === input.provenGeneration.collectionName
-            && current.marker.runId === input.provenGeneration.marker.runId
-            && current.marker.indexStatus === 'completed'
-            && current.marker.indexedFiles === input.provenGeneration.marker.indexedFiles
-            && current.marker.totalChunks === input.provenGeneration.marker.totalChunks
-            && current.marker.indexPolicyHash === input.candidatePolicyHash
-            && current.policyDocumentDigest === input.provenGeneration.policyDocumentDigest
-            && current.policy.canonicalRoot === input.provenGeneration.policy.canonicalRoot
-            && current.policy.policyHash === input.provenGeneration.policy.policyHash
-            && current.policy.controlSignature === input.provenGeneration.policy.controlSignature
-            && current.exactPayloadCount === input.provenGeneration.exactPayloadCount
-            && current.observations.profileFileToken === input.provenGeneration.observations.profileFileToken
-            && current.observations.policyFileToken === input.provenGeneration.observations.policyFileToken;
-
-        if (!this.deps.hasCurrentWatcherCapture(codebasePath, input.capture)) return false;
-
-        try {
-            const currentGeneration = await this.deps.proveVectorGeneration(codebasePath);
-            if (!currentGeneration || !matchesProvenGeneration(currentGeneration)) {
-                return false;
-            }
-
-            const currentCheckpoint = await this.deps.inspectSourceFreshnessCheckpoint(
-                codebasePath,
-                input.provenGeneration.collectionName,
-                input.provenGeneration,
-            );
-            if (
-                currentCheckpoint.status !== 'valid'
-                || currentCheckpoint.observationToken !== input.checkpointObservation
-                || (
-                    currentCheckpoint.generationReceipt !== undefined
-                    && !matchesProvenGeneration(currentCheckpoint.generationReceipt)
-                )
-            ) {
-                return false;
-            }
-
-            const registeredObservation = this.deps
-                .getRegisteredSourceFreshnessCheckpointObservation(codebasePath);
-            if (registeredObservation !== input.checkpointObservation) return false;
-        } catch {
-            return false;
-        }
-
-        this.deps.assertMutationCurrent(mutationLease);
+        this.deps.assertMutationCurrent(codebasePath);
         if (!this.deps.hasCurrentWatcherCapture(codebasePath, input.capture)) return false;
         this.sourceCheckpointStatuses.set(codebasePath, 'valid');
         this.sourceCheckpointObservations.set(codebasePath, input.checkpointObservation);

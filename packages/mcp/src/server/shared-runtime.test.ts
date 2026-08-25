@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { IndexCompletionMarkerDocument } from "@zokizuan/satori-core";
 import {
     buildRuntimeIndexFingerprint,
     type ContextMcpConfig,
@@ -17,7 +16,7 @@ import {
 } from "../core/handlers.js";
 import type { SearchRequestCoordinator } from "../core/search-request-coordinator.js";
 import { toolRegistry } from "../tools/registry.js";
-import type { MissingProviderConfigIssue, ToolContext } from "../tools/types.js";
+import type { ToolContext } from "../tools/types.js";
 import {
     WorkspaceAuthorizationError,
     createSessionWorkspacePolicy,
@@ -43,7 +42,6 @@ function config(): ContextMcpConfig {
         encoderOutputDimension: 1024,
         readFileMaxLines: 1000,
         watchSyncEnabled: false,
-        watchDebounceMs: 5000,
     };
 }
 
@@ -110,10 +108,6 @@ test("one runtime host serves independent MCP sessions over separate transports"
             };
             toolContext: {
                 context: unknown;
-                snapshotManager: {
-                    setCodebaseIndexing(path: string): void;
-                    getCodebaseStatus(path: string): string;
-                };
                 syncManager: unknown;
                 runtimeOwnerGate: unknown;
             };
@@ -140,10 +134,6 @@ test("one runtime host serves independent MCP sessions over separate transports"
         secondInternals.resources.toolContext.context,
     );
     assert.equal(
-        firstInternals.resources.toolContext.snapshotManager,
-        secondInternals.resources.toolContext.snapshotManager,
-    );
-    assert.equal(
         firstInternals.resources.toolContext.syncManager,
         secondInternals.resources.toolContext.syncManager,
     );
@@ -166,18 +156,6 @@ test("one runtime host serves independent MCP sessions over separate transports"
         (secondInternals.resources.localHandlers as unknown as {
             mutationLeaseCoordinator: unknown;
         }).mutationLeaseCoordinator,
-    );
-    const firstRoot = path.join(stateRoot, "repo-a");
-    const secondRoot = path.join(stateRoot, "repo-b");
-    firstInternals.resources.toolContext.snapshotManager.setCodebaseIndexing(firstRoot);
-    secondInternals.resources.toolContext.snapshotManager.setCodebaseIndexing(secondRoot);
-    assert.equal(
-        firstInternals.resources.toolContext.snapshotManager.getCodebaseStatus(firstRoot),
-        "indexing",
-    );
-    assert.equal(
-        secondInternals.resources.toolContext.snapshotManager.getCodebaseStatus(secondRoot),
-        "indexing",
     );
     const stored = firstInternals.continuationCoordinator.store(
         (
@@ -209,163 +187,6 @@ test("one runtime host serves independent MCP sessions over separate transports"
 
     const stillAvailable = await second.client.listTools();
     assert.equal(stillAvailable.tools.length, 7);
-});
-
-test("startup interrupted-index recovery uses the vector-only provider context", async (t) => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-recovery-provider-"));
-    const previousStateRoot = process.env.SATORI_STATE_ROOT;
-    process.env.SATORI_STATE_ROOT = stateRoot;
-    const databasePath = path.join(stateRoot, "lancedb");
-    const codebasePath = path.join(stateRoot, "repo");
-    fs.mkdirSync(codebasePath, { recursive: true });
-    const runtimeConfig: ContextMcpConfig = {
-        ...config(),
-        stateRoot,
-        vectorStoreProvider: "LanceDB",
-        lanceDbPath: databasePath,
-        milvusEndpoint: undefined,
-    };
-    const runtimeFingerprint = buildRuntimeIndexFingerprint(runtimeConfig, 1024);
-    const host = new SharedRuntimeHost(
-        runtimeConfig,
-        runtimeFingerprint,
-        "cli",
-    );
-    t.after(async () => {
-        await host.shutdown();
-        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
-        else process.env.SATORI_STATE_ROOT = previousStateRoot;
-        fs.rmSync(stateRoot, { recursive: true, force: true });
-    });
-
-    const providerContext = await host.getProviderRuntime().requireToolContext("vector_only");
-    assert.equal("code" in providerContext, false);
-    if ("code" in providerContext) return;
-    const collectionName = providerContext.context.resolveCollectionName(codebasePath);
-    await providerContext.context.getVectorStore().createHybridCollection(
-        collectionName,
-        runtimeFingerprint.embeddingDimension,
-    );
-    const markerFingerprint = (providerContext.context as unknown as {
-        buildIndexCompletionFingerprint(): IndexCompletionMarkerDocument["fingerprint"];
-    }).buildIndexCompletionFingerprint();
-    const marker: IndexCompletionMarkerDocument = {
-        kind: "satori_index_completion_v3",
-        codebasePath,
-        fingerprint: markerFingerprint,
-        indexedFiles: 0,
-        totalChunks: 0,
-        completedAt: new Date().toISOString(),
-        runId: "startup-recovery-provider-marker",
-        indexPolicyHash: "a".repeat(64),
-        indexStatus: "completed",
-        navigation: { status: "not_bound" },
-    };
-    await providerContext.context.writeIndexCompletionMarker(
-        codebasePath,
-        marker,
-        collectionName,
-    );
-    providerContext.snapshotManager.setCodebaseIndexing(codebasePath);
-    assert.equal(providerContext.snapshotManager.saveCodebaseSnapshot(), true);
-
-    await host.recoverInterruptedIndexingAtStartup();
-
-    assert.equal(providerContext.snapshotManager.getCodebaseStatus(codebasePath), "indexed");
-    assert.equal(
-        providerContext.snapshotManager.getCodebaseInfo(codebasePath)?.collectionName,
-        collectionName,
-    );
-});
-
-test("startup interrupted-index recovery defers when vector configuration is unavailable", async (t) => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-recovery-deferred-"));
-    const previousStateRoot = process.env.SATORI_STATE_ROOT;
-    process.env.SATORI_STATE_ROOT = stateRoot;
-    const codebasePath = path.join(stateRoot, "repo");
-    fs.mkdirSync(codebasePath, { recursive: true });
-    const runtimeConfig = { ...config(), stateRoot };
-    const host = new SharedRuntimeHost(
-        runtimeConfig,
-        buildRuntimeIndexFingerprint(runtimeConfig, 1024),
-        "cli",
-    );
-    t.after(async () => {
-        await host.shutdown();
-        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
-        else process.env.SATORI_STATE_ROOT = previousStateRoot;
-        fs.rmSync(stateRoot, { recursive: true, force: true });
-    });
-
-    const operations: string[] = [];
-    const internals = host as unknown as {
-        snapshotManager: {
-            setCodebaseIndexing(codebasePath: string): void;
-            saveCodebaseSnapshot(): boolean;
-            getCodebaseStatus(codebasePath: string): string;
-        };
-        providerRuntime: {
-            requireToolContext(
-                operation: string,
-            ): Promise<ToolContext | MissingProviderConfigIssue>;
-        };
-    };
-    internals.snapshotManager.setCodebaseIndexing(codebasePath);
-    assert.equal(internals.snapshotManager.saveCodebaseSnapshot(), true);
-    internals.providerRuntime.requireToolContext = async (operation) => {
-        operations.push(operation);
-        return {
-            ok: false,
-            code: "MISSING_PROVIDER_CONFIG",
-            missingEnv: ["LANCEDB_PATH"],
-            message: "LANCEDB_PATH is not configured",
-            hints: {
-                setup: {
-                    code: "MISSING_PROVIDER_CONFIG",
-                    missingEnv: ["LANCEDB_PATH"],
-                    nextSteps: ["Configure LANCEDB_PATH and restart."],
-                },
-            },
-        };
-    };
-
-    await host.recoverInterruptedIndexingAtStartup();
-
-    assert.deepEqual(operations, ["vector_only"]);
-    assert.equal(internals.snapshotManager.getCodebaseStatus(codebasePath), "indexing");
-});
-
-test("startup interrupted-index recovery keeps provider construction lazy without interrupted roots", async (t) => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "satori-shared-recovery-empty-"));
-    const previousStateRoot = process.env.SATORI_STATE_ROOT;
-    process.env.SATORI_STATE_ROOT = stateRoot;
-    const runtimeConfig = { ...config(), stateRoot };
-    const host = new SharedRuntimeHost(
-        runtimeConfig,
-        buildRuntimeIndexFingerprint(runtimeConfig, 1024),
-        "cli",
-    );
-    t.after(async () => {
-        await host.shutdown();
-        if (previousStateRoot === undefined) delete process.env.SATORI_STATE_ROOT;
-        else process.env.SATORI_STATE_ROOT = previousStateRoot;
-        fs.rmSync(stateRoot, { recursive: true, force: true });
-    });
-
-    const operations: string[] = [];
-    const internals = host as unknown as {
-        providerRuntime: {
-            requireToolContext(operation: string): Promise<never>;
-        };
-    };
-    internals.providerRuntime.requireToolContext = async (operation) => {
-        operations.push(operation);
-        throw new Error("provider construction must remain lazy");
-    };
-
-    await host.recoverInterruptedIndexingAtStartup();
-
-    assert.deepEqual(operations, []);
 });
 
 test("session shutdown waits for its active operation without stopping the host", async (t) => {

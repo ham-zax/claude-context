@@ -93,7 +93,7 @@ function makeGroup(index: number, options: {
                 },
                 graphEvidence: {
                     validatedAt: "2026-01-01T00:00:00.000Z",
-                    sidecarBuiltAt: "2026-01-01T00:00:00.000Z",
+                    relationshipBuiltAt: "2026-01-01T00:00:00.000Z",
                 },
                 provenance: {
                     retrievalPasses: ["primary", "expanded"],
@@ -406,7 +406,7 @@ test("malformed grouped candidates are omitted with one deterministic warning", 
         limit: 10,
         queryPlan: { intent: "semantic", referenceSeeking: false, exactMatchPinningEnabled: false },
         mustMatchesFirst: false,
-        navigationState: { relationshipReady: false, relationshipUnavailableReason: "missing_relationship_sidecar" },
+        navigationState: { relationshipReady: false, relationshipUnavailableReason: "missing_relationship_navigation" },
         debugMode: "none",
         now: helpers.now,
         previewMaxBytes: 768,
@@ -480,6 +480,21 @@ test("documented grouped navigation mappings validate and execute through regist
             },
         };
         assert.equal(readFileInputSchema.safeParse(exactReadInput).success, true);
+        const publication = {
+            id: "publication-fallback",
+            publication: { canonicalRoot: tempRoot },
+        };
+        const publishedContext = {
+            listCurrentPublications: () => [publication],
+            getCurrentPublication: () => publication,
+            getPublicationSourceCheckpoint: () => ({
+                fileHashes: [[relativeFile, "hash"]],
+                fileStats: [],
+                unprocessedPaths: [],
+            }),
+            getActiveIgnorePatterns: () => [],
+        };
+        const mutationRuntime = { listActiveMutations: () => [] };
         let composedInput: unknown;
         const exactReadResponse = await readFileTool.execute(exactReadInput, {
             readFileMaxLines: 100,
@@ -488,18 +503,8 @@ test("documented grouped navigation mappings validate and execute through regist
                 homeDirectory: os.homedir(),
                 stateRoot: path.join(os.homedir(), ".satori"),
             }),
-            snapshotManager: {
-                getAllCodebases: () => [{
-                    path: tempRoot,
-                    info: {
-                        status: "indexed",
-                        indexManifest: {
-                            indexedPaths: ["src/fallback.ts"],
-                            updatedAt: "2026-01-01T00:00:00.000Z",
-                        },
-                    },
-                }],
-            },
+            context: publishedContext,
+            mutationRuntime,
             syncManager: { touchWatchedCodebase: async () => undefined },
             toolHandlers: {
                 composeSymbolContext: async (input: unknown) => {
@@ -552,18 +557,8 @@ test("documented grouped navigation mappings validate and execute through regist
                 homeDirectory: os.homedir(),
                 stateRoot: path.join(os.homedir(), ".satori"),
             }),
-            snapshotManager: {
-                getAllCodebases: () => [{
-                    path: tempRoot,
-                    info: {
-                        status: "indexed",
-                        indexManifest: {
-                            indexedPaths: ["src/fallback.ts"],
-                            updatedAt: "2026-01-01T00:00:00.000Z",
-                        },
-                    },
-                }],
-            },
+            context: publishedContext,
+            mutationRuntime,
             syncManager: { touchWatchedCodebase: async () => undefined },
             toolHandlers: {},
         } as unknown as ToolContext);

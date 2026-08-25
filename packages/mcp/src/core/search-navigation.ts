@@ -26,7 +26,7 @@ export function buildRelationshipCallGraphHint(input: {
     symbolId: string;
     symbolLabel?: string;
     span: { startLine: number; endLine: number };
-    sidecarBuiltAt?: string;
+    relationshipBuiltAt?: string;
 }, helpers: SearchNavigationHelpers): CallGraphHint {
     if (!helpers.isCallGraphLanguageSupported(input.language, input.file)) {
         return { supported: false, reason: "unsupported_language" };
@@ -45,7 +45,7 @@ export function buildRelationshipCallGraphHint(input: {
         supported: true,
         validated: true,
         validatedAt,
-        sidecarBuiltAt: input.sidecarBuiltAt || validatedAt,
+        relationshipBuiltAt: input.relationshipBuiltAt || validatedAt,
         symbolRef: {
             file: normalizedFile,
             symbolId: input.symbolId,
@@ -82,13 +82,13 @@ export function buildRegistrySymbolCallGraphHint(
                 startLine: symbol.span.startLine,
                 endLine: symbol.span.endLine,
             },
-            sidecarBuiltAt: navigationState.relationshipBuiltAt,
+            relationshipBuiltAt: navigationState.relationshipBuiltAt,
         }, helpers);
     }
 
     return {
         supported: false,
-        reason: navigationState.relationshipUnavailableReason || "missing_relationship_sidecar",
+        reason: navigationState.relationshipUnavailableReason || "missing_relationship_navigation",
     };
 }
 

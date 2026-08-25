@@ -1,21 +1,19 @@
 import crypto from "node:crypto";
 import {
     COLLECTION_LIMIT_MESSAGE,
-    type ProvenGenerationReceipt,
-    type ProvenVectorGenerationReceipt,
-    type PreparedGenerationRevalidation,
-    type SourceFreshnessPort,
-    type NavigationStore,
+    type PublicationLease,
+    type PublicationRef,
+    JsonNavigationStore,
     type Reranker,
 } from "@zokizuan/satori-core";
-import type { ProvenSourceFreshnessCheckpointEvidence, SemanticSearchCandidateTraceOptions, SemanticSearchExecutionResult, SemanticSearchRequest, SemanticSearchResult, SourceFreshnessPathComparison } from "@zokizuan/satori-core";
+import type { SemanticSearchCandidateTraceOptions, SemanticSearchExecutionResult, SemanticSearchRequest, SemanticSearchResult } from "@zokizuan/satori-core";
+import type { ProvenSourceFreshnessCheckpointEvidence, SourceFreshnessPathComparison } from "@zokizuan/satori-core/integration";
 import type { SymbolRecord, SymbolRegistry } from "@zokizuan/satori-core";
 import { CapabilityResolver } from "./capabilities.js";
 import { absolutePathOrRaw } from "../utils.js";
 import {
     SyncManager,
     type FreshnessDecision,
-    type PreparedReadObservationUnavailableReason,
     type PreparedReadWatcherDiagnostics,
     type WatcherObservationSnapshot,
 } from "./sync.js";
@@ -33,6 +31,7 @@ import {
 import {
     CallGraphHint,
     FileOutlineStatus,
+    CallGraphDirection,
     NonOkReason,
     SearchDebugHint,
     SearchFreshnessSummary,
@@ -54,15 +53,9 @@ import {
     ManageIndexAction,
 } from "./manage-types.js";
 import {
-    CallGraphDirection,
-    CallGraphEdge,
-    CallGraphNode,
-    CallGraphNote,
-    CallGraphTestReference,
-} from "./call-graph.js";
-import {
     type PythonSourceBackedSpanRepair,
 } from "./python-call-fallback.js";
+import type { RelationshipBackedCallGraphResult } from "./relationship-backed-call-graph.js";
 import {
     resolveSearchOwnerFromRegistry as resolveSearchOwnerFromRegistryWithRepair,
 } from "./search-owner-resolution.js";
@@ -166,14 +159,9 @@ import { PreparedPublicationReadSession } from "./prepared-publication-read-sess
 const SEARCH_PARTIAL_INDEX_LIMIT_REACHED_WARNING = 'SEARCH_PARTIAL_INDEX:limit_reached';
 const SEARCH_PARTIAL_INDEX_NAVIGATION_UNAVAILABLE_WARNING = 'SEARCH_PARTIAL_INDEX_NAVIGATION_UNAVAILABLE';
 type CallGraphUnavailableReason = Extract<CallGraphHint, { supported: false }>['reason'];
-// Recovery probe threshold for "likely interrupted" indexing states.
-// Keep this shorter than snapshot merge stale semantics for better operator UX.
-
 type SearchPhaseTimingKey =
     | 'prepareRead'
-    | 'snapshotReload'
     | 'trackedRootResolution'
-    | 'fingerprintGate'
     | 'completionProof'
     | 'collectionProbe'
     | 'ensureFreshness'
@@ -198,15 +186,11 @@ type SearchPhaseTimingKey =
     | 'publicationCheckpointStage'
     | 'publicationPayloadCount'
     | 'publicationActivation'
-    | 'publicationRetentionProof'
     | 'finalSourceValidation';
 
 export type FrozenSearchResultSet = {
     canonicalRoot: string;
-    vectorReceipt: ProvenVectorGenerationReceipt;
-    generationReceipt?: ProvenGenerationReceipt;
-    preparedObservation: string;
-    sourceObservation: string | null;
+    publication: PublicationRef;
     queryPolicyDigest: string;
     rankedSetBinding: SearchRankedSetBinding;
     responseByteLimit: number;
@@ -322,10 +306,7 @@ function resolveSearchRerankRequestIdOrNone(
 }
 
 function buildFrozenSearchRankedSetBindingInput(input: {
-    vectorReceipt: ProvenVectorGenerationReceipt;
-    generationReceipt?: ProvenGenerationReceipt;
-    preparedObservation: string;
-    sourceObservation: string | null;
+    publication: PublicationRef;
     queryPolicyDigest: string;
     rerankerIdentity: SearchRerankerBindingIdentity;
     rerankerProjectionIdentity: string;
@@ -339,15 +320,13 @@ function buildFrozenSearchRankedSetBindingInput(input: {
         rankingPolicyIdentity: input.rankingPolicyIdentity,
         disclosurePolicyVersion: SEARCH_DISCLOSURE_POLICY_VERSION,
         publicationIdentity: {
-            collectionName: input.vectorReceipt.collectionName,
-            marker: input.vectorReceipt.marker,
-            policyDocumentDigest: input.vectorReceipt.policyDocumentDigest,
-            navigation: input.generationReceipt
-                ? { status: "sealed", receipt: input.generationReceipt.navigation }
+            publicationId: input.publication.id,
+            collectionName: input.publication.publication.vector.collectionName,
+            policyHash: input.publication.publication.policy.policyHash,
+            navigation: input.publication.publication.navigation
+                ? { status: "bound" }
                 : { status: "not_bound" },
         },
-        preparedObservation: input.preparedObservation,
-        sourceObservation: input.sourceObservation,
         rerankerIdentity: input.rerankerIdentity,
         rerankerProjectionIdentity: input.rerankerProjectionIdentity,
         rerankerRequestIdentity: input.rerankerRequestIdentity,
@@ -378,47 +357,6 @@ type SearchToolTextResponse = ToolTextResponse & {
     meta?: Record<string, unknown>;
 };
 
-type RequestSourceBarrier =
-    | Readonly<{
-        mode: 'watcher';
-        observation: string;
-        sourceObservation: string;
-    }>
-    | Readonly<{
-        mode: 'full_comparison';
-        authorityObservation: string;
-    }>
-    | Readonly<{
-        mode: 'publication_consistent_stale_read';
-        collectionName: string;
-    }>;
-
-type CompletedFreshnessRequestProof = Readonly<{
-    checkpointObservation: string;
-    collectionName: string;
-    markerRunId: string;
-    indexPolicyHash: string;
-    comparisonMode: 'full' | 'exact_paths';
-    exactPathCount: number;
-    preRetrievalFullComparisons: number;
-}>;
-
-const WATCHER_UNAVAILABLE_SOURCE_REASONS = new Set([
-    'watcher_disabled',
-    'watcher_manager_not_started',
-    'root_not_registered',
-    'watcher_failed',
-    'watcher_starting',
-    'root_watcher_not_active',
-    'watcher_observation_gap',
-]);
-
-type PreparedReadCacheObservationResult = {
-    observation: string | null;
-    sourceObservation: string | null;
-    unavailableReason?: PreparedReadObservationUnavailableReason;
-};
-
 type CachedPreparedReadResult =
     | {
         status: "hit";
@@ -427,11 +365,10 @@ type CachedPreparedReadResult =
     | {
         status: "miss";
         reason: SearchReadinessInvalidationReason;
-        observationUnavailableReason?: PreparedReadObservationUnavailableReason;
     };
 
-type NavigationManifestState = Awaited<ReturnType<NavigationStore['getManifest']>>;
-type NavigationCompatibilityState = Awaited<ReturnType<NavigationStore['getCompatibilityState']>>;
+type NavigationManifestState = Awaited<ReturnType<JsonNavigationStore['getManifest']>>;
+type NavigationCompatibilityState = Awaited<ReturnType<JsonNavigationStore['getCompatibilityState']>>;
 
 type CompletionProbeDebugHint = {
     ok: false;
@@ -439,26 +376,6 @@ type CompletionProbeDebugHint = {
     message: string;
     action: string;
 };
-
-export type RelationshipBackedCallGraphResult = {
-    supported: true;
-    direction: CallGraphDirection;
-    depth: number;
-    limit: number;
-    nodes: CallGraphNode[];
-    edges: CallGraphEdge[];
-    notes: CallGraphNote[];
-    warnings?: string[];
-    testReferences?: CallGraphTestReference[];
-    notesTruncated: boolean;
-    totalNoteCount: number;
-    returnedNoteCount: number;
-    sidecar: {
-        builtAt: string;
-        nodeCount: number;
-        edgeCount: number;
-    };
-} | null;
 
 /**
  * Phase 8 gate correction B - grouped narrow collaborator seams for the
@@ -480,7 +397,7 @@ export interface SearchReadinessCollaborator {
         accessMode?: 'semantic' | 'navigation',
     ): Promise<TrackedRootReadinessState>;
 
-    loadRegistryValidatedCallGraphSidecar(input: {
+    loadRegistryValidatedRelationshipNavigation(input: {
         codebaseRoot: string;
         registryManifestHash?: string;
         registryUnavailableReason?: CallGraphUnavailableReason;
@@ -507,11 +424,8 @@ export interface SearchReadinessCollaborator {
     isPartialIndexNavigationUnavailable(info: unknown): boolean;
 
     getIndexingOperationForReadiness(codebasePath: string):
-        | { action: "create" | "reindex" | "sync" | "repair"; phase: string; generation: number }
+        | { action: "create" | "reindex" | "sync"; phase: string; generation: number }
         | undefined;
-
-
-    canSyncStaleLocal(codebasePath: string, reason: CompletionProofReason): boolean;
 
     probeLocalSearchCollectionState(codebasePath: string): Promise<{
         state: 'ready' | 'missing' | 'unknown';
@@ -548,13 +462,10 @@ export interface SearchHintPayloadCollaborator {
 
     buildStaleLocalMessage(codebasePath: string, requestedPath: string, reason: CompletionProofReason): string;
 
-    buildStaleLocalHint(codebasePath: string, reason: CompletionProofReason): Record<string, unknown>;
-
-    buildRepairHint(codebasePath: string): { tool: string; args: { action: string; path: string } };
-
     buildRelationshipBackedCallGraph(input: {
         codebaseRoot: string;
-        generationId?: string;
+        publicationId: string;
+        navigationRoot: string;
         registry: SymbolRegistry;
         registryManifestHash: string;
         resolvedSymbol: SymbolRecord;
@@ -563,10 +474,10 @@ export interface SearchHintPayloadCollaborator {
         depth: number;
         limit: number;
         readAuthorizedSourceLines?: (codebaseRoot: string, relativeFilePath: string) => Promise<string[] | undefined>;
-    }): Promise<RelationshipBackedCallGraphResult>;
+    }): Promise<RelationshipBackedCallGraphResult | null>;
 
     buildManageIndexRecommendedAction(
-        action: Extract<ManageIndexAction, "create" | "reindex" | "status" | "sync" | "repair">,
+        action: Extract<ManageIndexAction, "create" | "reindex" | "status" | "sync">,
         codebasePath: string,
         reason: string,
     ): SearchRecommendedNextAction;
@@ -582,9 +493,12 @@ export interface SearchPreparedReadCollaborator {
         operations?: SearchReadinessDebugHint['operations'],
     ): Promise<NavigationManifestState>;
 
-    getPreparedReadCacheObservation(codebasePath: string): PreparedReadCacheObservationResult;
-
     getPreparedAuthorityObservation(codebasePath: string): string | null;
+
+    getPublicationNavigationAddress(publication: PublicationRef): {
+        publicationId: string;
+        navigationRoot: string;
+    } | null;
 
     seedPreparedRead(
         state: Extract<TrackedRootReadinessState, { state: 'ready' }>,
@@ -606,40 +520,33 @@ export interface SearchPreparedReadCollaborator {
         requireNavigation?: boolean,
     ): Promise<CachedPreparedReadResult>;
 
-    acquirePublicationReadLease(codebasePath: string): Promise<(() => void) | undefined>;
+    acquirePublicationLease(codebasePath: string, publicationId?: string): PublicationLease | undefined;
+    isPublicationLeaseAdmitted(lease: PublicationLease): Promise<boolean>;
+    isPublicationAdmitted(publication: PublicationRef): Promise<boolean>;
+    getPublicationNavigationStatus(publication: PublicationRef): Promise<import("@zokizuan/satori-core").PublicationNavigationStatus>;
 }
 
 export interface SearchFreshnessCollaborator {
-    getSourceFreshnessPort(): SourceFreshnessPort | undefined;
-
     inspectSourceFreshnessCheckpoint(
         codebasePath: string,
-        checkpointIdentity?: string,
-        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+        publication?: PublicationRef,
     ): Promise<ProvenSourceFreshnessCheckpointEvidence>;
 
     compareAllSourceToFreshnessCheckpoint(
         codebasePath: string,
-        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+        publication?: PublicationRef,
     ): Promise<SourceFreshnessPathComparison>;
 
     compareSourceObservationToFreshnessCheckpoint(
         codebasePath: string,
-        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+        publication?: PublicationRef,
     ): Promise<SourceFreshnessPathComparison>;
 
     compareSourcePathsToFreshnessCheckpoint(
         codebasePath: string,
         relativePaths: readonly string[],
-        requestBoundReceipt?: ProvenVectorGenerationReceipt,
+        publication?: PublicationRef,
     ): Promise<SourceFreshnessPathComparison>;
-
-    getPreparedGenerationRevalidator():
-        | ((codebasePath: string, receipt: ProvenVectorGenerationReceipt, options?: {
-            priorGenerationReceipt?: ProvenGenerationReceipt;
-            navigationObservationChanged?: boolean;
-        }) => Promise<PreparedGenerationRevalidation | null>)
-        | undefined;
 }
 
 export interface SearchEnvironmentCollaborator {
@@ -654,12 +561,12 @@ export interface SearchEnvironmentCollaborator {
     getEmbeddingProviderName(): string;
 
     semanticSearch(request: SemanticSearchRequest): Promise<SemanticSearchResult[]>;
-    semanticSearchInProvenGeneration?: (
-        receipt: ProvenVectorGenerationReceipt,
+    semanticSearchInPublication?: (
+        publication: PublicationRef,
         request: SemanticSearchRequest,
     ) => Promise<SemanticSearchResult[]>;
-    semanticSearchWithCandidateTraceInProvenGeneration?: (
-        receipt: ProvenVectorGenerationReceipt,
+    semanticSearchWithCandidateTraceInPublication?: (
+        publication: PublicationRef,
         request: SemanticSearchRequest,
         maxEntriesPerStage: number,
         options?: SemanticSearchCandidateTraceOptions,
@@ -715,9 +622,7 @@ export class SearchRequestCoordinator {
     private createSearchPhaseTimings(): SearchPhaseTimings {
         return {
             prepareRead: 0,
-            snapshotReload: 0,
             trackedRootResolution: 0,
-            fingerprintGate: 0,
             completionProof: 0,
             collectionProbe: 0,
             ensureFreshness: 0,
@@ -742,7 +647,6 @@ export class SearchRequestCoordinator {
             publicationCheckpointStage: 0,
             publicationPayloadCount: 0,
             publicationActivation: 0,
-            publicationRetentionProof: 0,
             finalSourceValidation: 0,
         };
     }
@@ -986,7 +890,6 @@ export class SearchRequestCoordinator {
                 coldReadinessChecks: 0,
                 postFreshnessColdChecks: 0,
                 warmReceiptRevalidations: 0,
-                exactPayloadRecounts: 0,
                 registryLoads: 0,
                 navigationValidationRuns: 0,
             },
@@ -994,12 +897,9 @@ export class SearchRequestCoordinator {
         let preservePreparedProofAge = false;
         let preparedEntrypointOwnerEvidence: PreparedEntrypointOwnerEvidence | undefined;
         let observedChangedFilesForSearch: { available: boolean; files: Set<string> } | undefined;
-        let completedFreshnessRequestProof: CompletedFreshnessRequestProof | undefined;
 
         const readinessPhaseToSearchPhase = {
-            snapshot_reload: 'snapshotReload',
             tracked_root_resolution: 'trackedRootResolution',
-            fingerprint_gate: 'fingerprintGate',
             completion_proof: 'completionProof',
             collection_probe: 'collectionProbe',
         } as const;
@@ -1028,9 +928,6 @@ export class SearchRequestCoordinator {
                     if (cached.reason === "proof_expired") {
                         readinessDebug.auditClassification = "proof_expiry_audit";
                     }
-                    if (debugMode === 'full' && cached.observationUnavailableReason) {
-                        readinessDebug.observationUnavailableReason = cached.observationUnavailableReason;
-                    }
                     readinessDebug.operations.coldReadinessChecks += 1;
                     const prepareReadStartedAtMs = this.searchPhaseNowMs();
                     const trackedRootState = await this.readiness.prepareTrackedRootReadWithObservation(
@@ -1039,15 +936,6 @@ export class SearchRequestCoordinator {
                             phaseTimings[readinessPhaseToSearchPhase[phase]] += durationMs;
                         },
                     );
-                    if (trackedRootState.state === "ready") {
-                        readinessDebug.operations.exactPayloadRecounts += trackedRootState.exactPayloadRecounts ?? 0;
-                        if (debugMode === 'full') {
-                            const sourceObservation = this.preparedRead.getPreparedReadCacheObservation(trackedRootState.root.path);
-                            if (sourceObservation.unavailableReason) {
-                                readinessDebug.observationUnavailableReason = sourceObservation.unavailableReason;
-                            }
-                        }
-                    }
                     this.addSearchPhaseTiming(phaseTimings, 'prepareRead', prepareReadStartedAtMs);
                     return trackedRootState;
                 },
@@ -1067,14 +955,10 @@ export class SearchRequestCoordinator {
                                     phaseTimings[readinessPhaseToSearchPhase[phase]] += durationMs;
                                 },
                             );
-                            if (trackedRootState.state === "ready") {
-                                readinessDebug.operations.exactPayloadRecounts += trackedRootState.exactPayloadRecounts ?? 0;
-                            }
                             return trackedRootState;
                         },
                     );
                 },
-                getPreparedReadObservation: (canonicalRoot) => this.preparedRead.getPreparedAuthorityObservation(canonicalRoot),
                 getIndexingOperation: (codebasePath) => this.readiness.getIndexingOperationForReadiness(codebasePath),
                 ensureSearchFreshness: (effectiveRoot, preparedRead) => this.measureSearchPhase(
                     phaseTimings,
@@ -1098,39 +982,14 @@ export class SearchRequestCoordinator {
                             && exactSourceComparisonRequired
                             ? Array.from(changedFilesState.files).sort()
                             : undefined;
-                        const statusPreparedSourceObservation = preparedRead?.statusPrepared === true
-                            ? this.preparedRead.getPreparedReadCacheObservation(effectiveRoot)
-                            : null;
-
-                        // A recent sync timestamp does not prove that Git-dirty files still
-                        // match the published generation. Compare them exactly so search does
-                        // not suppress synchronized persisted evidence behind a bounded overlay.
-                        // Status proves the publication, not current source. Preserve the
-                        // one-use shortcut only with a valid source observation or the
-                        // established watcher-disabled fallback.
-                        const statusPreparedSourceIsBound =
-                            typeof statusPreparedSourceObservation?.sourceObservation === 'string'
-                            || statusPreparedSourceObservation?.unavailableReason === 'watcher_disabled';
-                        if (
-                            preparedRead?.statusPrepared === true
-                            && !exactSourceComparisonRequired
-                            && statusPreparedSourceIsBound
-                        ) {
-                            return Promise.resolve({
-                                mode: 'skipped_recent' as const,
-                                checkedAt: new Date(this.environment.now()).toISOString(),
-                                thresholdMs: SEARCH_FRESHNESS_THRESHOLD_MS,
-                            });
-                        }
-
                         const decision = await this.readiness.ensureFreshness(
                             effectiveRoot,
                             exactSourceComparisonRequired || fullSourceComparisonRequired
                                 ? 0
                                 : SEARCH_FRESHNESS_THRESHOLD_MS,
                             {
-                                ...(preparedRead?.vectorReceipt
-                                    ? { preparedVectorReceipt: preparedRead.vectorReceipt }
+                                ...(preparedRead?.publication
+                                    ? { preparedPublication: preparedRead.publication }
                                     : {}),
                                 ...(exactSourceComparisonPaths
                                     ? { exactSourceComparisonPaths }
@@ -1155,8 +1014,7 @@ export class SearchRequestCoordinator {
                                                 | 'publication_sidecar_stage'
                                                 | 'publication_checkpoint_stage'
                                                 | 'publication_payload_count'
-                                                | 'publication_activation'
-                                                | 'publication_retention_proof',
+                                                | 'publication_activation',
                                             durationMs: number,
                                         ) => {
                                             const timingKey = {
@@ -1182,8 +1040,6 @@ export class SearchRequestCoordinator {
                                                 publication_payload_count:
                                                     'publicationPayloadCount',
                                                 publication_activation: 'publicationActivation',
-                                                publication_retention_proof:
-                                                    'publicationRetentionProof',
                                             }[phase] as SearchPhaseTimingKey;
                                             phaseTimings[timingKey] += durationMs;
                                         },
@@ -1191,41 +1047,6 @@ export class SearchRequestCoordinator {
                                     : {}),
                             },
                         );
-                        if (
-                            fullSourceComparisonRequired
-                            && !decision.errorMessage
-                            && (
-                                decision.mode === 'synced'
-                                || decision.mode === 'skipped_source_unchanged'
-                                || decision.mode === 'reconciled_ignore_change'
-                            )
-                        ) {
-                            const sourceFreshnessPort = this.freshness.getSourceFreshnessPort();
-                            const checkpoint = sourceFreshnessPort
-                                ? (await sourceFreshnessPort.prepareCurrentSourceObservation(effectiveRoot)).evidence
-                                : await this.freshness.inspectSourceFreshnessCheckpoint(
-                                    effectiveRoot,
-                                );
-                            if (checkpoint.status === 'valid' && checkpoint.generationReceipt) {
-                                completedFreshnessRequestProof = {
-                                    checkpointObservation: checkpoint.observationToken,
-                                    collectionName: checkpoint.generationReceipt.collectionName,
-                                    markerRunId: checkpoint.generationReceipt.marker.runId,
-                                    indexPolicyHash:
-                                        checkpoint.generationReceipt.marker.indexPolicyHash,
-                                    comparisonMode: exactSourceComparisonPaths
-                                        ? 'exact_paths'
-                                        : 'full',
-                                    exactPathCount: exactSourceComparisonPaths?.length ?? 0,
-                                    preRetrievalFullComparisons:
-                                        decision.mode === 'skipped_source_unchanged'
-                                        && fullSourceComparisonRequired
-                                        && !exactSourceComparisonRequired
-                                            ? 1
-                                            : 0,
-                                };
-                            }
-                        }
                         return decision;
                     },
                 ),
@@ -1262,15 +1083,11 @@ export class SearchRequestCoordinator {
                     rationale
                 ),
                 buildCreateHint: (codebasePath) => this.hints.buildCreateHint(codebasePath),
-                buildSyncHint: (codebasePath) => this.hints.buildSyncHint(codebasePath),
-                buildRepairHint: (codebasePath) => this.hints.buildRepairHint(codebasePath),
-                buildStaleLocalHint: (codebasePath, reason) => this.hints.buildStaleLocalHint(codebasePath, reason),
                 buildStaleLocalMessage: (codebasePath, requestedPath, reason) => this.hints.buildStaleLocalMessage(
                     codebasePath,
                     requestedPath,
                     reason
                 ),
-                canSyncStaleLocal: (codebasePath, reason) => this.readiness.canSyncStaleLocal(codebasePath, reason),
                 withProofDebugHint: (payload, proofDebugHint) => this.hints.withProofDebugHint(payload, proofDebugHint),
                 isPartialIndexNavigationUnavailable: (info) => this.readiness.isPartialIndexNavigationUnavailable(info),
                 partialIndexWarnings: [
@@ -1290,212 +1107,37 @@ export class SearchRequestCoordinator {
             let absolutePath: string = "";
             let effectiveRoot: string = "";
             let freshnessDecision!: SearchFrontDoorReady["freshnessDecision"];
-            let sourceBarrierChanged: () => Promise<boolean> = async () => false;
-            let finalBarrierChanged = false;
-            // The outer flow returns the blocked payload before the session
-            // runs, so the session operates on the ready front-door outcome.
             const session = new PreparedPublicationReadSession<SearchFrontDoorReady>({
                 prepareReadiness: async () => frontDoor as SearchFrontDoorReady,
-                // The publication read lease is acquired only after readiness
-                // (the front door) resolves.
-                acquirePublicationReadLease: (prepared) => (
-                    this.preparedRead.acquirePublicationReadLease(prepared.effectiveRoot)
+                acquirePublicationLease: (prepared) => this.preparedRead.acquirePublicationLease(
+                    prepared.effectiveRoot,
+                    prepared.freshnessDecision.mode === "served_previous_generation"
+                        ? prepared.publication.id
+                        : undefined,
                 ),
-                // Final authority revalidation: the prepared source barrier must
-                // still match. Handled mid-execute drift paths release the lease
-                // early, which skips this check in favour of the fresh attempt.
-                // The execute performs the final barrier comparison; the session
-                // revalidates against that captured result so drift paths and
-                // stable paths both prove one final revalidation.
-                //
-                // Phase 5.2 R3 decision: finalBarrierChanged is retained as the
-                // revalidation callable (compatibility rule: do not replace
-                // finalBarrierChanged logic). Its source-freshness components are
-                // port-backed after the 5.1 repair: the full-comparison branch
-                // calls SourceFreshnessPort.compareCurrentSourceToCheckpoint /
-                // compareAllCurrentSourceToCheckpoint, and the prepared-read cache
-                // flows through SyncManager -> SourceObservationState ->
-                // port.currentObservationToken. The port's registered-token
-                // revalidateCurrentSourceObservation cannot substitute for these
-                // richer barrier semantics (deep comparison + authority
-                // observation + watcher cache) without weakening revalidation.
-                revalidateAuthority: async () => !finalBarrierChanged,
+                isLeaseAdmitted: (_prepared, lease) => (
+                    this.preparedRead.isPublicationLeaseAdmitted(lease)
+                ),
             });
-            const outcome = await session.read(async (prepared, releaseLease): Promise<SearchToolTextResponse> => {
-
-                    const {
-                        absolutePath: absolutePathFromFrontDoor,
-                        searchableRoot,
-                        effectiveRoot: effectiveRootFromFrontDoor,
-                        proofDebugHint,
-                        partialIndexSearchWarnings: frontDoorWarnings,
-                        freshnessDecision: freshnessDecisionFromFrontDoor,
-                        vectorReceipt,
-                        generationReceipt,
-                        navigationStatus,
-                        preparedObservation,
-                    } = prepared;
-                    absolutePath = absolutePathFromFrontDoor;
-                    effectiveRoot = effectiveRootFromFrontDoor;
-                    freshnessDecision = freshnessDecisionFromFrontDoor;
-                const finalSourceObservation = this.preparedRead.getPreparedReadCacheObservation(effectiveRoot);
-                let requestSourceBarrier: RequestSourceBarrier | undefined;
-                if (freshnessDecision.mode === 'served_previous_generation') {
-                    requestSourceBarrier = {
-                        mode: 'publication_consistent_stale_read',
-                        collectionName: vectorReceipt?.collectionName ?? '',
-                    };
-                    readinessDebug.requestProof = {
-                        freshnessComparisonMode: 'stale_while_sync',
-                        exactPathCount: 0,
-                        checkpointBindings: 1,
-                        preRetrievalFullComparisons: 0,
-                        finalFullComparisons: 0,
-                    };
-                } else if (
-                    finalSourceObservation.observation !== null
-                    && finalSourceObservation.sourceObservation !== null
-                    && finalSourceObservation.unavailableReason === undefined
-                ) {
-                    requestSourceBarrier = {
-                        mode: 'watcher',
-                        observation: finalSourceObservation.observation,
-                        sourceObservation: finalSourceObservation.sourceObservation,
-                    };
-                } else if (
-                    finalSourceObservation.observation !== null
-                    && finalSourceObservation.unavailableReason !== undefined
-                    && WATCHER_UNAVAILABLE_SOURCE_REASONS.has(finalSourceObservation.unavailableReason)
-                ) {
-                    let freshnessProofBound = false;
-                    if (completedFreshnessRequestProof) {
-                        const freshnessPort = this.freshness.getSourceFreshnessPort();
-                        const checkpoint = await this.measureSearchPhase(
-                            phaseTimings,
-                            'freshnessCheckpointProof',
-                            freshnessPort
-                                ? () => freshnessPort.prepareCurrentSourceObservation(
-                                    effectiveRoot,
-                                    { requestBoundReceipt: vectorReceipt },
-                                ).then((prepared) => prepared.evidence)
-                                : () => this.freshness.inspectSourceFreshnessCheckpoint(
-                                    effectiveRoot,
-                                    undefined,
-                                    vectorReceipt,
-                                ),
-                        );
-                        freshnessProofBound = checkpoint.status === 'valid'
-                            && checkpoint.observationToken
-                                === completedFreshnessRequestProof.checkpointObservation
-                            && checkpoint.generationReceipt?.collectionName
-                                === completedFreshnessRequestProof.collectionName
-                            && checkpoint.generationReceipt.marker.runId
-                                === completedFreshnessRequestProof.markerRunId
-                            && checkpoint.generationReceipt.marker.indexPolicyHash
-                                === completedFreshnessRequestProof.indexPolicyHash;
-                    }
-                    if (freshnessProofBound) {
-                        requestSourceBarrier = {
-                            mode: 'full_comparison',
-                            authorityObservation: finalSourceObservation.observation,
-                        };
-                        readinessDebug.requestProof = {
-                            freshnessComparisonMode:
-                                completedFreshnessRequestProof!.comparisonMode,
-                            exactPathCount: completedFreshnessRequestProof!.exactPathCount,
-                            checkpointBindings: 1,
-                            preRetrievalFullComparisons:
-                                completedFreshnessRequestProof!.preRetrievalFullComparisons,
-                            finalFullComparisons: 0,
-                        };
-                    } else {
-                        const comparisonPort = this.freshness.getSourceFreshnessPort();
-                        const comparison = comparisonPort
-                            ? await comparisonPort.compareAllCurrentSourceToCheckpoint(
-                                effectiveRoot,
-                                vectorReceipt,
-                            )
-                            : await this.freshness.compareAllSourceToFreshnessCheckpoint(
-                                effectiveRoot,
-                                vectorReceipt,
-                            );
-                        if (comparison.status === 'matches') {
-                            requestSourceBarrier = {
-                                mode: 'full_comparison',
-                                authorityObservation: finalSourceObservation.observation,
-                            };
-                            readinessDebug.requestProof = {
-                                freshnessComparisonMode: 'full',
-                                exactPathCount: 0,
-                                checkpointBindings: 0,
-                                preRetrievalFullComparisons: 0,
-                                finalFullComparisons: 0,
-                            };
-                        }
-                    }
-                }
-                if (!requestSourceBarrier) {
-                    const payload = this.hints.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
-                        effectiveRoot,
-                        {
-                            path: absolutePath,
-                            query: input.query,
-                            scope: input.scope,
-                            groupBy: input.groupBy,
-                            resultMode: input.resultMode,
-                            limit: input.limit,
-                        },
-                        "Satori could not verify the active publication against the current source.",
-                        "source_state_unverified",
-                        {
-                            debugMode,
-                            freshnessDecision,
-                            readiness: readinessDebug,
-                        },
-                    );
-                    return {
-                        content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
-                        meta: { searchDiagnostics },
-                    };
-                }
-                sourceBarrierChanged = async (): Promise<boolean> => {
-                    if (requestSourceBarrier.mode === 'publication_consistent_stale_read') {
-                        return false;
-                    }
-                    if (requestSourceBarrier.mode === 'watcher') {
-                        const currentBarrier = this.preparedRead.getPreparedReadCacheObservation(effectiveRoot);
-                        return currentBarrier.observation !== requestSourceBarrier.observation
-                            || currentBarrier.sourceObservation !== requestSourceBarrier.sourceObservation
-                            || currentBarrier.unavailableReason !== undefined;
-                    }
-                    if (
-                        this.preparedRead.getPreparedAuthorityObservation(effectiveRoot)
-                        !== requestSourceBarrier.authorityObservation
-                    ) {
-                        return true;
-                    }
-                    const validationPort = this.freshness.getSourceFreshnessPort();
-                    const comparison = await this.measureSearchPhase(
-                        phaseTimings,
-                        'finalSourceValidation',
-                        validationPort
-                            ? () => validationPort.compareCurrentSourceToCheckpoint(
-                                effectiveRoot,
-                                vectorReceipt,
-                            )
-                            : () => this.freshness.compareSourceObservationToFreshnessCheckpoint(
-                                effectiveRoot,
-                                vectorReceipt,
-                            ),
-                    );
-                    if (readinessDebug.requestProof) {
-                        readinessDebug.requestProof.finalFullComparisons += 1;
-                    }
-                    return comparison.status !== 'matches';
-                };
-                if (debugMode === 'full' && finalSourceObservation.unavailableReason) {
-                    readinessDebug.observationUnavailableReason = finalSourceObservation.unavailableReason;
-                }
+            const outcome = await session.read(async (prepared, lease): Promise<SearchToolTextResponse> => {
+                const {
+                    absolutePath: absolutePathFromFrontDoor,
+                    searchableRoot,
+                    effectiveRoot: effectiveRootFromFrontDoor,
+                    proofDebugHint,
+                    partialIndexSearchWarnings: frontDoorWarnings,
+                    freshnessDecision: freshnessDecisionFromFrontDoor,
+                } = prepared;
+                absolutePath = absolutePathFromFrontDoor;
+                effectiveRoot = effectiveRootFromFrontDoor;
+                freshnessDecision = freshnessDecisionFromFrontDoor;
+                const navigationStatus = await this.preparedRead.getPublicationNavigationStatus(lease);
+                const partialIndexSearchWarnings = [
+                    ...frontDoorWarnings.filter((warning) => warning !== "NAVIGATION_REINDEX_REQUIRED"),
+                    ...(navigationStatus !== "valid" && navigationStatus !== "not_bound"
+                        ? ["NAVIGATION_REINDEX_REQUIRED"]
+                        : []),
+                ];
                 if (debugMode === 'full') {
                     const getPreparedReadDiagnostics = this.readiness.getPreparedReadDiagnostics;
                     if (typeof getPreparedReadDiagnostics === 'function') {
@@ -1505,18 +1147,6 @@ export class SearchRequestCoordinator {
                         );
                     }
                 }
-                const sourceFreshnessWasEstablished = freshnessDecision.mode === 'synced'
-                    || freshnessDecision.mode === 'reconciled_ignore_change'
-                    || freshnessDecision.mode === 'skipped_source_unchanged'
-                    || freshnessDecision.mode === 'served_previous_generation';
-                const checkpointWarningAlreadyPresent = frontDoorWarnings.includes(
-                    WARNING_CODES.SOURCE_FRESHNESS_CHECKPOINT_UNAVAILABLE,
-                );
-                const partialIndexSearchWarnings = !sourceFreshnessWasEstablished
-                    && !checkpointWarningAlreadyPresent
-                    && finalSourceObservation.unavailableReason
-                    ? [...frontDoorWarnings, WARNING_CODES.SOURCE_FRESHNESS_UNVERIFIED]
-                    : frontDoorWarnings;
 
                 if (searchableRoot.path !== absolutePath) {
                     console.log(`[SEARCH] Auto-resolved subdirectory '${absolutePath}' to indexed root '${searchableRoot.path}'`);
@@ -1563,8 +1193,11 @@ export class SearchRequestCoordinator {
                     removedByExclude: 0,
                 };
                 const initialOperatorSummary = this.searchQuerySupport.buildOperatorSummary(parsedOperators);
-                const initialObservedChangedFilesState = observedChangedFilesForSearch
-                    ?? this.readiness.getChangedFilesForCodebase(effectiveRoot);
+                const staleWhileSync = freshnessDecision.mode === "served_previous_generation";
+                const initialObservedChangedFilesState = staleWhileSync
+                    ? { available: false, files: new Set<string>() }
+                    : observedChangedFilesForSearch
+                        ?? this.readiness.getChangedFilesForCodebase(effectiveRoot);
                 const initialChangedFilesState = initialObservedChangedFilesState;
                 const initialDebugChangedFilesState = debugMode === 'freshness' || debugMode === 'full'
                     ? initialObservedChangedFilesState
@@ -1594,9 +1227,9 @@ export class SearchRequestCoordinator {
                     exactMatchPinningApplied: false,
                     registryRepairGroupCount: 0,
                 };
+                const navigationAddress = this.preparedRead.getPublicationNavigationAddress(lease);
                 const navigationAuthority = navigationStatus === 'valid'
-                    && generationReceipt?.navigation
-                    && generationReceipt.navigation.navigationSealHash
+                    && navigationAddress
                     ? 'valid' as const
                     : 'unavailable' as const;
                 const preparedReadState: Extract<TrackedRootReadinessState, { state: 'ready' }> = {
@@ -1604,10 +1237,11 @@ export class SearchRequestCoordinator {
                     root: searchableRoot,
                     navigationAuthorityMode: 'canonical_v4',
                     proofDebugHint,
-                    vectorReceipt,
-                    generationReceipt,
+                    publication: {
+                        id: lease.id,
+                        publication: lease.publication,
+                    },
                     navigationStatus,
-                    preparedObservation,
                 };
                 const attachSearchResultSet = (
                     envelope: SearchGroupedResponseEnvelope,
@@ -1616,12 +1250,6 @@ export class SearchRequestCoordinator {
                     orderAuthority: SearchOrderAuthority,
                 ): SearchGroupedResponseEnvelope => {
                     if (!resultSet) return envelope;
-                    if (!vectorReceipt) {
-                        throw new Error("Search result-set binding requires a proven vector publication.");
-                    }
-                    if (!preparedObservation) {
-                        throw new Error("Search result-set binding requires a prepared publication and source observation.");
-                    }
                     const responseByteLimit = debugMode === "full"
                         ? SEARCH_GROUPED_DEBUG_RESPONSE_MAX_UTF8_BYTES
                         : SEARCH_GROUPED_RESPONSE_MAX_UTF8_BYTES;
@@ -1659,10 +1287,7 @@ export class SearchRequestCoordinator {
                         rerankerApplied,
                     );
                     const bindingInput = buildFrozenSearchRankedSetBindingInput({
-                        vectorReceipt,
-                        ...(generationReceipt ? { generationReceipt } : {}),
-                        preparedObservation,
-                        sourceObservation: finalSourceObservation.sourceObservation,
+                        publication: lease,
                         queryPolicyDigest,
                         rerankerIdentity,
                         rerankerProjectionIdentity,
@@ -1684,10 +1309,10 @@ export class SearchRequestCoordinator {
                         const stored = this.continuationCoordinator.store(this, {
                             value: {
                                 canonicalRoot: effectiveRoot,
-                                vectorReceipt,
-                                ...(generationReceipt ? { generationReceipt } : {}),
-                                preparedObservation,
-                                sourceObservation: finalSourceObservation.sourceObservation,
+                                publication: structuredClone({
+                                    id: lease.id,
+                                    publication: lease.publication,
+                                }),
                                 queryPolicyDigest,
                                 rankedSetBinding,
                                 responseByteLimit,
@@ -1761,25 +1386,6 @@ export class SearchRequestCoordinator {
                         ? warnedEnvelope
                         : boundEnvelope;
                 };
-                if (
-                    freshnessDecision.mode !== "served_previous_generation"
-                    && preparedObservation
-                    && this.preparedRead.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
-                ) {
-                    this.preparedRead.evictPreparedRead(effectiveRoot);
-                    const payload = this.buildNotReadySearchPayload(effectiveRoot, {
-                        path: absolutePath,
-                        query: input.query,
-                        scope: input.scope,
-                        groupBy: input.groupBy,
-                        resultMode: input.resultMode,
-                        limit: input.limit,
-                    });
-                    return {
-                        content: [{ type: 'text', text: this.hints.stringifyToolJson(payload) }],
-                        meta: { searchDiagnostics },
-                    };
-                }
                 const exactFastPath = await runExactRegistryFastPath({
                     absolutePath,
                     effectiveRoot,
@@ -1822,17 +1428,18 @@ export class SearchRequestCoordinator {
                         preparedReadState,
                         readinessDebug.operations,
                     ),
-                    loadRegistryValidatedCallGraphSidecar: (exactInput) => this.readiness.loadRegistryValidatedCallGraphSidecar({
+                    loadRegistryValidatedRelationshipNavigation: (exactInput) => this.readiness.loadRegistryValidatedRelationshipNavigation({
                         ...exactInput,
                         preparedRead: preparedReadState,
                         operations: readinessDebug.operations,
                     }),
-                    buildRelationshipBackedCallGraph: (exactInput) => this.hints.buildRelationshipBackedCallGraph({
-                        ...exactInput,
-                        ...(generationReceipt
-                            ? { generationId: generationReceipt.navigation.generationId }
-                            : {}),
-                    }),
+                    buildRelationshipBackedCallGraph: (exactInput) => navigationAddress
+                        ? this.hints.buildRelationshipBackedCallGraph({
+                            ...exactInput,
+                            publicationId: navigationAddress.publicationId,
+                            navigationRoot: navigationAddress.navigationRoot,
+                        })
+                        : Promise.resolve(null),
                     buildChangedCodeDebug: (_codebaseRoot, changedFilesState) => this.hints.buildChangedCodeDebug(preparedReadState, changedFilesState),
                     buildGeneratedArtifactsVerificationHint: (codebaseRoot, results) => this.hints.buildGeneratedArtifactsVerificationHint(codebaseRoot, results),
                     getSearchNavigationHelpers: () => this.hints.getSearchNavigationHelpers(),
@@ -1849,35 +1456,6 @@ export class SearchRequestCoordinator {
                 let exactRegistryFallbackForTrackedLexical = exactFastPath.exactRegistryFallbackForTrackedLexical;
 
                 if (exactFastPath.kind === 'handled') {
-                    const barrierChanged = await sourceBarrierChanged();
-                    if (barrierChanged) {
-                        releaseLease();
-                        if (sourceDriftRetryCount === 0) {
-                            return this.attempt(args, 1);
-                        }
-                        const payload = this.hints.getToolResponseBuilders().buildSourceStateUnverifiedSearchPayload(
-                            effectiveRoot,
-                            {
-                                path: absolutePath,
-                                query: input.query,
-                                scope: input.scope,
-                                groupBy: input.groupBy,
-                                resultMode: input.resultMode,
-                                limit: input.limit,
-                            },
-                            "Source changed again while Satori was preparing this response.",
-                            "source_changed_during_request",
-                            {
-                                debugMode,
-                                freshnessDecision,
-                                readiness: readinessDebug,
-                            },
-                        );
-                        return {
-                            content: [{ type: "text", text: this.hints.stringifyToolJson(payload) }],
-                            meta: { searchDiagnostics },
-                        };
-                    }
                     let exactEnvelope = exactFastPath.finalized.envelope;
                     if (
                         (debugMode === 'freshness' || debugMode === 'full')
@@ -1898,31 +1476,12 @@ export class SearchRequestCoordinator {
                         exactFastPath.finalized.kind === "ok"
                         && exactEnvelope.resultMode === "grouped"
                     ) {
-                        if (vectorReceipt && preparedObservation) {
-                            exactEnvelope = attachSearchResultSet(
-                                exactEnvelope,
-                                exactFastPath.finalized.resultSet,
-                                false,
-                                "retrieval_order",
-                            );
-                        } else if (exactFastPath.finalized.resultSet) {
-                            const unboundEnvelope = { ...exactEnvelope };
-                            delete unboundEnvelope.continuation;
-                            delete unboundEnvelope.rankedSetDigest;
-                            delete unboundEnvelope.resultIndex;
-                            exactEnvelope = {
-                                ...unboundEnvelope,
-                                warnings: buildSearchWarningDetails([
-                                    ...(exactEnvelope.warnings?.map((warning) => warning.code) ?? []),
-                                    ...(exactEnvelope.continuation
-                                        ? [WARNING_CODES.SEARCH_RESULT_SET_NOT_CACHE_ADMISSIBLE]
-                                        : []),
-                                    ...(input.includeResultIndex === true
-                                        ? [WARNING_CODES.SEARCH_RESULT_INDEX_NOT_ADMISSIBLE]
-                                        : []),
-                                ]),
-                            };
-                        }
+                        exactEnvelope = attachSearchResultSet(
+                            exactEnvelope,
+                            exactFastPath.finalized.resultSet,
+                            false,
+                            "retrieval_order",
+                        );
                     }
                     await this.readiness.touchWatchedCodebaseBestEffort(effectiveRoot);
                     this.preparedRead.seedPreparedRead(preparedReadState, preservePreparedProofAge);
@@ -1942,85 +1501,42 @@ export class SearchRequestCoordinator {
                     };
                 }
 
-                if (
-                    freshnessDecision.mode !== "served_previous_generation"
-                    && preparedObservation
-                    && this.preparedRead.getPreparedAuthorityObservation(effectiveRoot) !== preparedObservation
-                ) {
-                    this.preparedRead.evictPreparedRead(effectiveRoot);
-                    const payload = this.buildNotReadySearchPayload(effectiveRoot, {
-                        path: absolutePath,
-                        query: input.query,
-                        scope: input.scope,
-                        groupBy: input.groupBy,
-                        resultMode: input.resultMode,
-                        limit: input.limit,
-                    });
-                    return {
-                        content: [{ type: 'text', text: this.hints.stringifyToolJson(payload) }],
-                        meta: { searchDiagnostics },
-                    };
-                }
-
                 let entrypointOwnerEvidence: EntrypointOwnerEvidenceResolution | undefined;
-                const completeEntrypointPublicationBinding = Boolean(
-                    generationReceipt
-                    && typeof generationReceipt.collectionName === "string"
-                    && typeof generationReceipt.marker?.runId === "string"
-                    && typeof generationReceipt.policyDocumentDigest === "string"
-                    && typeof generationReceipt.policy?.policyHash === "string"
-                    && typeof generationReceipt.navigation?.generationId === "string"
-                    && typeof generationReceipt.navigation?.symbolRegistryManifestHash === "string",
-                );
                 if (
-                    entrypointOwnerSeeking
-                    && completeEntrypointPublicationBinding
-                    && generationReceipt
+                    !staleWhileSync
+                    && entrypointOwnerSeeking
                     && navigationStatus === "valid"
+                    && navigationAddress
                 ) {
-                    if (
-                        !searchSymbolRegistry
-                        || searchSymbolRegistryManifestHash
-                            !== generationReceipt.navigation.symbolRegistryManifestHash
-                    ) {
+                    if (!searchSymbolRegistry) {
                         const registryState = await this.preparedRead.loadPreparedNavigationManifest(
                             preparedReadState,
                             readinessDebug.operations,
                         );
-                        if (
-                            registryState.status === "ok"
-                            && registryState.manifestHash
-                                === generationReceipt.navigation.symbolRegistryManifestHash
-                        ) {
+                        if (registryState.status === "ok") {
                             searchSymbolRegistry = registryState.registry;
                             searchSymbolRegistryManifestHash = registryState.manifestHash;
                         }
                     }
-                    if (
-                        searchSymbolRegistry
-                        && searchSymbolRegistryManifestHash
-                            === generationReceipt.navigation.symbolRegistryManifestHash
-                    ) {
+                    if (searchSymbolRegistry && searchSymbolRegistryManifestHash) {
                         const preparedEvidence = await prepareEntrypointOwnerEvidence({
                             codebaseRoot: effectiveRoot,
                             registry: searchSymbolRegistry,
                             publication: {
-                                collectionName: generationReceipt.collectionName,
-                                markerRunId: generationReceipt.marker.runId,
-                                policyDocumentDigest: generationReceipt.policyDocumentDigest,
-                                policyHash: generationReceipt.policy.policyHash,
-                                navigationGenerationId: generationReceipt.navigation.generationId,
-                                symbolRegistryManifestHash:
-                                    generationReceipt.navigation.symbolRegistryManifestHash,
+                                publicationId: lease.id,
+                                collectionName: lease.publication.vector.collectionName,
+                                policyHash: lease.publication.policy.policyHash,
+                                navigationPublicationId: navigationAddress.publicationId,
+                                symbolRegistryManifestHash: searchSymbolRegistryManifestHash,
                             },
                         });
                         if ("resolution" in preparedEvidence) {
                             preparedEntrypointOwnerEvidence = preparedEvidence;
                             const manifestComparison = await this.freshness.compareSourcePathsToFreshnessCheckpoint(
-                                    effectiveRoot,
-                                    ["pyproject.toml"],
-                                    generationReceipt,
-                                );
+                                effectiveRoot,
+                                ["pyproject.toml"],
+                                lease,
+                            );
                             if (manifestComparison.status === "matches") {
                                 entrypointOwnerEvidence = preparedEvidence.resolution;
                             } else {
@@ -2079,12 +1595,11 @@ export class SearchRequestCoordinator {
                     searchQuerySupport: this.searchQuerySupport,
                     semanticSearch: (request) => {
                         if (
-                            vectorReceipt
-                            && debugMode === 'full'
-                            && this.environment.semanticSearchWithCandidateTraceInProvenGeneration
+                            debugMode === 'full'
+                            && this.environment.semanticSearchWithCandidateTraceInPublication
                         ) {
-                            return this.environment.semanticSearchWithCandidateTraceInProvenGeneration(
-                                vectorReceipt,
+                            return this.environment.semanticSearchWithCandidateTraceInPublication(
+                                lease,
                                 request,
                                 SEARCH_CANDIDATE_SURVIVAL_MAX_ENTRIES_PER_STAGE,
                                 retrievalPolicy.diagnosticCandidateLimit !== undefined
@@ -2098,43 +1613,27 @@ export class SearchRequestCoordinator {
                                     : {},
                             );
                         }
-                        if (freshnessDecision.mode === "served_previous_generation") {
-                            if (!vectorReceipt) {
-                                throw new Error("Stale-while-sync requires a proven vector generation receipt.");
-                            }
-                            return this.environment.semanticSearchInProvenGeneration!(vectorReceipt, request);
+                        if (!this.environment.semanticSearchInPublication) {
+                            throw new Error("Publication-bound semantic search is unavailable.");
                         }
-                        return vectorReceipt
-                            ? this.environment.semanticSearchInProvenGeneration!(vectorReceipt, request)
-                            : this.environment.semanticSearch(request);
+                        return this.environment.semanticSearchInPublication(lease, request);
                     },
-                    reranker: this.reranker,
-                    ...(rerankerDocumentProjectionIdentity === SEARCH_RERANK_DOCUMENT_POLICY.id
+                    reranker: staleWhileSync ? null : this.reranker,
+                    ...(!staleWhileSync && rerankerDocumentProjectionIdentity === SEARCH_RERANK_DOCUMENT_POLICY.id
                         ? {
                             buildRerankDocument: async (
                                 rerankQuery: string,
                                 result: SearchResultLike,
                             ): Promise<SearchRerankProjectionResult> => {
                                 const candidateId = searchRerankCandidateId(result);
-                                if (!generationReceipt) {
-                                    return {
-                                        ok: false,
-                                        candidateId,
-                                        reason: "generation_receipt_missing",
-                                    };
-                                }
-                                if (navigationStatus !== "valid") {
+                                if (navigationStatus !== "valid" || !navigationAddress) {
                                     return {
                                         ok: false,
                                         candidateId,
                                         reason: "navigation_status_invalid",
                                     };
                                 }
-                                if (
-                                    !searchSymbolRegistry
-                                    || searchSymbolRegistryManifestHash
-                                        !== generationReceipt.navigation.symbolRegistryManifestHash
-                                ) {
+                                if (!searchSymbolRegistry || !searchSymbolRegistryManifestHash) {
                                     const registryState = await this.preparedRead.loadPreparedNavigationManifest(
                                         preparedReadState,
                                         readinessDebug.operations,
@@ -2146,16 +1645,6 @@ export class SearchRequestCoordinator {
                                             reason: "registry_load_failed",
                                         };
                                     }
-                                    if (
-                                        registryState.manifestHash
-                                            !== generationReceipt.navigation.symbolRegistryManifestHash
-                                    ) {
-                                        return {
-                                            ok: false,
-                                            candidateId,
-                                            reason: "registry_manifest_mismatch",
-                                        };
-                                    }
                                     searchSymbolRegistry = registryState.registry;
                                     searchSymbolRegistryManifestHash = registryState.manifestHash;
                                 }
@@ -2163,17 +1652,11 @@ export class SearchRequestCoordinator {
                                     ? await (structuralContextLoad ??= (async () => {
                                         const compatibility = await this.preparedRead.loadPreparedNavigationCompatibility(
                                             preparedReadState,
-                                            searchSymbolRegistryManifestHash
-                                                ?? generationReceipt.navigation.symbolRegistryManifestHash,
+                                            searchSymbolRegistryManifestHash!,
                                             readinessDebug.operations,
                                         );
                                         const status = resolveSearchRerankStructuralContextStatus({
                                             relationshipStatus: compatibility.relationships.status,
-                                            ...(compatibility.relationships.status === "ok"
-                                                ? { relationshipManifestHash: compatibility.relationships.manifestHash }
-                                                : {}),
-                                            expectedRelationshipManifestHash:
-                                                generationReceipt.navigation.relationshipManifestHash,
                                         });
                                         if (status !== "available" || compatibility.relationships.status !== "ok") {
                                             return { status };
@@ -2317,7 +1800,7 @@ export class SearchRequestCoordinator {
                         preparedReadState,
                         readinessDebug.operations,
                     ),
-                    loadRegistryValidatedCallGraphSidecar: (finalizationInput) => this.readiness.loadRegistryValidatedCallGraphSidecar({
+                    loadRegistryValidatedRelationshipNavigation: (finalizationInput) => this.readiness.loadRegistryValidatedRelationshipNavigation({
                         ...finalizationInput,
                         preparedRead: preparedReadState,
                         operations: readinessDebug.operations,
@@ -2336,28 +1819,26 @@ export class SearchRequestCoordinator {
                 if (preparedEntrypointOwnerEvidence) {
                     const finalizedEntrypointEvidence = await preparedEntrypointOwnerEvidence.finalize({
                         validatePreparedAuthority: async () => {
-                            barrierChanged = await sourceBarrierChanged();
-                            if (!barrierChanged) {
-                                const manifestComparison = await this.freshness.compareSourcePathsToFreshnessCheckpoint(
-                                        effectiveRoot,
-                                        ["pyproject.toml"],
-                                        generationReceipt,
-                                    );
-                                barrierChanged = manifestComparison.status !== "matches";
+                            if (!await this.preparedRead.isPublicationLeaseAdmitted(lease)) {
+                                barrierChanged = true;
+                                return;
                             }
+                            const manifestComparison = await this.freshness.compareSourcePathsToFreshnessCheckpoint(
+                                effectiveRoot,
+                                ["pyproject.toml"],
+                                lease,
+                            );
+                            barrierChanged = manifestComparison.status !== "matches";
                         },
                     });
                     if (finalizedEntrypointEvidence.status !== "available") {
                         barrierChanged = true;
                     }
-                } else {
-                    barrierChanged = await sourceBarrierChanged();
                 }
-                finalBarrierChanged = barrierChanged;
                 if (barrierChanged) {
                     await preparedEntrypointOwnerEvidence?.release();
                     preparedEntrypointOwnerEvidence = undefined;
-                    releaseLease();
+                    lease.release();
                     if (sourceDriftRetryCount === 0) {
                         return this.attempt(args, 1);
                     }
@@ -2575,12 +2056,7 @@ export class SearchRequestCoordinator {
                 && verifySearchRankedSetBinding(
                     entry.rankedSetBinding,
                     buildFrozenSearchRankedSetBindingInput({
-                        vectorReceipt: entry.vectorReceipt,
-                        ...(entry.generationReceipt
-                            ? { generationReceipt: entry.generationReceipt }
-                            : {}),
-                        preparedObservation: entry.preparedObservation,
-                        sourceObservation: entry.sourceObservation,
+                        publication: entry.publication,
                         queryPolicyDigest: entry.queryPolicyDigest,
                         rerankerIdentity,
                         rerankerProjectionIdentity,
@@ -2604,30 +2080,9 @@ export class SearchRequestCoordinator {
                 "Search result-set identity changed. Run search_codebase again.",
             );
         }
-        const observationBefore = this.preparedRead.getPreparedReadCacheObservation(entry.canonicalRoot);
-        const revalidate = this.freshness.getPreparedGenerationRevalidator();
-        if (
-            !observationBefore.observation
-            || observationBefore.observation !== entry.preparedObservation
-            || observationBefore.sourceObservation !== entry.sourceObservation
-            || typeof revalidate !== "function"
-        ) {
+        if (!await this.preparedRead.isPublicationAdmitted(entry.publication)) {
             this.continuationCoordinator.remove(handle);
-            return fail("SEARCH_RESULT_SET_STALE", "Search publication or source observation changed. Run search_codebase again.");
-        }
-        const proof = await revalidate(entry.canonicalRoot, entry.vectorReceipt, {
-            ...(entry.generationReceipt ? { priorGenerationReceipt: entry.generationReceipt } : {}),
-        }).catch(() => null);
-        const observationAfter = this.preparedRead.getPreparedReadCacheObservation(entry.canonicalRoot);
-        if (
-            !proof
-            || proof.navigationProof.status === "requires_reindex"
-            || proof.navigationProof.status === "unsupported"
-            || observationAfter.observation !== observationBefore.observation
-            || observationAfter.sourceObservation !== observationBefore.sourceObservation
-        ) {
-            this.continuationCoordinator.remove(handle);
-            return fail("SEARCH_RESULT_SET_STALE", "Search publication changed while continuation was being prepared. Run search_codebase again.");
+            return fail("SEARCH_RESULT_SET_STALE", "Search Publication is no longer admitted by current selection controls. Run search_codebase again.");
         }
 
         const pageSize = Number.isFinite(requestedLimit)
@@ -2722,27 +2177,11 @@ export class SearchRequestCoordinator {
         if (projection.status === "page_too_large") {
             return fail("SEARCH_RESULT_SET_PAGE_TOO_LARGE", "The next search result cannot fit within the response byte budget. Use read_file on an earlier target or run a narrower search.");
         }
-        const proofAfterProjection = await revalidate(
-            entry.canonicalRoot,
-            entry.vectorReceipt,
-            {
-                ...(entry.generationReceipt
-                    ? { priorGenerationReceipt: entry.generationReceipt }
-                    : {}),
-            },
-        ).catch(() => null);
-        const observationAfterProjection = this.preparedRead.getPreparedReadCacheObservation(entry.canonicalRoot);
-        if (
-            !proofAfterProjection
-            || proofAfterProjection.navigationProof.status === "requires_reindex"
-            || proofAfterProjection.navigationProof.status === "unsupported"
-            || observationAfterProjection.observation !== observationAfter.observation
-            || observationAfterProjection.sourceObservation !== observationAfter.sourceObservation
-        ) {
+        if (!await this.preparedRead.isPublicationAdmitted(entry.publication)) {
             this.continuationCoordinator.remove(handle);
             return fail(
                 "SEARCH_RESULT_SET_STALE",
-                "Search publication or source observation changed while the continuation page was being projected. Run search_codebase again.",
+                "Search Publication selection controls changed while the continuation page was being projected. Run search_codebase again.",
             );
         }
         const nextOffset = lookup.nextOffset + projection.results.length;

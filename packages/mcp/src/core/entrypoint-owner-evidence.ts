@@ -20,11 +20,10 @@ const PROJECT_SCRIPT_ASSIGNMENT_PATTERN =
     /^\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9][A-Za-z0-9._-]*))\s*=\s*(?:"([^"]+)"|'([^']+)')\s*(?:#.*)?$/;
 
 export type EntrypointPublicationIdentity = Readonly<{
+    publicationId: string;
     collectionName: string;
-    markerRunId: string;
-    policyDocumentDigest: string;
     policyHash: string;
-    navigationGenerationId: string;
+    navigationPublicationId: string;
     symbolRegistryManifestHash: string;
 }>;
 
@@ -88,11 +87,10 @@ function sha256(value: string): string {
 
 function publicationIdentity(input: EntrypointPublicationIdentity): string {
     return sha256(JSON.stringify([
+        input.publicationId,
         input.collectionName,
-        input.markerRunId,
-        input.policyDocumentDigest,
         input.policyHash,
-        input.navigationGenerationId,
+        input.navigationPublicationId,
         input.symbolRegistryManifestHash,
     ]));
 }

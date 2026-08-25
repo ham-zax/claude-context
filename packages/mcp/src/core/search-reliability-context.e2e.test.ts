@@ -79,7 +79,6 @@ function buildSupport(reranker: Reranker | null): SearchQuerySupport {
         getContextTrackedRelativePaths: () => [],
         classifyPathCategory: () => "srcRuntime",
         shouldIncludeCategoryInScope: () => true,
-        getSyncWatchDebounceMs: () => 0,
         capabilities: {
             hasReranker: () => reranker !== null,
             getDefaultRerankEnabled: () => reranker !== null,
@@ -511,7 +510,12 @@ test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded 
             root: { path: codebasePath, info: {} as never },
             navigationAuthorityMode: "canonical_v4",
             navigationStatus: "valid",
-            preparedObservation: "observation-1",
+            publication: {
+                id: "publication-1",
+                publication: {
+                    vector: { collectionName: "collection-1" },
+                },
+            } as never,
         });
         const host: SearchFrontDoorHost = {
             trackedRootReadiness: {
@@ -538,7 +542,6 @@ test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded 
                 return true;
             },
             preparePostFreshnessTrackedRootRead: async () => readyState(),
-            getPreparedReadObservation: () => "observation-1",
             ensureSearchFreshness: async () => ({
                 mode: "skipped_recent",
                 checkedAt: new Date(0).toISOString(),
@@ -564,11 +567,7 @@ test("Scenario G: cold-start joins a same-root sync once; reindex stays bounded 
                 throw new Error("unexpected recommended action");
             },
             buildCreateHint: () => ({ tool: "manage_index", args: { action: "create", path: codebasePath } }),
-            buildSyncHint: () => ({ tool: "manage_index", args: { action: "sync", path: codebasePath } }),
-            buildRepairHint: () => ({ tool: "manage_index", args: { action: "repair", path: codebasePath } }),
-            buildStaleLocalHint: () => ({}),
             buildStaleLocalMessage: () => "",
-            canSyncStaleLocal: () => false,
             withProofDebugHint: (payload) => payload,
             isPartialIndexNavigationUnavailable: () => false,
             partialIndexWarnings: [],

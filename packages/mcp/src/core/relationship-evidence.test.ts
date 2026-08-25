@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { CallGraphEdge, CallGraphNote } from "./call-graph.js";
+import type {
+    CallGraphEdgeResult as CallGraphEdge,
+    CallGraphNoteResult as CallGraphNote,
+} from "./search-types.js";
 import { projectRelationshipEvidence } from "./relationship-evidence.js";
 
 test("relationship evidence preserves graph order and marks static confidence as uncalibrated", () => {

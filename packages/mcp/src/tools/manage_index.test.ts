@@ -65,23 +65,18 @@ test("manage_index rejects relative path without CWD resolve", async () => {
     assert.doesNotMatch(response.content[0].text, /handler must not run/);
 });
 
-test("manage_index public action enum includes repair and full lifecycle set", () => {
+test("manage_index public action enum exposes only the current lifecycle set", () => {
     assert.deepEqual([...MANAGE_INDEX_ACTIONS], [
         "create",
         "reindex",
         "sync",
         "status",
         "clear",
-        "repair",
     ]);
-    assert.equal(MANAGE_INDEX_ACTIONS.includes("repair"), true);
 
     const schema = manageIndexTool.inputSchemaZod({} as ToolContext);
-    const parsed = schema.safeParse({ action: "repair", path: "/repo" });
-    assert.equal(parsed.success, true);
-
-    const rejected = schema.safeParse({ action: "not_an_action", path: "/repo" });
-    assert.equal(rejected.success, false);
+    assert.equal(schema.safeParse({ action: "repair", path: "/repo" }).success, false);
+    assert.equal(schema.safeParse({ action: "not_an_action", path: "/repo" }).success, false);
 });
 
 test("manage_index status defaults detail to summary and forwards explicit detail", async () => {
@@ -132,19 +127,16 @@ test("manage_index rejects status detail on non-status actions", async () => {
     assert.match(response.content[0]?.text || "", /detail.*status/i);
 });
 
-test("manage_index tool description lists actions and durable receipt semantics", () => {
+test("manage_index tool description lists current actions and process-lifetime operation semantics", () => {
     const description = manageIndexTool.description({} as ToolContext);
     for (const action of MANAGE_INDEX_ACTIONS) {
         assert.match(description, new RegExp(action));
     }
-    assert.match(description, /create\/reindex\/sync\/status\/clear\/repair/);
-    assert.match(description, /durable `operation` receipt/);
-    assert.match(description, /latest persisted receipt after restart/);
+    assert.match(description, /create\/reindex\/sync\/status\/clear/);
+    assert.match(description, /process-lifetime `operation` projection/);
+    assert.match(description, /not persisted as operation history/);
+    assert.match(description, /After process restart, status derives indexed state from the current Publication/);
     assert.match(description, /Terminal phases are `completed`, `failed`, and `blocked`/);
-    assert.match(description, /optional `repairProof` evidence/);
-    assert.match(description, /No related collection routes to create/);
-    assert.match(description, /generation routes to reindex/);
-    assert.match(description, /does not re-embed or rewrite source chunks/);
     assert.match(description, /syncStats/);
     assert.match(description, /added/);
     assert.match(description, /removed/);
@@ -572,13 +564,13 @@ test("manage_index returns structured backend diagnostics when handler backend c
     assert.equal(payload.code, "VECTOR_BACKEND_TIMEOUT");
 });
 
-test("manage_index repair uses provider embedding/vector context when available", async () => {
+test("manage_index reindex uses provider embedding/vector context when available", async () => {
     const capabilities = new CapabilityResolver(buildConfig());
     let requestedOperation: string | null = null;
     const providerContext = {
         toolHandlers: {
-            handleRepairIndex: async () => ({
-                content: [{ type: "text", text: "provider-backed repair" }]
+            handleReindexCodebase: async () => ({
+                content: [{ type: "text", text: "provider-backed reindex" }]
             })
         }
     } as unknown as ToolContext;
@@ -592,19 +584,19 @@ test("manage_index repair uses provider embedding/vector context when available"
             }
         },
         toolHandlers: {
-            handleRepairIndex: async () => {
-                throw new Error("startup context should not handle repair when provider context is available");
+            handleReindexCodebase: async () => {
+                throw new Error("startup context should not handle reindex when provider context is available");
             }
         }
     } as unknown as ToolContext;
 
     const response = await manageIndexTool.execute({
-        action: "repair",
+        action: "reindex",
         path: "/repo",
     }, ctx);
 
     assert.equal(requestedOperation, "embedding_vector");
-    assert.equal(response.content[0].text, "provider-backed repair");
+    assert.equal(response.content[0].text, "provider-backed reindex");
 });
 
 test("manage_index rejects an unauthorized path before provider resolution", async () => {

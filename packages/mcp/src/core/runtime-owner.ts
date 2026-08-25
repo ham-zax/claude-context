@@ -7,7 +7,7 @@ import { compareContractStrings } from "@zokizuan/satori-core";
 import type { ContextMcpConfig, IndexFingerprint } from "../config.js";
 
 /** Mutating manage_index actions that must honor the runtime-owner gate. */
-export type RuntimeOwnerMutationAction = "create" | "reindex" | "sync" | "clear" | "repair";
+export type RuntimeOwnerMutationAction = "create" | "reindex" | "sync" | "clear";
 
 
 export interface RuntimeOwnerConfigSummary {
