@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -10,42 +9,25 @@ import { isRepositoryRelativePath } from '../paths/repository-path';
 import type { SymbolRegistry } from './registry';
 import type { RelationshipAnalysisEvidence } from '../relationships';
 import {
-    CURRENT_GENERATION_SCHEMA_VERSION,
-    NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION,
     SYMBOL_INDEX_SCHEMA_VERSION,
     isSymbolIndexFile,
-    parseNavigationGenerationSeal,
-} from './sidecar-validators';
-import type {
-    NavigationGenerationSeal,
 } from './sidecar-validators';
 import {
-    CURRENT_GENERATION_FILE_NAME,
-    GENERATIONS_DIR_NAME,
-    NAVIGATION_GENERATION_SEAL_FILE_NAME,
     RELATIONSHIPS_DIR_NAME,
     SYMBOLS_DIR_NAME,
-    buildNavigationSymbolQualityAggregate,
     compareStrings,
-    computeNavigationGenerationSealHash,
     computeNavigationSourceFilesDigest,
-    hashSerializedJson,
+    hashSerializedString,
     readJson,
-    resolveCurrentNavigationGeneration,
-    resolveNavigationGeneration,
-    resolveNavigationSidecarRoot,
-    serializeJson,
 } from './sidecar-reads';
 import type { WriteSymbolRegistrySidecarResult } from './sidecar-writes';
 import {
-    BACKUP_ENTRY_PREFIX,
     SHARD_IO_CONCURRENCY,
     TEMP_ENTRY_PREFIX,
     fsyncPath,
     getRelationshipAnalysisEvidence,
     samePathIdentity,
     uniqueSidecarEntryName,
-    writeJson,
     writeRelationshipSidecarInternal,
     writeSymbolRegistrySidecarInternal,
 } from './sidecar-writes';
@@ -55,7 +37,8 @@ import type {
 } from './sidecar-writes';
 
 const CLEANUP_ENTRY_PREFIX = '.satori-cleanup-';
-export class NavigationSidecarStagingCleanupError extends Error {
+
+export class PublicationNavigationStagingCleanupError extends Error {
     readonly cleanupStatus = 'unresolved' as const;
 
     constructor(
@@ -64,59 +47,35 @@ export class NavigationSidecarStagingCleanupError extends Error {
         readonly cleanupCause: unknown,
     ) {
         super(
-            `Navigation sidecar staging failed and cleanup is unresolved for '${cleanupPath}': ${
+            `Publication navigation staging failed and cleanup is unresolved for '${cleanupPath}': ${
                 cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
             }`,
         );
-        this.name = 'NavigationSidecarStagingCleanupError';
+        this.name = 'PublicationNavigationStagingCleanupError';
     }
 }
 
-class NavigationSidecarCleanupFailure extends Error {
-    constructor(
-        readonly cleanupPath: string,
-        readonly cleanupCause: unknown,
-    ) {
-        super(
-            `Navigation sidecar cleanup failed for '${cleanupPath}': ${
-                cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
-            }`,
-        );
-        this.name = 'NavigationSidecarCleanupFailure';
-    }
-}
-
-export interface ClearSymbolRegistrySidecarInput {
-    normalizedRootPath: string;
-    stateRoot?: string;
-    beforeDelete?: () => void;
-    publishMutation?: (publish: () => void) => void;
-}
-
-export interface WriteNavigationSidecarGenerationInput {
+export interface StagePublicationNavigationInput {
+    publicationId: string;
+    navigationRoot: string;
     registry: SymbolRegistry;
     records: RelationshipRecord[];
     analysisByFile: Map<string, RelationshipAnalysisEvidence> | Record<string, RelationshipAnalysisEvidence>;
-    stateRoot?: string;
-    beforePublish?: () => void;
-    publishMutation?: (publish: () => void) => void;
     deltaReuse?: {
-        baseGenerationId: string;
+        basePublicationId: string;
+        baseNavigationRoot: string;
         symbolFilesToRewrite: readonly string[];
         relationshipFilesToRewrite: readonly string[];
     };
 }
 
-export interface WriteNavigationSidecarGenerationResult extends WriteSymbolRegistrySidecarResult {
-    generationId: string;
-    relationshipCount: number;
-    relationshipFileShardCount: number;
-}
-
-export interface StagedNavigationSidecarGeneration extends WriteNavigationSidecarGenerationResult {
+export interface StagedPublicationNavigation extends WriteSymbolRegistrySidecarResult {
+    publicationId: string;
+    navigationRoot: string;
     normalizedRootPath: string;
     relationshipManifestHash: string;
-    navigationSealHash: string;
+    relationshipCount: number;
+    relationshipFileShardCount: number;
     sourceFileCount: number;
     sourceFilesDigest: string;
     physical: {
@@ -127,10 +86,7 @@ export interface StagedNavigationSidecarGeneration extends WriteNavigationSideca
     };
 }
 
-export type NavigationGenerationPointerCandidate = Pick<
-    StagedNavigationSidecarGeneration,
-    'rootPath' | 'normalizedRootPath' | 'generationId' | 'manifestHash' | 'relationshipManifestHash' | 'navigationSealHash'
->;
+const stagedNavigationIdentities = new WeakMap<StagedPublicationNavigation, fs.Stats>();
 
 async function confirmPathAbsent(targetPath: string): Promise<void> {
     try {
@@ -139,99 +95,35 @@ async function confirmPathAbsent(targetPath: string): Promise<void> {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
         throw error;
     }
-    throw new Error(`Staged navigation artifact still exists after cleanup: ${targetPath}`);
+    throw new Error(`Publication navigation still exists after cleanup: ${targetPath}`);
 }
 
-async function restoreDetachedNavigationGeneration(input: {
-    generationRoot: string;
-    cleanupPath: string;
-    detachedStat: fs.Stats;
-}): Promise<void> {
-    try {
-        await fs.promises.lstat(input.generationRoot);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        await fs.promises.rename(input.cleanupPath, input.generationRoot);
-        const restoredStat = await fs.promises.lstat(input.generationRoot);
-        if (!samePathIdentity(input.detachedStat, restoredStat)) {
-            throw new Error(`detached navigation artifact identity changed while restoring ${input.generationRoot}`);
-        }
-        await fsyncPath(path.dirname(input.generationRoot));
-        return;
-    }
-    throw new Error(`cannot restore detached navigation artifact because ${input.generationRoot} is occupied`);
-}
-
-async function cleanupStagedNavigationGeneration(input: {
-    generationRoot: string;
-    generationId: string;
-    generationStat?: fs.Stats;
-    navigationSealHash?: string;
-}): Promise<void> {
-    if (!input.generationStat || !input.navigationSealHash) {
-        throw new Error('staged navigation generation identity was not fully established');
-    }
-
+async function cleanupOwnedNavigationRoot(
+    navigationRoot: string,
+    expectedStat: fs.Stats,
+): Promise<void> {
     const cleanupPath = path.join(
-        path.dirname(input.generationRoot),
+        path.dirname(navigationRoot),
         uniqueSidecarEntryName(CLEANUP_ENTRY_PREFIX),
     );
-    let detached = false;
-    let detachedStat: fs.Stats | undefined;
-    let ownershipValidated = false;
     try {
-        try {
-            await fs.promises.rename(input.generationRoot, cleanupPath);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                await fsyncPath(path.dirname(input.generationRoot));
-                return;
-            }
-            throw error;
-        }
-        detached = true;
-        detachedStat = await fs.promises.lstat(cleanupPath);
-        if (
-            !detachedStat.isDirectory()
-            || detachedStat.isSymbolicLink()
-            || !samePathIdentity(input.generationStat, detachedStat)
-        ) {
-            throw new Error(`staged navigation generation identity changed at ${input.generationRoot}`);
-        }
-
-        const seal = parseNavigationGenerationSeal(
-            await readJson(path.join(cleanupPath, NAVIGATION_GENERATION_SEAL_FILE_NAME)),
-        );
-        if (
-            !seal
-            || seal.generationId !== input.generationId
-            || computeNavigationGenerationSealHash(seal) !== input.navigationSealHash
-        ) {
-            throw new Error(`staged navigation generation seal changed at ${input.generationRoot}`);
-        }
-        ownershipValidated = true;
-
-        await fs.promises.rm(cleanupPath, { recursive: true, force: false });
-        await confirmPathAbsent(cleanupPath);
-        await fsyncPath(path.dirname(input.generationRoot));
+        await fs.promises.rename(navigationRoot, cleanupPath);
     } catch (error) {
-        if (detached && !ownershipValidated && detachedStat) {
-            try {
-                await restoreDetachedNavigationGeneration({
-                    generationRoot: input.generationRoot,
-                    cleanupPath,
-                    detachedStat,
-                });
-            } catch (restoreError) {
-                throw new NavigationSidecarCleanupFailure(cleanupPath, restoreError);
-            }
-            throw error;
-        }
-        if (detached) {
-            throw new NavigationSidecarCleanupFailure(cleanupPath, error);
-        }
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
         throw error;
     }
+    const detachedStat = await fs.promises.lstat(cleanupPath);
+    if (
+        !detachedStat.isDirectory()
+        || detachedStat.isSymbolicLink()
+        || !samePathIdentity(expectedStat, detachedStat)
+    ) {
+        await fs.promises.rename(cleanupPath, navigationRoot).catch(() => undefined);
+        throw new Error(`Publication navigation identity changed at '${navigationRoot}'.`);
+    }
+    await fs.promises.rm(cleanupPath, { recursive: true, force: false });
+    await confirmPathAbsent(cleanupPath);
+    await fsyncPath(path.dirname(navigationRoot));
 }
 
 async function collectDirectoryTreePaths(
@@ -246,6 +138,8 @@ async function collectDirectoryTreePaths(
             await collectDirectoryTreePaths(entryPath, files, directories);
         } else if (entry.isFile()) {
             files.push(entryPath);
+        } else {
+            throw new Error(`Publication navigation contains unsupported filesystem entry '${entryPath}'.`);
         }
     }
     directories.push(rootPath);
@@ -254,7 +148,7 @@ async function collectDirectoryTreePaths(
 async function fsyncDirectoryTree(
     rootPath: string,
     sharedFileSizes: ReadonlyMap<string, number> = new Map(),
-): Promise<StagedNavigationSidecarGeneration['physical']> {
+): Promise<StagedPublicationNavigation['physical']> {
     const files: string[] = [];
     const directories: string[] = [];
     await collectDirectoryTreePaths(rootPath, files, directories);
@@ -273,9 +167,8 @@ async function fsyncDirectoryTree(
         }));
         for (const { filePath, size, shared } of stats) {
             logicalBytes += size;
-            if (shared) {
-                sharedFiles += 1;
-            } else {
+            if (shared) sharedFiles += 1;
+            else {
                 physicallyWrittenBytes += size;
                 writtenFiles.push(filePath);
             }
@@ -293,125 +186,66 @@ async function fsyncDirectoryTree(
     };
 }
 
-async function publishCurrentGenerationPointer(
-    rootPath: string,
-    pointer: {
-        schemaVersion: typeof CURRENT_GENERATION_SCHEMA_VERSION;
-        generationId: string;
-        symbolRegistryManifestHash: string;
-        relationshipManifestHash: string;
-        navigationSealHash: string;
-    },
-    beforePublish?: () => void,
-    publishMutation?: (publish: () => void) => void,
-): Promise<void> {
-    await fs.promises.mkdir(rootPath, { recursive: true });
-    const pointerPath = path.join(rootPath, CURRENT_GENERATION_FILE_NAME);
-    const temporaryPath = path.join(rootPath, uniqueSidecarEntryName(TEMP_ENTRY_PREFIX));
-    let published = false;
-    let publicationCount = 0;
-    try {
-        await fs.promises.writeFile(temporaryPath, serializeJson(pointer), 'utf8');
-        if (publishMutation) {
-            publishMutation(() => {
-                publicationCount += 1;
-                if (publicationCount > 1) {
-                    throw new Error('Navigation generation publication callback invoked publish more than once.');
-                }
-                fs.renameSync(temporaryPath, pointerPath);
-                published = true;
-            });
-            if (!published || publicationCount !== 1) {
-                throw new Error('Navigation generation publication callback returned without publishing the pointer.');
-            }
-        } else {
-            beforePublish?.();
-            await fs.promises.rename(temporaryPath, pointerPath);
-            published = true;
+function validateRewritePaths(paths: readonly string[], kind: string): Set<string> {
+    const normalized = new Set<string>();
+    for (const filePath of paths) {
+        const candidate = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!isRepositoryRelativePath(candidate)) {
+            throw new Error(`Atomic navigation delta ${kind} rewrite path '${filePath}' is invalid.`);
         }
-    } finally {
-        if (!published) {
-            await fs.promises.rm(temporaryPath, { force: true }).catch(() => undefined);
-        }
+        normalized.add(candidate);
+    }
+    return normalized;
+}
+
+async function verifyReusableShardHash(sourceRoot: string, shardPath: string, expectedHash: string): Promise<void> {
+    const serialized = await fs.promises.readFile(path.join(sourceRoot, shardPath), 'utf8');
+    if (hashSerializedString(serialized) !== expectedHash) {
+        throw new Error(`Atomic navigation delta source shard '${shardPath}' is corrupt; reindex is required.`);
     }
 }
 
-export async function writeNavigationSidecarGeneration(
-    input: WriteNavigationSidecarGenerationInput,
-): Promise<StagedNavigationSidecarGeneration> {
-    const staged = await stageNavigationSidecarGeneration(input);
-    await publishNavigationSidecarGeneration(staged, {
-        beforePublish: input.beforePublish,
-        publishMutation: input.publishMutation,
-    });
-    return staged;
-}
-
-async function loadNavigationShardReuse(
-    stateRoot: string | undefined,
+async function loadPublicationNavigationReuse(
     normalizedRootPath: string,
-    input: NonNullable<WriteNavigationSidecarGenerationInput['deltaReuse']>,
+    input: NonNullable<StagePublicationNavigationInput['deltaReuse']>,
 ): Promise<{ symbols: SymbolShardReuse; relationships: RelationshipShardReuse }> {
-    const generation = await resolveNavigationGeneration(
-        stateRoot,
-        normalizedRootPath,
-        input.baseGenerationId,
-    );
-    const rawSymbolIndex = await readJson(path.join(generation.generationRoot, SYMBOLS_DIR_NAME, 'index.json'));
+    const sourceRoot = path.resolve(input.baseNavigationRoot);
+    if (path.basename(path.dirname(sourceRoot)) !== input.basePublicationId) {
+        throw new Error('Atomic navigation delta source path does not belong to the declared base Publication.');
+    }
+    const rawSymbolIndex = await readJson(path.join(sourceRoot, SYMBOLS_DIR_NAME, 'index.json'));
     if (!isSymbolIndexFile(rawSymbolIndex) || rawSymbolIndex.schemaVersion !== SYMBOL_INDEX_SCHEMA_VERSION) {
         throw new Error('Atomic navigation delta source lacks reusable symbol contributions; reindex is required.');
     }
-    if (rawSymbolIndex.manifestHash !== generation.symbolRegistryManifestHash) {
-        throw new Error('Atomic navigation delta source symbol identity is incompatible; reindex is required.');
+    const rawManifest = await readJson(path.join(sourceRoot, 'manifest.json')) as { normalizedRootPath?: unknown };
+    if (rawManifest?.normalizedRootPath !== normalizedRootPath) {
+        throw new Error('Atomic navigation delta source belongs to a different codebase root; reindex is required.');
     }
 
-    const relationshipManifestPath = path.join(generation.generationRoot, RELATIONSHIPS_DIR_NAME, 'manifest.json');
-    const serializedRelationshipManifest = await fs.promises.readFile(relationshipManifestPath, 'utf8');
-    const rawRelationshipManifest = JSON.parse(serializedRelationshipManifest) as unknown;
+    const rawRelationshipManifest = await readJson(path.join(sourceRoot, RELATIONSHIPS_DIR_NAME, 'manifest.json'));
     if (
         !isRelationshipManifest(rawRelationshipManifest)
-        || rawRelationshipManifest.fileContributionSchemaVersion
-            !== RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION
+        || rawRelationshipManifest.fileContributionSchemaVersion !== RELATIONSHIP_FILE_CONTRIBUTION_SCHEMA_VERSION
+        || rawRelationshipManifest.symbolRegistryManifestHash !== rawSymbolIndex.manifestHash
     ) {
-        throw new Error('Atomic navigation delta source lacks reusable relationship contributions; reindex is required.');
-    }
-    const relationshipManifestHash = crypto.createHash('sha256')
-        .update(serializedRelationshipManifest, 'utf8')
-        .digest('hex');
-    if (relationshipManifestHash !== generation.relationshipManifestHash) {
-        throw new Error('Atomic navigation delta source relationship identity is incompatible; reindex is required.');
-    }
-    const rawSeal = await readJson(path.join(generation.generationRoot, NAVIGATION_GENERATION_SEAL_FILE_NAME));
-    const seal = parseNavigationGenerationSeal(rawSeal);
-    const artifactSet = [
-        ...rawSymbolIndex.files.map((file) => ({ path: file.shardPath, hash: file.shardHash })),
-        ...rawRelationshipManifest.files.map((file) => ({ path: file.shardPath, hash: file.shardHash })),
-    ].sort((left, right) => compareStrings(left.path, right.path));
-    if (!seal || hashSerializedJson(artifactSet) !== seal.artifactSetHash) {
-        throw new Error('Atomic navigation delta source artifact identity is incompatible; reindex is required.');
+        throw new Error('Atomic navigation delta source relationship metadata is incompatible; reindex is required.');
     }
 
-    const validateRewritePaths = (paths: readonly string[], kind: string): Set<string> => {
-        const normalized = new Set<string>();
-        for (const filePath of paths) {
-            const candidate = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
-            if (!isRepositoryRelativePath(candidate)) {
-                throw new Error(`Atomic navigation delta ${kind} rewrite path '${filePath}' is invalid.`);
-            }
-            normalized.add(candidate);
-        }
-        return normalized;
-    };
+    await Promise.all([
+        ...rawSymbolIndex.files.map((file) => verifyReusableShardHash(sourceRoot, file.shardPath, file.shardHash)),
+        ...rawRelationshipManifest.files.map((file) => verifyReusableShardHash(sourceRoot, file.shardPath, file.shardHash)),
+    ]);
+
     const sharedFileSizes = new Map<string, number>();
     return {
         symbols: {
-            sourceRoot: generation.generationRoot,
+            sourceRoot,
             filesByPath: new Map(rawSymbolIndex.files.map((file) => [file.path, file])),
             filesToRewrite: validateRewritePaths(input.symbolFilesToRewrite, 'symbol'),
             sharedFileSizes,
         },
         relationships: {
-            sourceRoot: generation.generationRoot,
+            sourceRoot,
             filesByPath: new Map(rawRelationshipManifest.files.map((file) => [file.path, file])),
             filesToRewrite: validateRewritePaths(input.relationshipFilesToRewrite, 'relationship'),
             sharedFileSizes,
@@ -419,38 +253,38 @@ async function loadNavigationShardReuse(
     };
 }
 
-export async function stageNavigationSidecarGeneration(
-    input: Omit<WriteNavigationSidecarGenerationInput, 'beforePublish' | 'publishMutation'>,
-): Promise<StagedNavigationSidecarGeneration> {
-    const rootPath = resolveNavigationSidecarRoot(
-        input.stateRoot,
-        input.registry.manifest.normalizedRootPath,
-    );
+export async function stagePublicationNavigation(
+    input: StagePublicationNavigationInput,
+): Promise<StagedPublicationNavigation> {
+    const navigationRoot = path.resolve(input.navigationRoot);
+    if (path.basename(path.dirname(navigationRoot)) !== input.publicationId) {
+        throw new Error(`Publication '${input.publicationId}' navigation path does not belong to that Publication.`);
+    }
     for (const file of input.registry.manifest.files) {
         if (!getRelationshipAnalysisEvidence(input.analysisByFile, file.path)) {
             throw new Error(`Relationship analysis evidence is missing for manifest file '${file.path}'.`);
         }
     }
-    const reuse = input.deltaReuse
-        ? await loadNavigationShardReuse(
-            input.stateRoot,
-            input.registry.manifest.normalizedRootPath,
-            input.deltaReuse,
-        )
-        : undefined;
+    try {
+        await fs.promises.lstat(navigationRoot);
+        throw new Error(`Publication '${input.publicationId}' navigation is immutable and already exists.`);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
 
-    const buildStateRoot = path.join(rootPath, uniqueSidecarEntryName(TEMP_ENTRY_PREFIX));
-    let generationRoot: string | undefined;
-    let generationRenamed = false;
-    let generationStat: fs.Stats | undefined;
-    let navigationSealHash: string | undefined;
+    const reuse = input.deltaReuse
+        ? await loadPublicationNavigationReuse(input.registry.manifest.normalizedRootPath, input.deltaReuse)
+        : undefined;
+    const buildRoot = path.join(path.dirname(navigationRoot), uniqueSidecarEntryName(TEMP_ENTRY_PREFIX));
+    let navigationStat: fs.Stats | undefined;
+    let renamed = false;
     try {
         const symbolResult = await writeSymbolRegistrySidecarInternal({
-            stateRoot: buildStateRoot,
+            navigationRoot: buildRoot,
             registry: input.registry,
         }, reuse?.symbols);
         const relationshipResult = await writeRelationshipSidecarInternal({
-            stateRoot: buildStateRoot,
+            navigationRoot: buildRoot,
             normalizedRootPath: input.registry.manifest.normalizedRootPath,
             symbolRegistryManifestHash: symbolResult.manifestHash,
             relationshipVersion: input.registry.manifest.relationshipVersion,
@@ -460,70 +294,37 @@ export async function stageNavigationSidecarGeneration(
             analysisByFile: input.analysisByFile,
         }, reuse?.relationships);
 
-        const builtRoot = symbolResult.rootPath;
-        const generationId = `${symbolResult.manifestHash.slice(0, 16)}-${crypto.randomBytes(8).toString('hex')}`;
-        generationRoot = path.join(rootPath, GENERATIONS_DIR_NAME, generationId);
-        await fs.promises.mkdir(path.dirname(generationRoot), { recursive: true });
-        await fs.promises.rename(builtRoot, generationRoot);
-        generationRenamed = true;
-        generationStat = await fs.promises.lstat(generationRoot);
+        const physical = await fsyncDirectoryTree(buildRoot, reuse?.symbols.sharedFileSizes);
+        await fs.promises.mkdir(path.dirname(navigationRoot), { recursive: true });
+        await fs.promises.rename(buildRoot, navigationRoot);
+        renamed = true;
+        navigationStat = await fs.promises.lstat(navigationRoot);
+        await fsyncPath(path.dirname(navigationRoot));
 
-        const symbolIndex = await readJson(path.join(generationRoot, SYMBOLS_DIR_NAME, 'index.json'));
-        const relationshipManifest = await readJson(path.join(generationRoot, RELATIONSHIPS_DIR_NAME, 'manifest.json'));
-        if (!isSymbolIndexFile(symbolIndex) || !isRelationshipManifest(relationshipManifest)) {
-            throw new Error('Staged navigation generation cannot be sealed because its artifact manifests are invalid.');
-        }
-        const artifactSet = [
-            ...symbolIndex.files.map((file) => ({ path: file.shardPath, hash: file.shardHash })),
-            ...relationshipManifest.files.map((file) => ({ path: file.shardPath, hash: file.shardHash })),
-        ].sort((left, right) => compareStrings(left.path, right.path));
-        const seal: NavigationGenerationSeal = {
-            schemaVersion: NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION,
-            generationId,
-            symbolRegistryManifestHash: symbolResult.manifestHash,
-            relationshipManifestHash: relationshipResult.manifestHash,
-            artifactSetHash: hashSerializedJson(artifactSet),
-            symbolQuality: buildNavigationSymbolQualityAggregate(input.registry),
-        };
-        await writeJson(path.join(generationRoot, NAVIGATION_GENERATION_SEAL_FILE_NAME), seal);
-        navigationSealHash = computeNavigationGenerationSealHash(seal);
-        const physical = await fsyncDirectoryTree(
-            generationRoot,
-            reuse?.symbols.sharedFileSizes,
-        );
-        await fsyncPath(path.dirname(generationRoot));
-        await fsyncPath(rootPath);
-
-        return {
-            rootPath,
+        const candidate: StagedPublicationNavigation = {
+            rootPath: navigationRoot,
+            navigationRoot,
             normalizedRootPath: input.registry.manifest.normalizedRootPath,
+            publicationId: input.publicationId,
             manifestHash: symbolResult.manifestHash,
             fileShardCount: symbolResult.fileShardCount,
             symbolCount: symbolResult.symbolCount,
-            generationId,
             relationshipManifestHash: relationshipResult.manifestHash,
             relationshipCount: relationshipResult.relationshipCount,
             relationshipFileShardCount: relationshipResult.fileShardCount,
-            navigationSealHash,
             sourceFileCount: input.registry.manifest.files.length,
             sourceFilesDigest: computeNavigationSourceFilesDigest(input.registry.manifest.files),
             physical,
         };
+        stagedNavigationIdentities.set(candidate, navigationStat);
+        return candidate;
     } catch (error) {
-        if (generationRenamed && generationRoot) {
+        if (renamed && navigationStat) {
             try {
-                await cleanupStagedNavigationGeneration({
-                    generationRoot,
-                    generationId: path.basename(generationRoot),
-                    generationStat,
-                    navigationSealHash,
-                });
+                await cleanupOwnedNavigationRoot(navigationRoot, navigationStat);
             } catch (cleanupError) {
-                const unresolvedCleanupPath = cleanupError instanceof NavigationSidecarCleanupFailure
-                    ? cleanupError.cleanupPath
-                    : generationRoot;
-                throw new NavigationSidecarStagingCleanupError(
-                    unresolvedCleanupPath,
+                throw new PublicationNavigationStagingCleanupError(
+                    navigationRoot,
                     error,
                     cleanupError,
                 );
@@ -531,94 +332,19 @@ export async function stageNavigationSidecarGeneration(
         }
         throw error;
     } finally {
-        await fs.promises.rm(buildStateRoot, { recursive: true, force: true }).catch(() => undefined);
+        await fs.promises.rm(buildRoot, { recursive: true, force: true }).catch(() => undefined);
     }
 }
 
-export async function publishNavigationSidecarGeneration(
-    candidate: NavigationGenerationPointerCandidate,
-    options: Pick<WriteNavigationSidecarGenerationInput, 'beforePublish' | 'publishMutation'> = {},
-): Promise<void> {
-    await publishCurrentGenerationPointer(
-        candidate.rootPath,
-        {
-            schemaVersion: CURRENT_GENERATION_SCHEMA_VERSION,
-            generationId: candidate.generationId,
-            symbolRegistryManifestHash: candidate.manifestHash,
-            relationshipManifestHash: candidate.relationshipManifestHash,
-            navigationSealHash: candidate.navigationSealHash,
-        },
-        options.beforePublish,
-        options.publishMutation,
-    );
-}
-
-export async function discardNavigationSidecarGeneration(
-    candidate: StagedNavigationSidecarGeneration,
+export async function discardPublicationNavigation(
+    candidate: StagedPublicationNavigation,
     beforeDelete?: () => void,
 ): Promise<void> {
+    const expectedStat = stagedNavigationIdentities.get(candidate);
+    if (!expectedStat) {
+        throw new Error(`Publication navigation '${candidate.publicationId}' is not an owned staged candidate.`);
+    }
     beforeDelete?.();
-    await fs.promises.rm(
-        path.join(candidate.rootPath, GENERATIONS_DIR_NAME, candidate.generationId),
-        { recursive: true, force: true },
-    );
-}
-
-export async function pruneNavigationSidecarGenerations(input: {
-    stateRoot?: string;
-    normalizedRootPath: string;
-    keepGenerationIds: ReadonlySet<string>;
-}): Promise<string[]> {
-    const rootPath = resolveNavigationSidecarRoot(input.stateRoot, input.normalizedRootPath);
-    const generationsRoot = path.join(rootPath, GENERATIONS_DIR_NAME);
-    const keepGenerationIds = new Set(input.keepGenerationIds);
-    const current = await resolveCurrentNavigationGeneration(
-        input.stateRoot,
-        input.normalizedRootPath,
-    ).catch(() => null);
-    if (current) keepGenerationIds.add(current.generationId);
-
-    let entries: fs.Dirent[];
-    try {
-        entries = await fs.promises.readdir(generationsRoot, { withFileTypes: true });
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-        throw error;
-    }
-    const removed: string[] = [];
-    for (const entry of entries
-        .filter((candidate) => candidate.isDirectory() && !keepGenerationIds.has(candidate.name))
-        .sort((left, right) => compareStrings(left.name, right.name))) {
-        await fs.promises.rm(path.join(generationsRoot, entry.name), { recursive: true, force: true });
-        removed.push(entry.name);
-    }
-    if (removed.length > 0) await fsyncPath(generationsRoot);
-    return removed;
-}
-
-export async function clearSymbolRegistrySidecar(input: ClearSymbolRegistrySidecarInput): Promise<void> {
-    const rootPath = resolveNavigationSidecarRoot(input.stateRoot, input.normalizedRootPath);
-    if (input.publishMutation) {
-        const detachedPath = path.join(
-            path.dirname(rootPath),
-            uniqueSidecarEntryName(BACKUP_ENTRY_PREFIX),
-        );
-        let detached = false;
-        input.publishMutation(() => {
-            try {
-                fs.renameSync(rootPath, detachedPath);
-                detached = true;
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                    throw error;
-                }
-            }
-        });
-        if (detached) {
-            await fs.promises.rm(detachedPath, { recursive: true, force: true });
-        }
-        return;
-    }
-    input.beforeDelete?.();
-    await fs.promises.rm(rootPath, { recursive: true, force: true });
+    await cleanupOwnedNavigationRoot(candidate.navigationRoot, expectedStat);
+    stagedNavigationIdentities.delete(candidate);
 }

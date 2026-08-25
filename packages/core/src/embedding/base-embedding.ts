@@ -1,4 +1,4 @@
-import { EMBEDDING_NORMALIZATION_POLICY_VERSION } from '../core/persisted-index-authority';
+export const EMBEDDING_NORMALIZATION_POLICY_VERSION = 'provider_output_v1';
 
 // Interface definitions
 export interface EmbeddingVector {

@@ -3,8 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-import { collectionFamilyName } from '../core/collection-naming.js';
-
 import {
     connect,
     Index,
@@ -23,10 +21,8 @@ import {
 } from 'apache-arrow';
 
 import { compareContractStrings } from '../utils/compare-contract-strings';
-import { escapeLanceDbStringLiteral, serializeLanceDbFilter } from './filters';
+import { serializeLanceDbFilter } from './filters';
 import {
-    INDEX_COMPLETION_MARKER_DOC_ID,
-    INDEX_COMPLETION_MARKER_FILE_EXTENSION,
     type CollectionCreateOptions,
     type CollectionDetails,
     type CollectionForkReceipt,
@@ -34,7 +30,6 @@ import {
     type IndexedVectorDocument,
     type LexicalCandidateRequest,
     type VectorCandidate,
-    type VectorControlRecord,
     type VectorDatabase,
     type VectorDocument,
     type VectorDocumentMetadata,
@@ -46,7 +41,6 @@ import {
     type VectorWriteAggregationPolicy,
 } from './types';
 
-const CONTROL_TABLE_PREFIX = '__satori_control_';
 const DEFAULT_MAX_WRITE_BATCH_SIZE = 512;
 const DEFAULT_WRITE_AGGREGATION_BATCH_SIZE = 256;
 const STABLE_TIE_INITIAL_MULTIPLIER = 2;
@@ -126,50 +120,6 @@ async function resolveCurrentManifestFileName(collectionPath: string): Promise<s
         throw new Error('LanceDB candidate source advanced while its current manifest was resolved.');
     }
     return currentManifest;
-}
-
-async function currentManifestObservation(
-    databasePath: string,
-    tableName: string,
-): Promise<string | null> {
-    const versionsPath = path.join(databasePath, `${tableName}.lance`, '_versions');
-    const hintPath = path.join(versionsPath, 'latest_version_hint.json');
-    try {
-        const hintBefore = await fs.promises.readFile(hintPath);
-        const parsed = JSON.parse(hintBefore.toString('utf8')) as { version?: unknown };
-        if (!Number.isSafeInteger(parsed.version) || Number(parsed.version) < 0) return null;
-        const version = BigInt(Number(parsed.version));
-        const manifestNames = [
-            `${version}.manifest`,
-            `${((1n << 64n) - 1n) - version}.manifest`,
-        ];
-        let manifest: Buffer | null = null;
-        for (const manifestName of manifestNames) {
-            try {
-                manifest = await fs.promises.readFile(path.join(versionsPath, manifestName));
-                break;
-            } catch (error) {
-                const code = error && typeof error === 'object' && 'code' in error
-                    ? String((error as NodeJS.ErrnoException).code)
-                    : null;
-                if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
-            }
-        }
-        if (!manifest) return null;
-        const hintAfter = await fs.promises.readFile(hintPath);
-        if (!hintBefore.equals(hintAfter)) return null;
-        return crypto.createHash('sha256')
-            .update(hintBefore)
-            .update(manifest)
-            .digest('hex');
-    } catch (error) {
-        if (error instanceof SyntaxError) return null;
-        const code = error && typeof error === 'object' && 'code' in error
-            ? String((error as NodeJS.ErrnoException).code)
-            : null;
-        if (code === 'ENOENT' || code === 'ENOTDIR') return null;
-        throw error;
-    }
 }
 
 async function shareDirectoryForCandidate(
@@ -305,14 +255,6 @@ function assertCollectionName(collectionName: string): void {
     if (!/^[A-Za-z0-9_]+$/.test(collectionName)) {
         throw new Error(`Invalid LanceDB collection name '${collectionName}'.`);
     }
-    if (collectionName.startsWith(CONTROL_TABLE_PREFIX)) {
-        throw new Error(`Collection name '${collectionName}' uses the reserved LanceDB control prefix.`);
-    }
-}
-
-function controlTableName(collectionName: string): string {
-    const family = collectionFamilyName(collectionName);
-    return `${CONTROL_TABLE_PREFIX}${crypto.createHash('sha256').update(family, 'utf8').digest('hex')}`;
 }
 
 function dataSchema(dimension: number): Schema {
@@ -327,16 +269,6 @@ function dataSchema(dimension: number): Schema {
         new Field('endLine', new Int32(), false),
         new Field('fileExtension', new Utf8(), false),
         new Field('contentHash', new Utf8(), false),
-        new Field('metadataJson', new Utf8(), false),
-    ]);
-}
-
-function controlSchema(): Schema {
-    return new Schema([
-        new Field('key', new Utf8(), false),
-        new Field('collectionName', new Utf8(), false),
-        new Field('id', new Utf8(), false),
-        new Field('kind', new Utf8(), false),
         new Field('metadataJson', new Utf8(), false),
     ]);
 }
@@ -407,14 +339,6 @@ function encodeSearchableRow(indexed: IndexedVectorDocument): LanceDbPhysicalRow
     const { document, projections } = indexed;
     if (document.id.length === 0) {
         throw new Error('LanceDB searchable document ID must be non-empty.');
-    }
-    if (document.id === INDEX_COMPLETION_MARKER_DOC_ID) {
-        throw new Error(`Searchable document ID '${document.id}' is reserved for a control record.`);
-    }
-    if (document.fileExtension === INDEX_COMPLETION_MARKER_FILE_EXTENSION) {
-        throw new Error(
-            `Searchable document '${document.id}' uses reserved control extension '${document.fileExtension}'.`,
-        );
     }
     if (!Number.isSafeInteger(document.startLine) || !Number.isSafeInteger(document.endLine)) {
         throw new Error(`LanceDB document '${document.id}' has non-integer line bounds.`);
@@ -508,12 +432,6 @@ function idFilter(ids: readonly string[]): VectorFilter {
     return { kind: 'in', field: 'id', values: ids };
 }
 
-function fixedControlFilter(collectionName: string, id?: string): string {
-    const collection = `'${escapeLanceDbStringLiteral(collectionName)}'`;
-    if (id === undefined) return `collectionName = ${collection}`;
-    return `collectionName = ${collection} AND id = '${escapeLanceDbStringLiteral(id)}'`;
-}
-
 async function withTable<T>(
     connection: Connection,
     tableName: string,
@@ -603,7 +521,7 @@ export class LanceDbVectorDatabase implements VectorDatabase {
         assertCollectionName(collectionName);
         const connection = await this.getConnection();
         // Publication finalization only establishes search readiness (FTS).
-        // Compaction/optimize is maintenance, not a completion-marker requirement:
+        // Compaction/optimize is maintenance, not a Publication activation requirement:
         // optimize({ cleanupOlderThan: new Date(0) }) fails to decode real multi-file
         // UTF-8 payloads at scale under @lancedb/lancedb 0.31.x and must not gate
         // searchable publication. Do not fail-soft around optimize on this path.
@@ -676,20 +594,8 @@ export class LanceDbVectorDatabase implements VectorDatabase {
         assertCollectionName(collectionName);
         const connection = await this.getConnection();
         if (await this.hasTable(collectionName, connection)) {
-            // Dropping data first is fail-closed: a crash can leave only an orphaned
-            // control record, which can never authorize a missing generation table.
             await connection.dropTable(collectionName);
         }
-
-        const controls = controlTableName(collectionName);
-        if (!await this.hasTable(controls, connection)) return;
-        await withTable(connection, controls, async (table) => {
-            await table.delete(fixedControlFilter(collectionName));
-            if (await table.countRows() === 0) {
-                table.close();
-                await connection.dropTable(controls);
-            }
-        });
     }
 
     async hasCollection(collectionName: string): Promise<boolean> {
@@ -697,27 +603,8 @@ export class LanceDbVectorDatabase implements VectorDatabase {
         return this.hasTable(collectionName);
     }
 
-    async getPublicationObservation(collectionName: string): Promise<string | null> {
-        assertCollectionName(collectionName);
-        const [dataVersion, controlVersion] = await Promise.all([
-            currentManifestObservation(this.databasePath, collectionName),
-            currentManifestObservation(this.databasePath, controlTableName(collectionName)),
-        ]);
-        if (!dataVersion || !controlVersion) return null;
-        return crypto.createHash('sha256')
-            .update(JSON.stringify([collectionName, dataVersion, controlVersion]), 'utf8')
-            .digest('hex');
-    }
-
-    async getCollectionDataObservation(collectionName: string): Promise<string | null> {
-        assertCollectionName(collectionName);
-        return currentManifestObservation(this.databasePath, collectionName);
-    }
-
     async listCollections(): Promise<string[]> {
-        return (await this.tableNames())
-            .filter((name) => !name.startsWith(CONTROL_TABLE_PREFIX))
-            .sort(compareContractStrings);
+        return (await this.tableNames()).sort(compareContractStrings);
     }
 
     async listCollectionDetails(): Promise<CollectionDetails[]> {
@@ -796,105 +683,6 @@ export class LanceDbVectorDatabase implements VectorDatabase {
                     .execute(changed);
             }
         });
-    }
-
-    private async ensureControlTable(connection: Connection, collectionName: string): Promise<string> {
-        const tableName = controlTableName(collectionName);
-        if (await this.hasTable(tableName, connection)) return tableName;
-        const table = await connection.createEmptyTable(
-            tableName,
-            controlSchema(),
-            { mode: 'create', existOk: true },
-        );
-        table.close();
-        return tableName;
-    }
-
-    async insertControl(collectionName: string, record: VectorControlRecord): Promise<void> {
-        assertCollectionName(collectionName);
-        if (record.id.length === 0 || record.kind.length === 0) {
-            throw new Error('LanceDB control record ID and kind must be non-empty.');
-        }
-        if (
-            Object.prototype.hasOwnProperty.call(record.metadata, 'kind')
-            && record.metadata.kind !== record.kind
-        ) {
-            throw new Error(`LanceDB control record '${record.id}' has inconsistent kind fields.`);
-        }
-        const connection = await this.getConnection();
-        if (!await this.hasTable(collectionName, connection)) {
-            throw new Error(`Cannot publish LanceDB control record for missing collection '${collectionName}'.`);
-        }
-        const tableName = await this.ensureControlTable(connection, collectionName);
-        const metadataJson = serializeMetadata(record.metadata);
-        const current = await this.readControl(connection, collectionName, record.id);
-        if (current && current.kind === record.kind && isDeepStrictEqual(current.metadata, record.metadata)) {
-            return;
-        }
-
-        await withTable(connection, tableName, async (table) => {
-            await table.delete(fixedControlFilter(collectionName, record.id));
-            const key = crypto.createHash('sha256')
-                .update(JSON.stringify([collectionName, record.kind, record.id]), 'utf8')
-                .digest('hex');
-            await table.mergeInsert('key')
-                .whenMatchedUpdateAll()
-                .whenNotMatchedInsertAll()
-                .execute([{
-                    key,
-                    collectionName,
-                    id: record.id,
-                    kind: record.kind,
-                    metadataJson,
-                }]);
-        });
-    }
-
-    private async readControl(
-        connection: Connection,
-        collectionName: string,
-        id: string,
-    ): Promise<VectorControlRecord | null> {
-        const tableName = controlTableName(collectionName);
-        if (!await this.hasTable(tableName, connection)) return null;
-        return withTable(connection, tableName, async (table) => {
-            const rows = await table.query()
-                .where(fixedControlFilter(collectionName, id))
-                .select(['id', 'kind', 'metadataJson'])
-                .limit(2)
-                .toArray() as LanceDbPhysicalRow[];
-            if (rows.length === 0) return null;
-            if (rows.length > 1) {
-                throw new Error(`LanceDB control record '${id}' is duplicated in '${collectionName}'.`);
-            }
-            const row = rows[0] as LanceDbPhysicalRow;
-            const kind = requiredString(row, 'kind', `control record '${id}'`);
-            const metadata = parseMetadata(row.metadataJson, `control record '${id}'`);
-            if (Object.prototype.hasOwnProperty.call(metadata, 'kind') && metadata.kind !== kind) {
-                throw new Error(`LanceDB control record '${id}' has inconsistent kind fields.`);
-            }
-            return { id: requiredString(row, 'id', `control record '${id}'`), kind, metadata };
-        });
-    }
-
-    async getControl(collectionName: string, id: string): Promise<VectorControlRecord | null> {
-        assertCollectionName(collectionName);
-        if (id.length === 0) throw new Error('LanceDB control record ID must be non-empty.');
-        const connection = await connect(this.databasePath, { readConsistencyInterval: 0 });
-        try {
-            return await this.readControl(connection, collectionName, id);
-        } finally {
-            connection.close();
-        }
-    }
-
-    async deleteControl(collectionName: string, id: string): Promise<void> {
-        assertCollectionName(collectionName);
-        if (id.length === 0) throw new Error('LanceDB control record ID must be non-empty.');
-        const connection = await this.getConnection();
-        const tableName = controlTableName(collectionName);
-        if (!await this.hasTable(tableName, connection)) return;
-        await withTable(connection, tableName, (table) => table.delete(fixedControlFilter(collectionName, id)).then(() => undefined));
     }
 
     private async retrieveStableCandidates(
@@ -1001,8 +789,8 @@ export class LanceDbVectorDatabase implements VectorDatabase {
     async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
         assertCollectionName(collectionName);
         if (ids.length === 0) return;
-        if (ids.some((id) => id.length === 0 || id === INDEX_COMPLETION_MARKER_DOC_ID)) {
-            throw new Error('LanceDB document deletion contains an empty or reserved control ID.');
+        if (ids.some((id) => id.length === 0)) {
+            throw new Error('LanceDB document deletion contains an empty document ID.');
         }
         const connection = await this.getConnection();
         await withTable(connection, collectionName, async (table) => {

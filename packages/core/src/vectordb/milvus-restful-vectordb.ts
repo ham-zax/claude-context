@@ -10,7 +10,6 @@
  */
 
 import {
-    VectorControlRecord,
     IndexedVectorDocument,
     DenseCandidateRequest,
     VectorCandidate,
@@ -25,20 +24,13 @@ import {
     VectorPublicationCapabilities,
 } from './types';
 import {
-    fromLegacyMilvusControlRow,
-    toLegacyMilvusControlDocument,
-    withMilvusControlExclusion,
-} from './milvus-control-record';
-import {
-    assertMilvusSearchableDocumentIds,
     decodeMilvusCandidate,
-    encodeMilvusDocument,
     encodeMilvusSearchableDocument,
     type MilvusPhysicalRow,
 } from './milvus-row-codec';
 import { ClusterManager } from './zilliz-utils';
 import { deleteCollectionWithVerification } from './remote-delete';
-import { buildMilvusIdInFilter } from './filters';
+import { buildMilvusIdInFilter, serializeMilvusFilter } from './filters';
 import { BoundedHttpError, fetchWithDeadline } from '../net/fetch-with-deadline';
 
 type MilvusRestResponse<T = unknown> = {
@@ -121,8 +113,6 @@ export interface MilvusRestfulConfig {
     username?: string;
     password?: string;
     database?: string;
-    /** Dimension used only for placeholder vectors required by the legacy Milvus control-row schema. */
-    vectorDimension: number;
     /** Per-attempt HTTP timeout in milliseconds (default 30000). */
     requestTimeoutMs?: number;
     /** Delay between bounded retry attempts in milliseconds (default 250). */
@@ -585,32 +575,6 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
         }
     }
 
-    async insertControl(collectionName: string, record: VectorControlRecord): Promise<void> {
-        await this.ensureInitialized();
-        const restfulConfig = this.config as MilvusRestfulConfig;
-        const response = await this.makeRequest('/entities/insert', 'POST', {
-            collectionName,
-            data: [encodeMilvusDocument(toLegacyMilvusControlDocument(record, this.config.vectorDimension))],
-            dbName: restfulConfig.database,
-        });
-        if (!isSuccessCode(response.code)) {
-            throw new Error(`Control-record insert failed: ${response.message || 'Unknown error'}`);
-        }
-    }
-
-    async getControl(collectionName: string, id: string): Promise<VectorControlRecord | null> {
-        const rows = await this.queryRows(collectionName, buildMilvusIdInFilter([id]), ['id', 'metadata'], 2);
-        for (const row of rows) {
-            const record = fromLegacyMilvusControlRow(row, id);
-            if (record) return record;
-        }
-        return null;
-    }
-
-    async deleteControl(collectionName: string, id: string): Promise<void> {
-        await this.deleteRows(collectionName, [id]);
-    }
-
     async retrieveDense(collectionName: string, request: DenseCandidateRequest): Promise<VectorCandidate[]> {
         await this.ensureInitialized();
         await this.ensureLoaded(collectionName);
@@ -636,7 +600,7 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
                     metricType: "COSINE", // Match the index metric type
                     params: {}
                 },
-                filter: withMilvusControlExclusion(request.filter),
+                filter: serializeMilvusFilter(request.filter),
             };
 
             const response = await this.makeRequest<MilvusPhysicalRow[]>('/entities/search', 'POST', searchRequest);
@@ -660,7 +624,6 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
     }
 
     async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-        assertMilvusSearchableDocumentIds(ids);
         await this.deleteRows(collectionName, ids);
     }
 
@@ -691,7 +654,7 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
     async queryDocuments(collectionName: string, request: VectorDocumentQuery): Promise<VectorRecord[]> {
         return this.queryRows(
             collectionName,
-            withMilvusControlExclusion(request.filter),
+            serializeMilvusFilter(request.filter),
             [...request.fields],
             request.limit,
         );
@@ -736,7 +699,7 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
     async countDocuments(collectionName: string, filter?: VectorFilter): Promise<number> {
         const rows = await this.queryRows(
             collectionName,
-            withMilvusControlExclusion(filter),
+            serializeMilvusFilter(filter),
             ['count(*)'],
             1,
         );
@@ -915,7 +878,7 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
                     drop_ratio_search: 0.2,
                 },
             },
-            filter: withMilvusControlExclusion(request.filter),
+            filter: serializeMilvusFilter(request.filter),
         };
 
         const response = await this.makeRequest<MilvusPhysicalRow[]>('/entities/search', 'POST', searchRequest);

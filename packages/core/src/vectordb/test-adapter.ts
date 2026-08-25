@@ -4,7 +4,6 @@ import type {
     IndexedVectorDocument,
     LexicalCandidateRequest,
     VectorCandidate,
-    VectorControlRecord,
     VectorDatabase,
     VectorDocumentQuery,
     VectorFilter,
@@ -44,18 +43,6 @@ export abstract class VectorDatabaseTestAdapter implements VectorDatabase {
 
     async writeDocuments(_name: string, _documents: IndexedVectorDocument[]): Promise<void> {
         this.unsupported('writeDocuments');
-    }
-
-    async insertControl(_name: string, _record: VectorControlRecord): Promise<void> {
-        this.unsupported('insertControl');
-    }
-
-    async getControl(_name: string, _id: string): Promise<VectorControlRecord | null> {
-        return this.unsupported('getControl');
-    }
-
-    async deleteControl(_name: string, _id: string): Promise<void> {
-        this.unsupported('deleteControl');
     }
 
     async retrieveDense(_name: string, _request: DenseCandidateRequest): Promise<VectorCandidate[]> {

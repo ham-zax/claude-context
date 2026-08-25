@@ -5,10 +5,9 @@ import type {
 } from '../symbols';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 import { isProofBackedAuthoritativeCall } from '../relationships/resolution';
-import { createRuntimeNavigationStore } from './runtime';
-import type {
-    NavigationRelationshipsState,
-    NavigationStore,
+import {
+    JsonNavigationStore,
+    type NavigationRelationshipsState,
 } from './store';
 
 type RelationshipQueryFailure = Extract<NavigationRelationshipsState, { status: 'missing' | 'incompatible' }>;
@@ -23,12 +22,17 @@ type RelationshipQueryOk = {
 
 export type RelationshipQueryResult = RelationshipQueryOk | RelationshipQueryFailure;
 
+type RelationshipNavigationReader = Pick<
+    JsonNavigationStore,
+    'getManifest' | 'getRelationships'
+>;
+
 export interface GetRelationshipManifestInput {
     normalizedRootPath: string;
     expectedSymbolRegistryManifestHash: string;
-    stateRoot?: string;
-    navigationStore?: NavigationStore;
-    generationId?: string;
+    publicationId: string;
+    navigationRoot: string;
+    navigationStore?: RelationshipNavigationReader;
 }
 
 export interface GetRelationshipsForSymbolInput extends GetRelationshipManifestInput {
@@ -90,15 +94,17 @@ function matchesTargetSelector(record: RelationshipRecord, input: GetRelationshi
     return Boolean(input.targetInstanceId || input.targetKey);
 }
 
-function getNavigationStore(store?: NavigationStore): NavigationStore {
-    return store || createRuntimeNavigationStore();
+const jsonNavigationStore = new JsonNavigationStore();
+
+function getNavigationStore(store?: RelationshipNavigationReader): RelationshipNavigationReader {
+    return store || jsonNavigationStore;
 }
 
 async function readCompatibleRelationshipState(input: GetRelationshipManifestInput): Promise<RelationshipQueryResult> {
     const result = await getNavigationStore(input.navigationStore).getRelationships({
-        stateRoot: input.stateRoot,
         normalizedRootPath: input.normalizedRootPath,
-        generationId: input.generationId,
+        publicationId: input.publicationId,
+        navigationRoot: input.navigationRoot,
         expectedSymbolRegistryManifestHash: input.expectedSymbolRegistryManifestHash,
     });
     if (result.status !== 'ok') {
@@ -411,20 +417,20 @@ function isImportUniqueMethodLowConfidenceCall(
 
 /**
  * Load symbol registry only when needed for Path 2 (import-unique method) upgrades.
- * Uniqueness evidence must come from the same registry generation as the relationship sidecar.
+ * Uniqueness evidence must come from the same Publication navigation as the relationship JSON.
  */
 async function loadMatchingSymbolSupportIndex(input: {
-    stateRoot?: string;
     normalizedRootPath: string;
-    navigationStore?: NavigationStore;
-    generationId?: string;
+    publicationId: string;
+    navigationRoot: string;
+    navigationStore?: RelationshipNavigationReader;
     relationshipSymbolRegistryManifestHash: string;
 }): Promise<SymbolSupportIndex | undefined> {
     try {
         const registryState = await getNavigationStore(input.navigationStore).getManifest({
-            stateRoot: input.stateRoot,
             normalizedRootPath: input.normalizedRootPath,
-            generationId: input.generationId,
+            publicationId: input.publicationId,
+            navigationRoot: input.navigationRoot,
         });
         if (registryState.status !== 'ok') {
             return undefined;
@@ -516,10 +522,10 @@ export async function getGraphNeighbors(input: GetGraphNeighborsInput): Promise<
             return symbolSupport;
         }
         symbolSupport = await loadMatchingSymbolSupportIndex({
-            stateRoot: input.stateRoot,
             normalizedRootPath: input.normalizedRootPath,
+            publicationId: input.publicationId,
+            navigationRoot: input.navigationRoot,
             navigationStore: input.navigationStore,
-            generationId: input.generationId,
             relationshipSymbolRegistryManifestHash: relationshipSidecar.manifest.symbolRegistryManifestHash,
         });
         symbolSupportLoadState = symbolSupport ? 'loaded' : 'unavailable';

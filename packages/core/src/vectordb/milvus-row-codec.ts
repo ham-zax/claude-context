@@ -1,6 +1,4 @@
 import {
-    INDEX_COMPLETION_MARKER_DOC_ID,
-    INDEX_COMPLETION_MARKER_FILE_EXTENSION,
     type VectorCandidate,
     type VectorDocument,
     type VectorDocumentMetadata,
@@ -33,21 +31,7 @@ export function encodeMilvusDocument(document: VectorDocument): VectorRecord {
 }
 
 export function encodeMilvusSearchableDocument(document: VectorDocument): VectorRecord {
-    if (document.id === INDEX_COMPLETION_MARKER_DOC_ID) {
-        throw new Error(`Searchable document ID '${document.id}' is reserved for a control record.`);
-    }
-    if (document.fileExtension === INDEX_COMPLETION_MARKER_FILE_EXTENSION) {
-        throw new Error(
-            `Searchable document '${document.id}' uses reserved control extension '${document.fileExtension}'.`,
-        );
-    }
     return encodeMilvusDocument(document);
-}
-
-export function assertMilvusSearchableDocumentIds(ids: readonly string[]): void {
-    if (ids.some((id) => id === INDEX_COMPLETION_MARKER_DOC_ID)) {
-        throw new Error(`Document deletion cannot target reserved control ID '${INDEX_COMPLETION_MARKER_DOC_ID}'.`);
-    }
 }
 
 function isRecord(value: unknown): value is VectorRecord {

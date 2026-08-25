@@ -215,9 +215,11 @@ test('resolveLanguageCapabilityEvidence binds relationship evidence to the compa
     });
 
     try {
-        const written = await writeSymbolRegistrySidecar({ stateRoot, registry });
+        const publicationId = 'publication-test';
+        const navigationRoot = path.join(stateRoot, publicationId, 'navigation');
+        const written = await writeSymbolRegistrySidecar({ navigationRoot, registry });
         await writeRelationshipSidecar({
-            stateRoot,
+            navigationRoot,
             normalizedRootPath,
             symbolRegistryManifestHash: written.manifestHash,
             relationshipVersion: 'relationships-v1',
@@ -228,7 +230,8 @@ test('resolveLanguageCapabilityEvidence binds relationship evidence to the compa
 
         const summary = await resolveLanguageCapabilityEvidence({
             normalizedRootPath,
-            stateRoot,
+            publicationId,
+            navigationRoot,
             searchable: true,
         });
         assert.equal(summary.relationshipEvidence, 'compatible');

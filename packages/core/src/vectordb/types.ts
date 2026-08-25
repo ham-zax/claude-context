@@ -1,8 +1,3 @@
-import type {
-    CanonicalCompletionFingerprint,
-    CanonicalCompletionMarker,
-} from '../core/persisted-index-authority';
-
 export type VectorRecord = Record<string, unknown>;
 
 export interface VectorDocumentMetadata extends VectorRecord {
@@ -41,14 +36,6 @@ export interface SearchProjections {
 export interface IndexedVectorDocument {
     readonly document: VectorDocument;
     readonly projections: SearchProjections;
-}
-
-export interface VectorControlRecord {
-    readonly id: string;
-    /** Adapter routing identity; completion readers require it to match metadata.kind. */
-    readonly kind: string;
-    /** Logical payload. Adapters must round-trip it without transport-only fields. */
-    readonly metadata: VectorDocumentMetadata;
 }
 
 export type RetrievalMode = 'dense' | 'lexical' | 'hybrid';
@@ -159,13 +146,6 @@ export type VectorStoreBackendInfo =
         defaultLexicalMatchMode?: 'all_terms' | 'any_terms' | 'provider_sparse';
     };
 
-export type IndexCompletionFingerprint = CanonicalCompletionFingerprint;
-
-export type IndexCompletionMarkerDocument = CanonicalCompletionMarker & VectorDocumentMetadata;
-
-export const INDEX_COMPLETION_MARKER_DOC_ID = '__satori_index_completion_marker_v1__';
-export const INDEX_COMPLETION_MARKER_FILE_EXTENSION = '.satori_meta';
-
 export type CollectionCreateOptions = {
     deferIndexBuild?: boolean;
 };
@@ -243,7 +223,7 @@ export interface VectorDatabase {
 
     /**
      * Build deferred indexes and make a newly populated collection searchable.
-     * Full indexing calls this before publishing its authoritative marker.
+     * Full indexing calls this before activating the candidate Publication.
      */
     finalizeCollectionForSearch?(collectionName: string): Promise<void>;
 
@@ -271,21 +251,6 @@ export interface VectorDatabase {
     hasCollection(collectionName: string): Promise<boolean>;
 
     /**
-     * Cheap immutable-publication observation used to revalidate a process-local
-     * receipt without recounting payload. Changes committed through the backend,
-     * collection replacement, and missing current-generation metadata must change
-     * the token or return null.
-     */
-    getPublicationObservation?(collectionName: string): Promise<string | null>;
-
-    /**
-     * Observation of searchable collection data only, excluding shared control
-     * metadata. Retention uses this to prove that pruning an inactive sibling did
-     * not mutate the active collection before rebinding a cached receipt.
-     */
-    getCollectionDataObservation?(collectionName: string): Promise<string | null>;
-
-    /**
      * List all collections
      */
     listCollections(): Promise<string[]>;
@@ -309,15 +274,6 @@ export interface VectorDatabase {
 
     /** Persist searchable documents. Collection schema determines lexical support. */
     writeDocuments(collectionName: string, documents: IndexedVectorDocument[]): Promise<void>;
-
-    /** Persist one non-searchable backend control record. */
-    insertControl(collectionName: string, record: VectorControlRecord): Promise<void>;
-
-    /** Read one non-searchable backend control record by exact ID. */
-    getControl(collectionName: string, id: string): Promise<VectorControlRecord | null>;
-
-    /** Delete one non-searchable backend control record by exact ID. */
-    deleteControl(collectionName: string, id: string): Promise<void>;
 
     retrieveDense(collectionName: string, request: DenseCandidateRequest): Promise<VectorCandidate[]>;
 

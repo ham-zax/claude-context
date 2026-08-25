@@ -13,29 +13,7 @@ import type {
     SymbolRegistryManifestFile,
 } from './contracts';
 
-export const LEGACY_SYMBOL_INDEX_SCHEMA_VERSION = 'symbol_index_v2';
 export const SYMBOL_INDEX_SCHEMA_VERSION = 'symbol_index_v3';
-export const CURRENT_GENERATION_SCHEMA_VERSION = 'navigation_current_v3';
-export const NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION = 'navigation_generation_seal_v1';
-
-export interface NavigationSymbolQualityAggregate {
-    indexedFileCount: number;
-    languages: Array<{
-        language: string;
-        indexedFiles: number;
-        filesWithNonFileSymbols: number;
-        nonFileSymbolCount: number;
-    }>;
-}
-
-export interface NavigationGenerationSeal {
-    schemaVersion: typeof NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION;
-    generationId: string;
-    symbolRegistryManifestHash: string;
-    relationshipManifestHash: string;
-    artifactSetHash: string;
-    symbolQuality: NavigationSymbolQualityAggregate;
-}
 
 export interface SymbolIndexFileEntry {
     path: string;
@@ -48,21 +26,9 @@ export interface SymbolIndexFileEntry {
 }
 
 export interface SymbolIndexFile {
-    schemaVersion: typeof LEGACY_SYMBOL_INDEX_SCHEMA_VERSION | typeof SYMBOL_INDEX_SCHEMA_VERSION;
+    schemaVersion: typeof SYMBOL_INDEX_SCHEMA_VERSION;
     manifestHash: string;
     files: SymbolIndexFileEntry[];
-}
-
-export interface CurrentNavigationGenerationPointer {
-    schemaVersion: typeof CURRENT_GENERATION_SCHEMA_VERSION;
-    generationId: string;
-    symbolRegistryManifestHash: string;
-    relationshipManifestHash: string;
-    navigationSealHash: string;
-}
-
-function compareStrings(a: string, b: string): number {
-    return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,8 +88,7 @@ export function isSymbolIndexFile(value: unknown): value is SymbolIndexFile {
     if (!isRecord(value)) {
         return false;
     }
-    return (value.schemaVersion === SYMBOL_INDEX_SCHEMA_VERSION
-        || value.schemaVersion === LEGACY_SYMBOL_INDEX_SCHEMA_VERSION)
+    return value.schemaVersion === SYMBOL_INDEX_SCHEMA_VERSION
         && isNonEmptyString(value.manifestHash)
         && Array.isArray(value.files)
         && value.files.every((file) => (
@@ -177,61 +142,6 @@ export function isSymbolRecord(value: unknown): value is SymbolRecord {
         return false;
     }
     return true;
-}
-
-export function isCurrentGenerationPointer(value: unknown): value is CurrentNavigationGenerationPointer {
-    return isRecord(value)
-        && Object.keys(value).length === 5
-        && [
-            'schemaVersion',
-            'generationId',
-            'symbolRegistryManifestHash',
-            'relationshipManifestHash',
-            'navigationSealHash',
-        ].every((key) => Object.prototype.hasOwnProperty.call(value, key))
-        && value.schemaVersion === CURRENT_GENERATION_SCHEMA_VERSION
-        && isNonEmptyString(value.generationId)
-        && /^[a-zA-Z0-9_-]+$/.test(value.generationId)
-        && isNonEmptyString(value.symbolRegistryManifestHash)
-        && isNonEmptyString(value.relationshipManifestHash)
-        && typeof value.navigationSealHash === 'string'
-        && /^[a-f0-9]{64}$/.test(value.navigationSealHash);
-}
-
-export function parseNavigationGenerationSeal(value: unknown): NavigationGenerationSeal | null {
-    if (!isRecord(value)) return null;
-    const quality = value.symbolQuality;
-    const structurallyValid = value.schemaVersion === NAVIGATION_GENERATION_SEAL_SCHEMA_VERSION
-        && isNonEmptyString(value.generationId)
-        && /^[a-zA-Z0-9_-]+$/.test(value.generationId)
-        && typeof value.symbolRegistryManifestHash === 'string'
-        && /^symmanifest_[a-f0-9]{32}$/.test(value.symbolRegistryManifestHash)
-        && typeof value.relationshipManifestHash === 'string'
-        && /^[a-f0-9]{64}$/.test(value.relationshipManifestHash)
-        && typeof value.artifactSetHash === 'string'
-        && /^[a-f0-9]{64}$/.test(value.artifactSetHash)
-        && isRecord(quality)
-        && isNonNegativeInteger(quality.indexedFileCount)
-        && Array.isArray(quality.languages)
-        && quality.languages.every((entry) => isRecord(entry)
-            && isNonEmptyString(entry.language)
-            && isNonNegativeInteger(entry.indexedFiles)
-            && isNonNegativeInteger(entry.filesWithNonFileSymbols)
-            && entry.filesWithNonFileSymbols <= entry.indexedFiles
-            && isNonNegativeInteger(entry.nonFileSymbolCount)
-            && entry.nonFileSymbolCount >= entry.filesWithNonFileSymbols);
-    if (!structurallyValid || !isRecord(quality) || !Array.isArray(quality.languages)) return null;
-    let indexedFileTotal = 0;
-    let previousLanguage: string | null = null;
-    for (const rawEntry of quality.languages) {
-        const entry = rawEntry as NavigationSymbolQualityAggregate['languages'][number];
-        if (previousLanguage !== null && compareStrings(previousLanguage, entry.language) >= 0) return null;
-        previousLanguage = entry.language;
-        indexedFileTotal += entry.indexedFiles;
-        if (!Number.isSafeInteger(indexedFileTotal)) return null;
-    }
-    if (indexedFileTotal !== quality.indexedFileCount) return null;
-    return value as unknown as NavigationGenerationSeal;
 }
 
 const VALID_RELATIONSHIP_TYPES = new Set([

@@ -15,6 +15,11 @@
       "require": "./dist/semantic/index.js",
       "default": "./dist/semantic/index.js"
     },
+    "./integration": {
+      "types": "./dist/integration.d.ts",
+      "require": "./dist/integration.js",
+      "default": "./dist/integration.js"
+    },
     "./lancedb": {
       "types": "./dist/lancedb.d.ts",
       "require": "./dist/lancedb.js",

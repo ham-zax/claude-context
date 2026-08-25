@@ -16,6 +16,41 @@ function sha256(content: string): string {
     return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
+type WorkflowNavigationInternals = {
+    stageSymbolRegistryForCompletedIndex(
+        root: string,
+        publicationId: string,
+        navigationRoot: string,
+        symbols: SymbolRecord[],
+        files: SymbolRegistryManifestFile[],
+        assertMutationCurrent?: () => void,
+        analysisByFile?: Map<string, unknown>,
+        indexPolicy?: unknown,
+        semanticSources?: readonly { path: string; source: string; sourceHash: string }[],
+        capturedSources?: readonly { path: string; source: string; sourceHash: string }[],
+    ): Promise<{
+        publicationId: string;
+        navigationRoot: string;
+        manifestHash: string;
+        relationshipManifestHash: string;
+    } | undefined>;
+    rebuildNavigationArtifactsForSyncDelta(
+        root: string,
+        registry: unknown,
+        changedRelativePaths: string[],
+        rebuiltSymbols: SymbolRecord[],
+        rebuiltManifestFiles: SymbolRegistryManifestFile[],
+        sourcePublicationId: string,
+        sourceNavigationRoot: string,
+        publicationId: string,
+        navigationRoot: string,
+        assertMutationCurrent?: () => void,
+        analysisByFile?: Map<string, unknown>,
+        existingRelationshipState?: unknown,
+        onPhaseTiming?: unknown,
+    ): Promise<{ candidate: unknown }>;
+};
+
 test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic reanalysis and updates relationships', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'satori-semantic-delta-src-'));
     const stateRoot = path.join(tmpDir, '.satori-state');
@@ -108,7 +143,10 @@ test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic
             getLanguageRouterVersion: () => 'r-1',
             getSymbolExtractorVersion: () => 'e-1',
             getRelationshipVersion: () => 'rel-1',
-            readIndexableFileInsideRoot: async (filePath) => fs.readFileSync(filePath, 'utf8'),
+            readIndexableFileObservationInsideRoot: async (filePath: string) => {
+                const content = fs.readFileSync(filePath, 'utf8');
+                return { content, sourceHash: sha256(content) };
+            },
             languageAnalyzer: {
                 analyze: async () => ({
                     moduleBindings: [],
@@ -119,56 +157,33 @@ test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic
                 supportedExtensions: ['.go'],
                 canAnalyze: () => true,
             } as unknown as IndexGenerationWorkflowPorts['languageAnalyzer'],
-            publishNavigationCandidate: async () => {},
-            symbolRegistryStateRoot: stateRoot,
             semanticAnalyzer: trackingAnalyzer as unknown as IndexGenerationWorkflowPorts['semanticAnalyzer'],
             semanticLanguageRegistry: new DefaultSemanticLanguageRegistry(),
         };
 
         const workflow = new IndexGenerationWorkflow(mockPorts as IndexGenerationWorkflowPorts);
-        const internals = workflow as unknown as {
-            stageSymbolRegistryForCompletedIndex: (
-                root: string,
-                symbols: readonly SymbolRecord[],
-                files: readonly SymbolRegistryManifestFile[],
-                previousGenerationId?: string,
-                options?: unknown,
-                signal?: unknown,
-                forceFull?: boolean,
-                evidence?: unknown,
-                sourceFiles?: readonly { path: string; source: string; sourceHash: string }[],
-            ) => Promise<{ generationId: string } | null>;
-            rebuildNavigationArtifactsForSyncDelta: (
-                root: string,
-                registry: unknown,
-                changedRelativePaths: readonly string[],
-                rebuiltSymbols: readonly SymbolRecord[],
-                rebuiltManifestFiles: readonly SymbolRegistryManifestFile[],
-                options?: unknown,
-                evidence?: unknown,
-                signal?: unknown,
-                previousGenerationId?: string,
-                forceFull?: boolean,
-                sidecars?: unknown,
-            ) => Promise<{ candidate: unknown }>;
-        };
+        const internals = workflow as unknown as WorkflowNavigationInternals;
 
-        // 1. Initial full navigation generation
-        const initialGeneration = await internals.stageSymbolRegistryForCompletedIndex(
+        // 1. Initial full navigation Publication
+        const initialPublicationId = 'publication-initial';
+        const initialNavigationRoot = path.join(stateRoot, initialPublicationId, 'navigation');
+        const initialSources = [
+            { path: fileA, source: contentA1, sourceHash: manifestA1.hash },
+            { path: fileB, source: contentB1, sourceHash: manifestB1.hash },
+        ];
+        const initialPublication = await internals.stageSymbolRegistryForCompletedIndex(
             tmpDir,
+            initialPublicationId,
+            initialNavigationRoot,
             initialRegistry.symbols,
             initialRegistry.manifest.files,
             undefined,
             undefined,
             undefined,
-            false,
-            undefined,
-            [
-                { path: fileA, source: contentA1, sourceHash: manifestA1.hash },
-                { path: fileB, source: contentB1, sourceHash: manifestB1.hash },
-            ],
+            initialSources,
+            initialSources,
         );
-        assert.ok(initialGeneration);
+        assert.ok(initialPublication);
         assert.equal(analyzeCallCount, 1);
 
         // 2. Modify Helper in a.go (source-only change)
@@ -197,39 +212,21 @@ test('IndexGenerationWorkflow delta rebuild: source-only delta triggers semantic
             extractorVersion: 'e-1',
         };
 
-        // 3. Rebuild navigation artifacts for sync delta
+        // 3. Rebuild navigation artifacts into a distinct Publication candidate.
+        const deltaPublicationId = 'publication-delta';
+        const deltaNavigationRoot = path.join(stateRoot, deltaPublicationId, 'navigation');
         const deltaResult = await internals.rebuildNavigationArtifactsForSyncDelta(
             tmpDir,
             initialRegistry,
             [fileA],
             [symHelper2],
             [manifestA2],
+            initialPublicationId,
+            initialNavigationRoot,
+            deltaPublicationId,
+            deltaNavigationRoot,
             undefined,
             new Map([[fileA, { moduleBindings: [], callSites: [], receiverTypeBindings: [], pythonFlowFacts: [] }]]),
-            undefined,
-            initialGeneration.generationId,
-            false,
-            {
-                canonicalRoot: tmpDir,
-                generationId: initialGeneration.generationId,
-                records: [
-                    {
-                        sourceKey: symMain1.symbolKey,
-                        sourceInstanceId: symMain1.symbolInstanceId,
-                        targetKey: symHelper1.symbolKey,
-                        targetInstanceId: symHelper1.symbolInstanceId,
-                        type: 'CALLS',
-                        file: fileB,
-                        span: { startByte: 28, endByte: 36, startLine: 4, endLine: 4, startColumn: 1, endColumn: 9 },
-                        confidence: 'high',
-                        resolutionAuthority: 'direct_binding',
-                    },
-                ],
-                analysisByFile: new Map([
-                    [fileA, { moduleBindings: [], callSites: [], receiverTypeBindings: [], pythonFlowFacts: [] }],
-                    [fileB, { moduleBindings: [], callSites: [], receiverTypeBindings: [], pythonFlowFacts: [] }],
-                ]),
-            },
         );
 
         assert.ok(deltaResult.candidate);
@@ -314,7 +311,10 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
             getLanguageRouterVersion: () => 'r-1',
             getSymbolExtractorVersion: () => 'e-1',
             getRelationshipVersion: () => 'rel-1',
-            readIndexableFileInsideRoot: async (filePath) => fs.readFileSync(filePath, 'utf8'),
+            readIndexableFileObservationInsideRoot: async (filePath: string) => {
+                const content = fs.readFileSync(filePath, 'utf8');
+                return { content, sourceHash: sha256(content) };
+            },
             languageAnalyzer: {
                 analyze: async () => ({
                     moduleBindings: [],
@@ -325,53 +325,30 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
                 supportedExtensions: ['.go'],
                 canAnalyze: () => true,
             } as unknown as IndexGenerationWorkflowPorts['languageAnalyzer'],
-            publishNavigationCandidate: async () => {},
-            symbolRegistryStateRoot: stateRoot,
             semanticAnalyzer: trackingAnalyzer as unknown as IndexGenerationWorkflowPorts['semanticAnalyzer'],
             semanticLanguageRegistry: new DefaultSemanticLanguageRegistry(),
         };
 
         const workflow = new IndexGenerationWorkflow(mockPorts as IndexGenerationWorkflowPorts);
-        const internals = workflow as unknown as {
-            stageSymbolRegistryForCompletedIndex: (
-                root: string,
-                symbols: readonly SymbolRecord[],
-                files: readonly SymbolRegistryManifestFile[],
-                previousGenerationId?: string,
-                options?: unknown,
-                signal?: unknown,
-                forceFull?: boolean,
-                evidence?: unknown,
-                sourceFiles?: readonly { path: string; source: string; sourceHash: string }[],
-            ) => Promise<{ generationId: string } | null>;
-            rebuildNavigationArtifactsForSyncDelta: (
-                root: string,
-                registry: unknown,
-                changedRelativePaths: readonly string[],
-                rebuiltSymbols: readonly SymbolRecord[],
-                rebuiltManifestFiles: readonly SymbolRegistryManifestFile[],
-                options?: unknown,
-                evidence?: unknown,
-                signal?: unknown,
-                previousGenerationId?: string,
-                forceFull?: boolean,
-                sidecars?: unknown,
-            ) => Promise<{ candidate: unknown }>;
-        };
+        const internals = workflow as unknown as WorkflowNavigationInternals;
 
-        // 1. Initial navigation build observes auxiliary go.mod
-        const initialGeneration = await internals.stageSymbolRegistryForCompletedIndex(
+        // 1. Initial navigation Publication observes auxiliary go.mod.
+        const initialPublicationId = 'publication-initial';
+        const initialNavigationRoot = path.join(stateRoot, initialPublicationId, 'navigation');
+        const initialSources = [{ path: fileA, source: contentA, sourceHash: manifestA.hash }];
+        const initialPublication = await internals.stageSymbolRegistryForCompletedIndex(
             tmpDir,
+            initialPublicationId,
+            initialNavigationRoot,
             initialRegistry.symbols,
             initialRegistry.manifest.files,
             undefined,
             undefined,
             undefined,
-            false,
-            undefined,
-            [{ path: fileA, source: contentA, sourceHash: manifestA.hash }],
+            initialSources,
+            initialSources,
         );
-        assert.ok(initialGeneration);
+        assert.ok(initialPublication);
         assert.equal(analyzeCallCount, 1);
         assert.deepEqual(lastAuxiliaryFiles, ['go.mod']);
 
@@ -381,25 +358,18 @@ test('IndexGenerationWorkflow delta rebuild: auxiliary-only delta (go.mod) trigg
 
         // 3. Reindex delta where only go.mod is reported in changedRelativePaths
         // (rebuiltSymbolRecords is empty, rebuiltManifestFiles is empty)
+        const deltaPublicationId = 'publication-delta';
+        const deltaNavigationRoot = path.join(stateRoot, deltaPublicationId, 'navigation');
         const deltaResult = await internals.rebuildNavigationArtifactsForSyncDelta(
             tmpDir,
             initialRegistry,
             [auxMod],
             [],
             [],
-            undefined,
-            undefined,
-            undefined,
-            initialGeneration.generationId,
-            false,
-            {
-                canonicalRoot: tmpDir,
-                generationId: initialGeneration.generationId,
-                records: [],
-                analysisByFile: new Map([
-                    [fileA, { moduleBindings: [], callSites: [], receiverTypeBindings: [], pythonFlowFacts: [] }],
-                ]),
-            },
+            initialPublicationId,
+            initialNavigationRoot,
+            deltaPublicationId,
+            deltaNavigationRoot,
         );
 
         assert.ok(deltaResult.candidate);

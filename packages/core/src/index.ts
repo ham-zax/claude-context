@@ -1,31 +1,228 @@
-export * from './language-analysis';
-export * from './embedding';
-export * from './vectordb';
-export * from './types';
-export * from './context';
-export * from './core/persisted-index-authority';
-export * from './core/index-policy-input-observer';
+export {
+    assertNetworkPolicyAllowsEndpoint,
+    resolveExecutionPolicy,
+} from './config/execution-profile';
+export type {
+    ExecutionProfile,
+    NetworkPolicy,
+} from './config/execution-profile';
 export {
     SATORI_COLLECTION_FAMILY_PREFIXES,
-    isStagedGenerationCollectionName,
 } from './core/collection-naming';
-export * from './core/search-projections';
-export { LexicalRetrievalModeUnsupportedError } from './core/semantic-search-service';
-export { VECTOR_CANDIDATE_RRF_K_V1 } from './core/vector-candidate-fusion';
-export * from './sync/synchronizer';
-export * from './sync/source-freshness-port';
-export * from './core/index-mutation-port';
-export * from './sync/root-bound-fs';
-export * from './sync/root-bound-file-window';
-export * from './net/fetch-with-deadline';
-export * from './measurement/source-ledger';
-export * from './utils';
-export * from './reranker';
-export * from './language';
-export * from './languages/evidence';
-export * from './navigation';
-export * from './symbols';
-export * from './relationships';
-export * from './config/defaults';
-export * from './config/execution-profile';
-export * from './config/repo-config';
+export {
+    Context,
+} from './core/context';
+export type {
+    ContextConfig,
+    ResolvedIndexPolicy,
+} from './core/context';
+export {
+    computeIndexPolicyControlSignature,
+} from './core/index-policy-input-observer';
+export {
+    EMBEDDING_PROJECTION_VERSION,
+    LEXICAL_PROJECTION_VERSION,
+} from './core/search-projections';
+export {
+    LexicalRetrievalModeUnsupportedError,
+} from './core/semantic-search-service';
+export {
+    EMBEDDING_NORMALIZATION_POLICY_VERSION,
+    Embedding,
+    EmbeddingProviderError,
+} from './embedding/base-embedding';
+export type {
+    EmbeddingIdentity,
+    EmbeddingProviderErrorCode,
+    EmbeddingVector,
+} from './embedding/base-embedding';
+export {
+    GeminiEmbedding,
+} from './embedding/gemini-embedding';
+export {
+    OllamaEmbedding,
+} from './embedding/ollama-embedding';
+export {
+    resolveOllamaModelIdentity,
+} from './embedding/ollama-model-identity';
+export type {
+    ResolvedOllamaModelIdentity,
+} from './embedding/ollama-model-identity';
+export {
+    OpenAIEmbedding,
+} from './embedding/openai-embedding';
+export {
+    POTION_DIMENSION,
+    POTION_MAX_TIMEOUT_MS,
+    POTION_MODEL_ID,
+    POTION_SEMANTIC_VERSION,
+    PotionEmbedding,
+    restoreVerifiedOwnerExecutableBit,
+} from './embedding/potion-embedding';
+export {
+    VoyageAIEmbedding,
+} from './embedding/voyageai-embedding';
+export type {
+    CustomIndexPolicyUpdate,
+    ObservedResolvedIndexPolicy,
+    PublicationLease,
+    PublicationNavigationStatus,
+    PublicationRef,
+} from './generation/contracts';
+export {
+    AtomicIncrementalPublicationUnsupportedError,
+} from './generation/errors';
+export {
+    createLanguageAnalysisService,
+} from './language-analysis/service';
+export {
+    analyzePythonSymbolStructure,
+} from './language-analysis/tree-sitter-adapter';
+export type {
+    PythonStructuralAnalysis,
+} from './language-analysis/tree-sitter-adapter';
+export type {
+    CodeChunk,
+    LanguageAnalysisPort,
+} from './language-analysis/types';
+export {
+    LANGUAGE_PARSER_VERSION,
+    RELATIONSHIP_BUILDER_VERSION,
+    SYMBOL_EXTRACTOR_VERSION,
+} from './language-analysis/versions';
+export {
+    getLanguageIdFromFilename,
+    getSupportedExtensionsForCapability,
+    isLanguageCapabilitySupportedForExtension,
+    isLanguageCapabilitySupportedForFilename,
+    isLanguageCapabilitySupportedForLanguage,
+    normalizeLanguageId,
+} from './language/registry';
+export {
+    resolveLanguageCapabilityEvidence,
+} from './languages/evidence';
+export type {
+    LanguageCapabilityEvidenceSummary,
+} from './languages/evidence';
+export {
+    beginSourceMeasurementObservation,
+    finishSourceMeasurementObservation,
+    recordSourceIo,
+    recordSourceProcessing,
+    sourceIoOwnerForCurrentOperation,
+    withSourceMeasurementOperation,
+} from './measurement/source-ledger';
+export type {
+    SourceIoOwner,
+    SourceMeasurementObservation,
+    SourceProcessingOutcome,
+} from './measurement/source-ledger';
+export {
+    getGraphNeighbors,
+    getRelationshipsForSymbol,
+} from './navigation/query';
+export type {
+    GetRelationshipManifestInput,
+} from './navigation/query';
+export {
+    JsonNavigationStore,
+} from './navigation/store';
+export {
+    isRepositoryRelativePath,
+} from './paths/repository-path';
+export {
+    isProofBackedAuthoritativeCall,
+} from './relationships/resolution';
+export {
+    isTestOrFixturePath,
+} from './relationships/test-path';
+export type {
+    RerankExecutionDiagnostics,
+    RerankOptions,
+    RerankResult,
+    Reranker,
+} from './reranker/reranker';
+export {
+    RerankerRequestError,
+    VoyageAIReranker,
+} from './reranker/voyageai-reranker';
+export type {
+    RerankerFailureKind,
+} from './reranker/voyageai-reranker';
+export {
+    SYMBOL_REGISTRY_SCHEMA_VERSION,
+} from './symbols/contracts';
+export type {
+    RelationshipManifest,
+    RelationshipRecord,
+    RepositoryOntologyTag,
+    SymbolKind,
+    SymbolRecord,
+    SymbolRegistryManifest,
+    SymbolSpan,
+} from './symbols/contracts';
+export {
+    buildSymbolRecordsForFile,
+    buildSymbolRegistry,
+    createSymbolInstanceId,
+    createSymbolKey,
+    resolveOwnerSymbolForChunk,
+} from './symbols/registry';
+export type {
+    SymbolRegistry,
+} from './symbols/registry';
+export {
+    readSymbolRegistrySidecar,
+} from './symbols/sidecar-reads';
+export {
+    computeSymbolQualitySummaryFromSidecarRead,
+    formatSymbolQualityMarker,
+    unknownSymbolQualitySummary,
+} from './symbols/symbol-quality';
+export type {
+    SymbolQualitySummary,
+} from './symbols/symbol-quality';
+export {
+    RootBoundFileWindowLimitError,
+    readStableRootBoundFileWindow,
+} from './sync/root-bound-file-window';
+export {
+    RootBoundFileError,
+    canPublishRootBoundFileIdentity,
+    openRegularFileInsideRoot,
+    openRegularFileWithIdentityInsideRoot,
+    readFileHandleExactly,
+    sameRootBoundFileIdentity,
+    verifyStableFileDescriptorObservation,
+    verifyStableFileObservation,
+} from './sync/root-bound-fs';
+export type {
+    RootBoundFileIdentity,
+} from './sync/root-bound-fs';
+export type {
+    SemanticSearchCandidateTrace,
+    SemanticSearchCandidateTraceOccurrence,
+    SemanticSearchCandidateTraceOptions,
+    SemanticSearchExecutionResult,
+    SemanticSearchRequest,
+    SemanticSearchResult,
+} from './types';
+export {
+    compareContractStrings,
+} from './utils/compare-contract-strings';
+export {
+    envManager,
+} from './utils/env-manager';
+export {
+    MilvusVectorDatabase,
+} from './vectordb/milvus-vectordb';
+export {
+    RemoteCollectionDeletePendingError,
+    deleteCollectionWithVerification,
+} from './vectordb/remote-delete';
+export {
+    COLLECTION_LIMIT_MESSAGE,
+} from './vectordb/types';
+export type {
+    VectorDatabase,
+} from './vectordb/types';

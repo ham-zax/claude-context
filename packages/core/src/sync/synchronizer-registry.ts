@@ -1,204 +1,124 @@
 /**
- * Phase 4.6 — Synchronizer registry.
+ * Runtime cache for source synchronizers.
  *
- * Owns the per-collection synchronizer registry and its lifecycle: registration,
- * recreation, checkpoint-comparison resolution, and mutation-target tracking.
- * Context retains compatibility delegates but no synchronizer domain state or
- * policy decisions. All dependencies are narrow ports supplied by Context.
+ * Durable source state is owned by PublicationStore/source.json. This registry
+ * binds each reusable FileSynchronizer to its current Publication ID and keeps
+ * mutation targets; it never persists source authority.
  */
 import { FileSynchronizer } from './synchronizer';
-import type { IndexCompletionMarkerDocument } from '../vectordb/types';
-import type { ProvenGenerationReceipt } from '../generation/contracts';
+import type { PublicationRef } from '../generation/contracts';
+import type { PublicationSourceCheckpoint } from './snapshot-codec';
 
-/**
- * Narrow ports the synchronizer registry needs from Context. Every dependency is
- * an explicit capability; the registry never reaches into Context state.
- */
 export interface SynchronizerRegistryPorts {
     canonicalizeCodebasePath(codebasePath: string): string;
+    getCurrentPublicationSourceCheckpoint(codebasePath: string): {
+        ref: PublicationRef;
+        checkpoint: PublicationSourceCheckpoint;
+        observationToken: string;
+    } | null;
     getActiveIgnorePatterns(codebasePath?: string): string[];
     getIndexedExtensionsForCodebase(codebasePath: string): string[];
-    getIsHybrid(): boolean;
-    indexCompletionMarkersEqual(
-        left: IndexCompletionMarkerDocument,
-        right: IndexCompletionMarkerDocument,
-    ): boolean;
     loadIndexProfileForCodebase(codebasePath: string): unknown;
-    proveIndexedGeneration(codebasePath: string): Promise<ProvenGenerationReceipt | null>;
     resolveCollectionName(codebasePath: string): string;
 }
 
 export class SynchronizerRegistry {
-    private readonly synchronizers = new Map<string, FileSynchronizer>();
+    private readonly synchronizers = new Map<string, {
+        synchronizer: FileSynchronizer;
+        publicationId?: string;
+    }>();
     private readonly synchronizerMutationTargets = new Map<string, string>();
 
     constructor(private readonly ports: SynchronizerRegistryPorts) {}
 
-    /**
-     * The registered synchronizer for a collection key, or undefined.
-     */
     getSynchronizer(collectionName: string): FileSynchronizer | undefined {
-        return this.synchronizers.get(collectionName);
+        return this.synchronizers.get(collectionName)?.synchronizer;
     }
 
-    /**
-     * Get a defensive copy of the synchronizers map.
-     */
+    getSynchronizerForPublication(
+        collectionName: string,
+        publicationId: string,
+    ): FileSynchronizer | undefined {
+        const registered = this.synchronizers.get(collectionName);
+        return registered?.publicationId === publicationId
+            ? registered.synchronizer
+            : undefined;
+    }
+
     getActiveSynchronizers(): Map<string, FileSynchronizer> {
-        return new Map(this.synchronizers);
+        const active = new Map<string, FileSynchronizer>();
+        for (const [collectionName, registered] of this.synchronizers.entries()) {
+            active.set(collectionName, registered.synchronizer);
+        }
+        return active;
     }
 
-    /**
-     * Register a synchronizer for a collection and clear any pending mutation
-     * target for it.
-     */
-    registerSynchronizer(collectionName: string, synchronizer: FileSynchronizer): void {
-        this.synchronizers.set(collectionName, synchronizer);
+    registerSynchronizerForPublication(
+        collectionName: string,
+        publicationId: string,
+        synchronizer: FileSynchronizer,
+    ): void {
+        for (const [registeredKey, registered] of this.synchronizers.entries()) {
+            if (
+                registered.synchronizer === synchronizer
+                && registered.publicationId !== undefined
+                && registered.publicationId !== publicationId
+            ) {
+                this.synchronizers.delete(registeredKey);
+                this.synchronizerMutationTargets.delete(registeredKey);
+            }
+        }
+        this.synchronizers.set(collectionName, { synchronizer, publicationId });
         this.synchronizerMutationTargets.delete(collectionName);
     }
 
-    /**
-     * Recreate a synchronizer for a codebase using currently active ignore
-     * patterns. Used when ignore rules change and deterministic reconciliation
-     * is required.
-     */
     async recreateSynchronizerForCodebase(
         codebasePath: string,
-        assertMutationCurrent?: () => void,
-        publishMutation?: (publish: () => void) => void,
+        assertMutationCurrent: () => void,
         options: { requireAuthorityCheckpoint?: boolean } = {},
     ): Promise<void> {
         this.ports.loadIndexProfileForCodebase(codebasePath);
-        const collectionName = this.ports.resolveCollectionName(codebasePath);
-        const authorityBefore = options.requireAuthorityCheckpoint
-            ? await this.ports.proveIndexedGeneration(codebasePath)
-            : null;
-        if (options.requireAuthorityCheckpoint && !authorityBefore) {
-            throw new Error(`Cannot recreate source freshness state for '${codebasePath}': no authoritative indexed generation is available.`);
+        const canonicalRoot = this.ports.canonicalizeCodebasePath(codebasePath);
+        const currentSource = this.ports.getCurrentPublicationSourceCheckpoint(canonicalRoot);
+        if (options.requireAuthorityCheckpoint && !currentSource) {
+            throw new Error(`Cannot recreate source freshness state for '${canonicalRoot}': no current Publication source checkpoint exists.`);
         }
+        if (!currentSource) {
+            this.synchronizers.delete(this.ports.resolveCollectionName(canonicalRoot));
+            return;
+        }
+        assertMutationCurrent();
         const synchronizer = new FileSynchronizer(
-            codebasePath,
-            this.ports.getActiveIgnorePatterns(codebasePath),
-            this.ports.getIndexedExtensionsForCodebase(codebasePath),
-            authorityBefore ? {
-                checkpointIdentity: authorityBefore.collectionName,
-                checkpointAuthority: {
-                    collectionName: authorityBefore.collectionName,
-                    markerRunId: authorityBefore.marker.runId,
-                    indexPolicyHash: authorityBefore.marker.indexPolicyHash,
-                },
-            } : {},
+            canonicalRoot,
+            this.ports.getActiveIgnorePatterns(canonicalRoot),
+            this.ports.getIndexedExtensionsForCodebase(canonicalRoot),
+            { sourceCheckpoint: currentSource.checkpoint },
         );
-        await synchronizer.initialize(assertMutationCurrent, publishMutation, {
-            requireExistingCheckpoint: authorityBefore !== null,
-        });
-        if (authorityBefore) {
-            assertMutationCurrent?.();
-            const authorityAfter = await this.ports.proveIndexedGeneration(codebasePath);
-            if (
-                !authorityAfter
-                || authorityAfter.collectionName !== authorityBefore.collectionName
-                || authorityAfter.policyDocumentDigest !== authorityBefore.policyDocumentDigest
-                || !this.ports.indexCompletionMarkersEqual(authorityAfter.marker, authorityBefore.marker)
-            ) {
-                throw new Error(`Cannot register source freshness state for '${codebasePath}': indexed authority changed while its checkpoint was loading.`);
-            }
-        }
-        this.synchronizers.set(collectionName, synchronizer);
-        this.synchronizerMutationTargets.delete(collectionName);
+        const collectionName = this.ports.resolveCollectionName(canonicalRoot);
+        this.registerSynchronizerForPublication(
+            collectionName,
+            currentSource.ref.id,
+            synchronizer,
+        );
     }
 
-    /**
-     * Whether a synchronizer is registered for the codebase's active collection.
-     */
     hasSynchronizerForCodebase(codebasePath: string): boolean {
         return this.synchronizers.has(this.ports.resolveCollectionName(codebasePath));
     }
 
-    /**
-     * The registered synchronizer's owned snapshot observation token, or null.
-     */
-    getRegisteredSourceFreshnessCheckpointObservation(codebasePath: string): string | null {
-        const synchronizer = this.synchronizers.get(this.ports.resolveCollectionName(codebasePath));
-        return synchronizer?.getOwnedSnapshotObservationToken() ?? null;
-    }
-
-    /**
-     * Resolve a synchronizer whose checkpoint identity and authority match the
-     * receipt, either from the registry or by building a fresh inspector.
-     */
-    async resolveCheckpointComparisonSynchronizer(
-        canonicalRoot: string,
-        receipt: ProvenGenerationReceipt,
-        observationToken: string,
-    ): Promise<FileSynchronizer | null> {
-        const checkpointAuthority = {
-            collectionName: receipt.collectionName,
-            markerRunId: receipt.marker.runId,
-            indexPolicyHash: receipt.marker.indexPolicyHash,
-        };
-        const registered = this.synchronizers.get(this.ports.resolveCollectionName(canonicalRoot));
-        if (
-            registered
-            && registered.ownsCheckpointIdentity(receipt.collectionName)
-            && registered.ownsCheckpointAuthority(checkpointAuthority)
-            && registered.getOwnedSnapshotObservationToken() === observationToken
-        ) {
-            return registered;
-        }
-
-        const inspector = new FileSynchronizer(
-            canonicalRoot,
-            [],
-            [],
-            {
-                checkpointIdentity: receipt.collectionName,
-                checkpointAuthority,
-            },
-        );
-        try {
-            await inspector.initialize(
-                undefined,
-                undefined,
-                { requireExistingCheckpoint: true },
-            );
-        } catch {
-            return null;
-        }
-        if (inspector.getOwnedSnapshotObservationToken() !== observationToken) {
-            return null;
-        }
-        const collectionName = this.ports.resolveCollectionName(canonicalRoot);
-        this.synchronizers.set(collectionName, inspector);
-        this.synchronizerMutationTargets.delete(collectionName);
-        return inspector;
-    }
-
-    /**
-     * Drop the synchronizer and mutation target for a collection (clear path).
-     */
     clearSynchronizerForCollection(collectionName: string): void {
         this.synchronizers.delete(collectionName);
         this.synchronizerMutationTargets.delete(collectionName);
     }
 
-    /**
-     * The pending mutation target for a synchronizer key, or undefined.
-     */
     getMutationTarget(synchronizerKey: string): string | undefined {
         return this.synchronizerMutationTargets.get(synchronizerKey);
     }
 
-    /**
-     * Remove a pending mutation target for a synchronizer key.
-     */
     clearMutationTarget(synchronizerKey: string): void {
         this.synchronizerMutationTargets.delete(synchronizerKey);
     }
 
-    /**
-     * Set a pending mutation target for a synchronizer key.
-     */
     setMutationTarget(synchronizerKey: string, collectionName: string): void {
         this.synchronizerMutationTargets.set(synchronizerKey, collectionName);
     }

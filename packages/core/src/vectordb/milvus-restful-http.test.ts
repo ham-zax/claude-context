@@ -51,7 +51,6 @@ function makeDb(server: TestServer, overrides: Record<string, number> = {}): Htt
     return new HttpTestMilvusRest({
         address: server.url,
         database: 'default',
-        vectorDimension: 4,
         ...overrides,
     });
 }

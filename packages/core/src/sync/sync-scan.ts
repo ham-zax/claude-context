@@ -29,6 +29,7 @@ export interface SynchronizerScanContext {
     rootDir: string;
     ignoreMatcher: ReturnType<typeof ignore>;
     supportedExtensions: readonly string[];
+    excludedPaths?: ReadonlySet<string>;
     forceFullHash: boolean;
     hashConcurrency: number;
     previousHashes: ReadonlyMap<string, string>;
@@ -122,6 +123,10 @@ function shouldIgnore(
     const normalizedPath = normalizeSynchronizerRelPath(context.rootDir, relativePath);
     if (!normalizedPath) {
         return false;
+    }
+
+    if (!isDirectory && context.excludedPaths?.has(normalizedPath)) {
+        return true;
     }
 
     if (isDirectory) {

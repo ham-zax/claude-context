@@ -6,7 +6,6 @@ import { getLanguageCapabilityDeclaration } from '../languages/capabilities';
 import type { SymbolKind, SymbolRecord, SymbolRegistryManifestFile } from './contracts';
 import type { SymbolRegistry } from './registry';
 import type { ReadSymbolRegistrySidecarResult } from './sidecar';
-import type { NavigationSymbolQualityAggregate } from './sidecar';
 
 export type SymbolQualityStatus =
     | 'symbol_rich'
@@ -248,55 +247,6 @@ export function computeSymbolQualitySummaryFromRegistry(registry: SymbolRegistry
             kind: symbol.kind as SymbolKind | string,
         })),
     });
-}
-
-export function computeSymbolQualitySummaryFromAggregate(
-    aggregate: NavigationSymbolQualityAggregate,
-): SymbolQualitySummary {
-    let eligibleFiles = 0;
-    let filesWithNonFileSymbols = 0;
-    let fileOwnerOnlyFiles = 0;
-    let nonFileSymbolCount = 0;
-    let searchOnlyFiles = 0;
-    let unclassifiedFiles = 0;
-    const languages = aggregate.languages.map((entry) => {
-        const eligibility = isLanguageSymbolEligible(entry.language);
-        const observedEligible = eligibility === true || (eligibility === null && entry.nonFileSymbolCount > 0);
-        if (observedEligible) {
-            eligibleFiles += entry.indexedFiles;
-            filesWithNonFileSymbols += entry.filesWithNonFileSymbols;
-            fileOwnerOnlyFiles += entry.indexedFiles - entry.filesWithNonFileSymbols;
-        } else if (eligibility === false) {
-            searchOnlyFiles += entry.indexedFiles;
-        } else {
-            unclassifiedFiles += entry.indexedFiles;
-        }
-        nonFileSymbolCount += entry.nonFileSymbolCount;
-        return {
-            language: entry.language,
-            eligibleFiles: observedEligible ? entry.indexedFiles : 0,
-            filesWithNonFileSymbols: observedEligible ? entry.filesWithNonFileSymbols : 0,
-            status: observedEligible
-                ? statusFromRatio(entry.indexedFiles, entry.filesWithNonFileSymbols)
-                : eligibility === false ? 'search_only' as const : 'unknown' as const,
-        };
-    });
-    const status = aggregate.indexedFileCount === 0
-        ? 'unknown'
-        : eligibleFiles > 0
-            ? statusFromRatio(eligibleFiles, filesWithNonFileSymbols)
-            : searchOnlyFiles > 0 && unclassifiedFiles === 0 ? 'search_only' : 'unknown';
-    return {
-        status,
-        basis: 'symbol_registry',
-        eligibleFiles,
-        filesWithNonFileSymbols,
-        fileOwnerOnlyFiles,
-        nonFileSymbolCount,
-        languages,
-        message: messageForStatus(status),
-        evidenceAvailability: 'ready',
-    };
 }
 
 export function unknownSymbolQualitySummary(

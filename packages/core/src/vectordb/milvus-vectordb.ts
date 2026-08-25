@@ -10,7 +10,6 @@ import {
     type SearchSimpleReq,
 } from '@zilliz/milvus2-sdk-node';
 import {
-    VectorControlRecord,
     IndexedVectorDocument,
     DenseCandidateRequest,
     VectorCandidate,
@@ -27,20 +26,13 @@ import {
     VectorPublicationCapabilities,
 } from './types';
 import {
-    fromLegacyMilvusControlRow,
-    toLegacyMilvusControlDocument,
-    withMilvusControlExclusion,
-} from './milvus-control-record';
-import {
-    assertMilvusSearchableDocumentIds,
     decodeMilvusCandidate,
-    encodeMilvusDocument,
     encodeMilvusSearchableDocument,
     type MilvusPhysicalRow,
 } from './milvus-row-codec';
 import { ClusterManager } from './zilliz-utils';
 import { deleteCollectionWithVerification } from './remote-delete';
-import { buildMilvusIdInFilter } from './filters';
+import { buildMilvusIdInFilter, serializeMilvusFilter } from './filters';
 import { envManager } from '../utils/env-manager';
 
 type MilvusCollectionListPayload = {
@@ -313,8 +305,6 @@ export interface MilvusConfig {
     username?: string;
     password?: string;
     ssl?: boolean;
-    /** Dimension used only for placeholder vectors required by the legacy Milvus control-row schema. */
-    vectorDimension: number;
 }
 
 
@@ -841,25 +831,6 @@ export class MilvusVectorDatabase implements VectorDatabase {
         await this.upsertDocuments(collectionName, data);
     }
 
-    async insertControl(collectionName: string, record: VectorControlRecord): Promise<void> {
-        await this.upsertDocuments(collectionName, [
-            encodeMilvusDocument(toLegacyMilvusControlDocument(record, this.config.vectorDimension)) as RowData,
-        ]);
-    }
-
-    async getControl(collectionName: string, id: string): Promise<VectorControlRecord | null> {
-        const rows = await this.queryRows(collectionName, buildMilvusIdInFilter([id]), ['id', 'metadata'], 2);
-        for (const row of rows) {
-            const record = fromLegacyMilvusControlRow(row, id);
-            if (record) return record;
-        }
-        return null;
-    }
-
-    async deleteControl(collectionName: string, id: string): Promise<void> {
-        await this.deleteRows(collectionName, [id]);
-    }
-
     async retrieveDense(collectionName: string, request: DenseCandidateRequest): Promise<VectorCandidate[]> {
         await this.ensureInitialized();
         await this.ensureLoaded(collectionName);
@@ -873,7 +844,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
             data: [[...request.vector]],
             limit: request.limit,
             output_fields: ['id', 'content', 'relativePath', 'startLine', 'endLine', 'fileExtension', 'metadata'],
-            expr: withMilvusControlExclusion(request.filter),
+            expr: serializeMilvusFilter(request.filter),
         };
 
         const searchResult = await this.client.search(searchParams);
@@ -892,7 +863,6 @@ export class MilvusVectorDatabase implements VectorDatabase {
     }
 
     async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-        assertMilvusSearchableDocumentIds(ids);
         await this.deleteRows(collectionName, ids);
     }
 
@@ -913,7 +883,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
     async queryDocuments(collectionName: string, request: VectorDocumentQuery): Promise<VectorRecord[]> {
         return this.queryRows(
             collectionName,
-            withMilvusControlExclusion(request.filter),
+            serializeMilvusFilter(request.filter),
             [...request.fields],
             request.limit,
         );
@@ -965,7 +935,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
     async countDocuments(collectionName: string, filter?: VectorFilter): Promise<number> {
         const rows = await this.queryRows(
             collectionName,
-            withMilvusControlExclusion(filter),
+            serializeMilvusFilter(filter),
             ['count(*)'],
         );
         const rawCount = rows[0]?.['count(*)'] ?? rows[0]?.count;
@@ -1146,7 +1116,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
                 drop_ratio_search: 0.2,
             },
             output_fields: ['id', 'content', 'relativePath', 'startLine', 'endLine', 'fileExtension', 'metadata'],
-            expr: withMilvusControlExclusion(request.filter),
+            expr: serializeMilvusFilter(request.filter),
         };
 
         const searchResult = await this.client.search(searchParams);

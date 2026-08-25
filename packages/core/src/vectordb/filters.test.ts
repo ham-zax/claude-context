@@ -6,8 +6,6 @@ import {
     serializeMilvusFilter,
     validateVectorFilter,
 } from './filters';
-import { withMilvusControlExclusion } from './milvus-control-record';
-import type { VectorFilter } from './types';
 
 test('buildMilvusIdInFilter escapes Milvus string literals', () => {
     assert.equal(
@@ -76,31 +74,6 @@ test('vector filter validation bounds recursive input', () => {
         filter = { kind: 'and', operands: [filter] };
     }
     assert.throws(() => validateVectorFilter(filter), /maximum depth/);
-});
-
-test('Milvus control exclusion preserves the public filter depth and node limits', () => {
-    let maximumDepthFilter: VectorFilter = {
-        kind: 'comparison',
-        field: 'id',
-        operator: 'eq',
-        value: 'chunk-1',
-    };
-    for (let depth = 1; depth < 16; depth++) {
-        maximumDepthFilter = { kind: 'and', operands: [maximumDepthFilter] };
-    }
-
-    const maximumNodeFilter: VectorFilter = {
-        kind: 'and',
-        operands: Array.from({ length: 255 }, (_, index) => ({
-            kind: 'comparison' as const,
-            field: 'id' as const,
-            operator: 'ne' as const,
-            value: `chunk-${index}`,
-        })),
-    };
-
-    assert.match(withMilvusControlExclusion(maximumDepthFilter), /fileExtension !=/);
-    assert.match(withMilvusControlExclusion(maximumNodeFilter), /fileExtension !=/);
 });
 
 test('vector filter validation returns an immutable canonical copy', () => {

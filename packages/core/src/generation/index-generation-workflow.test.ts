@@ -68,7 +68,7 @@ test('IndexGenerationWorkflow removes the final queue entry after concurrent ser
 
 import * as crypto from 'node:crypto';
 
-test('stageSymbolRegistryForCompletedIndex fails closed when source drifts even if analysisByFile is supplied', async () => {
+test('stageSymbolRegistryForCompletedIndex fails closed when navigation source drifts', async () => {
     const canonicalRoot = '/mock/repo';
     const filePath = 'src/foo.ts';
     const initialContent = 'export function foo() {}\n';
@@ -82,7 +82,10 @@ test('stageSymbolRegistryForCompletedIndex fails closed when source drifts even 
         getLanguageRouterVersion: () => 'router-v1',
         getSymbolExtractorVersion: () => 'extractor-v1',
         getRelationshipVersion: () => 'rel-v1',
-        readIndexableFileInsideRoot: async () => driftedContent,
+        readIndexableFileObservationInsideRoot: async () => ({
+            content: driftedContent,
+            sourceHash: crypto.createHash('sha256').update(driftedContent, 'utf8').digest('hex'),
+        }),
         languageAnalyzer: {
             analyze: async () => ({
                 symbols: [],
@@ -95,25 +98,16 @@ test('stageSymbolRegistryForCompletedIndex fails closed when source drifts even 
             supportedExtensions: ['.ts'],
             canAnalyze: () => true,
         } as unknown as IndexGenerationWorkflowPorts['languageAnalyzer'],
-        symbolRegistryStateRoot: '/mock/state',
-        publishNavigationCandidate: async () => {},
     };
 
 
     const workflow = new IndexGenerationWorkflow(mockPorts as IndexGenerationWorkflowPorts);
 
-    const suppliedAnalysisByFile = new Map([
-        [filePath, {
-            moduleBindings: [],
-            callSites: [],
-            receiverTypeBindings: [],
-            pythonFlowFacts: [],
-        }],
-    ]);
-
     await assert.rejects(
         () => workflow.stageSymbolRegistryForCompletedIndex(
             canonicalRoot,
+            'publication-test',
+            '/mock/publication-test/navigation',
             [],
             [{
                 path: filePath,
@@ -122,8 +116,6 @@ test('stageSymbolRegistryForCompletedIndex fails closed when source drifts even 
                 symbolCount: 0,
                 definitionStatus: 'definitions_present',
             }],
-            undefined,
-            suppliedAnalysisByFile,
         ),
         /Source changed before navigation publication for 'src\/foo\.ts'\./,
     );

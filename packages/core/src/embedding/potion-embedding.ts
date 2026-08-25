@@ -16,16 +16,6 @@ export const POTION_SEMANTIC_VERSION = 'potion_semantics_v1';
 export const POTION_DIMENSION = 256;
 export const POTION_RETAINED_TOKEN_LIMIT = 4096;
 export const POTION_MAX_TIMEOUT_MS = 300_000;
-/**
- * @deprecated Legacy pre-semantic-identity digest; do not compare against
- * the current inference fixture. Installation integrity is owned by the
- * pinned Potion manifest (see packages/cli/src/install-preflight.ts), and
- * index compatibility is owned by POTION_SEMANTIC_VERSION. Retained only
- * for published-surface compatibility; scheduled for removal.
- */
-export const POTION_INFERENCE_CONTRACT_DIGEST =
-    'e716e695cc5895150602501601832a1e7467a09bf9dae1c347b1ff80accf0364';
-
 const MAX_WORKER_FRAME_BYTES = 1_048_576;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 5_000;

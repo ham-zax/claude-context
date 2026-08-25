@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    assertMilvusSearchableDocumentIds,
     decodeMilvusCandidate,
     encodeMilvusSearchableDocument,
 } from './milvus-row-codec';
@@ -52,14 +51,8 @@ test('Milvus COSINE response values preserve the higher-is-better candidate cont
     assert.ok(moreSimilar.score > lessSimilar.score);
 });
 
-test('Milvus searchable mutations reject the physical control discriminator', () => {
-    assert.throws(() => encodeMilvusSearchableDocument(document({
-        fileExtension: '.satori_meta',
-    })), /reserved control extension/);
-    assert.throws(() => encodeMilvusSearchableDocument(document({
-        id: '__satori_index_completion_marker_v1__',
-    })), /reserved for a control record/);
-    assert.throws(() => assertMilvusSearchableDocumentIds([
-        '__satori_index_completion_marker_v1__',
-    ]), /cannot target reserved control ID/);
+test('Milvus searchable mutations preserve current vector document fields', () => {
+    const encoded = encodeMilvusSearchableDocument(document());
+    assert.equal(encoded.id, 'chunk-1');
+    assert.equal(encoded.fileExtension, '.ts');
 });

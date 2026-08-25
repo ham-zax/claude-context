@@ -1,7 +1,6 @@
 // Re-export types and interfaces
 export {
     VectorDocument,
-    VectorControlRecord,
     IndexedVectorDocument,
     SearchProjections,
     DenseCandidateRequest,
@@ -24,10 +23,6 @@ export {
     ScorePolicy,
     BackendScoreKind,
     VectorStoreProviderIdentity,
-    IndexCompletionFingerprint,
-    IndexCompletionMarkerDocument,
-    INDEX_COMPLETION_MARKER_DOC_ID,
-    INDEX_COMPLETION_MARKER_FILE_EXTENSION,
     COLLECTION_LIMIT_MESSAGE
 } from './types';
 

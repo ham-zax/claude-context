@@ -30,7 +30,7 @@ test('Milvus count requests the aggregate field without imposing a row limit', a
     assert.equal(count, 42);
     assert.deepEqual(calls, [[
         'chunks',
-        'fileExtension != ".satori_meta"',
+        '',
         ['count(*)'],
     ]]);
 });
@@ -52,7 +52,7 @@ test('Milvus REST count requests one aggregate result row', async () => {
     assert.equal(count, 7);
     assert.deepEqual(calls, [[
         'chunks',
-        'fileExtension != ".satori_meta"',
+        '',
         ['count(*)'],
         1,
     ]]);

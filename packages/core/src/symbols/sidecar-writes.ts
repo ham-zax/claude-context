@@ -38,7 +38,6 @@ import {
     fileShardName,
     hashSerializedJson,
     hashSerializedString,
-    resolveNavigationSidecarRoot,
     serializeJson,
 } from './sidecar-reads';
 
@@ -48,7 +47,7 @@ export const SHARD_IO_CONCURRENCY = 64;
 const RELATIONSHIP_SHARD_IO_CONCURRENCY = 8;
 export interface WriteSymbolRegistrySidecarInput {
     registry: SymbolRegistry;
-    stateRoot?: string;
+    navigationRoot: string;
     beforePublish?: () => void;
 }
 
@@ -67,7 +66,7 @@ export interface WriteRelationshipSidecarInput {
     records: RelationshipRecord[];
     analysisByFile?: Map<string, RelationshipAnalysisEvidence> | Record<string, RelationshipAnalysisEvidence>;
     files?: SymbolRegistryManifestFile[];
-    stateRoot?: string;
+    navigationRoot: string;
     beforePublish?: () => void;
 }
 
@@ -176,7 +175,7 @@ async function writeSymbolRegistrySidecarInternal(
     input: WriteSymbolRegistrySidecarInput,
     reuse?: SymbolShardReuse,
 ): Promise<WriteSymbolRegistrySidecarResult> {
-    const rootPath = resolveNavigationSidecarRoot(input.stateRoot, input.registry.manifest.normalizedRootPath);
+    const rootPath = path.resolve(input.navigationRoot);
     const symbolsDir = path.join(rootPath, SYMBOLS_DIR_NAME);
     const temporarySymbolsDir = path.join(rootPath, uniqueSidecarEntryName(TEMP_ENTRY_PREFIX));
     const byFileDir = path.join(temporarySymbolsDir, 'by-file');
@@ -209,9 +208,9 @@ async function writeSymbolRegistrySidecarInternal(
                     ) {
                         throw new Error(`Reusable symbol contribution is incompatible for '${file.path}'; reindex is required.`);
                     }
-                    // The base generation seal already binds this immutable shard's
-                    // hash and metadata. Reusing that authority avoids serializing
-                    // unchanged symbols merely to derive the same hash again.
+                    // The base Publication is immutable. The shard hash remains
+                    // reuse metadata so unchanged files can be hard-linked without
+                    // serializing the same contribution again; it is not read authority.
                     shardHashes.set(file.path, source.shardHash);
                     const sharedSize = await linkReusableShard(
                         path.join(reuse.sourceRoot, source.shardPath),
@@ -444,7 +443,7 @@ async function writeRelationshipSidecarInternal(
     input: WriteRelationshipSidecarInput,
     reuse?: RelationshipShardReuse,
 ): Promise<WriteRelationshipSidecarResult> {
-    const rootPath = resolveNavigationSidecarRoot(input.stateRoot, input.normalizedRootPath);
+    const rootPath = path.resolve(input.navigationRoot);
     const relationshipsDir = path.join(rootPath, RELATIONSHIPS_DIR_NAME);
     const temporaryRelationshipsDir = path.join(rootPath, uniqueSidecarEntryName(TEMP_ENTRY_PREFIX));
     const relationshipByFileDir = path.join(temporaryRelationshipsDir, 'by-file');
@@ -497,8 +496,8 @@ async function writeRelationshipSidecarInternal(
                     ) {
                         throw new Error(`Reusable relationship contribution is incompatible for '${filePath}'; reindex is required.`);
                     }
-                    // As with symbol shards, the sealed base manifest is the
-                    // authority for an explicitly unchanged contribution.
+                    // As with symbol shards, this hash is reuse metadata for an
+                    // immutable base Publication, not an independent authority.
                     const sharedSize = await linkReusableShard(
                         path.join(reuse.sourceRoot, source.shardPath),
                         targetPath,

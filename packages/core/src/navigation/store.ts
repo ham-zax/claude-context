@@ -1,7 +1,6 @@
 import {
     readRelationshipSidecar,
     readSymbolRegistrySidecar,
-    resolveNavigationSidecarRoot,
     resolveOwnerSymbolForChunk,
 } from '../symbols';
 import type {
@@ -48,8 +47,8 @@ export type NavigationRelationshipsState = NavigationStoreRelationshipsOk | Navi
 
 export interface NavigationStoreInput {
     normalizedRootPath: string;
-    stateRoot?: string;
-    generationId?: string;
+    publicationId: string;
+    navigationRoot: string;
 }
 
 export interface NavigationSymbolsByFileInput extends NavigationStoreInput {
@@ -103,16 +102,6 @@ export interface NavigationCompatibilityState {
 
 export interface NavigationCompatibilityInput extends NavigationStoreInput {
     expectedSymbolRegistryManifestHash?: string;
-}
-
-export interface NavigationStore {
-    getManifest(input: NavigationStoreInput): Promise<NavigationRegistryState>;
-    getSymbolsByFile(input: NavigationSymbolsByFileInput): Promise<NavigationSymbolsByFileResult>;
-    getSymbolByInstanceId(input: NavigationSymbolByInstanceIdInput): Promise<NavigationSymbolByInstanceIdResult>;
-    getSymbolCandidatesByKey(input: NavigationSymbolCandidatesByKeyInput): Promise<NavigationSymbolCandidatesByKeyResult>;
-    findOwnerForSpan(input: NavigationOwnerForSpanInput): Promise<NavigationOwnerForSpanResult>;
-    getRelationships(input: NavigationRelationshipsQueryInput): Promise<NavigationRelationshipsState>;
-    getCompatibilityState(input: NavigationCompatibilityInput): Promise<NavigationCompatibilityState>;
 }
 
 function normalizeRelativeFilePath(filePath: string): string {
@@ -173,11 +162,11 @@ function buildFailure(rootPath: string, reason: string, status: 'missing' | 'inc
 }
 
 function relationshipQueryCacheIdentity(input: NavigationRelationshipsQueryInput): string | undefined {
-    if (!input.generationId || !input.expectedSymbolRegistryManifestHash) {
+    if (!input.publicationId || !input.expectedSymbolRegistryManifestHash) {
         return undefined;
     }
     return [
-        input.generationId,
+        input.publicationId,
         input.expectedSymbolRegistryManifestHash,
         input.direction || 'both',
         input.sourceInstanceId || '',
@@ -189,7 +178,7 @@ function relationshipQueryCacheIdentity(input: NavigationRelationshipsQueryInput
 }
 
 function relationshipQueryCacheRoot(input: NavigationRelationshipsQueryInput): string {
-    return `${input.stateRoot || ''}\0${input.normalizedRootPath}`;
+    return `${input.publicationId}\0${input.navigationRoot}\0${input.normalizedRootPath}`;
 }
 
 async function readRegistryState(input: NavigationStoreInput): Promise<NavigationRegistryState> {
@@ -223,8 +212,8 @@ async function readRelationshipState(input: NavigationRelationshipsQueryInput): 
 
     const result = await readRelationshipSidecar({
         normalizedRootPath: input.normalizedRootPath,
-        stateRoot: input.stateRoot,
-        generationId: input.generationId,
+        publicationId: input.publicationId,
+        navigationRoot: input.navigationRoot,
         expectedSymbolRegistryManifestHash: expectedManifestHash,
     });
     if (result.status !== 'ok') {
@@ -268,7 +257,7 @@ async function readRelationshipState(input: NavigationRelationshipsQueryInput): 
     };
 }
 
-export class JsonNavigationStore implements NavigationStore {
+export class JsonNavigationStore {
     private readonly relationshipStateByRoot = new Map<string, {
         identity: string;
         result: Promise<NavigationRelationshipsState>;
@@ -364,9 +353,8 @@ export class JsonNavigationStore implements NavigationStore {
             return cached.result;
         }
 
-        // Published generation directories are immutable. Cache only reads that
-        // bind both the generation and registry manifest, and replace the prior
-        // generation entry so lifecycle transitions cannot reuse stale state.
+        // Publication navigation directories are immutable. Cache only reads
+        // bound to one Publication and registry manifest.
         const result = readRelationshipState(input);
         this.relationshipStateByRoot.set(root, { identity, result });
         const resolved = await result;
@@ -380,7 +368,7 @@ export class JsonNavigationStore implements NavigationStore {
     }
 
     public async getCompatibilityState(input: NavigationCompatibilityInput): Promise<NavigationCompatibilityState> {
-        const rootPath = resolveNavigationSidecarRoot(input.stateRoot, input.normalizedRootPath);
+        const rootPath = input.navigationRoot;
         const registry = await readRegistryState(input);
         const expectedManifestHash = input.expectedSymbolRegistryManifestHash
             || (registry.status === 'ok' ? registry.manifestHash : undefined);
@@ -399,8 +387,8 @@ export class JsonNavigationStore implements NavigationStore {
 
         const relationships = await this.getRelationships({
             normalizedRootPath: input.normalizedRootPath,
-            stateRoot: input.stateRoot,
-            generationId: input.generationId,
+            publicationId: input.publicationId,
+            navigationRoot: input.navigationRoot,
             expectedSymbolRegistryManifestHash: expectedManifestHash,
         });
 

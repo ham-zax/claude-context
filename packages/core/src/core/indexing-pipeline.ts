@@ -30,10 +30,12 @@ import type {
 import type { RepositoryRelativePath } from '../paths/repository-path';
 import type { RelationshipAnalysisEvidence } from '../relationships';
 import { defaultSemanticLanguageRegistry, type SemanticLanguageRegistry } from '../semantic/descriptor';
+import type { SemanticProjectAnalyzer, SemanticSourceFile } from '../semantic';
 import {
     openRegularFileInsideRoot,
     readFileHandleExactly,
 } from '../sync/root-bound-fs';
+import type { SnapshotFileStatSignature } from '../sync/snapshot-codec';
 import type {
     IndexedVectorDocument,
     SearchProjections,
@@ -59,7 +61,7 @@ export interface AnalyzedIndexedFile {
     readonly relativePath: RepositoryRelativePath;
     readonly source: string;
     readonly sourceHash: string;
-    readonly contentHash: string;
+    readonly sourceStat: SnapshotFileStatSignature;
     readonly language: string;
     readonly structuralStatus: LanguageAnalysisResult['structuralStatus'];
     readonly chunks: CodeChunk[];
@@ -68,6 +70,12 @@ export interface AnalyzedIndexedFile {
     readonly callSites: LanguageAnalysisResult['callSites'];
     readonly receiverTypeBindings: LanguageAnalysisResult['receiverTypeBindings'];
     readonly pythonFlowFacts: LanguageAnalysisResult['pythonFlowFacts'];
+}
+
+export interface IndexedSourceFileObservation {
+    readonly path: RepositoryRelativePath;
+    readonly sourceHash: string;
+    readonly sourceStat: SnapshotFileStatSignature;
 }
 
 export interface AnalyzedFileSymbolFacts {
@@ -86,8 +94,6 @@ export type ExpectedIndexedChunk = Readonly<{
     chunkIndex: number;
 }>;
 
-import type { SemanticProjectAnalyzer, SemanticSourceFile } from '../semantic';
-
 type IgnoreMatcher = ReturnType<typeof ignore>;
 
 export type ProcessedFileList = Readonly<{
@@ -98,7 +104,7 @@ export type ProcessedFileList = Readonly<{
     symbolManifestFiles: SymbolRegistryManifestFile[];
     analysisByFile: Map<string, RelationshipAnalysisEvidence>;
     semanticSources?: readonly SemanticSourceFile[];
-    indexedFileHashes: ReadonlyMap<string, string>;
+    sourceFiles: readonly IndexedSourceFileObservation[];
     performance: IndexingPipelineMetrics;
 }>;
 
@@ -283,7 +289,7 @@ export class IndexingPipeline {
         filePath: string,
         codebasePath: string,
         indexPolicy?: IndexingPolicy,
-    ): Promise<{ content: string; sourceHash: string } | null> {
+    ): Promise<{ content: string; sourceHash: string; sourceStat: SnapshotFileStatSignature } | null> {
         const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
         const handle = await openRegularFileInsideRoot(filePath, canonicalRoot);
         try {
@@ -334,6 +340,11 @@ export class IndexingPipeline {
             return {
                 content,
                 sourceHash: crypto.createHash('sha256').update(sourceBytes).digest('hex'),
+                sourceStat: {
+                    size: after.size,
+                    mtimeMs: after.mtimeMs,
+                    ctimeMs: after.ctimeMs,
+                },
             };
         } finally {
             await handle.close().catch(() => undefined);
@@ -383,7 +394,7 @@ export class IndexingPipeline {
             relativePath,
             source,
             sourceHash: sourceObservation.sourceHash,
-            contentHash: crypto.createHash('sha256').update(source, 'utf8').digest('hex'),
+            sourceStat: sourceObservation.sourceStat,
             language,
             structuralStatus: analysis.structuralStatus,
             chunks: chunksWithTrustedRelativePath(analysis.chunks, relativePath),
@@ -402,7 +413,7 @@ export class IndexingPipeline {
             relativePath: analyzed.relativePath,
             language: analyzed.language,
             content: analyzed.source,
-            fileHash: analyzed.contentHash,
+            fileHash: analyzed.sourceHash,
             extractorVersion: this.getSymbolExtractorVersion(),
             extractedSymbols: analyzed.extractedSymbols,
             chunks: analyzed.chunks,
@@ -417,7 +428,7 @@ export class IndexingPipeline {
             symbolRecords,
             manifestFile: {
                 path: analyzed.relativePath,
-                hash: analyzed.contentHash,
+                hash: analyzed.sourceHash,
                 language: analyzed.language,
                 symbolCount: symbolRecords.length,
                 definitionStatus,
@@ -479,7 +490,7 @@ export class IndexingPipeline {
         const symbolManifestFiles: SymbolRegistryManifestFile[] = [];
         const analysisByFile = new Map<string, RelationshipAnalysisEvidence>();
         const semanticSources: SemanticSourceFile[] = [];
-        const indexedFileHashes = new Map<string, string>();
+        const sourceFiles: IndexedSourceFileObservation[] = [];
         const performance: IndexingPipelineMetrics = {
             analysisMs: 0,
             embeddedInputBytes: 0,
@@ -553,7 +564,11 @@ export class IndexingPipeline {
                 );
                 const { relativePath } = analyzed;
                 analysisByFile.set(relativePath, symbolFacts.relationshipEvidence);
-                indexedFileHashes.set(relativePath, analyzed.sourceHash);
+                sourceFiles.push({
+                    path: analyzed.relativePath,
+                    sourceHash: analyzed.sourceHash,
+                    sourceStat: analyzed.sourceStat,
+                });
                 if (this.semanticAnalyzer?.supportsLanguage(analyzed.language)) {
                     semanticSources.push({
                         path: analyzed.relativePath,
@@ -659,9 +674,9 @@ export class IndexingPipeline {
                 performance,
             );
         }
-        if (!limitReached && indexedFileHashes.size !== processedFiles) {
+        if (!limitReached && sourceFiles.length !== processedFiles) {
             throw new Error(
-                `Completed full index source coverage is inconsistent: ${processedFiles} processed files but ${indexedFileHashes.size} source identities.`,
+                `Completed full index source coverage is inconsistent: ${processedFiles} processed files but ${sourceFiles.length} source observations.`,
             );
         }
         return {
@@ -672,7 +687,7 @@ export class IndexingPipeline {
             symbolManifestFiles,
             analysisByFile,
             ...(semanticSources.length > 0 ? { semanticSources } : {}),
-            indexedFileHashes,
+            sourceFiles,
             performance,
         };
     }

@@ -22,6 +22,7 @@ import type {
     VectorFilter,
 } from '../vectordb';
 import { validateVectorFilter } from '../vectordb/filters';
+import type { PublicationLease, PublicationRef } from '../generation/contracts';
 import { compareContractStrings } from '../utils/compare-contract-strings';
 import {
     fuseVectorCandidatesWithRrf,
@@ -32,29 +33,9 @@ import {
 
 const MAX_SEMANTIC_SEARCH_TRACE_ENTRIES_PER_STAGE = 160;
 
-export type MutationGenerationObservation = Readonly<{
-    generation: number;
-    mutationActive: boolean;
-}>;
-
-export type MutationGenerationObserver = (
-    canonicalRoot: string,
-) => MutationGenerationObservation;
-
-type SearchGenerationReceipt = Readonly<{
-    collectionName: string;
-}>;
-
-type SemanticSearchAuthority<Receipt extends SearchGenerationReceipt> = Readonly<{
-    proveVectorGeneration: (codebasePath: string) => Promise<Receipt | null>;
-    revalidateProvenVectorGeneration: (
-        codebasePath: string,
-        receipt: Receipt,
-    ) => Promise<Receipt | null>;
-    isPreparedReceiptBoundToCurrentAuthority: (
-        codebasePath: string,
-        receipt: Receipt,
-    ) => boolean;
+type SemanticSearchAuthority = Readonly<{
+    acquireCurrentRead: (codebasePath: string) => PublicationLease | null;
+    isReadAdmitted: (publication: PublicationRef) => Promise<boolean>;
 }>;
 
 type EmbeddingAccess = Readonly<{
@@ -62,13 +43,12 @@ type EmbeddingAccess = Readonly<{
     assertEmbeddingIdentityCurrent: () => void;
 }>;
 
-type SemanticSearchServiceConfig<Receipt extends SearchGenerationReceipt> = Readonly<{
+type SemanticSearchServiceConfig = Readonly<{
     getVectorDatabase: () => VectorDatabase;
     embeddingAccess: EmbeddingAccess;
-    authority: SemanticSearchAuthority<Receipt>;
+    authority: SemanticSearchAuthority;
     isHybridEnabled: () => boolean;
     canonicalizeCodebasePath: (codebasePath: string) => string;
-    mutationGenerationObserver?: MutationGenerationObserver;
 }>;
 
 function buildSemanticSearchTraceStage(
@@ -304,21 +284,19 @@ function toSemanticSearchResult(
     };
 }
 
-export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
+export class SemanticSearchService {
     private readonly getVectorDatabase: () => VectorDatabase;
     private readonly embeddingAccess: EmbeddingAccess;
-    private readonly authority: SemanticSearchAuthority<Receipt>;
+    private readonly authority: SemanticSearchAuthority;
     private readonly isHybridEnabled: () => boolean;
     private readonly canonicalizeCodebasePath: (codebasePath: string) => string;
-    private readonly mutationGenerationObserver?: MutationGenerationObserver;
 
-    constructor(config: SemanticSearchServiceConfig<Receipt>) {
+    constructor(config: SemanticSearchServiceConfig) {
         this.getVectorDatabase = config.getVectorDatabase;
         this.embeddingAccess = config.embeddingAccess;
         this.authority = config.authority;
         this.isHybridEnabled = config.isHybridEnabled;
         this.canonicalizeCodebasePath = config.canonicalizeCodebasePath;
-        this.mutationGenerationObserver = config.mutationGenerationObserver;
     }
 
     async search(
@@ -328,25 +306,39 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         threshold: number = 0.5,
         filter?: VectorFilter,
     ): Promise<SemanticSearchResult[]> {
-        return this.searchWithReceipt(
-            undefined,
+        const request = this.normalizeRequest(
             requestOrCodebasePath,
             query,
             topK,
             threshold,
             filter,
         );
+        const codebasePath = this.resolveRequest(request).codebasePath;
+        const lease = this.authority.acquireCurrentRead(codebasePath);
+        if (!lease) return [];
+        try {
+            return await this.searchWithPublication(
+                lease,
+                request,
+                undefined,
+                topK,
+                threshold,
+                filter,
+            );
+        } finally {
+            lease.release();
+        }
     }
 
-    async searchInProvenGeneration(
-        receipt: Receipt,
+    async searchInPublication(
+        publication: PublicationRef,
         request: SemanticSearchRequest,
     ): Promise<SemanticSearchResult[]> {
-        return this.searchWithReceipt(receipt, request, undefined, 5, 0.5, undefined, true);
+        return this.searchWithPublication(publication, request, undefined, 5, 0.5, undefined);
     }
 
-    async searchWithCandidateTraceInProvenGeneration(
-        receipt: Receipt,
+    async searchWithCandidateTraceInPublication(
+        publication: PublicationRef,
         request: SemanticSearchRequest,
         maxEntriesPerStage: number,
         options: SemanticSearchCandidateTraceOptions = {},
@@ -354,14 +346,13 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         this.assertCandidateTraceOptions(maxEntriesPerStage, options);
         let candidateTrace: SemanticSearchCandidateTrace | undefined;
         let diagnosticCandidateArms: SemanticSearchExecutionResult['diagnosticCandidateArms'];
-        const results = await this.searchWithReceipt(
-            receipt,
+        const results = await this.searchWithPublication(
+            publication,
             request,
             undefined,
             5,
             0.5,
             undefined,
-            true,
             (trace) => {
                 candidateTrace = trace;
             },
@@ -425,14 +416,13 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         }
     }
 
-    private async searchWithReceipt(
-        receipt: Receipt | undefined,
+    private async searchWithPublication(
+        publication: PublicationRef | undefined,
         requestOrCodebasePath: SemanticSearchRequest | string,
         query?: string,
         topK: number = 5,
         threshold: number = 0.5,
         filter?: VectorFilter,
-        requestBoundReceipt = false,
         candidateTraceConsumer?: (trace: SemanticSearchCandidateTrace) => void,
         candidateTraceMaxEntries = MAX_SEMANTIC_SEARCH_TRACE_ENTRIES_PER_STAGE,
         candidateTraceOptions: SemanticSearchCandidateTraceOptions = {},
@@ -476,15 +466,6 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             && (isSparseOnly || isHybrid);
         const lexicalFallbackTerms = candidateTraceOptions.lexicalFallbackTerms;
         const lexicalFallbackQuery = lexicalFallbackTerms?.join(' ') ?? resolvedRequest.query;
-        const monitorMutableGeneration =
-            !requestBoundReceipt
-            && (isHybrid || captureLexicalFallback);
-        const initialMutationObservation = monitorMutableGeneration
-            ? this.observeMutationGeneration(codebasePath)
-            : null;
-        if (initialMutationObservation?.mutationActive) {
-            throw new Error('Index generation changed during hybrid retrieval.');
-        }
         const searchType = isSparseOnly
             ? 'sparse search'
             : isHybrid
@@ -495,34 +476,17 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             `[Context] 🔍 Executing ${searchType}: query_length=${resolvedRequest.query.length}, request_id=${requestId}, root=${codebasePath}`,
         );
 
-        const revalidatedReceipt = receipt
-            ? requestBoundReceipt
-                ? this.authority.isPreparedReceiptBoundToCurrentAuthority(codebasePath, receipt)
-                    ? receipt
-                    : null
-                : await this.authority.revalidateProvenVectorGeneration(codebasePath, receipt)
-            : await this.authority.proveVectorGeneration(codebasePath);
-        console.log(`[Context] 🔍 Using collection: ${revalidatedReceipt?.collectionName ?? null}`);
+        const canonicalRoot = this.canonicalizeCodebasePath(codebasePath);
+        const admittedPublication = publication
+            && publication.publication.canonicalRoot === canonicalRoot
+            && await this.authority.isReadAdmitted(publication)
+            ? publication
+            : null;
+        console.log(`[Context] 🔍 Using collection: ${admittedPublication?.publication.vector.collectionName ?? null}`);
 
-        if (process.env.SATORI_TASK7_DEBUG === '1') {
-            console.error(
-                '[TASK7-DEBUG][semantic-search-receipt] '
-                + JSON.stringify({
-                    root: codebasePath,
-                    requestBoundReceipt,
-                    retrievalMode: resolvedRequest.retrievalMode,
-                    collectionName: revalidatedReceipt?.collectionName ?? null,
-                    authorityMode: requestBoundReceipt
-                        ? 'pinned_publication'
-                        : 'mutable_current_publication',
-                    mutationObserverEnabled: monitorMutableGeneration,
-                }),
-            );
-        }
-
-        if (!revalidatedReceipt) {
+        if (!admittedPublication) {
             console.log(
-                `[Context] ⚠️  No proven collection exists for '${codebasePath}'. Please index the codebase first.`,
+                `[Context] ⚠️  No admitted Publication exists for '${codebasePath}'. Please index the codebase first.`,
             );
             candidateTraceConsumer?.(buildSemanticSearchCandidateTrace({
                 ...(isSparseOnly ? { productLexical: [] } : { productDense: [] }),
@@ -538,35 +502,11 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
             return [];
         }
 
-        const collectionName = revalidatedReceipt.collectionName;
+        const collectionName = admittedPublication.publication.vector.collectionName;
         const assertCandidateReadAuthorityUnchanged = async (
             errorMessage: string,
         ): Promise<void> => {
-            if (requestBoundReceipt) {
-                return;
-            }
-            const finalMutationObservation = initialMutationObservation
-                ? this.observeMutationGeneration(codebasePath)
-                : null;
-            const sameGenerationReceipt = requestBoundReceipt && initialMutationObservation
-                ? this.authority.isPreparedReceiptBoundToCurrentAuthority(
-                    codebasePath,
-                    revalidatedReceipt,
-                )
-                    ? revalidatedReceipt
-                    : null
-                : await this.authority.revalidateProvenVectorGeneration(
-                    codebasePath,
-                    revalidatedReceipt,
-                );
-            if (
-                !sameGenerationReceipt
-                || (initialMutationObservation && (
-                    !finalMutationObservation
-                    || finalMutationObservation.mutationActive
-                    || finalMutationObservation.generation !== initialMutationObservation.generation
-                ))
-            ) {
+            if (!await this.authority.isReadAdmitted(admittedPublication)) {
                 throw new Error(errorMessage);
             }
         };
@@ -906,26 +846,6 @@ export class SemanticSearchService<Receipt extends SearchGenerationReceipt> {
         ));
         console.log(`[Context] ✅ Found ${results.length} relevant results`);
         return results;
-    }
-
-    private observeMutationGeneration(
-        codebasePath: string,
-    ): MutationGenerationObservation | null {
-        if (!this.mutationGenerationObserver) return null;
-        const observation = this.mutationGenerationObserver(
-            this.canonicalizeCodebasePath(codebasePath),
-        );
-        if (
-            !Number.isSafeInteger(observation.generation)
-            || observation.generation < 0
-            || typeof observation.mutationActive !== 'boolean'
-        ) {
-            throw new Error('Mutation generation observer returned an invalid observation.');
-        }
-        return {
-            generation: observation.generation,
-            mutationActive: observation.mutationActive,
-        };
     }
 
     private normalizeRequest(

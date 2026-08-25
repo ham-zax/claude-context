@@ -42,7 +42,7 @@ test('Milvus gRPC sparse search sends one BM25 request without dense data', asyn
         metric_type: 'BM25',
         params: { drop_ratio_search: 0.2 },
         output_fields: ['id', 'content', 'relativePath', 'startLine', 'endLine', 'fileExtension', 'metadata'],
-        expr: 'fileExtension != ".satori_meta"',
+        expr: '',
     });
     assert.equal(results.length, 1);
     assert.equal(results[0]?.document.relativePath, 'src/checkpoint.ts');
@@ -126,7 +126,7 @@ test('Milvus REST sparse search sends one BM25 request through the search endpoi
             metricType: 'BM25',
             params: { drop_ratio_search: 0.2 },
         },
-        filter: 'fileExtension != ".satori_meta"',
+        filter: '',
     });
     assert.equal(results.length, 1);
     assert.equal(results[0]?.document.relativePath, 'src/checkpoint.ts');
