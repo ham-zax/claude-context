@@ -1,7 +1,7 @@
 # Offline indexing post-simplification controlled A/B
 
-**Date:** 2026-08-26  
-**Decision:** `post_simplification_indexing_performance_improved`  
+**Date:** 2026-08-26
+**Decision:** `post_simplification_indexing_performance_improved`
 **Scope:** offline Satori indexing only; search/reranker latency and memory are not qualified by this receipt.
 
 ## Comparison boundary
@@ -93,8 +93,8 @@ All eight successful runs (two discarded warm-ups plus six measured runs) produc
 | Pre-simplification | 49.093 s | 48.901 s | 48.868 s | **48.954 s** | 48.901 s | 48.868–49.093 s |
 | Simplified | 41.226 s | 40.914 s | 39.416 s | **40.519 s** | 40.914 s | 39.416–41.226 s |
 
-Mean delta: **-8.435 s**.  
-Mean reduction: **17.23%**.  
+Mean delta: **-8.435 s**.
+Mean reduction: **17.23%**.
 Speedup: **1.208x**.
 
 ### End-to-end CLI wall time
