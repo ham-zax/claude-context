@@ -284,7 +284,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
         importExportCapability: NONE,
         callsCapability: PRODUCTION_READY,
         typeReceiverAwareCapability: NONE,
-        testReferenceCapability: NONE,
+        testReferenceCapability: PRODUCTION_READY,
         fixtures: {
             navigation: [
                 'fixtures/navigation/go-basic-symbols/expected_symbols.json',

@@ -23,7 +23,7 @@ const fileOutlineInputSchema = z.object({
     resolveMode: z.enum(['outline', 'exact']).default('outline').optional().describe('Outline mode returns all symbols (windowed/limited). Exact mode resolves deterministic symbol matches in this file.'),
     symbolIdExact: z.string().min(1).optional().describe('Used with resolveMode=\"exact\": exact symbol identifier match in the target file. On symbol-owned flows, pass the symbol\'s symbolInstanceId.'),
     symbolLabelExact: z.string().min(1).optional().describe('Used with resolveMode=\"exact\": exact symbol label match in the target file.'),
-    detail: z.enum(['summary', 'analysis', 'relationships']).default('summary').optional().describe('Summary returns the existing outline. Analysis adds Python structural-v1 metrics. Relationships adds direct relationship metadata. Both detail modes require one exact canonical symbol.'),
+    detail: z.enum(['summary', 'analysis', 'relationships']).default('summary').optional().describe('Summary returns the existing outline. Analysis adds Python/Go structural-v1 metrics. Relationships adds direct relationship metadata. Both detail modes require one exact canonical symbol.'),
 }).superRefine((input, ctx) => {
     if (input.resolveMode === 'exact') {
         if (!input.symbolIdExact && !input.symbolLabelExact) {
@@ -82,7 +82,7 @@ function formatWorkspaceAuthorizationError(
 
 export const fileOutlineTool: McpTool = {
     name: 'file_outline',
-    description: () => 'Return a sidecar-backed symbol outline for one file, including call_graph jump handles. Use detail=\"analysis\" for on-demand Python structural metrics or detail=\"relationships\" for generation-bound direct relationship metadata; both require exact canonical symbol identity.',
+    description: () => 'Return a sidecar-backed symbol outline for one file, including call_graph jump handles. Use detail=\"analysis\" for on-demand Python or Go structural metrics or detail=\"relationships\" for generation-bound direct relationship metadata; both require exact canonical symbol identity.',
     inputSchemaZod: () => fileOutlineInputSchema,
     execute: async (args: unknown, ctx: ToolContext) => {
         const parsed = fileOutlineInputSchema.safeParse(args || {});

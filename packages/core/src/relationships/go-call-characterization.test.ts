@@ -199,7 +199,7 @@ func TestService(t *testing.T) {
     assert.equal(
         calls.some((record) => record.sourceKey === 'service_test.go#TestService'),
         false,
-        '_test.go callers must not produce initial Go v2 CALLS',
+        'receiver/type-dispatch calls from _test.go remain non-authoritative at Tier 3',
     );
     assert.equal(records.some((record) => record.type === 'TESTS'), false);
 });

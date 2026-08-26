@@ -861,6 +861,224 @@ export async function analyzePythonSymbolStructure(
     }
 }
 
+export const GO_STRUCTURAL_ANALYSIS_VERSION = 'go_structural_v1' as const;
+
+export type GoStructuralMetric<T> = PythonStructuralMetric<T>;
+
+export type GoStructuralAnalysis = Readonly<{
+    analysisVersion: typeof GO_STRUCTURAL_ANALYSIS_VERSION;
+    language: 'go';
+    backend: 'tree_sitter_wasm';
+    sourceBinding: 'current_source';
+    metrics: Readonly<{
+        parameterCount: GoStructuralMetric<number>;
+        loopCount: GoStructuralMetric<number>;
+        maxLoopDepth: GoStructuralMetric<number>;
+        cyclomaticComplexity: GoStructuralMetric<number>;
+        signature: GoStructuralMetric<string>;
+        declaredReturnType: GoStructuralMetric<string | null>;
+    }>;
+}>;
+
+export type GoStructuralAnalysisResult =
+    | Readonly<{ status: 'ok'; analysis: GoStructuralAnalysis }>
+    | Readonly<{
+        status: 'unavailable';
+        reason:
+            | 'unsupported_symbol_kind'
+            | 'parser_unavailable'
+            | 'syntax_error'
+            | 'symbol_not_found'
+            | 'analysis_failure';
+    }>;
+
+export type GoStructuralSymbolInput = PythonStructuralSymbolInput;
+
+function matchesGoStructuralSymbol(
+    node: Node,
+    input: GoStructuralSymbolInput['symbol'],
+    sourceMap: Utf8SourceMap,
+): boolean {
+    const name = nameForNode(node);
+    const receiver = goReceiverOwner(node);
+    const qualifiedName = name ? (receiver ? `${receiver}.${name}` : name) : '';
+    if (qualifiedName !== input.qualifiedName || name !== input.name) {
+        return false;
+    }
+    if (input.span.startByte !== undefined && input.span.endByte !== undefined) {
+        const currentSpan = sourceMap.spanFromUtf16(node.startIndex, node.endIndex);
+        return currentSpan.startByte === input.span.startByte
+            && currentSpan.endByte === input.span.endByte;
+    }
+    return node.startPosition.row + 1 === input.span.startLine
+        && node.endPosition.row + 1 === input.span.endLine;
+}
+
+function findGoStructuralFunction(
+    root: Node,
+    input: GoStructuralSymbolInput['symbol'],
+    sourceMap: Utf8SourceMap,
+): Node | undefined {
+    let match: Node | undefined;
+    const visit = (node: Node): void => {
+        if (match) return;
+        if (
+            (node.type === 'function_declaration' || node.type === 'method_declaration')
+            && matchesGoStructuralSymbol(node, input, sourceMap)
+        ) {
+            match = node;
+            return;
+        }
+        for (const child of node.namedChildren) visit(child);
+    };
+    visit(root);
+    return match;
+}
+
+function measureGoStructure(body: Node): {
+    loopCount: number;
+    maxLoopDepth: number;
+    cyclomaticComplexity: number;
+} {
+    let loopCount = 0;
+    let maxLoopDepth = 0;
+    let decisionCount = 0;
+    const visit = (node: Node, loopDepth: number): void => {
+        if (node !== body && node.type === 'func_literal') return;
+
+        let childLoopDepth = loopDepth;
+        if (node.type === 'for_statement') {
+            loopCount += 1;
+            decisionCount += 1;
+            childLoopDepth = loopDepth + 1;
+            maxLoopDepth = Math.max(maxLoopDepth, childLoopDepth);
+        } else if (
+            node.type === 'if_statement'
+            || node.type === 'expression_case'
+            || node.type === 'type_case'
+            || node.type === 'communication_case'
+        ) {
+            decisionCount += 1;
+        } else if (
+            node.type === 'binary_expression'
+            && node.children.some((child) => child.type === '&&' || child.type === '||')
+        ) {
+            decisionCount += 1;
+        }
+
+        for (const child of node.namedChildren) visit(child, childLoopDepth);
+    };
+    visit(body, 0);
+    return {
+        loopCount,
+        maxLoopDepth,
+        cyclomaticComplexity: 1 + decisionCount,
+    };
+}
+
+function countGoParameters(parameters: Node): number {
+    let count = 0;
+    for (const parameter of parameters.namedChildren) {
+        if (parameter.type !== 'parameter_declaration' && parameter.type !== 'variadic_parameter_declaration') {
+            continue;
+        }
+        const named = parameter.namedChildren.filter((child) => child.type === 'identifier').length;
+        count += Math.max(1, named);
+    }
+    return count;
+}
+
+export async function analyzeGoSymbolStructure(
+    input: GoStructuralSymbolInput,
+    assetRoot?: string,
+): Promise<GoStructuralAnalysisResult> {
+    if (input.symbol.kind !== 'function' && input.symbol.kind !== 'method') {
+        return { status: 'unavailable', reason: 'unsupported_symbol_kind' };
+    }
+
+    let language: Language;
+    try {
+        language = await loadLanguage('go', assetRoot);
+    } catch {
+        return { status: 'unavailable', reason: 'parser_unavailable' };
+    }
+
+    let parser: Parser | undefined;
+    let tree: ReturnType<Parser['parse']> | null = null;
+    try {
+        parser = new Parser();
+        parser.setLanguage(language);
+        tree = parser.parse(input.content);
+        if (!tree) return { status: 'unavailable', reason: 'analysis_failure' };
+        if (tree.rootNode.hasError) return { status: 'unavailable', reason: 'syntax_error' };
+
+        const functionNode = findGoStructuralFunction(
+            tree.rootNode,
+            input.symbol,
+            new Utf8SourceMap(input.content),
+        );
+        if (!functionNode) return { status: 'unavailable', reason: 'symbol_not_found' };
+
+        const parameters = functionNode.childForFieldName('parameters');
+        const body = functionNode.childForFieldName('body');
+        if (!parameters || !body) return { status: 'unavailable', reason: 'analysis_failure' };
+
+        const signature = functionNode.text
+            .slice(0, body.startIndex - functionNode.startIndex)
+            .trimEnd();
+        const declaredReturnType = functionNode.childForFieldName('result')?.text.trim() || null;
+        const structure = measureGoStructure(body);
+        return {
+            status: 'ok',
+            analysis: {
+                analysisVersion: GO_STRUCTURAL_ANALYSIS_VERSION,
+                language: 'go',
+                backend: 'tree_sitter_wasm',
+                sourceBinding: 'current_source',
+                metrics: {
+                    parameterCount: {
+                        derivationKind: 'exact_syntax',
+                        availability: 'available',
+                        value: countGoParameters(parameters),
+                    },
+                    loopCount: {
+                        derivationKind: 'structural_metric',
+                        availability: 'available',
+                        value: structure.loopCount,
+                    },
+                    maxLoopDepth: {
+                        derivationKind: 'structural_metric',
+                        availability: 'available',
+                        value: structure.maxLoopDepth,
+                    },
+                    cyclomaticComplexity: {
+                        derivationKind: 'structural_metric',
+                        availability: 'available',
+                        value: structure.cyclomaticComplexity,
+                    },
+                    signature: {
+                        derivationKind: 'exact_syntax',
+                        availability: 'available',
+                        value: signature,
+                    },
+                    declaredReturnType: {
+                        derivationKind: 'exact_syntax',
+                        availability: 'available',
+                        value: declaredReturnType,
+                    },
+                },
+            },
+        };
+    } catch {
+        return { status: 'unavailable', reason: 'analysis_failure' };
+    } finally {
+        tree?.delete();
+        parser?.delete();
+    }
+}
+
+export type SymbolStructuralAnalysis = PythonStructuralAnalysis | GoStructuralAnalysis;
+
 function callableName(node: Node): string | undefined {
     const callable = node.childForFieldName('function')
         ?? node.childForFieldName('name')

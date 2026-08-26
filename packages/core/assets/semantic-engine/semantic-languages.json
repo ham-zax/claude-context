@@ -8,7 +8,7 @@
         ".go"
       ],
       "strategy": "cbm_semantic",
-      "semanticRevision": "go-v2",
+      "semanticRevision": "go-v3",
       "grammar": "tree-sitter-go",
       "auxiliaryFiles": [
         {
@@ -25,8 +25,8 @@
         }
       ],
       "providerId": "satori-cbm-semantic-go",
-      "providerVersion": "cbm-d150ebe4+satori-go-semantic-v2",
-      "environmentConfigId": "cbm-go-semantic-v2"
+      "providerVersion": "cbm-d150ebe4+satori-go-semantic-v3",
+      "environmentConfigId": "cbm-go-semantic-v3"
     }
   ]
 }

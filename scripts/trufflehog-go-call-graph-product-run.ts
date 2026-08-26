@@ -12,6 +12,7 @@ const MCP_ROOT = path.join(SATORI_ROOT, 'packages', 'mcp');
 const RUNTIME_ENTRY = path.join(MCP_ROOT, 'dist', 'index.js');
 const TARGET_REPO = process.env.SATORI_GO_CALL_GRAPH_REPO || '/home/hamza/repo/trufflehog';
 const TARGET_FILE = 'hack/checksecretparts/check.go';
+const TARGET_TEST_FILE = 'hack/checksecretparts/check_test.go';
 const POTION_ASSETS = path.join(MCP_ROOT, 'assets', 'potion', 'linux-x64');
 const POLL_INTERVAL_MS = 100;
 const OPERATION_TIMEOUT_MS = 10 * 60_000;
@@ -45,6 +46,7 @@ type SourceFacts = {
     checkPackageDirLine: number;
     checkFilesLine: number;
     callSiteLine: number;
+    testCallSiteLine: number;
 };
 
 function asRecord(value: unknown): JsonRecord | undefined {
@@ -172,22 +174,23 @@ function buildExactHead(): string {
 }
 
 function sourceFacts(): SourceFacts {
-    const filePath = path.join(TARGET_REPO, TARGET_FILE);
-    if (!fs.existsSync(filePath)) {
-        throw new Error(`Required TruffleHog witness file is missing: ${filePath}`);
-    }
-    const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
-    const findUniqueLine = (needle: string): number => {
+    const findUniqueLine = (relativeFile: string, needle: string): number => {
+        const filePath = path.join(TARGET_REPO, relativeFile);
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`Required TruffleHog witness file is missing: ${filePath}`);
+        }
+        const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
         const matches = lines.flatMap((line, index) => line.includes(needle) ? [index + 1] : []);
         if (matches.length !== 1) {
-            throw new Error(`Expected exactly one '${needle}' in ${TARGET_FILE}, saw ${matches.length}.`);
+            throw new Error(`Expected exactly one '${needle}' in ${relativeFile}, saw ${matches.length}.`);
         }
         return matches[0];
     };
     return {
-        checkPackageDirLine: findUniqueLine('func CheckPackageDir('),
-        checkFilesLine: findUniqueLine('func checkFiles('),
-        callSiteLine: findUniqueLine('return checkFiles('),
+        checkPackageDirLine: findUniqueLine(TARGET_FILE, 'func CheckPackageDir('),
+        checkFilesLine: findUniqueLine(TARGET_FILE, 'func checkFiles('),
+        callSiteLine: findUniqueLine(TARGET_FILE, 'return checkFiles('),
+        testCallSiteLine: findUniqueLine(TARGET_TEST_FILE, 'got, err := CheckPackageDir(dir)'),
     };
 }
 
@@ -340,6 +343,44 @@ async function searchCanonicalSymbol(
     };
 }
 
+async function requireGoStructuralAnalysis(
+    session: CliMcpSession,
+    codebaseRoot: string,
+    symbolRef: SymbolRef,
+): Promise<JsonRecord> {
+    const response = parseFirstText(await session.callTool('file_outline', {
+        path: codebaseRoot,
+        file: symbolRef.file,
+        resolveMode: 'exact',
+        symbolIdExact: symbolRef.symbolId,
+        detail: 'analysis',
+    }));
+    debug('file_outline Go structural analysis', response);
+    if (response.status !== 'ok') {
+        throw new Error(`file_outline Go analysis returned status=${String(response.status)} reason=${String(response.reason)}.`);
+    }
+    const outline = asRecord(response.outline);
+    const symbols = outline ? asRecords(outline.symbols) : [];
+    if (symbols.length !== 1 || symbols[0].symbolId !== symbolRef.symbolId) {
+        throw new Error('file_outline Go analysis did not preserve the exact canonical symbol identity.');
+    }
+    const analysis = asRecord(symbols[0].analysis);
+    const metrics = analysis ? asRecord(analysis.metrics) : undefined;
+    const parameterCount = metrics ? asRecord(metrics.parameterCount) : undefined;
+    const declaredReturnType = metrics ? asRecord(metrics.declaredReturnType) : undefined;
+    if (
+        analysis?.analysisVersion !== 'go_structural_v1'
+        || analysis.language !== 'go'
+        || analysis.backend !== 'tree_sitter_wasm'
+        || analysis.sourceBinding !== 'current_source'
+        || parameterCount?.value !== 1
+        || declaredReturnType?.value !== '([]Finding, error)'
+    ) {
+        throw new Error(`Unexpected Go structural analysis payload: ${JSON.stringify(analysis)}`);
+    }
+    return analysis;
+}
+
 async function callGraph(
     session: CliMcpSession,
     codebaseRoot: string,
@@ -401,6 +442,26 @@ function requireEdge(input: {
     return matches[0];
 }
 
+function requireTestReference(
+    response: JsonRecord,
+    targetSymbolId: string,
+    expectedCallSiteLine: number,
+): JsonRecord {
+    const matches = asRecords(response.testReferences).filter((reference) => {
+        const site = asRecord(reference.site);
+        return reference.file === TARGET_TEST_FILE
+            && reference.targetSymbolId === targetSymbolId
+            && typeof reference.symbolLabel === 'string'
+            && reference.symbolLabel.includes('TestCheckPackageDir')
+            && site?.file === TARGET_TEST_FILE
+            && site.startLine === expectedCallSiteLine;
+    });
+    if (matches.length !== 1) {
+        throw new Error(`Expected exactly one CheckPackageDir testReference at ${TARGET_TEST_FILE}:${expectedCallSiteLine}, saw ${matches.length}.`);
+    }
+    return matches[0];
+}
+
 async function main(): Promise<void> {
     console.log('='.repeat(80));
     console.log('GO calls_v0: TRUFFLEHOG PUBLIC CALL-GRAPH PRODUCT WITNESS');
@@ -423,15 +484,22 @@ async function main(): Promise<void> {
         assertHead(TARGET_REPO, truffleHogHead, 'TruffleHog');
         session = await connect(stateRoot);
 
-        console.log('\n[1/5] Indexing TruffleHog through public manage_index on one live MCP runtime...');
+        console.log('\n[1/6] Indexing TruffleHog through public manage_index on one live MCP runtime...');
         const publication = await establishPublication(session);
         console.log(`Publication: ${publication.collectionName} / ${publication.publicationId}`);
 
-        console.log('[2/5] Resolving canonical CheckPackageDir through public search_codebase...');
+        console.log('[2/6] Resolving canonical CheckPackageDir through public search_codebase...');
         const checkPackageDir = await searchCanonicalSymbol(session, 'CheckPackageDir', facts.checkPackageDirLine);
         console.log(`CheckPackageDir: ${checkPackageDir.target.symbolId} @ ${checkPackageDir.target.file}:${checkPackageDir.target.span.startLine}-${checkPackageDir.target.span.endLine}`);
 
-        console.log('[3/5] Traversing CheckPackageDir callees through public call_graph...');
+        console.log('[3/6] Proving Go file_outline structural-analysis parity...');
+        const structuralAnalysis = await requireGoStructuralAnalysis(
+            session,
+            checkPackageDir.codebaseRoot,
+            checkPackageDir.target,
+        );
+
+        console.log('[4/6] Traversing CheckPackageDir callees and test references through public call_graph...');
         const callees = await callGraph(
             session,
             checkPackageDir.codebaseRoot,
@@ -458,8 +526,13 @@ async function main(): Promise<void> {
             expectedCallSiteLine: facts.callSiteLine,
             label: 'Callee traversal',
         });
+        const testReference = requireTestReference(
+            callees,
+            checkPackageDir.target.symbolId,
+            facts.testCallSiteLine,
+        );
 
-        console.log('[4/5] Resolving checkFiles and proving the reverse caller relationship...');
+        console.log('[5/6] Resolving checkFiles and proving the reverse caller relationship...');
         const checkFiles = await searchCanonicalSymbol(session, 'checkFiles', facts.checkFilesLine);
         if (checkFiles.codebaseRoot !== checkPackageDir.codebaseRoot) {
             throw new Error('CheckPackageDir and checkFiles searches disagreed on codebaseRoot.');
@@ -484,7 +557,7 @@ async function main(): Promise<void> {
             label: 'Caller traversal',
         });
 
-        console.log('[5/5] Verifying serving Publication and repository identities stayed fixed...');
+        console.log('[6/6] Verifying serving Publication and repository identities stayed fixed...');
         const finalStatus = await readStatus(session);
         const finalPublication = requirePublication(finalStatus, 'Final manage_index status');
         if (
@@ -508,10 +581,14 @@ async function main(): Promise<void> {
         console.log(`CheckPackageDir: ${checkPackageDir.target.symbolId} (${TARGET_FILE}:${checkPackageDir.target.span.startLine}-${checkPackageDir.target.span.endLine})`);
         console.log(`checkFiles:      ${checkFiles.target.symbolId} (${TARGET_FILE}:${checkFiles.target.span.startLine}-${checkFiles.target.span.endLine})`);
         console.log(`Call site:       ${TARGET_FILE}:${facts.callSiteLine}`);
+        console.log(`Test reference:  ${String(testReference.symbolId)} @ ${TARGET_TEST_FILE}:${facts.testCallSiteLine}`);
+        console.log(`Analysis:        ${String(structuralAnalysis.analysisVersion)} / ${String(structuralAnalysis.language)}`);
         console.log(`Callee authority publication: ${String(calleeAuthority.publicationId)}`);
         console.log(`Caller authority publication: ${String(callerAuthority.publicationId)}`);
         console.log(' - search_codebase returned canonical graph-ready CheckPackageDir and checkFiles symbols');
+        console.log(' - file_outline returned current-source Go structural metrics for the exact CheckPackageDir symbol');
         console.log(' - callees proved CheckPackageDir -> checkFiles with exact symbol IDs and source call site');
+        console.log(' - call_graph returned the resolved TestCheckPackageDir testReference from _test.go');
         console.log(' - callers proved the same CheckPackageDir -> checkFiles relationship in reverse traversal');
         console.log(' - both call_graph traversals were attributed to the serving Publication');
         console.log('='.repeat(80));

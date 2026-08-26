@@ -87,6 +87,7 @@ test('call_graph description is capability-based and calibrates conservative CAL
     assert.match(callGraphTool!.description, /name-based/i);
     assert.match(callGraphTool!.description, /Go.*qualified direct calls/i);
     assert.match(callGraphTool!.description, /excludes receiver\/type-aware dispatch/i);
+    assert.match(callGraphTool!.description, /Python and Go.*testReferences/i);
     assert.match(callGraphTool!.description, /bounded/i);
     assert.match(callGraphTool!.description, /advisory/i);
     assert.match(callGraphTool!.description, /not authoritative blast-radius/i);
@@ -195,6 +196,7 @@ test('file_outline schema exposes path/file and line window controls', () => {
     const tools = getMcpToolList(buildContext());
     const fileOutlineTool = tools.find((tool) => tool.name === 'file_outline');
     assert.ok(fileOutlineTool);
+    assert.match(fileOutlineTool!.description, /Python or Go structural metrics/i);
 
     const properties = fileOutlineTool!.inputSchema.properties as Record<string, SchemaProperty>;
     assert.ok(properties.path);

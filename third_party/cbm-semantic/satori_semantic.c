@@ -14,7 +14,7 @@
 
 extern const TSLanguage *tree_sitter_go(void);
 
-#define SATORI_ENGINE_VERSION_STR "cbm-d150ebe4+satori-go-semantic-v2"
+#define SATORI_ENGINE_VERSION_STR "cbm-d150ebe4+satori-go-semantic-v3"
 
 typedef struct {
     char *path;
@@ -445,6 +445,8 @@ typedef struct {
     const char *import_path;
     const SatoriGoModule *module;
     uint32_t package_index;
+    bool test_source;
+    bool definitions_eligible;
     bool calls_eligible;
 } SatoriGoSourceMeta;
 
@@ -640,6 +642,9 @@ static bool go_filename_has_build_constraint(const char *path) {
     if (len <= 3 || strcmp(base + len - 3, ".go") != 0) return false;
 
     size_t stem_len = len - 3;
+    if (stem_len > 5 && strncmp(base + stem_len - 5, "_test", 5) == 0) {
+        stem_len -= 5;
+    }
     const char *last_us = NULL;
     for (size_t i = 0; i < stem_len; i++) {
         if (base[i] == '_') last_us = base + i;
@@ -727,7 +732,7 @@ static int go_build_package_table(const SatoriGoSourceMeta *meta, uint32_t sourc
 
     for (uint32_t i = 0; i < source_count; i++) {
         mutable_meta[i].package_index = UINT32_MAX;
-        if (!meta[i].calls_eligible) continue;
+        if (!meta[i].definitions_eligible) continue;
         uint32_t found = UINT32_MAX;
         for (uint32_t j = 0; j < packages->count; j++) {
             SatoriGoPackage *pkg = &packages->items[j];
@@ -772,6 +777,7 @@ static int go_build_package_table(const SatoriGoSourceMeta *meta, uint32_t sourc
     for (uint32_t i = 0; i < source_count; i++) {
         uint32_t package_index = mutable_meta[i].package_index;
         if (package_index != UINT32_MAX && packages->items[package_index].ambiguous) {
+            mutable_meta[i].definitions_eligible = false;
             mutable_meta[i].calls_eligible = false;
         }
     }
@@ -793,6 +799,34 @@ static SatoriGoPackageLookupState go_find_package_by_import_path(const SatoriGoP
     if (!match) return SATORI_GO_PACKAGE_LOOKUP_NONE;
     if (out) *out = match;
     return SATORI_GO_PACKAGE_LOOKUP_UNIQUE;
+}
+
+static SatoriGoPackageLookupState go_find_same_source_package(const SatoriGoPackageTable *packages,
+                                                               const SatoriGoSourceMeta *meta,
+                                                               const SatoriGoPackage **out) {
+    if (out) *out = NULL;
+    if (!packages || !meta) return SATORI_GO_PACKAGE_LOOKUP_NONE;
+    const SatoriGoPackage *match = NULL;
+    for (uint32_t i = 0; i < packages->count; i++) {
+        const SatoriGoPackage *pkg = &packages->items[i];
+        if (strcmp(pkg->source_dir, meta->source_dir) != 0 ||
+            !go_nullable_string_equal(pkg->module_root, meta->module ? meta->module->root : NULL) ||
+            !go_nullable_string_equal(pkg->module_path, meta->module ? meta->module->module_path : NULL) ||
+            !go_nullable_string_equal(pkg->import_path, meta->import_path) ||
+            strcmp(pkg->declared_package_name, meta->declared_package_name) != 0) {
+            continue;
+        }
+        if (pkg->ambiguous || match) return SATORI_GO_PACKAGE_LOOKUP_AMBIGUOUS;
+        match = pkg;
+    }
+    if (!match) return SATORI_GO_PACKAGE_LOOKUP_NONE;
+    if (out) *out = match;
+    return SATORI_GO_PACKAGE_LOOKUP_UNIQUE;
+}
+
+static const char *go_compute_test_package_qn(CBMArena *arena, const SatoriGoSourceMeta *meta) {
+    if (!arena || !meta || !meta->normalized_path || !meta->declared_package_name) return NULL;
+    return cbm_arena_sprintf(arena, "@test/%s#%s", meta->normalized_path, meta->declared_package_name);
 }
 
 static int extract_package_name(CBMArena *arena, TSNode root, const char *source, const char **out_name) {
@@ -1102,10 +1136,13 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
         size_t normalized_len = strlen(meta->normalized_path);
         bool is_test_file = normalized_len >= 8 &&
             strcmp(meta->normalized_path + normalized_len - 8, "_test.go") == 0;
-        meta->calls_eligible = !is_test_file &&
+        bool build_context_eligible =
             !go_filename_has_build_constraint(meta->normalized_path) &&
             !go_has_explicit_build_constraint(sf->source) &&
             !go_ast_imports_c(root, sf->source);
+        meta->test_source = is_test_file;
+        meta->definitions_eligible = build_context_eligible && !is_test_file;
+        meta->calls_eligible = build_context_eligible;
     }
 
     status = go_build_package_table(source_meta, s->source_count, &packages, source_meta);
@@ -1114,9 +1151,33 @@ int satori_semantic_resolve(SatoriSemanticHandle handle) {
         goto cleanup;
     }
 
-    // Phase 2: Register definitions only from files whose build/package identity is authoritative.
+    // Test files may call production definitions but never register authoritative targets.
+    // Same-package tests share the proven production package identity; external test packages
+    // get an isolated local identity and can reach production only through explicit imports.
     for (uint32_t i = 0; i < s->source_count; i++) {
-        if (!source_meta[i].calls_eligible) continue;
+        SatoriGoSourceMeta *meta = &source_meta[i];
+        if (!meta->test_source || !meta->calls_eligible) continue;
+        const SatoriGoPackage *production_package = NULL;
+        SatoriGoPackageLookupState lookup = go_find_same_source_package(&packages, meta, &production_package);
+        if (lookup == SATORI_GO_PACKAGE_LOOKUP_AMBIGUOUS) {
+            meta->calls_eligible = false;
+            continue;
+        }
+        if (lookup == SATORI_GO_PACKAGE_LOOKUP_UNIQUE) {
+            meta->package_qn = production_package->package_qn;
+        } else {
+            meta->package_qn = go_compute_test_package_qn(&s->arena, meta);
+            if (!meta->package_qn) {
+                set_session_error(s, "Out of memory computing Go test package identity");
+                status = SATORI_SEMANTIC_ERR_OUT_OF_MEMORY;
+                goto cleanup;
+            }
+        }
+    }
+
+    // Phase 2: Register production definitions only from files whose build/package identity is authoritative.
+    for (uint32_t i = 0; i < s->source_count; i++) {
+        if (!source_meta[i].definitions_eligible) continue;
         SatoriSourceFile *sf = &s->sources[i];
         TSNode root = ts_tree_root_node(trees[i]);
         status = extract_ast_definitions(&s->arena, &reg, &def_locs, root, sf->source,

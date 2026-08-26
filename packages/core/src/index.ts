@@ -76,10 +76,13 @@ export {
     createLanguageAnalysisService,
 } from './language-analysis/service';
 export {
+    analyzeGoSymbolStructure,
     analyzePythonSymbolStructure,
 } from './language-analysis/tree-sitter-adapter';
 export type {
+    GoStructuralAnalysis,
     PythonStructuralAnalysis,
+    SymbolStructuralAnalysis,
 } from './language-analysis/tree-sitter-adapter';
 export type {
     CodeChunk,

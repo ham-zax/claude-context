@@ -1,13 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+    analyzeGoSymbolStructure,
     analyzePythonSymbolStructure,
     getSupportedExtensionsForCapability,
     JsonNavigationStore,
     type PublicationLease,
     type PublicationRef,
-    type PythonStructuralAnalysis,
     type SymbolRecord,
+    type SymbolStructuralAnalysis,
 } from "@zokizuan/satori-core";
 
 import {
@@ -276,9 +277,9 @@ function buildAnalysisUnavailableFileOutlinePayload(
     };
 }
 
-function withPythonStructuralAnalysis(
+function withStructuralAnalysis(
     payload: FileOutlineResponseEnvelope,
-    analysis: PythonStructuralAnalysis,
+    analysis: SymbolStructuralAnalysis,
 ): FileOutlineResponseEnvelope {
     if (payload.status !== "ok" || payload.outline?.symbols.length !== 1) {
         return payload;
@@ -1482,47 +1483,48 @@ export class NavigationHandlers {
         let projectedPayload = payload;
         if (detail === "analysis" && payload.status === "ok") {
             const selectedSymbol = payload.outline?.symbols[0];
-                if (!selectedSymbol) {
-                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                        effectiveRoot,
-                        normalizedFile,
-                        "No exact canonical symbol was available for structural analysis.",
-                    );
-                } else if (selectedSymbol.language !== "python") {
-                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                        effectiveRoot,
-                        normalizedFile,
-                        "Structural analysis v1 is available only for Python symbols.",
-                        "unsupported_language",
-                    );
+            if (!selectedSymbol) {
+                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                    effectiveRoot,
+                    normalizedFile,
+                    "No exact canonical symbol was available for structural analysis.",
+                );
+            } else if (selectedSymbol.language !== "python" && selectedSymbol.language !== "go") {
+                projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                    effectiveRoot,
+                    normalizedFile,
+                    "Structural analysis v1 is available only for Python and Go symbols.",
+                    "unsupported_language",
+                );
+            } else {
+                const structuralInput = {
+                    content: sourceBytes.toString("utf8"),
+                    symbol: {
+                        kind: selectedSymbol.kind,
+                        name: selectedSymbol.name,
+                        qualifiedName: selectedSymbol.qualifiedName,
+                        span: selectedSymbol.span,
+                    },
+                };
+                const analysisResult = selectedSymbol.language === "python"
+                    ? await analyzePythonSymbolStructure(structuralInput)
+                    : await analyzeGoSymbolStructure(structuralInput);
+                if (analysisResult.status === "ok") {
+                    projectedPayload = withStructuralAnalysis(payload, analysisResult.analysis);
                 } else {
-                    const analysisResult = await analyzePythonSymbolStructure({
-                        content: sourceBytes.toString("utf8"),
-                        symbol: {
-                            kind: selectedSymbol.kind,
-                            name: selectedSymbol.name,
-                            qualifiedName: selectedSymbol.qualifiedName,
-                            span: selectedSymbol.span,
-                        },
-                    });
-                    if (analysisResult.status === "ok") {
-                        projectedPayload = withPythonStructuralAnalysis(
-                            payload,
-                            analysisResult.analysis,
-                        );
-                    } else {
-                        projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
-                            effectiveRoot,
-                            normalizedFile,
-                            analysisResult.reason === "unsupported_symbol_kind"
-                                ? "Structural analysis v1 supports Python functions and methods only."
-                                : `Python structural analysis is unavailable (${analysisResult.reason}).`,
-                            analysisResult.reason === "unsupported_symbol_kind"
-                                ? "unsupported_symbol_kind"
-                                : "analysis_unavailable",
-                        );
-                    }
+                    const languageLabel = selectedSymbol.language === "python" ? "Python" : "Go";
+                    projectedPayload = buildAnalysisUnavailableFileOutlinePayload(
+                        effectiveRoot,
+                        normalizedFile,
+                        analysisResult.reason === "unsupported_symbol_kind"
+                            ? "Structural analysis v1 supports functions and methods only."
+                            : `${languageLabel} structural analysis is unavailable (${analysisResult.reason}).`,
+                        analysisResult.reason === "unsupported_symbol_kind"
+                            ? "unsupported_symbol_kind"
+                            : "analysis_unavailable",
+                    );
                 }
+            }
         }
         if (detail === "relationships" && payload.status === "ok") {
             const selectedSymbol = payload.outline?.symbols[0];

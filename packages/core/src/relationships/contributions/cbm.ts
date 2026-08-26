@@ -1,5 +1,5 @@
 import { getLanguageCapabilityDeclaration } from '../../language';
-import { isCallableSymbolKind, type SymbolRecord, type SymbolRegistry } from '../../symbols';
+import { isCallableSymbolKind, type RelationshipRecord, type SymbolRecord, type SymbolRegistry } from '../../symbols';
 import type {
     CallResolutionContribution,
     CallResolutionEngine,
@@ -14,6 +14,7 @@ import {
 import type { SemanticProjectEvidence } from '../../semantic/contracts';
 import { defaultSemanticLanguageRegistry, type SemanticLanguageDescriptor, type SemanticLanguageRegistry } from '../../semantic/descriptor';
 import { admitAuthoritativeProofBackedCalls } from '../admission';
+import { isTestOrFixturePath } from '../test-path';
 
 function findEnclosingCaller(
     fileSymbols: readonly SymbolRecord[] | undefined,
@@ -132,8 +133,9 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
         const providerId = this.descriptor.providerId;
         const providerVersion = this.descriptor.providerVersion;
         const environmentConfigId = this.descriptor.environmentConfigId;
-        const typeReceiverAwareReady =
-            getLanguageCapabilityDeclaration(this.language)?.typeReceiverAwareCapability === 'production_ready';
+        const capability = getLanguageCapabilityDeclaration(this.language);
+        const typeReceiverAwareReady = capability?.typeReceiverAwareCapability === 'production_ready';
+        const testReferencesReady = capability?.testReferenceCapability === 'production_ready';
 
         const sourceFilter = input.sourceFiles;
 
@@ -282,11 +284,20 @@ export class CbmSemanticContributionEngine implements CallResolutionEngine {
             claimsByFile.set(filePath, fileClaims);
         }
 
-        // Central Satori admission: CBM proposes claims, Satori centrally admits them
-        const records = admitAuthoritativeProofBackedCalls({
+        // Central Satori admission: CBM proposes claims, Satori centrally admits them.
+        const calls = admitAuthoritativeProofBackedCalls({
             registry: input.registry,
             claims: allClaims,
         });
+        const records: RelationshipRecord[] = [...calls];
+        if (testReferencesReady) {
+            for (const call of calls) {
+                if (!call.targetInstanceId || !isTestOrFixturePath(call.file)) continue;
+                const target = input.registry.symbolsByInstanceId.get(call.targetInstanceId);
+                if (!target || isTestOrFixturePath(target.file)) continue;
+                records.push({ ...call, type: 'TESTS' });
+            }
+        }
 
         return {
             records,

@@ -431,7 +431,7 @@ an explicit authoritative rank.
 
 ## Language Support
 
-Search and bounded reads work across the indexed text and language catalog. Rich symbol navigation depends on parser evidence. TypeScript, JavaScript, Python, and Go expose production `CALLS v0` when the current Publication has compatible relationship navigation. Go support is conservative direct-call evidence only: receiver/type, embedded/interface dispatch, callbacks/callable aliases, and unknown strategies are not claimed as authoritative Go calls. Other supported languages may provide symbols without graph traversal. Inspect `manage_index status` instead of assuming every indexed language is graph-ready.
+Search and bounded reads work across the indexed text and language catalog. Rich symbol navigation depends on parser evidence. TypeScript, JavaScript, Python, and Go expose production `CALLS v0` and resolved test-reference navigation when the current Publication has compatible relationship navigation. Python and Go additionally expose on-demand `file_outline(detail="analysis")` structural metrics for exact functions and methods. Go support is conservative direct-call evidence only: receiver/type, embedded/interface dispatch, callbacks/callable aliases, and unknown strategies are not claimed as authoritative Go calls. Other supported languages may provide symbols without graph traversal. Inspect `manage_index status` instead of assuming every indexed language is graph-ready.
 
 Python inbound relationships are qualified for bounded static patterns,
 including absolute-import constructor receivers and direct service or callback

@@ -33,7 +33,7 @@ test('language registry is backed by canonical capability declarations', () => {
     assert.equal(go?.importExportCapability, 'none');
     assert.equal(go?.callsCapability, 'production_ready');
     assert.equal(go?.typeReceiverAwareCapability, 'none');
-    assert.equal(go?.testReferenceCapability, 'none');
+    assert.equal(go?.testReferenceCapability, 'production_ready');
     assert.equal(go?.publicClaim, 'calls_v0');
 });
 
@@ -82,7 +82,7 @@ test('unpromoted L1 candidate languages do not claim graph capabilities by routi
     assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'callGraphBuild'), true);
     assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'callGraphQuery'), true);
     assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'imports'), false);
-    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'testLinks'), false);
+    assert.equal(isLanguageCapabilitySupportedForLanguage('go', 'testLinks'), true);
     assert.equal(isLanguageCapabilitySupportedForExtension('.go', 'callGraph'), true);
     assert.equal(isLanguageCapabilitySupportedForExtension('.go', 'callGraphBuild'), true);
     assert.equal(isLanguageCapabilitySupportedForExtension('.go', 'callGraphQuery'), true);

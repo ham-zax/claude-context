@@ -981,7 +981,7 @@ export interface CanonicalSymbolIdentity {
 
 export interface FileOutlineSymbolResult extends CanonicalSymbolIdentity {
     callGraphHint: CallGraphHint;
-    analysis?: import("@zokizuan/satori-core").PythonStructuralAnalysis;
+    analysis?: import("@zokizuan/satori-core").SymbolStructuralAnalysis;
     relationships?: {
         directCallerCount: number | null;
         directCalleeCount: number | null;
