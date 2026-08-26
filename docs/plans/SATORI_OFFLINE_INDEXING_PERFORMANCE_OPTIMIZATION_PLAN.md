@@ -45,6 +45,21 @@ graph TD
 > [!NOTE]
 > 256 rows represents the selected **bounded-memory tradeoff** (512 remains the maximum-throughput point). Release acceptance is governed by verified empirical call-count reductions, frozen inference parity, and absence of correctness/install regressions.
 
+### Post-simplification controlled A/B — 2026-08-26
+
+The architecture simplification was rebenchmarked against its exact pre-simplification baseline, `203cd09dc941`, using a separate target worktree frozen at that same revision. Both runtimes indexed identical source bytes with Potion + LanceDB and no reranker. One warm-up per runtime was discarded, followed by three fresh-state measured `manage_index create` runs per runtime.
+
+| Runtime | Mean mutation time | Median | Mean CLI wall time | Indexed workload |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-simplification `203cd09dc941` | **48.954 s** | 48.901 s | 51.154 s | 1,019 files / 22,397 chunks |
+| Simplified `4b14385ef72a` | **40.519 s** | 40.914 s | 44.219 s | 1,019 files / 22,397 chunks |
+
+The simplified runtime reduced mean indexing mutation time by **8.435 s / 17.23%** (**1.208x** speedup) and end-to-end CLI wall time by **6.935 s / 13.56%** on the frozen workload.
+
+This is the authoritative simplification A/B. The Phase 3 **46.79 s** mean above remains the historical August 14 result, but its then-current Satori workload was smaller and is not a controlled before/after comparison for the later architecture simplification.
+
+Evidence: `docs/evidence/offline-indexing-post-simplification-ab-20260826/REPORT.md` and `docs/evidence/offline-indexing-post-simplification-ab-20260826/benchmark.json`.
+
 ---
 
 ## Step-by-Step Implementation Sequence
