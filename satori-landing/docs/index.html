@@ -1127,13 +1127,16 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
               syntax are intentionally skipped.
             </p>
             <p>
-              TypeScript, JavaScript, Python, Go, Java, C#, C++, and Rust provide
+              TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala provide
               production-ready <code>CALLS v0</code> navigation when the current
               Publication has compatible relationship navigation. Resolved
               test-reference navigation remains separately qualified for TypeScript,
               JavaScript, Python, and Go. Python and Go additionally provide on-demand
               <code>file_outline</code> structural analysis for exact functions and
-              methods. The CBM-backed languages expose conservative direct-call
+              methods. TypeScript, JavaScript, and Scala use Satori's syntax/name-based
+              advisory resolver; Scala v1 admits direct non-member calls only when the
+              indexed target is unique, while member/dynamic dispatch remains outside
+              the claim. The CBM-backed languages expose conservative direct-call
               slices: Go excludes receiver/type, embedded/interface dispatch,
               callbacks, and callable aliases; Java and C# admit exact static
               bindings only within the same detected build root (Maven/Gradle or
@@ -1142,7 +1145,6 @@ npx -y @zokizuan/satori-cli@latest install --runtime voyage --vector-store milvu
               C++ admits exact same-translation-unit direct calls and rejects unproved cross-translation-unit or conditional
               preprocessor cases; Rust requires Cargo package ownership and rejects
               receiver dispatch plus unmodeled <code>cfg</code>-dependent sources.
-              Scala remains <code>symbol_only</code>.
             </p>
           </div>
           <div class="panel">

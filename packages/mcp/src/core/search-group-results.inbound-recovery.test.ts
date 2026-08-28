@@ -120,9 +120,9 @@ test("exact registry result publishes one concrete target and compact graph veri
     }
 });
 
-test("still-symbol-only graph language keeps exact read identity without a caller term", () => {
+test("graph-unsupported language keeps exact read identity without a caller term", () => {
     const result = buildExactRegistryGroupResult({
-        symbol: makeSymbol({ language: "scala" }),
+        symbol: makeSymbol({ language: "php" }),
         indexedAt: "2026-01-01T00:00:00.000Z",
         navigationState: navState,
         debugMode: 'none',

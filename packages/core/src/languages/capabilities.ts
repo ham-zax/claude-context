@@ -57,26 +57,6 @@ function parserDeclaredSearchOnlyLanguage(input: {
     });
 }
 
-function symbolOnlyLanguage(input: {
-    readonly languageId: string;
-    readonly aliases: readonly string[];
-    readonly extensions: readonly string[];
-    readonly fixtures: Required<Pick<LanguageCapabilityDeclaration['fixtures'], 'navigation' | 'symbols' | 'ownerMetadata' | 'fileOutline' | 'readFileOpenSymbol'>>;
-}): LanguageCapabilityDeclaration {
-    return declaration({
-        ...input,
-        searchEligibility: PRODUCTION_READY,
-        parserCapability: PRODUCTION_READY,
-        symbolExtractionCapability: PRODUCTION_READY,
-        ownerExtractionCapability: PRODUCTION_READY,
-        importExportCapability: NONE,
-        callsCapability: NONE,
-        typeReceiverAwareCapability: NONE,
-        testReferenceCapability: NONE,
-        publicClaim: 'symbol_only',
-    });
-}
-
 function directCallsSymbolLanguage(input: {
     readonly languageId: string;
     readonly aliases: readonly string[];
@@ -378,7 +358,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             calls: ['packages/core/src/relationships/cbm-language-call-qualification.test.ts'],
         },
     }),
-    symbolOnlyLanguage({
+    directCallsSymbolLanguage({
         languageId: 'scala',
         aliases: [],
         extensions: ['.scala'],
@@ -391,6 +371,7 @@ const SATORI_DECLARATIONS: readonly LanguageCapabilityDeclaration[] = [
             ownerMetadata: ['packages/mcp/src/core/search-group-results.ownership.test.ts'],
             fileOutline: ['packages/mcp/src/tools/file_outline.test.ts'],
             readFileOpenSymbol: ['packages/mcp/src/core/current-source-symbols.test.ts'],
+            calls: ['packages/core/src/relationships/contributions/syntactic.test.ts'],
         },
     }),
     parserDeclaredSearchOnlyLanguage({

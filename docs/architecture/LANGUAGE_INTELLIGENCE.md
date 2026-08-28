@@ -45,7 +45,7 @@ Language capabilities, file extensions, semantic revisions, grammar references, 
 ### Tier 2: Generic Strategy Dispatch & Central Admission
 Relationship construction in `packages/core/src/relationships/builder.ts` is fully strategy-driven and free of hardcoded language branches:
 
-1. **Resolution Strategy Selection:** Each source file is routed to its designated strategy (`python_native`, `cbm_semantic`, `syntactic`) based on the declarative registry.
+1. **Resolution Strategy Selection:** Each source file is routed to its designated strategy (`python_native`, `cbm_semantic`, `syntactic`). Python uses the native Python resolver; TypeScript, JavaScript, and Scala use the built-in syntactic resolver; descriptor-registered languages use the CBM semantic path.
 2. **Generic CBM Contribution Engine (`cbm.ts`):** Handles any CBM-backed language uniformly by consuming `SemanticProjectEvidence` produced by the semantic analyzer.
 3. **Neutral Central Admission (`admission.ts`):** `admitAuthoritativeProofBackedCalls` validates every call claim against the repository's `SymbolRegistry`:
    - Enforces exact byte span containment within source callable symbols (`function`, `method`, `component`, `hook`, `test`).
@@ -79,7 +79,7 @@ Semantic analysis for CBM languages is executed in a sandboxed, high-performance
 
 ## 4. Extension Runbook: Adding Another CBM-Backed Language
 
-The compiled CBM semantic engine currently supports Go, Java, C#, C++, and Rust. Adding another CBM-backed language does not require a language branch in the TypeScript relationship builder:
+The compiled CBM semantic engine currently supports Go, Java, C#, C++, and Rust. Scala is intentionally outside this list: upstream CBM provides its grammar and generic extraction but no dedicated Scala semantic resolver, while Satori already has a production Scala Tree-sitter analyzer and routes its qualified direct-call slice through the existing syntactic strategy. Adding another CBM-backed language does not require a language branch in the TypeScript relationship builder:
 
 1. **Vendor the grammar and resolver closure:**
    - Add the generated Tree-sitter parser/scanner and matching generated headers under `third_party/cbm-semantic/grammars/tree-sitter-<lang>/`.

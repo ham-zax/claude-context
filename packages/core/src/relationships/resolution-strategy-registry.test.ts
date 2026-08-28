@@ -13,6 +13,7 @@ test('defaultResolutionStrategyRegistry maps canonical languages to their correc
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('typescript'), 'syntactic');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('ts'), 'syntactic');
     assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('tsx'), 'syntactic');
+    assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage('scala'), 'syntactic');
     
     for (const language of ['go', 'rust', 'rs', 'java', 'csharp', 'cs', 'cpp', 'c++']) {
         assert.equal(defaultResolutionStrategyRegistry.strategyForLanguage(language), 'cbm_semantic', language);

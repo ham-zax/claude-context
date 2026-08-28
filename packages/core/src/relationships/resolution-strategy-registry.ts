@@ -14,6 +14,7 @@ export interface LanguageResolutionStrategyRegistry {
 const STATIC_BUILTIN_STRATEGIES: Readonly<Record<string, LanguageResolutionStrategy>> = {
     python: 'python_native',
     javascript: 'syntactic',
+    scala: 'syntactic',
     typescript: 'syntactic',
 };
 

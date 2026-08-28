@@ -1,12 +1,12 @@
 {
   "language": "scala",
-  "tier": "symbol_only",
+  "tier": "calls_v0",
   "fileOutline": { "status": "ok" },
   "readFileOpenSymbol": {
     "targetQualifiedName": "Service.run",
     "status": "ok",
     "span": { "startLine": 2, "endLine": 4 }
   },
-  "searchCodebase": { "nextActionsCallGraph": false },
-  "callGraph": { "supported": false, "reason": "unsupported_language" }
+  "searchCodebase": { "navigation": { "graph": "ready" } },
+  "callGraph": { "status": "ok", "supported": true }
 }

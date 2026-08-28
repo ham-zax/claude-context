@@ -220,8 +220,8 @@ test('CMM-derived broad catalog stays tiered instead of becoming symbol or graph
 
     assert.ok(routedLanguages.length > 140, 'broad catalog should expose recognized/routed languages');
     assert.ok(parserCoveredLanguages.length > 140, 'broad catalog should expose parser-declared languages');
-    assert.deepEqual(symbolOnlyLanguages, ['scala']);
-    assert.deepEqual(callGraphLanguages, ['cpp', 'csharp', 'go', 'java', 'javascript', 'python', 'rust', 'typescript']);
+    assert.deepEqual(symbolOnlyLanguages, []);
+    assert.deepEqual(callGraphLanguages, ['cpp', 'csharp', 'go', 'java', 'javascript', 'python', 'rust', 'scala', 'typescript']);
 
     for (const language of ['zig', 'solidity', 'gleam', 'kotlin', 'ruby', 'swift']) {
         const declaration = getLanguageCapabilityDeclaration(language);
@@ -258,7 +258,7 @@ test('tiered catalog counts are computed from the Satori matrix', () => {
         declarations.filter((declaration) => declaration.callsCapability === 'production_ready').length
     );
     assert.ok(counts.recognizedRoutedLanguages > counts.symbolOnlyLanguages);
-    assert.ok(counts.symbolOnlyLanguages > 0);
+    assert.equal(counts.symbolOnlyLanguages, 0);
     assert.ok(counts.callGraphLanguages > 0);
 });
 

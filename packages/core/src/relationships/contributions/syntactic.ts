@@ -26,6 +26,7 @@ export class SyntacticResolutionContributionEngine implements CallResolutionEngi
             const isEligible = isLanguageCapabilitySupportedForLanguage(file.language, 'callGraphBuild')
                 || (input.mode?.kind === 'qualification' && input.mode.enabledUnpromotedCallLanguages.has(file.language));
             if (!isEligible) continue;
+            const testReferencesReady = isLanguageCapabilitySupportedForLanguage(file.language, 'testLinks');
 
             const evidence = getEvidence(input.analysisByFile, file.path);
             if (!evidence) continue;
@@ -54,7 +55,7 @@ export class SyntacticResolutionContributionEngine implements CallResolutionEngi
                     confidence: target.file === source.file ? 'high' : 'low',
                 };
                 recordsByKey.set(relationshipKey(record), record);
-                if (isTestOrFixturePath(source.file) && !isTestOrFixturePath(target.file)) {
+                if (testReferencesReady && isTestOrFixturePath(source.file) && !isTestOrFixturePath(target.file)) {
                     const testRecord: RelationshipRecord = {
                         ...record,
                         type: 'TESTS',
