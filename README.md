@@ -4,9 +4,22 @@
 [![CI](https://github.com/ham-zax/satori/actions/workflows/ci.yml/badge.svg)](https://github.com/ham-zax/satori/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@zokizuan/satori-cli?label=npm)](https://www.npmjs.com/package/@zokizuan/satori-cli)
 
-Give your coding agent a map of the repository before it edits.
+Give your coding agent a fast, freshness-aware map of the repository before it edits.
 
-Satori turns a repository into a freshness-aware code map. MCP-compatible agents can find behavior by intent, open the real owner, follow nearby relationships, and read only the source needed to act. Offline search uses bundled Potion embeddings, BM25, and LanceDB—no model API key required.
+Satori is a local-first repository intelligence layer for coding agents. It combines exact evidence, lexical retrieval, dense retrieval, symbol ownership, and conservative call relationships behind MCP tools, so an agent can find behavior by intent, open the real owner, follow nearby code, and read only the source needed to act. Offline search uses bundled Potion embeddings, BM25, and LanceDB—no model API key required.
+
+## Product
+
+Satori is built for the part of coding-agent work that should be fast, repeatable, and evidence-backed before any edit happens:
+
+- **Fast local retrieval.** On the Satori repository benchmark, warm Potion + LanceDB search measured **154.543 ms p95** across 10,830 indexed chunks. The benchmark and its limits are documented below.
+- **Robust publication architecture.** Satori builds complete searchable generations, checks source freshness, and activates publications atomically instead of exposing a partially updated index.
+- **Real language navigation.** TypeScript, JavaScript, Python, Go, Java, C#, C++, Rust, and Scala have production symbol navigation plus qualified `CALLS v0` support.
+- **Conservative graph semantics.** Ambiguous or unproved call relationships fail closed; the graph is navigation evidence, not a compiler-grade blast-radius claim.
+- **Local-first runtime.** The default Linux x64 / WSL2 path runs Potion + LanceDB locally and shares one managed runtime across compatible agent sessions.
+- **Coordinated releases.** CLI, MCP, and Core are qualified and packed as one exact dependency closure before publication, preventing accidental mix-and-match runtime combinations.
+
+Satori is not another code editor or autonomous patcher. It is the repository intelligence product an agent consults before it changes code.
 
 ## Install
 
